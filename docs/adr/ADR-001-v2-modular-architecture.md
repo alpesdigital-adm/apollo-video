@@ -40,14 +40,14 @@ renderer ◄── RenderInput materializado
 
 ## Runtime baseline da Fundação
 
-- Next.js 16.2.12 e React/React DOM 19.2.7.
+- Next.js 16.3.4 e React/React DOM 19.2.7.
 - Verificação de suporte em 2 de agosto de 2026: [Next.js 16.x está em Active LTS](https://nextjs.org/support-policy) e [React 19.2 é a linha documentada mais recente, com o patch 19.2.7 publicado](https://react.dev/versions). Essa constatação é temporal e deve ser reavaliada ao alterar a baseline.
 - Remotion, CLI, Player e Renderer 4.0.489; o subprojeto usa React/React DOM 19.2.7.
 - Node.js 20.9+; a imagem de aplicação usa Node 22 bookworm-slim e desenvolvimento atual também é validado em Node 24.
 - Dynamic route `params` é assíncrono em pages e route handlers.
 - Builds usam Webpack explicitamente enquanto os aliases de Remotion não forem migrados para Turbopack.
 - O adapter FFmpeg invoca `ffmpeg`/`ffprobe` com `execFile` e arrays de argumentos, sem shell ou wrapper abandonado.
-- `FFMPEG_PATH`/`FFPROBE_PATH` têm precedência; os binários empacotados são fallback e o `PATH` do worker é a última opção.
+- A resolução do binário de mídia tem **quatro** passos e mora em `ffmpeg-binary.ts`, não nesta lista: primeiro o que a implantação nomeou (para ffmpeg, na ordem `APOLLO_V2_FFMPEG_PATH`, `FFMPEG_PATH`, `APOLLO_FFMPEG_PATH`, `FFMPEG_BIN`; para ffprobe, `APOLLO_V2_FFPROBE_PATH` e `FFPROBE_PATH`), depois o binário empacotado **se estiver em disco**, depois uma busca em `node_modules` que sobrevive ao bundling, e por fim o `PATH`, nomeado de forma absoluta. Sob `next build` o caminho que o `ffmpeg-static` calcula é inválido, então uma implantação tem de satisfazer um dos outros passos: [ADR-158](ADR-158-media-binary-resolution-and-deployment-fault.md).
 - Todo processo de mídia usa timeout finito, `AbortSignal`, `maxBuffer`, `shell: false`, `-nostdin` e saída sem progresso interativo.
 - Falhas de processo são classificadas como cancelamento, timeout, limite de saída ou erro operacional; argumentos e paths não entram na mensagem pública.
 - Outputs FFmpeg são materializados em arquivo parcial irmão, validados e promovidos por rename no mesmo filesystem; o path final nunca aponta para encode incompleto.

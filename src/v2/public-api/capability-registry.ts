@@ -1,5 +1,12 @@
 import { assertDomain } from '../domain/errors.ts'
 import { API_ENVIRONMENTS, isApiScope, type ApiEnvironment, type ApiScope } from '../domain/api-client.ts'
+// Query-parameter enums are spread from the domain constants that define them.
+// The one place this registry ever typed an enum by hand is a capture-scenario
+// filter, and it is the one place the published contract can drift from the
+// system without anything raising.
+import { COLOR_CRITIC_DIMENSIONS, COLOR_CRITIC_SEVERITIES } from '../domain/color-critic-report.ts'
+import { MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES } from '../domain/multicam-longform-gate.ts'
+import { PLAYBACK_MODES } from '../domain/playback-map.ts'
 import { assertAllowlistedPublicQuery } from './conventions.ts'
 
 export type CapabilityExposure = 'public' | 'workspace-admin' | 'internal-only'
@@ -2556,7 +2563,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     id: 'apollo.projects.capture-sessions.sync.request',
     version: '1.0.0',
     title: 'Synchronize a capture session',
-    description: 'Starts one durable synchronization of every non-reference track against the session clock, running the evidence cascade and persisting maps, coverage and drift without invoking any paid provider.',
+    description: 'Queues one durable synchronization of every non-reference track against the session clock. A worker claims the run, derives each track coverage from its parts, correlates the tracks by audio and files the evidence cascade verdict with a piecewise clock map for every track it could align, without invoking any paid provider. Clock drift is not fitted yet, so a diagnostic reports no drift rate.',
     exposure: 'public',
     operationKind: 'job',
     authMode: 'required',
@@ -6959,6 +6966,576 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     endpoint: { method: 'POST', path: '/v1/projects/{projectId}/transformation-fallbacks/{ledgerId}/actions' },
     toolName: 'apollo.projects.transformation-fallbacks.act', supportsDryRun: false, costClass: 'free',
     confirmation: 'human-approval', successStatuses: [200, 201], idempotency: 'natural', requestBodyRequired: true,
+  },
+  // ---------------------------------------------------------------------------
+  // Wave 20 — F4.012 multicam direction, F4.013/F4.014 colour, F4.015 playback.
+  //
+  // Every command here derives its own numbers. A request carries ids, a
+  // position, a labelled attestation and the version+hash pair it was computed
+  // against; a score, an eligibility, a measurement or an approval sent with it
+  // is refused by name rather than ignored, because a field that is accepted
+  // and dropped teaches the next caller to keep sending it.
+  //
+  // Two of the six commands declare `idempotency: 'required'` and four declare
+  // `'natural'`, and the split is the truth about which of them reads a header.
+  //
+  // The two direction commands read `Idempotency-Key` in their routes and hand
+  // it to `directMulticamSessionService`, which binds it to the whole actor —
+  // workspace, client, credential, authentication kind and any delegated user —
+  // and refuses a key reused with a different request.
+  //
+  // The other four never read the header, so they must not advertise one. An
+  // earlier revision declared `'required'` for all six on the strength of a
+  // natural-key argument, which put a mandatory `Idempotency-Key` into the
+  // published OpenAPI and a required `idempotencyKey` into every agent tool
+  // that nothing on the server would ever consume. The natural key is real —
+  // each write is fenced on the exact version and hash the caller read, and
+  // each service collapses a repeat into `replayed: true` (`derive` when the
+  // head already carries the same measurements, `overrides.add` when the plan
+  // already carries the override, `playback-map.build` when the fingerprint is
+  // unchanged, `anchors.add` through the fenced append) — but a real natural
+  // key is `'natural'`, not `'required'`. `'required'` without a route that
+  // reads the key is a contract that documents a parameter into existence.
+  //
+  // The precondition audit distinguishes the two as
+  // `base-version-bound-action` (fence plus caller key) and
+  // `fenced-natural-idempotent-action` (fence plus content-addressed replay),
+  // and `wave20-public-contract.test.mjs` checks each declaration against the
+  // route source, so this cannot drift back.
+  // ---------------------------------------------------------------------------
+  {
+    id: 'apollo.projects.capture-sessions.direction.run',
+    version: '1.0.0',
+    title: 'Direct a capture session across its cameras',
+    description: 'Derives the evidence, scores every angle over every window, cuts the session into shots and commits the re-cut timeline as a new project version. The request names the aspect ratio, the stretch of session time and the project version it was computed against; every score, rejection and confidence comes from the stored session, its coverages, its clock maps, its diagnostic and its evidence.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/direct-multicam-session-request/v1',
+    outputSchemaRef: 'apollo://schemas/multicam-direction-directed/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/direction' },
+    toolName: 'apollo.projects.capture-sessions.direction.run',
+    supportsDryRun: false,
+    costClass: 'medium',
+    confirmation: 'human-approval',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.capture-sessions.direction.read',
+    version: '1.0.0',
+    title: 'Read the direction of a capture session',
+    description: 'Reads one link of the direction chain: the range it covers, the calibration and the five editorial numbers it ran under, the audio bed and the tracks refused for it, the stretches no angle was eligible for, the warnings and whether a person has to look. Says whether the link it returns is the head, so a superseded cut cannot be quoted as the current one.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-direction-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/direction' },
+    toolName: 'apollo.projects.capture-sessions.direction.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'version', description: 'Read this exact link of the direction chain instead of the current one, so a rendered cut can be inspected against the direction it was actually made under.', required: false, schema: { type: 'integer', minimum: 1 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.capture-sessions.direction.candidates.list',
+    version: '1.0.0',
+    title: 'List the angles offered over a range, and why each was refused',
+    description: 'Lists every track evaluated over each shot of a range, chosen and rejected alike, with its resolved source window, its coverage availability and confidence, its sync status, the named parts of its score and the reasons it was ruled out. Read out of the stored direction rather than re-scored, so it answers about the evidence the cut was made from.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-angle-candidate-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/direction/candidates' },
+    toolName: 'apollo.projects.capture-sessions.direction.candidates.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'version', description: 'Read the candidacies of this exact link of the direction chain.', required: false, schema: { type: 'integer', minimum: 1 } },
+      { name: 'startTicks', description: 'Session ticks, as a decimal string, from which windows are returned. A tick is 64-bit and crosses as a string because a JSON number would come back rounded.', required: false, schema: { type: 'string', minLength: 1, maxLength: 19 } },
+      { name: 'endTicks', description: 'Session ticks, as a decimal string, up to which windows are returned. Half-open: a window that starts here is not included.', required: false, schema: { type: 'string', minLength: 1, maxLength: 19 } },
+      { name: 'trackId', description: 'Keep only the candidacies of one track, in every window it was offered. Windows where it was never offered are dropped rather than returned empty.', required: false, schema: { type: 'string', minLength: 3, maxLength: 128 } },
+      { name: 'limit', description: 'Maximum windows to return. What the limit left out is reported beside them.', required: false, schema: { type: 'integer', minimum: 1, maximum: 200, default: 25 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.capture-sessions.direction.shots.list',
+    version: '1.0.0',
+    title: 'List the angle decisions of a direction',
+    description: 'Lists the shots of a direction with the rule that decided each one, the sentence that justifies it, the angles that lost with their scores, the evidence it cites and how many citations the cap dropped.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-shot-decision-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/direction/shots' },
+    toolName: 'apollo.projects.capture-sessions.direction.shots.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'version', description: 'Read the shots of this exact link of the direction chain.', required: false, schema: { type: 'integer', minimum: 1 } },
+      { name: 'startTicks', description: 'Session ticks, as a decimal string, from which shots are returned.', required: false, schema: { type: 'string', minLength: 1, maxLength: 19 } },
+      { name: 'endTicks', description: 'Session ticks, as a decimal string, up to which shots are returned.', required: false, schema: { type: 'string', minLength: 1, maxLength: 19 } },
+      { name: 'limit', description: 'Maximum shots to return. What the limit left out is reported beside them.', required: false, schema: { type: 'integer', minimum: 1, maximum: 200, default: 25 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.capture-sessions.direction.protected-selections.direct',
+    version: '1.0.0',
+    title: 'Direct a capture session holding a protected selection',
+    description: 'Re-directs the session with one or more operator-protected selections in force, so a named stretch keeps a named angle whatever the scorer would have preferred. The note is the operator\'s; the identity is the authenticated actor\'s, and the two are concatenated rather than one replacing the other, so who overrode the measurement is recorded and not only what they said about it.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/protect-multicam-selection-request/v1',
+    outputSchemaRef: 'apollo://schemas/multicam-direction-directed/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/direction/protected-selections' },
+    toolName: 'apollo.projects.capture-sessions.direction.protected-selections.direct',
+    supportsDryRun: false,
+    costClass: 'medium',
+    confirmation: 'human-approval',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.capture-sessions.color-match.derive',
+    version: '1.0.0',
+    title: 'Choose the reference camera and derive the colour match',
+    description: 'Measures the cameras of a capture session against the one a person chose as the reference, fits a match-stage transform per camera and writes the resulting layers into the project ColorPlan through the same command a person would use. The only colour input is which camera is the reference; every delta, confidence and issue is measured from decoded frames.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/derive-multicam-match-plan-request/v1',
+    outputSchemaRef: 'apollo://schemas/multicam-match-plan-derived/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/color-match' },
+    toolName: 'apollo.projects.capture-sessions.color-match.derive',
+    supportsDryRun: false,
+    costClass: 'medium',
+    confirmation: 'human-approval',
+    successStatuses: [201, 200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.capture-sessions.color-match.read',
+    version: '1.0.0',
+    title: 'Read the colour match plan of a capture session',
+    description: 'Reads one link of the match chain: which camera is the reference and who chose it against which session version, the per-camera exposure, white balance, contrast and saturation deltas, the local overrides in force, the ranges that were not comparable and the issues a person has to answer.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-match-plan-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/color-match' },
+    toolName: 'apollo.projects.capture-sessions.color-match.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'version', description: 'Read this exact link of the match chain instead of the current one, so a graded render can be inspected against the corrections it was actually made under.', required: false, schema: { type: 'integer', minimum: 1 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.capture-sessions.color-match.overrides.add',
+    version: '1.0.0',
+    title: 'Apply one local colour correction to a camera',
+    description: 'Amends the match plan with one operator correction over a named range of one camera and rewrites only the segment layers of the clips it matched. The sibling camera layers, the global layer and the source layers are copied through untouched, so a fix to one shot cannot become a grade on the programme.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/add-multicam-match-override-request/v1',
+    outputSchemaRef: 'apollo://schemas/multicam-match-override-applied/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/color-match/overrides' },
+    toolName: 'apollo.projects.capture-sessions.color-match.overrides.add',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'human-approval',
+    successStatuses: [201, 200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.color-critic-reports.list',
+    version: '1.0.0',
+    title: 'List the colour verdicts of a project version',
+    description: 'Lists the colour critic verdicts recorded about one project version, newest evaluation first, with how many bounded corrections that version has already had and whether the budget for another is spent. The count is read off the same rows the evaluator counts, so a reader deciding what to do next has the number the evaluator will use.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/color-critic-report-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/color-critic-reports' },
+    toolName: 'apollo.projects.color-critic-reports.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'projectVersionId', description: 'The project version whose verdicts are listed. Required: a verdict is about one exact version of a cut, and a list across versions would mix judgements of different frames.', required: true, schema: { type: 'string', minLength: 3, maxLength: 128 } },
+      { name: 'limit', description: 'Maximum verdicts to return, newest evaluation first.', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.color-critic-reports.read',
+    version: '1.0.0',
+    title: 'Read one colour verdict',
+    description: 'Reads one content-addressed colour critic report: the bytes it judged, the evaluators that read them, which before reading was paired with which after reading for which camera, every dimension it could and could not measure, the cause it settled on, the action that cause maps to and the bounded correction it proposed.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/color-critic-report-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/color-critic-reports/{reportId}' },
+    toolName: 'apollo.projects.color-critic-reports.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.color-critic-reports.issues.list',
+    version: '1.0.0',
+    title: 'List the issues of a colour verdict with their evidence',
+    description: 'Lists the issues one verdict raised, each with the dimension it was measured on, the number measured against the threshold that bounded it, the version of the thresholds, the camera and range it applies to and the evidence refs it rests on. The count the filters removed travels with the answer, so a narrowed list cannot read as a clean report.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/color-critic-issue-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/color-critic-reports/{reportId}/issues' },
+    toolName: 'apollo.projects.color-critic-reports.issues.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'severity', description: 'Keep only the issues that block, or only the ones that warn.', required: false, schema: { type: 'string', enum: [...COLOR_CRITIC_SEVERITIES] } },
+      { name: 'dimension', description: 'Keep only the issues raised on one measured dimension.', required: false, schema: { type: 'string', enum: [...COLOR_CRITIC_DIMENSIONS] } },
+    ],
+  },
+  {
+    id: 'apollo.projects.capture-sessions.playback-map.build',
+    version: '1.0.0',
+    title: 'Measure where a reaction was inside the reference it played',
+    description: 'Fingerprints the reaction against the reference recording and builds the map of what the player did: playing, paused, rewound, replayed, seeked or talked over with the reference stopped, each piece carrying its evidence, its measured rate where one could be measured and the worst disagreement between its observations and the line it asserts. A stretch that fits several stories equally well is left uncovered for a person rather than resolved by guess.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/build-react-playback-map-request/v1',
+    outputSchemaRef: 'apollo://schemas/react-playback-map-built/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map' },
+    toolName: 'apollo.projects.capture-sessions.playback-map.build',
+    supportsDryRun: false,
+    costClass: 'medium',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.capture-sessions.playback-map.read',
+    version: '1.0.0',
+    title: 'Read the playback map of a reaction track',
+    description: 'Reads one version of the map: the two recordings by their bytes, the stretches nobody could resolve with the reason each one is unanswerable, every anchor with who placed it, the status and the warnings. The pieces themselves are their own read.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/react-playback-map-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map' },
+    toolName: 'apollo.projects.capture-sessions.playback-map.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'reactionTrackId', description: 'Which reactor. Required rather than guessed: a session with two reaction tracks is two edits, and returning the first would silently answer about the wrong one.', required: true, schema: { type: 'string', minLength: 3, maxLength: 128 } },
+      { name: 'version', description: 'Read this exact link of the map chain instead of the current one.', required: false, schema: { type: 'integer', minimum: 1 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.capture-sessions.playback-map.pieces.list',
+    version: '1.0.0',
+    title: 'List the pieces of a playback map',
+    description: 'Lists what the player did, piece by piece: the mode, the reaction range, the reference range where the reference produced time at all, the measured rate or null where none was measured, the detection method, the evidence and the residual. What a mode filter removed and what a limit left out both travel with the answer.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/react-playback-piece-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/pieces' },
+    toolName: 'apollo.projects.capture-sessions.playback-map.pieces.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'reactionTrackId', description: 'Which reactor the pieces belong to.', required: true, schema: { type: 'string', minLength: 3, maxLength: 128 } },
+      { name: 'version', description: 'Read the pieces of this exact link of the map chain.', required: false, schema: { type: 'integer', minimum: 1 } },
+      { name: 'mode', description: 'Keep only the pieces where the player was doing one thing.', required: false, schema: { type: 'string', enum: [...PLAYBACK_MODES] } },
+      { name: 'limit', description: 'Maximum pieces to return.', required: false, schema: { type: 'integer', minimum: 1, maximum: 500, default: 100 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.capture-sessions.playback-map.anchors.add',
+    version: '1.0.0',
+    title: 'Answer an uncovered stretch of a playback map',
+    description: 'Appends one map version carrying a manual anchor inside a stretch the detector could not resolve, under a fence on the exact version and hash the operator read. An anchor is added and never moved or removed: the list only grows, an automatic anchor is never touched, and an instant outside an uncovered stretch is refused, because overruling a measurement is a different act from answering an absence.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/add-react-playback-anchor-request/v1',
+    outputSchemaRef: 'apollo://schemas/react-playback-map-anchored/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/anchors' },
+    toolName: 'apollo.projects.capture-sessions.playback-map.anchors.add',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'human-approval',
+    successStatuses: [201, 200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  // ---------------------------------------------------------------------------
+  // Wave 20 — the two compiles that make a decision renderable.
+  //
+  // Both services existed, were tested and were wired into the composition root
+  // before this entry, and neither could be reached from outside a test: nothing
+  // under `src/app` called either one, so the only two writers of
+  // `renderable_plan_snapshots` were unreachable through the published API. The
+  // F4.016 gate reads exactly those rows for criterion 4
+  // (`map-compiled-into-plan`) and for the render evidence behind criterion 6,
+  // which meant the gate could not be driven to ten of ten by a client — only by
+  // a test reaching past the API into the repositories.
+  //
+  // They are commands rather than jobs because they finish inside the request:
+  // the map or the synthesis is already stored, the recordings are already
+  // measured, and compiling is arithmetic over both. Nothing here decodes media.
+  // ---------------------------------------------------------------------------
+  {
+    id: 'apollo.projects.capture-sessions.playback-map.plan.compile',
+    version: '1.0.0',
+    title: 'Compile a resolved playback map into a renderable plan',
+    description: 'Turns one resolved playback map into the cut a renderer accepts: every piece becomes a clip of the reaction or of the reference, the seams carry the reason the player changed what it was doing, and the timeline runs for as long as the reaction did rather than for as long as the reference did. Refuses a map version the caller no longer holds, a map with a stretch nobody answered, and a recording whose bytes are not the ones the map was measured against. Compiling the same map version into the same project version at the same planFps returns the stored plan; a different planFps is a different cut and gets a plan of its own, because the frame rate is the timebase every clip is expressed in. The objective must be one this compile can deliver without a destination — discovery, awareness or warming — and any other is refused INVALID_ARGUMENT naming what it would need.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/compile-react-playback-plan-request/v1',
+    outputSchemaRef: 'apollo://schemas/renderable-plan-compiled/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/plan' },
+    toolName: 'apollo.projects.capture-sessions.playback-map.plan.compile',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.editorial-syntheses.render-plan.compile',
+    version: '1.0.0',
+    title: 'Compile a multi-range synthesis into a renderable plan',
+    description: 'Turns one stored multi-range synthesis into the cut a renderer accepts, keeping every selected range once and in output order, carrying each splice justification onto the seam it explains, and marking the dropped span an editor has to listen to before defending the join. The masters are resolved through the media links the project itself carries and refused when their bytes are no longer the ones the ranges were selected from; the caller supplies no source, no digest and no duration. Compiling the same synthesis into the same project version returns the stored plan: there is no frame-rate knob here, because the synthesis already fixed the rate. The objective must be one this compile can deliver without a destination — discovery, awareness or warming — and any other is refused INVALID_ARGUMENT naming what it would need.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/compile-synthesis-render-plan-request/v1',
+    outputSchemaRef: 'apollo://schemas/renderable-plan-compiled/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/editorial-syntheses/{synthesisId}/render-plan' },
+    toolName: 'apollo.projects.editorial-syntheses.render-plan.compile',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  // ---------------------------------------------------------------------------
+  // Wave 20 — F4.016 the multicamera and long-form phase gate.
+  //
+  // Seven capabilities, one of them a command. ADR-135's sentence that outranks
+  // its own six conditions is "every condition is independently visible before
+  // the phase is approved", and a surface that published only `approved: true`
+  // would be the aggregated boolean of 18/07/2026 with a REST envelope on it.
+  // So the criteria are a catalogue of their own, the newest evaluation has its
+  // own address, what is still missing has its own address, and the artifacts a
+  // run read can be listed and opened one by one.
+  //
+  // The evaluation is the only command, and it is the one place in this whole
+  // wave where a caller's request carries no fence at all — not an oversight:
+  // there is no aggregate to fence against. A gate reads whatever the project
+  // is now and records the version it read. The caller cannot narrow that to a
+  // version it prefers, cannot supply a measurement, and cannot approve
+  // anything; the entire request body is an optional session filter. What it
+  // does carry is an `Idempotency-Key`, read in the route and bound by the
+  // service to the whole actor context, because two clicks on "run the gate"
+  // must produce one record rather than two evaluations of the same evidence.
+  // ---------------------------------------------------------------------------
+  {
+    id: 'apollo.projects.multicam-longform-gate.evaluate',
+    version: '1.0.0',
+    title: 'Run the multicamera and long-form phase gate',
+    description: 'Evaluates the ten conditions of ADR-135 for one project from server-read evidence alone and persists one immutable record naming, per criterion, every check it ran, the rows it read, whether each row hash recomputed, and the exact reason any check said no. Missing evidence reproves its own criterion and the gate, and leaves the other nine visible. The request carries a project and at most a session: no measurement, no evidence ref and no approval can be sent.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/evaluate-multicam-longform-gate-request/v1',
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-evaluated/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/multicam-longform-gate/evaluations' },
+    toolName: 'apollo.projects.multicam-longform-gate.evaluate',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.latest.read',
+    version: '1.0.0',
+    title: 'Read the newest phase-gate evaluation of a project',
+    description: 'Reads the most recent multicamera and long-form gate record: all ten criteria with their checks, the evidence each check read and whether it verified, the project version it was judged against, and the record hash. Fails with MULTICAM_LONGFORM_GATE_NOT_FOUND when the gate has never been run, which is a different answer from a gate that ran and refused.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate' },
+    toolName: 'apollo.projects.multicam-longform-gate.latest.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.read',
+    version: '1.0.0',
+    title: 'Read one phase-gate evaluation',
+    description: 'Reads one immutable gate record by id, re-derived and hash-verified on read, so a record edited in the database is refused rather than displayed as an approval nobody evaluated. Reading an older evaluation is how a claim made last week is checked against what the evidence said at the time.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}' },
+    toolName: 'apollo.projects.multicam-longform-gate.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.list',
+    version: '1.0.0',
+    title: 'List the phase-gate history of a project',
+    description: 'Lists the gate evaluations of one project, newest first, each with its own ten criteria. The history is the answer to "what changed": a criterion that passed in March and fails now names the evidence that moved.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate/evaluations' },
+    toolName: 'apollo.projects.multicam-longform-gate.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'limit', description: 'Maximum evaluations to return, newest first.', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.outstanding.read',
+    version: '1.0.0',
+    title: 'Read what the phase gate is still missing',
+    description: 'Reads the newest evaluation and returns only the criteria that did not pass, ordered so the criteria nothing has ever answered come before the criteria that answered and refused. Each one carries the sentence it stands for and every failing check with its reason, so the next action is readable without diffing two reports.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-outstanding/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate/outstanding' },
+    toolName: 'apollo.projects.multicam-longform-gate.outstanding.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.artifacts.list',
+    version: '1.0.0',
+    title: 'List the artifacts one phase-gate evaluation read',
+    description: 'Lists the evidence rows one evaluation cited, deduplicated across the checks that read them, each with its resource kind, its stored hash or null when the table keeps none, whether that hash recomputed, and the criteria and checks it answered. This is how a reader gets from "criterion 9 failed" to the exact artifact to open.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-artifact-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}/artifacts' },
+    toolName: 'apollo.projects.multicam-longform-gate.artifacts.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      // Spread from the domain constant that owns the closed set of row kinds a
+      // check may have read. Typed by hand it would publish a filter for a
+      // table the evaluator never names.
+      { name: 'type', description: 'Keep only the artifacts of one evidence resource kind. How many the filter removed travels with the answer.', required: false, schema: { type: 'string', enum: [...MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES] } },
+      { name: 'limit', description: 'Maximum artifacts to return. What the limit left out is reported beside them.', required: false, schema: { type: 'integer', minimum: 1, maximum: 200, default: 100 } },
+    ],
+  },
+  {
+    id: 'apollo.multicam-longform-gate.criteria.list',
+    version: '1.0.0',
+    title: 'List the criteria of the multicamera and long-form phase gate',
+    description: 'Lists the ten conditions the phase gate judges and the named checks each one is made of, in the words ADR-135 uses. Project-independent on purpose: these are what the gate checks, readable before any project has been evaluated, so an operator can see what the phase demands before running anything.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-criteria/v1',
+    endpoint: { method: 'GET', path: '/v1/multicam-longform-gate/criteria' },
+    toolName: 'apollo.multicam-longform-gate.criteria.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
   },
   {
     id: 'apollo.provider-callbacks.receive', version: '1.0.0', title: 'Receive a provider callback',

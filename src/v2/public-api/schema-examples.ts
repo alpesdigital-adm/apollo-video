@@ -41,6 +41,79 @@ import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
 import { RESPONSIVE_VISUAL_GOLDENS } from '../domain/responsive-output.ts'
 import { quickSubtitlePreview, SUBTITLE_STYLE_REGISTRY } from '../domain/subtitle-system.ts'
 import { SUBTITLE_STYLE_REGISTRY_V1 } from './subtitle-style-contract.ts'
+// Wave 20 — F4.012 to F4.015. Same rule as Wave 19: the aggregate comes out of
+// the constructor the endpoint uses and goes through the presenter the route
+// uses, so a published example cannot describe a response the code does not
+// produce.
+import { buildDirectMulticamSessionCommand } from '../application/direct-multicam-session.ts'
+import {
+  calculateMulticamLongformGateRecordHash,
+  listMulticamLongformGateCriteria,
+} from '../application/multicam-longform-gate.ts'
+import {
+  buildLegacyRuntimeCriterion,
+  calculateLegacyRuntimeAuditHash,
+  evaluateMulticamLongformGate,
+  explainMulticamLongformGate,
+  MULTICAM_LONGFORM_CRITERION_CHECKS,
+  type MulticamLongformCriterion,
+  type MulticamLongformEvidenceResourceType,
+} from '../domain/multicam-longform-gate.ts'
+import {
+  presentMulticamLongformGateArtifacts,
+  presentMulticamLongformGateCriteria,
+  presentMulticamLongformGateEvaluated,
+  presentMulticamLongformGateHistory,
+  presentMulticamLongformGateOutstanding,
+  presentMulticamLongformGateRead,
+} from './multicam-longform-gate-contract.ts'
+import { directionVersionRef, toAngleCandidateWindow } from '../application/multicam-direction.ts'
+import { matchPlanVersionRef } from '../application/multicam-color-match.ts'
+import { captureSessionDerivationRef } from '../domain/capture-session.ts'
+import { evaluateColorCritic } from '../domain/color-critic-report.ts'
+import { createCameraColorMeasurement } from '../domain/color-measurement.ts'
+import { directMulticam } from '../domain/multicam-direction.ts'
+import { createMulticamEvidenceSet } from '../domain/multicam-evidence.ts'
+import {
+  addMulticamMatchRangeOverride,
+  deriveMulticamMatchPlan,
+} from '../domain/multicam-match-plan.ts'
+import { compileSynthesisToDirectedPlan } from '../application/compile-synthesis-to-directed-plan.ts'
+import { compilePlaybackMapToDirectedPlan } from '../application/react-playback-map.ts'
+import { renderablePlanSnapshotOf } from '../application/renderable-edit-plan.ts'
+import { createEditorialSynthesis } from '../domain/editorial-synthesis.ts'
+import { STORY_GOLDEN_FIXTURES } from '../domain/story-plan.ts'
+import { presentCompiledRenderablePlan } from './renderable-plan-contract.ts'
+import { createPiecewiseClockMap } from '../domain/piecewise-clock-map.ts'
+import { applyPlaybackAnchor, buildPlaybackMap, defaultPlaybackPolicy } from '../domain/playback-map.ts'
+import { createProjectVersion } from '../domain/project-version.ts'
+import {
+  createSessionClock,
+  createSourceClock,
+  createSourceToSessionMapping,
+} from '../domain/session-clock.ts'
+import { timebaseFromRate } from '../domain/session-time.ts'
+import { createTrackCoverage } from '../domain/track-coverage.ts'
+import {
+  presentAngleCandidateListing,
+  presentDirectedSessionResponse,
+  presentMulticamDirectionRead,
+  presentShotDecisionListing,
+} from './multicam-direction-contract.ts'
+import {
+  presentColorCriticIssueListing,
+  presentColorCriticReportListing,
+  presentColorCriticReportResponse,
+  presentDerivedMatchPlan,
+  presentMatchOverrideResult,
+  presentMulticamMatchPlanRead,
+} from './multicam-color-contract.ts'
+import {
+  presentAnchoredPlaybackMap,
+  presentBuiltPlaybackMap,
+  presentPlaybackMapRead,
+  presentPlaybackPieceListing,
+} from './react-playback-map-contract.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 
@@ -6215,6 +6288,1000 @@ const editorialSynthesisExample = Object.freeze({
   synthesisHash: 'c'.repeat(64),
   createdAt: '2029-04-02T14:30:00.000Z',
 })
+
+/**
+ * Wave 20 fixtures (F4.012–F4.015).
+ *
+ * Every aggregate below comes out of the same constructor the endpoint uses:
+ * the direction from `directMulticam`, the match plan from
+ * `deriveMulticamMatchPlan`, the verdict from `evaluateColorCritic`, the map
+ * from `buildPlaybackMap`. The only literals are the service result records
+ * that have no factory — a ColorPlan write receipt and an idempotency replay
+ * flag — which is the same exception `w19MarkerArtifactExample` already makes.
+ *
+ * The published shapes are deliberately not all healthy. Camera B stops
+ * recording a third of the way through the panel, so its candidacies carry real
+ * `coverage-out-of-bounds` rejections; the reaction pauses, talks over a stopped
+ * reference and leaves a stretch nobody could resolve, so the playback example
+ * publishes a `needs-input` map with an uncovered range. An example that only
+ * ever shows the happy path documents the one case a naive client also gets
+ * right.
+ */
+
+const w20Hz = 90_000
+const w20Timebase = timebaseFromRate(w20Hz)
+const w20Ticks = (seconds: number): bigint => BigInt(Math.round(seconds * w20Hz))
+const w20At = (second: number) => new Date(Date.parse('2026-09-04T09:00:00.000Z') + second * 1000).toISOString()
+const w20Digest = (seed: string) => seed.repeat(64).slice(0, 64)
+const w20Session = 'capture-session-multicam-panel'
+
+function w20Part(input: {
+  partId: string
+  sourceAssetId: string
+  coverage: Readonly<{ start: bigint; end: bigint }>
+  ingestSha256: string
+}) {
+  return {
+    partId: input.partId,
+    ordinal: 0,
+    sourceAssetId: input.sourceAssetId,
+    timebase: w20Timebase,
+    coverage: createTickInterval(input.coverage.start, input.coverage.end),
+    streamIndex: 0,
+    splitReason: 'single-file' as const,
+    evidence: {
+      ingestArtifactId: `artifact-${input.sourceAssetId}`,
+      ingestSha256: input.ingestSha256,
+      probeHash: w20Digest('b'),
+      probeSource: 'packet-scan' as const,
+      observedAt: w20At(0),
+    },
+  }
+}
+
+function w20Track(input: {
+  trackId: string
+  role: 'master-audio' | 'camera-main' | 'reaction' | 'reference-video'
+  deviceId: string
+  assetId: string
+  endSeconds: number
+  ingestSha256: string
+  syncAudioPolicy?: 'sync-only' | 'final-candidate'
+  includeInFinalMix?: boolean
+}) {
+  return {
+    trackId: input.trackId,
+    role: input.role,
+    device: { deviceId: input.deviceId, recorderId: `recorder-${input.deviceId}`, make: null, model: null, serial: null },
+    sourceAssetId: input.assetId,
+    timebase: w20Timebase,
+    streamIndex: 0,
+    syncAudioPolicy: input.syncAudioPolicy ?? 'sync-only',
+    includeInFinalMix: input.includeInFinalMix ?? false,
+    parts: [w20Part({
+      partId: `part-${input.trackId}`,
+      sourceAssetId: input.assetId,
+      coverage: { start: BigInt(0), end: w20Ticks(input.endSeconds) },
+      ingestSha256: input.ingestSha256,
+    })],
+  }
+}
+
+const w20Lineage = {
+  commandId: 'command-open-panel',
+  operation: 'create-session' as const,
+  actorKind: 'human' as const,
+  actorId: 'user-editor-1',
+  occurredAt: w20At(0),
+  note: null,
+}
+
+/**
+ * A two-camera panel on a master audio recorder.
+ *
+ * Camera B stops two hundred seconds in. That is the fact the candidate listing
+ * exists to publish: after that instant B is refused by name rather than
+ * silently missing from the offer.
+ */
+const w20DirectionSessionExample = createCaptureSession({
+  workspaceId,
+  projectId,
+  sessionId: w20Session,
+  clock: { timebase: w20Timebase, rounding: 'nearest-half-even' },
+  referenceTrackId: 'track-master-audio',
+  tracks: [
+    w20Track({
+      trackId: 'track-master-audio',
+      role: 'master-audio',
+      deviceId: 'device-recorder',
+      assetId: 'asset-master-audio',
+      endSeconds: 600,
+      ingestSha256: w20Digest('a'),
+      syncAudioPolicy: 'final-candidate',
+      includeInFinalMix: true,
+    }),
+    w20Track({
+      trackId: 'track-camera-a',
+      role: 'camera-main',
+      deviceId: 'device-camera-a',
+      assetId: 'asset-camera-a',
+      endSeconds: 600,
+      ingestSha256: w20Digest('c'),
+    }),
+    w20Track({
+      trackId: 'track-camera-b',
+      role: 'camera-main',
+      deviceId: 'device-camera-b',
+      assetId: 'asset-camera-b',
+      endSeconds: 200,
+      ingestSha256: w20Digest('d'),
+    }),
+  ],
+  lineage: w20Lineage,
+  createdAt: w20At(0),
+})
+
+const w20SessionClock = createSessionClock({
+  sessionId: w20Session,
+  timebase: w20Timebase,
+  frameRate: rational(30, 1),
+  authority: {
+    origin: 'master-audio',
+    sourceId: 'asset-master-audio',
+    provenance: 'original-capture',
+    evidenceRef: 'probe-master-audio',
+  },
+  establishedAt: w20At(0),
+})
+
+function w20ClockMap(trackId: string, offsetTicks: bigint) {
+  const track = w20DirectionSessionExample.tracks.find((entry) => entry.trackId === trackId)!
+  const source = createSourceClock({
+    sourceId: track.sourceAssetId,
+    timebase: track.timebase,
+    provenance: 'original-capture',
+  })
+  return createPiecewiseClockMap({
+    workspaceId,
+    sessionId: w20Session,
+    sourceId: track.sourceAssetId,
+    clock: w20SessionClock,
+    derivedFrom: {
+      sessionVersion: w20DirectionSessionExample.version,
+      referenceEpoch: w20DirectionSessionExample.referenceEpoch,
+    },
+    pieces: track.parts.map((piece) => ({
+      pieceId: `${trackId}-piece-${piece.ordinal}`,
+      mapping: createSourceToSessionMapping({
+        clock: w20SessionClock,
+        source,
+        sourceCoverage: piece.coverage,
+        driftRate: rational(1),
+        offsetTicks,
+        residualBoundTicks: BigInt(0),
+        confidence: 'high',
+        anchorIds: [`anchor-${trackId}`],
+        evidenceRefs: [`marker-${trackId}`],
+      }),
+    })),
+  })
+}
+
+function w20Coverage(trackId: string) {
+  const track = w20DirectionSessionExample.tracks.find((entry) => entry.trackId === trackId)!
+  return createTrackCoverage({
+    workspaceId,
+    trackId,
+    derivedFrom: captureSessionDerivationRef(w20DirectionSessionExample),
+    timebase: track.timebase,
+    claims: track.parts.map((piece) => ({
+      partId: piece.partId,
+      ordinal: piece.ordinal,
+      timebase: piece.timebase,
+      interval: piece.coverage,
+      confidenceBps: 9_800,
+      evidence: { kind: 'packet-scan' as const, ref: `probe-${piece.partId}` },
+    })),
+  })
+}
+
+function w20TrackDiagnostic(input: { trackId: string; offsetMs: number; coverageBps: number }) {
+  const base = {
+    trackId: input.trackId,
+    methods: ['apollo-marker'],
+    confidence: 0.94,
+    offsetMs: input.offsetMs,
+    residualMs: 6,
+    driftPpm: null,
+    coverageBps: input.coverageBps,
+    gaps: [],
+    automaticAnchors: [],
+    manualAnchors: [],
+    pieceIds: [],
+    warnings: [],
+    previewSampleMs: [],
+  }
+  return { ...base, status: deriveTrackStatus({ ...base, hasContradictoryAnchors: false }) }
+}
+
+const w20DirectionDiagnosticExample = createSyncDiagnostic({
+  workspaceId,
+  sessionId: w20Session,
+  referenceTrackId: 'track-master-audio',
+  version: 3,
+  previousVersionHash: w20Digest('e'),
+  sessionVersion: w20DirectionSessionExample.version,
+  referenceEpoch: w20DirectionSessionExample.referenceEpoch,
+  tracks: [
+    w20TrackDiagnostic({ trackId: 'track-camera-a', offsetMs: 500, coverageBps: 9_800 }),
+    w20TrackDiagnostic({ trackId: 'track-camera-b', offsetMs: 30_000, coverageBps: 9_000 }),
+  ],
+  protocolCeiling: 'automatic',
+  generatedAt: w20At(120),
+})
+
+function w20Speech(trackId: string, fromSecond: number, toSecond: number) {
+  const id = `obs-active-speaker-${trackId}-${fromSecond}-${toSecond}`
+  return {
+    observationId: id,
+    trackId,
+    range: createTickInterval(w20Ticks(fromSecond), w20Ticks(toSecond)),
+    kind: 'active-speaker' as const,
+    // `identityResolved: false` is the literal the domain allows: a diarization
+    // cluster is a voice nobody has named, and the type refuses the claim that
+    // it is a known person.
+    value: { kind: 'active-speaker' as const, speakerKey: `cluster-${trackId}`, identityResolved: false as const },
+    confidence: 0.9,
+    provenance: {
+      method: 'diarization/pyannote',
+      evaluatorKind: 'measured' as const,
+      evidenceRef: `diarization-run:${id}`,
+      producedAt: w20At(60),
+    },
+  }
+}
+
+const w20EvidenceExample = createMulticamEvidenceSet({
+  session: w20DirectionSessionExample,
+  observations: [
+    w20Speech('track-camera-a', 1, 60),
+    w20Speech('track-camera-b', 60, 130),
+    w20Speech('track-camera-a', 130, 260),
+    w20Speech('track-camera-b', 260, 300),
+  ],
+  generatedAt: w20At(130),
+})
+
+const w20DirectionExample = directMulticam({
+  session: w20DirectionSessionExample,
+  coverages: ['track-master-audio', 'track-camera-a', 'track-camera-b'].map(w20Coverage),
+  clockMaps: [
+    w20ClockMap('track-camera-a', w20Ticks(0.5)),
+    w20ClockMap('track-camera-b', w20Ticks(30)),
+  ],
+  diagnostic: w20DirectionDiagnosticExample,
+  protocolCeiling: 'automatic',
+  evidence: w20EvidenceExample,
+  format: { aspectRatio: '16:9' },
+  range: createTickInterval(w20Ticks(1), w20Ticks(300)),
+  generatedAt: w20At(140),
+})
+
+const w20DirectionVersion = 4
+
+const w20DirectionReadExample = Object.freeze({
+  direction: w20DirectionExample,
+  version: w20DirectionVersion,
+  previousVersionHash: w20Digest('f'),
+  versionRef: directionVersionRef(w20Session, w20DirectionVersion),
+  isHead: true,
+})
+
+const w20DirectedCommandExample = buildDirectMulticamSessionCommand({
+  commandId: 'edit-command-direct-panel',
+  workspaceId,
+  projectId,
+  baseVersionId: 'project-version-panel-7',
+  baseHash: w20Digest('1'),
+  resultVersionId: 'project-version-panel-8',
+  author: { type: 'api-client', id: 'client-editor-console' },
+  direction: w20DirectionExample,
+  durationFrames: 8_970,
+  outputReferences: [
+    { artifactId: 'artifact-proxy-panel', kind: 'proxy', sourceVersionId: 'project-version-panel-7', variantId: 'variant-16x9' },
+  ],
+  idempotencyKey: 'direct-panel-2026-09-04-1',
+  createdAt: w20At(140),
+})
+
+const w20DirectedProjectVersionExample = createProjectVersion({
+  id: 'project-version-panel-8',
+  workspaceId,
+  projectId,
+  sequence: 8,
+  parentVersionId: 'project-version-panel-7',
+  snapshotRefs: {
+    brief: 'project-snapshot-brief-1',
+    editPlan: 'project-snapshot-edit-plan-8',
+    policies: 'project-snapshot-policies-1',
+  },
+  baseHash: w20DirectedCommandExample.resultBaseHash,
+  createdBy: 'client-editor-console',
+  commandId: 'edit-command-direct-panel',
+  createdAt: w20At(140),
+})
+
+const w20DirectedSessionExample = Object.freeze({
+  direction: w20DirectionExample,
+  directionVersion: w20DirectionVersion,
+  version: w20DirectedProjectVersionExample,
+  command: w20DirectedCommandExample.command,
+  impact: w20DirectedCommandExample.impact,
+  evidenceReplayed: false,
+})
+
+// --- F4.013 / F4.014 -------------------------------------------------------
+
+const w20ColorMetadata = Object.freeze({
+  colorSpace: 'rec709',
+  transfer: 'bt709',
+  primaries: 'bt709',
+  matrix: 'bt709',
+  range: 'limited' as const,
+  bitDepth: 8,
+})
+
+const w20StatisticsEvaluator = Object.freeze({
+  id: 'ffmpeg-rgb24-statistics',
+  kind: 'measured' as const,
+  version: '1.0.0',
+})
+
+function w20Measurement(input: {
+  measurementId: string
+  cameraId: string
+  sourceAssetId: string
+  sourceSha256: string
+  exposure: number
+  rOverG: number
+  bOverG: number
+  saturation: number
+}) {
+  const evidenceRef = `rawvideo-rgb24:${input.measurementId}`
+  const measured = (value: number, unit: string, components?: Readonly<Record<string, number>>) => ({
+    status: 'measured' as const,
+    value,
+    unit,
+    evaluator: w20StatisticsEvaluator,
+    evidenceRef,
+    ...(components ? { components } : {}),
+  })
+  return createCameraColorMeasurement({
+    measurementId: input.measurementId,
+    sessionId: w20Session,
+    sourceAssetId: input.sourceAssetId,
+    sourceSha256: input.sourceSha256,
+    cameraId: input.cameraId,
+    range: createTickInterval(BigInt(0), w20Ticks(20)),
+    sourceRange: { startFrame: 0, endFrame: 600 },
+    sampledFrames: 12,
+    technical: { metadata: w20ColorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+    dimensions: {
+      whiteBalance: measured(input.bOverG / input.rOverG, 'ratio', {
+        rOverG: input.rOverG,
+        bOverG: input.bOverG,
+        bOverR: input.bOverG / input.rOverG,
+      }),
+      exposure: measured(input.exposure, 'normalized-luma'),
+      contrast: measured(0.2, 'normalized-luma', { p5: 0.1, p95: 0.9, spread: 0.8 }),
+      blacks: measured(0.001, 'ratio', { threshold: 4 / 255 }),
+      highlights: measured(0.001, 'ratio', { threshold: 251 / 255 }),
+      saturation: measured(input.saturation, 'normalized-chroma'),
+      tonalResponse: measured(0.5, 'normalized-luma', {
+        p1: 0.02, p5: 0.1, p25: 0.3, p50: 0.5, p75: 0.7, p95: 0.9, p99: 0.98,
+      }),
+      skin: {
+        status: 'not-applicable' as const,
+        reason: 'fewer than 2% of sampled pixels fall in the skin band; no skin-band region to measure',
+      },
+    },
+    confidence: 1,
+  })
+}
+
+const w20MatchMeasurements = [
+  w20Measurement({
+    measurementId: 'ccm-panel-camera-a',
+    cameraId: 'camera-a',
+    sourceAssetId: 'asset-camera-a',
+    sourceSha256: w20Digest('c'),
+    exposure: 0.5,
+    rOverG: 1,
+    bOverG: 0.9,
+    saturation: 0.1,
+  }),
+  w20Measurement({
+    measurementId: 'ccm-panel-camera-b',
+    cameraId: 'camera-b',
+    sourceAssetId: 'asset-camera-b',
+    sourceSha256: w20Digest('d'),
+    exposure: 0.42,
+    rOverG: 1.06,
+    bOverG: 0.86,
+    saturation: 0.09,
+  }),
+]
+
+const w20MatchPlanExample = deriveMulticamMatchPlan({
+  planId: 'mmp-panel-1',
+  workspaceId,
+  projectId,
+  sessionId: w20Session,
+  sessionVersion: w20DirectionSessionExample.version,
+  referenceEpoch: w20DirectionSessionExample.referenceEpoch,
+  referenceCameraId: 'camera-a',
+  referenceCameraSelection: {
+    selectedBy: { kind: 'human', id: 'user-colourist-1' },
+    selectedAt: w20At(200),
+    baseVersionId: `${w20Session}:v${w20DirectionSessionExample.version}`,
+    baseHash: w20DirectionSessionExample.sessionHash,
+  },
+  measurements: w20MatchMeasurements,
+  lineage: { colorProbeIds: ['probe-camera-a', 'probe-camera-b'] },
+  createdAt: w20At(210),
+})
+
+const w20MatchPlanOverriddenExample = addMulticamMatchRangeOverride(w20MatchPlanExample, {
+  planId: 'mmp-panel-1.o1',
+  createdAt: w20At(260),
+  override: {
+    overrideId: 'override-panel-wide-1',
+    cameraId: 'camera-b',
+    range: createTickInterval(w20Ticks(120), w20Ticks(180)),
+    parameters: { brightness: 0.04, contrast: 1, saturation: 1 },
+    reason: 'The wide shot sits under the window; the practical behind the guest reads a third of a stop hotter there than anywhere else.',
+    actor: { kind: 'human', id: 'user-colourist-1' },
+  },
+})
+
+/**
+ * The ColorPlan write receipt.
+ *
+ * No factory: it is what `setProjectColorPlanService` reports back after the
+ * layers land, so it is written out here the way `w19MarkerArtifactExample`
+ * writes out an artifact reference.
+ */
+const w20ColorPlanWriteExample = Object.freeze({
+  colorPlanId: 'color-plan-panel-3',
+  colorPlanHash: w20Digest('2'),
+  compiledManifestHash: w20Digest('3'),
+  resultVersionId: 'project-version-panel-9',
+  replayed: false,
+  omittedCameraIds: [],
+  prunedCameraIds: [],
+  prunedSegmentIds: [],
+})
+
+const w20CriticReportExample = evaluateColorCritic({
+  reportId: 'ccr-panel-1',
+  workspaceId,
+  projectId,
+  projectVersionId: 'project-version-panel-9',
+  subject: { kind: 'output', artifactId: 'artifact-proxy-panel' },
+  before: [
+    w20Measurement({
+      measurementId: 'ccm-before-camera-a',
+      cameraId: 'camera-a',
+      sourceAssetId: 'artifact-intermediate-panel',
+      sourceSha256: w20Digest('4'),
+      exposure: 0.5,
+      rOverG: 1,
+      bOverG: 0.9,
+      saturation: 0.1,
+    }),
+    w20Measurement({
+      measurementId: 'ccm-before-camera-b',
+      cameraId: 'camera-b',
+      sourceAssetId: 'artifact-intermediate-panel',
+      sourceSha256: w20Digest('4'),
+      exposure: 0.5,
+      rOverG: 1,
+      bOverG: 0.9,
+      saturation: 0.1,
+    }),
+  ],
+  after: [
+    w20Measurement({
+      measurementId: 'ccm-after-camera-a',
+      cameraId: 'camera-a',
+      sourceAssetId: 'artifact-proxy-panel',
+      sourceSha256: w20Digest('5'),
+      exposure: 0.5,
+      rOverG: 1,
+      bOverG: 0.9,
+      saturation: 0.1,
+    }),
+    // Camera B leaves the output transform warmer than it went in. The example
+    // publishes a verdict with something in it: a report whose issue list is
+    // empty documents the one case a client also gets right by ignoring it.
+    w20Measurement({
+      measurementId: 'ccm-after-camera-b',
+      cameraId: 'camera-b',
+      sourceAssetId: 'artifact-proxy-panel',
+      sourceSha256: w20Digest('5'),
+      exposure: 0.5,
+      rOverG: 1.12,
+      bOverG: 0.86,
+      saturation: 0.1,
+    }),
+  ],
+  matchPlan: w20MatchPlanExample,
+  creativeIntent: { declared: false },
+  evaluatedAt: w20At(300),
+})
+
+// --- F4.015 ----------------------------------------------------------------
+
+const w20ReactionTrack = w20Track({
+  trackId: 'track-reaction',
+  role: 'reaction',
+  deviceId: 'device-webcam',
+  assetId: 'asset-reaction',
+  endSeconds: 40,
+  ingestSha256: w20Digest('6'),
+  syncAudioPolicy: 'final-candidate',
+  includeInFinalMix: true,
+})
+
+const w20ReferenceVideoTrack = w20Track({
+  trackId: 'track-reference',
+  role: 'reference-video',
+  deviceId: 'device-screen',
+  assetId: 'asset-reference',
+  endSeconds: 30,
+  ingestSha256: w20Digest('7'),
+})
+
+const w20ReactSessionExample = createCaptureSession({
+  workspaceId,
+  projectId,
+  sessionId: 'capture-session-react-watchalong',
+  clock: { timebase: w20Timebase, rounding: 'nearest-half-even' },
+  referenceTrackId: 'track-reference',
+  tracks: [w20ReactionTrack, w20ReferenceVideoTrack],
+  lineage: { ...w20Lineage, commandId: 'command-open-watchalong' },
+  createdAt: w20At(0),
+})
+
+/**
+ * Forty seconds of reaction over a thirty-second reference: play, pause, play,
+ * commentary, play, and a stretch where the player was hidden.
+ *
+ * The hidden stretch is the one that matters. "Played on unobserved",
+ * "paused then scrubbed" and "seeked" all fit it equally, so the aggregate
+ * leaves it uncovered and asks for a person instead of picking one.
+ */
+function w20PlaybackObservations() {
+  const windows: { reactionTick: bigint; referenceTick: bigint | null; confidence: number; method: 'audio-fingerprint'; evidenceRef: string; peakRatio: number }[] = []
+  const push = (fromSecond: number, toSecond: number, reference: number | null) => {
+    for (let second = fromSecond; second < toSecond; second += 0.5) {
+      const reactionTick = w20Ticks(second)
+      windows.push({
+        reactionTick,
+        referenceTick: reference === null ? null : w20Ticks(reference + (second - fromSecond)),
+        confidence: 0.9,
+        method: 'audio-fingerprint',
+        evidenceRef: `fingerprint:${reactionTick}`,
+        peakRatio: 4,
+      })
+    }
+  }
+  push(0, 6, 0)
+  push(6, 10, null)
+  push(10, 14, 6)
+  push(14, 25, null)
+  push(25, 28, 10)
+  push(28, 34, 13)
+  push(34, 36, null)
+  push(36, 40, 21)
+  return windows
+}
+
+const w20PlaybackMapExample = buildPlaybackMap({
+  mapId: 'capture-session-react-watchalong:track-reaction:playback-1',
+  session: w20ReactSessionExample,
+  reactionTrack: w20ReactSessionExample.tracks.find((track) => track.trackId === 'track-reaction')!,
+  referenceTrack: w20ReactSessionExample.tracks.find((track) => track.trackId === 'track-reference')!,
+  referenceMedia: {
+    assetId: 'asset-reference',
+    sha256: w20Digest('7'),
+    durationTicks: w20Ticks(30),
+    timebase: w20Timebase,
+  },
+  reactionMedia: {
+    assetId: 'asset-reaction',
+    sha256: w20Digest('6'),
+    durationTicks: w20Ticks(40),
+  },
+  observations: w20PlaybackObservations(),
+  policy: defaultPlaybackPolicy(w20Timebase),
+})
+
+const w20PlaybackReadExample = Object.freeze({
+  map: w20PlaybackMapExample,
+  versionRef: `capture-session-react-watchalong:playback:track-reaction:v${w20PlaybackMapExample.version}`,
+  manualReviewRequired: w20PlaybackMapExample.uncovered.length > 0,
+})
+
+/**
+ * The stretch nobody could measure, answered by a person.
+ *
+ * The anchor lands inside the map's own uncovered range because that is the
+ * only place `applyPlaybackAnchor` accepts one: an anchor over a measured piece
+ * would be an operator overruling a measurement rather than resolving an
+ * absence, and the aggregate refuses it.
+ */
+const w20PlaybackUncoveredExample = w20PlaybackMapExample.uncovered[0]!
+const w20AnchoredPlaybackMapExample = applyPlaybackAnchor(w20PlaybackMapExample, {
+  expectedVersion: w20PlaybackMapExample.version,
+  expectedHash: w20PlaybackMapExample.mapHash,
+  anchor: {
+    anchorId: 'anchor-hidden-player-1',
+    reactionTick: (w20PlaybackUncoveredExample.range.start + w20PlaybackUncoveredExample.range.end) / BigInt(2),
+    referenceTick: w20Ticks(20),
+    mode: 'playing',
+    actorId: 'user-editor-1',
+    note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
+    createdAt: w20At(400),
+  },
+})
+
+/**
+ * Wave 20 fixture — the two compiled plans, built by the compilers themselves.
+ *
+ * The react plan is `compilePlaybackMapToDirectedPlan` over the anchored map
+ * above, at thirty frames a second, with the two recordings measured the way a
+ * server measures them: forty seconds of reaction and thirty of reference. The
+ * published assumptions are therefore the compiler's own sentence about
+ * ADR-135 — the output runs the reaction's length, not the reference's — and
+ * not prose written next to a schema.
+ *
+ * The synthesis plan is `compileSynthesisToDirectedPlan` over a real
+ * `createEditorialSynthesis`: two hours of interview kept as six windows two
+ * minutes long, at 30000/1001. Every number a reader sees below — the duration
+ * in frames, the clip count, the plan hash — is what those compilers produced.
+ */
+const w20ReactPlanFps = rational(BigInt(30), BigInt(1))
+const w20ReactMeasured = new Map([
+  ['asset-reaction', { artifactId: 'artifact-reaction', sha256: w20Digest('6'), durationSeconds: 40 }],
+  ['asset-reference', { artifactId: 'artifact-reference', sha256: w20Digest('7'), durationSeconds: 30 }],
+])
+const w20ReactPlanExample = compilePlaybackMapToDirectedPlan(w20AnchoredPlaybackMapExample, {
+  session: w20ReactSessionExample,
+  measured: w20ReactMeasured,
+  artifactByAssetId: new Map([
+    ['asset-reaction', 'artifact-reaction'],
+    ['asset-reference', 'artifact-reference'],
+  ]),
+  projectVersionId: 'project-version-3',
+  objective: 'discovery',
+  planFps: w20ReactPlanFps,
+  createdAt: w20At(500),
+})
+const w20ReactPlanSnapshotExample = Object.freeze({
+  ...renderablePlanSnapshotOf({
+    workspaceId,
+    projectId,
+    origin: 'react-playback',
+    sourceId: w20AnchoredPlaybackMapExample.mapId,
+    sourceHash: w20AnchoredPlaybackMapExample.mapHash,
+    sourceVersion: w20AnchoredPlaybackMapExample.version,
+    plan: w20ReactPlanExample,
+  }),
+  createdAt: w20At(500),
+})
+
+const w20SynthesisMasterSha = w20Digest('9')
+const w20SynthesisLineage = Object.freeze({
+  sourceArtifactId: 'artifact-founder-interview',
+  sourceArtifactSha256: w20SynthesisMasterSha,
+  sourceManifestId: 'manifest-founder-interview',
+  sourceManifestHash: w20Digest('a'),
+  indexRunId: 'index-run-founder-interview',
+  momentId: 'moment-founder-interview',
+  momentHash: w20Digest('b'),
+  evaluationId: 'evaluation-founder-interview',
+  evaluationHash: w20Digest('c'),
+})
+const w20SynthesisRanges = [
+  { rangeId: 'range-1', startMs: 120_000, endMs: 145_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-2', startMs: 900_000, endMs: 918_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-3', startMs: 1_800_000, endMs: 1_822_000, claimIds: ['claim-1'], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-4', startMs: 3_600_000, endMs: 3_615_000, claimIds: [], qualifierIds: ['qualifier-1'], proofContextIds: [] },
+  { rangeId: 'range-5', startMs: 5_400_000, endMs: 5_425_000, claimIds: [], qualifierIds: [], proofContextIds: ['proof-1'] },
+  { rangeId: 'range-6', startMs: 7_000_000, endMs: 7_015_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+].map((window) => ({
+  ...window,
+  lineage: w20SynthesisLineage,
+  rightsSnapshotId: 'rights-founder-interview',
+  rightsStatus: 'approved' as const,
+  consentStatus: 'approved' as const,
+}))
+const w20SynthesisExample = createEditorialSynthesis({
+  id: 'synthesis-founder-interview',
+  workspaceId,
+  projectId,
+  objective: 'two-minute cut of the founder interview',
+  targetDurationMs: 120_000,
+  toleranceMs: 2_000,
+  sourceDurationMs: 7_200_000,
+  frameRate: rational(BigInt(30_000), BigInt(1_001)),
+  storyPlan: {
+    ...STORY_GOLDEN_FIXTURES.linear,
+    id: 'story-plan-founder-interview',
+    mode: 'multi-range' as const,
+    targetDurationMs: { min: 100_000, max: 140_000 },
+    blocks: STORY_GOLDEN_FIXTURES.linear.blocks.map((block) => ({
+      ...block,
+      durationTargetMs: { min: 20_000, ideal: 30_000, max: 45_000 },
+    })),
+  },
+  editPlanId: 'edit-plan-founder-interview',
+  ranges: w20SynthesisRanges,
+  joins: w20SynthesisRanges.slice(0, -1).map((range, index) => ({
+    beforeRangeId: range.rangeId,
+    afterRangeId: w20SynthesisRanges[index + 1]!.rangeId,
+    kind: 'spliced' as const,
+    justification: `window ${index + 1} closes the thought that window ${index + 2} opens`,
+    continuityRisks: ['argument'],
+  })),
+})
+const w20SynthesisPlanExample = compileSynthesisToDirectedPlan(w20SynthesisExample, {
+  sources: [{
+    artifactId: 'artifact-founder-interview',
+    sha256: w20SynthesisMasterSha,
+    durationSeconds: 7_200,
+  }],
+  projectVersionId: 'project-version-3',
+  objective: 'discovery',
+  createdAt: w20At(600),
+})
+const w20SynthesisPlanSnapshotExample = Object.freeze({
+  ...renderablePlanSnapshotOf({
+    workspaceId,
+    projectId,
+    origin: 'multi-range-synthesis',
+    sourceId: w20SynthesisExample.id,
+    sourceHash: w20SynthesisExample.synthesisHash,
+    sourceVersion: null,
+    plan: w20SynthesisPlanExample,
+  }),
+  createdAt: w20At(600),
+})
+
+/**
+ * Wave 20 fixture (F4.016) — a phase gate that has not been passed.
+ *
+ * Built by the evaluator itself: `evaluateMulticamLongformGate` derives the
+ * counts, the fingerprint and the ordering, `buildLegacyRuntimeCriterion` turns
+ * a real module-graph scan into criterion 10, and
+ * `calculateMulticamLongformGateRecordHash` hashes the record the repository
+ * would store. Nothing below is a literal shape written to match the schema.
+ *
+ * The published state is deliberately the unhappy one, because the happy one
+ * teaches a client nothing. Seven criteria pass; one has never been evaluated
+ * at all; one read a row whose hash did not recompute; one read rows and found
+ * the requirement unmet. Those three failures are three different next actions,
+ * and a client that renders them identically has lost the point of the gate.
+ *
+ * It also carries the reference state that is easy to get wrong: the delivered
+ * MP4 is cited with `hash: null` — the artifact table stores no digest of its
+ * own, so nothing could be recomputed — and that is NOT the same as the colour
+ * verdict, whose digest was recomputed and disagreed.
+ */
+const w20GateAt = '2026-09-04T18:30:00.000Z'
+const w20GateDigest = (seed: string) => seed.repeat(64).slice(0, 64)
+
+function w20GateReference(
+  type: MulticamLongformEvidenceResourceType,
+  id: string,
+  hash: string | null,
+  verified = hash !== null,
+) {
+  return { type, id, hash, verified }
+}
+
+function w20GatePassingChecks(
+  criterion: MulticamLongformCriterion,
+  detail: (code: string) => string,
+  references: readonly ReturnType<typeof w20GateReference>[],
+) {
+  return {
+    criterion,
+    checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) => ({
+      code,
+      passed: true,
+      failureReason: null,
+      detail: detail(code),
+      references: [...references],
+    })),
+  }
+}
+
+const w20GateSessionId = 'capture-session-multicam-panel'
+const w20GateDiagnostic = w20GateReference('sync-diagnostic', `${w20GateSessionId}:diagnostic:v3`, w20GateDigest('1'))
+const w20GateCoverage = w20GateReference('track-coverage', `${w20GateSessionId}:coverage:track-camera-a`, w20GateDigest('2'))
+const w20GateClockMap = w20GateReference('clock-map', `${w20GateSessionId}:clock:asset-camera-a`, w20GateDigest('3'))
+
+/** A scan that found nothing, hashed by the same function that verifies it. */
+const w20GateAuditContent = {
+  schemaVersion: 'legacy-runtime-audit/v1' as const,
+  entryModules: [
+    'src/v2/application/multicam-longform-gate.ts',
+    'src/v2/infrastructure/repository-factory.ts',
+  ],
+  unreadableEntryModules: [],
+  scannedModuleCount: 412,
+  violations: [],
+  scannedAt: w20GateAt,
+}
+const w20GateAudit = {
+  ...w20GateAuditContent,
+  auditHash: calculateLegacyRuntimeAuditHash(w20GateAuditContent),
+}
+
+const w20GateReport = evaluateMulticamLongformGate({
+  workspaceId,
+  projectId,
+  sessionId: w20GateSessionId,
+  evaluatedAt: w20GateAt,
+  evidence: [
+    w20GatePassingChecks(
+      'podcast-multicam-synchronised',
+      (code) => `${code}: two participants on distinct audio, synced-high at 600 s of derived coverage`,
+      [w20GateDiagnostic, w20GateCoverage, w20GateClockMap],
+    ),
+    w20GatePassingChecks(
+      'teacher-and-screen-synchronised',
+      (code) => `${code}: the screen recording runs 42 s longer than the camera and neither was stretched`,
+      [w20GateReference('sync-diagnostic', 'capture-session-teacher:diagnostic:v2', w20GateDigest('4'))],
+    ),
+    w20GatePassingChecks(
+      'insufficient-evidence-requires-manual',
+      (code) => `${code}: the protocol ceiling is manual-anchors-required and auto-edit is refused`,
+      [w20GateReference('capture-protocol-evaluation', 'capture-session-lecture:protocol-evaluation:v1', w20GateDigest('5'))],
+    ),
+    {
+      // Read, and found wanting: the map exists, the pieces are there, the
+      // durations differ — and nothing compiled it into a renderable plan.
+      criterion: 'react-edited-with-piecewise-map' as const,
+      checks: [
+        {
+          code: 'playback-map-persisted' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'playback map v4 of track-reaction, 6 pieces, status needs-input',
+          references: [w20GateReference('playback-map', `${w20GateSessionId}:playback:track-reaction:v4`, w20GateDigest('6'))],
+        },
+        {
+          code: 'interrupted-piece-present' as const,
+          passed: true,
+          failureReason: null,
+          detail: '2 paused pieces and 1 rewind piece between 120 s and 210 s',
+          references: [w20GateReference('playback-piece', `${w20GateSessionId}:playback:track-reaction:piece-3`, null)],
+        },
+        {
+          code: 'reaction-duration-differs' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'reaction runs 612 s against a 540 s reference',
+          references: [w20GateReference('playback-map', `${w20GateSessionId}:playback:track-reaction:v4`, w20GateDigest('6'))],
+        },
+        {
+          code: 'map-compiled-into-plan' as const,
+          passed: false,
+          failureReason: 'requirement-unmet' as const,
+          detail: 'the newest renderable plan snapshot was compiled from map v3 and the map is now v4',
+          references: [w20GateReference('renderable-plan-snapshot', 'plan-snapshot-reaction-9', w20GateDigest('7'))],
+        },
+      ],
+    },
+    w20GatePassingChecks(
+      'active-speaker-and-demonstration-directed',
+      (code) => `${code}: 41 shots, rules active-speaker and demonstration both fired, every shot justified`,
+      [w20GateReference('multicam-direction', `${w20GateSessionId}:direction:v2`, w20GateDigest('8'))],
+    ),
+    // Criterion 6 is absent from this list entirely: nobody has run a
+    // multi-range synthesis for this project. It still appears in the report
+    // with all five checks missing, which is the difference between "not done"
+    // and "not shown".
+    w20GatePassingChecks(
+      'colour-match-precedes-creative-lut',
+      (code) => `${code}: 3 match-stage transforms resolve before the creative LUT in the resolved ColorPlan`,
+      [w20GateReference('match-plan', `${w20GateSessionId}:match:v2`, w20GateDigest('9'))],
+    ),
+    {
+      // The case the gate exists for: a row edited underneath the product. The
+      // digest was recomputed and disagreed, so every check of this criterion
+      // reproves — and none of them may claim a pass beside it.
+      criterion: 'colour-critic-resolved' as const,
+      checks: MULTICAM_LONGFORM_CRITERION_CHECKS['colour-critic-resolved'].map((code) => ({
+        code,
+        passed: false,
+        failureReason: 'evidence-unverified' as const,
+        detail: 'the stored colour critic report does not recompute from its own content',
+        references: [w20GateReference('colour-critic-report', 'color-critic-report-panel-3', w20GateDigest('a'), false)],
+      })),
+    },
+    {
+      criterion: 'final-mp4-inspectable' as const,
+      checks: [
+        {
+          code: 'final-export-promoted' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'final export attempt 2 promoted the delivered master',
+          references: [w20GateReference('final-export', 'final-export-attempt-2', w20GateDigest('b'))],
+        },
+        {
+          code: 'output-codec-recorded' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'h264 / aac, 1920x1080, 30/1',
+          references: [w20GateReference('media-manifest', 'manifest-final-master', w20GateDigest('c'))],
+        },
+        {
+          code: 'output-probe-measured' as const,
+          passed: true,
+          failureReason: null,
+          // The artifact table stores no digest of its own, so the reference
+          // carries `hash: null`. That is "nothing to recompute", never "the
+          // hash was wrong" — and a check may pass beside it.
+          detail: 'ffprobe measured 3 600 frames over 120,000 s',
+          references: [w20GateReference('media-artifact', 'artifact-final-master', null, false)],
+        },
+        {
+          code: 'artifact-hash-matches-attempt' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'the manifest sha256 equals the sha256 the export attempt recorded',
+          references: [
+            w20GateReference('media-manifest', 'manifest-final-master', w20GateDigest('c')),
+            w20GateReference('final-export', 'final-export-attempt-2', w20GateDigest('b')),
+          ],
+        },
+      ],
+    },
+    buildLegacyRuntimeCriterion(w20GateAudit),
+  ],
+})
+
+const w20GateRecordContent = {
+  schemaVersion: 'multicam-longform-gate/v1' as const,
+  id: 'multicam-longform-gate-example-1',
+  workspaceId,
+  projectId,
+  sessionId: w20GateSessionId,
+  projectVersionId: 'project-version-panel-9',
+  projectVersionHash: w20GateDigest('d'),
+  report: w20GateReport,
+  reportFingerprint: w20GateReport.fingerprint,
+  idempotencyKey: 'gate-panel-2026-09-04',
+  requestFingerprint: w20GateDigest('e'),
+  createdBy: { type: 'api-client' as const, id: clientId },
+  createdAt: w20GateAt,
+}
+const w20GateExample = {
+  ...w20GateRecordContent,
+  recordHash: calculateMulticamLongformGateRecordHash(w20GateRecordContent),
+}
+
+/** The same derivation the explain service performs, from the same report. */
+const w20GateOutstandingExample = {
+  gateId: w20GateExample.id,
+  evaluatedAt: w20GateExample.report.evaluatedAt,
+  ...explainMulticamLongformGate(w20GateExample.report),
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -13253,6 +14320,303 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           retryable: false,
           requestId: 'request-export-matrix-example-1',
         },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — F4.012 multicam direction
+    // -----------------------------------------------------------------------
+    'apollo://schemas/direct-multicam-session-request/v1': [
+      {
+        baseVersionId: 'project-version-panel-7',
+        baseHash: w20Digest('1'),
+        format: { aspectRatio: '16:9' },
+        range: { sessionStartTicks: w20Ticks(1).toString(), sessionEndTicks: w20Ticks(300).toString() },
+        reason: 'Re-cut the panel across both cameras now that the second camera is synced.',
+      },
+    ],
+    'apollo://schemas/protect-multicam-selection-request/v1': [
+      {
+        baseVersionId: 'project-version-panel-7',
+        baseHash: w20Digest('1'),
+        format: { aspectRatio: '16:9' },
+        protectedSelections: [
+          {
+            selectionId: 'protected-selection-demo-1',
+            trackId: 'track-camera-b',
+            sessionStartTicks: w20Ticks(60).toString(),
+            sessionEndTicks: w20Ticks(90).toString(),
+            note: 'Hold on camera B through the demo: the scorer prefers the speaker, and the thing being demonstrated is on the other side of the table.',
+          },
+        ],
+      },
+    ],
+    'apollo://schemas/multicam-direction-directed/v1': [
+      {
+        data: presentDirectedSessionResponse({ ...w20DirectedSessionExample, replayed: false }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-direction-read/v1': [
+      { data: presentMulticamDirectionRead(w20DirectionReadExample), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/multicam-angle-candidate-list/v1': [
+      {
+        data: presentAngleCandidateListing({
+          ...w20DirectionReadExample,
+          // One window, with every track that was evaluated over it — the
+          // chosen one and the two that lost, each with its own reasons.
+          windows: w20DirectionExample.shots.slice(0, 1).map((shot) => toAngleCandidateWindow(shot)),
+          omittedWindows: Math.max(0, w20DirectionExample.shots.length - 1),
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-shot-decision-list/v1': [
+      {
+        data: presentShotDecisionListing({
+          ...w20DirectionReadExample,
+          shots: w20DirectionExample.shots.slice(0, 1),
+          omittedShots: Math.max(0, w20DirectionExample.shots.length - 1),
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — F4.013 colour match, F4.014 colour critic
+    // -----------------------------------------------------------------------
+    'apollo://schemas/derive-multicam-match-plan-request/v1': [
+      {
+        referenceCameraId: 'camera-a',
+        baseVersionId: `${w20Session}:v${w20DirectionSessionExample.version}`,
+        baseHash: w20DirectionSessionExample.sessionHash,
+        projectBaseVersionId: 'project-version-panel-8',
+        projectBaseHash: w20DirectedProjectVersionExample.baseHash,
+        note: 'Camera A is the one lit for the guest; B is the wide.',
+      },
+    ],
+    'apollo://schemas/add-multicam-match-override-request/v1': [
+      {
+        baseVersionId: matchPlanVersionRef(w20Session, 1),
+        baseHash: w20MatchPlanExample.planHash,
+        projectBaseVersionId: 'project-version-panel-9',
+        projectBaseHash: w20Digest('8'),
+        override: {
+          overrideId: 'override-panel-wide-1',
+          cameraId: 'camera-b',
+          range: { start: w20Ticks(120).toString(), end: w20Ticks(180).toString() },
+          parameters: { brightness: 0.04, contrast: 1, saturation: 1 },
+          reason: 'The wide shot sits under the window; the practical behind the guest reads a third of a stop hotter there than anywhere else.',
+        },
+      },
+    ],
+    'apollo://schemas/multicam-match-plan-derived/v1': [
+      {
+        data: presentDerivedMatchPlan({
+          plan: w20MatchPlanExample,
+          version: 1,
+          replayed: false,
+          colorPlan: w20ColorPlanWriteExample,
+          invalidated: { matchPlanIds: [], colorCriticReportIds: [] },
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-match-override-applied/v1': [
+      {
+        data: presentMatchOverrideResult({
+          plan: w20MatchPlanOverriddenExample,
+          version: 2,
+          replayed: false,
+          colorPlan: { ...w20ColorPlanWriteExample, resultVersionId: 'project-version-panel-10' },
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-match-plan-read/v1': [
+      {
+        data: presentMulticamMatchPlanRead({
+          plan: w20MatchPlanOverriddenExample,
+          version: 2,
+          previousVersionHash: w20MatchPlanExample.planHash,
+          versionRef: matchPlanVersionRef(w20Session, 2),
+          isHead: true,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/color-critic-report-list/v1': [
+      {
+        data: presentColorCriticReportListing({
+          reports: [w20CriticReportExample],
+          // One bounded correction spent of the two the budget allows — counted
+          // by the service over the evaluator's window, never over the page.
+          correctionsApplied: 1,
+          correctionBudgetExhausted: false,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/color-critic-report-read/v1': [
+      { data: presentColorCriticReportResponse(w20CriticReportExample), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/color-critic-issue-list/v1': [
+      {
+        data: presentColorCriticIssueListing({
+          reportId: w20CriticReportExample.reportId,
+          projectId: w20CriticReportExample.projectId,
+          projectVersionId: w20CriticReportExample.projectVersionId,
+          action: w20CriticReportExample.action,
+          cause: w20CriticReportExample.cause,
+          referenceCameraId: w20CriticReportExample.referenceCameraId,
+          matchPlanId: w20CriticReportExample.matchPlanId,
+          evaluatedAt: w20CriticReportExample.evaluatedAt,
+          reportHash: w20CriticReportExample.reportHash,
+          issues: w20CriticReportExample.issues.filter((issue) => issue.severity === 'hard'),
+          filteredOut: w20CriticReportExample.issues.filter((issue) => issue.severity !== 'hard').length,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — F4.015 react playback map
+    // -----------------------------------------------------------------------
+    'apollo://schemas/build-react-playback-map-request/v1': [
+      {
+        baseVersionId: `capture-session-react-watchalong:v${w20ReactSessionExample.version}`,
+        baseHash: w20ReactSessionExample.sessionHash,
+        reactionTrackId: 'track-reaction',
+      },
+    ],
+    'apollo://schemas/add-react-playback-anchor-request/v1': [
+      {
+        baseVersionId: w20PlaybackReadExample.versionRef,
+        baseHash: w20PlaybackMapExample.mapHash,
+        reactionTrackId: 'track-reaction',
+        anchor: {
+          anchorId: 'anchor-hidden-player-1',
+          reactionTick: ((w20PlaybackUncoveredExample.range.start + w20PlaybackUncoveredExample.range.end) / BigInt(2)).toString(),
+          referenceTick: w20Ticks(20).toString(),
+          mode: 'playing',
+          note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
+        },
+      },
+    ],
+    'apollo://schemas/react-playback-map-built/v1': [
+      {
+        data: presentBuiltPlaybackMap({
+          map: w20PlaybackMapExample,
+          replayed: false,
+          manualReviewRequired: w20PlaybackMapExample.uncovered.length > 0,
+          supersededMapId: null,
+          carriedAnchors: 0,
+          droppedAnchors: 0,
+          invalidated: null,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/react-playback-map-anchored/v1': [
+      {
+        data: presentAnchoredPlaybackMap({
+          map: w20AnchoredPlaybackMapExample,
+          replayed: false,
+          manualReviewRequired: w20AnchoredPlaybackMapExample.uncovered.length > 0,
+          invalidated: null,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/react-playback-map-read/v1': [
+      { data: presentPlaybackMapRead(w20PlaybackReadExample), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/react-playback-piece-list/v1': [
+      {
+        data: presentPlaybackPieceListing({
+          ...w20PlaybackReadExample,
+          pieces: w20PlaybackMapExample.pieces,
+          filteredOut: 0,
+          omittedPieces: 0,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — the two compilers that make a decision renderable
+    // -----------------------------------------------------------------------
+    'apollo://schemas/compile-react-playback-plan-request/v1': [
+      {
+        baseVersionId: `capture-session-react-watchalong:playback:track-reaction:v${w20AnchoredPlaybackMapExample.version}`,
+        baseHash: w20AnchoredPlaybackMapExample.mapHash,
+        reactionTrackId: 'track-reaction',
+        projectVersionId: 'project-version-3',
+        objective: 'discovery',
+        planFps: '30/1',
+      },
+    ],
+    'apollo://schemas/compile-synthesis-render-plan-request/v1': [
+      {
+        projectVersionId: 'project-version-3',
+        objective: 'discovery',
+      },
+    ],
+    'apollo://schemas/renderable-plan-compiled/v1': [
+      // The react compile: a forty-second reaction over a thirty-second
+      // reference, so the plan runs the reaction and says so in its own words.
+      {
+        data: presentCompiledRenderablePlan({
+          snapshot: w20ReactPlanSnapshotExample,
+          replayed: false,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+      // The synthesis compile: two hours kept as six windows, `sourceVersion`
+      // null because an immutable cut has no chain.
+      {
+        data: presentCompiledRenderablePlan({
+          snapshot: w20SynthesisPlanSnapshotExample,
+          replayed: false,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — F4.016 multicamera and long-form phase gate
+    // -----------------------------------------------------------------------
+    'apollo://schemas/evaluate-multicam-longform-gate-request/v1': [
+      // The entire request. There is no second example with more fields in it,
+      // because there is no second shape: a measurement, a criterion result or
+      // an approval sent here is refused by the name of the key.
+      { sessionId: w20GateSessionId },
+      {},
+    ],
+    'apollo://schemas/multicam-longform-gate-evaluated/v1': [
+      {
+        data: presentMulticamLongformGateEvaluated({ gate: w20GateExample, replayed: false }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-longform-gate-read/v1': [
+      { data: presentMulticamLongformGateRead(w20GateExample), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/multicam-longform-gate-list/v1': [
+      { data: presentMulticamLongformGateHistory([w20GateExample]), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/multicam-longform-gate-criteria/v1': [
+      {
+        data: presentMulticamLongformGateCriteria(listMulticamLongformGateCriteria()),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-longform-gate-outstanding/v1': [
+      {
+        data: presentMulticamLongformGateOutstanding(w20GateOutstandingExample),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-longform-gate-artifact-list/v1': [
+      {
+        data: presentMulticamLongformGateArtifacts(w20GateExample, { limit: 100 }),
+        meta: { apiVersion: 'v1' },
       },
     ],
     'apollo://schemas/openapi-document/v1': [

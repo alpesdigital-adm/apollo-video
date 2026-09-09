@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
 import { DomainError, assertDomain } from '../domain/errors.ts'
@@ -10,17 +9,15 @@ import type { MediaArtifactQueryRepository } from '../application/ports/media-ar
 import type { ArtifactSourceMaterializer } from '../application/ports/media-ingest.ts'
 import type { ProviderSubmissionInputMaterializer } from '../application/ports/provider-job-runtime.ts'
 import type { SyntheticProductionRepository } from '../application/ports/synthetic-production-repository.ts'
+import { resolveFfmpegBinary } from './media/ffmpeg-binary.ts'
 
 const MAX_HEYGEN_ASSET_BYTES = 32 * 1024 * 1024
 const MAX_TRANSFORMATION_SOURCE_BYTES = 256 * 1024 * 1024
 const AUDIO_CONTAINERS = new Set(['mp3', 'wav'])
 const execFileAsync = promisify(execFile)
-const require = createRequire(import.meta.url)
-const ffmpeg = require('ffmpeg-static') as string | null
 
 async function extractAudioRange(input: { path: string; startMs: number; endMs: number; signal?: AbortSignal }): Promise<Uint8Array> {
-  assertDomain(Boolean(ffmpeg), 'PRECONDITION_REQUIRED', 'FFmpeg is unavailable for audio-first range materialization')
-  const { stdout } = await execFileAsync(ffmpeg!, [
+  const { stdout } = await execFileAsync(resolveFfmpegBinary(), [
     '-v', 'error', '-ss', (input.startMs / 1_000).toFixed(3), '-i', input.path,
     '-t', ((input.endMs - input.startMs) / 1_000).toFixed(3), '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-f', 'mp3', 'pipe:1',
   ], { encoding: 'buffer', maxBuffer: MAX_HEYGEN_ASSET_BYTES + 1024, windowsHide: true, signal: input.signal })

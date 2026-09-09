@@ -292,7 +292,9 @@ interface PublicError {
 
 `message` é segura para client. Diagnóstico interno, prompt, stack, signed URL, provider secret e conteúdo sensível não aparecem no envelope.
 
-`PUBLIC_ERROR_CATALOG` é a fonte executável dos 117 códigos atuais: cada código possui status HTTP, uma das sete categorias, retry explícito e mensagem pública canônica. O envelope v3 publica exatamente esse enum e preserva v1/v2. `INTERNAL_ERROR` usa o mesmo catálogo que DomainError; presenter e fallback nunca ecoam diagnóstico interno. Código novo sem classificação ou classificação duplicada impede a inicialização/CI.
+Alguns códigos publicam um `details` estreito, campo a campo, e nunca o `details` inteiro do domínio. Desde a Wave 20, `PERSISTENCE_NOT_CONFIGURED` é um deles: ele saiu do grupo 503 retryable para um grupo próprio com **`retryable: false`** — todo ponto que o levanta é falha de implantação, e nenhuma delas se conserta repetindo o pedido — e o presenter publica `details.binary` (o executável que falta) e `details.variables` (as variáveis de ambiente que o nomeariam, na ordem em que ganham). `details.searched`, que é listagem de diretório do servidor, **não** atravessa. O mesmo código levantado sem esses detalhes é apresentado exatamente como antes. Ver [ADR-158](../adr/ADR-158-media-binary-resolution-and-deployment-fault.md); a classificação está em `public-api/public-error-catalog.ts:256-267` e a projeção em `public-api/error-presenter.ts:136-146`.
+
+`PUBLIC_ERROR_CATALOG` é a fonte executável dos 162 códigos atuais (`Object.keys(PUBLIC_ERROR_CATALOG).length`, medido em 2026-09-06; o número 117 que estava aqui era de antes das Waves 18–20): cada código possui status HTTP, uma das sete categorias, retry explícito e mensagem pública canônica. O envelope v3 publica exatamente esse enum e preserva v1/v2. `INTERNAL_ERROR` usa o mesmo catálogo que DomainError; presenter e fallback nunca ecoam diagnóstico interno. Código novo sem classificação ou classificação duplicada impede a inicialização/CI.
 
 Códigos são estáveis dentro da major version, incluindo:
 

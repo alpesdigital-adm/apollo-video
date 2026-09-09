@@ -179,7 +179,7 @@ test('review annotations persist idempotently without mutating the project versi
       data: {
         id: 'review-integration-operation',
         workspaceId,
-        projectId,
+        projectId: projectResult.project.id,
         clientId: issued.client.id,
         actorClientId: projectAuthenticationAudit.clientId,
         actorCredentialId: projectAuthenticationAudit.credentialId,

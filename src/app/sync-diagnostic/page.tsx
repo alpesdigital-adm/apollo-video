@@ -273,6 +273,34 @@ export default function SyncDiagnosticPage() {
 
       <h1>Diagnóstico de sincronia</h1>
 
+      {/* Cross navigation, in both directions. The three Wave 20 surfaces each
+          nominate this page as a sibling; without this block the edge was
+          one-way, and an operator standing on the diagnostic could not reach
+          the direction, the colour or the playback of the session they were
+          already looking at. The shell carries a fixed set of destinations and
+          none of these is one of them, so the links live here. */}
+      <nav data-testid="diagnostic-siblings">
+        <a data-testid="link-capture-sessions" href="/capture-sessions">Sessões de captura</a>
+        <a
+          data-testid="link-multicam-direction"
+          href={`/multicam-direction?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(sessionId.trim())}`}
+        >
+          Direção multicâmera
+        </a>
+        <a
+          data-testid="link-color-match"
+          href={`/color-match?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(sessionId.trim())}`}
+        >
+          Cor multicâmera
+        </a>
+        <a
+          data-testid="link-playback-map"
+          href={`/playback-map?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(sessionId.trim())}`}
+        >
+          Mapa de playback
+        </a>
+      </nav>
+
       <form
         onSubmit={(event) => {
           event.preventDefault()

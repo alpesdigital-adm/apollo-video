@@ -304,3 +304,121 @@ test('T-FR-140 the reference track must be one of the session tracks', () => {
   )
   assert.throws(() => session({ tracks: [] }), /track/i)
 })
+
+// Re-homed from the deleted pre-audit `capture-synchronization.test.mjs`, which
+// asserted a `discardScratch: true` flag on a millisecond-based helper. The
+// authority does not compute a discard flag at all: it REFUSES to build a
+// session in which a scratch-audio track is marked for the mix
+// (`domain/capture-session.ts:383-387`) or offers its audio as final
+// (`domain/capture-session.ts:388-392`), because a flag can be ignored downstream and a
+// refused aggregate cannot. Asserting the refusal is asserting the requirement.
+function screenTrack(overrides = {}) {
+  return track({
+    trackId: 'track-screen',
+    role: 'screen',
+    device: { deviceId: 'device-capture-card', recorderId: 'recorder-obs', make: null, model: null, serial: null },
+    sourceAssetId: 'asset-screen-1',
+    // A different rate on purpose: the screen counts in its own ticks.
+    timebase: timebaseFromRate(1_000),
+    syncAudioPolicy: 'none',
+    // `screen` is not a final-mix-eligible role either.
+    includeInFinalMix: false,
+    parts: [part({
+      partId: 'part-screen-1',
+      sourceAssetId: 'asset-screen-1',
+      timebase: timebaseFromRate(1_000),
+      // 540 s at 1 kHz — shorter than the camera, and never stretched to match.
+      coverage: createTickInterval(BigInt(0), BigInt(1_000) * BigInt(540)),
+      evidence: evidence({ ingestArtifactId: 'artifact-screen-1' }),
+    })],
+    ...overrides,
+  })
+}
+
+function scratchTrack(overrides = {}) {
+  return track({
+    trackId: 'track-scratch',
+    role: 'scratch-audio',
+    device: { deviceId: 'device-zoom-h6', recorderId: 'recorder-scratch', make: null, model: null, serial: null },
+    sourceAssetId: 'asset-scratch-1',
+    timebase: timebaseFromRate(48_000),
+    syncAudioPolicy: 'sync-only',
+    includeInFinalMix: false,
+    parts: [part({
+      partId: 'part-scratch-1',
+      sourceAssetId: 'asset-scratch-1',
+      timebase: timebaseFromRate(48_000),
+      coverage: createTickInterval(BigInt(0), BigInt(48_000) * BigInt(605)),
+      evidence: evidence({ ingestArtifactId: 'artifact-scratch-1' }),
+    })],
+    ...overrides,
+  })
+}
+
+test('T-FR-146 unequal camera and screen keep their own coverage, and scratch audio cannot reach the mix', () => {
+  const created = session({ tracks: [track(), screenTrack(), scratchTrack()] })
+
+  // (a) Three tracks of three different durations counted in three different
+  // timebases. Nothing is resampled, padded or clamped to the reference: each
+  // part comes back with exactly the ticks and the timebase that went in.
+  const camera = findCaptureTrack(created, 'track-cam-main')
+  const screen = findCaptureTrack(created, 'track-screen')
+  const scratch = findCaptureTrack(created, 'track-scratch')
+  assert.deepEqual(camera.parts[0].coverage, { start: BigInt(0), end: BigInt(90_000) * BigInt(600) })
+  assert.deepEqual(screen.parts[0].coverage, { start: BigInt(0), end: BigInt(1_000) * BigInt(540) })
+  assert.deepEqual(scratch.parts[0].coverage, { start: BigInt(0), end: BigInt(48_000) * BigInt(605) })
+  assert.ok(rationalEquals(camera.parts[0].timebase.secondsPerTick, timebaseFromRate(90_000).secondsPerTick))
+  assert.ok(rationalEquals(screen.parts[0].timebase.secondsPerTick, timebaseFromRate(1_000).secondsPerTick))
+  assert.ok(rationalEquals(scratch.parts[0].timebase.secondsPerTick, timebaseFromRate(48_000).secondsPerTick))
+  // The three durations really are unequal, so the assertions above are not
+  // trivially satisfied by three equal intervals.
+  assert.equal(new Set([600, 540, 605].map(String)).size, 3)
+
+  // (b) The scratch track is in the session — it is what the clocks are lined
+  // up on — but it is carried as excluded from the mix.
+  assert.equal(scratch.includeInFinalMix, false)
+  assert.equal(screen.includeInFinalMix, false)
+  assert.equal(camera.includeInFinalMix, true)
+
+  // …and the exclusion is enforced, not merely recorded: `domain/capture-session.ts:383-387`
+  // refuses the aggregate outright rather than silently unsetting the flag.
+  assert.throws(
+    () => session({ tracks: [track(), screenTrack(), scratchTrack({ includeInFinalMix: true })] }),
+    /scratch-audio track carries no final audio and cannot be marked for the final mix/,
+  )
+  // `domain/capture-session.ts:388-392`: nor can it volunteer its audio as the final one.
+  assert.throws(
+    () => session({ tracks: [track(), screenTrack(), scratchTrack({ syncAudioPolicy: 'final-candidate' })] }),
+    /scratch-audio track cannot offer its audio as a final candidate/,
+  )
+  // The same rule is a role rule, not a scratch-audio special case: `screen`
+  // carries no final audio either.
+  assert.throws(
+    () => session({ tracks: [track(), screenTrack({ includeInFinalMix: true }), scratchTrack()] }),
+    /screen track carries no final audio and cannot be marked for the final mix/,
+  )
+  // A master-audio track, by contrast, is allowed both.
+  const withMaster = session({
+    tracks: [
+      track(),
+      scratchTrack(),
+      track({
+        trackId: 'track-master-audio',
+        role: 'master-audio',
+        device: { deviceId: 'device-zoom-h6', recorderId: 'recorder-master', make: null, model: null, serial: null },
+        sourceAssetId: 'asset-master-1',
+        timebase: timebaseFromRate(48_000),
+        syncAudioPolicy: 'final-candidate',
+        includeInFinalMix: true,
+        parts: [part({
+          partId: 'part-master-1',
+          sourceAssetId: 'asset-master-1',
+          timebase: timebaseFromRate(48_000),
+          coverage: createTickInterval(BigInt(0), BigInt(48_000) * BigInt(610)),
+          evidence: evidence({ ingestArtifactId: 'artifact-master-1' }),
+        })],
+      }),
+    ],
+  })
+  assert.equal(findCaptureTrack(withMaster, 'track-master-audio').includeInFinalMix, true)
+})

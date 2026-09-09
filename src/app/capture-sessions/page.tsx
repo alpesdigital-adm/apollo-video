@@ -362,12 +362,61 @@ export default function CaptureSessionsPage() {
         <a href="/capture-protocols">Ver as exigências antes de gravar</a>
       </p>
 
+      {/* The phase gate is not a shell destination either. It is reached from
+          here because the question it answers — can this phase be closed? —
+          is asked about the material on this screen. */}
+      <p data-testid="open-multicam-longform-gate">
+        <a href={`/multicam-longform-gate?projeto=${encodeURIComponent(projectId.trim())}`}>
+          Ver o gate de fase multicâmera e formato longo
+        </a>
+      </p>
+
       {selected && (
         <p data-testid="open-diagnostic">
           <a
             href={`/sync-diagnostic?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected)}`}
           >
             Abrir o diagnóstico desta sessão
+          </a>
+        </p>
+      )}
+
+      {/* The Wave 20 operator surfaces. They are sub-pages rather than shell
+          destinations — the shell declares a fixed set — so this is the place
+          they are reached from, and each of them links back here and to its
+          siblings. The links carry the session already chosen: landing on an
+          empty form would ask the operator to retype what they just clicked.
+
+          Guarded on `selected`, like the diagnostic link above it. Rendered
+          before a session is chosen they pointed at `?projeto=&sessao=` — the
+          empty form this comment says they avoid — and looked reachable while
+          leading nowhere. */}
+      {selected && (
+        <p data-testid="open-multicam-direction">
+          <a
+            href={`/multicam-direction?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected)}`}
+          >
+            Dirigir esta sessão entre as câmeras
+          </a>
+        </p>
+      )}
+
+      {selected && (
+        <p data-testid="open-color-match">
+          <a
+            href={`/color-match?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected)}`}
+          >
+            Casar a cor entre as câmeras
+          </a>
+        </p>
+      )}
+
+      {selected && (
+        <p data-testid="open-playback-map">
+          <a
+            href={`/playback-map?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected)}`}
+          >
+            Ver o que o player fez nesta reação
           </a>
         </p>
       )}

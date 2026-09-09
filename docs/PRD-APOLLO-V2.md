@@ -1480,6 +1480,75 @@ Entregue localmente em 2026-09-03: um tick entre duas peças devolve
 `uncovered`, sem número junto — interpolar ali é como uma edição longa termina
 um quadro fora na segunda metade. Duas peças nunca reivindicam o mesmo tick, e a
 causa registrada da fronteira precisa bater com a evidência medida.
+
+A metade react deste requisito — pause/rewind e mapping não linear — foi
+entregue localmente em 2026-09-06, e **não** pelo `PiecewiseClockMap`. Uma pausa
+não tem lei afim (taxa zero é recusada) e um replay reivindica os mesmos ticks
+da referência duas vezes (sobreposição de origem é recusada); as duas recusas
+são certas e ficaram como estão. O `react-playback-map/v1` mapeia reação →
+referência, direção em que intervalos da reação nunca se sobrepõem e intervalos
+da referência podem repetir, correr para trás ou faltar. Seis modos —
+`playing`, `paused`, `rewind`, `replay`, `seek`, `commentary-only` — e o
+vocabulário de fronteira da Wave 18 entra por spread, acrescido de `pause`,
+`commentary` e `manual-anchor`. Medido sobre uma gravação de react gerada
+(referência 30,00 s, reação 60,00 s): 119 janelas, 69 travadas, 8 peças, 1
+trecho que só uma pessoa pode responder, erro de fronteira de 0 ou 15 quadros
+por peça, e o mesmo `mapHash` em duas execuções. Ver ADR-152.
+
+**O corte de react passou a dizer por que corta (2026-09-07).** A direção
+multicâmera (F4.012) já publicava um log de decisão em `director.decisions`; o
+compile do react publicava um `Object.freeze([])`, e o
+`grep -rnE "reactDirector|react-director" src/ tests/` que a auditoria rodou
+saía com 1 e nenhuma linha — o corte de react era o único da wave cujas escolhas
+de imagem nenhum registro explicava. `buildPlaybackDecisions`
+(`react-playback-map.ts`) monta o log a partir das peças que o mapa já resolveu
+— modo, direção, taxa medida, causa da fronteira, método de detecção, resíduo e
+a confiança da própria peça — e `assembleDirectedEditPlan` o passa por
+`validateDirectorDecisions`, a mesma autoridade por onde a direção passa: 4 a 64
+entradas, cada uma com escolha, razão, evidência e confiança, e com tipo de
+decisão, detalhe de confiança e banda **derivados ali**, nunca declarados pelo
+compilador. A escolha por peça é a gravação que a peça implica — referência
+quando existe `referenceRange`, reactor quando não —, e uma peça pausada diz por
+escrito que a referência não produziu tempo ali. Os três campos de referência do
+plano continuam nomeando `react-playback:<mapId>`: um log mais completo não
+compra a aparência de uma aprovação que nenhum crítico deu. Medido sobre o
+fixture não-saudável: 12 decisões sobre 9 peças, todas na banda `auto-apply`. O
+compile da síntese multi-range (F4.016) continua sem log e com a lista vazia,
+porque ele justifica o seu corte no próprio agregado de síntese; a lista vazia é
+a forma honesta disso e não uma pendência escondida.
+
+**Não entregue, nomeado aqui em vez de calado (2026-09-07).**
+`PLAYBACK_DETECTION_METHODS` tem quatro valores e só dois produzem peça em
+produção: `audio-fingerprint`, que o correlator FFmpeg mede, e `manual-anchor`,
+que uma pessoa registra por `applyPlaybackAnchor`. Os outros dois nunca foram
+implementados e não são baratos:
+
+- **`player-visual`** significa ler a posição do player dentro do quadro da
+  reação — barra de progresso, botão de play, estado da interface. Isso é
+  detecção de UI em vídeo (template matching ou um modelo treinado por player),
+  e cada player muda de aparência entre versões.
+- **`ocr-timestamp`** significa ler o relógio que o player desenha. Motor de OCR
+  o repositório **tem**: a porta `ImageVisionProvider` já roda Tesseract
+  (`tesseract-image-vision-provider.ts`, ligado por `APOLLO_TESSERACT_PATH`) e o
+  worker de ingestão a usa (`repository-factory.ts:1979`). Não é pacote npm — é
+  binário externo que a implantação instala, e é por isso que
+  `image-analysis-tesseract.integration.mjs` roda em nenhum passo do CI. Quem
+  procurar o motor em `package.json` não acha e conclui errado: a linha de
+  F4.015 da traçabilidade concluiu, e foi corrigida contra este parágrafo. O que não existe é o resto do detector, e é a parte
+  cara: não há caminho de quadro de vídeo materializado até essa porta — ela só
+  recebe imagem parada vinda da ingestão —, e transformar texto reconhecido em
+  posição de playhead é trabalho de região e template por player, porque cada um
+  desenha o relógio onde e como quiser.
+
+Nenhum dos dois é uma lacuna escondida no código: o vocabulário existe para que
+o agregado consiga registrar uma peça que veio da interface do player sem
+fingir que um correlator a produziu, e enquanto ninguém escreve o detector o
+efeito prático é o já documentado — um player escondido vira trecho descoberto
+com `manual-anchor-required`, e uma pessoa responde. A decisão do proprietário
+é entre financiar um detector visual (dependência nova, manutenção por player,
+custo por minuto) e assumir que react com player escondido é sempre trabalho
+manual.
+
 ### FR-146 — Sync audio separado
 
 Scratch audio pode servir para sync e ser descartado no mix final.
@@ -1504,6 +1573,129 @@ Método, confiança, offset, drift, coverage, warnings e necessidade de anchors.
 ### FR-150 — Direção multicâmera
 
 Escolher ângulo por falante, expressão, tela relevante, reação, formato e ritmo.
+
+
+Entregue localmente em 2026-09-06: oito espécies de evidência sobre a sessão
+(falante ativo, fala simultânea, silêncio, reação, demonstração, atividade de
+tela, qualidade técnica e atenção), cada observação dizendo se foi medida,
+controlada ou declarada. A escolha do ângulo é um score de nove parcelas
+nomeadas sob a calibração `multicam-direction-2026-09-v2` — plano mínimo de
+1200 ms, cutaway devolvido em 4000 ms, ganho mínimo de 0,15 para trocar de
+ângulo, ritmo alvo de 8000 ± 4000 ms — e cada decisão registra qual das nove
+regras decidiu e por quê, em texto. Formato entra como penalidade de contexto:
+em 9:16 o plano aberto vale metade.
+
+O que não é escolhido automaticamente é tão importante quanto o que é. Quinze
+razões nomeadas tornam um ângulo inelegível, e o candidato rejeitado continua
+guardado dentro do hash da decisão, com a sua razão. Uma janela sem nenhum
+ângulo elegível não recebe ângulo: vira um intervalo descoberto, a direção fica
+com `manualReviewRequired` e a compilação recusa transformá-la em clipes. Dois
+ângulos com evidência a menos de 0,1 um do outro não são ordenados — a direção
+segura o plano corrente e avisa; qualquer observação de fala simultânea que
+cruze a janela dobra essa margem, declarada ou medida (spec 05 §29.4). Uma
+seleção protegida por uma pessoa nunca é substituída em silêncio: elegível, ela
+vence; inelegível, o aviso nomeia as rejeições que a impediram. O chamador não
+manda score, elegibilidade, medição nem aprovação — um pedido que traga
+qualquer um deles é recusado pelo nome.
+
+Um ângulo é um clipe, e um de cada vez: a compilação resolve cada plano contra
+o mapa de relógio da faixa escolhida e emite `EditorialCutClip`. Professor e
+tela são **cortados** entre si, nunca compostos — o caminho editorial não tem
+picture-in-picture nem freeze (spec 05 §34.4). Medido com FFmpeg real: uma
+direção de duas câmeras rendeu 2 clipes sobre 3 fontes, 300 quadros, 10,000 s,
+h264/aac, e a inspeção de pixel confirmou a troca de ângulo (vermelho aos
+2,50 s, azul aos 7,50 s); duas câmeras a cadências diferentes (30/1 e 25/1 num
+plano de 30/1) são recusadas pela compilação com as taxas que o `ffprobe` leu.
+Superfície `/v1` com cinco capabilities e tela de operador em
+`/multicam-direction`. Deploy e aceite pendentes.
+
+**Não entregue, nomeado aqui em vez de calado (2026-09-07).** Das oito
+espécies, **cinco** têm adaptador ligado na raiz de composição: falante ativo e
+fala simultânea vêm da diarização persistida, atividade de tela e qualidade
+técnica vêm dos pixels, e silêncio vem das amostras
+(`ffmpeg/silencedetect+astats`, medido: um tom contínuo não produz trecho
+nenhum, uma pausa de 2,95 s a −77,04 dBFS produz exatamente ela, zeros digitais
+produzem o piso de −120 dBFS). A **sexta**, reação, o produtor sabe emitir e a
+porta `MulticamPerceptionSource` não tem adaptador nenhum, então em produção
+ela é ausência — nunca zero.
+
+**Medido não é o mesmo que lido.** Silêncio é observado, entra no hash da
+evidência e é persistido, e **nenhuma regra de `DIRECTION_RULES` o lê**:
+`grep silence src/v2/domain/multicam-direction.ts` não devolve linha nenhuma.
+Uma observação de silêncio muda o hash do conjunto e não muda decisão de corte
+alguma — é medição registrada, não entrada da direção. Isso o separa de fala
+simultânea (que dobra a margem de ambiguidade, §29.4) e de qualidade técnica
+(que produz `quality-below-floor`), as duas outras espécies de adaptador, que
+são lidas. Ligar silêncio a uma regra — segurar plano numa pausa, cortar para
+reação quando ninguém fala — é trabalho não começado e não decidido.
+
+**Duas** espécies continuam modeladas, validadas pelo agregado e aceitas pelo
+banco sem que nada as observe:
+
+- **demonstração** exigiria detecção de mãos e objetos. O repositório tem porta
+  de visão e dois adaptadores — Tesseract para OCR e Google Cloud Vision pedindo
+  `FACE_DETECTION` e `OBJECT_LOCALIZATION` —, e nenhum dos dois responde a
+  pergunta: os dois leem **imagem parada** vinda da ingestão de mídia, ninguém
+  liga quadro de gravação nessa porta, e uma caixa em volta de um objeto num
+  quadro não é uma mão demonstrando alguma coisa ao longo do tempo. Chamar
+  movimento de tela de "demonstração" poria o nome errado num número real — a
+  mesma recusa que o passe visual já faz sobre nitidez. A consequência está
+  escrita onde ela dói: a regra `demonstration-prefers-screen` decide por uma
+  tela compartilhada e **nunca** pode decidir por uma demonstração física numa
+  câmera, porque em produção não existe observação de uma.
+- **atenção** exigiria olhar (gaze). `FACE_DETECTION` devolve caixa de rosto e
+  confiança — o adaptador não pede nem lê ângulo de cabeça —, e caixa de rosto
+  não é direção do olhar. Nenhum adaptador aqui estima gaze.
+
+E **expressão**, que a linha do requisito acima pede, não é sequer uma espécie
+de evidência: não está em `MULTICAM_EVIDENCE_KINDS` e nunca esteve. Ler
+expressão facial é mais um modelo de visão, não um parâmetro de FFmpeg — e o
+adaptador de Cloud Vision daqui pede só `FACE_DETECTION` e
+`OBJECT_LOCALIZATION` e lê só caixa e confiança, então nem as verossimilhanças
+de expressão que a API sabe devolver chegam a este repositório. A linha
+do requisito fica como está — ela continua sendo o requisito — e o que muda é
+que a entrega agora diz que essa parte não foi feita, em vez de enumerar oito
+espécies e deixar o leitor concluir que a lista respondia à linha inteira.
+
+As três custam a mesma decisão, e ela é do proprietário. O preço não é "adotar
+visão computacional do zero" — a porta e dois adaptadores já estão aqui; é
+adotar **modelos que estes não têm** (mão em ação, gaze, expressão facial),
+**ligar quadro de vídeo à porta de visão**, que hoje só recebe imagem parada, e
+pagar o segundo passe sobre a mídia já materializada, com licença e custo por
+minuto. A alternativa é declarar demonstração física, atenção e expressão fora
+do escopo e apagar a palavra da linha do requisito. Nada foi começado, e nada
+aqui aproxima uma coisa da outra.
+
+**Não entregue, nomeado aqui em vez de calado (2026-09-07): "histórico
+imutável" é imutável para quem lê, não para um DELETE.** Vale para todos os
+agregados versionados desta wave — sessão de captura, diagnóstico de
+sincronismo, direção multicâmera, plano de match, mapa de playback, snapshot de
+plano renderizável e o registro do gate. Medido num PostgreSQL 16 descartável
+migrado do zero: nas quinze tabelas de histórico e de gate há **0 gatilhos** não
+internos, **0 rules** e **0 tabelas com row-level security**; no banco inteiro,
+268 tabelas e os mesmos três zeros. Um UPDATE é pego na leitura, porque a
+hidratação recalcula o hash e recusa a linha — `wave20-persistence.e2e.mjs`
+prova isso em quatro agregados. Um DELETE não é pego por nada: apagar a versão 1
+de uma direção removeu 1 linha, levou em cascata as decisões de plano dela, e a
+cabeça continuou respondendo na v2 nomeando pelo hash um ancestral que já não
+existe. A cadeia é verificável para frente a partir de uma linha e inverificável
+para trás depois de uma linha que alguém removeu.
+
+A proteção **não** foi adicionada, e a razão é medida e não suposta: bloquear
+DELETE nessas tabelas quebra um caminho de escrita de produção e duas suítes.
+`prisma/capture-session-repository.ts:407` apaga o mapa de relógio anterior dentro de
+`persistClockMap`, porque "um mapa é a resposta corrente para uma fonte";
+`multicam-longform-gate.e2e.mjs` falsifica nove dos dez critérios apagando uma
+linha de evidência de cada vez e ainda exige que apagar um registro de gate
+cascateie para os seus critérios, checagens e evidências (304 chaves
+estrangeiras do schema são `ON DELETE CASCADE`); e a limpeza de toda suíte
+PostgreSQL da wave apaga das mesmas tabelas. Uma proteção que um GUC de sessão
+desligasse para acomodar tudo isso protegeria contra engano e não contra
+intenção, e seria descrita aqui como "o banco recusa um DELETE", que não é
+verdade. O registro fica aqui, na spec 05 §34.9 e na linha de rastreabilidade;
+o arame de tropeço é o terceiro teste de `wave20-persistence.e2e.mjs`, que falha
+no dia em que a proteção existir e nomeia os três lugares a corrigir.
+
 
 ---
 
@@ -1613,9 +1805,71 @@ UI atual; o aceite de FR-182 é API-first e não afirma essa superfície.
 
 Igualar exposição, white balance, contraste, saturação e pele antes da LUT.
 
+
+Entregue localmente em 2026-09-06: oito dimensões medidas por câmera e por
+intervalo, cada uma com unidade fixa, e um piso de três quadros decodificados
+abaixo do qual o intervalo não foi medido — um quadro é um still, não uma
+estatística. O match é um estágio do ColorPlan que já existia (`match`, dentro
+de `technical → match → creative-lut → output`), e a ordem não é convenção: um
+plano que declare a LUT criativa antes do match é recusado com
+`COLOR_STAGE_VIOLATION`. O provedor `apollo-match` ganhou uma segunda versão
+declarada, com ganho por canal para white balance; uma transformação v2 tem hash
+diferente da v1, e as compilações existentes não foram tocadas (ADR-154).
+
+Medido sobre pixels reais: com duas câmeras, a razão azul/verde da câmera B
+passou de 0,916081 para 1,046333 contra uma referência de 1,047486 — de 12,54 %
+de erro para 0,11 %; com três câmeras, o erro de vermelho caiu de 17,03 % para
+1,05 %. A mesma câmera casada, sob duas LUTs criativas diferentes, continua
+produzindo resultados separados (0,0828 em azul, 0,1235 em vermelho) e digests
+distintos: o match não apaga a intenção que vem depois dele.
+
+A câmera de referência é escolhida por alguém, e a escolha é carregada como
+atestação cercada por `baseVersionId` + `baseHash` da sessão que essa pessoa
+estava vendo — não como medição. Overrides são por câmera e opcionalmente por
+segmento ou intervalo, com motivo e ator. Uma correção além do limite é
+grampeada no limite e o plano diz isso com `humanReviewRequired`; nunca é
+aplicada em força total nem descartada em silêncio, e um único par de intervalos
+não pode reivindicar confiança acima de 0,8. Sete recusas fail-closed cobrem
+referência sem medição, HDR sem tone-map, colorimetrias diferentes, medição
+insuficiente, intervalos que nunca se cruzam, violação de estágio e colisão de
+identidade de câmera. **Fica em aberto:** a dimensão `skin` é medida mas não
+entra em transformação alguma. Deploy e aceite pendentes.
+
 ### FR-184 — Crítico de cor
 
 Skin tones, clipping, blacks, saturation, mismatch, brand color drift e HDR/SDR.
+
+
+Entregue localmente em 2026-09-06: doze dimensões avaliadas antes e depois do
+output transform, mais as que só existem comparando os dois lados. Cinco
+dimensões são obrigatórias — sem elas nada se sabe sobre os bytes — e as três
+dimensões entre câmeras são `not-applicable` com uma câmera e obrigatórias com
+duas ou mais: comparação ilegível num sujeito multicâmera é evidência faltando,
+não defeito ausente. Dois limiares por dimensão, `warn` e `hard`, sob a
+calibração `color-critic-thresholds/v1`.
+
+A ação nunca é a média dos números: ela é lida numa tabela de dez causas com
+precedência declarada, e a precedência começa em defeito técnico irreversível.
+Um defeito duro **medido** supera uma dimensão que ninguém conseguiu ler — saber
+que um quadro está ceifado não fica menos certo porque uma segunda pergunta
+ficou sem resposta — e tudo abaixo disso cai para revisão humana. Correção
+automática limitada exige confiança ≥ 0,85 e no máximo duas iterações. Uma
+intenção criativa declarada limita um deslocamento de cor e nunca uma amostra
+destruída: clipping, blacks esmagados, pele fora da banda, deriva de cor de
+marca e inconsistência HDR/SDR não são desfeitos por ganho nenhum, e o que a
+declaração pode desculpar tem teto (ADR-157).
+
+Medido: com `highlights = 0,5` a ação é `reject` por defeito irreversível, com
+declaração ou sem ela, enquanto o controle da mesma suíte sai `human-review` por
+correção não derivável — o positivo e o negativo lado a lado. Um cast medido de
+0,201998 é preservado quando declarado e continua sendo defeito quando não
+declarado, com a rejeição residual em pele. Um desencontro confinado a um
+segundo é reportado como aquele intervalo daquela câmera, e não como defeito
+global. Uma mancha de pele controlada é medida por máscara de banda e rotulada
+como controlada, nunca como pele real. O avaliador declara o que é: ele não lê
+pixels, compara agregados de medição contra limiares versionados. **Não
+calibrado contra material real** — todos os números vieram de fixtures geradas.
+Deploy e aceite pendentes.
 
 ---
 
@@ -2932,7 +3186,9 @@ foi contabilizada neste aceite.
 - Cross-library long-form retrieval.
 - Editorial synthesis multi-range.
 - Color match multicâmera.
+- Crítico de cor antes e depois do output transform.
 - API de CaptureSession, anchors, diagnostic e sync maps autorizados.
+- Gate da fase com cada condição visível sozinha.
 
 **Critério de saída:** múltiplas fontes do mesmo evento são sincronizadas, diagnosticadas e editadas automaticamente.
 

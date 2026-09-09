@@ -85,6 +85,19 @@ export type DirectorDecisionCategory =
   | 'subtitle'
   | 'transition'
   | 'insert'
+  /**
+   * Which camera plays over a stretch of the timeline (F4.012, ADR-118).
+   *
+   * Additive: no existing decision changes category, and the entry in
+   * `decisionTypeByCategory` below is what makes the category real. Choosing an
+   * angle is a `cut` for confidence purposes — the same band policy a
+   * transition is graded by (`decision-confidence.ts:23`), because both answer
+   * "what does the viewer see at this instant?" and both are wrong in the same
+   * way when they are wrong. `multicam-direction.ts` builds these decisions
+   * (`toAngleDecision`) and says there that the integration phase adds the
+   * category; this is that addition.
+   */
+  | 'angle'
 
 export interface DirectorDecision {
   id: string
@@ -275,6 +288,7 @@ const decisionTypeByCategory: Readonly<Record<DirectorDecisionCategory, Confiden
   subtitle: 'transcription',
   transition: 'cut',
   insert: 'asset-selection',
+  angle: 'cut',
 })
 
 export function validateDirectorDecisions(

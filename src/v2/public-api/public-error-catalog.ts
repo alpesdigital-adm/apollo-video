@@ -99,7 +99,33 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
     // The request was well formed, and correct when the caller computed it.
     // What changed is the session, so 409 with the current version is the
     // answer an operator can act on.
-    status: 409, category: 'conflict', codes: ['CAPTURE_SESSION_VERSION_STALE', 'SYNC_DIAGNOSTIC_VERSION_STALE'],
+    status: 409, category: 'conflict', codes: [
+      'CAPTURE_SESSION_VERSION_STALE', 'SYNC_DIAGNOSTIC_VERSION_STALE',
+      'PLAYBACK_MAP_VERSION_STALE',
+    ],
+  },
+  {
+    // The map exists and is current. What it says is that a stretch of the
+    // reaction has no answer yet, so there is nothing to compile — a refusal of
+    // evidence, like a tampered marker, not a malformed request.
+    status: 422, category: 'policy', codes: ['PLAYBACK_MAP_UNRESOLVED'],
+  },
+  {
+    // Refusals of evidence and of shape, not of the request. The session is not
+    // a react session, or its track was recorded in more than one file, or the
+    // detector never found the reference inside the reaction — a hidden player,
+    // which ADR-135 answers with a person rather than a guess. Each is 422
+    // because retrying the same request cannot change any of them.
+    status: 422, category: 'policy', codes: [
+      'PLAYBACK_SESSION_NOT_REACT',
+      'PLAYBACK_TRACK_NOT_SINGLE_PART',
+      'PLAYBACK_EVIDENCE_INSUFFICIENT',
+    ],
+  },
+  {
+    // This one IS the caller's to fix: the session has more than one reactor and
+    // the request did not say which to map.
+    status: 422, category: 'validation', codes: ['PLAYBACK_REACTION_TRACK_AMBIGUOUS'],
   },
   {
     // Not a 404: the artifact exists. Not a stale version: the request is
@@ -114,6 +140,9 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
       'CAPTURE_SESSION_NOT_FOUND', 'CAPTURE_TRACK_NOT_FOUND',
       'CAPTURE_TRACK_PART_NOT_FOUND',
       'CAPTURE_SYNC_RUN_NOT_FOUND', 'EDITORIAL_SYNTHESIS_NOT_FOUND',
+      'PLAYBACK_MAP_NOT_FOUND', 'MULTICAM_LONGFORM_GATE_NOT_FOUND',
+      'MULTICAM_DIRECTION_NOT_FOUND', 'MULTICAM_MATCH_PLAN_NOT_FOUND',
+      'COLOR_CRITIC_REPORT_NOT_FOUND',
       'MEDIA_UPLOAD_NOT_FOUND', 'MEDIA_DOWNLOAD_GRANT_NOT_FOUND',
       'MEDIA_ARTIFACT_NOT_FOUND', 'MEDIA_ARTIFACT_MANIFEST_NOT_FOUND',
       'MEDIA_TRANSCRIPT_NOT_FOUND', 'MATERIALIZATION_AUTHORIZATION_NOT_FOUND',
@@ -171,6 +200,17 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
       'ASSET_NOT_USABLE', 'ASSET_RIGHTS_BLOCKED', 'EDITORIAL_ACCEPTANCE_FAILED',
       'CAPTURE_COVERAGE_NOT_AVAILABLE', 'CAPTURE_COVERAGE_UNVERIFIED',
       'CAPTURE_COVERAGE_OVERLAP_UNRESOLVED', 'CAPTURE_SESSION_DERIVATION_STALE',
+      'DIRECTION_RANGE_UNRESOLVABLE', 'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
+      'CAMERA_IDENTITY_COLLISION',
+      // The request is well formed and the caller had no business sending it:
+      // a score, an eligibility, a measurement or an approval the server is the
+      // only thing entitled to derive. 422 with the offending field, not 400.
+      'DIRECTION_CALLER_SUPPLIED_DERIVATION',
+      // Colour match and critic refusals: the measurements arrived intact and
+      // say something the system will not build a correction on.
+      'COLOR_SOURCES_INCOMPARABLE', 'COLOR_HDR_SDR_UNSUPPORTED',
+      'COLOR_RANGES_NOT_COMPARABLE', 'COLOR_MEASUREMENT_INSUFFICIENT',
+      'COLOR_REFERENCE_UNAVAILABLE', 'COLOR_STAGE_VIOLATION',
     ],
   },
   {
@@ -211,7 +251,20 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
   {
     status: 503, category: 'internal', retryable: true,
     message: 'The request could not be completed',
-    codes: ['AUTH_NOT_CONFIGURED', 'PERSISTENCE_NOT_CONFIGURED', 'INVALID_CAPABILITY_POLICY'],
+    codes: ['AUTH_NOT_CONFIGURED', 'INVALID_CAPABILITY_POLICY'],
+  },
+  {
+    // Split out of the group above, and not retryable. Every raise site of this
+    // code is a fault in the deployment — an environment variable nobody set, a
+    // credential that is not there, an executable that is not installed — and
+    // none of them is fixed by sending the same request again. It used to
+    // answer `retryable: true`, so a server with no ffmpeg told every caller to
+    // come back and be refused identically. The presenter carries the name of
+    // the missing tool and the variables that would name it, when the refusal
+    // knows them.
+    status: 503, category: 'internal', retryable: false,
+    message: 'The server is not configured to complete this request',
+    codes: ['PERSISTENCE_NOT_CONFIGURED'],
   },
   {
     status: 429, category: 'quota', retryable: true,

@@ -1,6 +1,6 @@
 # Apollo Video v2 — Backlog executável
 
-> **Fonte principal:** [`docs/PRD-APOLLO-V2.md`](./docs/PRD-APOLLO-V2.md), versão 1.1  
+> **Fonte principal:** [`docs/PRD-APOLLO-V2.md`](./docs/PRD-APOLLO-V2.md), versão 1.2  
 > **Rastreabilidade:** [`docs/REQUIREMENTS-TRACEABILITY.md`](./docs/REQUIREMENTS-TRACEABILITY.md)  
 > **Especificações:** [`docs/specs`](./docs/specs)  
 > **Estado:** backlog inicial; nenhuma caixa marcada sem evidência verificável  
@@ -556,8 +556,8 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 - [ ] Mapear todas as entidades das seções 10.1–10.6 para aggregates, tabelas e value objects, sem implementar tabela genérica sem contrato. Evidência parcial integrada F0.033: `docs/specs/10-conceptual-model.md` cobre exatamente as 57 entidades do PRD em 26 targets de tabela, 5 snapshots, 14 value objects e 12 lacunas `planned`; o gate rejeita ausência, duplicação, model/símbolo inexistente e tabela genérica. O run `30775662600` passou 827 testes. As 12 lacunas precisam de contratos próprios antes de concluir. Evidência: T-F0.033 e ADR-134.
 - [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution. Evidência parcial integrada F0.033: cada uma das 57 linhas declara owner, lifecycle e chave, e T-F0.033 exige o owner canônico da seção. Relações e integridade das 12 entidades ainda planejadas permanecem abertas. Evidência: T-F0.033 e ADR-134.
 - [ ] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06. Evidência parcial integrada F0.033: a matriz da Spec 10 e T-F0.033 provam manifest content-addressed sem localização pública, timing frame-first/reverse fail-closed, OutputSpec, Command preso à base/scope/registry e o novo `AsyncMediaProviderAdapter` com capabilities TTL, estimate, submit, status, retrieve, cancel e webhook sem secrets. O run `30776437393` passou 832 testes e toda a matriz. `DocumentAsset` e integração do adapter com ProviderJob durável/provider real permanecem abertas. Evidência: T-F0.033 e ADR-134.
-- [x] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008. Evidência F0.033: `config/platform-versions.json` é a fonte única; `platform:validate` cruza manifests, locks, imagens pinadas e ADRs no CI. O drift Next 16.2.10→16.2.12 e o registry duplicado foram removidos; FFmpeg/ffprobe 8.1.1 permanecem alvos declarados, enquanto probes/goldens comprovam separadamente o binário executado. O run `30776962496` passou o novo gate, 832 testes, dois audits com zero vulnerabilidades e toda a matriz hospedada. Evidência: T-F0.033 e ADR-134.
-- [x] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`. Evidência F0.033: Next 16.2.12 pertence à linha 16.x Active LTS e React 19.2.7 à linha 19.2 atual, conforme fontes oficiais verificadas em 2 de agosto de 2026. O upgrade controlado `c350181` aplicou o codemod de params assíncronos; o gate atual fiscaliza versões/locks e `next typegen` + TypeScript validam os dynamic routes. O primeiro run de fechamento revelou um `503` concorrente real na rotação de sessão; `c491c9c` tornou o conflito esperado recuperável e ampliou a prova PostgreSQL para oito concorrentes. O run `30778010953` aprovou 831 testes, contratos `/v1`, integração OIDC, bundle e render Remotion reais, build App Router, PostgreSQL/MinIO e Compose. Evidência: T-F0.033 e ADR-001/134.
+- [x] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008. Evidência F0.033: `config/platform-versions.json` é a fonte única; `platform:validate` cruza manifests, locks, imagens pinadas e ADRs no CI. O drift original Next 16.2.10→16.2.12 e o registry duplicado foram removidos; em 8 de setembro de 2026 a baseline avançou para Next 16.3.4, Hono 4.13.7, Sharp 0.35.4 e js-yaml 4.3.2 após novos advisories. FFmpeg/ffprobe 8.1.1 permanecem alvos declarados, enquanto probes/goldens comprovam separadamente o binário executado. Evidência: T-F0.033 e ADR-134.
+- [x] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`. Evidência F0.033: Next 16.3.4 pertence à linha 16.x e React 19.2.7 à linha 19.2. O upgrade original `c350181` aplicou o codemod de params assíncronos; o patch de segurança de 8 de setembro de 2026 manteve `next typegen`, TypeScript, os 349 contratos `/v1`, a suíte e os builds App Router/Remotion verdes. O gate atual fiscaliza versões e locks. Evidência: T-F0.033 e ADR-001/134.
 - [x] Corrigir advisories não-major de `uuid`, `postcss` e `form-data`. Evidência F0.033: `uuid` 11.1.1 está pinado no manifest/lock, `postcss` 8.5.18 está pinado e forçado por override nos locks do app e renderer, e `form-data` está ausente das duas árvores. O gate `platform:validate` impede drift dessas condições; o run `30778629569` aprovou os audits root/Remotion com zero vulnerabilidades e toda a matriz hospedada. Evidência: T-F0.033 e ADR-134.
 - [x] Configurar S3-compatible storage. Evidência F0.033: o composition root seleciona `s3` explicitamente; MinIO pinado e loopback-only cria convergentemente um bucket versionado, enquanto app e workers recebem somente configuração requerida. Promoção e rematerialização exigem key content-addressed, SHA-256, tamanho e VersionId; signed URLs são curtas, limitadas pela autorização e não atravessam a API. No run `30807744785`, a jornada hospedada removeu o estado local, reconstruiu o proxy exclusivamente de PostgreSQL + MinIO versionado, reabriu e validou os bytes e encerrou toda a topologia. Evidência: T-F0.033, ADR-003 e ADR-134.
 - [x] Impedir SQLite como domínio final fora de protótipos locais. Evidência F0.033: `createV2PostgresClient` recusa URL ausente, `file:` e qualquer protocolo não-PostgreSQL; o schema V2 usa exclusivamente `provider = "postgresql"`. O gate `3aba0f9` agora também rejeita imports/dependências SQLite e drift do datasource, com casos de falsificação executáveis. O run `30807744785` aprovou o gate, migrations limpas, 832 testes e toda a matriz PostgreSQL/API-first. Evidência: T-F0.033 e ADR-134.
@@ -1806,8 +1806,11 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 > 12 capabilities `/v1` com rotas executáveis, worker durável com lease e
 > fencing, página operável `/capture-sessions` e quatro E2E.
 >
-> **Não entregue e fora do escopo desta wave:** F4.009 a F4.016, providers
-> pagos, deploy e aceite.
+> **Não entregue e fora do escopo da Wave 18:** F4.009 a F4.016, providers
+> pagos, deploy e aceite. Esta frase é de 2026-09-03 e vale para a Wave 18 —
+> F4.012 a F4.016 foram implementados localmente depois, na Wave 20; cada seção
+> abaixo tem a sua nota. Deploy e aceite continuam pendentes, e é por isso que
+> nenhuma caixa mudou.
 >
 > **Verificado por medição:** suíte 1796/1796; `db:v2:validate` 227 tabelas,
 > 1099 índices, 850 FKs; E2E 5/5, 4/4 e 4/4.
@@ -1819,15 +1822,15 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 ### F4.009 — Capture Protocol [FR-147]
 
 - [ ] Criar requisitos por cenário: professor+tela, podcast, react e multicâmera. Evidência T-FR-147.
-- [ ] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência tela `/capture`.
-- [ ] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture`.
-- [ ] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachProtocol`.
+- [ ] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência telas `/capture-protocols` e `/sync-diagnostic`.
+- [ ] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture-protocols`.
+- [ ] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachCaptureProtocolService` (`src/v2/application/capture-protocol.ts`).
 - [ ] Criar E2E de aceite do protocolo e aviso de sincronização limitada. Evidência T-FR-147.
 
 ### F4.010 — Apollo Sync Marker [FR-148]
 
 - [ ] Especificar marker audiovisual com flash, chirp e ID/tempo decodificável. Evidência T-FR-148.
-- [ ] Criar tela/arquivo de marker para reprodução e captura. Evidência API direction-v2.
+- [ ] Criar tela/arquivo de marker para reprodução e captura. Evidência capabilities `apollo.projects.capture-sessions.sync-markers.generate` e tela `/capture-protocols`.
 - [ ] Implementar detectors independentes de áudio e vídeo. Evidência T-FR-148.
 - [ ] Fundir detections, medir precisão e rejeitar falso positivo. Evidência T-FR-148.
 - [ ] Criar fixtures filmadas/gravadas em diferentes dispositivos. Evidência T-FR-148.
@@ -1835,12 +1838,29 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 ### F4.011 — SyncDiagnostic [FR-149]
 
 - [ ] Modelar método, confidence, residual, drift, coverage, warnings e ações. Evidência T-FR-149.
-- [ ] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e API direction-v2.
+- [ ] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e tela `/sync-diagnostic`.
 - [ ] Permitir adicionar/mover/remover anchor manual e recalcular. Evidência T-FR-149.
 - [ ] Bloquear auto-edit quando confidence/coverage estiver abaixo do mínimo. Evidência T-FR-149.
 - [ ] Criar E2E de diagnóstico aprovado, corrigido e impossível. Evidência T-FR-149.
 
 ### F4.012 — Direção multicâmera [FR-150]
+
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-FR-150` em `multicam-direction.test.mjs` e
+> `wave20-falsification.test.mjs`; `T-F4.012` em
+> `multicam-direction-service.test.mjs`, `capture-sync-worker.test.mjs`,
+> `capture-sync-worker-coverage.test.mjs`, `capture-sync-signal-source.test.mjs`,
+> `audio-sync-correlation.test.mjs`, `multicam-direction-render.integration.mjs`,
+> `capture-sync-worker.integration.mjs`,
+> `multicam-visual-evidence.integration.mjs` e as três suítes de persistência da
+> wave; `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs`,
+> `teacher-screen-journey.e2e.mjs`, `insufficient-evidence-journey.e2e.mjs`,
+> `capture-sync-worker-persistence.e2e.mjs` e `wave20-operator-browser.e2e.mjs`.
+> Registro: spec 05 §29, §27.1 e §34; ADR-153.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Detectar active speaker e momentos de demonstração/tela. Evidência T-FR-150.
 - [ ] Definir angle candidates por coverage, qualidade, contexto e continuidade. Evidência T-FR-150.
@@ -1850,6 +1870,19 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F4.013 — Multicam color match [FR-183]
 
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-FR-183` em `multicam-color.test.mjs`,
+> `color-export-journeys.test.mjs`, `color-measurement.integration.mjs` e
+> `wave20-falsification.test.mjs`; `T-F4.013` em `color-match-service.test.mjs`,
+> `color-match.integration.mjs`, `color-visual-evaluations.integration.mjs`,
+> `wave20-persistence.test.mjs`, `wave20-public-contract.test.mjs` e
+> `wave20-persistence-journey.e2e.mjs`. Registro: spec 05 §30 e §34; ADR-153,
+> ADR-154.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
+
 - [ ] Estimar diferenças de white balance, exposure e resposta entre câmeras. Evidência T-FR-183.
 - [ ] Aplicar match antes da creative LUT. Evidência T-FR-183.
 - [ ] Permitir reference camera e override por range. Evidência T-FR-183.
@@ -1858,12 +1891,38 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F4.014 — Crítico de cor [FR-184]
 
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-FR-184` em `multicam-color.test.mjs`,
+> `color-measurement.integration.mjs` e `wave20-falsification.test.mjs`;
+> `T-F4.014` em `color-match-service.test.mjs`, `color-match.integration.mjs`,
+> `color-visual-evaluations.integration.mjs`,
+> `project-proxy-render-worker.test.mjs`, `wave20-persistence.test.mjs`,
+> `wave20-public-contract.test.mjs` e `wave20-persistence-journey.e2e.mjs`.
+> Registro: spec 05 §31 e §34; ADR-157.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
+
 - [ ] Detectar clipping, cast, skin tone fora do alvo e mismatch localizado. Evidência T-FR-184.
 - [ ] Avaliar antes/depois do output transform sem confundir intenção criativa. Evidência T-FR-184.
 - [ ] Propor correção limitada ou revisão humana conforme confidence. Evidência T-FR-184.
 - [ ] Criar visual eval com fontes técnicas e LUTs diferentes. Evidência T-FR-184.
 
 ### F4.015 — React playback map
+
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-F4.015` em `playback-map.test.mjs`,
+> `playback-map-service.test.mjs`, `renderable-plan-hash.test.mjs`,
+> `playback-map-fingerprint.integration.mjs`, `wave20-falsification.test.mjs`,
+> `wave20-persistence.test.mjs`, `wave20-public-contract.test.mjs` e
+> `wave20-persistence-journey.e2e.mjs`; `E2E-F4.015` em `playback-map.e2e.mjs` e
+> `react-playback-journey.e2e.mjs`. Registro: spec 05 §32 e §34; ADR-152,
+> ADR-155.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Detectar no vídeo de reação os intervalos em que o conteúdo de referência toca, pausa, volta ou avança. Evidência: T-F4.015 e ADR-135.
 - [ ] Modelar playback pieces entre reference media e session time. Evidência: T-F4.015 e ADR-135.
@@ -1872,6 +1931,22 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Criar fixture com play, pause, rewind e seek. Evidência: T-F4.015 e ADR-135.
 
 ### F4.016 — Gate multicâmera/long-form
+
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-F4.016` em `multicam-longform-gate.test.mjs`,
+> `multicam-longform-gate-public-contract.test.mjs`,
+> `synthesis-directed-plan.test.mjs`, `synthesis-render.integration.mjs` e
+> `wave20-falsification.test.mjs`; `E2E-F4.016` em
+> `multicam-longform-gate.e2e.mjs`, `phase-gate-journey.e2e.mjs`,
+> `longform-synthesis-journey.e2e.mjs` e
+> `multicam-longform-gate-browser.e2e.mjs`. Registro: spec 05 §33 e §34;
+> ADR-155, ADR-156. Um gate aprovado em PostgreSQL não é implantação nem aceite:
+> ele diz que as dez condições estão satisfeitas num banco desta máquina, e nada
+> mais.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Sincronizar podcast com dois participantes e áudios distintos. Evidência: T-F4.016 e ADR-135.
 - [ ] Sincronizar professor e captura de tela com durações diferentes. Evidência: T-F4.016 e ADR-135.
@@ -2345,43 +2420,57 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### Antes de F1 público
 
-- [x] Decidir modelo de permissões por membro e registrar em ADR-010/012. Evidência: T-DECISION-001 e ADR-140.
-- [x] Decidir limites de auto-aplicação de correções sem revisão humana. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir duração e custo-alvo do primeiro proxy por duração de source. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir política inicial de retenção de masters, derivatives e temporários. Evidência: T-DECISION-001 e ADR-140.
-- [x] Decidir OAuth 2.1, signed service keys ou ambos para clients externos. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir versionamento, depreciação e janela de suporte da API. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir garantias de ordenação, retenção e replay de webhooks. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir rate limits, quotas e limites de custo por client/workspace. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir tools MCP oficiais e quais exigem preflight ou aprovação humana. Evidência: T-DECISION-001 e ADR-140.
+- [x] Decidir modelo de permissões por membro e registrar em ADR-010/012. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Decidir limites de auto-aplicação de correções sem revisão humana. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir duração e custo-alvo do primeiro proxy por duração de source. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir política inicial de retenção de masters, derivatives e temporários. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Decidir OAuth 2.1, signed service keys ou ambos para clients externos. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir versionamento, depreciação e janela de suporte da API. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir garantias de ordenação, retenção e replay de webhooks. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir rate limits, quotas e limites de custo por client/workspace. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir tools MCP oficiais e quais exigem preflight ou aprovação humana. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 ### Antes de F2 público
 
-- [x] Decidir quantidade padrão e máxima de variações por lote. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir critério e fontes externas para status “validado” de hooks. Evidência: T-DECISION-001 e ADR-140.
-- [x] Decidir importação direta por URL, termos e regras de plataforma. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir compartilhamento de biblioteca entre workspaces ou confirmar isolamento estrito. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir licenciamento e provenance de LUTs e stock. Evidência: T-DECISION-001 e ADR-140.
+- [x] Decidir quantidade padrão e máxima de variações por lote. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir critério e fontes externas para status “validado” de hooks. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Decidir importação direta por URL, termos e regras de plataforma. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir compartilhamento de biblioteca entre workspaces ou confirmar isolamento estrito. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir licenciamento e provenance de LUTs e stock. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 ### Antes de F3 público
 
-- [x] Selecionar providers iniciais de imagem/vídeo além de HeyGen/ElevenLabs. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir disclosure padrão de mídia sintética por mercado/canal. Evidência: T-DECISION-001 e ADR-140.
+- [x] Selecionar providers iniciais de imagem/vídeo além de HeyGen/ElevenLabs. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir disclosure padrão de mídia sintética por mercado/canal. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 ### Antes de F5 público
 
-- [x] Definir estratégia de licenciamento de música e SFX. Evidência: T-DECISION-001 e ADR-140.
-- [x] Calibrar loudness targets e regras de locale/mercado. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir estratégia de licenciamento de música e SFX. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Calibrar loudness targets e regras de locale/mercado. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 Para cada decisão:
 
-- [x] Registrar owner, data limite, opções, evidências e impacto. Evidência: T-DECISION-001 e ADR-140.
-- [x] Publicar ADR/decision record e atualizar defaults/configuração versionada. Evidência: T-DECISION-001 e ADR-140.
-- [x] Adicionar teste que fixe a decisão onde ela alterar comportamento. Evidência: T-DECISION-001 e ADR-140.
+- [ ] Registrar owner, data limite, opções, evidências e impacto. Pendente: `docs/PUBLIC-RELEASE-DECISIONS.md` registra os defaults, mas não owner, prazo, opções e impacto por decisão; `T-DECISION-001` foi removido com `release-risk-control.ts` em `e8ba18e6`.
+- [ ] Publicar ADR/decision record e atualizar defaults/configuração versionada. Parcial: ADR-140 e `docs/PUBLIC-RELEASE-DECISIONS.md` registram as decisões em prosa, mas não existe catálogo/configuração versionada ligado ao runtime.
+- [ ] Adicionar teste que fixe a decisão onde ela alterar comportamento. Pendente: `T-DECISION-001` não possui substituto executável e os defaults em prosa podem divergir do runtime sem reprovar um gate.
 
 ---
 
 ## 14. Jornadas E2E obrigatórias
+
+> **Nenhum ponteiro `T-J.001` a `T-J.009` resolve para um teste — conferido em
+> 2026-09-06.** Esses ids eram gerados por
+> `src/v2/application/mandatory-journeys.ts` a partir de
+> `completeJourneyFixture`, que construía toda etapa com `passed: true` e em
+> seguida afirmava que ela passara; como o arquivo terminava em `.test.mjs`,
+> aquilo rodava dentro do `npm test` e do CI sem nunca poder falhar. Foi removido
+> no commit `e8ba18e6` (ADR-141), e hoje `grep -rl "T-J\.00[0-9]" tests/` não
+> devolve arquivo nenhum. Restam **35** ponteiros desses nesta seção — quatro em
+> cada uma de J.001 a J.006 e J.008, sete em J.009 — e cada um deles nomeia um
+> teste que não existe, que é exatamente o defeito que ADR-141 descreve. Só
+> J.007 teve os seus quatro trocados por ids de testes reais. Nenhuma caixa desta
+> seção está marcada, e substituir um ponteiro não marcaria nenhuma: as jornadas
+> obrigatórias continuam sem módulo que as avalie.
 
 ### J.001 — Vídeo bruto único
 
@@ -2427,10 +2516,16 @@ Para cada decisão:
 
 ### J.007 — Multicâmera, tela e react
 
-- [ ] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: T-J.007 e ADR-141.
-- [ ] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: T-J.007 e ADR-141.
-- [ ] Exigir marker/anchor quando evidência for insuficiente. Evidência: T-J.007 e ADR-141.
-- [ ] Dirigir podcast, professor+tela e react com playback map. Evidência: T-J.007 e ADR-141.
+> **Ponteiro de evidência corrigido em 2026-09-06.** As quatro linhas abaixo
+> citavam `T-J.007`, id que nunca existiu como teste — a nota no começo da §14
+> conta por quê, e vale para as outras oito jornadas, que seguem citando os seus.
+> Os ids abaixo são os testes que de fato exercem cada item, e nenhum deles fecha
+> a jornada: as caixas seguem desmarcadas.
+
+- [ ] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: `E2E-FR-140` em `capture-heterogeneous-session.e2e.mjs` e ADR-130.
+- [ ] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: `E2E-FR-142`/`E2E-FR-144`/`E2E-FR-145` em `capture-heterogeneous-session.e2e.mjs` e `E2E-F4.012` em `capture-sync-worker-persistence.e2e.mjs`.
+- [ ] Exigir marker/anchor quando evidência for insuficiente. Evidência: `E2E-FR-142` em `capture-insufficient-evidence.e2e.mjs` e `E2E-F4.012` em `insufficient-evidence-journey.e2e.mjs`.
+- [ ] Dirigir podcast, professor+tela e react com playback map. Evidência: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs` e `teacher-screen-journey.e2e.mjs`, `E2E-F4.015` em `react-playback-journey.e2e.mjs`.
 
 ### J.008 — Localização
 
@@ -2761,7 +2856,7 @@ Critério de falha:
 
 - qualquer comando retorna status diferente de zero e bloqueia o job;
 - nenhuma credencial externa é necessária: banco e credenciais de integração são efêmeros;
-- o job possui timeout de 20 minutos e não publica artifacts nem recebe permissão de escrita.
+- o job possui timeout de 35 minutos (era 20 até a jornada de síntese long-form passar a RENDERIZAR o master de duas horas do brief, +159,3 s medidos em máquina de 8 núcleos) e não publica artifacts nem recebe permissão de escrita.
 
 Evidências locais:
 

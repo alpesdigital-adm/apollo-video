@@ -52,6 +52,42 @@ const coverage = Object.freeze({
     mode: 'durable-covered',
     evidence: 'Wave19 puts the expected version in the append predicate rather than in a preceding read, so an anchor nudge computed against a diagnostic somebody else has already changed is refused instead of silently discarding their correction',
   },
+  'apollo.projects.capture-sessions.direction.run': {
+    mode: 'durable-covered',
+    evidence: 'Wave20 advances the direction head by an UPDATE whose predicate names both the version and the hash the caller read (prisma/multicam-direction-repository.ts:721-748), and the Command, the edit-plan snapshot, the project version and the outbox event commit in one transaction keyed on the idempotency key and the full actor context, so two concurrent runs cannot both produce version N+1 and a retry returns the first Command rather than a second cut',
+  },
+  'apollo.projects.capture-sessions.direction.protected-selections.direct': {
+    mode: 'durable-covered',
+    evidence: 'Wave20 runs the same fenced append and the same transactional commit as the plain direction, and the protected selection is part of the request fingerprint, so the same key sent with a different selection is refused as IDEMPOTENCY_PAYLOAD_MISMATCH instead of quietly re-cutting under somebody else attestation',
+  },
+  'apollo.projects.capture-sessions.color-match.derive': {
+    mode: 'durable-covered',
+    evidence: 'Wave20 appends the match plan under a head compare-and-set on version and plan hash (prisma/multicam-match-plan-repository.ts:753-780), and the ColorPlan write goes through set-project-color-plan under a key derived from the project fence, the plan hash, the reason and the actor, so a second derivation of the same measured bytes replays rather than layering a second correction on the first',
+  },
+  'apollo.projects.capture-sessions.color-match.overrides.add': {
+    mode: 'durable-covered',
+    evidence: 'Wave20 refuses an amendment whose basePlanVersion and basePlanHash are not the current head before it writes, then appends under the same predicate, and an override id the plan already carries returns the stored plan without a second write, so two operators correcting the same shot cannot both believe they applied it',
+  },
+  'apollo.projects.capture-sessions.playback-map.build': {
+    mode: 'durable-covered',
+    evidence: 'Wave20 advances the map head only where it still names the expected version and hash (prisma/playback-map-repository.ts:384-414), and a rebuild that produced the identical derivation fingerprint returns the stored map, so two builds of one reaction converge on one chain instead of two maps of the same recording',
+  },
+  'apollo.projects.capture-sessions.playback-map.anchors.add': {
+    mode: 'durable-covered',
+    evidence: 'Wave20 puts the version and hash the operator read into the append predicate, so an anchor computed against a map somebody else has already answered is refused with the current pair rather than silently overwriting their answer; the anchor list only grows and an automatic anchor is never touched',
+  },
+  'apollo.projects.capture-sessions.playback-map.plan.compile': {
+    mode: 'durable-covered',
+    evidence: 'Wave20 fences the compile on the map version and hash the caller read and writes the plan under the unique key (workspace, origin, sourceId, sourceHash, projectVersionId) in prisma/renderable-plan-snapshot-repository.ts:139-176, so two operators compiling the same map land on one row: the same cut replays, and a different cut under the same key is refused as PERSISTENCE_CONFLICT rather than overwriting the plan somebody already rendered',
+  },
+  'apollo.projects.editorial-syntheses.render-plan.compile': {
+    mode: 'durable-covered',
+    evidence: 'Wave20 writes the plan under the same unique key as the react compile, and the source half of that key is the immutable synthesis hash, so a recompile converges on one row while a plan compiled from a synthesis whose master bytes changed is refused before the write rather than stored beside the first',
+  },
+  'apollo.projects.multicam-longform-gate.evaluate': {
+    mode: 'durable-covered',
+    evidence: 'F4.016 writes the gate record, its ten criteria, their checks and every evidence reference in one transaction under the unique index multicam_longform_gates_project_idempotency_key on (workspaceId, projectId, idempotencyKey), so two concurrent evaluations under one key cannot both persist and a retry returns the first record without re-reading a row; the stored actorContextHash is compared on that read, so the same key presented by another credential, environment or delegated user and the same key carrying a different session filter are both refused as IDEMPOTENCY_PAYLOAD_MISMATCH — one saying the key belongs to another authenticated actor context, the other that it answered a different request — rather than answering about another session; one code, two messages, both asserted against a real PostgreSQL in tests/v2/multicam-longform-gate.e2e.mjs',
+  },
   'apollo.projects.editorial-syntheses.create': {
     mode: 'durable-covered',
     evidence: 'Wave18 writes the cut, its ranges and its joins in one transaction; a duplicate id with the same hash replays and a duplicate id with different content is refused, so reviewed splice justifications are never overwritten',
@@ -537,7 +573,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    154,
+    163,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

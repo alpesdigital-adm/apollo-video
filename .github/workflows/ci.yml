@@ -17,7 +17,30 @@ jobs:
   quality:
     name: Quality and security
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Raised from 20 to 35 by two Wave 20 changes that landed in the same
+    # phase, so the reasons are recorded together.
+    #
+    # First, the two capture product journeys encode their own fixtures and
+    # render a 60 s 960x540 h264+aac file rather than reading a committed one.
+    # Measured on a sixteen-core developer machine against a local PostgreSQL
+    # 16: the react playback journey ran 21.8-42.8 s over an uninterrupted
+    # N=10 (median 22.2 s) and 90.4 s once on a loaded box; the insufficient
+    # evidence journey 20.3-22.0 s over N=3 and 88.2 s under the same load. So
+    # about twenty seconds each when the machine is idle, four times that when
+    # it is not.
+    #
+    # Second, the long-form synthesis journey started RENDERING the brief's
+    # two-hour master instead of stopping at its plan. On an eight-core machine
+    # that step cost 122.8, 125.6, 153.6, 159.3 and 194.5 s of FFmpeg over five
+    # runs, and the whole suite went from about 213 s to 361.4, 400.1, 412.8
+    # and 559.1 s over four runs.
+    #
+    # The 35 minutes are a BUDGET, not a measurement. A hosted runner has fewer
+    # cores than either machine those seconds came from, this repository has no
+    # CI history to calibrate against, and how much of the old cap the job was
+    # already using is not observable from a developer machine. If a real run
+    # reports the job finishing well inside this, bring it back down.
+    timeout-minutes: 35
 
     env:
       CI: true
@@ -51,6 +74,33 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             remotion/package-lock.json
+
+      # `git diff --check` is required by TODO.md, which lists it among the
+      # commands that must pass before a slice is called finished — "typecheck,
+      # `git diff --check`, audits sem vulnerabilidades, migration validation,
+      # bundle Remotion e build Next.js passam" — and repeats it in two more
+      # acceptance lists. Four reports under `docs/quality` then record it as
+      # approved: proof-mode-v1.md, batch-edit-v1.md, batch-partial-retry-v1.md
+      # and source-deconstruction-v1.md.
+      #
+      # It is NOT one of the nine gates AGENTS.md enumerates. An earlier
+      # version of this comment attributed the requirement there, in the one
+      # sentence written to show the gate was mandated rather than invented;
+      # `grep -n "diff --check" AGENTS.md` returns nothing.
+      #
+      # Every one of those documents reports the check as having passed on
+      # somebody's machine, and until this step existed nothing made the next
+      # machine repeat it: `grep -rn "diff --check" .github/ scripts/
+      # package.json` came back empty while the checked-out tree carried seven
+      # blank lines at end of file. A gate nobody runs is a sentence in a
+      # document.
+      #
+      # `lint:whitespace` diffs against `4b825dc…`, git's empty tree, so every
+      # line in the repository is read as added and the whole tree is checked —
+      # not just a branch's own diff, which has no base to compare against on a
+      # push to main. Which rules apply per path is declared in `.gitattributes`.
+      - name: Reject trailing whitespace and blank lines at end of file
+        run: npm run lint:whitespace
 
       - name: Prepare integration environment
         run: touch .env
@@ -231,17 +281,215 @@ jobs:
       - name: Run Wave 19 marker robustness fixtures
         run: npm run test:integration:marker-robustness
 
+      - name: Run Wave 20 falsification suite
+        run: npm run test:unit:wave20-falsification
+
+      - name: Run Wave 20 ffmpeg binary resolution guard
+        run: npm run test:unit:ffmpeg-binary
+
+      - name: Run Wave 20 multicam direction render against ffprobe
+        run: npm run test:integration:multicam-direction-render
+
+      # The calibration source for `SCREEN_ACTIVITY_SATURATION_BPS = 400`. Spec
+      # 05 §29.1 and the FR-150 traceability row both quote this suite's
+      # measured 0/4/103/137/3151 bps by name, and the script existed in
+      # package.json without a CI step while `.integration.mjs` keeps it out of
+      # `npm test` — so the two documents cited a number nothing re-measured.
+      - name: Run Wave 20 multicam visual evidence against real pixels
+        run: npm run test:integration:multicam-visual-evidence
+
+      - name: Run Wave 20 multicam silence evidence against real samples
+        run: npm run test:integration:multicam-silence-evidence
+
+      # The composition root itself, executed. It needs `tsx` rather than the
+      # default gate's strip-only loader because `repository-factory.ts` pulls
+      # modules with TypeScript parameter properties. No database: PrismaClient
+      # connects lazily, so the URL points at a closed port on purpose.
+      - name: Run Wave 20 multicam composition root
+        run: npm run test:integration:multicam-composition
+
+      - name: Run Wave 20 react playback fingerprint fixture
+        run: npm run test:integration:playback-map-fingerprint
+
+      - name: Run Wave 20 colour measurement against decoded frames
+        run: npm run test:integration:color-measurement
+
+      - name: Run Wave 20 multicam colour match against real pixels
+        run: npm run test:integration:color-match
+
+      - name: Run Wave 20 colour visual evaluations and keep the artifacts
+        id: color-visual-evaluations
+        run: npm run test:integration:color-visual-evaluations
+        env:
+          APOLLO_COLOR_VISUAL_EVAL_OUTPUT: ${{ runner.temp }}/color-visual-evaluations
+
+      # `always()` alone made this step demand files from a job that had failed
+      # before the evaluations ran, so an unrelated failure earlier in the job
+      # was reported twice and the second report named the wrong step. It now
+      # runs whenever the producing step ran — including when that step itself
+      # failed, which is exactly when its partial output is worth keeping — and
+      # is skipped when the evaluations never started. `if-no-files-found`
+      # stays `error`: if the suite ran, the files must exist.
+      - name: Publish Wave 20 colour visual evaluation artifacts
+        if: always() && steps.color-visual-evaluations.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-color-visual-evaluations-${{ github.sha }}
+          path: ${{ runner.temp }}/color-visual-evaluations
+          if-no-files-found: error
+          retention-days: 30
+      - name: Run Wave 20 multi-range synthesis render against ffprobe
+        run: npm run test:integration:synthesis-render
+
+      - name: Run Wave 20 repository round trip against the schema
+        run: npm run test:e2e:wave20-journey
+      - name: Run Wave 20 capture sync worker against generated audio
+        run: npm run test:integration:capture-sync-worker
+
       - name: Run Wave 19 sync diagnostic persistence against PostgreSQL
         run: npm run test:e2e:sync-diagnostic-persistence
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-sync-diagnostic-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_SYNC_DIAGNOSTIC_E2E: "1"
 
+      - name: Run Wave 20 multicam, colour and playback persistence against PostgreSQL
+        run: npm run test:e2e:wave20-persistence
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-wave20-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_WAVE20_PERSISTENCE_E2E: "1"
+      - name: Run Wave 20 multicam direction round trip against PostgreSQL
+        run: npm run test:e2e:multicam-direction
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-multicam-direction-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_MULTICAM_DIRECTION_E2E: "1"
+      - name: Run Wave 20 react playback journey against PostgreSQL
+        run: npm run test:e2e:playback-map
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-playback-map-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PLAYBACK_MAP_E2E: "1"
+      - name: Run Wave 20 react playback product journey against PostgreSQL
+        run: npm run test:e2e:react-playback-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-react-playback-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_REACT_PLAYBACK_JOURNEY_E2E: "1"
+          APOLLO_REACT_PLAYBACK_JOURNEY_OUTPUT: ${{ runner.temp }}/react-playback-journey
+
+      # The suite reads the MP4 back with ffprobe before this runs, so the
+      # upload is for a human, not for the assertion. `warn` rather than
+      # `error`: a journey that failed before the render must show its own
+      # failure, not a second one about a missing file.
+      - name: Publish the react playback journey MP4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-react-playback-journey-${{ github.sha }}
+          path: ${{ runner.temp }}/react-playback-journey
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Run Wave 20 insufficient evidence product journey against PostgreSQL
+        run: npm run test:e2e:insufficient-evidence-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-insufficient-evidence-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_INSUFFICIENT_EVIDENCE_E2E: "1"
+      - name: Run Wave 20 capture sync worker persistence against PostgreSQL
+        run: npm run test:e2e:capture-sync-persistence
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-capture-sync-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_CAPTURE_SYNC_E2E: "1"
+
+      - name: Run Wave 20 colour critic gate against PostgreSQL
+        run: npm run test:e2e:color-critic
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-color-critic-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_COLOR_CRITIC_E2E: "1"
+
+      - name: Run Wave 20 multicam long-form phase gate against PostgreSQL
+        run: npm run test:e2e:multicam-longform-gate
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-multicam-gate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_MULTICAM_GATE_E2E: "1"
+
+      - name: Run Wave 20 phase gate journey through the published /v1 routes
+        run: npm run test:e2e:phase-gate-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-phase-gate-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PHASE_GATE_E2E: "1"
+
+      - name: Run Wave 20 two-hour and ten-minute masters to rendered two-minute cuts against ffprobe and PostgreSQL
+        run: npm run test:e2e:longform-synthesis
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-longform-synthesis-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_LONGFORM_SYNTHESIS_E2E: "1"
+      # Both capture journeys refuse a database whose name does not say `e2e`
+      # (`assertIsolatedDatabase`, tests/v2/helpers/capture-journey.mjs): each
+      # deletes every row of its own workspace before and after the run, and
+      # that guard is what keeps a misconfigured environment from doing the same
+      # to a shared server. The service container is disposable, so they get
+      # their own database inside it instead of the guard being relaxed — the
+      # shape the long-form workflow step already uses on the Compose cluster.
+      #
+      # The database is created THROUGH the service container, the way the
+      # orphan check above already does it (`docker exec ... psql`), and not
+      # with a `psql` on the runner: a bare `psql` would be the only invocation
+      # in this workflow that depends on the runner image shipping a PostgreSQL
+      # client, and the day it stops shipping one this step fails before the
+      # journeys have a chance to say anything.
+      - name: Create the disposable capture journey database
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" \
+            psql -U apollo -d postgres -c 'create database apollo_v2_e2e_capture'
+          npm run db:v2:migrate:deploy
+
+      - name: Run Wave 20 podcast multicam product journey against PostgreSQL
+        run: npm run test:e2e:podcast-multicam-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-podcast-multicam-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PODCAST_MULTICAM_E2E: "1"
+          APOLLO_PODCAST_MULTICAM_OUTPUT: ${{ runner.temp }}/podcast-multicam-journey
+
+      - name: Run Wave 20 teacher and screen product journey against PostgreSQL
+        run: npm run test:e2e:teacher-screen-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-teacher-screen-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_TEACHER_SCREEN_E2E: "1"
+          APOLLO_TEACHER_SCREEN_OUTPUT: ${{ runner.temp }}/teacher-screen-journey
+
+      # Each suite reads its own MP4 back with ffprobe and samples its pixels
+      # before this runs, so the upload is for a person, not for the assertion.
+      # `warn` rather than `error`: a journey that failed before the render must
+      # show its own failure, not a second one about a missing file.
+      - name: Publish the capture journey MP4s
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-capture-journeys-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/podcast-multicam-journey
+            ${{ runner.temp }}/teacher-screen-journey
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Run Wave 19 capture protocol and diagnostic browser journey
         run: npm run test:e2e:sync-diagnostic-browser
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-sync-browser-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_SYNC_DIAGNOSTIC_BROWSER_E2E: "1"
+
+      - name: Run Wave 20 multicam long-form phase gate browser journey
+        run: npm run test:e2e:multicam-longform-gate-browser
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-multicam-gate-browser-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_MULTICAM_GATE_BROWSER_E2E: "1"
+      - name: Run Wave 20 multicam, colour and playback operator browser journey
+        run: npm run test:e2e:wave20-browser
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-wave20-browser-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_WAVE20_BROWSER_E2E: "1"
 
       - name: Run Wave 18 capture sessions browser journey
         run: npm run test:e2e:capture-sessions-browser
@@ -307,6 +555,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # The Wave 20 journeys spawn `worker:v2:capture-sync`, and every
+      # `worker:v2:*` script in this repository runs `tsx --env-file=.env`,
+      # which exits 9 when the file is absent. The quality job has prepared it
+      # since Wave 18; this job did not, and the podcast journey it gained in
+      # Wave 20 reported `driver exited 9: node: .env: not found` on a runner
+      # where nothing had created one.
+      - name: Prepare integration environment
+        run: touch .env
 
       - name: Install locked dependencies
         run: npm ci
@@ -480,6 +737,98 @@ jobs:
           # proves zero orphan objects and deletes it afterwards.
           APOLLO_V2_S3_BUCKET: apollo-blockplan-${{ github.run_id }}-${{ github.run_attempt }}
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-block-plan-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      # The Wave 20 product journeys run in the `quality` job, which has
+      # PostgreSQL and no MinIO, and every one of them used to pin
+      # APOLLO_V2_ARTIFACT_STORAGE_DRIVER=local inside the test file — so the
+      # briefing's "PostgreSQL 16 AND versioned object storage" was true of
+      # neither half. The driver now comes from the environment, and these two
+      # steps are the half that was missing: the journey with the heaviest
+      # media path and the journey that decides whether the phase ships, both
+      # against the versioned MinIO this job already runs.
+      #
+      # They run HERE and stay in `quality` too, on purpose: the `quality` runs
+      # keep proving the local driver, and a difference between the two answers
+      # is the signal worth having.
+      - name: Provision the isolated capture journey database
+        run: |
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_v2_e2e_capture
+          npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-capture-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run Wave 20 podcast multicam journey against PostgreSQL and versioned MinIO
+        run: npm run test:e2e:podcast-multicam-journey
+        env:
+          APOLLO_PODCAST_MULTICAM_E2E: "1"
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_PODCAST_MULTICAM_OUTPUT: ${{ runner.temp }}/podcast-multicam-journey-s3
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+          # Exclusive per-run bucket: the journey creates it, enables
+          # versioning, proves zero orphan objects and deletes it afterwards.
+          APOLLO_V2_S3_BUCKET: apollo-podcast-${{ github.run_id }}-${{ github.run_attempt }}
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-podcast-multicam-s3-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run Wave 20 phase gate journey against PostgreSQL and versioned MinIO
+        run: npm run test:e2e:phase-gate-journey
+        env:
+          APOLLO_PHASE_GATE_E2E: "1"
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+          # The gate reads rows and manifests, never bytes — no route it
+          # serves constructs artifact storage at all — so this bucket exists
+          # to be asserted EMPTY at the end, which is what makes that sentence
+          # falsifiable rather than a comment. No APOLLO_V2_RENDER_WORK_ROOT on
+          # purpose: a criterion that starts reading bytes fails here with
+          # PERSISTENCE_NOT_CONFIGURED instead of quietly succeeding.
+          APOLLO_V2_S3_BUCKET: apollo-phase-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-phase-gate-s3-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan capture journey backends and buckets
+        if: always()
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for name in apollo-video-e2e-podcast-multicam-s3-ci apollo-video-e2e-phase-gate-s3-ci; do
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = '$name'")"
+              if test "$backends" = 0; then break; fi
+              sleep 1
+            done
+            echo "$name backends: $backends"
+            test "$backends" = 0
+          done
+          for bucket in "apollo-podcast-${{ github.run_id }}-${{ github.run_attempt }}" "apollo-phase-gate-${{ github.run_id }}-${{ github.run_attempt }}"; do
+            if $compose exec -T minio mc ls "local/$bucket" >/dev/null 2>&1; then
+              echo "run-exclusive bucket $bucket still exists after cleanup" >&2
+              exit 1
+            fi
+          done
+
+      # Read back with ffprobe and sampled for pixels by the journey itself
+      # before this runs, so the upload is for a person. Separate from the
+      # `quality` job's copy on purpose: this is the file the object-storage
+      # run delivered, and comparing the two is the point.
+      - name: Publish the versioned-storage podcast journey MP4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-podcast-journey-s3-${{ github.sha }}
+          path: ${{ runner.temp }}/podcast-multicam-journey-s3
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Run synthetic master cross-project reuse E2E against /v1 and PostgreSQL
         run: npm run test:e2e:synthetic-master-reuse

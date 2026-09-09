@@ -3,7 +3,6 @@ import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import ffmpegStatic from 'ffmpeg-static'
 
 import type {
   AudioMarkerObservation,
@@ -15,6 +14,7 @@ import {
   MARKER_GRID_CELLS,
   synthesizeChirp,
 } from './ffmpeg-sync-marker-renderer.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -41,7 +41,7 @@ export interface DetectorOptions {
 }
 
 function resolveFfmpeg(options: DetectorOptions): string {
-  return options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+  return resolveFfmpegBinary(options.ffmpegPath)
 }
 
 /**

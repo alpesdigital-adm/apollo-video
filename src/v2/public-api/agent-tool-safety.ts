@@ -654,6 +654,58 @@ export function createFoundationAgentToolSafety(
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Removes an explicit governance envelope and restores the broader configured defaults for its scope.',
     },
+    // Wave 20. The two direction commands and the colour derivation are broad
+    // because each one commits a new project version: the timeline the renderer
+    // reads, or the ColorPlan every clip is graded through. The two overrides
+    // are bounded and still gated, for the reason the Wave 19 anchor edit is:
+    // they put a person's judgement over a measurement, and an agent deciding
+    // its own reading beats the instrument is the failure mode.
+    'apollo.projects.capture-sessions.direction.run': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Replaces the project timeline with a cut across every camera and drops the subtitle cues, the retimed transcript and the editorial exclusions that named the old one, so a person confirms rather than an agent re-cutting a programme and discarding the captions with it.',
+    },
+    'apollo.projects.capture-sessions.direction.protected-selections.direct': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Re-cuts the timeline while forcing a named angle onto a named stretch against what the scorer measured. The attestation is signed with the authenticated actor, so it must be a person who is prepared to have their name on it.',
+    },
+    'apollo.projects.capture-sessions.color-match.derive': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Writes match-stage transforms into the project ColorPlan, which every clip of every render is graded through, on the strength of one human decision about which camera is the reference; an agent choosing that reference would grade the programme towards a camera nobody approved.',
+    },
+    'apollo.projects.capture-sessions.color-match.overrides.add': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Overrides what the instrument measured about one camera over one range with numbers the caller supplies, so a person confirms rather than an agent deciding that its own preference beats the measurement.',
+    },
+    'apollo.projects.capture-sessions.playback-map.build': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Fingerprints already ingested recordings whose identity it verifies against the session, appends one immutable map version and produces no media; it derives every piece and accepts none from the caller.',
+    },
+    'apollo.projects.capture-sessions.playback-map.anchors.add': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Answers a stretch the detector left unresolved because several stories fit it equally well; a person decides which one happened, because an agent picking one would manufacture the measurement the aggregate refused to invent.',
+    },
+    // The two compiles. Bounded and unconfirmed for the same reason the gate is:
+    // each reads a decision somebody already made, resolves the recordings it
+    // names through the project's own media links, and writes one
+    // content-addressed plan row. Neither renders, spends, or decides anything
+    // about the cut — a recompile of an unmoved derivation is the same row.
+    'apollo.projects.capture-sessions.playback-map.plan.compile': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Turns one resolved playback map, named by the exact version and hash the caller read, into a stored renderable plan; every frame number comes from the map and from durations the server measured, and a recompile of the same map returns the same row.',
+    },
+    'apollo.projects.editorial-syntheses.render-plan.compile': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Turns one immutable multi-range synthesis into a stored renderable plan, refusing any master whose bytes are no longer the ones the ranges were selected from; it renders nothing, changes no media and converges on a recompile.',
+    },
+    // F4.016. Bounded and unconfirmed, unlike every other Wave 20 command: this
+    // one writes an audit record and nothing else. It changes no media, moves no
+    // aggregate, and cannot approve anything a person would otherwise judge —
+    // the approval is derived from rows the caller cannot touch. An agent that
+    // runs it twice gets the same record back.
+    'apollo.projects.multicam-longform-gate.evaluate': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one immutable fail-closed phase-gate record derived only from server-read PostgreSQL rows and a module-graph scan; it accepts no evidence, changes no media or aggregate, and starts no provider or render work.',
+    },
   })
 }
 

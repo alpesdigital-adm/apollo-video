@@ -100,6 +100,66 @@ export const DOMAIN_ERROR_CODES = [
   'CAPTURE_COVERAGE_UNVERIFIED',
   'CAPTURE_COVERAGE_OVERLAP_UNRESOLVED',
   'CAPTURE_SESSION_DERIVATION_STALE',
+  // F4.012 — multicamera direction. Two refusals an operator acts on
+  // differently: the first says the chosen angle has no source law for the
+  // range it was cut over (fix the sync, or re-direct); the second says two
+  // tracks fold to one colour key (rename a track), which would apply one
+  // camera's correction to another camera's frames.
+  'DIRECTION_RANGE_UNRESOLVABLE',
+  'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
+  'CAMERA_IDENTITY_COLLISION',
+  // A direction request that carried a score, an eligibility, a measurement or
+  // an approval. Not a malformed body — the JSON parses and the field has the
+  // right type — but a claim the server derives and the caller may not make. It
+  // is named apart from INVALID_ARGUMENT so the refusal says which field was the
+  // lie rather than "invalid request".
+  'DIRECTION_CALLER_SUPPLIED_DERIVATION',
+  // A session nobody has directed yet, or a version of its chain that does not
+  // exist. Separate from CAPTURE_SESSION_NOT_FOUND because the remedy differs:
+  // the session is there and the answer is "run the direction", not "check the
+  // id".
+  'MULTICAM_DIRECTION_NOT_FOUND',
+  // F4.013/F4.014 — multicamera colour match and colour critic. Each is a
+  // refusal of evidence with its own remedy: sources that were never brought
+  // to one colourimetry cannot be compared, an HDR source has no tone-map to
+  // stand behind a comparison, ranges that never overlap in session time
+  // measure different moments, too few frames measure nothing, a reference
+  // camera without a measurement anchors nothing, and a match placed after
+  // the creative LUT would grade the grade instead of the camera.
+  'COLOR_SOURCES_INCOMPARABLE',
+  'COLOR_HDR_SDR_UNSUPPORTED',
+  'COLOR_RANGES_NOT_COMPARABLE',
+  'COLOR_MEASUREMENT_INSUFFICIENT',
+  'COLOR_REFERENCE_UNAVAILABLE',
+  'COLOR_STAGE_VIOLATION',
+  // Nothing has been derived or judged yet for this session or project version.
+  // Distinct from COLOR_REFERENCE_UNAVAILABLE, which says a reference camera
+  // was named and the session carries no such camera: that one is a bad
+  // argument, these two are an absent record.
+  'MULTICAM_MATCH_PLAN_NOT_FOUND',
+  'COLOR_CRITIC_REPORT_NOT_FOUND',
+  // F4.015 — react playback maps. A map with an uncovered stretch is not a
+  // malformed request and not a missing record: it is a complete answer that
+  // says a person has to look. Compiling it anyway would approximate an edit.
+  'PLAYBACK_MAP_UNRESOLVED',
+  'PLAYBACK_MAP_VERSION_STALE',
+  'PLAYBACK_MAP_NOT_FOUND',
+  // The runtime's refusals, each naming the remedy rather than a fault. A
+  // session without a reference-video track is not a react session and never
+  // will be; two reaction tracks are two edits and the caller has to say which;
+  // a track recorded in two files has no single clock to count reference ticks
+  // from; and a reaction the detector never locked onto is the ADR-135 hidden
+  // player — a person has to anchor it, because "played through", "paused then
+  // seeked" and "scrubbed" all fit the evidence equally well.
+  'PLAYBACK_SESSION_NOT_REACT',
+  'PLAYBACK_REACTION_TRACK_AMBIGUOUS',
+  'PLAYBACK_TRACK_NOT_SINGLE_PART',
+  'PLAYBACK_EVIDENCE_INSUFFICIENT',
+  // F4.016 — the multicamera/long-form phase gate. "Nobody has run it" is not
+  // "it failed": a project with no evaluation has to be distinguishable from a
+  // project whose evaluation said no, or a UI would show a red gate for work
+  // that was never attempted.
+  'MULTICAM_LONGFORM_GATE_NOT_FOUND',
   'PROJECT_NOT_FOUND',
   'PRODUCTION_BATCH_NOT_FOUND',
   'PRODUCTION_BATCH_ITEM_NOT_FOUND',

@@ -12,6 +12,7 @@ import type {
   DetectedMediaColor,
 } from '../../domain/color-and-export.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
+import { resolveFfprobeBinaryPath } from './ffmpeg-binary.ts'
 
 const require = createRequire(import.meta.url)
 const ffprobeStatic = require('ffprobe-static') as { path?: string }
@@ -143,10 +144,10 @@ function detectedColor(
 }
 
 function resolveBinary(environment: NodeJS.ProcessEnv): string {
-  const configured = environment.FFPROBE_PATH?.trim()
-  if (configured) return configured
-  const bundled = typeof ffprobeStatic?.path === 'string' ? ffprobeStatic.path.trim() : ''
-  return bundled || 'ffprobe'
+  // Shared with ffmpeg, and for the same reason: ffprobe-static computes its
+  // path from `__dirname`, so a bundled server was probing a binary inside
+  // `.next/server/chunks` that was never copied there.
+  return resolveFfprobeBinaryPath(ffprobeStatic?.path, undefined, environment)
 }
 
 function describeProducer(binary: string) {

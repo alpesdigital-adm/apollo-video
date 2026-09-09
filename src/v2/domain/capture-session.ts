@@ -69,6 +69,27 @@ export const CAPTURE_TRACK_ROLES = Object.freeze([
 ] as const)
 export type CaptureTrackRole = (typeof CAPTURE_TRACK_ROLES)[number]
 
+/**
+ * Roles that carry a person, so "two participants were captured" can be
+ * counted rather than guessed.
+ *
+ * Defined beside the vocabulary it narrows instead of inside whoever needs it:
+ * a reader that spells out its own five-role list drifts from
+ * `CAPTURE_TRACK_ROLES` the first time a role is added, and the drift shows up
+ * as a condition that quietly stops being met. `screen` and `reference-video`
+ * are what a participant is filmed against; `master-audio` and `scratch-audio`
+ * are what the session is lined up by. None of the four is a participant.
+ */
+export const PODCAST_PARTICIPANT_ROLES: readonly CaptureTrackRole[] = Object.freeze(
+  CAPTURE_TRACK_ROLES.filter(
+    (role) =>
+      role !== 'screen' &&
+      role !== 'reference-video' &&
+      role !== 'master-audio' &&
+      role !== 'scratch-audio',
+  ),
+)
+
 /** Roles whose audio can legitimately end up in the delivered mix. */
 const FINAL_MIX_ELIGIBLE_ROLES: readonly CaptureTrackRole[] = Object.freeze([
   'camera-main',

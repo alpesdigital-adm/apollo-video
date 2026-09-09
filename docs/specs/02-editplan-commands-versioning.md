@@ -309,7 +309,13 @@ interface ResolvedPatch {
 - TrimClip, SplitClip, MoveClip.
 - ReorderStoryBlock.
 - DuplicateRange/ColdOpen.
-- ChangeCameraAngle.
+- ChangeCameraAngle. **Não registrado.** A Wave 20 (F4.012) registrou
+  `direct-multicam-session` em `edit-command-registry.ts`, que dirige a sessão
+  inteira — um plano por janela de decisão — em vez de trocar o ângulo de um
+  plano já cortado. Ele é `renderPolicy: 'deferred'` com
+  `deferralReason: 'director-run'`, porque qual ângulo toca em cada instante é
+  exatamente o que a direção decide, e portanto todo o timeline é afetado. Ver
+  spec 05 §29.5. Uma troca pontual de ângulo continua sem comando.
 
 ### Visual
 
