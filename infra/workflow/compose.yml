@@ -20,7 +20,11 @@ x-apollo-runtime: &apollo-runtime
     APOLLO_V2_ARTIFACT_ROOT: /app/artifacts
     APOLLO_V2_RENDER_WORK_ROOT: /app/tmp/render
     APOLLO_V2_RENDER_OUTPUT_ROOT: /app/render-outputs
+    APOLLO_V2_FFMPEG_PATH: /usr/bin/ffmpeg
     APOLLO_FFMPEG_PATH: /usr/bin/ffmpeg
+    FFMPEG_PATH: /usr/bin/ffmpeg
+    APOLLO_FFPROBE_PATH: /usr/bin/ffprobe
+    FFPROBE_PATH: /usr/bin/ffprobe
   init: true
   restart: unless-stopped
   security_opt:
@@ -87,6 +91,29 @@ services:
       APOLLO_V2_HEYGEN_API_KEY: ${APOLLO_V2_HEYGEN_API_KEY:-}
       APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE: ${APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE:-}
       APOLLO_V2_HEYGEN_RESULT_HOSTS: ${APOLLO_V2_HEYGEN_RESULT_HOSTS:-files.heygen.ai}
+
+  capture-sync-worker:
+    <<: *apollo-runtime
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-capture-sync-worker.mjs"]
+
+  music-analysis-worker:
+    <<: *apollo-runtime
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-music-analysis-worker.mjs"]
+
+  localization-translation-worker:
+    <<: *apollo-runtime
+    profiles: ["localization-provider"]
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-localization-translation-worker.mjs"]
+    environment:
+      <<: *apollo-environment
+      APOLLO_LOCALIZATION_WORKER_ENABLED: "true"
+      APOLLO_LOCALIZATION_PROVIDER_BASE_URL: ${APOLLO_LOCALIZATION_PROVIDER_BASE_URL:-}
+      APOLLO_LOCALIZATION_PROVIDER_API_KEY: ${APOLLO_LOCALIZATION_PROVIDER_API_KEY:-}
+      APOLLO_LOCALIZATION_PROVIDER_MODEL: ${APOLLO_LOCALIZATION_PROVIDER_MODEL:-}
+
+  localization-media-worker:
+    <<: *apollo-runtime
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-localization-media-worker.mjs"]
 
 volumes:
   apollo-local-artifacts:

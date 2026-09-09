@@ -30,7 +30,12 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=dependencies /app/generated ./generated
 COPY --from=dependencies /app/remotion/node_modules ./remotion/node_modules
 COPY . .
-RUN mkdir -p public && npm run build
+RUN mkdir -p public \
+    && npm run remotion:build \
+    && cd remotion \
+    && node -e "require('@remotion/renderer').ensureBrowser({logLevel:'error'}).catch((error)=>{console.error(error);process.exit(1)})" \
+    && cd .. \
+    && npm run build
 
 FROM node:22-bookworm-slim AS runtime
 
@@ -44,7 +49,25 @@ ENV NODE_ENV=production \
     PORT=3333
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg openssl \
+    && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      ffmpeg \
+      fonts-liberation \
+      libasound2 \
+      libatk-bridge2.0-0 \
+      libatk1.0-0 \
+      libcups2 \
+      libdbus-1-3 \
+      libdrm2 \
+      libgbm1 \
+      libnss3 \
+      libx11-xcb1 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxfixes3 \
+      libxkbcommon0 \
+      libxrandr2 \
+      openssl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
