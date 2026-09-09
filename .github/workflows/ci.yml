@@ -150,6 +150,31 @@ jobs:
       - name: Apply database migrations
         run: npm run db:v2:migrate:deploy
 
+      - name: Prepare synthetic phase gate PostgreSQL proof database
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" createdb -U apollo apollo_synthetic_gate_e2e
+          npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_synthetic_gate_e2e?schema=public&application_name=apollo-video-e2e-synthetic-phase-gate-migrate-${{ github.run_id }}&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run synthetic phase gate PostgreSQL proof
+        run: npm run test:integration:synthetic-phase-gate-pg
+        env:
+          APOLLO_SYNTHETIC_PHASE_GATE_PG_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_synthetic_gate_e2e?schema=public&application_name=apollo-video-e2e-synthetic-phase-gate-${{ github.run_id }}&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify synthetic phase gate PostgreSQL cleanup
+        if: always()
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where application_name = '$APOLLO_SYNTHETIC_PHASE_GATE_APP_NAME'")"
+          test "$orphans" = 0
+        env:
+          APOLLO_SYNTHETIC_PHASE_GATE_APP_NAME: apollo-video-e2e-synthetic-phase-gate-${{ github.run_id }}
+
       - name: Run source cleanup and separation FFmpeg goldens
         run: npm run test:integration:source-cleanup-goldens
 
