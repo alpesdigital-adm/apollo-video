@@ -393,6 +393,9 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
 
     // 1. Not approved, and all ten conditions on screen.
     assert.equal(await page.getByTestId('gate-summary').getAttribute('data-approved'), 'false')
+    // The gate summary and criteria catalogue load independently. Wait for the
+    // catalogue boundary before asserting its exact, fail-closed cardinality.
+    await page.getByTestId('criteria-list').locator('> li').nth(9).waitFor({ state: 'visible' })
     const listed = await page.getByTestId('criteria-list').locator('> li').count()
     assert.equal(listed, 10, 'a criterion with no rows was dropped from the screen')
     for (const criterion of MULTICAM_LONGFORM_CRITERIA) {
