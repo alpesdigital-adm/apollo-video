@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { stat } from 'node:fs/promises'
 import {
   isAbsolute,
@@ -15,9 +14,8 @@ import type {
 } from '../../application/ports/contiguous-visual-evidence-provider.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { calculateFileSha256 } from '../media/local-artifact-manifest.ts'
+import { resolveFfmpegBinary } from '../media/ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
@@ -189,7 +187,7 @@ implements ContiguousVisualEvidenceProvider {
   }) {
     this.artifactRoot = resolve(options.artifactRoot.trim())
     this.ffmpegPath =
-      options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+      resolveFfmpegBinary(options.ffmpegPath)
     this.timeoutMs = options.timeoutMs ?? 10 * 60_000
     if (
       !options.artifactRoot.trim() ||

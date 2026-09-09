@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
 import type { ArtifactSourceMaterializer, MediaSourceProber } from '../../application/ports/media-ingest.ts'
@@ -15,9 +14,8 @@ import {
   type TransformationCriticMeasurement,
   type TransformationCriticRegion,
 } from '../../domain/transformation-critic-report.ts'
+import { resolveFfmpegBinary } from '../media/ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpeg = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 const SAMPLE_EDGE = 32
 const SAMPLE_BYTES = SAMPLE_EDGE * SAMPLE_EDGE * 3
@@ -65,8 +63,7 @@ async function sampleFrame(input: {
   region?: Readonly<TransformationCriticRegion>
   signal?: AbortSignal
 }): Promise<Uint8Array> {
-  assertDomain(Boolean(ffmpeg), 'PRECONDITION_REQUIRED', 'FFmpeg is unavailable for transformation critic evidence')
-  const { stdout } = await execFileAsync(ffmpeg!, [
+  const { stdout } = await execFileAsync(resolveFfmpegBinary(), [
     '-v', 'error', '-ss', Math.max(input.second, 0).toFixed(6), '-i', input.path,
     '-frames:v', '1', '-vf', cropFilter(input.region), '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
   ], { encoding: 'buffer', windowsHide: true, maxBuffer: MAX_BUFFER, signal: input.signal })

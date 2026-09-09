@@ -104,7 +104,7 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 299)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 349)
   const endpoints = new Set()
 
   for (const capability of FOUNDATION_CAPABILITIES) {
@@ -195,4 +195,38 @@ test('T-FR-241 every public operation has an executable, versioned contract test
 
   assert.equal(endpoints.size, FOUNDATION_CAPABILITIES.length)
   assert.equal(Object.keys(DIRECT_PUBLIC_API_BOUNDARIES).length, 6)
+})
+
+test('T-F4.015 each renderable-plan compiler is reached by its own route and by no other', () => {
+  // The dead wiring this refuses: `createReactPlaybackMapServices` built a
+  // `compile:` member that nothing ever called once the published route moved
+  // to `createReactPlaybackPlanCompileService`. The walker follows a factory
+  // call into every service the factory constructs, so that one dead member
+  // attributed the compiler to the build and the anchors rows of the parity
+  // report — two endpoints whose handlers never invoke it. That is not only a
+  // cosmetic inflation: `api-governance-coverage.test.mjs` matches a route's
+  // required scope against the concatenated source of every service attributed
+  // to it, so a sibling dragged in by a factory can satisfy an assertion the
+  // route itself would fail.
+  const attribution = new Map([
+    ['compileReactPlaybackPlanService', []],
+    ['compileSynthesisRenderPlanService', []],
+  ])
+  for (const capability of FOUNDATION_CAPABILITIES) {
+    if (Object.hasOwn(DIRECT_PUBLIC_API_BOUNDARIES, capability.id)) continue
+    const services = applicationServicesForEndpoint(root, capability.endpoint)
+    for (const [service, endpoints] of attribution) {
+      if (services.includes(service)) {
+        endpoints.push(`${capability.endpoint.method} ${capability.endpoint.path}`)
+      }
+    }
+  }
+  assert.deepEqual(
+    attribution.get('compileReactPlaybackPlanService'),
+    ['POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/plan'],
+  )
+  assert.deepEqual(
+    attribution.get('compileSynthesisRenderPlanService'),
+    ['POST /v1/projects/{projectId}/editorial-syntheses/{synthesisId}/render-plan'],
+  )
 })

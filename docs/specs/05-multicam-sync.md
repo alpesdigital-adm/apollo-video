@@ -380,3 +380,1504 @@ Director escolhe ângulo em outra etapa. Range com confidence baixa não pode se
 - Lip-sync validator.
 - Tratamento de drift no áudio final sem alterar pitch.
 
+
+---
+
+## 27. Estado de implementação — Wave 18 (F4.002–F4.008)
+
+Implementado localmente em 2026-09-03. Deploy e aceite pendentes.
+
+### 27.1 O que foi construído
+
+| Seção da spec | Módulo | Evidência |
+|---|---|---|
+| §5 Relógio de referência | `src/v2/domain/session-clock.ts` | T-FR-141, 11 casos |
+| §6 Timebase e normalização | `src/v2/domain/session-time.ts` | 13 casos |
+| §7 SyncAnchor e map | `src/v2/domain/sync-evidence.ts` | T-FR-142, 13 casos |
+| §8 Estratégia em cascata | `src/v2/domain/sync-evidence.ts` | T-FR-142 |
+| §10 Offset e drift | `src/v2/domain/clock-drift.ts` | T-FR-144, 12 casos |
+| §11 Piecewise maps | `src/v2/domain/piecewise-clock-map.ts` | T-FR-145, 14 casos |
+| §12 TrackCoverage | `src/v2/domain/track-coverage.ts` | T-FR-143, 14 casos |
+| §13 Recorder splits | `capture-session.ts` + piecewise | E2E heterogêneo |
+| §4 Modelo | `src/v2/domain/capture-session.ts` | T-FR-140, 8 casos |
+
+Persistência em treze tabelas com `CHECK` e `EXCLUDE` que carregam as
+invariantes; API `/v1` com doze capabilities e rotas executáveis; worker durável
+com lease, heartbeat e fencing; página operável em `/capture-sessions`.
+
+**Corrigido na Wave 20 (F4.012):** o worker existia como função e nada o
+chamava — `POST .../sync-runs` enfileirava uma linha que nenhum processo
+consumia. A Wave 20 entregou o driver (`scripts/run-v2-capture-sync-worker.mjs`,
+`npm run worker:v2:capture-sync`, com `--once` para CI), a primeira
+implementação de `SyncSignalSource`
+(`infrastructure/media/ffmpeg-audio-sync-signal-source.ts`) e o produtor de
+`TrackCoverage` dentro do worker. O fallback de frame rate `30000/1001` saiu: a
+taxa vem do relógio persistido ou do timebase da track de referência, e sem
+nenhum dos dois o run é liquidado como falho com o motivo nomeado.
+
+### 27.2 Decisões que a spec não previa
+
+**Sessão é cadeia imutável mais ponteiro.** A spec descrevia o modelo sem dizer
+como versioná-lo. Cada operação devolve versão+1 carregando o hash da anterior,
+e o ponteiro `capture_session_heads` diz qual é a corrente. Colapsar os dois
+numa linha atualizável significaria que adicionar uma faixa reescreve
+silenciosamente o que a versão anterior dizia — que é exatamente a pergunta que
+um editor faz quando um corte deixa de bater com o material.
+
+**Ticks atravessam a fronteira pública como string decimal.** Número JSON é
+`double` IEEE 754 em todo parser corrente, então um tick de 64 bits chegaria ao
+cliente já arredondado, sem erro e sem como perceber. Taxas atravessam como
+`"num/den"` pelo mesmo motivo invertido: 30000/1001 não tem forma decimal
+alguma.
+
+**A run de sincronização é fenced, não apenas leased.** Um lease é um timeout, e
+um processo pausado não pode ser avisado de que foi pausado. O token de fencing
+cresce estritamente por sessão e só o mais alto pode liquidar.
+
+**O lease tem que ser maior que a medição.** Uma correlação de áudio é uma
+chamada síncrona: medido nesta máquina com os argumentos que o adaptador usa
+(2 kHz, janelas de 2 s, busca exaustiva), um par (parte candidata × parte de
+referência) custa 160 ms (N=3, sd 12 ms) para 40 s de material, 9,1 s (N=3,
+sd 1,6 s) para 300 s e 71 s (N=1, 345 MB de RSS) no teto de análise de 1800 s do
+próprio adaptador. Com o lease de 60 s que o worker trazia, qualquer sessão além
+de cerca de um minuto de áudio era retomada no meio da medição e falhava de vez
+depois de três tentativas. O lease padrão é de cinco minutos, o `SyncSignalSource`
+recebe um `heartbeat` que o adaptador aguarda entre decodificações e entre pares
+— nenhum temporizador serviria, porque a busca não devolve o event loop — e a
+fábrica lê `APOLLO_V2_CAPTURE_SYNC_LEASE_MS ?? APOLLO_V2_WORKER_LEASE_MS`.
+
+**Uma peça do mapa é um trecho de ticks de origem que uma lei descreve, não um
+arquivo.** Dois arquivos que se encostam exatamente e concordam no deslocamento
+são UMA peça: rotular essa junção como `file-split` — causa descontínua — fazia
+`createPiecewiseClockMap` recusar a divisão de 4 GB mais comum que existe, e a
+`DomainError` escapava do worker deixando a run reivindicada e nunca liquidada.
+Duas partes que medem deslocamentos diferentes viram duas peças, abertas por
+`residual-exceeded`, cada uma com o deslocamento que a sua própria parte mediu.
+
+**Arquivo ausente é fato da sessão, não falha da run.** Um artefato que sumiu ou
+cujos bytes não são mais os que a parte declara degrada AQUELA trilha para
+`insufficient-evidence` e a passagem continua; um codec que não abre continua
+falhando a run inteira. Uma câmera sem cartão copiado não pode bloquear a
+sincronização das outras cinco.
+
+### 27.3 O que continua aberto
+
+- §9 correlação de áudio: **entregue na Wave 20**. O adaptador decodifica as
+  duas trilhas, correlaciona janelas com `correlateAudioWindows` (F4.015) e
+  emite `SyncSignalObservation`; âncoras manuais do diagnóstico e marcadores
+  confirmados entram pela mesma porta. Medido sobre fixture gerada: erro de lag
+  de 0, 0, +18 e 0 ticks de 90 kHz em quatro atrasos (o único não nulo é o
+  atraso deliberadamente fora da grade de correlação).
+- §14 a §18 saíram do escopo da Wave 18 e foram entregues depois: Capture
+  Protocol, Apollo Sync Marker, contrato de sync manual e SyncDiagnostic na
+  Wave 19 (§28); react PlaybackMap, direção multicâmera, match de cor, crítico
+  de cor e o gate da fase na Wave 20 (§29 a §34). Este item dizia
+  "F4.009 a F4.016 seguem fora de escopo" e ficou falso no momento em que a
+  §28 foi escrita logo abaixo dele.
+- §26: a escolha de biblioteca de fingerprint está fechada — não há biblioteca
+  externa; a correlação é `correlateAudioWindows`, escrita neste repositório
+  (`src/v2/infrastructure/media/ffmpeg-playback-fingerprint.ts:436`), e os seus
+  limiares de admissão são constantes exportadas (§32.2). Os thresholds por
+  fps/duração e o tratamento de drift no áudio final sem alterar pitch
+  continuam sem calibração contra material real.
+
+O que a Wave 20 deixou aberto, medido e não estimado:
+
+- **Drift não é ajustado.** `fitClockDrift` e a tabela `capture_drift_fits`
+  continuam sem escritor: não existe função de hash canônico para um
+  `ClockDriftFit`, e o repositório teria que inventar a serialização e a tabela
+  filha de âncoras. O que a peça do mapa carrega hoje é o resíduo que o sinal
+  eleito mediu para AQUELA peça, mais o tique de arredondamento que
+  `createSourceToSessionMapping` sempre soma — um limite do deslocamento, não de
+  uma taxa. O diagnóstico segue relatando `driftPpm: null`, que é "não medido",
+  não zero.
+- **Marcador confirmado não é prova admissível.** A cascata exige evidência de
+  ambiguidade de todo método que localiza por busca, e `MarkerDetection` guarda
+  só os ids das observações: o pico e o segundo pico que a fusão mediu não
+  sobrevivem no agregado. As observações de marcador são emitidas e descartadas
+  com `ambiguity-evidence-missing`, registrado no record.
+- **`SessionClock` continua sem escritor.** O worker resolve a taxa de quadros,
+  usa, e não persiste.
+
+### 27.4 Não medido
+
+A migração nunca foi aplicada contra um PostgreSQL: não há instância nesta
+máquina. `btree_gist`, as constraints `EXCLUDE` e o E2E de browser são medidos
+apenas no CI.
+
+## 28. Estado de implementação — Wave 19 (F4.009–F4.011)
+
+Implementado localmente em 2026-09-04. Deploy e aceite pendentes.
+
+### 28.1 O que foi construído
+
+| Seção da spec | Módulo | Evidência |
+|---|---|---|
+| §14 Professor + tela (os demais cenários não têm seção própria) | `src/v2/domain/capture-protocol-catalog.ts` | T-FR-147, 12 casos |
+| Protocolo versionado e endereçado por conteúdo | `src/v2/domain/capture-protocol.ts` | T-FR-147 |
+| Conformidade derivada da sessão | `src/v2/domain/capture-protocol-evaluation.ts` | T-FR-147 |
+| §15 Apollo Sync Marker | `src/v2/domain/sync-marker.ts` | T-FR-148, 14 casos |
+| Marcador como mídia verificável | `src/v2/infrastructure/media/ffmpeg-sync-marker-renderer.ts` | 3 casos com ffprobe |
+| Detectores independentes e fusão | `src/v2/domain/sync-marker-detection.ts` | T-FR-148 |
+| Detecção sobre mídia real | `src/v2/infrastructure/media/ffmpeg-marker-detectors.ts` | 9 fixtures geradas |
+| §18 SyncDiagnostic | `src/v2/domain/sync-diagnostic.ts` | T-FR-149, 13 casos |
+| §17 Contrato de UX de sync manual | `src/v2/domain/sync-diagnostic-anchors.ts` + `/sync-diagnostic` | E2E de jornada |
+
+Persistência em sete tabelas; API `/v1` com catorze capabilities e dez rotas;
+duas páginas operáveis (`/capture-protocols` antes de gravar, `/sync-diagnostic`
+depois).
+
+### 28.2 Decisões que a spec não previa
+
+**Exigência obrigatória precisa nomear o que se perde.** A spec listava
+requisitos; o construtor recusa um item `required` que não nomeie nenhuma
+capacidade de sincronização perdida sem ele. Um requisito que não custa nada
+quando pulado não é obrigatório — é preferência com o rótulo errado, e um
+operador atrasado acerta ao pular.
+
+**Concordância entre canais não identifica o marcador.** Ver
+[ADR-151](../adr/ADR-151-marker-identity-requires-the-code.md). Todo marcador
+de uma sessão alterna igual e varre o mesmo chirp; só o código visual carrega
+identidade.
+
+**Cobertura não medida é `null`, nunca zero.** Zero afirma "nada desta faixa é
+aproveitável" sobre uma medição que ninguém fez, e o bloqueio de corte
+automático se apoia nesse número. `null` não sustenta a nota máxima e também não
+é `partial`: cai em `synced-medium`, que é exatamente "editável, convém
+conferir".
+
+**Avaliação e diagnóstico nomeiam a versão da sessão.** Ambos são derivações de
+uma CaptureSession, e a Wave 18 já decidiu que derivação nomeia versão+hash.
+Sem isso, uma faixa adicionada um segundo antes muda silenciosamente a resposta
+sobre a qual o operador está prestes a agir.
+
+**A chave de idempotência do marcador é ligada à credencial inteira.** Gerar
+marcador não tem chave natural: repetir renderiza um segundo clipe e queima uma
+segunda sequência, e depois "qual marcador a câmera viu" passa a ter duas
+respostas. O id do marcador é derivado de workspace, cliente, credencial, tipo
+de autenticação e usuário delegado — duas credenciais do mesmo cliente são dois
+chamadores.
+
+**O arquivo procurado vem da posição do marcador — pelo ordinal, não pelo
+`splitReason`.** Um marcador emitido após reinício está no arquivo de reinício e
+em nenhum outro. Procurar no primeiro reportaria ausência do que foi gravado;
+procurar em todos deixaria um marcador de início ser creditado a um reinício.
+
+O sinal certo é o ordinal. A Wave 18 recarimba **a primeira** parte como
+`recorder-restart` no instante em que uma segunda chega — de propósito, porque
+uma primeira parte que continuasse dizendo `single-file` estaria mentindo. Ou
+seja: o `splitReason` diz que a faixa está partida, nunca qual arquivo veio
+depois da quebra. Ler o campo como se dissesse a segunda coisa fazia todo
+marcador de reinício ser procurado no arquivo anterior ao reinício, onde ele
+nunca poderia estar.
+
+**"Cada câmera" quer dizer cada uma.** A checagem
+`track-carries-sync-audio` aceitava uma faixa do papel com áudio utilizável e
+declarava o requisito cumprido. O requisito diz "cada câmera grava o próprio
+áudio de referência", e uma câmera que jogou o áudio fora não pode ser alinhada
+por impressão digital, independentemente do que a câmera ao lado fez. A leitura
+permissiva reportava `audio-fingerprint` intacta numa sessão que já a tinha
+perdido em um gravador — o teto mentindo na direção mais cara.
+
+**Mídia materializada é devolvida no `finally`.** O resolvedor chamava
+`materialize` e nunca `cleanup`. No driver S3 isso baixa a gravação inteira para
+um diretório por operação, então cada detecção deixava uma cópia completa em
+disco — uma varredura de seis faixas vaza seis gravações por passada. O driver
+local aponta para a raiz de artefatos e não copia nada, que é exatamente por que
+o esquecimento era invisível em desenvolvimento. `resolve` agora devolve
+`{ path, release }` e todo chamador libera no `finally`.
+
+**Ticks são serializados antes de entrar no hash — e antes de entrar no banco.** Buracos de cobertura são
+intervalos de tick, e tick é `bigint`; o hasher canônico recusa `bigint` de
+propósito, porque não existe uma renderização óbvia. O resultado é que um
+diagnóstico **com** buracos não podia sequer ser construído — exatamente a
+sessão que vale a pena diagnosticar. Todo teste anterior passava `gaps: []`, e
+por isso nada pegou. Serializados como a Wave 18 já serializa qualquer tick que
+entra em hash, e o teste de regressão confirma que dois buracos diferentes
+continuam produzindo digests diferentes.
+
+O mesmo defeito existia uma camada abaixo: o repositório escrevia
+`tracksJson` com `JSON.stringify`, que recusa `bigint` do mesmo jeito. Agora usa
+o codec com tag `{"$tick": "…"}` que a Wave 18 já tinha para exatamente isso, e
+o teste verifica o que importa — não que os bytes voltem, mas que o agregado
+reconstruído a partir deles ainda confira contra o hash guardado ao lado.
+
+### 28.3 O que continua aberto
+
+- O canal de áudio não carrega identidade. Enquanto `DEFAULT_MARKER_AUDIO` for
+  fixo, o teto de robustez do marcador é o teto de legibilidade do código.
+- O código só é lido em escala nativa (recorte central de `codeSizePx`). Filmado
+  maior ou menor, o flash aparece e o código some.
+- A varredura de detecção é retomável e observável, mas **não é fenced**. O
+  progresso é a própria tabela de detecções, então uma passada que morre
+  recomeça exatamente onde parou; dois trabalhadores na mesma sessão duplicam
+  decodificação e convergem em linhas idênticas, porque cada par é chaveado por
+  marcador e faixa. Isso custa CPU, não correção — diferente da run de
+  sincronização da Wave 18, onde liquidar um resultado obsoleto atribuiria um
+  mapa à versão errada e por isso exige token de fencing.
+- `spoken-code` existe como tipo e carrega um piso de erro de 120 ms; nenhum
+  reconhecedor de fala foi escrito, e a spec é explícita em não prometer
+  precisão de quadro para ele.
+
+### 28.4 Não medido
+
+O round trip contra PostgreSQL e a jornada de navegador não foram executados
+nesta máquina: não há runtime de contêiner aqui. Os testes existem, estão
+ligados ao job de CI que tem banco e build de produção, e são medidos lá — não
+aqui.
+
+Dois erros de método registrados porque a forma se repete.
+
+O primeiro: os módulos de mídia da Wave 19 resolviam `ffprobe` pelo nome nu.
+`ffmpeg-static` empacota só o ffmpeg; o ffprobe existe no meu PATH e não no
+runner. O repositório já depende de `ffprobe-static` e todo outro módulo de
+mídia resolve por ele — eu adotei a conveniência da minha máquina em vez do
+padrão que já existia, e o suite passava aqui e falhava em qualquer outro
+lugar. Os testes também passavam `ffprobePath` explícito, o que forçava o valor
+quebrado; agora deixam o módulo resolver, como a produção faz.
+
+O segundo: dois suites de mídia estavam
+registrados no `package.json` sob `tsx`, que transpila os módulos `.ts` para
+CJS e torna os exports nomeados invisíveis ao importador ESM. Toda invocação
+morria em `does not provide an export named FfmpegSyncMarkerRenderer`. Eu vinha
+rodando os arquivos direto com `node` e lendo isso como "o suite passa" —
+verificando o arquivo, não o comando. Ambos rodam com `node` agora e estão no
+CI.
+
+## 29. Direção multicâmera (F4.012)
+
+Implementa §20. `src/v2/domain/multicam-evidence.ts` guarda o que foi observado;
+`multicam-direction.ts` decide; `camera-identity.ts` dá a chave que cor e render
+usam para a mesma câmera. Todos os valores abaixo são as constantes exportadas
+desses módulos, não uma paráfrase delas.
+
+### 29.1 Evidência
+
+`MULTICAM_EVIDENCE_KINDS` tem oito espécies: `active-speaker`,
+`concurrent-speech`, `silence`, `reaction`, `demonstration`, `screen-activity`,
+`technical-quality`, `attention`. Cada observação diz de que faixa fala, em que
+intervalo semiaberto de ticks da sessão, com que confiança, e como veio a ser
+acreditada — `EVIDENCE_EVALUATOR_KINDS` é `measured | controlled | declared`.
+`declared` é frase humana carregada com rótulo; nunca vira medição.
+
+Três consequências que o tipo impõe:
+
+- `active-speaker` carrega `speakerKey` (um cluster de diarização) e
+  `identityResolved: false`, literal. Um cluster não é uma pessoa.
+- `concurrent-speech.speakerCount`, `silence.levelDbfs` e as três dimensões de
+  `technical-quality` são anuláveis: não medido é `null`.
+- `reaction.intensityBps`, `screen-activity.activityBps` e
+  `attention.gazeOnCameraBps` são `PositiveBps` — basis points em `(0, 10000]`.
+  Zero não é valor; é ausência de observação, e a observação não é emitida.
+
+`SCREEN_ACTIVITY_SATURATION_BPS = 400` é o ponto de saturação da atividade de
+tela. A régua é física — diferença absoluta média de luma entre quadros
+consecutivos sobre 255 — e foi medida com a passagem de produção sobre fontes
+geradas (`tests/v2/multicam-visual-evidence.integration.mjs`, uma execução por
+fonte, 240 quadros cada): campo de cor estático 0 bps, slideshow trocando a cada
+dois segundos 4 bps, padrão em movimento 103 bps, zoom de mandelbrot 137 bps,
+ruído de quadro inteiro 3151 bps.
+
+**Quais espécies alguém realmente observa (2026-09-07).** Cinco têm adaptador
+ligado em `createDirectMulticamSessionService`: `active-speaker` e
+`concurrent-speech` da diarização persistida, `screen-activity` e
+`technical-quality` dos pixels
+(`ffmpeg-multicam-visual-evidence-provider.ts`), e `silence` das amostras
+(`ffmpeg-multicam-silence-provider.ts`, `ffmpeg/silencedetect+astats`:
+`silencedetect=noise=-50dB:d=0.700` diz **onde**, `astats` sobre blocos de
+100 ms diz **quão baixo**, e o teto reportado é o bloco inteiro mais alto
+dentro do trecho — nunca a média, que subestimaria uma pausa com uma batida
+dentro). `reaction` o produtor sabe emitir, e a porta `MulticamPerceptionSource`
+não tem adaptador, então em produção não existe.
+
+**Medida não é lida.** `silence` entra no hash do conjunto e no banco, e
+**nenhuma regra de `DIRECTION_RULES` a lê** — `grep silence` em
+`src/v2/domain/multicam-direction.ts` não devolve linha. Uma observação de
+silêncio não muda decisão de corte nenhuma; é medição registrada, não entrada da
+direção. As outras duas espécies do mesmo lote são lidas, e é por isso que a
+diferença importa: `concurrent-speech` dobra a margem de ambiguidade (§29.4) e
+`technical-quality` produz `quality-below-floor`. Ligar silêncio a uma regra é
+trabalho não começado.
+
+`demonstration` e `attention` **não são produzidas por nada**, e o motivo não é
+o que esta spec dizia antes. O repositório **tem** porta de visão
+(`ImageVisionProvider`, com `ocr`, `faces` e `objects`) e dois adaptadores:
+Tesseract (`APOLLO_TESSERACT_PATH`) e Google Cloud Vision pedindo
+`FACE_DETECTION` e `OBJECT_LOCALIZATION`
+(`APOLLO_IMAGE_ENTITY_PROVIDER=google-cloud-vision`), compostos por
+`createConfiguredImageVisionProvider`. O que falta são três coisas concretas:
+(i) os dois só recebem **imagem parada**, pela ingestão de mídia — não existe
+caminho de quadro de gravação materializada até essa porta; (ii) caixa de rosto
+e caixa de objeto num quadro não são mão demonstrando ao longo do tempo; e
+(iii) `FACE_DETECTION` devolve caixa e confiança, o adaptador não pede nem lê
+ângulo de cabeça, e caixa de rosto não é direção do olhar. Chamar movimento de
+tela de "demonstração" poria o nome errado num número real — a mesma recusa que
+o passe visual faz sobre nitidez. O preço está em §29.3:
+`demonstration-prefers-screen` decide por uma tela compartilhada e nunca pode
+decidir por uma demonstração física numa câmera. A escolha entre financiar
+modelo de mão/gaze mais o caminho de vídeo até a porta de visão e declarar as
+duas fora de escopo é do proprietário; ver PRD FR-150.
+
+O passe de silêncio ouve toda faixa cujo `syncAudioPolicy` não seja `none` — a
+declaração da própria faixa —, não os papéis de vídeo: um microfone nunca é
+ângulo e uma câmera com áudio de sync ainda tem o que ser ouvido. Cada parte é
+materializada **uma vez** e serve às duas passagens, porque o driver S3 baixa a
+gravação inteira a cada `resolve`. Um arquivo sem faixa de áudio devolve
+`measuredBlockCount: 0` e é **reportado** em `skipped`, nunca registrado como
+trecho silencioso: nada ouvido e nada soando são fatos opostos.
+
+### 29.2 Candidatos
+
+Um candidato é derivado por faixa e por janela. `ANGLE_CONTEXTS` é
+`speaker | reaction | screen | wide | reference-video`; `VIDEO_ANGLE_ROLES`
+limita ângulo a `camera-main`, `camera-alt`, `screen`, `phone`, `reaction` e
+`reference-video` — papel só de áudio nunca é ângulo.
+
+`ANGLE_REJECTIONS` são as quinze razões pelas quais um candidato não é elegível:
+
+| Razão | O que ela diz |
+|---|---|
+| `not-a-video-source` | o papel da faixa não produz imagem |
+| `coverage-missing` | não há `TrackCoverage` para essa faixa |
+| `coverage-gap` | o gravador não gravou ali |
+| `coverage-unverified` | ninguém verificou aquele trecho |
+| `coverage-corrupt` | os bytes daquele trecho não abrem |
+| `coverage-out-of-bounds` | a janela cai fora da cobertura medida |
+| `coverage-below-floor` | a confiança da cobertura está abaixo do piso de corte automático |
+| `sync-map-missing` | a fonte não tem mapa de relógio |
+| `sync-uncovered` | a janela não cai em nenhuma peça do mapa |
+| `sync-missing` | a faixa não aparece no diagnóstico |
+| `sync-below-threshold` | o diagnóstico da faixa não sustenta corte automático |
+| `protocol-ceiling` | o teto do protocolo é `manual-anchors-required` ou `not-synchronizable` |
+| `quality-below-floor` | qualidade técnica **medida** abaixo de `qualityFloorBps` |
+| `excluded-from-final-mix` | (áudio) a faixa está fora do mix final |
+| `audio-not-final-candidate` | (áudio) `syncAudioPolicy` é `none` ou `sync-only` |
+
+Duas leituras que a lista torna explícitas. `quality-below-floor` exige
+qualidade medida: qualidade não medida não rejeita ninguém — só qualidade ruim
+rejeita. E o piso de cobertura é o da Wave 18 (`assertCoverageSelectable` com
+`purpose: 'auto-edit'`), não um segundo piso escrito aqui.
+
+O score tem nove parcelas nomeadas (`ANGLE_SCORE_COMPONENT_NAMES`): `baseline`,
+`speaker`, `demonstration`, `reaction`, `quality`, `continuity`,
+`redundancyPenalty`, `protectedBonus`, `formatPenalty`. Cada parcela carrega as
+suas `evidenceRefs`; a persistência guarda uma linha por parcela.
+
+### 29.3 Regras e política
+
+`DIRECTION_RULES` são as nove regras que podem decidir uma janela:
+`demonstration-prefers-screen`, `speech-prefers-active-speaker`,
+`reaction-cutaway`, `cutaway-return`, `redundant-angles-hold`,
+`minimum-shot-hold`, `jump-cut-avoided`, `protected-selection`,
+`conservative-hold`. Toda decisão registra qual delas decidiu e por quê, em
+texto.
+
+`DIRECTION_WARNINGS` são os nove avisos: `jump-cut-unavoidable`,
+`protected-selection-ineligible`, `protected-selection-unknown-track`,
+`no-eligible-candidate`, `session-not-auto-editable`, `ambiguous-active-speaker`,
+`active-speaker-unmapped`, `minimum-shot-violated`, `audio-master-unavailable`.
+
+`DEFAULT_DIRECTION_POLICY`, calibração `multicam-direction-2026-09-v2`:
+
+| Campo | Valor |
+|---|---:|
+| `minimumShotMs` | 1200 |
+| `maxCutawayMs` | 4000 |
+| `jumpCutSameAngleMs` | 2000 |
+| `redundancyThreshold` | 0,15 |
+| `ambiguityMargin` | 0,1 |
+| `rhythm.targetShotMs` / `varianceMs` | 8000 / 4000 |
+| `conservativeHoldConfidence` | 0,65 |
+| `protectedSelectionConfidence` | 0,9 |
+| `qualityFloorBps` | 3000 |
+| `reactionIntensityFloorBps` | 5000 |
+| `weights` | speaker 1; demonstration 1,2; reaction 0,9; quality 0,25; continuity 0,1; protectedBonus 2; redundancyPenalty 0,15 |
+| `contextBaseline` | speaker 0,3; wide 0,25; reference-video 0,3; screen 0; reaction 0 |
+| `formatContextPenalties` | `9:16` → wide × 0,5; `1:1` → wide × 0,75 |
+
+`resolveDirectionPolicy` converte cada duração para ticks da sessão uma vez, com
+arredondamento único, e recusa uma política cujo `maxCutawayMs` ou
+`jumpCutSameAngleMs` seja menor que `minimumShotMs`. Nenhum milissegundo solto
+atravessa o algoritmo.
+
+As bandas de confiança são as da spec 01 §20:
+`DIRECTION_CONFIDENCE_BAND_FLOORS` = high 0,85, medium 0,65, low 0,4; abaixo
+disso, `insufficient`.
+
+### 29.4 O que nunca é auto-selecionado
+
+- Qualquer candidato com pelo menos uma razão de `ANGLE_REJECTIONS` não entra na
+  disputa. Ele continua **guardado** na decisão: `shot-decision/v2` faz hash de
+  `evaluated`, isto é, de todos os ângulos pesados, com as suas rejeições, e não
+  só do escolhido.
+- Uma janela em que nenhuma faixa é elegível não recebe ângulo nenhum. Ela vira
+  um intervalo de `uncovered`, com o aviso `no-eligible-candidate` que nomeia
+  cada faixa e a sua rejeição, e a direção fica com `manualReviewRequired`. A
+  compilação recusa transformar essa direção em clipes.
+- Uma seleção protegida (`ProtectedSelection`) é uma atestação humana, não uma
+  medição: elegível, ela vence e a decisão sai com
+  `protectedSelectionConfidence`; inelegível, a janela é dirigida normalmente e
+  o aviso `protected-selection-ineligible` nomeia as rejeições que a impediram.
+  Ela nunca é substituída em silêncio.
+- Dois candidatos com evidência a menos de `ambiguityMargin` um do outro não são
+  ordenados: a direção segura o ângulo corrente e emite
+  `ambiguous-active-speaker`. **Qualquer** observação de `concurrent-speech` que
+  cruze a janela dobra a margem, e a proveniência não entra nessa conta:
+  `domain/multicam-direction.ts:1394-1395` só pergunta se existe alguma, e
+  `observationsOverlapping` (`multicam-evidence.ts:392-400`) filtra por `kinds` e
+  `trackId`, não por `evaluatorKind`. Uma observação `declared` alarga a margem
+  tanto quanto uma `measured`.
+- O chamador não fornece nada disso. Um pedido que traga score, elegibilidade,
+  medição, aprovação ou `manualReviewRequired` é recusado pelo nome
+  (`DIRECTION_CALLER_SUPPLIED_DERIVATION`), não ignorado.
+
+### 29.5 O que a direção entrega
+
+`multicam-direction/v2` é uma cadeia versionada por sessão, com hash canônico
+que dobra o `decisionHash` de cada plano. Um plano cita no máximo
+`SHOT_EVIDENCE_REF_CAP = 32` referências de evidência — o teto que
+`createDecisionConfidence` já impunha a uma decisão de Director — e as duas
+referências de porteiro (o diagnóstico de sync e a cobertura) são **reservadas**
+antes de as observações preencherem o resto. Ordenar o conjunto inteiro e cortar
+nos 32 primeiros descartava exatamente essas duas, porque `observation:` ordena
+antes de `sync-diagnostic:` e `track-coverage:`. O número de referências
+descartadas é gravado, para que uma lista cortada não seja indistinguível de uma
+completa; a constraint `multicam_shot_decisions_evidence_check` recusa uma linha
+que diga ter descartado alguma coisa sem ter chegado ao teto.
+
+O comando é `direct-multicam-session`, registrado em `edit-command-registry.ts`
+com `renderPolicy: 'deferred'`, `impactSchema: 'multicam-direction-impact/v1'` e
+`deferralReason: 'director-run'`: um plano vira clipe quando um DirectorRun o
+compila, e não quando o comando é aceito.
+
+Um ângulo **é** um clipe — e um de cada vez. Professor e tela nunca aparecem
+juntos na imagem: o critério `teacher-and-screen-synchronised` da §33.1 entrega
+um **corte** entre os dois, não uma composição, porque o caminho editorial não
+tem picture-in-picture nem freeze (§34.4). É a limitação que um operador que
+peça exatamente esse cenário encontra primeiro.
+
+A compilação (`multicam-shot-compilation/v1`) resolve
+cada plano para o intervalo de origem da faixa escolhida, monta
+`EditorialCutClip` e recusa cadências de origem que o plano não possa cortar —
+medido em `tests/v2/multicam-direction-render.integration.mjs`: com câmera A a
+30/1 e câmera B a 25/1 num plano de 30/1, a compilação recusa com as taxas que o
+`ffprobe` leu. Na mesma suíte, uma direção de duas câmeras rendeu 2 clipes sobre
+3 fontes, 300 quadros, 10,000 s, h264/aac, e a inspeção de pixel confirmou a
+troca de ângulo: `shot-0001@2,50s` vermelho, `shot-0002@7,50s` azul.
+
+## 30. Match de cor multicâmera (F4.013)
+
+Implementa FR-183. A spec 05 não tinha seção de cor; esta e a §31 são a seção
+que faltava.
+
+### 30.1 Medição
+
+`camera-color-measurement/v1` (`src/v2/domain/color-measurement.ts`) mede um
+intervalo de uma câmera. `COLOR_MEASUREMENT_DIMENSIONS` são oito, cada uma com
+unidade fixa em `COLOR_MEASUREMENT_UNITS`:
+
+| Dimensão | Unidade | O que é |
+|---|---|---|
+| `whiteBalance` | `ratio` | média do canal azul sobre a do vermelho; > 1 puxa azul |
+| `exposure` | `normalized-luma` | luma BT.709 média sobre RGB decodificado, 0–1 |
+| `contrast` | `normalized-luma` | desvio-padrão da luma |
+| `blacks` | `ratio` | fração de pixels no piso de esmagamento |
+| `highlights` | `ratio` | fração de pixels no teto de clipping |
+| `saturation` | `normalized-chroma` | magnitude média de croma Cb/Cr |
+| `tonalResponse` | `normalized-luma` | luma mediana, com P1…P99 como componentes |
+| `skin` | `degrees` | ângulo de matiz do croma médio da banda de pele |
+
+`COLOR_MEASUREMENT_STATUSES` é `measured | not-applicable | unavailable`, e uma
+dimensão não medida tem de dizer o motivo. `COLOR_MEASUREMENT_MINIMUM_FRAMES = 3`:
+abaixo de três quadros decodificados o intervalo não foi medido, digam os
+números o que disserem — um quadro é um still, não uma estatística.
+
+`COLOR_MEASUREMENT_COMPARABILITY_DIMENSIONS` são as quatro que um match precisa
+ler como `measured` para comparar duas câmeras: `whiteBalance`, `exposure`,
+`contrast`, `saturation`. Pele e resposta tonal informam; não sustentam o match.
+
+Cada medição carrega o que o `ffprobe` disse dos bytes medidos — metadados de
+cor, pixel format e `HDR_MODES` (`sdr | hlg | pq`) — e o intervalo de quadros de
+origem que foi lido.
+
+### 30.2 Ordem
+
+O match é um estágio do `ColorPlan` já existente: `MATCH_PIPELINE_STAGE = 'match'`,
+dentro de `COLOR_TRANSFORM_ORDER = ['technical', 'match', 'creative-lut', 'output']`.
+A ordem não é uma convenção deste módulo — `createColorPlan` **recusa** uma
+camada que declare a LUT criativa antes do match, com `COLOR_STAGE_VIOLATION`.
+Igualar câmeras depois de graduar seria graduar o grau.
+
+**Isto mudou na Wave 20, e o que havia antes era pior do que "sem regra".** Até
+o commit `e1d5dec1`, a camada fora de ordem era **aceita**. `resolveColorPlan`
+indexa os estágios por tipo (`color-and-export.ts:550-552`), então uma camada
+declarada `[technical, creative-lut, match, output]` passava na construção, era
+reordenada na leitura e renderizada numa ordem que o plano guardado não
+descrevia: a declaração e o pipeline divergiam, e nada recusava. A guarda
+`assertMatchStagePosition` existia, mas o único chamador de produção montava — e
+ainda monta — camadas de um transform só
+(`multicam-match-plan.ts:1279-1296,1300`), onde ela nunca pode falhar. Hoje ela roda dentro de
+`normalizeLayer` (`color-and-export.ts:407-424`), que é por onde passa **toda**
+camada de todo `ColorPlan`: a global e cada override de source, câmera e
+segmento. A recusa carrega `{ position, after }`.
+
+**O que isso faz com quem chama.** Um corpo que declare a LUT criativa antes do
+match e que antes respondia 200 hoje responde **422 `COLOR_STAGE_VIOLATION`**,
+categoria `policy`, `retryable: false` (`PUBLIC_ERROR_CATALOG`, lido em
+2026-09-06). Vale para `POST /v1/projects/{projectId}/color-pipeline-compilations`
+— `createColorPipelineCompilation` chama `resolveColorPlan`, que começa por
+`createColorPlan` (`color-and-export.ts:524`) — e para
+`POST /v1/projects/{projectId}/color-plan`, que chega ao mesmo construtor por
+`createProjectColorPlan` (`application/project-color-plans.ts:159`,
+`domain/project-color-plan.ts:54`). A rota de compilação tem asserção de
+jornada: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs:1298-1304` e em
+`teacher-screen-journey.e2e.mjs:883-889` conferem o código, a categoria e o
+`retryable` do envelope. Essas duas jornadas **não** foram executadas nesta
+máquina (§34.6); rodam no CI. Pela rota de ColorPlan a recusa é leitura de
+código, não medição.
+
+**E um plano já guardado na ordem antiga deixa de reidratar.** A leitura repassa
+o plano pelo mesmo construtor: `parseProjectColorPlan`
+(`project-color-plan.ts:74-101`) reconstrói o agregado com
+`createProjectColorPlan`, então a guarda dispara também na leitura. Não há
+migração de dados para isso, e este documento não afirma que exista. Nenhuma
+linha assim existe em fixture ou seed deste repositório — se alguma existir num
+ambiente implantado, ela para de ser legível, e ninguém mediu isso porque não há
+ambiente implantado.
+
+O provedor é `apollo-match`, em duas versões declaradas em
+`MATCH_PROVIDER_VERSIONS`:
+
+- **v1** — o que o processador FFmpeg já aceitava: um filtro `eq`, parâmetros
+  `mode`, `brightness`, `contrast`, `saturation`.
+- **v2** — acrescenta ganho por canal para white balance, renderizado como
+  `colorchannelmixer` antes do mesmo `eq`; parâmetros adicionais `red-gain`,
+  `green-gain`, `blue-gain`. Os nomes são em minúsculas com hífen, e não em
+  camelCase, porque `createColorPlan` valida toda chave de
+  `implementation.parameters` contra a gramática TOKEN de `color-and-export.ts`,
+  que não aceita maiúsculas.
+
+`MATCH_PARAMETER_BOUNDS`: brightness [-1, 1], contrast [0,1, 3],
+saturation [0, 3], ganho de canal [0,5, 2].
+
+### 30.3 Câmera de referência, limites e overrides
+
+A câmera de referência é escolhida por alguém, e a escolha é uma atestação
+cercada: `ReferenceCameraSelection` carrega quem escolheu (`MATCH_ACTOR_KINDS` =
+`human | director | system`), quando, e o par `baseVersionId` + `baseHash` da
+sessão que essa pessoa estava vendo. Não é medição, e é rotulada como não sendo.
+
+`DEFAULT_MULTICAM_MATCH_POLICY` nomeia os limites:
+
+| Campo | Valor |
+|---|---:|
+| `minimumSampledFrames` | 3 (o mesmo `COLOR_MEASUREMENT_MINIMUM_FRAMES`) |
+| `whiteBalanceGainTolerance` | 0,02 |
+| `maxWhiteBalanceGain` | 1,25 |
+| `maxBrightnessOffset` | 0,2 |
+| `maxExposureCorrectionEv` | 1 |
+| `contrastRange` | [0,67; 1,5] |
+| `saturationRange` | [0,67; 1,5] |
+| `exposureGamma` | 2,2 |
+| `exposureDispersionEvScale` | 0,5 |
+| `gainDispersionScale` | 0,1 |
+| `singleRangeConfidenceCap` | 0,8 |
+
+Uma correção além do limite é **grampeada no limite** e o plano diz isso com
+`humanReviewRequired`; ela não é aplicada em força total nem descartada em
+silêncio. Um único par de intervalos não estima dispersão e por isso não pode
+reivindicar confiança alta: o teto é 0,8.
+
+Um override é por câmera e opcionalmente por `segmentId` ou por intervalo de
+ticks, com motivo e ator (`MatchRangeOverride`). Ele desloca a transformação
+daquele trecho; não apaga a medição que estava lá.
+
+### 30.4 Recusas fail-closed
+
+Nenhuma delas devolve um match aproximado:
+
+| Código | Quando |
+|---|---|
+| `COLOR_REFERENCE_UNAVAILABLE` | a câmera de referência não tem medição alguma |
+| `COLOR_HDR_SDR_UNSUPPORTED` | alguma medição é `hlg` ou `pq`; não existe tone-map no pipeline |
+| `COLOR_SOURCES_INCOMPARABLE` | uma câmera foi medida em colorimetria diferente da referência |
+| `COLOR_MEASUREMENT_INSUFFICIENT` | faltam quadros ou dimensões comparáveis |
+| `COLOR_RANGES_NOT_COMPARABLE` | os intervalos medidos de uma câmera nunca cruzam os da referência |
+| `COLOR_STAGE_VIOLATION` | a transformação não é do estágio `match`, ou vem depois da LUT criativa |
+| `CAMERA_IDENTITY_COLLISION` | duas faixas dobram para a mesma chave de câmera |
+
+O HDR é recusado **antes** da comparação de colorimetria, de propósito: dizer
+"incomparável" esconderia que o problema é a ausência de tone-map, não uma
+diferença de números.
+
+### 30.5 Medido
+
+`tests/v2/color-visual-evaluations.integration.mjs`, executado nesta máquina
+(7 casos, 7 passes; nos dois primeiros, N=2 é o número de intervalos medidos por
+câmera):
+
+- **Duas câmeras.** Razão azul/verde da referência 1,047486. Antes do match a
+  câmera B media 0,916081 — 12,54 % de erro; depois, 1,046333 — 0,11 %. Ganho
+  aplicado 1,143444, confiança 0,995497.
+- **Três câmeras.** Erro de azul 12,54 % → 0,11 %; erro de vermelho
+  17,03 % → 1,05 %; confiança 0,981982.
+- **Mesma câmera casada sob duas LUTs criativas diferentes.** A LUT fria deixa
+  bOverG 1,089309 / rOverG 0,948087; a quente, 0,999065 / 1,065208. Separação
+  medida de 0,0828 em azul e 0,1235 em vermelho, e digests distintos
+  (`d287273c4e20` contra `213a61b09742`): o match não apaga a intenção criativa
+  que vem depois dele.
+
+## 31. Crítico de cor (F4.014)
+
+Implementa FR-184. `src/v2/domain/color-critic-report.ts`, com o avaliador em
+`src/v2/infrastructure/media/ffmpeg-color-critic-evaluator.ts`.
+
+### 31.1 O que é lido, e onde
+
+`COLOR_CRITIC_STAGES` é `before-output-transform` e `after-output-transform`;
+`COLOR_CRITIC_ACROSS_STAGES = 'across-output-transform'` nomeia a dimensão que
+só existe comparando os dois lados. Medir apenas depois do transform confundiria
+intenção criativa com defeito; medir apenas antes não veria o que o transform
+fez.
+
+`COLOR_CRITIC_DIMENSIONS` são doze, cada uma com unidade fixa
+(`COLOR_CRITIC_UNITS`): `clipping` e `crushedBlacks` (ratio), `cast`,
+`whiteBalanceMismatch` e `brandColorDrift` (ratio-delta), `exposureMismatch`
+(ev), `saturationExcess` e `saturationDeficit` (ratio), `skinToneOffTarget`
+(degrees), `localizedMismatch` (ratio), `hdrSdrInconsistency` e
+`matchRegression` (count).
+
+Três subconjuntos fecham o que cada dimensão pode significar:
+
+- `COLOR_CRITIC_REQUIRED_DIMENSIONS` — `clipping`, `crushedBlacks`, `cast`,
+  `hdrSdrInconsistency`, `matchRegression`: se não puderem ser lidas, nada se
+  sabe sobre os bytes e não há veredito.
+- `COLOR_CRITIC_BETWEEN_CAMERA_DIMENSIONS` — `whiteBalanceMismatch`,
+  `exposureMismatch`, `localizedMismatch`: `not-applicable` com uma câmera,
+  **obrigatórias** com duas ou mais. Comparação ilegível num sujeito
+  multicâmera é evidência faltando, não defeito ausente.
+- `COLOR_CRITIC_IRREVERSIBLE_DIMENSIONS` — `clipping`, `crushedBlacks`,
+  `skinToneOffTarget`, `brandColorDrift`, `hdrSdrInconsistency`: nenhum ganho do
+  estágio `match` desfaz. Amostra ceifada não guarda valor para restaurar.
+- `COLOR_CRITIC_CORRECTABLE_DIMENSIONS` — as sete que uma rederivação limitada
+  do estágio `match` ainda alcança.
+
+`DEFAULT_COLOR_CRITIC_THRESHOLDS` (calibração `color-critic-thresholds/v1`) dá
+dois limiares por dimensão, `warn` e `hard` — um número só faria "um pouco
+acima" e "arruinado" darem o mesmo veredito:
+
+| Dimensão | warn | hard |
+|---|---:|---:|
+| `clipping` | 0,005 | 0,02 |
+| `crushedBlacks` | 0,005 | 0,02 |
+| `cast` | 0,03 | 0,08 |
+| `whiteBalanceMismatch` | 0,03 | 0,08 |
+| `exposureMismatch` | 0,15 | 0,35 |
+| `saturationExcess` | 1,15 | 1,35 |
+| `saturationDeficit` | 0,87 | 0,7 |
+| `skinToneOffTarget` | 8 | 15 |
+| `localizedMismatch` | 0,001 | 0,001 |
+| `brandColorDrift` | 0,03 | 0,08 |
+| `hdrSdrInconsistency` | 1 | 1 |
+| `matchRegression` | 1 | 1 |
+
+### 31.2 Ações
+
+`COLOR_CRITIC_ACTIONS` é `approve | bounded-correction | human-review | reject`.
+A ação não é a média dos números: ela é lida numa tabela de causa,
+`COLOR_CRITIC_CAUSE_ACTIONS`, e a causa é escolhida na ordem de
+`COLOR_CRITIC_CAUSE_PRECEDENCE` (a primeira que se aplica decide):
+
+| Causa | Ação |
+|---|---|
+| `irreversible-technical-defect` | `reject` |
+| `evidence-unavailable` | `human-review` |
+| `correction-budget-exhausted` | `human-review` |
+| `correction-confidence-insufficient` | `human-review` |
+| `correction-out-of-bounds` | `human-review` |
+| `correction-not-derivable` | `human-review` |
+| `correctable-technical-defect` | `bounded-correction` |
+| `advisory-warning` | `approve` |
+| `documented-intent` | `approve` |
+| `no-defect` | `approve` |
+
+Um defeito duro **medido** vence uma dimensão que ninguém conseguiu ler: saber
+que um quadro está ceifado não fica menos certo porque uma segunda pergunta
+ficou sem resposta. Tudo abaixo de um defeito duro medido cai para um humano.
+
+`COLOR_CRITIC_CLASSIFICATIONS` (`technical-defect`, `documented-intent`,
+`insufficient-evidence`, `localized`, `global`) e
+`COLOR_CRITIC_SEVERITIES` (`hard`, `warning`) descrevem a questão; o sujeito é
+um de `COLOR_CRITIC_SUBJECT_KINDS` (`source`, `camera`, `range`, `output`).
+
+### 31.3 Limites de correção
+
+- `COLOR_CRITIC_BOUNDED_CORRECTION_MINIMUM_CONFIDENCE = 0,85` — uma correção
+  automática precisa da banda `high`. Abaixo disso vai para um humano: correção
+  reversível aplicada sobre número em que ninguém confia é exatamente a
+  aprovação por silêncio que este repositório existe para impedir.
+- `COLOR_CRITIC_MAX_CORRECTION_ITERATIONS = 2` — esgotado o orçamento, a causa é
+  `correction-budget-exhausted` e a ação é `human-review`.
+- `DEFAULT_COLOR_CRITIC_POLICY` limita o que uma correção pode propor:
+  `maxProposedExposureEv` 0,75; `maxProposedGain` 1,25;
+  `proposedSaturationRange` [0,67; 1,5]; `contrastRegressionRatio` 0,7;
+  `exposureGamma` 2,2; `skinTargetHueDegrees` 136,13.
+- `maxDeclaredCastAllowance = 0,25` é o teto do que uma intenção criativa pode
+  declarar como cast aceitável, e é `maxProposedGain - 1`: um look declarado
+  pode deslocar a razão entre canais no máximo o que o estágio `match` teria
+  permissão de aplicar para desfazê-lo. Não é múltiplo do limiar `hard` de
+  `cast`, que vale 0,08 (`color-critic-report.ts:244`) — o teto é 3,1 vezes
+  esse limiar, e quem estiver orçando quanto cast uma declaração desculpa
+  precisa do número, não da razão. Sem teto, o chamador escreveria o próprio
+  veredito:
+  bastaria declarar uma tolerância grande o suficiente para transformar qualquer
+  cast em `documented-intent`/`approve`.
+
+O avaliador é `COLOR_CRITIC_EVALUATOR = { id: 'apollo-color-critic', kind:
+'controlled' }`, e o relatório diz isso de si mesmo: o crítico não lê pixels,
+compara agregados de medição contra limiares versionados.
+
+### 31.4 Medido
+
+Mesma suíte da §30.5, executada nesta máquina:
+
+- **Clipping declarado como estética continua sendo defeito.** Com
+  `highlights = 0,500000`, a ação é `reject` por
+  `irreversible-technical-defect`, com o declarante ou sem ele. O controle da
+  mesma suíte (valor 0) sai como `human-review`/`correction-not-derivable` — o
+  positivo e o negativo, lado a lado.
+- **Cast declarado é preservado; o mesmo cast sem declaração é defeito.** Cast
+  medido 0,201998: declarado, a classificação vira `documented-intent` e as
+  questões de cast caem para zero; a rejeição que sobra é
+  `skinToneOffTarget`, que a declaração não cobre.
+- **Um desencontro confinado a um segundo é reportado como aquele intervalo.**
+  Fração 0,5 no intervalo `[1000, 2000)` da câmera `cam-b`, e em nenhum outro.
+- **Uma mancha de pele CONTROLADA é medida por máscara de banda e nunca é
+  chamada de pele real.** Matiz 133,104086, área 1, desvio 3,025914, avaliador
+  `ycbcr-skin-band-mask/controlled`; sem pixels na banda, a dimensão sai
+  `not-applicable`, não zero.
+
+## 32. React PlaybackMap (F4.015)
+
+Implementa §16. `src/v2/domain/playback-map.ts` (agregado),
+`playback-mode.ts` (vocabulário sem dependências, para a página do editor de
+âncoras) e `src/v2/infrastructure/media/ffmpeg-playback-fingerprint.ts` (o
+correlacionador). Ver [ADR-152](../adr/ADR-152-react-playback-map-aggregate.md)
+para por que isto é um agregado próprio e não um `PiecewiseClockMap`.
+
+### 32.1 Modos e peças
+
+`PLAYBACK_MODES` são seis: `playing`, `paused`, `rewind`, `replay`, `seek`,
+`commentary-only`. `NO_REFERENCE_PLAYBACK_MODES` — `paused` e `commentary-only` —
+são aqueles em que a referência não produz tempo nenhum, e por isso a peça não
+tem `referenceRange`.
+
+O mapa é **reação → referência**, e a direção importa: intervalos da reação
+nunca se sobrepõem (o reactor viveu cada instante uma vez), enquanto intervalos
+da referência podem repetir, correr para trás ou faltar.
+
+`PLAYBACK_DIRECTIONS` (`forward`, `backward`, `none`) descrevem a *fronteira*,
+não o interior: uma peça de rewind corre para frente dentro de si; o que a faz
+rewind é ter começado atrás de onde a peça anterior parou.
+
+`PLAYBACK_DISCONTINUITY_REASONS` faz spread de `PIECE_BOUNDARY_CAUSES` da
+Wave 18 — `recorder-restart`, `pts-regression`, `seek`, `rewind`, `file-split`,
+`coverage-gap`, `residual-exceeded`, `manual-anchor-conflict` — e acrescenta os
+três que só acontecem a um *player*: `pause`, `commentary`, `manual-anchor`.
+
+`PLAYBACK_DETECTION_METHODS` são `audio-fingerprint`, `player-visual`,
+`ocr-timestamp` e `manual-anchor`. Só o primeiro mede taxa hoje; os outros três
+existem para que o agregado consiga registrar uma peça que veio de uma pessoa ou
+da interface do player sem fingir que um correlacionador a produziu.
+
+A duração da reação nunca implica a da referência. `PlaybackReferenceMedia`
+carrega `durationTicks` medida, com `assetId` e `sha256`: bytes diferentes são
+outro mapa.
+
+### 32.2 Evidência
+
+`PLAYBACK_FINGERPRINT_DEFAULTS`: `sampleRate` 16 000 Hz, `windowMs` 1000,
+`hopMs` 500, `energyFloor` 0,01 (−40 dBFS), `minimumPeak` 0,5,
+`correlationRate` 2000 Hz. O piso de pico existe porque o teste de pico sobre
+vice-pico não o enxerga sozinho: uma janela de ruído de sala também tem um
+melhor deslocamento e um segundo melhor, e a razão entre eles fica bem acima do
+piso de admissão.
+
+O que o agregado não sabe medir, ele recusa em vez de escolher:
+
+- `PLAYBACK_UNCOVERED_REASONS` — `manual-anchor-required` (o player estava
+  escondido; "tocou", "pausou e pulou" e "arrastou" cabem igualmente na
+  evidência) e `conflicting-evidence`.
+- `PLAYBACK_MAP_WARNINGS` — `manual-anchor-required`, `conflicting-evidence`,
+  `rate-unmeasured`, `reference-exhausted`, `no-reference-detected`.
+- `PLAYBACK_MAP_STATUSES` — `resolved`, `needs-input`, `failed`. Um mapa com
+  trecho descoberto é `needs-input`, e não um `resolved` com um buraco; um mapa
+  em que nenhuma peça encontrou a referência é `failed`.
+
+Uma âncora manual usa a mesma forma de `DiagnosticAnchor`/`ANCHOR_ORIGINS` da
+Wave 19, e a nota do operador cabe em `PLAYBACK_ANCHOR_NOTE_MAX = 1000`
+caracteres.
+
+Recusas nomeadas: `PLAYBACK_EVIDENCE_INSUFFICIENT`, `PLAYBACK_MAP_UNRESOLVED`,
+`PLAYBACK_MAP_VERSION_STALE` (com a versão e o hash correntes),
+`PLAYBACK_SESSION_NOT_REACT`, `PLAYBACK_REACTION_TRACK_AMBIGUOUS`,
+`PLAYBACK_TRACK_NOT_SINGLE_PART`, `PLAYBACK_MAP_NOT_FOUND`.
+
+**Quantos detectores existem, de quatro declarados (2026-09-07).**
+`PLAYBACK_DETECTION_METHODS` é `audio-fingerprint`, `player-visual`,
+`ocr-timestamp` e `manual-anchor`. Dois produzem peça:
+`audio-fingerprint`, pelo correlator de `ffmpeg-playback-fingerprint.ts`, e
+`manual-anchor`, por `applyPlaybackAnchor` quando uma pessoa responde um trecho
+descoberto. `player-visual` e `ocr-timestamp` **não têm detector nenhum** e não
+são baratos de escrever: o primeiro é detecção de interface dentro do quadro
+(barra de progresso, botão, estado do player, que muda a cada versão de cada
+player); o segundo **não** esbarra em falta de motor de OCR — o repositório tem
+Tesseract atrás de `ImageVisionProvider` — e sim em duas outras coisas: essa
+porta só recebe imagem parada da ingestão de mídia, sem caminho vindo de quadro
+de gravação, e virar texto reconhecido em posição de playhead é trabalho de
+região e template por player.
+
+O vocabulário continua com quatro valores de propósito — o agregado precisa
+conseguir registrar uma peça que veio da interface do player sem fingir que um
+correlator a produziu — e enquanto ninguém escreve os dois detectores o efeito
+é o já descrito acima: player escondido vira trecho descoberto com
+`manual-anchor-required`, e uma pessoa responde. Financiar um detector visual
+ou assumir que react com player escondido é sempre trabalho manual é decisão
+do proprietário; ver PRD FR-145.
+
+### 32.3 Materialização é só corte
+
+A compilação transforma o mapa num plano renderizável cuja linha do tempo é a
+**da reação**, peça por peça, e o compilador afirma isso em vez de deixar
+implícito: o número de quadros do plano é comparado com o da reação e diverge no
+máximo um quadro.
+
+A limitação é declarada nas próprias `assumptions` do plano: a materialização é
+só corte. Um trecho pausado mostra o reactor, não um quadro congelado da
+referência, porque o caminho editorial não tem freeze (`clip-timing.ts` recusa
+taxa zero) nem picture-in-picture. `retainedSourceRanges` lista o que sobrevive
+da referência, em segundos dela; a reação não aparece ali porque ela não é um
+intervalo de origem retido — ela é a linha do tempo.
+
+O plano também carrega, desde 2026-09-07, um log de decisão por peça em
+`director.decisions` — antes era uma lista vazia congelada.
+`buildPlaybackDecisions` o monta a partir das peças já resolvidas e
+`assembleDirectedEditPlan` o passa por `validateDirectorDecisions`, a mesma
+autoridade da direção multicâmera: 4 a 64 entradas, escolha, razão, evidência e
+confiança em cada uma, com tipo, detalhe e banda de confiança derivados ali. São
+três decisões de resumo — o mapa, a regra de emenda e a cama de áudio — mais uma
+por peça, citadas da menos confiante para cima quando passam do teto de 64. As
+refs de evidência são construídas a partir de identidades que o agregado valida
+(mapa, peça e hash da peça) e **não** repassam as `evidenceRefs` da peça: uma
+âncora manual constrói a sua a partir da nota de uma pessoa
+(`playback-map.ts:1481`) e o agregado só exige que ela não seja vazia, então uma
+nota com espaço tornaria incompilável um mapa válido. Os três campos de
+referência do plano continuam nomeando a derivação, nunca uma run: o log diz por
+que o compilador cortou, e não que alguém aprovou.
+
+### 32.4 Medido
+
+`tests/v2/playback-map-fingerprint.integration.mjs`, executado nesta máquina
+sobre uma gravação de react gerada: referência 30,00 s (h264/aac), reação
+60,00 s, 119 janelas das quais 69 travaram, 8 peças, 1 trecho descoberto, status
+`needs-input`. O erro de fronteira medido em cada peça foi 0 ou 15 quadros:
+
+| Instante (ticks) | Modo | Erro |
+|---:|---|---:|
+| 0 | `playing` | 0 |
+| 900000 | `paused` | 0 |
+| 1575000 | `playing` | 15 |
+| 2070000 | `commentary-only` | 0 |
+| 3285000 | `playing` | 15 |
+| 3690000 | `replay` | 0 |
+| 4365000 | `seek` | 15 |
+| 4770000 | `uncovered`/`manual-anchor-required` | 0 |
+| 5085000 | `playing` | 15 |
+
+Cinquenta janelas foram recusadas (27 delas com razão de pico ≥ 1,2 — isto é,
+janelas que passariam num teste que olhasse só a razão), com confiança entre
+0,000 e 0,950. Duas execuções produziram o mesmo `mapHash`
+(`fc4646da3a638ded`).
+
+`npm run test:e2e:playback-map` contra o mesmo cluster PostgreSQL descartável
+da §33.4 (1 teste, 1 passe, 8,2 s): um mapa v1 com 8 peças e 1 trecho descoberto
+recebe uma âncora manual e vira um v2 `resolved`; a compilação produz um plano
+de 1200 quadros em 9 clipes e uma linha de snapshot; um segundo escritor sobre a
+mesma cabeça é recusado por `PLAYBACK_MAP_VERSION_STALE` no serviço **e** por
+`PERSISTENCE_CONFLICT` no banco. O plano guardado é recusado depois de um
+deslocamento de clipe que passa pelo `CHECK` (`PERSISTENCE_CONFLICT`), depois de
+um documento irrenderizável com hash refeito (`PERSISTENCE_CONFLICT`) e depois
+de desligar a referência (`MEDIA_ARTIFACT_NOT_FOUND`).
+
+## 33. Gate da fase multicâmera/long-form (F4.016)
+
+`src/v2/domain/multicam-longform-gate.ts` modela o gate como dez critérios
+independentes, id `multicam-longform/v1`. Os ids dos critérios são frases e não
+números de série, porque "insufficient-evidence-requires-manual: failed" ensina
+o que falhou e "AC-003: failed" manda o operador a uma tabela.
+
+### 33.1 Os dez critérios
+
+| Critério | O que ele afirma | Checagens |
+|---|---|---|
+| `podcast-multicam-synchronised` | podcast de dois participantes com áudios distintos sincronizado, cobertura derivada e mapa de relógio persistido | `podcast-protocol-evaluated`, `diagnostic-synchronised`, `participant-tracks-distinct`, `coverage-derived`, `clock-map-persisted` |
+| `teacher-and-screen-synchronised` | professor e tela com durações diferentes sincronizados sem esticar nenhum dos dois | `teacher-protocol-evaluated`, `diagnostic-synchronised`, `track-durations-unequal`, `coverage-derived` |
+| `insufficient-evidence-requires-manual` | uma sessão que a evidência não resolve diz isso, recusa inventar mapa e exige marcador ou âncora antes de qualquer edição automática | `sync-evidence-insufficient`, `diagnostic-requires-manual`, `protocol-ceiling-blocks-auto-edit` |
+| `react-edited-with-piecewise-map` | react editado por mapa de playback piecewise que sobrevive a pausa, rewind ou seek, com duração de reação diferente da referência | `playback-map-persisted`, `interrupted-piece-present`, `reaction-duration-differs`, `map-compiled-into-plan` |
+| `active-speaker-and-demonstration-directed` | direção multicâmera cortada por falante ativo e por demonstração, com regra e justificativa por plano | `direction-persisted`, `active-speaker-rule-fired`, `demonstration-rule-fired`, `decisions-carry-justification` |
+| `contextual-multi-range-synthesis` | síntese multi-range de cerca de 120 s que guarda a sua prova de contexto e cai dentro da tolerância declarada | `synthesis-persisted`, `target-duration-is-120s`, `duration-within-tolerance`, `multiple-ranges-preserved`, `context-proof-recorded` |
+| `colour-match-precedes-creative-lut` | o match de câmeras é um plano de estágio `match` e resolve antes da LUT criativa | `match-plan-persisted`, `transforms-are-match-stage`, `match-precedes-creative-lut` |
+| `colour-critic-resolved` | o crítico de cor chegou a um veredito que fecha sozinho — `approve` ou `bounded-correction` — sem questão dura em aberto; `human-review` pede uma pessoa e por isso não fecha | `critic-report-persisted`, `verdict-resolved`, `no-open-hard-issue` |
+| `final-mp4-inspectable` | o MP4 entregue existe como artifact cujo hash, codec, dimensões, taxa e duração foram **medidos** e não declarados | `final-export-promoted`, `output-codec-recorded`, `output-probe-measured`, `artifact-hash-matches-attempt` |
+| `no-legacy-runtime-dependency` | o grafo de módulos atrás de tudo acima foi varrido e não importa runtime legado nem persistência de compatibilidade | `module-graph-scanned`, `no-legacy-runtime-import`, `no-compatibility-persistence` |
+
+São 38 checagens no total — número medido na execução da §33.4, não contado à
+mão.
+
+### 33.2 De onde vem a evidência
+
+`MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES` é um conjunto fechado de vinte e
+quatro nomes de evidência que uma checagem pode ter lido, de `workspace` a
+`module-graph-audit`. Vinte e três nomeiam uma tabela do schema v2 —
+`workspaces`, `projects`, `project_versions`, `capture_session_versions`,
+`capture_protocols`, `capture_protocol_evaluations`, `sync_diagnostics`,
+`capture_sync_evidence`, `capture_track_coverages`, `capture_clock_maps`,
+`playback_maps`, `playback_pieces`, `multicam_directions`,
+`multicam_shot_decisions`, `editorial_syntheses`, `multicam_match_plans`,
+`camera_match_transforms`, `project_color_plans`, `color_critic_reports`,
+`renderable_plan_snapshots`, `project_final_export_operations`,
+`media_artifacts`, `media_artifact_manifests` — e não todas foram criadas nas
+Waves 18/19/20: `workspaces` vem da migração inicial `20260712210000_init`. O
+vigésimo quarto, `module-graph-audit`, **não** é tabela: `grep module_graph
+prisma/v2/schema.prisma` devolve zero linhas, e a referência que o gate constrói
+é `{ type: 'module-graph-audit', id: 'legacy-runtime-audit:<scannedAt>', hash:
+auditHash }` (`domain/multicam-longform-gate.ts:814-819`) — o resultado de uma
+varredura, não uma linha. É o mesmo fato que a nota sobre o critério 10 registra
+adiante. "evidence-ref: o que o leitor quiser" é como um gate deixa de ser
+auditável.
+
+`MULTICAM_LONGFORM_FAILURE_REASONS` são cinco, porque a próxima ação do operador
+é diferente em cada uma: `evidence-missing` (grave de novo),
+`evidence-unverified` (investigue a linha), `evidence-not-measured`
+(meça — nulo, nunca zero), `requirement-unmet` (conserte o conteúdo) e
+`evidence-stale` (re-execute contra a versão corrente).
+
+`evidence-stale` **não** é geral, e esta lista o apresentava como se fosse.
+Quem o emite são três dos dez critérios, respondendo a duas perguntas
+diferentes:
+
+- o critério 4 (`react-edited-with-piecewise-map`) o usa quando o plano
+  compilado não nomeia mais o mapa no hash em que o mapa está — plano velho,
+  mapa novo;
+- os critérios 4, 5 (`active-speaker-and-demonstration-directed`) e 7
+  (`colour-match-precedes-creative-lut`) o usam quando o agregado foi derivado
+  sob uma versão de sessão ou uma época de referência que a sessão já não tem.
+  É a mesma comparação que os serviços fazem ao **derivar**
+  (`react-playback-map.ts:1184`, `multicam-color-match.ts:565`,
+  `compileShotsToSourceRanges` em `domain/multicam-direction.ts:2146`), refeita sobre
+  linhas já persistidas — que é onde ela nunca tinha rodado, e por isso uma
+  direção cortada sob uma versão de sessão respondia a este gate exatamente tão
+  bem depois de a sessão passar dela.
+
+A comparação é versão de sessão **e** época de referência, e não a versão do
+diagnóstico, embora a direção registre uma. Toda trava que o domínio tem
+compara exatamente esses dois, e `directMulticam` pede que o diagnóstico
+descreva a versão **corrente** da sessão, nunca que ele seja o mais novo; exigir
+o mais novo inventaria uma regra que a derivação não tem. A primeira versão
+desta correção comparava a versão do diagnóstico e o
+`phase-gate-journey.e2e.mjs` a recusou, porque anexar um diagnóstico mais novo
+movia dois critérios onde a suíte prova que se move exatamente um.
+
+Os outros sete critérios não fazem comparação de versão nenhuma, e não é
+esquecimento: os critérios 1 e 2 escolhem a avaliação de protocolo pela chave
+`[workspace, sessão, versão de sessão, protocolo, versão de protocolo]`, então
+já leem a linha da versão certa em vez de comparar depois; os critérios 6, 8, 9
+e 10 leem agregados que não são derivados de uma sessão de captura.
+
+A verificação de hash tem três estados, e o terceiro é o que torna o gate
+possível: hash presente e conferido; hash presente e **não** conferido, que é
+adulteração e é contada em `unverifiedReferenceCount`; e hash ausente, porque a
+tabela não guarda hash próprio — contada em `unhashedReferenceCount` e nunca na
+primeira. Confundir "não pude conferir" com "conferi e estava errado" tornava
+quatro dos dez critérios impossíveis de registrar como aprovados, porque a
+migração recusa uma linha aprovada que cite uma referência não verificada.
+
+O critério 10 é o único cuja evidência não é uma linha de banco: "sem runtime
+legado" é propriedade do código que produziu os outros nove.
+`LEGACY_RUNTIME_MARKERS` fixa o que conta — `legacy-runtime-import`,
+`legacy-prisma-client`, `sqlite-persistence`, `legacy-process-route`,
+`dual-write-compatibility` — para que o scanner não estreite em silêncio a
+própria definição. Módulos de entrada que o processo não conseguiu ler são
+reportados à parte das violações.
+
+### 33.3 Superfície
+
+Seis capabilities `/v1` por projeto publicam o gate — executar, ler o último,
+ler um pelo id, listar o histórico, ler o que falta e listar os artifacts — mais
+uma sétima independente de projeto, `apollo.multicam-longform-gate.criteria.list`
+em `GET /v1/multicam-longform-gate/criteria`, que publica o catálogo dos dez
+critérios antes de qualquer avaliação. A tela em
+`src/app/multicam-longform-gate/page.tsx`, alcançável a partir de
+`/capture-sessions`, mostra os dez critérios um a um. O registro de por que essa
+tela chegou depois das outras três está em
+[`docs/quality/wave20-operator-surfaces.md`](../quality/wave20-operator-surfaces.md).
+
+### 33.4 Medido
+
+`npm run test:e2e:multicam-longform-gate` contra um cluster PostgreSQL 16
+descartável levantado nesta máquina, com todas as migrações aplicadas a partir
+do zero (3 testes, 3 passes, 72,9 s):
+
+- Um projeto vazio produz 10 critérios e 38 checagens, 3 linhas de evidência, e
+  satisfaz 1 de 10.
+- O mundo completo, lido pelo leitor real e não por um duplo, satisfaz 10 de 10
+  (sessão `f4016-session-podcast`, fingerprint `e3b5c38c6c8f`).
+- Nove exclusões de uma linha cada foram medidas, e **cada uma falhou exatamente
+  o seu próprio critério** — é isso que impede que os dez critérios sejam um
+  critério só com dez nomes.
+- Quinze recusas de constraint foram medidas no mesmo banco.
+- Oito vocabulários do leitor foram conferidos contra as constantes de domínio
+  que os definem, em vez de redigitados.
+
+`npm run test:e2e:phase-gate-journey`, no mesmo cluster, dirige o gate pelas
+rotas `/v1` publicadas (1 teste, 1 passe, 58,7 s): 13 avaliações, aprovação
+10/10 com fingerprint `dba04547dfc6` citando 40 artifacts, e um replay
+byte-a-byte idêntico de 19 955 caracteres. Apagar a cabeça do plano de match
+leva a 9/10 por `evidence-missing`; adulterar a síntese leva a 9/10 por
+`evidence-unverified`; restaurar volta a 10/10. Cinco corpos de requisição que
+carregavam um veredito foram recusados com 422 `INVALID_ARGUMENT` e **zero**
+linhas escritas — o chamador não declara o resultado do gate. Outras quatro
+condições foram quebradas uma de cada vez, e cada uma derrubou exatamente a sua
+checagem: podcast dessincronizado → `diagnostic-synchronised`; cobertura de uma
+faixa só → `coverage-derived`; LUT criativa autorada antes do match →
+`match-precedes-creative-lut`; reação do mesmo tamanho da referência →
+`reaction-duration-differs` e `map-compiled-into-plan`.
+
+## 34. Estado de implementação — Wave 20 (F4.012–F4.016)
+
+Implementado localmente entre 2026-09-04 e 2026-09-06. **Integração final,
+deploy e aceite do proprietário não aconteceram**; nenhuma caixa de F4.012 a
+F4.016 no `TODO.md` está marcada.
+
+### 34.1 O que foi construído
+
+| Seção | Módulo de domínio | Evidência |
+|---|---|---|
+| §29 Direção multicâmera | `multicam-direction.ts`, `multicam-evidence.ts`, `camera-identity.ts`, `ffmpeg-multicam-silence-provider.ts` | T-FR-150 (33 casos), T-F4.012 (24 casos de serviço, 2 de mídia em `multicam-silence-evidence.integration.mjs`, 1 de raiz de composição em `multicam-direction-composition.integration.mjs`) |
+| §30 Match de cor | `color-measurement.ts`, `multicam-match-plan.ts` | T-FR-183/T-FR-184 (43 casos), T-F4.013/T-F4.014 (30 casos de serviço) |
+| §31 Crítico de cor | `color-critic-report.ts` | T-FR-184, `color-visual-evaluations.integration.mjs` (7 avaliações) |
+| §32 React PlaybackMap | `playback-map.ts`, `playback-mode.ts` | T-F4.015 (31 casos + 16 de serviço) |
+| §33 Gate da fase | `multicam-longform-gate.ts` | T-F4.016 (16 casos), `E2E-F4.016` |
+
+Persistência em 33 modelos Prisma novos, distribuídos por seis migrações, todas
+aplicáveis do zero: medido levantando um PostgreSQL 16 vazio nesta máquina e
+rodando `db:v2:migrate:deploy`, que respondeu "All migrations have been
+successfully applied".
+
+`npm run db:v2:validate` respondeu nesta máquina, em 2026-09-06, "267 tabelas,
+1247 índices, 935 chaves estrangeiras" — a nota da Wave 18 no `TODO.md` havia
+registrado 227 / 1099 / 850. O registry de capabilities passou de 325 entradas em
+`041eb97d` para 347 em `HEAD`, e `npm run api:v1:validate` respondeu no mesmo dia
+"347 capabilities, 606 schemas, 671 examples, 282 paths, compatibility baseline
+intact". Quatro telas de operador: direção, cor, playback e gate.
+
+### 34.2 O worker de sincronização — o que passou a existir
+
+A §27.1 registra a correção: até a Wave 20, `POST .../sync-runs` enfileirava uma
+linha que nenhum processo consumia. O que existe agora, e é executável:
+
+- **Driver**: `scripts/run-v2-capture-sync-worker.mjs`, script npm
+  `worker:v2:capture-sync`, com `--once` para CI.
+- **Fonte de sinal**: `ffmpeg-audio-sync-signal-source.ts`, a primeira
+  implementação de `SyncSignalSource` que o worker já esperava, apoiada em
+  `correlateAudioWindows`.
+- **Cobertura derivada dentro do worker**, em vez de nenhum produtor:
+  `createTrackCoverage` passou a ter chamador de produção.
+- **Sem taxa de quadros inventada**: o fallback `30000/1001` saiu; a taxa vem do
+  relógio persistido ou do timebase da faixa de referência, e sem nenhum dos
+  dois o run é liquidado como falho com o motivo nomeado.
+
+Medido nesta máquina (`npm run test:integration:capture-sync-worker`, 11 testes,
+11 passes): quatro atrasos conhecidos sobre relógio de sessão de 90 kHz deram
+erro de 0, 0, +18 e 0 ticks (média 4,50 t, desvio 7,79 t, N=4); o único erro não
+nulo é o atraso deliberadamente fora da grade de correlação, e vale 0,200 ms.
+Áudio embaralhado sai como `insufficient-evidence` com zero sinais e zero mapas,
+em vez de virar um deslocamento. Uma separação mais fraca reporta confiança
+estritamente menor (razão de pico 2,4882 → confiança 0,8755, `auto-apply`;
+razão 1,4037 → confiança 0,6555, `review`). Uma câmera sem microfone não produz
+observação alguma — não produz zero.
+
+### 34.3 O renderer editorial: o custo de um corte deixou de ser o tamanho da fonte
+
+`FfmpegEditorialProxyRenderer` dava a cada clipe um `trim=start_frame=…` sobre
+**uma** entrada — a fonte inteira. O FFmpeg decodifica todo quadro da entrada e
+segura os quadros enquanto qualquer ramo do grafo ainda puder querer um, então o
+custo de um corte era o tamanho da FONTE e não o do que ele guarda. Hoje cada
+clipe tem a sua própria entrada `-ss`/`-t` sobre o mesmo arquivo já normalizado
+em cor, e o `trim` corta a partir do quadro 0 dessa entrada
+(`ffmpeg-editorial-proxy-renderer.ts:732-760`). O `-ss` começa meio quadro cedo e
+o `-t` leva um quadro de folga, para que um período de quadro que não divida em
+microssegundos jamais arredonde para depois do primeiro quadro do clipe; o `trim`
+segue cortando o intervalo exato.
+
+**O áudio continua na entrada não-buscada, de propósito.** `atrim` é exato ao
+sample e uma busca só pode cair num limite de pacote; buscar o áudio também
+mudou 5624 dos 5635 quadros de áudio — número medido pelo autor da mudança e
+registrado na mensagem do commit `4416e57b`, não re-executado aqui — e o
+objetivo da mudança é que os bytes **não** se movam.
+
+**Medido pelo autor da mudança**, registrado na mensagem do commit `4416e57b` e
+**não re-executado ao escrever este documento**:
+
+| Master | Clipes | Antes | Depois |
+|---|---|---|---|
+| 600 s | 6 | 111,3 s | 12,9 s, saída byte a byte idêntica (sha256 `8f11166c…`, 5 932 461 bytes) |
+| 7200 s | 6 | morto em 1856,5 s com 11,9 GB, `RENDER_EXECUTION_FAILED { killed: true, signal: 'SIGTERM' }` pelo timeout de 30 min do próprio renderer (`ffmpeg-editorial-proxy-renderer.ts:860`) | 38,9 s, abaixo de 3,6 GB, 7 075 824 bytes |
+
+Duas horas com dois minutos de saída é a Jornada 6 do brief — "extrair um
+conteúdo de dois minutos de uma live de duas horas"
+(`docs/PRD-APOLLO-V2.md:117`). O caminho de manchete do produto não terminava
+antes desta wave.
+
+**Medido aqui, com o mecanismo isolado.** Não é o renderer: é o par de grafos
+que ele emite, reduzido a vídeo. Fonte `testsrc2` 320x180 a 30 fps com 600,0 s,
+seis clipes de 600 quadros começando nos quadros 0/3000/6000/9000/12000/15000,
+libx264 `ultrafast`, N=3 por forma, nesta máquina em 2026-09-06:
+
+- uma entrada não-buscada + `trim=start_frame=…`: 49,82 / 43,01 / 41,86 s
+  (média 44,90 s, desvio-padrão 4,30 s);
+- seis entradas `-ss`/`-t` + `trim=start_frame=0`: 0,95 / 0,96 / 0,98 s
+  (média 0,96 s, desvio-padrão 0,02 s);
+- as seis saídas são o mesmo arquivo: 10 862 893 bytes, sha256
+  `20d40e898ea0c2f53965bb5f12b90e50c545d0cde8adfc94a88b53b5f671b6f0`.
+
+A razão de 47x desta bancada não é a razão do produto — ela não tem áudio,
+legenda nem overlay, e a fonte tem 600 s e não 7200 s. O que ela demonstra é o
+que a mudança afirma: o custo seguia o tamanho da fonte e deixou de seguir, com
+a saída inalterada.
+
+**O que ficou por consertar.** Os 3,6 GB que sobram no caso de 7200 s são a mesma
+patologia do lado do áudio, limitada pelo tamanho do quadro de áudio em vez do de
+imagem. Foi aceito como preço de manter os samples exatos, não corrigido, e não
+há teste que meça esse teto.
+
+### 34.4 O que continua faltando
+
+- **Drift continua sem ser ajustado.** `fitClockDrift` e `capture_drift_fits`
+  seguem sem escritor; o diagnóstico segue relatando `driftPpm: null`, que é
+  "não medido". Isso significa que `rate` numa peça de playback (§32) vem da
+  correlação daquela peça, e não de um ajuste de drift da sessão.
+- **`SessionClock` continua sem escritor.** O worker resolve a taxa de quadros,
+  usa e não persiste.
+- **Marcador confirmado continua não sendo prova admissível** pela cascata, pelo
+  motivo registrado na §27.3: `MarkerDetection` guarda os ids das observações,
+  não o pico e o segundo pico que a fusão mediu.
+- **`spoken-code` continua sem reconhecedor de fala.**
+- **`demonstration` e `attention` continuam sem produtor.** As duas espécies são
+  modeladas, validadas pelo agregado e aceitas pelo `CHECK` da migração, e nada
+  as observa. Não por falta de visão computacional no repositório — há
+  `ImageVisionProvider` com Tesseract e com Google Cloud Vision
+  (`FACE_DETECTION`, `OBJECT_LOCALIZATION`) —, mas porque essa porta só recebe
+  imagem parada da ingestão, ninguém liga quadro de gravação nela, e nem caixa
+  de objeto é mão demonstrando nem caixa de rosto é olhar. Preço:
+  `demonstration-prefers-screen` decide por tela compartilhada e nunca por
+  demonstração física numa câmera. `expressão`, que a linha de FR-150 pede, nem
+  espécie de evidência é. Decisão de escopo do proprietário (§29.1, PRD FR-150).
+- **`silence` é medido e não é lido.** O adaptador existe e persiste, e nenhuma
+  regra de `DIRECTION_RULES` consulta a espécie: a observação entra no hash e
+  não entra na decisão (§29.1).
+- **`player-visual` e `ocr-timestamp` continuam sem detector.** Dois dos quatro
+  `PLAYBACK_DETECTION_METHODS`. O que falta ao segundo não é motor de OCR — o
+  repositório tem Tesseract atrás de `ImageVisionProvider`, ligado no worker de
+  ingestão em `repository-factory.ts:1979` — e sim o caminho de quadro de vídeo
+  até essa porta e o trabalho de região por player (§32.2). O motor é binário
+  externo escolhido por `APOLLO_TESSERACT_PATH`, não pacote npm; quem procura em
+  `package.json` não acha e conclui que não existe, que foi exatamente o erro
+  que a linha F4.015 da traçabilidade carregou até 2026-09-07. Enquanto não
+  existirem detectores, player escondido é trecho `manual-anchor-required`
+  para uma pessoa responder (PRD FR-145).
+- **Freeze e picture-in-picture não existem.** A materialização de um react é só
+  corte (§32.3); a spec §16 descreve o mapa, não uma composição.
+- **Quatro das seis jornadas obrigatórias nunca tocam armazenamento de objetos
+  versionado.** O briefing pede "PostgreSQL 16 **e** armazenamento de objetos
+  versionado"; só duas jornadas provam as duas metades, e é honesto dizer quais.
+  `grep -n "APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3" .github/workflows/ci.yml`
+  devolve sete passos, e os de jornada obrigatória são dois: `Run Wave 20
+  podcast multicam journey against PostgreSQL and versioned MinIO` (linha 760) e
+  `Run Wave 20 phase gate journey against PostgreSQL and versioned MinIO` (778),
+  ambos no job `local-infrastructure`, cada um com bucket exclusivo por run.
+  - **Provam as duas metades:** `podcast-multicam-journey` (as quatro gravações
+    entram no bucket versionado e o render as lê de volta por `materialize`) e
+    `phase-gate-journey` (roda contra o bucket e o afirma **vazio** no fim,
+    porque nenhuma rota do gate constrói armazenamento de artefato — é uma
+    afirmação falsificável, não um comentário).
+  - **Provam só PostgreSQL:** `teacher-screen-journey`, `react-playback-journey`
+    e `insufficient-evidence-journey` leem o driver do ambiente e rodariam sob
+    `s3` sem alterar uma linha; nenhum passo do CI lhes dá um, então rodam uma
+    vez cada, no job `quality`, sobre disco local. `longform-synthesis-journey`
+    não tem armazenamento de artefato no caminho: os bytes chegam ao renderer
+    por `sources: [{ path: masterPath }]` de um `mkdtemp` da própria suíte, e o
+    cabeçalho do arquivo já dizia isso — era o único dos quatro que dizia.
+  - A regra que impede isto de voltar a ser prosa:
+    `mandatory-journey-ci-wiring.test.mjs` monta a lista das jornadas com passo
+    `s3` e afirma que ela é exatamente `{podcast, phase gate}`. Ligar uma quarta
+    jornada ao MinIO é mudança bem-vinda que precisa editar essa asserção, este
+    parágrafo e as linhas FR-150/F4.015/F4.016 da traçabilidade junto.
+
+- **Os limiares de §26 continuam sem calibração contra material real.** Todos os
+  números das §§29–31 vieram de fixtures geradas.
+
+### 34.5 Round trip contra PostgreSQL
+
+`npm run test:e2e:wave20-persistence` no mesmo cluster (2 testes, 2 passes,
+7,9 s) mede as três coisas que um duplo em memória não mede:
+
+- **`bigint` sobrevive.** O tick 9 007 199 254 740 993 — um a mais que o maior
+  inteiro exato de um `double` — voltou do driver como foi escrito. Se
+  atravessasse como número JSON, voltaria arredondado, sem erro.
+- **As constraints recusam o que o domínio recusa.** 28 recusas confirmadas na
+  mesma passada, com duas peças de playback preservadas depois da cascata de
+  exclusão da direção.
+- **Os repositórios devolvem o agregado que foi guardado**: direção com 4 planos
+  e 1 trecho descoberto, medição com 8 dimensões, plano de match com 2 questões,
+  relatório de crítico com 12 dimensões, mapa de playback com 8 peças na v1 e 9
+  na v2.
+
+### 34.6 O que não foi medido neste passe
+
+O passe que escreveu esta seção rodou `npm test` (2147 testes, 2147 passes,
+saída 0), seis suítes de integração de mídia da Wave 20 e quatro suítes de banco
+contra um cluster PostgreSQL 16 descartável levantado localmente e destruído em
+seguida. **Não** executou: as jornadas de navegador
+(`test:e2e:wave20-browser`, `test:e2e:multicam-longform-gate-browser`), que
+exigem `next start` e um build de produção, nem as jornadas de produto de
+podcast, professor+tela, react, evidência insuficiente e síntese long-form
+contra PostgreSQL. Elas existem, estão registradas em passos nomeados do CI, e
+são medidas lá.
+
+**Números com data, porque contagem sem data envelhece calada.** Em 2026-09-07,
+depois da rodada de fechamento, `npm test` nesta máquina devolveu **2165 testes,
+2165 passes, saída 0, 61,3 s** — os 2147 acima são do passe original e não do
+estado atual. Passes posteriores mediram contra PostgreSQL, e a traçabilidade
+registra o número de cada um: `playback-map.e2e.mjs`, `phase-gate-journey`
+(36,9 s) e `longform-synthesis-journey` (530,9 s) em 2026-09-07. As duas
+jornadas de navegador continuam sem execução registrada fora do CI.
+
+### 34.7 A correção da fase 9: os dois compiles que a API não alcançava
+
+Uma auditoria independente conferiu o que a §34 afirma e achou o furo. Até
+`93aa7f55`, `snapshots.persist` tinha exatamente dois chamadores —
+`application/react-playback-map.ts:1054` e
+`application/compile-synthesis-to-directed-plan.ts:368`, que em 2026-09-07 são
+as linhas 1127 e 377; continuam sendo dois, e `grep -rn "snapshots\.persist"
+src/` devolve exatamente essas duas — ambos dentro dos dois
+serviços de compile, e nenhuma rota alcançava nenhum dos dois.
+
+**O comando que prova isso não é o grep pelos nomes dos serviços.** A primeira
+redação desta seção citava
+`grep -rlnE "compileReactPlaybackPlanService|compileSynthesisRenderPlanService" src/app/`,
+que responde **nenhum arquivo antes e depois da correção**: as rotas chegam aos
+compiladores por fábricas da raiz de composição, e os nomes dos serviços só
+aparecem dentro de `repository-factory.ts`. Quem reexecutasse o comando leria
+"continua quebrado". O comando que de fato responde é
+`grep -rlnE "createReactPlaybackPlanCompileService|createSynthesisRenderPlanService" src/app/`,
+que devolve os dois arquivos de rota; a prova durável é o caminhador de alcance
+(`applicationServicesForEndpoint`), que atribui cada compilador à rota dele e a
+nenhuma outra — asserção em `public-operation-contracts.test.mjs` —, mais a
+jornada do phase gate, que chama as duas rotas por HTTP. Como o critério 4 do gate lê `map-compiled-into-plan` e o
+critério 6 lê o plano compilado dentro de `context-proof-recorded`, o **dez de
+dez da §33 era um número que só um teste conseguia produzir**. Isso contradiz a
+regra API-first da própria wave.
+
+O que passou a existir:
+
+- `POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/plan`
+  e `POST /v1/projects/{projectId}/editorial-syntheses/{synthesisId}/render-plan`,
+  com esquemas de requisição próprios, uma resposta compartilhada
+  (`renderable-plan-compiled/v1`, a linha guardada e não o documento do plano),
+  regras de segurança de ferramenta de agente e as duas linhas de auditoria de
+  concorrência e de precondição.
+- O compile do react **passou a ter cerca**. Ele lia a cabeça do mapa e nunca
+  perguntava contra qual versão o chamador decidiu; a cerca de sessão não cobre
+  isso, porque um rebuild contra uma sessão mais nova produz um mapa cujo
+  `sessionVersion` concorda com a sessão. Agora exige o par
+  `<sessionId>:playback:<trackId>:v<n>` + `mapHash` e recusa um par gasto com
+  `PLAYBACK_MAP_VERSION_STALE`.
+- `createReactPlaybackPlanCompileService` separou o compile da raiz de
+  composição que constrói o resolvedor de mídia e o fingerprinter do FFmpeg.
+  Medido, não suposto: a rota publicada respondeu 503
+  `PERSISTENCE_NOT_CONFIGURED` na primeira execução, porque aquela raiz recusa
+  existir sem `APOLLO_V2_ARTIFACT_ROOT` — que um compile nunca usa.
+
+A prova está em `phase-gate-journey.e2e.mjs`: o mundo é construído com
+`renderablePlans: 'omit'`, o gate responde **oito de dez** nomeando exatamente
+`react-edited-with-piecewise-map` (por `map-compiled-into-plan`) e
+`contextual-multi-range-synthesis` (por `context-proof-recorded`), as duas rotas
+são chamadas, e a avaliação seguinte responde dez de dez. Medido nesta máquina
+contra um PostgreSQL 16 descartável: 14 avaliações, 40 artefatos citados,
+`fingerprint 00060f773a8f`, 1 teste, 1 passe, 11,2 s.
+
+O que continua **fora** da API, e por quê: oito dos dez critérios leem linhas
+que nenhuma rota `/v1` escreve — cobertura, mapas de relógio, medições de cor,
+o veredito do crítico e a operação de export final vêm de decodificadores e de
+workers. O cabeçalho da jornada passou a dizer oito, e não nove.
+
+Correção de contagem: o registry saiu de 347 para **349 capabilities**, e
+`npm run api:v1:validate` respondeu nesta máquina "349 capabilities, 609
+schemas, 675 examples, 284 paths, compatibility baseline intact". O diff do
+baseline é estritamente aditivo — perdidos 0, alterados 0, acrescentados 2
+capabilities e 3 schemas.
+
+Um segundo achado da mesma auditoria: `docs/quality/ui-capability-parity-report.json`
+publicava `unboundActions: 0` e `routesWithoutApplicationService: 0` como
+**literais**. Nenhum arranjo do código movia qualquer um dos dois — uma ação sem
+capability estourava dentro do binder e uma rota sem serviço estourava dentro do
+walker, então o gerador quebrava antes de escrever qualquer coisa que não fosse
+zero. Os dois passaram a ser contados, o relatório nomeia os culpados
+(`unboundActionIds`, `routesWithoutApplicationServiceEndpoints`), a recusa
+continua no CLI nos dois modos, e um teste novo torna cada número diferente de
+zero de propósito para provar que ele se move.
+
+Nada nesta seção afirma implantação ou aceite. Os dois continuam pendentes.
+
+### 34.8 A revisão da fase 9: o que a correção da §34.7 deixou passar
+
+A revisão da própria §34.7 achou quatro coisas. A do meio é a que muda
+comportamento.
+
+**A taxa de entrega não estava na identidade do plano.** O pedido
+`compile-react-playback-plan-request/v1` publica `planFps` como escolha do
+chamador, e a descrição da capability prometia "compilar o mesmo mapa duas vezes
+devolve o plano guardado". As duas coisas só eram verdade em uma taxa: `planFps`
+é a base de tempo em que todo clipe do plano é expresso, e ela não estava na
+chave natural do snapshot. Medido no mapa de fixture antes da correção: 30/1
+guardou um plano de 1200 quadros e 25/1 foi recusado com **409
+`PERSISTENCE_CONFLICT`**, cujos detalhes não nomeavam a taxa nem um caminho
+adiante. Uma taxa de entrega por (versão de mapa, versão de projeto) era uma
+regra que ninguém escreveu e ninguém escolheu. A migration
+`20260907120000_renderable_plan_delivery_rate_key` põe `fps` em
+`renderable_plan_snapshots_source_key`; as duas taxas passam a ser dois planos,
+cada um com a sua linha, e pedir de novo uma taxa já guardada replica aquela
+linha e não a mais recente. Provado nos dois níveis: no conjunto em memória e
+contra um PostgreSQL 16 descartável, onde recriar o índice antigo de cinco
+colunas na mão faz o E2E falhar por `PERSISTENCE_CONFLICT` e recriá-lo com seis
+faz passar.
+
+O `objective` **não** entrou nessa chave, e a leitura de que ele também parte o
+plano não se reproduz. Ele chega ao plano só como ação desejada, nenhuma das duas
+rotas manda destino junto, e os três objetivos que dispensam destino —
+`discovery`, `awareness`, `warming` — produzem a mesma ação `continue-viewing`.
+Medido: compilar a 30/1 para `discovery` e depois para `awareness` devolve o
+mesmo hash de plano e replica. Colocar o objetivo na chave partiria um plano em
+duas linhas com um único `planHash`, o que o único `(workspaceId, planHash)`
+recusa — um conflito fabricado a partir de um replay. **Fica aberto**, porque a
+decisão é do dono do produto e não desta correção: o enum publicado de `objective`
+tem oito valores e só três são entregáveis; os outros cinco são recusados
+`INVALID_ARGUMENT` nomeando o destino que exigiriam. Os testes fixam esse
+comportamento e o comentário do schema passou a dizê-lo, mas estreitar o enum ou
+aceitar um `desiredAction` continua por decidir.
+
+**Fiação morta na raiz de composição.** `createReactPlaybackMapServices` continuou
+construindo um membro `compile:` depois que a rota publicada passou a usar
+`createReactPlaybackPlanCompileService`. Ninguém o chamava, e o caminhador do
+relatório de paridade segue uma chamada de fábrica para dentro de todo serviço
+que ela constrói — então aquele membro morto atribuía o compilador às linhas de
+`build` e de `anchors`, duas rotas que nunca o invocam. Não era só inflação
+cosmética: `api-governance-coverage.test.mjs` casa o escopo exigido de uma rota
+contra o fonte concatenado de todos os serviços atribuídos a ela. Removido, com
+um teste que anda por toda capability publicada e exige que cada um dos dois
+compiladores esteja atribuído a exatamente uma rota — a dele.
+
+**A jornada de long-form não passava pela rota.** `react-playback-journey` foi
+convertida e `longform-synthesis-journey` não: o passo 5 chamava
+`compileSynthesisRenderPlanService` direto, e o cabeçalho narrava o passo como o
+serviço. A rota `POST .../editorial-syntheses/{id}/render-plan` ficava dirigida
+por uma única suíte. Agora são duas. Medido nesta máquina em 2026-09-07: 2
+testes, 2 passes, 530,9 s, os dois cortes por `POST render-plan 201`.
+
+**Uma medição que não se reproduzia** — o grep citado como prova de fechamento —
+está corrigida no início da §34.7, junto com o comando que de fato responde.
+
+Contagens conferidas nesta máquina em 2026-09-07 e refletidas em
+`docs/REQUIREMENTS-TRACEABILITY.md`: `playback-map-service.test.mjs` tinha 18
+testes e passou a ter 19 na §34.9, o registry tem cinco capabilities de
+`playback-map`, a jornada do phase gate roda **14 avaliações** (oito de dez
+antes dos compiles, dez de dez depois; 40 artefatos citados então, 41 depois da
+§34.9) e `npm run api:v1:validate` responde "349 capabilities, 609 schemas, 675
+examples, 284 paths, compatibility baseline intact".
+
+Nada nesta seção afirma implantação ou aceite. Os dois continuam pendentes.
+
+### 34.9 A fase 11: três achados que a re-auditoria deixou em aberto
+
+A re-auditoria da §34.8 deixou três coisas sem registro em lugar nenhum que um
+leitor procure. Duas viraram código; uma virou declaração, porque consertá-la
+quebraria o que ela deveria proteger.
+
+**O corte de react não dizia por que cortava.** `grep -rnE
+"reactDirector|react-director" src/ tests/` saía com 1 e nenhuma linha, e
+`renderable-edit-plan.ts` punha `decisions: Object.freeze([])` no plano — de
+modo que a única metade da wave sem log de decisão era justamente a que decide,
+peça a peça, se o espectador vê a referência ou o reactor. `buildPlaybackDecisions`
+passou a montar esse log das peças já resolvidas e `assembleDirectedEditPlan`
+passou a aceitá-lo e a validá-lo com `validateDirectorDecisions` (spec §32.3,
+PRD FR-145). Dois limites do domínio foram achados ao fazer isso e estão no
+comentário da função: as `evidenceRefs` de uma peça **não** podem ser repassadas
+a `createDecisionConfidence`, porque a de uma âncora é construída a partir da
+nota de uma pessoa e o agregado só exige que ela não seja vazia; e o id de uma
+decisão para em 128 caracteres enquanto um id de mapa sozinho pode chegar a 128,
+caso que a suíte já cobre. Medido: `playback-map-service.test.mjs` passou de 18
+para 19 testes, e o novo mede 12 decisões sobre 9 peças.
+
+**A trava de sincronismo não era refeita sobre evidência já persistida.**
+`grep -n evidence-stale multicam-longform-gate-repository.ts` devolvia
+exatamente uma linha, dentro do critério 4, e ela comparava a linhagem de um
+plano contra um mapa — não uma derivação contra a sessão de que ela saiu. Os
+critérios 4, 5 e 7 passaram a comparar a versão de sessão e a época de
+referência que o agregado registrou contra o que a sessão diz agora, e a falhar
+com `evidence-stale` (spec §33.2, que apresentava as cinco razões lisas, como se
+a checagem fosse geral). Os contadores da sessão são lidos das linhas de cabeça
+e não por `PrismaCaptureSessionRepository.readHead`, de propósito: aquela
+leitura re-deriva o agregado e levanta `PERSISTENCE_CONFLICT`, o que deixaria uma
+linha de sessão editada decidir três critérios que não são sobre a integridade
+dela. Falsificado em `multicam-longform-gate.e2e.mjs`: a sessão do podcast, que
+carrega a direção **e** o plano de match, avança uma versão por
+`changeCaptureSessionStatus`; exatamente esses dois critérios caem com
+`evidence-stale`, o critério de react — que está em outra sessão — não se move, e
+devolver a sessão restaura 10/10. Contra o leitor como ele estava antes, esse
+bloco para em "direction-persisted passed over a session that moved past it".
+
+**"Histórico imutável" é imutável para quem lê, não para um DELETE.** Está
+declarado no PRD FR-150 com os números medidos e a razão de não ter sido
+consertado — bloquear DELETE quebra `persistClockMap`, as nove falsificações do
+próprio gate e a limpeza de toda suíte PostgreSQL da wave. O terceiro teste de
+`wave20-persistence.e2e.mjs` mede a declaração em vez de repeti-la: 15 tabelas
+de histórico, 0 gatilhos, 0 rules, 0 com row-level security, e um DELETE da
+versão 1 de uma direção que remove 1 linha e cascateia, com a cabeça continuando
+a nomear o ancestral pelo hash.
+
+**Um defeito de documentação achado ao medir.** A linha de rastreabilidade de
+F4.016 citava um `fingerprint` da jornada do phase gate como se fosse um valor
+para conferir. Ele não é: `evaluatedAt` está dentro do relatório que
+`calculateCanonicalHash` cobre (`domain/multicam-longform-gate.ts:576-581`) e a jornada
+avalia por `/v1` com o relógio real, então duas execuções em 2026-09-07
+devolveram `87337fe91d33` e `d422d78a6274`. O que se confere ali é o que não
+depende do instante: 14 avaliações, 41 artefatos citados e o replay
+byte-a-byte de 20 374 caracteres.
+
+O `fingerprint` do `multicam-longform-gate.e2e.mjs` também não serve como valor
+para copiar, e por outro motivo. Ali o relógio é da fixture, então ele é
+determinístico para uma dada árvore de código — duas execuções seguidas sem
+tocar em nada devolveram `70d89211e284` — mas ele **se move quando o código se
+move**: durante este passe ele foi `e3b5c38c6c8f`, depois `1ae136b295a7` em
+quatro execuções, depois `70d89211e284`. O que se confere ali é `satisfied
+10/10`, `1/10` no projeto vazio e quais critérios caem em cada falsificação.
+
+Medido nesta máquina em 2026-09-07 contra um PostgreSQL 16 descartável migrado
+do zero: `npm test` 2166 testes / 2166 passes, `test:e2e:multicam-longform-gate`
+3 passes, `test:e2e:phase-gate-journey` 1 passe, `test:e2e:wave20-persistence` 3
+passes, `test:e2e:playback-map` 1 passe, `test:e2e:react-playback-journey` 1
+passe. Cinco execuções do gate durante este passe mediram 369,3 s, 54,5 s,
+62,8 s, 30,3 s e 28,9 s — dispersão grande demais para que qualquer uma delas
+seja um número de duração para citar. Nada nesta seção afirma
+implantação ou aceite.

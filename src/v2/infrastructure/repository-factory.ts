@@ -28,6 +28,7 @@ import { runNextSourceCleanupOperationService } from '../application/run-source-
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { enqueueProviderJobService, runProviderJobWorkerOnce } from '../application/provider-jobs.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
+import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
 import {
@@ -61,6 +62,29 @@ import type { LongFormIndexRepository } from '../application/ports/long-form-ind
 import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { ColorPipelineCompilationRepository } from '../application/ports/color-pipeline-compilation-repository.ts'
 import type { TreatmentPlanRepository } from '../application/ports/treatment-plan-repository.ts'
+import type { CaptureProtocolRepository } from '../application/ports/capture-protocol-repository.ts'
+import type { SyncDiagnosticRepository } from '../application/ports/sync-diagnostic-repository.ts'
+import type { ColorCriticReportRepository } from '../application/ports/color-critic-report-repository.ts'
+import type {
+  MulticamDiarizationSource,
+  MulticamSilenceEvidenceProvider,
+  MulticamVisualEvidenceProvider,
+} from '../application/ports/multicam-evidence-sources.ts'
+import type { MulticamDirectionCommandRepository } from '../application/ports/multicam-direction-command-repository.ts'
+import type { MulticamDirectionRepository } from '../application/ports/multicam-direction-repository.ts'
+import type {
+  CameraColorMeasurementRepository,
+  MulticamMatchPlanRepository,
+} from '../application/ports/multicam-match-plan-repository.ts'
+import type { PlaybackMapRepository } from '../application/ports/playback-map-repository.ts'
+import type { RenderablePlanSnapshotRepository } from '../application/ports/renderable-plan-snapshot-repository.ts'
+import type {
+  LegacyRuntimeAuditPort,
+  MulticamLongformGateRepository,
+} from '../application/ports/multicam-longform-gate-repository.ts'
+import type { CaptureSessionRepository } from '../application/ports/capture-session-repository.ts'
+import type { CaptureSyncRunRepository } from '../application/ports/capture-sync-run-repository.ts'
+import type { EditorialSynthesisRepository } from '../application/ports/editorial-synthesis-repository.ts'
 import type { StoryPlanRepository } from '../application/ports/story-plan-repository.ts'
 import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
 import type { ProjectLutSelectionRepository } from '../application/ports/project-lut-selection-repository.ts'
@@ -208,7 +232,42 @@ import {
   readSyntheticCriticBlockEvidenceService,
   readSyntheticCriticReportService,
 } from '../application/synthetic-critic-report-queries.ts'
+import {
+  evaluateColorCriticService,
+  listColorCriticIssuesService,
+  listColorCriticReportsService,
+  readColorCriticReportService,
+  selectRenderMatchPlan,
+} from '../application/color-critic.ts'
+import {
+  evaluateMulticamLongformGateService,
+  explainMulticamLongformGateService,
+  listMulticamLongformGatesService,
+  readLatestMulticamLongformGateService,
+  readMulticamLongformGateService,
+} from '../application/multicam-longform-gate.ts'
+import type { MulticamMatchPlan } from '../domain/multicam-match-plan.ts'
+import {
+  addMulticamMatchRangeOverrideService,
+  deriveMulticamMatchPlanService,
+  readMulticamMatchPlanService,
+} from '../application/multicam-color-match.ts'
+import type { DeriveMulticamEvidenceDependencies } from '../application/multicam-direction.ts'
+import {
+  deriveMulticamEvidenceService,
+  directMulticamSessionService,
+  listMulticamAngleCandidatesService,
+  listMulticamShotDecisionsService,
+  readMulticamDirectionService,
+} from '../application/multicam-direction.ts'
+import { setProjectColorPlanService } from '../application/project-color-plans.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
+import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from './media/ffmpeg-binary.ts'
+import { FfmpegColorCriticEvaluator } from './media/ffmpeg-color-critic-evaluator.ts'
+import { FfmpegColorMeasurement } from './media/ffmpeg-color-measurement.ts'
+import { FfmpegAudioSyncSignalSource } from './media/ffmpeg-audio-sync-signal-source.ts'
+import { createMarkerMediaAdapter } from './media/marker-media-adapter.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
 import { PrismaSandboxProviderExecutionRepository } from './prisma/sandbox-provider-execution-repository.ts'
@@ -226,6 +285,40 @@ import { PrismaLongFormIndexRepository } from './prisma/long-form-index-reposito
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipeline-compilation-repository.ts'
 import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repository.ts'
+import { PrismaCaptureProtocolRepository } from './prisma/capture-protocol-repository.ts'
+import { PrismaSyncDiagnosticRepository } from './prisma/sync-diagnostic-repository.ts'
+import { PrismaColorCriticReportRepository } from './prisma/color-critic-report-repository.ts'
+import { FfmpegMulticamSilenceProvider } from './analysis/ffmpeg-multicam-silence-provider.ts'
+import { FfmpegMulticamVisualEvidenceProvider } from './analysis/ffmpeg-multicam-visual-evidence-provider.ts'
+import { PrismaMulticamDiarizationSource } from './prisma/multicam-diarization-source.ts'
+import { PrismaMulticamDirectionCommandRepository } from './prisma/multicam-direction-command-repository.ts'
+import { PrismaMulticamDirectionRepository } from './prisma/multicam-direction-repository.ts'
+
+import {
+  PrismaCameraColorMeasurementRepository,
+  PrismaMulticamMatchPlanRepository,
+} from './prisma/multicam-match-plan-repository.ts'
+import { PrismaPlaybackMapRepository } from './prisma/playback-map-repository.ts'
+import { PrismaRenderablePlanSnapshotRepository } from './prisma/renderable-plan-snapshot-repository.ts'
+import { PrismaMulticamLongformGateRepository } from './prisma/multicam-longform-gate-repository.ts'
+import { ModuleGraphLegacyRuntimeAudit } from './audit/module-graph-legacy-runtime-audit.ts'
+import { PrismaRenderSourceRepository } from './prisma/render-source-repository.ts'
+import { FfmpegPlaybackFingerprinter } from './media/ffmpeg-playback-fingerprint.ts'
+import {
+  buildReactPlaybackMapService,
+  compileReactPlaybackPlanService,
+  editReactPlaybackAnchorService,
+  listReactPlaybackMapVersionsService,
+  listReactPlaybackPiecesService,
+  listReferenceDependentsService,
+  readReactPlaybackMapService,
+  type PlaybackMediaPort,
+  type PlaybackObservationSource,
+} from '../application/react-playback-map.ts'
+import { compileSynthesisRenderPlanService } from '../application/compile-synthesis-to-directed-plan.ts'
+import { PrismaCaptureSessionRepository } from './prisma/capture-session-repository.ts'
+import { PrismaCaptureSyncRunRepository } from './prisma/capture-sync-run-repository.ts'
+import { PrismaEditorialSynthesisRepository } from './prisma/editorial-synthesis-repository.ts'
 import { PrismaStoryPlanRepository } from './prisma/story-plan-repository.ts'
 import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
 import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-selection-repository.ts'
@@ -885,11 +978,18 @@ const audioToolsRequire = createRequire(import.meta.url)
 export function createSyntheticBlockAudioCompilationService(environment: NodeJS.ProcessEnv = process.env) {
   const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
   if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires APOLLO_V2_RENDER_WORK_ROOT')
-  // Explicit env paths win: inside a bundled Next server the *-static
-  // packages resolve to paths that do not exist on disk.
-  const ffmpegPath = (environment.FFMPEG_PATH?.trim() || ((audioToolsRequire('ffmpeg-static') as string | null) ?? '')).trim()
-  const ffprobePath = (environment.FFPROBE_PATH?.trim() || ((audioToolsRequire('ffprobe-static') as { path?: string }).path ?? '')).trim()
-  if (!ffmpegPath || !ffprobePath) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires bundled ffmpeg and ffprobe')
+  // Both binaries through the shared resolver: inside a bundled Next server the
+  // *-static packages compute paths from a rewritten `__dirname` and answer
+  // with files that are not on disk. This composition root knew that and said
+  // so only for itself; the resolver says it for every spawn site.
+  const ffmpegPath = resolveFfmpegBinary(undefined, environment)
+  // `null` for the fallback: this composition root refused an unresolvable
+  // ffprobe before the shared resolver existed, and it keeps refusing. The
+  // resolver's bare-name last resort belongs to the callers that were written
+  // against a probe which never threw; this is not one of them.
+  const ffprobePath = resolveFfprobeBinaryPath(
+    (audioToolsRequire('ffprobe-static') as { path?: string }).path, undefined, environment, undefined, null,
+  )
   const artifacts = new PrismaMediaArtifactRepository(resolveV2Client())
   const plans = createSyntheticScriptPlanRepository()
   const projects = createProjectWorkspaceQueryRepository()
@@ -1982,6 +2082,13 @@ export function createProjectProxyRenderWorker(
     colorPipelines: createColorPipelineCompilationRepository(),
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
+    // F4.014. The colour verdict is taken on the bytes this worker just wrote
+    // and lands on the review it is about to persist. Assembled here because it
+    // needs the three things a worker has no business knowing: where FFmpeg is,
+    // where scratch space lives, and which storage driver this deployment uses.
+    // Judging, locating and cleaning up arrive together, so no deployment can
+    // wire the verdict and leave its intermediates behind.
+    colorCritic: createColorCriticRuntime(environment, clock),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
@@ -2208,4 +2315,563 @@ export function createDirectorBudgetRepository(): DirectorBudgetRepository {
 
 export function createWorkspaceRepository(): WorkspaceRepository {
   return new PrismaWorkspaceRepository(resolveV2Client())
+}
+
+export function createCaptureSessionRepository(): CaptureSessionRepository {
+  return new PrismaCaptureSessionRepository(resolveV2Client())
+}
+
+export function createCaptureSyncRunRepository(): CaptureSyncRunRepository {
+  return new PrismaCaptureSyncRunRepository(resolveV2Client())
+}
+
+export function createEditorialSynthesisRepository(): EditorialSynthesisRepository {
+  return new PrismaEditorialSynthesisRepository(resolveV2Client())
+}
+
+export function createCaptureProtocolRepository(): CaptureProtocolRepository {
+  return new PrismaCaptureProtocolRepository(resolveV2Client())
+}
+
+export function createSyncDiagnosticRepository(): SyncDiagnosticRepository {
+  return new PrismaSyncDiagnosticRepository(resolveV2Client())
+}
+
+export function createMulticamDirectionRepository(): MulticamDirectionRepository {
+  return new PrismaMulticamDirectionRepository(resolveV2Client())
+}
+
+export function createMulticamDirectionCommandRepository(): MulticamDirectionCommandRepository {
+  return new PrismaMulticamDirectionCommandRepository(resolveV2Client())
+}
+
+/**
+ * The persisted diarization the direction reads as speech evidence.
+ *
+ * This comment used to say that this factory,
+ * `createMulticamDirectionCommandRepository` above and
+ * `createMulticamVisualEvidenceProvider` below had no call site because no HTTP
+ * route existed for `direct-multicam-session`. Two do:
+ * `src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/direction/`
+ * `route.ts` and its `protected-selections/route.ts`, both through
+ * `createDirectMulticamSessionService`. What was still true until phase 9 is
+ * that nothing EXECUTED that assembly — see
+ * `multicamDirectionCompositionDependencies` below. The adapters themselves are
+ * executed on their own: the diarization source against real rows in
+ * `multicam-direction.e2e.mjs`, the visual provider against real pixels in
+ * `multicam-visual-evidence.integration.mjs`, the silence provider against real
+ * samples in `multicam-silence-evidence.integration.mjs`.
+ */
+export function createMulticamDiarizationSource(): MulticamDiarizationSource {
+  return new PrismaMulticamDiarizationSource(resolveV2Client())
+}
+
+/**
+ * The FFmpeg pass that measures screen activity and technical quality.
+ *
+ * It takes paths rather than artifact keys: the caller materializes the media
+ * through `createCaptureMediaResolver()` and releases it in `finally`, which is
+ * where the release discipline belongs (CONTRACT §2) and what keeps this class
+ * testable without an artifact store.
+ */
+export function createMulticamVisualEvidenceProvider(
+  environment: NodeJS.ProcessEnv = process.env,
+): MulticamVisualEvidenceProvider {
+  const timeoutMs = Number(environment.APOLLO_V2_MULTICAM_VISUAL_TIMEOUT_MS)
+  return new FfmpegMulticamVisualEvidenceProvider({
+    ...(environment.APOLLO_V2_FFMPEG_PATH?.trim() ? { ffmpegPath: environment.APOLLO_V2_FFMPEG_PATH.trim() } : {}),
+    ...(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+  })
+}
+
+/**
+ * The FFmpeg pass that listens for silence.
+ *
+ * Only the timeout and the binary are configurable. The threshold and the
+ * minimum duration are the definition of the measurement, so they stay in
+ * `MULTICAM_SILENCE_DEFAULTS` where a deployment cannot move them: an
+ * environment variable that lowers the bar for "silent" would change what the
+ * evidence says while every observation kept claiming it was measured.
+ */
+export function createMulticamSilenceEvidenceProvider(
+  environment: NodeJS.ProcessEnv = process.env,
+): MulticamSilenceEvidenceProvider {
+  const timeoutMs = Number(environment.APOLLO_V2_MULTICAM_SILENCE_TIMEOUT_MS)
+  return new FfmpegMulticamSilenceProvider({
+    ...(environment.APOLLO_V2_FFMPEG_PATH?.trim() ? { ffmpegPath: environment.APOLLO_V2_FFMPEG_PATH.trim() } : {}),
+    ...(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+  })
+}
+
+export function createCameraColorMeasurementRepository(): CameraColorMeasurementRepository {
+  return new PrismaCameraColorMeasurementRepository(resolveV2Client())
+}
+
+export function createMulticamMatchPlanRepository(): MulticamMatchPlanRepository {
+  return new PrismaMulticamMatchPlanRepository(resolveV2Client())
+}
+
+export function createColorCriticReportRepository(): ColorCriticReportRepository {
+  return new PrismaColorCriticReportRepository(resolveV2Client())
+}
+
+export function createPlaybackMapRepository(): PlaybackMapRepository {
+  return new PrismaPlaybackMapRepository(resolveV2Client())
+}
+
+export function createRenderablePlanSnapshotRepository(): RenderablePlanSnapshotRepository {
+  return new PrismaRenderablePlanSnapshotRepository(resolveV2Client())
+}
+
+export function createMulticamLongformGateRepository(): MulticamLongformGateRepository {
+  return new PrismaMulticamLongformGateRepository(resolveV2Client())
+}
+
+/**
+ * Criterion 10's evidence producer (F4.016).
+ *
+ * A separate factory from the repository because it reads the module graph
+ * rather than PostgreSQL, and because a caller that wants to scan a different
+ * entry set — a worker, say — should be able to say so without a database.
+ */
+export function createLegacyRuntimeAudit(
+  repositoryRoot: string = process.cwd(),
+): LegacyRuntimeAuditPort {
+  // The root is passed, not baked in. Inside `next build` webpack replaces
+  // `import.meta.url` with the build machine's absolute source path, so a
+  // scanner that resolved its own location froze the build directory into the
+  // bundle and accused ten pure-V2 modules the moment the app ran anywhere
+  // else. `process.cwd()` is the directory `next start`, `npm test` and the
+  // scripts all run from.
+  return new ModuleGraphLegacyRuntimeAudit({ repositoryRoot })
+}
+
+/**
+ * The F4.016 phase gate, assembled.
+ *
+ * The signature the API lane needs: `evaluate({ workspaceId, projectId,
+ * sessionId?, actor, idempotencyKey })`. Everything the evaluation reads is
+ * fetched by these two dependencies; the request carries no evidence.
+ */
+export function createMulticamLongformGateRuntime(clock: () => Date = () => new Date()) {
+  const repository = createMulticamLongformGateRepository()
+  // One scanner, not two. The exposed `legacyAudit` used to be a second
+  // instance the evaluation never touched, so a caller that inspected or
+  // configured it changed nothing about what the gate read — and every
+  // evaluation re-walked the module graph from disk twice over.
+  const legacyAudit = createLegacyRuntimeAudit()
+  return Object.freeze({
+    repository,
+    legacyAudit,
+    evaluate: evaluateMulticamLongformGateService({
+      repository,
+      legacyAudit,
+      clock,
+      createId: () => `mlg-${randomUUID()}`,
+    }),
+    read: readMulticamLongformGateService({ repository }),
+    readLatest: readLatestMulticamLongformGateService({ repository }),
+    list: listMulticamLongformGatesService({ repository }),
+    explain: explainMulticamLongformGateService({ repository }),
+  })
+}
+
+/**
+ * The durable synchronization worker, assembled (F4.004/F4.006/F4.007).
+ *
+ * Everything the worker needs that a route has no business knowing: which
+ * storage driver materializes a capture part, where FFmpeg is, and where the
+ * operator's own anchors and confirmed markers are kept. The signal source is
+ * given the diagnostic repository so manual anchors and marker detections enter
+ * the cascade as evidence read from the record, never as something a caller
+ * could assert.
+ */
+export function createCaptureSyncWorker(environment: NodeJS.ProcessEnv = process.env) {
+  const sessions = createCaptureSessionRepository()
+  const runs = createCaptureSyncRunRepository()
+  const signals = new FfmpegAudioSyncSignalSource({
+    media: createCaptureMediaResolver(environment),
+    diagnostics: createSyncDiagnosticRepository(),
+  })
+  // Read the way every sibling worker factory reads it. Without this the lease
+  // was whatever the module declared and no deployment could raise it, while
+  // one audio correlation at the adapter's analysis cap measures over a minute
+  // of uninterruptible CPU — long enough for a second worker to reclaim the run
+  // mid-flight and fail it permanently three attempts later.
+  const configuredLease = Number(
+    environment.APOLLO_V2_CAPTURE_SYNC_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS,
+  )
+  return async (owner: string) => runCaptureSyncWorker({
+    sessions,
+    runs,
+    signals,
+    owner,
+    clock: () => new Date(),
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseMs: configuredLease } : {}),
+  })()
+}
+
+/**
+ * The media side of sync markers (F4.010).
+ *
+ * Assembled here rather than inside a route because it needs three things the
+ * route has no business knowing: where FFmpeg is, where scratch space lives,
+ * and which storage driver this deployment uses.
+ */
+export function createMarkerMediaPort(environment: NodeJS.ProcessEnv = process.env) {
+  return createMarkerMediaAdapter(createVerifiedMediaStorage(environment), environment)
+}
+
+/**
+ * Turns a capture track's file into a path a detector can open.
+ *
+ * The materializer verifies the bytes against the artifact's recorded hash, so
+ * a detector never reads a file whose identity nobody checked.
+ */
+export function createCaptureMediaResolver(environment: NodeJS.ProcessEnv = process.env) {
+  return new CaptureMediaResolver(resolveV2Client(), createArtifactSourceMaterializer(environment))
+}
+
+/**
+ * The colour critic, assembled (F4.014).
+ *
+ * The evaluator writes its "before" intermediates under the artifact root's
+ * scratch space and promotes its evidence crops through the same verified
+ * storage every other derived artifact goes through — object storage, never a
+ * database column, because a crop is media.
+ */
+export function createColorCriticEvaluator(environment: NodeJS.ProcessEnv = process.env) {
+  const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
+  if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
+  return new FfmpegColorCriticEvaluator({
+    workRoot: join(resolve(artifactRoot), '.color-critic-work'),
+    storage: createVerifiedMediaStorage(environment),
+    ...(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+  })
+}
+
+/**
+ * The colour critic as the render worker takes it: judge, locate, clean up.
+ *
+ * One object, built around one evaluator instance, because the evaluator's
+ * intermediates can only be removed by the evaluator that wrote them. Splitting
+ * them into separate factory calls is what let a deployment wire the judging
+ * and leave a full re-encode of every source on disk after every render.
+ */
+export function createColorCriticRuntime(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const evaluator = createColorCriticEvaluator(environment)
+  return Object.freeze({
+    evaluate: evaluateColorCriticService({
+      evaluator,
+      reports: createColorCriticReportRepository(),
+      matchPlans: createMulticamMatchPlanRepository(),
+      clock,
+    }),
+    cleanup: (operationId: string) => evaluator.cleanup(operationId),
+    locateSession: createProjectCaptureSessionLocator(),
+  })
+}
+
+/**
+ * Which capture session a project's colour verdict should read its reference
+ * camera from.
+ *
+ * Not "the most recently updated head": a project can hold several capture
+ * sessions, and an unrelated session touched last would hand the critic a
+ * reference camera nobody approved for these frames. The session is the one
+ * whose match plan knows every camera the render actually cut to, and only when
+ * exactly one does — zero or several is `null`, which makes the critic report
+ * the cross-camera comparison unavailable rather than measure it against a
+ * guess.
+ */
+export function createProjectCaptureSessionLocator() {
+  const sessions = createCaptureSessionRepository()
+  const plans = createMulticamMatchPlanRepository()
+  return async (context: {
+    workspaceId: string
+    projectId: string
+    cameraIds: readonly string[]
+  }): Promise<string | null> => {
+    if (context.cameraIds.length === 0) return null
+    const heads = await sessions.listHeads({
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      limit: COLOR_CRITIC_SESSION_CANDIDATE_LIMIT,
+    })
+    const candidates: { sessionId: string; plan: MulticamMatchPlan }[] = []
+    for (const head of heads) {
+      const stored = await plans.readHead({
+        workspaceId: context.workspaceId,
+        projectId: context.projectId,
+        sessionId: head.sessionId,
+      })
+      if (stored) candidates.push({ sessionId: head.sessionId, plan: stored.plan })
+    }
+    return selectRenderMatchPlan({ cameraIds: context.cameraIds, candidates })?.sessionId ?? null
+  }
+}
+
+/** How many of a project's capture sessions the locator will consider. */
+const COLOR_CRITIC_SESSION_CANDIDATE_LIMIT = 25
+
+/**
+ * The multicam colour match, assembled (F4.013).
+ *
+ * The reference camera is a human decision the service checks for itself; every
+ * number in the plan is measured here by a real instrument, and the resulting
+ * layers are written into the project's ColorPlan through the same command a
+ * person's edit would use.
+ */
+export function createDeriveMulticamMatchPlanService(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  return deriveMulticamMatchPlanService({
+    sessions: createCaptureSessionRepository(),
+    media: createCaptureMediaResolver(environment),
+    probe: new FfmpegColorMeasurement(
+      environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {},
+    ),
+    measurements: createCameraColorMeasurementRepository(),
+    plans: createMulticamMatchPlanRepository(),
+    criticReports: createColorCriticReportRepository(),
+    colorPlans: createProjectColorPlanRepository(),
+    setProjectColorPlan: createSetProjectColorPlanService(clock),
+    clock,
+  })
+}
+
+export function createAddMulticamMatchRangeOverrideService(clock: () => Date = () => new Date()) {
+  return addMulticamMatchRangeOverrideService({
+    plans: createMulticamMatchPlanRepository(),
+    colorPlans: createProjectColorPlanRepository(),
+    setProjectColorPlan: createSetProjectColorPlanService(clock),
+    clock,
+  })
+}
+
+function createSetProjectColorPlanService(clock: () => Date) {
+  return setProjectColorPlanService({
+    repository: createProjectColorPlanRepository(),
+    luts: createWorkspaceLutRepository(),
+    createId: (kind) => `${kind}-${randomUUID()}`,
+    createEventId: randomUUID,
+    clock,
+  })
+}
+
+/**
+ * The react playback map, assembled from the adapters that already exist
+ * (F4.015).
+ *
+ * Two of the three dependencies were built in earlier slices and had no caller:
+ * `CaptureMediaResolver` verifies a part's bytes against the artifact's
+ * recorded hash before handing over a path, and `FfmpegPlaybackFingerprinter`
+ * reports where each window of the reaction matched inside the reference. This
+ * is where they meet the services — and where the compiler proves the adapters
+ * satisfy the ports, which no test with a fake can.
+ *
+ * `workRoot` reads `APOLLO_V2_RENDER_WORK_ROOT`, the same variable the marker
+ * adapter reads (`marker-media-adapter.ts:130`), so one deployment setting
+ * governs the scratch directories FFmpeg writes into. Absent, the fingerprinter
+ * falls back to its own `mkdtemp` — which is correct on a developer machine and
+ * is why the variable is optional here rather than a refusal.
+ */
+export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = process.env) {
+  const repository = createPlaybackMapRepository()
+  const sessions = createCaptureSessionRepository()
+  const snapshots = createRenderablePlanSnapshotRepository()
+  const clock = () => new Date()
+  const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
+  const media: PlaybackMediaPort = createCaptureMediaResolver(environment)
+  const observations: PlaybackObservationSource = new FfmpegPlaybackFingerprinter(
+    workRoot ? { workRoot } : {},
+  )
+  return Object.freeze({
+    build: buildReactPlaybackMapService({ repository, sessions, media, observations, snapshots, clock }),
+    anchor: editReactPlaybackAnchorService({ repository, snapshots, clock }),
+    read: readReactPlaybackMapService({ repository }),
+    listVersions: listReactPlaybackMapVersionsService({ repository }),
+    listReferenceDependents: listReferenceDependentsService({ repository }),
+  })
+}
+
+
+/**
+ * The multicam direction, assembled (F4.012).
+ *
+ * This is the composition root the phase-3 hand-off named as missing: the
+ * diarization source, the visual provider and the command repository existed
+ * and nothing pulled them. `MulticamPerceptionSource` still has no adapter, so
+ * reaction evidence is absent rather than zero — a session nobody ran
+ * perception over produces no reaction observations at all, which the direction
+ * reads as "nobody measured" and answers by holding the current angle.
+ *
+ * The silence provider IS wired here, and that is the whole point of it being
+ * here: `silence` was a modelled, validated and persisted evidence kind that no
+ * adapter produced, so a production run could never emit one. `demonstration`
+ * and `attention` are still in that state and cannot be lifted out of it with
+ * FFmpeg — see PRD FR-150 and spec 05 §29.1, where both are recorded as not
+ * delivered rather than left to look wired.
+ *
+ * Deliberately separate from `createMulticamDirectionReadServices` below. This
+ * one builds an FFmpeg provider and a media materializer that need a configured
+ * artifact root; a route that only reads a stored direction must not be able to
+ * fail on a deployment setting it never uses.
+ */
+export function createDirectMulticamSessionService(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const { evidence, ...session } = multicamDirectionCompositionDependencies(environment, clock)
+  return directMulticamSessionService({
+    ...session,
+    deriveEvidence: deriveMulticamEvidenceService(evidence),
+    createId: (prefix: string) => `${prefix}-${randomUUID()}`,
+    createEventId: randomUUID,
+  })
+}
+
+/**
+ * The dependency set above, built and returned instead of only being spread
+ * into a closure — so that something can read it.
+ *
+ * This split exists because of a measured hole, not for tidiness. The whole
+ * point of wiring `silence` here is "a production run could never emit one, and
+ * now it can", and until this function existed nothing in the repository
+ * executed the assembly that carries it: `createDirectMulticamSessionService`
+ * is imported only by the two `/v1` route files, `silence` is optional on
+ * `DeriveMulticamEvidenceDependencies`, and deleting the line that supplies it
+ * left typecheck, both lints, every case in `tests/v2` and the silence media
+ * suite green. `multicam-direction-composition.integration.mjs` now builds this
+ * set and looks at the classes in it, and falsification 10 of
+ * `wave20-falsification.test.mjs` refuses a source where the listening pass —
+ * or the visual one, which had the same hole — has left it.
+ *
+ * `evidence` is a member rather than a flattened field because the two halves
+ * have different readers: `directMulticamSessionService` takes the
+ * repositories, `deriveMulticamEvidenceService` takes the adapters, and the
+ * three things they share (`sessions`, `directions`, `clock`) are shared on
+ * purpose.
+ */
+export function multicamDirectionCompositionDependencies(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const directions = createMulticamDirectionRepository()
+  const sessions = createCaptureSessionRepository()
+  const evidence: DeriveMulticamEvidenceDependencies = {
+    sessions,
+    directions,
+    diarization: createMulticamDiarizationSource(),
+    visual: createMulticamVisualEvidenceProvider(environment),
+    silence: createMulticamSilenceEvidenceProvider(environment),
+    media: createCaptureMediaResolver(environment),
+    clock,
+  }
+  return Object.freeze({
+    sessions,
+    diagnostics: createSyncDiagnosticRepository(),
+    protocols: createCaptureProtocolRepository(),
+    directions,
+    commands: createMulticamDirectionCommandRepository(),
+    evidence: Object.freeze(evidence),
+    clock,
+  })
+}
+
+/** The three reads over a stored direction. Repository only, no media. */
+export function createMulticamDirectionReadServices() {
+  const directions = createMulticamDirectionRepository()
+  return Object.freeze({
+    read: readMulticamDirectionService({ directions }),
+    listCandidates: listMulticamAngleCandidatesService({ directions }),
+    listShots: listMulticamShotDecisionsService({ directions }),
+  })
+}
+
+/** The read over a stored match plan. Repository only, no probe. */
+export function createMulticamMatchPlanReadService() {
+  return readMulticamMatchPlanService({ plans: createMulticamMatchPlanRepository() })
+}
+
+/**
+ * The reads over stored colour verdicts (F4.014).
+ *
+ * There is no `evaluate` here on purpose. The critic runs inside the proxy
+ * render, where the server measures the delivered file, its sha and the clips
+ * the timeline was cut from; a route that took those from a request would let a
+ * caller supply the evidence for a verdict about their own render.
+ */
+export function createColorCriticReportReadServices() {
+  const reports = createColorCriticReportRepository()
+  return Object.freeze({
+    list: listColorCriticReportsService({ reports }),
+    read: readColorCriticReportService({ reports }),
+    listIssues: listColorCriticIssuesService({ reports }),
+  })
+}
+
+/**
+ * The compile, assembled without a decoder (F4.015).
+ *
+ * Deliberately separate from `createReactPlaybackMapServices`, for the reason
+ * `createMulticamDirectionReadServices` is separate from the direction runner:
+ * that root builds a `CaptureMediaResolver` and an FFmpeg fingerprinter, both
+ * of which refuse to be constructed without a configured artifact root, so a
+ * route that only compiles a map that has already been measured would answer
+ * `PERSISTENCE_NOT_CONFIGURED` on a deployment setting it never uses. Measured,
+ * not guessed: the published compile route returned exactly that 503 the first
+ * time it ran against a database with no media configuration.
+ *
+ * Compiling reads the stored map, the session it was derived under and the
+ * project's media-asset links. It opens no file.
+ */
+export function createReactPlaybackPlanCompileService() {
+  return compileReactPlaybackPlanService({
+    repository: createPlaybackMapRepository(),
+    sessions: createCaptureSessionRepository(),
+    sources: createRenderSourceRepository(),
+    snapshots: createRenderablePlanSnapshotRepository(),
+    clock: () => new Date(),
+  })
+}
+
+/** The two reads over a stored playback map. Repository only, no fingerprinter. */
+export function createReactPlaybackMapReadServices() {
+  const repository = createPlaybackMapRepository()
+  return Object.freeze({
+    read: readReactPlaybackMapService({ repository }),
+    listPieces: listReactPlaybackPiecesService({ repository }),
+  })
+}
+/**
+ * The files a compiled plan may cut from, resolved the way the renderer will.
+ *
+ * Deliberately the project's media-asset links rather than `media_artifacts`
+ * directly: `PrismaProjectProxyRenderRepository` resolves a plan's sources
+ * through those links, so an artifact this returns is one the render path can
+ * find, and one it omits is a compile-time refusal instead of a render-time one.
+ */
+export function createRenderSourceRepository() {
+  return new PrismaRenderSourceRepository(resolveV2Client())
+}
+
+/**
+ * The synthesis-to-render bridge, assembled (F4.016 condition 6).
+ *
+ * The synthesis is read from its own repository, the sources it cuts from are
+ * measured by the server through the project's media-asset links, and the plan
+ * is kept beside the synthesis. The caller brings ids and nothing else.
+ */
+export function createSynthesisRenderPlanService() {
+  return compileSynthesisRenderPlanService({
+    syntheses: createEditorialSynthesisRepository(),
+    sources: createRenderSourceRepository(),
+    snapshots: createRenderablePlanSnapshotRepository(),
+    clock: () => new Date(),
+  })
 }

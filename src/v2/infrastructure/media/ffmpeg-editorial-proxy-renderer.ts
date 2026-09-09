@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -19,9 +18,8 @@ import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from '../../doma
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 const FORMAT_DIMENSIONS: Readonly<Record<string, readonly [number, number]>> = Object.freeze(
@@ -449,7 +447,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
 
   constructor(options: { workRoot: string; ffmpegPath?: string }) {
     this.workRoot = resolve(options.workRoot)
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     this.colorProcessor = new FfmpegColorPipelineProcessor({ ffmpegPath: this.ffmpegPath })
   }
 
@@ -696,7 +694,12 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         if (await calculateFileSha256(asset.path) !== placement.assetSha256) {
           throw new DomainError('INVALID_RENDER_INPUT', 'Placement asset bytes do not match their planned sha256')
         }
-        assetInputIndexByElementId[placement.elementId] = renderSources.length + placementInputs.length
+        // Placement assets are the LAST inputs: the colour-normalized sources
+        // come first, then one seeked input per clip (see `clipVideoInputs`).
+        // Drawable placements are refused above when ranges are reused, so the
+        // single composition's clips are `input.clips` exactly.
+        assetInputIndexByElementId[placement.elementId] =
+          renderSources.length + input.clips.length + placementInputs.length
         placementInputs.push({ elementId: placement.elementId, path: asset.path, sha256: asset.sha256 })
       }
     }
@@ -725,10 +728,41 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     for (const composition of compositions) {
       if (composition.outputPath !== outputPath) await rm(composition.outputPath, { force: true })
     }
+    /**
+     * One seeked input per clip, so the graph never walks the whole source.
+     *
+     * A `trim=start_frame=…` over `[k:v:0]` costs whatever the source is long,
+     * not whatever the clip keeps: FFmpeg decodes every frame of the input and
+     * holds them for as long as any branch of the graph might still want one.
+     * Measured on a 7200 s / 216 000-frame colour-normalized master with six
+     * clips: 11.9 GB of private bytes and no output after 30 minutes, killed by
+     * the timeout below. The same six clips off six `-ss`/`-t` inputs finish in
+     * 38.9 s under 3.6 GB, and write the same bytes — the frames FFmpeg decodes
+     * after an accurate seek are the frames the `trim` used to keep.
+     *
+     * Audio deliberately stays on the unseeked source input: `atrim` is
+     * sample-accurate while a seek can only land on a packet boundary, and the
+     * whole point of this change is that the file it writes does not move.
+     */
+    const clipVideoInputs = (composition: typeof compositions[number]) =>
+      composition.clips.map((clip) => {
+        const source = renderSources[clipVideoIndex.get(clip.id)!]!
+        return Object.freeze({
+          path: source.path,
+          // Half a frame early on purpose: `-ss` keeps the frames at or after
+          // the instant it names, so a frame period that does not divide into
+          // microseconds can never round past the clip's own first frame.
+          ss: Math.max(0, (clip.sourceInFrame - 0.5) / input.fps).toFixed(6),
+          // One frame of slack for the same reason; `trim` below cuts the span
+          // exactly, so the extra frame is decoded and dropped, never encoded.
+          t: ((clip.sourceOutFrame - clip.sourceInFrame + 1) / input.fps).toFixed(6),
+        })
+      })
     const buildCompositionFilters = async (composition: typeof compositions[number]) => {
+      const videoInputs = clipVideoInputs(composition)
       const filters: string[] = []
       composition.clips.forEach((clip, index) => {
-        const videoIndex = clipVideoIndex.get(clip.id)!
+        const videoIndex = renderSources.length + index
         const audioIndex = sourceIndex.get(
           clip.audioSourceArtifactId ?? clip.sourceArtifactId,
         )!
@@ -749,7 +783,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         // rescale PTS, then re-sample to the output fps and hard-trim to the exact
         // timeline span so rounding never accumulates across the concat.
         filters.push(
-          `[${videoIndex}:v:0]trim=start_frame=${clip.sourceInFrame}:end_frame=${clip.sourceOutFrame},` +
+          `[${videoIndex}:v:0]trim=start_frame=0:end_frame=${clip.sourceOutFrame - clip.sourceInFrame},` +
           (rate === 1
             ? `setpts=PTS-STARTPTS,${cropFilter}`
             : `setpts=(PTS-STARTPTS)/${rate.toFixed(6)},${cropFilter}`) +
@@ -810,14 +844,15 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         )
         filters.push(`[${composedLabel}]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
       } else filters.push(`[${composedLabel}]null[outv]`)
-      return filters
+      return { filters, videoInputs }
     }
     try {
       for (const composition of compositions) {
-        const filters = await buildCompositionFilters(composition)
+        const { filters, videoInputs } = await buildCompositionFilters(composition)
         await execFileAsync(this.ffmpegPath, [
           '-hide_banner', '-loglevel', 'error', '-y',
           ...renderSources.flatMap((source) => ['-i', source.path]),
+          ...videoInputs.flatMap((clipInput) => ['-ss', clipInput.ss, '-t', clipInput.t, '-i', clipInput.path]),
           ...placementInputs.flatMap((asset) => ['-i', asset.path]),
           '-filter_complex', filters.join(';'), '-map', '[outv]', '-map', '[outa]',
           '-r', String(outputFps), '-c:v', 'libx264', '-preset', input.renderKind === 'final' ? 'medium' : 'veryfast', '-crf', input.renderKind === 'final' ? '18' : '23',

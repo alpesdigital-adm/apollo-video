@@ -374,6 +374,36 @@ function normalizedTransform(
   })
 }
 
+/**
+ * A layer, in application order, may not apply a match after the creative LUT
+ * or the output transform.
+ *
+ * It lives here rather than beside the match plan because this is where every
+ * layer of a ColorPlan is built, and because `resolveColorPlan` keys stages by
+ * kind: a global layer declared `[technical, creative-lut, match, output]` used
+ * to be accepted, re-sorted on resolve, and rendered in an order the stored
+ * plan did not describe — the declaration and the pipeline diverging with
+ * nothing refusing. `multicam-match-plan.ts` re-exports it for the compiled
+ * camera and segment layers.
+ */
+export function assertMatchStagePosition(transforms: readonly Readonly<ColorTransform>[]): void {
+  const matchIndex = COLOR_TRANSFORM_ORDER.indexOf('match')
+  let latestStageSeen = -1
+  for (const [index, transform] of transforms.entries()) {
+    const stage = COLOR_TRANSFORM_ORDER.indexOf(transform.kind)
+    assertDomain(stage >= 0, 'INVALID_ARGUMENT', `transform ${index} has an unknown stage kind`)
+    if (transform.kind === 'match') {
+      assertDomain(
+        latestStageSeen <= matchIndex,
+        'COLOR_STAGE_VIOLATION',
+        `match transform ${transform.id} is positioned after ${COLOR_TRANSFORM_ORDER[latestStageSeen]}; camera matching must precede the creative LUT`,
+        { position: index, after: COLOR_TRANSFORM_ORDER[latestStageSeen] },
+      )
+    }
+    latestStageSeen = Math.max(latestStageSeen, stage)
+  }
+}
+
 function normalizeLayer(
   value: readonly Readonly<ColorTransform>[] | undefined,
   field: string,
@@ -386,6 +416,10 @@ function normalizeLayer(
     'INVALID_ARGUMENT',
     `${field} cannot apply a color stage twice`,
   )
+  // Every layer, in the order it was written: the global one and each source,
+  // camera and segment override. A misordered layer used to be normalized into
+  // the right order on resolve and leave no trace of the mistake.
+  assertMatchStagePosition(transforms)
   return transforms
 }
 

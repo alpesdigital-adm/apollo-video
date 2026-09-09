@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
@@ -8,11 +7,17 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
 import type { ColorMetadata, ColorTransform, resolveColorPlan } from '../../domain/color-and-export.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  MATCH_PARAMETER_BOUNDS,
+  MATCH_PROVIDER,
+  MATCH_PROVIDER_VERSIONS,
+  MATCH_WHITE_BALANCE_PARAMETERS,
+  type MatchProviderVersion,
+} from '../../domain/multicam-match-plan.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 function escapeFilterPath(value: string): string {
@@ -99,13 +104,47 @@ function zscale(stage: Readonly<ColorTransform>) {
   return `zscale=pin=${input.primaries}:tin=${input.transfer}:min=${input.matrix}:rin=${input.range}:p=${output.primaries}:t=${output.transfer}:m=${output.matrix}:r=${output.range}${dither}`
 }
 
+/**
+ * `apollo-match`, both provider versions (F4.013).
+ *
+ * v1 is the `eq` filter this processor has always applied. v2 adds the three
+ * per-channel white-balance gains the domain derives
+ * (`multicam-match-plan.ts:66-100`) and renders them as a `colorchannelmixer`
+ * placed BEFORE the `eq`, because a channel gain and a luma/contrast/saturation
+ * adjustment do not commute: correcting the balance after the contrast curve
+ * would balance a picture the eq had already reshaped.
+ *
+ * The two versions are kept apart by `implementation.version`, not by which
+ * keys happen to be present. A v1 transform with a stray `red-gain` is a
+ * refusal, not a silent upgrade: `parametersHash` and therefore `pipelineHash`
+ * are computed over the whole parameter object, so a compilation that hashed as
+ * v1 must keep rendering exactly what v1 rendered for ever.
+ *
+ * The stage order `technical > match > creative-lut > output` is untouched:
+ * both versions return one link of the same chain, asserted four stages long by
+ * `assertCompilation`/`assertResolvedExecution` above.
+ *
+ * Nothing below retypes the provider's vocabulary. The accepted parameter
+ * names, the three gain keys and every bound are spread from the domain
+ * constants that publish them (`multicam-match-plan.ts`), so a renamed key or a
+ * widened bound cannot mean one thing in the plan and another in the filter.
+ */
+const MATCH_V2_GAIN_PARAMETERS: readonly string[] = Object.freeze(
+  Object.values(MATCH_WHITE_BALANCE_PARAMETERS),
+)
+const MATCH_GAIN_BOUNDS = MATCH_PARAMETER_BOUNDS.gain
+
 function match(stage: Readonly<ColorTransform>) {
-  if (stage.implementation.provider !== 'apollo-match') {
-    throw new DomainError('INVALID_RENDER_INPUT', 'match requires apollo-match')
+  if (stage.implementation.provider !== MATCH_PROVIDER) {
+    throw new DomainError('INVALID_RENDER_INPUT', `match requires ${MATCH_PROVIDER}`)
   }
+  const version = stage.implementation.version
+  if (!Object.hasOwn(MATCH_PROVIDER_VERSIONS, version)) {
+    throw new DomainError('INVALID_RENDER_INPUT', `match provider version ${version} is unsupported`)
+  }
+  const allowed: readonly string[] = MATCH_PROVIDER_VERSIONS[version as MatchProviderVersion].parameters
   const parameters = stage.implementation.parameters
-  if (Object.keys(parameters).some((key) =>
-    !['mode', 'brightness', 'contrast', 'saturation'].includes(key))) {
+  if (Object.keys(parameters).some((key) => !allowed.includes(key))) {
     throw new DomainError('INVALID_RENDER_INPUT', 'match has unsupported parameters')
   }
   if (!stage.enabled) {
@@ -120,14 +159,32 @@ function match(stage: Readonly<ColorTransform>) {
   const brightness = Number(parameters.brightness ?? 0)
   const contrast = Number(parameters.contrast ?? 1)
   const saturation = Number(parameters.saturation ?? 1)
+  const within = (value: number, bounds: readonly [number, number]) =>
+    Number.isFinite(value) && value >= bounds[0] && value <= bounds[1]
   if (
-    !Number.isFinite(brightness) || brightness < -1 || brightness > 1 ||
-    !Number.isFinite(contrast) || contrast < 0.1 || contrast > 3 ||
-    !Number.isFinite(saturation) || saturation < 0 || saturation > 3
+    !within(brightness, MATCH_PARAMETER_BOUNDS.brightness) ||
+    !within(contrast, MATCH_PARAMETER_BOUNDS.contrast) ||
+    !within(saturation, MATCH_PARAMETER_BOUNDS.saturation)
   ) {
     throw new DomainError('INVALID_RENDER_INPUT', 'match parameters are outside safe bounds')
   }
-  return `eq=brightness=${brightness.toFixed(6)}:contrast=${contrast.toFixed(6)}:saturation=${saturation.toFixed(6)}`
+  const eq = `eq=brightness=${brightness.toFixed(6)}:contrast=${contrast.toFixed(6)}:saturation=${saturation.toFixed(6)}`
+  if (version === MATCH_PROVIDER_VERSIONS.v1.version) return eq
+  // A v2 transform that names no gain is not a white balance; it is a v1
+  // transform wearing a newer version token, and letting it through would make
+  // two different parameter objects render identically under two hashes.
+  const gains = MATCH_V2_GAIN_PARAMETERS.map((key) => {
+    const value = Number(parameters[key])
+    if (
+      parameters[key] === undefined || !Number.isFinite(value) ||
+      value < MATCH_GAIN_BOUNDS[0] || value > MATCH_GAIN_BOUNDS[1]
+    ) {
+      throw new DomainError('INVALID_RENDER_INPUT', `match ${key} is missing or outside safe bounds`)
+    }
+    return value
+  })
+  const [red, green, blue] = gains as [number, number, number]
+  return `colorchannelmixer=rr=${red.toFixed(6)}:gg=${green.toFixed(6)}:bb=${blue.toFixed(6)},${eq}`
 }
 
 function creative(
@@ -192,7 +249,7 @@ export class FfmpegColorPipelineProcessor {
   private readonly ffmpegPath: string
 
   constructor(options: { ffmpegPath?: string } = {}) {
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
   }
 
   async process(input: {

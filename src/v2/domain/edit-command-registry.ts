@@ -35,6 +35,7 @@ export const EDIT_COMMAND_IMPACT_SCHEMAS = [
   'project-subtitle-configuration-impact/v1',
   'project-policy-overrides-impact/v1',
   'compare-action-impact/v1',
+  'multicam-direction-impact/v1',
 ] as const
 export type EditCommandImpactSchema = (typeof EDIT_COMMAND_IMPACT_SCHEMAS)[number]
 
@@ -164,6 +165,21 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
     deferralReason: 'director-run',
     evidence: 'source-transcript-replacement.ts:31 renderBlockedUntilDirectorRun is the literal '
       + 'true and the impact declares no minimalRenders field at all',
+  }),
+  'direct-multicam-session': Object.freeze({
+    // Deferred, not full-timeline, and the distinction is the whole point: a
+    // direction is a list of shots over session ticks, and a shot becomes a
+    // clip only when a DirectorRun compiles it. Enqueuing a render from the
+    // Command itself would render the timeline the direction replaced.
+    renderPolicy: 'deferred',
+    impactSchema: 'multicam-direction-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: false,
+    deferralReason: 'director-run',
+    evidence: 'multicam-direction-impact.ts:150 renderBlockedUntilDirectorRun is the literal '
+      + 'true and the impact declares no minimalRenders field at all; :146 affectedRanges is '
+      + 'always the whole compiled timeline because which angle plays at each instant is '
+      + 'exactly what multicam-direction.ts:1620 directMulticam decides',
   }),
   'set-project-policy-overrides': Object.freeze({
     renderPolicy: 'deferred',

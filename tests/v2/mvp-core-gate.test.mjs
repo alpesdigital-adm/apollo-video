@@ -136,4 +136,3 @@ test('MVP gate rejects duplicate, foreign and untraceable evidence', () => {
     /server references/,
   )
 })
-

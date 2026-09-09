@@ -80,7 +80,10 @@ const identityCube = `TITLE \"Identidade ç\"\nLUT_3D_SIZE 2\n0 0 0\n0 0 1\n0 1 
 
 test('T-FR-180 compiles the color pipeline in fixed order without duplicate transforms', () => {
   const plan = basePlan();
-  plan.global.reverse();
+  // Scrambled, but not past the one ordering the plan constructor refuses: the
+  // output transform is written before the creative LUT and the resolver still
+  // has to answer in stage order.
+  plan.global = [plan.global[0], plan.global[1], plan.global[3], plan.global[2]];
   const output = resolveColorPlan(plan, {});
   assert.deepEqual(output.stages.map(item => item.kind), ['technical', 'match', 'creative-lut', 'output']);
   assert.match(output.manifestKey, /technical:technical-log-to-working@1/);
@@ -92,6 +95,30 @@ test('T-FR-180 compiles the color pipeline in fixed order without duplicate tran
     SDR_COLOR_FIXTURES.map((fixture) => fixture.source),
     ['rec709-camera-a', 'rec709-camera-b', 'rec709-clipping-ramp'],
   );
+});
+
+test('T-FR-183 a layer that applies the match after the creative LUT is refused, not re-sorted', () => {
+  // The full reverse this test used to make: it also moves the match behind the
+  // creative LUT, which `resolveColorPlan` would silently put back in order —
+  // leaving the stored declaration and the rendered pipeline describing two
+  // different things. The plan constructor refuses it where it was written.
+  const plan = basePlan();
+  plan.global.reverse();
+  assert.throws(() => createColorPlan(plan), (error) => {
+    assert.equal(error.code, 'COLOR_STAGE_VIOLATION');
+    assert.equal(error.details.after, 'output');
+    return true;
+  });
+  assert.throws(() => resolveColorPlan(plan, {}), /COLOR_STAGE_VIOLATION|positioned after/);
+
+  // And a source override layer is read the same way, not only the global one.
+  const overridden = basePlan();
+  overridden.sources = { 'source-a': [overridden.global[2], overridden.global[1]] };
+  assert.throws(() => createColorPlan(overridden), (error) => {
+    assert.equal(error.code, 'COLOR_STAGE_VIOLATION');
+    assert.equal(error.details.position, 1);
+    return true;
+  });
 });
 
 test('T-FR-182 applies deterministic local overrides without changing sibling segments', () => {

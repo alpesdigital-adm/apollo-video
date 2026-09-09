@@ -54,6 +54,10 @@ import {
   createSourceTranscriptReplacementImpact,
   parseSourceTranscriptReplacementImpact,
 } from '../../src/v2/domain/source-transcript-replacement.ts'
+import {
+  createMulticamDirectionImpact,
+  parseMulticamDirectionImpact,
+} from '../../src/v2/domain/multicam-direction-impact.ts'
 import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
 
 const workspaceId = 'workspace-registry-1'
@@ -246,6 +250,23 @@ function projectPolicyImpact() {
   })
 }
 
+function multicamDirectionImpact(shotCount = 3) {
+  return createMulticamDirectionImpact({
+    commandId: 'edit-command-registry-multicam',
+    baseVersionId,
+    resultVersionId,
+    sessionId: 'capture-session-registry-1',
+    sessionVersion: 2,
+    directionHash: hashA,
+    diagnosticHash: hashB,
+    evidenceHash: 'c'.repeat(64),
+    shotCount,
+    manualReviewRequired: false,
+    durationFrames,
+    outputReferences: outputs,
+  })
+}
+
 function compareActionImpact(action = 'accept') {
   return createCompareActionImpact({
     commandId: 'edit-command-registry-compare',
@@ -277,6 +298,7 @@ function subtitleSegmentOverrideImpact() {
 const IMPACT_FIXTURES = {
   'apply-subtitle-segment-override': { build: () => subtitleSegmentOverrideImpact(), parse: parseCommandImpact },
   'compare-action': { build: () => compareActionImpact(), parse: parseCompareActionImpact },
+  'direct-multicam-session': { build: () => multicamDirectionImpact(), parse: parseMulticamDirectionImpact },
   'manual-edit': { build: () => manualImpact(), parse: parseCommandImpact },
   'apply-review-patch': { build: () => reviewPatchImpact('apply-review-patch'), parse: parseCommandImpact },
   'apply-review-patch-batch': { build: () => reviewPatchImpact('apply-review-patch-batch'), parse: parseCommandImpact },
@@ -308,7 +330,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 12)
+  assert.equal(EDIT_COMMAND_TYPES.length, 13)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -392,7 +414,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(type)
     }
   }
-  assert.equal(callSites, 12, 'expected one createEditCommand call site per Command type')
+  assert.equal(callSites, 13, 'expected one createEditCommand call site per Command type')
   assert.deepEqual([...discovered].toSorted(), [...EDIT_COMMAND_TYPES])
 })
 
@@ -446,7 +468,10 @@ test('T-F0-027 full-timeline types always invalidate from frame zero', () => {
 })
 
 test('T-F0-027 deferred types enqueue no render before their unblocking event', () => {
-  assert.deepEqual([...editCommandTypesByRenderPolicy('deferred')], ['replace-source-transcript', 'set-project-policy-overrides'])
+  assert.deepEqual(
+    [...editCommandTypesByRenderPolicy('deferred')],
+    ['direct-multicam-session', 'replace-source-transcript', 'set-project-policy-overrides'],
+  )
   const policy = editCommandPolicy('replace-source-transcript')
   assert.equal(policy.deferralReason, 'director-run')
 
@@ -464,6 +489,24 @@ test('T-F0-027 deferred types enqueue no render before their unblocking event', 
   assert.equal(Object.hasOwn(policyImpact, 'minimalRenders'), false)
   assert.deepEqual([...policyImpact.requiredRecomputations], ['treatment', 'story', 'edit-plan', 'proxy', 'final'])
   assert.equal(parseProjectPolicyOverridesImpact(JSON.parse(JSON.stringify(policyImpact))).impactHash, policyImpact.impactHash)
+
+  // F4.012: a direction invalidates the whole timeline it is about — which
+  // angle plays at each instant is what it decides — and still enqueues no
+  // render, because a shot becomes a clip only when a DirectorRun compiles it.
+  assert.equal(editCommandPolicy('direct-multicam-session').deferralReason, 'director-run')
+  const directionImpact = multicamDirectionImpact()
+  assert.equal(directionImpact.renderBlockedUntilDirectorRun, true)
+  assert.equal(Object.hasOwn(directionImpact, 'minimalRenders'), false, 'a deferred impact cannot request a render')
+  assert.equal(Object.hasOwn(directionImpact, 'renderSemanticsChanged'), false)
+  assert.deepEqual([...directionImpact.affectedRanges], [{ startFrame: 0, endFrame: durationFrames }])
+  assert.deepEqual([...directionImpact.requiredRecomputations], ['edit-plan', 'proxy', 'final'])
+  // A direction that directed nothing cannot invalidate a timeline, and a
+  // document that claims a different direction is not the one that was stored.
+  assert.throws(() => multicamDirectionImpact(0), /no shots/)
+  assert.throws(
+    () => parseMulticamDirectionImpact({ ...JSON.parse(JSON.stringify(directionImpact)), shotCount: 4 }),
+    /Stored multicam direction impact is inconsistent/,
+  )
 
   // The LUT selection defers within full-timeline until a timeline exists.
   assert.equal(editCommandPolicy('set-project-lut-selection').deferralReason, 'timeline')

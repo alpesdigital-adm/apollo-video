@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -8,9 +7,8 @@ import type { MediaIngestProcessor } from '../../application/ports/media-ingest.
 import { DomainError } from '../../domain/errors.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 function assertContained(root: string, candidate: string): void {
@@ -24,7 +22,7 @@ export class FfmpegIngestProcessor implements MediaIngestProcessor {
 
   constructor(options: { workRoot: string; ffmpegPath?: string }) {
     this.workRoot = resolve(options.workRoot)
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     if (!isAbsolute(this.workRoot)) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Ingest work root must be absolute')
   }
 

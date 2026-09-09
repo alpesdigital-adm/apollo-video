@@ -1,1 +1,19 @@
 *.sh text eol=lf
+
+# `git diff --check` is a required gate (CI step "Reject trailing whitespace and
+# blank lines at end of file"), and its default `blank-at-eol` rule reads a
+# CommonMark hard line break — two spaces before the newline — as an error.
+# Those spaces are content: they are what makes the header block of `TODO.md`
+# and the `> **Versão:** … / > **Status:** …` front matter of every file under
+# `docs/specs` render as separate lines instead of one run-on paragraph. There
+# are exactly 175 of them across twelve files, and every one is two spaces —
+# no tabs, no runs of three. Measured by deleting the rule below and running
+# `git diff --check 4b825dc… HEAD`, which prints 350 output LINES for those 175
+# problems because it echoes the offending source line under each location;
+# counting its output rather than its findings reports twice the real number.
+# So the choice was between rewriting rendered documents to satisfy a
+# whitespace preference and telling the gate which rule does not apply to prose.
+# This is the second. `blank-at-eof` and `space-before-tab` stay on for Markdown
+# — a stray blank line at the end of a document is still sloppiness, not a line
+# break — and every other path keeps the full default rule set.
+*.md whitespace=-blank-at-eol

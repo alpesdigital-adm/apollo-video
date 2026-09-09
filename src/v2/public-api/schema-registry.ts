@@ -1,4 +1,20 @@
-﻿import { DomainError, assertDomain } from '../domain/errors.ts'
+﻿import {
+  CAPTURE_SCENARIOS,
+  REQUIREMENT_LEVELS,
+  REQUIREMENT_VERIFICATIONS,
+  SYNC_CAPABILITIES,
+  SYNC_CEILINGS,
+} from '../domain/capture-protocol.ts'
+import { REQUIREMENT_OUTCOMES } from '../domain/capture-protocol-evaluation.ts'
+import { CAPTURE_TRACK_ROLES } from '../domain/capture-session.ts'
+import { ANCHOR_ORIGINS, DIAGNOSTIC_STATUSES, DIAGNOSTIC_WARNINGS, RECOMMENDED_ACTIONS } from '../domain/sync-diagnostic.ts'
+import {
+  FUSION_MODES,
+  FUSION_OUTCOMES,
+  FUSION_REJECTIONS,
+} from '../domain/sync-marker-detection.ts'
+import { MARKER_KINDS, MARKER_POSITIONS } from '../domain/sync-marker.ts'
+import { DomainError, assertDomain } from '../domain/errors.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import { PUBLIC_ERROR_CODES } from './public-error-catalog.ts'
@@ -18,6 +34,57 @@ import {
   TRANSFORMATION_MODES,
   TRANSFORMATION_PRESERVES,
 } from '../domain/transformation-brief.ts'
+// Wave 20. Every enum below is spread from the domain constant that defines it,
+// never retyped: an enum written from memory is a contract that says one thing
+// and a system that does another, and in Wave 19 each one written by hand was
+// wrong.
+import { COLOR_TRANSFORM_ORDER } from '../domain/color-and-export.ts'
+import {
+  COLOR_CRITIC_ACROSS_STAGES,
+  COLOR_CRITIC_ACTIONS,
+  COLOR_CRITIC_CAUSES,
+  COLOR_CRITIC_CLASSIFICATIONS,
+  COLOR_CRITIC_CONFIDENCE_BANDS,
+  COLOR_CRITIC_DIMENSIONS,
+  COLOR_CRITIC_SEVERITIES,
+  COLOR_CRITIC_STAGES,
+  COLOR_CRITIC_STATUSES,
+  COLOR_CRITIC_SUBJECT_KINDS,
+} from '../domain/color-critic-report.ts'
+import { COLOR_EVALUATOR_KINDS } from '../domain/color-measurement.ts'
+import {
+  ANGLE_CONTEXTS,
+  ANGLE_REJECTIONS,
+  ANGLE_SCORE_COMPONENT_NAMES,
+  DIRECTION_CONFIDENCE_BANDS,
+  DIRECTION_RULES,
+  DIRECTION_WARNINGS,
+  OUTPUT_ASPECT_RATIOS,
+  SPATIAL_RELATIONS,
+} from '../domain/multicam-direction.ts'
+import { MATCH_ACTOR_KINDS, MATCH_PIPELINE_STAGE } from '../domain/multicam-match-plan.ts'
+import {
+  PLAYBACK_DETECTION_METHODS,
+  PLAYBACK_DIRECTIONS,
+  PLAYBACK_DISCONTINUITY_REASONS,
+  PLAYBACK_MAP_STATUSES,
+  PLAYBACK_MAP_WARNINGS,
+  PLAYBACK_MODES,
+  PLAYBACK_UNCOVERED_REASONS,
+} from '../domain/playback-map.ts'
+import {
+  MULTICAM_LONGFORM_CRITERIA,
+  MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES,
+  MULTICAM_LONGFORM_FAILURE_REASONS,
+  MULTICAM_LONGFORM_GATE_ID,
+  MULTICAM_LONGFORM_GATE_REPORT_SCHEMA_VERSION,
+  MULTICAM_LONGFORM_GATE_SCHEMA_VERSION,
+} from '../domain/multicam-longform-gate.ts'
+import { COVERAGE_AVAILABILITIES } from '../domain/track-coverage.ts'
+import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../application/multicam-direction.ts'
+import { RENDERABLE_PLAN_ORIGINS } from '../application/renderable-edit-plan.ts'
+import { STRATEGIC_OBJECTIVES } from '../domain/strategic-objective.ts'
+import { MULTICAM_LONGFORM_CHECK_CODES } from './multicam-longform-gate-contract.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -107,11 +174,11 @@ const directorBudgetReservationSchema = {
     settledAt: { anyOf: [dateTimeSchema, { type: 'null' }] },
   },
 } as const
+// Spread from the domain constant rather than retyped. The eight ids below
+// used to be a hand-written copy that happened to be right; a ninth objective
+// would have left the published enum silently short.
 const strategicObjectiveSchema = {
-  enum: [
-    'discovery', 'awareness', 'warming', 'lead-generation',
-    'sale', 'whatsapp', 'booking', 'download',
-  ],
+  enum: STRATEGIC_OBJECTIVES.map((objective) => objective.id),
 } as const
 const editorialIdSchema = { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$' } as const
 const editorialTokenSchema = { type: 'string', minLength: 3, maxLength: 256 } as const
@@ -12635,6 +12702,323 @@ function defineSchema(
   })
 }
 
+/** F4.009 — a published capture protocol, as the catalogue lists it. */
+const captureProtocolSummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['protocolId', 'scenario', 'version', 'title', 'summary', 'bestCeiling', 'requirementCount', 'publishedAt', 'protocolHash'],
+  properties: {
+    protocolId: idSchema,
+    scenario: { type: 'string', enum: [...CAPTURE_SCENARIOS] },
+    version: { type: 'integer', minimum: 1 },
+    title: { type: 'string', minLength: 1, maxLength: 200 },
+    summary: { type: 'string', minLength: 1, maxLength: 1000 },
+    // The best this protocol can reach when everything is followed. It is a
+    // ceiling, not a promise: following the protocol does not guarantee the
+    // recording cooperated.
+    bestCeiling: { type: 'string', enum: [...SYNC_CEILINGS] },
+    requirementCount: { type: 'integer', minimum: 1 },
+    publishedAt: { type: 'string', format: 'date-time' },
+    protocolHash: sha256Schema,
+  },
+} as const
+
+const captureRequirementSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['requirementId', 'level', 'verification', 'checkKind', 'statement', 'losesCapabilities', 'consequence'],
+  properties: {
+    requirementId: idSchema,
+    level: { type: 'string', enum: [...REQUIREMENT_LEVELS] },
+    // Observed means the session is enough to decide it. Attested means only a
+    // person can, and the answer is their word — labelled, never mixed in with
+    // measurements.
+    verification: { type: 'string', enum: [...REQUIREMENT_VERIFICATIONS] },
+    checkKind: {
+      enum: [
+        'track-present', 'track-carries-sync-audio', 'track-excluded-from-mix',
+        'single-continuous-recording', 'marker-observed', 'distinct-devices',
+        'operator-attestation',
+      ],
+    },
+    statement: { type: 'string', minLength: 1, maxLength: 500 },
+    // A required item names what stops working without it. One that names
+    // nothing is a preference wearing the wrong label.
+    losesCapabilities: {
+      type: 'array',
+      items: { type: 'string', enum: [...SYNC_CAPABILITIES] },
+    },
+    consequence: { type: 'string', minLength: 1, maxLength: 500 },
+  },
+} as const
+
+const captureProtocolSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['protocolId', 'scenario', 'version', 'title', 'summary', 'bestCeiling', 'requirementCount', 'publishedAt', 'protocolHash', 'schemaVersion', 'requirements', 'expectedTracks'],
+  properties: {
+    ...captureProtocolSummarySchema.properties,
+    schemaVersion: { const: 'capture-protocol/v1' },
+    requirements: { type: 'array', minItems: 1, items: captureRequirementSchema },
+    expectedTracks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['role', 'minimum', 'maximum', 'mustCarryAudio', 'note'],
+        properties: {
+          role: { type: 'string', enum: [...CAPTURE_TRACK_ROLES] },
+          minimum: { type: 'integer', minimum: 0 },
+          maximum: { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+          mustCarryAudio: { type: 'boolean' },
+          note: { type: 'string', maxLength: 500 },
+        },
+      },
+    },
+  },
+} as const
+
+const captureProtocolAttachmentSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['protocolId', 'protocolVersion', 'protocolHash', 'attachedAt'],
+  properties: {
+    protocolId: idSchema,
+    // The exact version and hash attached, so a later reading of the protocol
+    // cannot silently rewrite what the shoot was held to.
+    protocolVersion: { type: 'integer', minimum: 1 },
+    protocolHash: sha256Schema,
+    attachedAt: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+const captureProtocolEvaluationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'sessionId', 'sessionVersion', 'sessionHash', 'protocolId', 'protocolVersion', 'protocolHash', 'findings', 'lostCapabilities', 'ceiling', 'blocksAutoEdit', 'attestedRequirementIds', 'evaluatedAt', 'evaluationHash'],
+  properties: {
+    schemaVersion: { const: 'capture-protocol-evaluation/v1' },
+    sessionId: idSchema,
+    sessionVersion: { type: 'integer', minimum: 1 },
+    sessionHash: sha256Schema,
+    protocolId: idSchema,
+    protocolVersion: { type: 'integer', minimum: 1 },
+    protocolHash: sha256Schema,
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['requirementId', 'level', 'outcome', 'observation', 'losesCapabilities', 'consequence'],
+        properties: {
+          requirementId: idSchema,
+          level: { type: 'string', enum: [...REQUIREMENT_LEVELS] },
+          // 'unknown' is a real answer, not a failure. A requirement nothing
+          // in the session speaks to has not been met and has not been missed.
+          outcome: { type: 'string', enum: [...REQUIREMENT_OUTCOMES] },
+          observation: { type: 'string', minLength: 1, maxLength: 500 },
+          losesCapabilities: captureRequirementSchema.properties.losesCapabilities,
+          consequence: { type: 'string', minLength: 1, maxLength: 500 },
+        },
+      },
+    },
+    lostCapabilities: captureRequirementSchema.properties.losesCapabilities,
+    ceiling: captureProtocolSummarySchema.properties.bestCeiling,
+    blocksAutoEdit: { type: 'boolean' },
+    attestedRequirementIds: { type: 'array', items: idSchema },
+    evaluatedAt: { type: 'string', format: 'date-time' },
+    evaluationHash: sha256Schema,
+  },
+} as const
+
+/** F4.010 — a marker and, when it has been rendered, where its media lives. */
+const syncMarkerSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['markerId', 'sessionId', 'kind', 'position', 'sequence', 'sessionCode', 'emittedAt', 'payload', 'checksum', 'markerHash', 'visual', 'audio', 'artifact'],
+  properties: {
+    markerId: idSchema,
+    sessionId: idSchema,
+    kind: { type: 'string', enum: [...MARKER_KINDS] },
+    position: { type: 'string', enum: [...MARKER_POSITIONS] },
+    sequence: { type: 'integer', minimum: 1 },
+    // Derived from the session id, so a marker filmed for another session is
+    // recognisable as foreign from the code alone.
+    sessionCode: { type: 'string', minLength: 6, maxLength: 6 },
+    emittedAt: { type: 'string', format: 'date-time' },
+    payload: { type: 'string', minLength: 1, maxLength: 200 },
+    // 16 hex characters of the payload digest, as markerChecksum produces.
+    checksum: { type: 'string', pattern: '^[a-f0-9]{16}$' },
+    markerHash: sha256Schema,
+    visual: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['patternFrames', 'frameRate', 'codeSizePx'],
+      properties: {
+        patternFrames: { type: 'array', minItems: 3, items: { type: 'string', enum: ['black', 'white'] } },
+        // Exact rational. 30000/1001 has no finite decimal form, and a client
+        // handed 29.97 could never recover the rate that was sent.
+        frameRate: { type: 'string', pattern: '^[1-9][0-9]*/[1-9][0-9]*$' },
+        codeSizePx: { type: 'integer', minimum: 1 },
+      },
+    },
+    audio: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['startHz', 'endHz', 'durationMs', 'sampleRate'],
+      properties: {
+        startHz: { type: 'number', exclusiveMinimum: 0 },
+        endHz: { type: 'number', exclusiveMinimum: 0 },
+        durationMs: { type: 'number', exclusiveMinimum: 0 },
+        sampleRate: { type: 'integer', minimum: 8000 },
+      },
+    },
+    // Bytes live in object storage. A marker is seconds of video, and a row
+    // carrying it would be paid for on every read of the marker list.
+    artifact: {
+      oneOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['artifactId', 'sha256', 'byteSize'],
+          properties: { artifactId: idSchema, sha256: sha256Schema, byteSize: { type: 'integer', minimum: 1 } },
+        },
+        { type: 'null' },
+      ],
+    },
+  },
+} as const
+
+const markerDetectionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['markerId', 'sessionId', 'trackId', 'position', 'mode', 'outcome', 'rejection', 'atMs', 'errorMs', 'visualObservationId', 'audioObservationId', 'confidence', 'reasons', 'detectionHash'],
+  properties: {
+    markerId: idSchema,
+    sessionId: idSchema,
+    trackId: idSchema,
+    position: { type: 'string', enum: [...MARKER_POSITIONS] },
+    mode: { type: 'string', enum: [...FUSION_MODES] },
+    outcome: { type: 'string', enum: [...FUSION_OUTCOMES] },
+    rejection: {
+      oneOf: [
+        { type: 'string', enum: [...FUSION_REJECTIONS] },
+        { type: 'null' },
+      ],
+    },
+    // Null when nothing was found. Zero would say the marker was at the very
+    // first frame, which is a different claim entirely.
+    atMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    errorMs: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'null' }] },
+    visualObservationId: { oneOf: [idSchema, { type: 'null' }] },
+    audioObservationId: { oneOf: [idSchema, { type: 'null' }] },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    reasons: { type: 'array', items: { type: 'string', maxLength: 300 } },
+    detectionHash: sha256Schema,
+  },
+} as const
+
+/** F4.011 — one anchor, and where it came from. */
+const diagnosticAnchorSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['anchorId', 'origin', 'sourceMs', 'sessionMs', 'method', 'confidence', 'residualMs', 'evidenceRef', 'createdAt'],
+  properties: {
+    anchorId: idSchema,
+    origin: { type: 'string', enum: [...ANCHOR_ORIGINS] },
+    sourceMs: { type: 'number' },
+    sessionMs: { type: 'number' },
+    method: { type: 'string', minLength: 1, maxLength: 120 },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    residualMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    evidenceRef: { type: 'string', minLength: 1, maxLength: 300 },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+const syncDiagnosticSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'sessionId', 'referenceTrackId', 'version', 'previousVersionHash', 'sessionVersion', 'referenceEpoch', 'status', 'globalConfidence', 'tracks', 'warnings', 'recommendedActions', 'manualRequired', 'protocolCeiling', 'generatedAt', 'diagnosticHash', 'autoEdit'],
+  properties: {
+    schemaVersion: { const: 'sync-diagnostic/v1' },
+    sessionId: idSchema,
+    referenceTrackId: idSchema,
+    version: { type: 'integer', minimum: 1 },
+    previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+    sessionVersion: { type: 'integer', minimum: 1 },
+    referenceEpoch: { type: 'integer', minimum: 1 },
+    status: { type: 'string', enum: [...DIAGNOSTIC_STATUSES] },
+    globalConfidence: { type: 'number', minimum: 0, maximum: 1 },
+    tracks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['trackId', 'methods', 'confidence', 'offsetMs', 'residualMs', 'driftPpm', 'coverageBps', 'gaps', 'automaticAnchors', 'manualAnchors', 'pieceIds', 'status', 'warnings', 'previewSampleMs'],
+        properties: {
+          trackId: idSchema,
+          methods: { type: 'array', items: { type: 'string', maxLength: 120 } },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+          offsetMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          residualMs: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'null' }] },
+          driftPpm: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          // Null means unmeasured. Zero would mean measured and unusable.
+          coverageBps: { oneOf: [{ type: 'integer', minimum: 0, maximum: 10000 }, { type: 'null' }] },
+          // Ticks, as decimal strings: a 64-bit count sent as a JSON number
+          // arrives rounded with nothing raised.
+          gaps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['start', 'end'],
+              properties: {
+                start: { type: 'string', pattern: '^-?[0-9]{1,19}$' },
+                end: { type: 'string', pattern: '^-?[0-9]{1,19}$' },
+              },
+            },
+          },
+          automaticAnchors: { type: 'array', items: diagnosticAnchorSchema },
+          manualAnchors: { type: 'array', items: diagnosticAnchorSchema },
+          pieceIds: { type: 'array', items: idSchema },
+          status: { type: 'string', enum: [...DIAGNOSTIC_STATUSES] },
+          warnings: {
+            type: 'array',
+            items: { type: 'string', enum: [...DIAGNOSTIC_WARNINGS] },
+          },
+          previewSampleMs: { type: 'array', items: { type: 'number' } },
+        },
+      },
+    },
+    warnings: {
+      type: 'array',
+      items: { type: 'string', enum: [...DIAGNOSTIC_WARNINGS] },
+    },
+    recommendedActions: {
+      type: 'array',
+      items: { type: 'string', enum: [...RECOMMENDED_ACTIONS] },
+    },
+    manualRequired: { type: 'boolean' },
+    protocolCeiling: {
+      oneOf: [captureProtocolSummarySchema.properties.bestCeiling, { type: 'null' }],
+    },
+    generatedAt: { type: 'string', format: 'date-time' },
+    diagnosticHash: sha256Schema,
+    // The gate travels with the document. A client made to recompute "may I
+    // cut this?" from the fields above could compute a kinder answer.
+    autoEdit: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['allowed', 'blockedBy'],
+      properties: {
+        allowed: { type: 'boolean' },
+        blockedBy: { type: 'array', items: { type: 'string', maxLength: 300 } },
+      },
+    },
+  },
+} as const
+
 function defineSchemaRegistry(definitions: readonly PublicSchemaDefinition[]) {
   const refs = new Set<string>()
   for (const definition of definitions) {
@@ -12668,7 +13052,11 @@ const colorTransformSchema = {
   required: ['id', 'kind', 'version', 'enabled', 'input', 'output', 'implementation'],
   properties: {
     id: idSchema,
-    kind: { enum: ['technical', 'match', 'creative-lut', 'output'] },
+    // Spread from the domain's own order rather than retyped beside it. The
+    // four names are identical, so the published contract does not move; what
+    // changes is that a fifth stage added to the pipeline cannot be published
+    // without this enum following it.
+    kind: { enum: [...COLOR_TRANSFORM_ORDER] },
     version: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
     enabled: { type: 'boolean' },
     input: colorMetadataSchema,
@@ -14138,6 +14526,1725 @@ const providerJobPublicSchema: JsonSchema = {
     resultArtifact: { type: 'object', additionalProperties: false, required: ['artifactId','artifactSha256','mediaType','byteSize'], properties: { artifactId: idSchema, artifactSha256: sha256Schema, mediaType: { enum: ['audio','video','image','data'] }, byteSize: { type: 'integer', minimum: 1 } } },
     error: { type: 'object', additionalProperties: false, required: ['code','message','retryable'], properties: { code: idSchema, message: { type: 'string', minLength: 1, maxLength: 1000 }, retryable: { type: 'boolean' }, retryAfterMs: { type: 'integer', minimum: 0 } } },
     createdAt: dateTimeSchema, updatedAt: dateTimeSchema, completedAt: dateTimeSchema,
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Wave 18 — shared shapes for capture sessions and multi-range synthesis.
+//
+// Ticks and rates cross the public boundary as strings. A JSON number is an
+// IEEE 754 double in every mainstream parser, so a 64-bit tick would arrive at
+// a client already rounded, with nothing raised and no way to notice; and
+// 30000/1001 has no decimal form at all, so a client handed 29.97 could never
+// recover the rate it was sent.
+// ---------------------------------------------------------------------------
+
+const tickSchema = { type: 'string', pattern: '^-?[0-9]{1,19}$' }
+const unsignedTickSchema = { type: 'string', pattern: '^[0-9]{1,19}$' }
+const rationalSchema = { type: 'string', pattern: '^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$' }
+
+/** Half-open, [start, end). Adjacent intervals tile with no gap and no overlap. */
+const tickIntervalSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['start', 'end'],
+  properties: { start: tickSchema, end: tickSchema },
+}
+
+const captureClockPolicySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['timebase', 'rounding'],
+  properties: { timebase: rationalSchema, rounding: { enum: ['nearest-half-even', 'floor', 'ceil'] } },
+}
+
+const captureCommandLineageSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['commandId', 'actorKind', 'actorId'],
+  properties: {
+    commandId: idSchema,
+    actorKind: { enum: ['human', 'api-client', 'director'] },
+    actorId: idSchema,
+    note: { type: ['string', 'null'], maxLength: 1024 },
+  },
+}
+
+const captureDeviceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['deviceId', 'recorderId'],
+  properties: {
+    deviceId: idSchema,
+    recorderId: idSchema,
+    make: { type: ['string', 'null'], maxLength: 128 },
+    model: { type: ['string', 'null'], maxLength: 128 },
+    serial: { type: ['string', 'null'], maxLength: 128 },
+  },
+}
+
+const captureTrackPartInputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['partId', 'ordinal', 'sourceAssetId', 'timebase', 'coverage', 'streamIndex',
+    'splitReason', 'evidence'],
+  properties: {
+    partId: idSchema,
+    ordinal: { type: 'integer', minimum: 0, maximum: 100_000 },
+    sourceAssetId: idSchema,
+    // The part's OWN timebase, exactly as the recorder wrote it. Never the
+    // transcode's: a normalized file is an output of the pipeline, and letting
+    // it define time means every timestamp moves when a setting changes.
+    timebase: rationalSchema,
+    coverage: tickIntervalSchema,
+    streamIndex: { type: 'integer', minimum: 0, maximum: 1_024 },
+    splitReason: {
+      enum: ['single-file', 'recorder-restart', 'file-size-limit', 'card-change',
+        'clip-duration-limit', 'unknown'],
+    },
+    evidence: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['ingestArtifactId', 'ingestSha256', 'probeHash', 'probeSource', 'observedAt'],
+      properties: {
+        ingestArtifactId: idSchema,
+        ingestSha256: sha256Schema,
+        probeHash: sha256Schema,
+        // How the interval was measured. A packet scan and a declared
+        // metadata field are both 'a duration', and only one of them was
+        // read off the media.
+        probeSource: {
+          enum: ['container-index', 'packet-scan', 'decoder-walk',
+            'declared-metadata', 'operator-report'],
+        },
+        observedAt: { type: 'string', format: 'date-time' },
+      },
+    },
+  },
+}
+
+const captureTrackInputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['trackId', 'role', 'device', 'timebase', 'streamIndex', 'syncAudioPolicy',
+    'includeInFinalMix', 'firstPart'],
+  properties: {
+    trackId: idSchema,
+    role: {
+      enum: ['camera-main', 'camera-alt', 'screen', 'phone', 'reaction',
+        'reference-video', 'microphone', 'master-audio', 'scratch-audio'],
+    },
+    device: captureDeviceSchema,
+    timebase: rationalSchema,
+    streamIndex: { type: 'integer', minimum: 0, maximum: 1_024 },
+    syncAudioPolicy: { enum: ['available', 'none', 'sync-only', 'final-candidate'] },
+    includeInFinalMix: { type: 'boolean' },
+    firstPart: captureTrackPartInputSchema,
+  },
+}
+
+const captureTrackSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['trackId', 'role', 'device', 'sourceAssetId', 'timebase', 'streamIndex',
+    'syncAudioPolicy', 'includeInFinalMix', 'parts'],
+  properties: {
+    trackId: idSchema,
+    role: {
+      enum: ['camera-main', 'camera-alt', 'screen', 'phone', 'reaction',
+        'reference-video', 'microphone', 'master-audio', 'scratch-audio'],
+    },
+    device: captureDeviceSchema,
+    sourceAssetId: idSchema,
+    timebase: rationalSchema,
+    streamIndex: { type: 'integer', minimum: 0, maximum: 1_024 },
+    syncAudioPolicy: { enum: ['available', 'none', 'sync-only', 'final-candidate'] },
+    includeInFinalMix: { type: 'boolean' },
+    parts: { type: 'array', items: captureTrackPartInputSchema },
+  },
+}
+
+const captureSessionSummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sessionId', 'version', 'status', 'sessionHash', 'referenceTrackId',
+    'referenceEpoch', 'trackCount'],
+  properties: {
+    sessionId: idSchema,
+    version: { type: 'integer', minimum: 1 },
+    previousVersionHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+    status: { enum: ['draft', 'analyzing', 'needs-input', 'synced', 'partial', 'failed'] },
+    sessionHash: sha256Schema,
+    referenceTrackId: idSchema,
+    referenceEpoch: { type: 'integer', minimum: 1 },
+    trackCount: { type: 'integer', minimum: 1 },
+    // Derivations this version invalidated. Empty on a purely additive change.
+    staleDerivations: {
+      type: 'array',
+      items: { enum: ['track-coverage', 'session-clock-map', 'sync-diagnostic', 'edit-plan'] },
+    },
+  },
+}
+
+const captureSessionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sessionId', 'projectId', 'version', 'status', 'clock', 'referenceTrackId',
+    'referenceEpoch', 'tracks', 'lineage', 'sessionHash', 'createdAt'],
+  properties: {
+    sessionId: idSchema,
+    projectId: idSchema,
+    version: { type: 'integer', minimum: 1 },
+    previousVersionHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+    status: { enum: ['draft', 'analyzing', 'needs-input', 'synced', 'partial', 'failed'] },
+    clock: captureClockPolicySchema,
+    referenceTrackId: idSchema,
+    referenceEpoch: { type: 'integer', minimum: 1 },
+    tracks: { type: 'array', items: captureTrackSchema },
+    lineage: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['commandId', 'operation', 'actorKind', 'actorId', 'occurredAt'],
+      properties: {
+        commandId: idSchema,
+        operation: {
+          enum: ['create-session', 'add-track', 'add-track-part',
+            'change-reference-track', 'change-status'],
+        },
+        actorKind: { enum: ['human', 'api-client', 'director'] },
+        actorId: idSchema,
+        occurredAt: { type: 'string', format: 'date-time' },
+        note: { type: ['string', 'null'], maxLength: 1024 },
+      },
+    },
+    staleDerivations: {
+      type: 'array',
+      items: { enum: ['track-coverage', 'session-clock-map', 'sync-diagnostic', 'edit-plan'] },
+    },
+    sessionHash: sha256Schema,
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+}
+
+const clockMapPieceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['pieceId', 'ordinal', 'sourceCoverage', 'sessionCoverage', 'rate', 'offsetTicks',
+    'driftPpm', 'confidence', 'residualBoundTicks'],
+  properties: {
+    pieceId: idSchema,
+    ordinal: { type: 'integer', minimum: 0 },
+    sourceCoverage: tickIntervalSchema,
+    sessionCoverage: tickIntervalSchema,
+    rate: rationalSchema,
+    offsetTicks: tickSchema,
+    driftPpm: { type: 'integer' },
+    confidence: { enum: ['high', 'medium', 'low'] },
+    residualBoundTicks: unsignedTickSchema,
+    // Null only for the first piece: nothing precedes it to be a boundary with.
+    openedBy: {
+      type: ['string', 'null'],
+      enum: ['recorder-restart', 'pts-regression', 'seek', 'rewind', 'file-split',
+        'coverage-gap', 'residual-exceeded', 'manual-anchor-conflict', null],
+    },
+    openedByDetail: { type: ['string', 'null'], maxLength: 512 },
+    anchorIds: { type: 'array', items: idSchema },
+    evidenceRefs: { type: 'array', items: { type: 'string', maxLength: 512 } },
+  },
+}
+
+const captureSyncTrackSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['trackId', 'outcome'],
+  properties: {
+    trackId: idSchema,
+    // `insufficient-evidence` is a first-class answer, not a failure. It is the
+    // difference between "we could not tell" and "we measured zero".
+    outcome: { enum: ['auto-apply', 'review', 'insufficient-evidence'] },
+    manualRequired: { type: 'boolean' },
+    selectedMethod: {
+      type: ['string', 'null'],
+      enum: ['shared-timecode', 'trusted-metadata', 'apollo-marker', 'audio-fingerprint',
+        'visual-event', 'transcript-lip', 'manual-anchor', null],
+    },
+    outcomeReasons: { type: 'array', items: { type: 'string', maxLength: 512 } },
+    // Absent whenever the cascade could not tell. Never an offset of zero, and
+    // never interpolated across the gap between two pieces.
+    map: {
+      type: ['object', 'null'],
+      additionalProperties: false,
+      required: ['sourceBounds', 'pieces'],
+      properties: {
+        sourceBounds: tickIntervalSchema,
+        uncovered: { type: 'array', items: tickIntervalSchema },
+        pieces: { type: 'array', items: clockMapPieceSchema },
+      },
+    },
+    coverage: {
+      type: ['object', 'null'],
+      additionalProperties: false,
+      required: ['bounds', 'coveredTicks', 'gapTicks', 'autoEditable'],
+      properties: {
+        bounds: tickIntervalSchema,
+        coveredTicks: unsignedTickSchema,
+        gapTicks: unsignedTickSchema,
+        minConfidenceBps: { type: 'integer', minimum: 0, maximum: 10_000 },
+        autoEditable: { type: 'boolean' },
+        unresolvedOverlaps: { type: 'integer', minimum: 0 },
+      },
+    },
+  },
+}
+
+const synthesisLineageSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sourceArtifactId', 'sourceArtifactSha256', 'sourceManifestId', 'sourceManifestHash',
+    'indexRunId', 'momentId', 'momentHash', 'evaluationId', 'evaluationHash'],
+  properties: {
+    sourceArtifactId: idSchema,
+    sourceArtifactSha256: sha256Schema,
+    sourceManifestId: idSchema,
+    sourceManifestHash: sha256Schema,
+    indexRunId: idSchema,
+    momentId: idSchema,
+    momentHash: sha256Schema,
+    evaluationId: idSchema,
+    evaluationHash: sha256Schema,
+  },
+}
+
+const synthesisRangeInputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['rangeId', 'startMs', 'endMs', 'lineage', 'rightsSnapshotId', 'rightsStatus',
+    'consentStatus'],
+  properties: {
+    rangeId: idSchema,
+    startMs: { type: 'integer', minimum: 0 },
+    endMs: { type: 'integer', minimum: 1 },
+    lineage: synthesisLineageSchema,
+    rightsSnapshotId: idSchema,
+    // Re-checked when the cut is assembled rather than trusted from selection:
+    // a window can be chosen while approved and assembled after a revocation.
+    rightsStatus: { enum: ['approved', 'blocked'] },
+    consentStatus: { enum: ['approved', 'not-required', 'blocked'] },
+    claimIds: { type: 'array', items: idSchema },
+    qualifierIds: { type: 'array', items: idSchema },
+    proofContextIds: { type: 'array', items: idSchema },
+  },
+}
+
+const synthesisJoinInputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['beforeRangeId', 'afterRangeId', 'kind', 'justification'],
+  properties: {
+    beforeRangeId: idSchema,
+    afterRangeId: idSchema,
+    // Checked against the source, never taken on trust: labelling a splice
+    // "contiguous" claims the speaker said those words consecutively.
+    kind: { enum: ['contiguous', 'spliced'] },
+    justification: { type: 'string', maxLength: 1_024 },
+    continuityRisks: {
+      type: 'array',
+      items: { enum: ['argument', 'audio', 'eye-line', 'position', 'color'] },
+    },
+  },
+}
+
+const editorialSynthesisSummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['synthesisId', 'objective', 'synthesizedDurationMs', 'sourceDurationMs',
+    'rangeCount', 'spliceCount', 'chronologyPreserved', 'synthesisHash'],
+  properties: {
+    synthesisId: idSchema,
+    objective: { type: 'string', maxLength: 512 },
+    synthesizedDurationMs: { type: 'integer', minimum: 1 },
+    sourceDurationMs: { type: 'integer', minimum: 1 },
+    droppedMs: { type: 'integer', minimum: 0 },
+    compressionBps: { type: 'integer', minimum: 0, maximum: 10_000 },
+    rangeCount: { type: 'integer', minimum: 1 },
+    spliceCount: { type: 'integer', minimum: 0 },
+    chronologyPreserved: { type: 'boolean' },
+    reorderReason: { type: ['string', 'null'], maxLength: 512 },
+    durationFrames: { type: 'integer', minimum: 1 },
+    editPlanSelectionHash: sha256Schema,
+    synthesisHash: sha256Schema,
+  },
+}
+
+const editorialSynthesisSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['synthesisId', 'projectId', 'objective', 'targetDurationMs', 'toleranceMs',
+    'synthesizedDurationMs', 'sourceDurationMs', 'droppedMs', 'chronologyPreserved',
+    'storyPlanId', 'editPlanId', 'frameRate', 'ranges', 'joins', 'contextProof',
+    'synthesisHash', 'createdAt'],
+  properties: {
+    synthesisId: idSchema,
+    projectId: idSchema,
+    objective: { type: 'string', maxLength: 512 },
+    targetDurationMs: { type: 'integer', minimum: 1 },
+    toleranceMs: { type: 'integer', minimum: 0 },
+    synthesizedDurationMs: { type: 'integer', minimum: 1 },
+    sourceDurationMs: { type: 'integer', minimum: 1 },
+    droppedMs: { type: 'integer', minimum: 0 },
+    chronologyPreserved: { type: 'boolean' },
+    reorderReason: { type: ['string', 'null'], maxLength: 512 },
+    storyPlanId: idSchema,
+    editPlanId: idSchema,
+    frameRate: rationalSchema,
+    durationFrames: { type: 'integer', minimum: 1 },
+    ranges: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['rangeId', 'startMs', 'endMs', 'lineage', 'rightsSnapshotId',
+          'rightsStatus', 'consentStatus'],
+        properties: synthesisRangeInputSchema.properties,
+      },
+    },
+    joins: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['beforeRangeId', 'afterRangeId', 'kind', 'droppedMs', 'timelineMs',
+          'justification'],
+        properties: {
+          ...synthesisJoinInputSchema.properties,
+          droppedMs: { type: 'integer', minimum: 0 },
+          timelineMs: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+    // What the context check examined, kept whether or not it found anything.
+    // A proof that only exists on failure cannot be told apart, afterwards,
+    // from a branch that never ran.
+    contextProof: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['claimsIncluded', 'qualifiersIncluded', 'proofContextsIncluded',
+        'claimsRequiringQualifiers', 'claimsRequiringProof'],
+      properties: {
+        claimsIncluded: { type: 'array', items: idSchema },
+        qualifiersIncluded: { type: 'array', items: idSchema },
+        proofContextsIncluded: { type: 'array', items: idSchema },
+        claimsRequiringQualifiers: { type: 'integer', minimum: 0 },
+        claimsRequiringProof: { type: 'integer', minimum: 0 },
+      },
+    },
+    lineageRefs: { type: 'array', items: { type: 'string', maxLength: 256 } },
+    synthesisHash: sha256Schema,
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Wave 20 — multicam direction, colour match, colour critic, react playback map
+// ---------------------------------------------------------------------------
+
+/**
+ * A tick, as every Wave 20 boundary carries one.
+ *
+ * Nineteen digits is the widest decimal a signed 64-bit tick can be. It is a
+ * string and not an integer because a 90 kHz session tick past 2^53 comes back
+ * from a JSON parser rounded, with nothing raised.
+ */
+const w20TickSchema = { type: 'string', pattern: '^[0-9]{1,19}$' }
+const w20IntervalSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['start', 'end'],
+  properties: { start: w20TickSchema, end: w20TickSchema },
+}
+const w20NullableIntervalSchema = { oneOf: [w20IntervalSchema, { type: 'null' }] }
+/** `num/den`. A rate that was measured; null where none was. */
+const w20RateSchema = { type: 'string', pattern: '^[0-9]+/[0-9]+$' }
+/**
+ * A derived identifier inside a document.
+ *
+ * Wider than `idSchema`, which bounds what a *caller* may send: a candidate id
+ * is built by the server out of a session id, a track id and a range, and
+ * holding it to the caller's 128-character bound would refuse a document the
+ * server itself produced.
+ */
+const w20DerivedIdSchema = { type: 'string', minLength: 1, maxLength: 300 }
+/**
+ * How one link of a capture-session derivation chain is named on the wire.
+ *
+ * `<sessionId>:v<n>`, `<sessionId>:match:v<n>`, `<sessionId>:direction:v<n>`,
+ * `<sessionId>:playback:<trackId>:v<n>` — every one of these is BUILT BY THE
+ * SERVER out of ids the caller was allowed to choose, and every one of them is
+ * then handed back to the server as the base of the next fence. Publishing them
+ * as `idSchema` bounded the composite at the 128 characters that bound one of
+ * its parts: a 128-character session id and a 128-character track id make a
+ * 269-character playback ref, so the API advertised a fence it hands out and
+ * would not accept back. The same schema is used on both sides — the eight
+ * `versionRef` properties and the four request `baseVersionId` fields that
+ * carry one — because a value the server emits and the caller echoes has to be
+ * one grammar, not two.
+ */
+const w20VersionRefSchema = { type: 'string', minLength: 3, maxLength: 300 }
+const w20EvidenceRefsSchema = { type: 'array', items: { type: 'string', minLength: 1, maxLength: 512 } }
+const w20ReasonSchema = { type: 'string', minLength: 1, maxLength: 2_000 }
+
+// --- direction -------------------------------------------------------------
+
+const angleScoreComponentSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['value', 'evidenceRefs'],
+  properties: { value: { type: 'number' }, evidenceRefs: w20EvidenceRefsSchema },
+}
+
+const angleScoreSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['total', ...ANGLE_SCORE_COMPONENT_NAMES],
+  properties: {
+    total: { type: 'number' },
+    ...Object.fromEntries(ANGLE_SCORE_COMPONENT_NAMES.map((name) => [name, angleScoreComponentSchema])),
+  },
+}
+
+const angleEvidenceScoreSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['score', 'evidenceRefs'],
+      properties: { score: { type: 'number' }, evidenceRefs: w20EvidenceRefsSchema },
+    },
+    { type: 'null' },
+  ],
+}
+
+const angleCandidateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'candidateId', 'trackId', 'sourceAssetId', 'role', 'context', 'sessionRange',
+    'sourceRange', 'sourcePieceId', 'sourcePartId', 'sourcePartAssetId', 'coverage', 'syncStatus',
+    'syncConfidence', 'activeSpeaker', 'screenActivity', 'reaction', 'technicalQuality', 'continuity',
+    'protectedSelection', 'eligible', 'rejectionReasons', 'score', 'candidateHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'angle-candidate/v1' },
+    candidateId: w20DerivedIdSchema,
+    trackId: w20DerivedIdSchema,
+    sourceAssetId: w20DerivedIdSchema,
+    role: { type: 'string', enum: [...CAPTURE_TRACK_ROLES] },
+    context: { type: 'string', enum: [...ANGLE_CONTEXTS] },
+    sessionRange: w20IntervalSchema,
+    sourceRange: w20NullableIntervalSchema,
+    sourcePieceId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    sourcePartId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    sourcePartAssetId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    coverage: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['availability', 'confidenceBps'],
+      properties: {
+        // The domain's own availabilities plus the two answers a candidacy can
+        // give that a coverage record cannot: the window fell outside the
+        // track, or nobody measured the track at all.
+        availability: { type: 'string', enum: [...COVERAGE_AVAILABILITIES, 'out-of-bounds', 'unmeasured'] },
+        confidenceBps: { oneOf: [{ type: 'integer', minimum: 0, maximum: 10_000 }, { type: 'null' }] },
+      },
+    },
+    syncStatus: { oneOf: [{ type: 'string', enum: [...DIAGNOSTIC_STATUSES, 'reference'] }, { type: 'null' }] },
+    syncConfidence: { oneOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }] },
+    activeSpeaker: {
+      oneOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['score', 'speakerKeys', 'evidenceRefs'],
+          properties: {
+            score: { type: 'number' },
+            speakerKeys: { type: 'array', items: w20DerivedIdSchema },
+            evidenceRefs: w20EvidenceRefsSchema,
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+    screenActivity: angleEvidenceScoreSchema,
+    reaction: angleEvidenceScoreSchema,
+    technicalQuality: {
+      oneOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['qualityBps', 'evidenceRefs'],
+          properties: {
+            qualityBps: { type: 'integer', minimum: 0, maximum: 10_000 },
+            evidenceRefs: w20EvidenceRefsSchema,
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+    continuity: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['previousTrackId', 'sameAngleTicks', 'spatialRelation'],
+      properties: {
+        previousTrackId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        sameAngleTicks: w20TickSchema,
+        spatialRelation: { type: 'string', enum: [...SPATIAL_RELATIONS] },
+      },
+    },
+    protectedSelection: {
+      oneOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['selectionId', 'reason'],
+          properties: { selectionId: w20DerivedIdSchema, reason: w20ReasonSchema },
+        },
+        { type: 'null' },
+      ],
+    },
+    eligible: { type: 'boolean' },
+    rejectionReasons: { type: 'array', items: { type: 'string', enum: [...ANGLE_REJECTIONS] } },
+    score: angleScoreSchema,
+    candidateHash: sha256Schema,
+  },
+}
+
+const shotDecisionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'shotId', 'ordinal', 'sessionRange', 'chosen', 'audioTrackId', 'alternatives',
+    'rule', 'reason', 'evidenceRefs', 'evidenceRefsTruncated', 'confidence', 'confidenceBand',
+    'decisionHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'shot-decision/v2' },
+    shotId: w20DerivedIdSchema,
+    ordinal: { type: 'integer', minimum: 0 },
+    sessionRange: w20IntervalSchema,
+    chosen: angleCandidateSchema,
+    audioTrackId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    alternatives: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['candidateId', 'trackId', 'scoreTotal', 'rejectedBecause'],
+        properties: {
+          candidateId: w20DerivedIdSchema,
+          trackId: w20DerivedIdSchema,
+          scoreTotal: { type: 'number' },
+          rejectedBecause: w20ReasonSchema,
+        },
+      },
+    },
+    rule: { type: 'string', enum: [...DIRECTION_RULES] },
+    reason: w20ReasonSchema,
+    evidenceRefs: w20EvidenceRefsSchema,
+    // How many citations the 32-ref cap dropped. Zero means the list is
+    // complete; without it a clipped citation reads as the whole one.
+    evidenceRefsTruncated: { type: 'integer', minimum: 0 },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    confidenceBand: { type: 'string', enum: [...DIRECTION_CONFIDENCE_BANDS] },
+    decisionHash: sha256Schema,
+  },
+}
+
+const directionPolicySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'calibrationVersion', ...DIRECTION_POLICY_OVERRIDE_KEYS],
+  properties: {
+    schemaVersion: { const: 'direction-policy/v1' },
+    // The calibration is named rather than published: the weights, the context
+    // baselines and the two floors are calibration, and a request that could
+    // set them could set the score. The five below are the editorial
+    // preferences an operator may move.
+    calibrationVersion: { type: 'string', minLength: 1, maxLength: 120 },
+    ...Object.fromEntries(DIRECTION_POLICY_OVERRIDE_KEYS.map((key) => [key, { type: 'number' }])),
+  },
+}
+
+const multicamDirectionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'sessionId', 'sessionVersion', 'referenceEpoch', 'diagnosticVersion',
+    'diagnosticHash', 'evidenceHash', 'range', 'format', 'policy', 'audio', 'shotCount',
+    'uncovered', 'warnings', 'manualReviewRequired', 'generatedAt', 'directionHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'multicam-direction/v2' },
+    sessionId: idSchema,
+    sessionVersion: { type: 'integer', minimum: 1 },
+    referenceEpoch: { type: 'integer', minimum: 1 },
+    diagnosticVersion: { type: 'integer', minimum: 1 },
+    diagnosticHash: sha256Schema,
+    evidenceHash: sha256Schema,
+    range: w20IntervalSchema,
+    format: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['aspectRatio'],
+      properties: { aspectRatio: { type: 'string', enum: [...OUTPUT_ASPECT_RATIOS] } },
+    },
+    policy: directionPolicySchema,
+    audio: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['trackId', 'rejected'],
+      properties: {
+        // Null means no track is both marked for the final mix and carrying
+        // final-candidate audio, so every clip keeps its own camera's audio.
+        trackId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        rejected: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['trackId', 'reason'],
+            properties: {
+              trackId: w20DerivedIdSchema,
+              reason: { type: 'string', enum: [...ANGLE_REJECTIONS] },
+            },
+          },
+        },
+      },
+    },
+    shotCount: { type: 'integer', minimum: 0 },
+    uncovered: { type: 'array', items: w20IntervalSchema },
+    warnings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'shotId', 'trackId', 'detail'],
+        properties: {
+          code: { type: 'string', enum: [...DIRECTION_WARNINGS] },
+          shotId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+          trackId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+          detail: w20ReasonSchema,
+        },
+      },
+    },
+    manualReviewRequired: { type: 'boolean' },
+    generatedAt: dateTimeSchema,
+    directionHash: sha256Schema,
+  },
+}
+
+const multicamDirectionReadProperties = {
+  direction: multicamDirectionSchema,
+  version: { type: 'integer', minimum: 1 },
+  previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+  versionRef: w20VersionRefSchema,
+  // False when an older link was read. A superseded direction quoted as the
+  // current one would name an angle this cut no longer uses.
+  isHead: { type: 'boolean' },
+}
+const multicamDirectionReadRequired = ['direction', 'version', 'previousVersionHash', 'versionRef', 'isHead']
+
+const directedSessionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'direction', 'directionVersion', 'versionRef', 'projectVersion', 'command',
+    'invalidatedArtifacts', 'affectedRanges', 'evidenceReplayed',
+  ],
+  properties: {
+    // Null on a replay whose chain has moved past this Command. The Command is
+    // still the one the first call produced; today's head under its name would
+    // be the wrong answer dressed as the right one.
+    direction: { oneOf: [multicamDirectionSchema, { type: 'null' }] },
+    directionVersion: { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+    versionRef: { oneOf: [w20VersionRefSchema, { type: 'null' }] },
+    projectVersion: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'createdAt'],
+      properties: {
+        id: idSchema,
+        sequence: { type: 'integer', minimum: 1 },
+        parentVersionId: { oneOf: [idSchema, { type: 'null' }] },
+        baseHash: sha256Schema,
+        createdAt: dateTimeSchema,
+      },
+    },
+    command: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'type', 'impactHash', 'shotCount', 'manualReviewRequired'],
+      properties: {
+        id: idSchema,
+        type: { const: 'direct-multicam-session' },
+        impactHash: sha256Schema,
+        shotCount: { type: 'integer', minimum: 0 },
+        manualReviewRequired: { type: 'boolean' },
+      },
+    },
+    invalidatedArtifacts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['artifactId', 'kind', 'variantId', 'sourceVersionId'],
+        properties: {
+          artifactId: w20DerivedIdSchema,
+          kind: { type: 'string', enum: ['proxy', 'final'] },
+          variantId: w20DerivedIdSchema,
+          sourceVersionId: w20DerivedIdSchema,
+        },
+      },
+    },
+    affectedRanges: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['startFrame', 'endFrame'],
+        properties: {
+          startFrame: { type: 'integer', minimum: 0 },
+          endFrame: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+    // True when the evidence set was already stored: the same observations for
+    // the same session version are the same set, not a second opinion.
+    evidenceReplayed: { type: 'boolean' },
+  },
+}
+
+const protectedSelectionRequestSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['selectionId', 'trackId', 'sessionStartTicks', 'sessionEndTicks', 'note'],
+  properties: {
+    selectionId: idSchema,
+    trackId: idSchema,
+    sessionStartTicks: w20TickSchema,
+    sessionEndTicks: w20TickSchema,
+    // The operator's own words. Who attested it is the authenticated actor and
+    // the service concatenates the two, so a note can never name its own author.
+    note: { type: 'string', minLength: 1, maxLength: 400 },
+  },
+}
+
+const directionRequestProperties = {
+  // The project version this cut is computed against, as a pair: a version
+  // number alone can be reused after a write that failed halfway.
+  baseVersionId: idSchema,
+  baseHash: sha256Schema,
+  format: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['aspectRatio'],
+    properties: { aspectRatio: { type: 'string', enum: [...OUTPUT_ASPECT_RATIOS] } },
+  },
+  range: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['sessionStartTicks', 'sessionEndTicks'],
+    properties: { sessionStartTicks: w20TickSchema, sessionEndTicks: w20TickSchema },
+  },
+  policy: {
+    type: 'object',
+    additionalProperties: false,
+    minProperties: 1,
+    properties: Object.fromEntries(DIRECTION_POLICY_OVERRIDE_KEYS.map((key) => [key, { type: 'number' }])),
+  },
+  reason: { type: 'string', minLength: 1, maxLength: 400 },
+}
+
+// --- colour ----------------------------------------------------------------
+
+const matchGainsSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['redGain', 'greenGain', 'blueGain'],
+      properties: {
+        redGain: { type: 'number' },
+        greenGain: { type: 'number' },
+        blueGain: { type: 'number' },
+      },
+    },
+    { type: 'null' },
+  ],
+}
+
+const cameraMatchTransformSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['cameraId', 'transform', 'derivedFrom', 'deltas', 'confidence', 'rangePairs'],
+  properties: {
+    cameraId: w20DerivedIdSchema,
+    transform: colorTransformSchema,
+    derivedFrom: { type: 'array', items: w20DerivedIdSchema },
+    deltas: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['exposureEv', 'whiteBalance', 'contrast', 'saturation'],
+      properties: {
+        // Null in every slot nobody could measure. A white balance of 1/1/1
+        // would read as "measured, and the camera already matches".
+        exposureEv: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+        whiteBalance: matchGainsSchema,
+        contrast: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+        saturation: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+      },
+    },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    rangePairs: { type: 'integer', minimum: 0 },
+  },
+}
+
+const matchActorSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['kind', 'id'],
+  properties: { kind: { type: 'string', enum: [...MATCH_ACTOR_KINDS] }, id: w20DerivedIdSchema },
+}
+
+const matchRangeOverrideSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['overrideId', 'cameraId', 'segmentId', 'range', 'transform', 'reason', 'actor'],
+  properties: {
+    overrideId: w20DerivedIdSchema,
+    cameraId: w20DerivedIdSchema,
+    segmentId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    range: w20NullableIntervalSchema,
+    transform: colorTransformSchema,
+    reason: w20ReasonSchema,
+    actor: matchActorSchema,
+  },
+}
+
+const matchMeasurementRefSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'measurementId', 'cameraId', 'sourceAssetId', 'sourceSha256', 'range', 'sourceRange',
+    'sampledFrames', 'confidence', 'comparability', 'issues', 'measurementHash',
+  ],
+  properties: {
+    measurementId: w20DerivedIdSchema,
+    cameraId: w20DerivedIdSchema,
+    sourceAssetId: w20DerivedIdSchema,
+    // Part of the citation, not a filter: a measurement of different bytes is a
+    // measurement of a different recording even under the same asset id.
+    sourceSha256: sha256Schema,
+    range: w20IntervalSchema,
+    sourceRange: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['startFrame', 'endFrame'],
+      properties: {
+        startFrame: { type: 'integer', minimum: 0 },
+        endFrame: { type: 'integer', minimum: 0 },
+      },
+    },
+    sampledFrames: { type: 'integer', minimum: 0 },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    comparability: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['comparable', 'reasons'],
+      properties: {
+        comparable: { type: 'boolean' },
+        reasons: { type: 'array', items: w20ReasonSchema },
+      },
+    },
+    issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'message'],
+        properties: { code: w20DerivedIdSchema, message: w20ReasonSchema },
+      },
+    },
+    measurementHash: sha256Schema,
+  },
+}
+
+const multicamMatchPlanSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'planId', 'projectId', 'sessionId', 'sessionVersion', 'referenceEpoch',
+    'referenceCameraId', 'referenceCameraSelection', 'measurements', 'cameraTransforms',
+    'rangeOverrides', 'confidence', 'issues', 'nonComparableRanges', 'humanReviewRequired',
+    'pipelineStage', 'lineage', 'dependsOn', 'supersedes', 'createdAt', 'planHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'multicam-match-plan/v1' },
+    planId: w20DerivedIdSchema,
+    projectId: idSchema,
+    sessionId: idSchema,
+    sessionVersion: { type: 'integer', minimum: 1 },
+    referenceEpoch: { type: 'integer', minimum: 1 },
+    referenceCameraId: w20DerivedIdSchema,
+    referenceCameraSelection: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['selectedBy', 'selectedAt', 'baseVersionId', 'baseHash'],
+      properties: {
+        // Which human chose the reference, and the exact session version they
+        // were looking at when they did.
+        selectedBy: matchActorSchema,
+        selectedAt: dateTimeSchema,
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+      },
+    },
+    measurements: { type: 'array', items: matchMeasurementRefSchema },
+    cameraTransforms: { type: 'array', items: cameraMatchTransformSchema },
+    rangeOverrides: { type: 'array', items: matchRangeOverrideSchema },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'cameraId', 'message', 'humanReviewRequired'],
+        properties: {
+          code: w20DerivedIdSchema,
+          cameraId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+          message: w20ReasonSchema,
+          humanReviewRequired: { type: 'boolean' },
+        },
+      },
+    },
+    nonComparableRanges: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['cameraId', 'measurementId', 'range', 'reason'],
+        properties: {
+          cameraId: w20DerivedIdSchema,
+          measurementId: w20DerivedIdSchema,
+          range: w20IntervalSchema,
+          reason: w20ReasonSchema,
+        },
+      },
+    },
+    humanReviewRequired: { type: 'boolean' },
+    // Where in the fixed transform order these corrections sit. A match placed
+    // after the creative LUT would grade the grade instead of the camera.
+    pipelineStage: { const: MATCH_PIPELINE_STAGE },
+    lineage: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['colorProbeIds', 'compilationIds', 'directionHash'],
+      properties: {
+        colorProbeIds: { type: 'array', items: w20DerivedIdSchema },
+        compilationIds: { type: 'array', items: w20DerivedIdSchema },
+        directionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+      },
+    },
+    dependsOn: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['measurementIds', 'referenceCameraId'],
+      properties: {
+        measurementIds: { type: 'array', items: w20DerivedIdSchema },
+        referenceCameraId: w20DerivedIdSchema,
+      },
+    },
+    supersedes: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    createdAt: dateTimeSchema,
+    planHash: sha256Schema,
+  },
+}
+
+const matchColorPlanWriteSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'colorPlanId', 'colorPlanHash', 'compiledManifestHash', 'resultVersionId', 'replayed',
+    'omittedCameraIds', 'prunedCameraIds', 'prunedSegmentIds',
+  ],
+  properties: {
+    colorPlanId: w20DerivedIdSchema,
+    colorPlanHash: sha256Schema,
+    compiledManifestHash: sha256Schema,
+    resultVersionId: idSchema,
+    replayed: { type: 'boolean' },
+    // Cameras the plan corrected that the EditPlan does not cut to, and layer
+    // keys the write dropped because the EditPlan no longer names them. Named
+    // rather than removed in silence: a dropped key can take a transform of
+    // another kind with it.
+    omittedCameraIds: { type: 'array', items: w20DerivedIdSchema },
+    prunedCameraIds: { type: 'array', items: w20DerivedIdSchema },
+    prunedSegmentIds: { type: 'array', items: w20DerivedIdSchema },
+  },
+}
+
+const colorCriticStageScopeSchema = {
+  type: 'string',
+  enum: [...COLOR_CRITIC_STAGES, COLOR_CRITIC_ACROSS_STAGES],
+}
+
+const colorCriticIssueSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'code', 'dimension', 'severity', 'classification', 'cause', 'stage', 'cameraId', 'range',
+    'measured', 'threshold', 'thresholdVersion', 'confidence', 'evidenceRefs',
+  ],
+  properties: {
+    code: w20DerivedIdSchema,
+    dimension: { type: 'string', enum: [...COLOR_CRITIC_DIMENSIONS] },
+    severity: { type: 'string', enum: [...COLOR_CRITIC_SEVERITIES] },
+    classification: { type: 'string', enum: [...COLOR_CRITIC_CLASSIFICATIONS] },
+    cause: { type: 'string', enum: [...COLOR_CRITIC_CAUSES] },
+    stage: colorCriticStageScopeSchema,
+    cameraId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    range: w20NullableIntervalSchema,
+    // Null only where there is no number: an insufficient-evidence issue has
+    // nothing measured, and a zero there would be a reading.
+    measured: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    threshold: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    thresholdVersion: { type: 'string', minLength: 1, maxLength: 120 },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    evidenceRefs: w20EvidenceRefsSchema,
+  },
+}
+
+const colorCriticReportSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'reportId', 'projectId', 'projectVersionId', 'subject', 'referenceCameraId',
+    'matchPlanId', 'matchPlanHash', 'sections', 'stagePairs', 'bytesEvaluated', 'evaluators',
+    'dimensions', 'issues', 'creativeIntent', 'intentBounds', 'cause', 'action',
+    'boundedCorrection', 'confidence', 'confidenceBand', 'thresholds', 'evaluatedAt', 'reportHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'color-critic-report/v1' },
+    reportId: w20DerivedIdSchema,
+    projectId: idSchema,
+    projectVersionId: idSchema,
+    subject: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['kind', 'sourceAssetId', 'cameraId', 'artifactId', 'range'],
+      properties: {
+        kind: { type: 'string', enum: [...COLOR_CRITIC_SUBJECT_KINDS] },
+        sourceAssetId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        cameraId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        artifactId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        range: w20NullableIntervalSchema,
+      },
+    },
+    // Null when no match plan covered every camera these frames were cut from:
+    // measuring exposure against a reference nobody approved here would answer
+    // with another session's camera.
+    referenceCameraId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    matchPlanId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    matchPlanHash: { oneOf: [sha256Schema, { type: 'null' }] },
+    sections: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['stage', 'bytesEvaluated', 'measurementIds'],
+        properties: {
+          stage: { type: 'string', enum: [...COLOR_CRITIC_STAGES] },
+          bytesEvaluated: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['artifactId', 'sha256'],
+              properties: { artifactId: w20DerivedIdSchema, sha256: sha256Schema },
+            },
+          },
+          measurementIds: { type: 'array', items: w20DerivedIdSchema },
+        },
+      },
+    },
+    // Which "before" reading was compared with which "after" reading, per
+    // camera. Publishing the pairing is what makes "the critic compared camera
+    // A with camera A" checkable instead of trusted.
+    stagePairs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['cameraId', 'beforeMeasurementId', 'afterMeasurementId'],
+        properties: {
+          cameraId: w20DerivedIdSchema,
+          beforeMeasurementId: w20DerivedIdSchema,
+          afterMeasurementId: w20DerivedIdSchema,
+        },
+      },
+    },
+    bytesEvaluated: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['artifactId', 'sha256'],
+        properties: { artifactId: w20DerivedIdSchema, sha256: sha256Schema },
+      },
+    },
+    evaluators: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'kind', 'version', 'scope'],
+        properties: {
+          id: w20DerivedIdSchema,
+          kind: { type: 'string', enum: [...COLOR_EVALUATOR_KINDS] },
+          version: { type: 'string', minLength: 1, maxLength: 64 },
+          // What this evaluator can and cannot answer, inside the report.
+          scope: w20ReasonSchema,
+        },
+      },
+    },
+    dimensions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'dimension', 'status', 'stage', 'value', 'unit', 'threshold', 'evaluatorIds',
+          'evidenceRefs', 'cameraIds', 'classification', 'reason',
+        ],
+        properties: {
+          dimension: { type: 'string', enum: [...COLOR_CRITIC_DIMENSIONS] },
+          status: { type: 'string', enum: [...COLOR_CRITIC_STATUSES] },
+          stage: colorCriticStageScopeSchema,
+          value: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          unit: { oneOf: [{ type: 'string', minLength: 1, maxLength: 64 }, { type: 'null' }] },
+          threshold: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          evaluatorIds: { type: 'array', items: w20DerivedIdSchema },
+          evidenceRefs: w20EvidenceRefsSchema,
+          cameraIds: { type: 'array', items: w20DerivedIdSchema },
+          classification: {
+            oneOf: [{ type: 'string', enum: [...COLOR_CRITIC_CLASSIFICATIONS] }, { type: 'null' }],
+          },
+          reason: { oneOf: [w20ReasonSchema, { type: 'null' }] },
+        },
+      },
+    },
+    issues: { type: 'array', items: colorCriticIssueSchema },
+    creativeIntent: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['declared', 'castAllowedDelta', 'lutId', 'note', 'brandColorsDeclared'],
+      properties: {
+        declared: { type: 'boolean' },
+        castAllowedDelta: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+        lutId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        note: { oneOf: [w20ReasonSchema, { type: 'null' }] },
+        brandColorsDeclared: { oneOf: [{ type: 'boolean' }, { type: 'null' }] },
+      },
+    },
+    // The declared allowance and the ceiling that bound it, both auditable: a
+    // big enough allowance would otherwise turn any cast into documented intent.
+    intentBounds: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['castAllowedDelta', 'maxDeclaredCastAllowance'],
+      properties: {
+        castAllowedDelta: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+        maxDeclaredCastAllowance: { type: 'number' },
+      },
+    },
+    cause: { type: 'string', enum: [...COLOR_CRITIC_CAUSES] },
+    action: { type: 'string', enum: [...COLOR_CRITIC_ACTIONS] },
+    boundedCorrection: {
+      oneOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['iteration', 'maxIterations', 'proposedDeltas', 'reason'],
+          properties: {
+            iteration: { type: 'integer', minimum: 1 },
+            maxIterations: { type: 'integer', minimum: 1 },
+            proposedDeltas: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['cameraId', 'exposureEv', 'whiteBalance', 'saturation'],
+                properties: {
+                  cameraId: w20DerivedIdSchema,
+                  exposureEv: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+                  whiteBalance: matchGainsSchema,
+                  saturation: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+                },
+              },
+            },
+            reason: w20ReasonSchema,
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    confidenceBand: { type: 'string', enum: COLOR_CRITIC_CONFIDENCE_BANDS.map((entry) => entry.band) },
+    thresholds: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['calibrationVersion', 'values'],
+      properties: {
+        calibrationVersion: { type: 'string', minLength: 1, maxLength: 120 },
+        values: {
+          type: 'object',
+          additionalProperties: false,
+          required: [...COLOR_CRITIC_DIMENSIONS],
+          properties: Object.fromEntries(COLOR_CRITIC_DIMENSIONS.map((dimension) => [
+            dimension,
+            {
+              type: 'object',
+              additionalProperties: false,
+              required: ['warn', 'hard'],
+              properties: { warn: { type: 'number' }, hard: { type: 'number' } },
+            },
+          ])),
+        },
+      },
+    },
+    evaluatedAt: dateTimeSchema,
+    reportHash: sha256Schema,
+  },
+}
+
+const colorCriticReportSummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'reportId', 'projectVersionId', 'action', 'cause', 'confidence', 'confidenceBand',
+    'referenceCameraId', 'matchPlanId', 'hardIssues', 'warningIssues', 'evaluatedAt', 'reportHash',
+  ],
+  properties: {
+    reportId: w20DerivedIdSchema,
+    projectVersionId: idSchema,
+    action: { type: 'string', enum: [...COLOR_CRITIC_ACTIONS] },
+    cause: { type: 'string', enum: [...COLOR_CRITIC_CAUSES] },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    confidenceBand: { type: 'string', enum: COLOR_CRITIC_CONFIDENCE_BANDS.map((entry) => entry.band) },
+    referenceCameraId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    matchPlanId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    hardIssues: { type: 'integer', minimum: 0 },
+    warningIssues: { type: 'integer', minimum: 0 },
+    evaluatedAt: dateTimeSchema,
+    reportHash: sha256Schema,
+  },
+}
+
+// --- react playback map ----------------------------------------------------
+
+const playbackPieceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'pieceId', 'ordinal', 'mode', 'reactionRange', 'referenceRange', 'rate', 'direction',
+    'confidence', 'evidenceRefs', 'detectionMethod', 'residualTicks', 'discontinuityReason',
+    'pieceHash',
+  ],
+  properties: {
+    pieceId: w20DerivedIdSchema,
+    ordinal: { type: 'integer', minimum: 0 },
+    mode: { type: 'string', enum: [...PLAYBACK_MODES] },
+    reactionRange: w20IntervalSchema,
+    // Mandatory null for `paused` and `commentary-only`: the reference produced
+    // no time, and an interval would claim it produced some.
+    referenceRange: w20NullableIntervalSchema,
+    // Null means nobody measured a rate. Never `1/1` by assumption — a rate of
+    // one is a measurement like any other.
+    rate: { oneOf: [w20RateSchema, { type: 'null' }] },
+    direction: { type: 'string', enum: [...PLAYBACK_DIRECTIONS] },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    evidenceRefs: w20EvidenceRefsSchema,
+    detectionMethod: { type: 'string', enum: [...PLAYBACK_DETECTION_METHODS] },
+    // Worst disagreement between this piece's observations and the straight
+    // line it asserts. Null when there was nothing to disagree with.
+    residualTicks: { oneOf: [w20TickSchema, { type: 'null' }] },
+    discontinuityReason: {
+      oneOf: [{ type: 'string', enum: [...PLAYBACK_DISCONTINUITY_REASONS] }, { type: 'null' }],
+    },
+    pieceHash: sha256Schema,
+  },
+}
+
+const playbackAnchorSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'anchorId', 'origin', 'reactionTick', 'referenceTick', 'mode', 'method', 'confidence',
+    'evidenceRef', 'createdAt',
+  ],
+  properties: {
+    anchorId: w20DerivedIdSchema,
+    origin: { type: 'string', enum: [...ANCHOR_ORIGINS] },
+    reactionTick: w20TickSchema,
+    // Null asserts "there was no reference here", which is itself an answer.
+    referenceTick: { oneOf: [w20TickSchema, { type: 'null' }] },
+    mode: { oneOf: [{ type: 'string', enum: [...PLAYBACK_MODES] }, { type: 'null' }] },
+    method: { type: 'string', enum: [...PLAYBACK_DETECTION_METHODS] },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    // `operator:<actorId> (<note>)`. Who overrode a measurement is recorded
+    // even when they said nothing about why.
+    evidenceRef: { type: 'string', minLength: 1, maxLength: 1_200 },
+    createdAt: dateTimeSchema,
+  },
+}
+
+const playbackMapSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'mapId', 'sessionId', 'sessionVersion', 'referenceEpoch', 'reactionTrackId',
+    'referenceTrackId', 'referenceMedia', 'reactionMedia', 'version', 'previousVersionHash',
+    'supersedesMapId', 'pieceCount', 'uncovered', 'anchors', 'status', 'warnings', 'mapHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'react-playback-map/v1' },
+    mapId: w20DerivedIdSchema,
+    sessionId: idSchema,
+    sessionVersion: { type: 'integer', minimum: 1 },
+    referenceEpoch: { type: 'integer', minimum: 1 },
+    reactionTrackId: w20DerivedIdSchema,
+    referenceTrackId: w20DerivedIdSchema,
+    referenceMedia: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['assetId', 'sha256', 'durationTicks', 'timebase'],
+      properties: {
+        assetId: w20DerivedIdSchema,
+        // The identity is the bytes, not the id: the same id re-uploaded is
+        // different footage and every reference tick then means something else.
+        sha256: sha256Schema,
+        durationTicks: w20TickSchema,
+        timebase: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['secondsPerTick'],
+          properties: { secondsPerTick: w20RateSchema },
+        },
+      },
+    },
+    reactionMedia: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['assetId', 'sha256', 'durationTicks'],
+      properties: {
+        assetId: w20DerivedIdSchema,
+        sha256: sha256Schema,
+        durationTicks: w20TickSchema,
+      },
+    },
+    version: { type: 'integer', minimum: 1 },
+    previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+    supersedesMapId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+    pieceCount: { type: 'integer', minimum: 0 },
+    // A stretch nobody could answer is not a piece with missing fields. It has
+    // its own list and its own reason.
+    uncovered: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['range', 'reason'],
+        properties: {
+          range: w20IntervalSchema,
+          reason: { type: 'string', enum: [...PLAYBACK_UNCOVERED_REASONS] },
+        },
+      },
+    },
+    anchors: { type: 'array', items: playbackAnchorSchema },
+    status: { type: 'string', enum: [...PLAYBACK_MAP_STATUSES] },
+    warnings: { type: 'array', items: { type: 'string', enum: [...PLAYBACK_MAP_WARNINGS] } },
+    mapHash: sha256Schema,
+  },
+}
+
+const playbackMapReadProperties = {
+  map: playbackMapSchema,
+  versionRef: w20VersionRefSchema,
+  manualReviewRequired: { type: 'boolean' },
+}
+
+const strandedPlanSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['planId', 'planHash', 'compiledFromHash'],
+      properties: {
+        planId: w20DerivedIdSchema,
+        planHash: sha256Schema,
+        // The map hash the plan was compiled at, so a reader can see WHICH
+        // version it still describes rather than only that it is stale.
+        compiledFromHash: sha256Schema,
+      },
+    },
+    { type: 'null' },
+  ],
+}
+
+// ---------------------------------------------------------------------------
+// Wave 20 — F4.016 multicamera and long-form phase gate
+//
+// Every enum below is spread from the domain constant that owns it: the ten
+// criteria, the check codes those criteria are made of, the five failure
+// reasons and the closed set of row kinds a check may have read. A gate whose
+// published vocabulary drifted from the evaluator's would describe a criterion
+// that no longer exists, which is the exact shape of the failure this gate was
+// built to catch.
+// ---------------------------------------------------------------------------
+
+/**
+ * An evidence reference id.
+ *
+ * Wider than `idSchema` because the server builds these itself out of composite
+ * derivation refs (`<sessionId>:playback:<trackId>:v<n>`, a scan named by its
+ * instant), and the domain bounds them at 200 characters. Published at the same
+ * bound so the contract cannot refuse a reference the evaluator produced.
+ */
+const gateEvidenceIdSchema = { type: 'string', minLength: 3, maxLength: 200 }
+const gateSessionIdSchema = { oneOf: [gateEvidenceIdSchema, { type: 'null' }] }
+/**
+ * The one value a caller of this gate may supply, published as the parser
+ * bounds it.
+ *
+ * Not `gateEvidenceIdSchema`, which is deliberately wide because the server
+ * builds composite evidence ids of its own (`<sessionId>:playback:<trackId>`,
+ * a scan named by its instant). Reusing it here advertised a 200-character
+ * free-form session id that the contract parser and the application service
+ * both refuse at 128 with a restricted charset, so an agent tool generated
+ * from this schema could emit a schema-valid request and get a 400 back.
+ */
+const gateSessionIdRequestSchema = {
+  type: 'string',
+  minLength: 3,
+  maxLength: 128,
+  pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$',
+}
+const gateCriterionSchema = { type: 'string', enum: [...MULTICAM_LONGFORM_CRITERIA] }
+const gateCheckCodeSchema = { type: 'string', enum: [...MULTICAM_LONGFORM_CHECK_CODES] }
+const gateFailureReasonSchema = {
+  oneOf: [
+    { type: 'string', enum: [...MULTICAM_LONGFORM_FAILURE_REASONS] },
+    { type: 'null' },
+  ],
+}
+const gateDetailSchema = { type: 'string', minLength: 1, maxLength: 512 }
+const gateCriterionCountSchema = {
+  type: 'integer', minimum: 0, maximum: MULTICAM_LONGFORM_CRITERIA.length,
+}
+
+const gateEvidenceReferenceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'id', 'hash', 'verified'],
+  properties: {
+    type: { type: 'string', enum: [...MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES] },
+    id: gateEvidenceIdSchema,
+    // Three states, not two: a digest that verified, a digest that did not, and
+    // `null` for a table that stores no hash of its own. Publishing the third
+    // as `false` would report "I could not check" as "I checked and it was
+    // wrong".
+    hash: { oneOf: [sha256Schema, { type: 'null' }] },
+    verified: { type: 'boolean' },
+  },
+}
+
+const gateCheckSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['code', 'passed', 'failureReason', 'detail', 'references'],
+  properties: {
+    code: gateCheckCodeSchema,
+    passed: { type: 'boolean' },
+    failureReason: gateFailureReasonSchema,
+    detail: gateDetailSchema,
+    references: { type: 'array', maxItems: 16, items: gateEvidenceReferenceSchema },
+  },
+}
+
+const gateCriterionResultSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'criterion', 'source', 'automatic', 'passed', 'checkCount', 'failedCheckCount',
+    'missingCheckCount', 'unverifiedReferenceCount', 'unhashedReferenceCount', 'checks',
+  ],
+  properties: {
+    criterion: gateCriterionSchema,
+    // Constants rather than free fields: no criterion of this gate is answered
+    // by a person or by anything but the server's own reading.
+    source: { const: 'server' },
+    automatic: { const: true },
+    passed: { type: 'boolean' },
+    checkCount: { type: 'integer', minimum: 1, maximum: 8 },
+    failedCheckCount: { type: 'integer', minimum: 0, maximum: 8 },
+    missingCheckCount: { type: 'integer', minimum: 0, maximum: 8 },
+    unverifiedReferenceCount: { type: 'integer', minimum: 0 },
+    unhashedReferenceCount: { type: 'integer', minimum: 0 },
+    checks: { type: 'array', minItems: 1, maxItems: 8, items: gateCheckSchema },
+  },
+}
+
+const gateReportSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'gate', 'workspaceId', 'projectId', 'sessionId', 'approved',
+    'satisfied', 'evaluated', 'total', 'failed', 'blocking', 'serverEvidenceOnly',
+    'criteria', 'evaluatedAt', 'fingerprint',
+  ],
+  properties: {
+    schemaVersion: { const: MULTICAM_LONGFORM_GATE_REPORT_SCHEMA_VERSION },
+    gate: { const: MULTICAM_LONGFORM_GATE_ID },
+    workspaceId: idSchema,
+    projectId: idSchema,
+    sessionId: gateSessionIdSchema,
+    approved: { type: 'boolean' },
+    satisfied: gateCriterionCountSchema,
+    // Criteria the reader answered at all, whether they passed or refused. Not
+    // the same number as `satisfied`, and the difference is the whole point:
+    // nine of ten evaluated with one never run is not "90% approved".
+    evaluated: gateCriterionCountSchema,
+    total: { const: MULTICAM_LONGFORM_CRITERIA.length },
+    failed: {
+      type: 'array',
+      maxItems: MULTICAM_LONGFORM_CRITERIA.length,
+      uniqueItems: true,
+      items: gateCriterionSchema,
+    },
+    blocking: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['criterion', 'check', 'reason', 'detail'],
+        properties: {
+          criterion: gateCriterionSchema,
+          check: gateCheckCodeSchema,
+          reason: gateFailureReasonSchema,
+          detail: gateDetailSchema,
+        },
+      },
+    },
+    serverEvidenceOnly: { const: true },
+    // All ten, always, in catalogue order. A criterion that vanished when it
+    // had no rows is a criterion nobody notices is unmet.
+    criteria: {
+      type: 'array',
+      minItems: MULTICAM_LONGFORM_CRITERIA.length,
+      maxItems: MULTICAM_LONGFORM_CRITERIA.length,
+      items: gateCriterionResultSchema,
+    },
+    evaluatedAt: dateTimeSchema,
+    fingerprint: sha256Schema,
+  },
+}
+
+const gateRecordSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'sessionId', 'projectVersionId',
+    'projectVersionHash', 'report', 'reportFingerprint', 'createdBy', 'createdAt', 'recordHash',
+  ],
+  properties: {
+    schemaVersion: { const: MULTICAM_LONGFORM_GATE_SCHEMA_VERSION },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    sessionId: gateSessionIdSchema,
+    // Null when the project has no current version: the evaluation still
+    // happened and still says what it read, rather than refusing to record.
+    projectVersionId: { oneOf: [gateEvidenceIdSchema, { type: 'null' }] },
+    projectVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+    report: gateReportSchema,
+    reportFingerprint: sha256Schema,
+    createdBy: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: { type: { const: 'api-client' }, id: idSchema },
+    },
+    createdAt: dateTimeSchema,
+    recordHash: sha256Schema,
+  },
+}
+
+const gateOutstandingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'criterion', 'statement', 'neverEvaluated', 'missingCheckCount', 'failedCheckCount',
+    'unverifiedReferenceCount', 'unhashedReferenceCount', 'blocking',
+  ],
+  properties: {
+    criterion: gateCriterionSchema,
+    statement: { type: 'string', minLength: 1, maxLength: 512 },
+    neverEvaluated: { type: 'boolean' },
+    missingCheckCount: { type: 'integer', minimum: 0, maximum: 8 },
+    failedCheckCount: { type: 'integer', minimum: 1, maximum: 8 },
+    unverifiedReferenceCount: { type: 'integer', minimum: 0 },
+    unhashedReferenceCount: { type: 'integer', minimum: 0 },
+    blocking: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['check', 'reason', 'detail'],
+        properties: {
+          check: gateCheckCodeSchema,
+          reason: gateFailureReasonSchema,
+          detail: gateDetailSchema,
+        },
+      },
+    },
+  },
+}
+
+const gateArtifactSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'id', 'hash', 'verified', 'citedBy'],
+  properties: {
+    type: { type: 'string', enum: [...MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES] },
+    id: gateEvidenceIdSchema,
+    hash: { oneOf: [sha256Schema, { type: 'null' }] },
+    verified: { type: 'boolean' },
+    // Which criteria and checks read this row. A reader who opens an artifact
+    // needs to know what it was being asked to prove.
+    citedBy: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['criterion', 'check', 'passed'],
+        properties: {
+          criterion: gateCriterionSchema,
+          check: gateCheckCodeSchema,
+          passed: { type: 'boolean' },
+        },
+      },
+    },
   },
 }
 
@@ -24098,6 +26205,1319 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       components: { type: 'object' },
     },
   }),
+  // -------------------------------------------------------------------------
+  // Wave 18 — F4.001-F4.008: capture sessions and multi-range synthesis.
+  //
+  // Every tick crosses this boundary as a DECIMAL STRING, never as a JSON
+  // number. A JSON number is an IEEE 754 double in every mainstream parser, and
+  // a double holds every integer only up to 2^53 — so a nanosecond tick would
+  // arrive at a JavaScript client already rounded, with no error raised and no
+  // way to tell. Rates cross as "num/den" for the same reason: 30000/1001 has
+  // no decimal form, and a client handed 29.97 could never recover it.
+  // -------------------------------------------------------------------------
+  defineSchema(
+    'create-capture-session-request',
+    1,
+    'Open a capture session around one reference track',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['sessionId', 'clock', 'referenceTrack', 'lineage'],
+      properties: {
+        sessionId: idSchema,
+        clock: captureClockPolicySchema,
+        referenceTrack: captureTrackInputSchema,
+        lineage: captureCommandLineageSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'add-capture-track-request',
+    1,
+    'Add one recorder to an existing capture session',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'track', 'lineage'],
+      properties: {
+        // The chain is content-addressed, so a caller names both the version it
+        // read and that version's hash. A version number alone can be reused
+        // after a failed write; the pair cannot, so a command computed against
+        // a session that has moved is refused rather than applied.
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+        track: captureTrackInputSchema,
+        lineage: captureCommandLineageSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'add-capture-track-part-request',
+    1,
+    'Add one more file to a track already in the session',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'trackId', 'part', 'lineage'],
+      properties: {
+        // The chain is content-addressed, so a caller names both the version it
+        // read and that version's hash. A version number alone can be reused
+        // after a failed write; the pair cannot, so a command computed against
+        // a session that has moved is refused rather than applied.
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+        trackId: idSchema,
+        part: captureTrackPartInputSchema,
+        lineage: captureCommandLineageSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'change-capture-reference-track-request',
+    1,
+    'Point the session at a different reference track',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'referenceTrackId', 'lineage'],
+      properties: {
+        // The chain is content-addressed, so a caller names both the version it
+        // read and that version's hash. A version number alone can be reused
+        // after a failed write; the pair cannot, so a command computed against
+        // a session that has moved is refused rather than applied.
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+        referenceTrackId: idSchema,
+        lineage: captureCommandLineageSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'request-capture-sync-request',
+    1,
+    'Ask for a capture session to be synchronized',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash'],
+      properties: {
+        // The chain is content-addressed, so a caller names both the version it
+        // read and that version's hash. A version number alone can be reused
+        // after a failed write; the pair cannot, so a command computed against
+        // a session that has moved is refused rather than applied.
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+        force: { type: 'boolean', default: false },
+      },
+    },
+  ),
+  defineSchema(
+    'capture-session-mutated',
+    1,
+    'The session version a capture command produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['session', 'replayed'],
+      properties: { session: captureSessionSummarySchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'capture-sync-run-mutated',
+    1,
+    'The durable operation a sync request started',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['run', 'replayed'],
+      properties: {
+        run: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['sessionId', 'operationId', 'state', 'sessionVersion'],
+          properties: {
+            sessionId: idSchema,
+            operationId: idSchema,
+            state: { enum: ['queued', 'running', 'succeeded', 'failed'] },
+            sessionVersion: { type: 'integer', minimum: 1 },
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'capture-session-read',
+    1,
+    'One version of a capture session, with its tracks',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['session'],
+      properties: { session: captureSessionSchema },
+    }),
+  ),
+  // ---------------------------------------------------------------------------
+  // Wave 19 — F4.009-F4.011: capture protocols, sync markers, diagnostics.
+  //
+  // Two shapes recur and both are deliberate.
+  //
+  // Milliseconds cross as numbers, tick intervals as decimal strings. A tick
+  // is a 64-bit count and a JSON number is a double, so a tick sent as a
+  // number arrives rounded with nothing raised; a millisecond is a
+  // measurement with an error bar, far inside the range a double represents
+  // exactly, and a string would only make clients parse it back.
+  //
+  // Every measured field is nullable, and null is not zero. `atMs: null` says
+  // no marker was found; `atMs: 0` would say it was found at the first frame.
+  // `coverageBps: null` says nobody measured coverage; zero would say the
+  // track was measured and none of it is usable. Collapsing those would let a
+  // cut be blocked by a measurement that never happened.
+  // ---------------------------------------------------------------------------
+  defineSchema(
+    'capture-protocol-list',
+    1,
+    'The published capture protocols',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['protocols'],
+      properties: { protocols: { type: 'array', items: captureProtocolSummarySchema } },
+    }),
+  ),
+  defineSchema(
+    'capture-protocol-read',
+    1,
+    'One published capture protocol, with its requirements',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['protocol'],
+      properties: { protocol: captureProtocolSchema },
+    }),
+  ),
+  defineSchema(
+    'attach-capture-protocol-request',
+    1,
+    'Declare which protocol a capture session was shot under',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['protocolId'],
+      // Only an id. A caller that could post a protocol's content could post
+      // an empty one and be told the session complies with it.
+      properties: { protocolId: idSchema },
+    },
+  ),
+  defineSchema(
+    'capture-protocol-attached',
+    1,
+    'The protocol now attached to a capture session',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['attachment'],
+      properties: { attachment: captureProtocolAttachmentSchema },
+    }),
+  ),
+  defineSchema(
+    'evaluate-capture-protocol-request',
+    1,
+    'Judge a capture session against a protocol',
+    {
+      type: 'object',
+      additionalProperties: false,
+      // The pair, not the number: a version number alone can be reused after a
+      // failed write, so a verdict naming only "version 3" could describe a
+      // different version 3 than the caller read.
+      required: ['baseVersionId', 'baseHash'],
+      properties: {
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+        protocolId: idSchema,
+        scenario: { type: 'string', enum: [...CAPTURE_SCENARIOS] },
+        // The one thing a caller may assert, and it is kept separate from
+        // everything observed so a person's word is never read as a
+        // measurement. Naming both protocolId and scenario is refused: two
+        // ways to pick a protocol can disagree.
+        attestedRequirementIds: { type: 'array', maxItems: 64, items: idSchema },
+      },
+    },
+  ),
+  defineSchema(
+    'capture-protocol-evaluated',
+    1,
+    'What the session lost against its protocol, and the ceiling that leaves',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['evaluation', 'replayed'],
+      properties: { evaluation: captureProtocolEvaluationSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'capture-session-protocol-read',
+    1,
+    'The protocol attached to a capture session and the last evaluation of it',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['sessionVersion', 'attachment', 'protocol', 'evaluation', 'evaluationIsForCurrentVersion'],
+      properties: {
+        sessionVersion: { type: 'integer', minimum: 1 },
+        attachment: { oneOf: [captureProtocolAttachmentSchema, { type: 'null' }] },
+        protocol: { oneOf: [captureProtocolSchema, { type: 'null' }] },
+        evaluation: { oneOf: [captureProtocolEvaluationSchema, { type: 'null' }] },
+        // Stale is not wrong, and the difference is worth stating rather than
+        // leaving a client to compare version numbers and guess.
+        evaluationIsForCurrentVersion: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'generate-sync-marker-request',
+    1,
+    'Ask for an Apollo sync marker',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['position'],
+      properties: {
+        position: { type: 'string', enum: [...MARKER_POSITIONS] },
+        kind: { type: 'string', enum: [...MARKER_KINDS], default: 'audiovisual' },
+        // No sequence. The server assigns it from the markers this session
+        // already has, so two callers cannot both claim the same number and
+        // leave "which marker was seen" without an answer.
+      },
+    },
+  ),
+  defineSchema(
+    'sync-marker-generated',
+    1,
+    'The marker that was generated and the media it rendered to',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['marker', 'replayed'],
+      properties: { marker: syncMarkerSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'sync-marker-list',
+    1,
+    'The sync markers generated for a capture session',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['markers'],
+      properties: { markers: { type: 'array', items: syncMarkerSchema } },
+    }),
+  ),
+  defineSchema(
+    'detect-sync-marker-request',
+    1,
+    'Look for a marker in one track',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['trackId'],
+      properties: {
+        trackId: idSchema,
+        // Omitted lets the server choose from the track: one that captured no
+        // usable audio can only ever produce one channel, and holding it to
+        // both would refuse it for something that is not its fault.
+        mode: { type: 'string', enum: [...FUSION_MODES] },
+      },
+    },
+  ),
+  defineSchema(
+    'sync-marker-detected',
+    1,
+    'What the two detectors found, and what their fusion concluded',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['detection', 'replayed'],
+      properties: { detection: markerDetectionSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'sync-marker-detection-list',
+    1,
+    'Every detection recorded against one marker',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['detections'],
+      properties: { detections: { type: 'array', items: markerDetectionSchema } },
+    }),
+  ),
+  defineSchema(
+    'marker-detection-sweep',
+    1,
+    'What one bounded detection pass did, pair by pair',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['sweep'],
+      properties: {
+        sweep: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['sessionId', 'sessionVersion', 'pairsConsidered', 'detected', 'skipped', 'failed', 'confirmed', 'outcomes', 'complete'],
+          properties: {
+            sessionId: idSchema,
+            sessionVersion: { type: 'integer', minimum: 1 },
+            pairsConsidered: { type: 'integer', minimum: 0 },
+            detected: { type: 'integer', minimum: 0 },
+            skipped: { type: 'integer', minimum: 0 },
+            failed: { type: 'integer', minimum: 0 },
+            confirmed: { type: 'integer', minimum: 0 },
+            outcomes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['markerId', 'trackId', 'position', 'state', 'outcome', 'rejection', 'atMs', 'detail'],
+                properties: {
+                  markerId: idSchema,
+                  trackId: idSchema,
+                  position: { type: 'string', enum: [...MARKER_POSITIONS] },
+                  state: { type: 'string', enum: ['detected', 'skipped-existing', 'skipped-no-file', 'failed'] },
+                  outcome: { oneOf: [{ type: 'string', enum: [...FUSION_OUTCOMES] }, { type: 'null' }] },
+                  rejection: { oneOf: [{ type: 'string', enum: [...FUSION_REJECTIONS] }, { type: 'null' }] },
+                  atMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+                  detail: { type: 'string', maxLength: 1000 },
+                },
+              },
+            },
+            // False means another pass would find more work.
+            complete: { type: 'boolean' },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema(
+    'sync-diagnostic-read',
+    1,
+    'One version of a capture session sync diagnostic',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['diagnostic'],
+      properties: { diagnostic: syncDiagnosticSchema },
+    }),
+  ),
+  defineSchema(
+    'sync-diagnostic-generated',
+    1,
+    'The diagnostic version a generate or anchor edit produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['diagnostic', 'replayed'],
+      properties: { diagnostic: syncDiagnosticSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'generate-sync-diagnostic-request',
+    1,
+    'Build a diagnostic for one exact version of a capture session',
+    {
+      type: 'object',
+      additionalProperties: false,
+      // A diagnostic describes one exact version. Deriving it against whatever
+      // is current would silently produce a document about a session the
+      // operator never saw.
+      required: ['baseVersionId', 'baseHash'],
+      properties: { baseVersionId: idSchema, baseHash: sha256Schema },
+    },
+  ),
+  defineSchema(
+    'edit-sync-anchor-request',
+    1,
+    'Add, move or remove one manual sync anchor',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'trackId', 'action', 'anchorId'],
+      properties: {
+        // The pair, exactly as the capture chain does it. A version number
+        // alone can be reused after a failed write, so a nudge naming only
+        // "version 3" could be aimed at a different version 3 than the caller
+        // read; the hash cannot be reused.
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+        trackId: idSchema,
+        action: { enum: ['add', 'move', 'remove'] },
+        anchorId: idSchema,
+        sourceMs: { type: 'number', minimum: -86400000, maximum: 86400000 },
+        sessionMs: { type: 'number', minimum: -86400000, maximum: 86400000 },
+        evidenceRef: idSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'sync-diagnostic-version-list',
+    1,
+    'The diagnostic chain of one capture session, newest first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['versions'],
+      properties: {
+        versions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['version', 'previousVersionHash', 'sessionVersion', 'status', 'globalConfidence', 'manualAnchorCount', 'generatedAt', 'diagnosticHash'],
+            properties: {
+              version: { type: 'integer', minimum: 1 },
+              previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+              sessionVersion: { type: 'integer', minimum: 1 },
+              status: { type: 'string', enum: [...DIAGNOSTIC_STATUSES] },
+              globalConfidence: { type: 'number', minimum: 0, maximum: 1 },
+              manualAnchorCount: { type: 'integer', minimum: 0 },
+              generatedAt: { type: 'string', format: 'date-time' },
+              diagnosticHash: sha256Schema,
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema(
+    'capture-session-list',
+    1,
+    'Capture sessions of one project, newest first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['sessions'],
+      properties: {
+        sessions: { type: 'array', items: captureSessionSummarySchema },
+      },
+    }),
+  ),
+  defineSchema(
+    'capture-session-version-list',
+    1,
+    'The immutable chain of a capture session, newest first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['sessionId', 'versions'],
+      properties: {
+        sessionId: idSchema,
+        versions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['version', 'sessionHash', 'operation', 'actorKind', 'actorId', 'occurredAt'],
+            properties: {
+              version: { type: 'integer', minimum: 1 },
+              previousVersionHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+              sessionHash: sha256Schema,
+              operation: {
+                enum: ['create-session', 'add-track', 'add-track-part',
+                  'change-reference-track', 'change-status'],
+              },
+              actorKind: { enum: ['human', 'api-client', 'director'] },
+              actorId: idSchema,
+              occurredAt: { type: 'string', format: 'date-time' },
+              note: { type: ['string', 'null'], maxLength: 1024 },
+              staleDerivations: {
+                type: 'array',
+                items: { enum: ['track-coverage', 'session-clock-map', 'sync-diagnostic', 'edit-plan'] },
+              },
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema(
+    'capture-sync-read',
+    1,
+    'What the evidence cascade decided for every track of a session',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['sessionId', 'sessionVersion', 'referenceTrackId', 'tracks'],
+      properties: {
+        sessionId: idSchema,
+        sessionVersion: { type: 'integer', minimum: 1 },
+        referenceEpoch: { type: 'integer', minimum: 1 },
+        referenceTrackId: idSchema,
+        tracks: { type: 'array', items: captureSyncTrackSchema },
+      },
+    }),
+  ),
+  defineSchema(
+    'create-editorial-synthesis-request',
+    1,
+    'Assemble several source ranges into one cut',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['synthesisId', 'objective', 'targetDurationMs', 'toleranceMs', 'sourceDurationMs',
+        'frameRate', 'storyPlanId', 'editPlanId', 'ranges', 'joins'],
+      properties: {
+        synthesisId: idSchema,
+        objective: { type: 'string', minLength: 1, maxLength: 512 },
+        targetDurationMs: { type: 'integer', minimum: 1_000, maximum: 3_600_000 },
+        toleranceMs: { type: 'integer', minimum: 0, maximum: 60_000 },
+        sourceDurationMs: { type: 'integer', minimum: 1, maximum: 86_400_000 },
+        frameRate: rationalSchema,
+        storyPlanId: idSchema,
+        editPlanId: idSchema,
+        // Declared only when the cut departs from source order. Reordering
+        // changes what the material asserts about cause, so it is never
+        // inferred from the array happening to arrive out of order.
+        allowReorder: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['reason'],
+          properties: { reason: { type: 'string', minLength: 12, maxLength: 512 } },
+        },
+        ranges: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 256,
+          items: synthesisRangeInputSchema,
+        },
+        joins: {
+          type: 'array',
+          maxItems: 255,
+          items: synthesisJoinInputSchema,
+        },
+      },
+    },
+  ),
+  defineSchema(
+    'editorial-synthesis-mutated',
+    1,
+    'The cut a multi-range synthesis command produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['synthesis', 'replayed'],
+      properties: { synthesis: editorialSynthesisSummarySchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'editorial-synthesis-read',
+    1,
+    'One persisted multi-range cut, with the proof its context survived',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['synthesis'],
+      properties: { synthesis: editorialSynthesisSchema },
+    }),
+  ),
+  defineSchema(
+    'editorial-synthesis-list',
+    1,
+    'Multi-range cuts of one project, newest first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['syntheses'],
+      properties: {
+        syntheses: { type: 'array', items: editorialSynthesisSummarySchema },
+      },
+    }),
+  ),
+  // -------------------------------------------------------------------------
+  // Wave 20 — F4.012 multicam direction
+  // -------------------------------------------------------------------------
+  defineSchema(
+    'direct-multicam-session-request',
+    1,
+    'Direct one capture session across its cameras',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'format'],
+      properties: directionRequestProperties,
+    },
+  ),
+  defineSchema(
+    'protect-multicam-selection-request',
+    1,
+    'Direct a capture session while holding an operator-protected selection on screen',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'format', 'protectedSelections'],
+      properties: {
+        ...directionRequestProperties,
+        protectedSelections: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 32,
+          items: protectedSelectionRequestSchema,
+        },
+      },
+    },
+  ),
+  defineSchema(
+    'multicam-direction-directed',
+    1,
+    'The direction and project version a direct-multicam-session command produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['directed', 'replayed'],
+      properties: { directed: directedSessionSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'multicam-direction-read',
+    1,
+    'One version of a capture session multicam direction',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: multicamDirectionReadRequired,
+      properties: multicamDirectionReadProperties,
+    }),
+  ),
+  defineSchema(
+    'multicam-angle-candidate-list',
+    1,
+    'Every angle offered over a range, with the reason each rejected one lost',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [...multicamDirectionReadRequired, 'windows', 'omittedWindows'],
+      properties: {
+        ...multicamDirectionReadProperties,
+        windows: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['shotId', 'ordinal', 'sessionRange', 'rule', 'chosenCandidateId', 'candidates'],
+            properties: {
+              shotId: w20DerivedIdSchema,
+              ordinal: { type: 'integer', minimum: 0 },
+              sessionRange: w20IntervalSchema,
+              rule: { type: 'string', enum: [...DIRECTION_RULES] },
+              chosenCandidateId: w20DerivedIdSchema,
+              candidates: { type: 'array', items: angleCandidateSchema },
+            },
+          },
+        },
+        // Shots inside the asked-for range the limit left out. A truncated list
+        // that reads as complete is an argument the direction made ten
+        // decisions when it made two hundred.
+        omittedWindows: { type: 'integer', minimum: 0 },
+      },
+    }),
+  ),
+  defineSchema(
+    'multicam-shot-decision-list',
+    1,
+    'The angle decisions of a direction, each with its rule, justification and alternatives',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [...multicamDirectionReadRequired, 'shots', 'omittedShots'],
+      properties: {
+        ...multicamDirectionReadProperties,
+        shots: { type: 'array', items: shotDecisionSchema },
+        omittedShots: { type: 'integer', minimum: 0 },
+      },
+    }),
+  ),
+  // -------------------------------------------------------------------------
+  // Wave 20 — F4.013 multicam colour match, F4.014 colour critic
+  // -------------------------------------------------------------------------
+  defineSchema(
+    'derive-multicam-match-plan-request',
+    1,
+    'Choose the reference camera and derive the match plan for a capture session',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['referenceCameraId', 'baseVersionId', 'baseHash', 'projectBaseVersionId', 'projectBaseHash'],
+      properties: {
+        // The one colour decision a caller makes: which camera the others are
+        // corrected towards. Every delta below is measured from decoded frames.
+        referenceCameraId: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+        // The capture-session version that choice was made against, as
+        // `<sessionId>:v<n>` — a ref the server built, so it is bounded as one.
+        baseVersionId: w20VersionRefSchema,
+        baseHash: sha256Schema,
+        // The project version the ColorPlan layers must land on. Neither fence
+        // stands in for the other: a session that moved means the cameras
+        // changed, a project that moved means the cut did.
+        projectBaseVersionId: idSchema,
+        projectBaseHash: sha256Schema,
+        note: { type: 'string', minLength: 1, maxLength: 400 },
+      },
+    },
+  ),
+  defineSchema(
+    'add-multicam-match-override-request',
+    1,
+    'Apply one local colour correction to a range of one camera',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'projectBaseVersionId', 'projectBaseHash', 'override'],
+      properties: {
+        // The match plan link this amendment was computed against, as
+        // `<sessionId>:match:v<n>` plus the plan hash.
+        baseVersionId: w20VersionRefSchema,
+        baseHash: sha256Schema,
+        projectBaseVersionId: idSchema,
+        projectBaseHash: sha256Schema,
+        override: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['overrideId', 'cameraId', 'parameters', 'reason'],
+          properties: {
+            overrideId: idSchema,
+            cameraId: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+            segmentId: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+            range: w20IntervalSchema,
+            // The one place a colour number is the caller's: an operator's own
+            // local correction, which the domain then bounds.
+            parameters: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['brightness', 'contrast', 'saturation'],
+              properties: {
+                brightness: { type: 'number', minimum: -1, maximum: 1 },
+                contrast: { type: 'number', minimum: 0, maximum: 4 },
+                saturation: { type: 'number', minimum: 0, maximum: 4 },
+                gains: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['redGain', 'greenGain', 'blueGain'],
+                  properties: {
+                    redGain: { type: 'number', minimum: 0.25, maximum: 4 },
+                    greenGain: { type: 'number', minimum: 0.25, maximum: 4 },
+                    blueGain: { type: 'number', minimum: 0.25, maximum: 4 },
+                  },
+                },
+              },
+            },
+            reason: { type: 'string', minLength: 1, maxLength: 400 },
+          },
+        },
+      },
+    },
+  ),
+  defineSchema(
+    'multicam-match-plan-derived',
+    1,
+    'The match plan a derivation produced and the ColorPlan write it made',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['plan', 'version', 'versionRef', 'colorPlan', 'invalidated', 'replayed'],
+      properties: {
+        plan: multicamMatchPlanSchema,
+        version: { type: 'integer', minimum: 1 },
+        versionRef: w20VersionRefSchema,
+        colorPlan: matchColorPlanWriteSchema,
+        // Advisory. Nothing here marks these stale; a superseded plan already
+        // names its successor, and this says which readers should look again.
+        invalidated: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['matchPlanIds', 'colorCriticReportIds'],
+          properties: {
+            matchPlanIds: { type: 'array', items: w20DerivedIdSchema },
+            colorCriticReportIds: { type: 'array', items: w20DerivedIdSchema },
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'multicam-match-override-applied',
+    1,
+    'The amended match plan a range override produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['plan', 'version', 'versionRef', 'colorPlan', 'replayed'],
+      properties: {
+        plan: multicamMatchPlanSchema,
+        version: { type: 'integer', minimum: 1 },
+        versionRef: w20VersionRefSchema,
+        colorPlan: matchColorPlanWriteSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'multicam-match-plan-read',
+    1,
+    'One version of a capture session multicam colour match plan',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['plan', 'version', 'previousVersionHash', 'versionRef', 'isHead'],
+      properties: {
+        plan: multicamMatchPlanSchema,
+        version: { type: 'integer', minimum: 1 },
+        previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+        versionRef: w20VersionRefSchema,
+        isHead: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'color-critic-report-list',
+    1,
+    'The colour verdicts recorded about one project version, newest first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['reports', 'correctionsApplied', 'correctionBudgetExhausted'],
+      properties: {
+        reports: { type: 'array', items: colorCriticReportSummarySchema },
+        // Counted off the same rows the evaluator counts, because it decides
+        // whether another bounded correction is allowed at all.
+        correctionsApplied: { type: 'integer', minimum: 0 },
+        correctionBudgetExhausted: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'color-critic-report-read',
+    1,
+    'One colour critic verdict with the measurements and pairings behind it',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['report'],
+      properties: { report: colorCriticReportSchema },
+    }),
+  ),
+  defineSchema(
+    'color-critic-issue-list',
+    1,
+    'The issues of one colour verdict, each with the evidence it was reached over',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'reportId', 'projectId', 'projectVersionId', 'action', 'cause', 'referenceCameraId',
+        'matchPlanId', 'evaluatedAt', 'reportHash', 'issues', 'filteredOut',
+      ],
+      properties: {
+        reportId: w20DerivedIdSchema,
+        projectId: idSchema,
+        projectVersionId: idSchema,
+        action: { type: 'string', enum: [...COLOR_CRITIC_ACTIONS] },
+        cause: { type: 'string', enum: [...COLOR_CRITIC_CAUSES] },
+        referenceCameraId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        matchPlanId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        evaluatedAt: dateTimeSchema,
+        reportHash: sha256Schema,
+        issues: { type: 'array', items: colorCriticIssueSchema },
+        // How many the filters removed. A narrowed list that reads like a clean
+        // report is how "no hard issues" becomes "no issues".
+        filteredOut: { type: 'integer', minimum: 0 },
+      },
+    }),
+  ),
+  // -------------------------------------------------------------------------
+  // Wave 20 — F4.015 react playback map
+  // -------------------------------------------------------------------------
+  defineSchema(
+    'build-react-playback-map-request',
+    1,
+    'Measure where a reaction was inside the reference it played',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash'],
+      properties: {
+        // The capture-session version the build was requested against, as
+        // `<sessionId>:v<n>`.
+        baseVersionId: w20VersionRefSchema,
+        baseHash: sha256Schema,
+        // Only needed when a session legitimately carries more than one
+        // reactor: two reaction tracks are two edits, and picking the first
+        // would silently produce a map for one of them.
+        reactionTrackId: idSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'add-react-playback-anchor-request',
+    1,
+    'Answer one uncovered stretch of a playback map with a manual anchor',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'reactionTrackId', 'anchor'],
+      properties: {
+        // `<sessionId>:playback:<trackId>:v<n>`. Two 128-character ids inside
+        // one ref is 269 characters, which `idSchema` would have refused — the
+        // caller cannot echo back a fence the server itself handed them.
+        baseVersionId: w20VersionRefSchema,
+        baseHash: sha256Schema,
+        reactionTrackId: idSchema,
+        anchor: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['anchorId', 'reactionTick', 'referenceTick'],
+          properties: {
+            anchorId: idSchema,
+            reactionTick: w20TickSchema,
+            // Required and nullable rather than optional: null asserts "there
+            // was no reference here", and leaving it out would make that
+            // indistinguishable from nobody saying.
+            referenceTick: { oneOf: [w20TickSchema, { type: 'null' }] },
+            mode: { type: 'string', enum: [...PLAYBACK_MODES] },
+            note: { type: 'string', minLength: 1, maxLength: 1_000 },
+          },
+        },
+      },
+    },
+  ),
+  defineSchema(
+    'react-playback-map-built',
+    1,
+    'The playback map a build produced, and what the rebuild stranded',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'map', 'versionRef', 'manualReviewRequired', 'supersededMapId', 'carriedAnchors',
+        'droppedAnchors', 'invalidated', 'replayed',
+      ],
+      properties: {
+        map: playbackMapSchema,
+        versionRef: w20VersionRefSchema,
+        manualReviewRequired: { type: 'boolean' },
+        supersededMapId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
+        carriedAnchors: { type: 'integer', minimum: 0 },
+        // Anchors that could not be carried because the recording they point
+        // into is no longer the same bytes. Counted, not re-pointed.
+        droppedAnchors: { type: 'integer', minimum: 0 },
+        invalidated: strandedPlanSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'react-playback-map-anchored',
+    1,
+    'The playback map version a manual anchor produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['map', 'versionRef', 'manualReviewRequired', 'invalidated', 'replayed'],
+      properties: {
+        map: playbackMapSchema,
+        versionRef: w20VersionRefSchema,
+        manualReviewRequired: { type: 'boolean' },
+        invalidated: strandedPlanSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'react-playback-map-read',
+    1,
+    'One version of a react playback map',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['map', 'versionRef', 'manualReviewRequired'],
+      properties: playbackMapReadProperties,
+    }),
+  ),
+  defineSchema(
+    'react-playback-piece-list',
+    1,
+    'The pieces of a playback map, each with its mode, evidence and residual',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['map', 'versionRef', 'manualReviewRequired', 'pieces', 'filteredOut', 'omittedPieces'],
+      properties: {
+        ...playbackMapReadProperties,
+        pieces: { type: 'array', items: playbackPieceSchema },
+        filteredOut: { type: 'integer', minimum: 0 },
+        omittedPieces: { type: 'integer', minimum: 0 },
+      },
+    }),
+  ),
+  // -------------------------------------------------------------------------
+  // Wave 20 — the two compilers that make a decision renderable
+  //
+  // One answer for both: what a caller can act on is the identity of the cut,
+  // the derivation that decided it at the hash it held, and the three numbers
+  // that say whether it is the cut they meant. The plan document itself is not
+  // published inline — a long-form cut is thousands of clips wide, and every
+  // compile response would be a download.
+  // -------------------------------------------------------------------------
+  defineSchema(
+    'compile-react-playback-plan-request',
+    1,
+    'Compile a resolved playback map into a plan the renderer accepts',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'reactionTrackId', 'projectVersionId', 'objective', 'planFps'],
+      properties: {
+        // `<sessionId>:playback:<trackId>:v<n>` — the map version the caller
+        // decided against, not whatever is head when the request lands.
+        baseVersionId: w20VersionRefSchema,
+        baseHash: sha256Schema,
+        reactionTrackId: idSchema,
+        // The project version the plan belongs to. The same cut under two
+        // project versions is two plans, which is why it is part of the
+        // snapshot's natural key.
+        projectVersionId: idSchema,
+        // What the cut is for. It reaches the plan as a desired action, and
+        // this compile sends no destination with it, so only the objectives
+        // that need none — `discovery`, `awareness`, `warming` — can be
+        // delivered; the other five are refused INVALID_ARGUMENT naming the
+        // destination they would require. All three produce the same
+        // `continue-viewing` action, so the objective never changes the
+        // compiled document and is not part of the snapshot's natural key.
+        objective: strategicObjectiveSchema,
+        // The delivery frame rate, exact. 30000/1001 is not 29.97, and a
+        // rounded number here would put a drift nobody chose into the timeline.
+        //
+        // It is part of the snapshot's natural key, because it is the timebase
+        // every clip is expressed in: compiling one map version into one
+        // project version at 25/1 and again at 30/1 produces two plans, each
+        // with its own `planId` and `planHash`, and neither supersedes the
+        // other. Repeating a compile at a rate already stored replays that
+        // plan and answers 200.
+        planFps: rationalSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'compile-synthesis-render-plan-request',
+    1,
+    'Compile a stored multi-range synthesis into a plan the renderer accepts',
+    {
+      type: 'object',
+      additionalProperties: false,
+      // No fence and no frame rate. A synthesis is one immutable
+      // content-addressed cut, so there is no later version of it to be stale
+      // against, and it already fixed its frame rate exactly — a second answer
+      // here would contradict the aggregate. With no rate to choose, the
+      // request contributes only the project version to the plan's identity,
+      // and a repeat compile always replays.
+      required: ['projectVersionId', 'objective'],
+      properties: {
+        projectVersionId: idSchema,
+        // Same restriction as the react compile: no destination travels with
+        // the objective, so `discovery`, `awareness` and `warming` are the
+        // three this compile can deliver.
+        objective: strategicObjectiveSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'renderable-plan-compiled',
+    1,
+    'The compiled plan a derivation produced, as the row that was stored',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['plan', 'replayed'],
+      properties: {
+        plan: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'planId', 'planHash', 'origin', 'sourceId', 'sourceHash', 'sourceVersion',
+            'projectId', 'projectVersionId', 'fps', 'durationFrames', 'clipCount',
+            'compilerVersion', 'assumptions', 'lineageRefs', 'createdAt',
+          ],
+          properties: {
+            planId: w20DerivedIdSchema,
+            // The identity of the cut, over the whole document minus
+            // `createdAt`. Two callers holding this hold the same clips.
+            planHash: sha256Schema,
+            origin: { type: 'string', enum: [...RENDERABLE_PLAN_ORIGINS] },
+            sourceId: w20DerivedIdSchema,
+            // The hash the deciding aggregate held when it was read. A source
+            // that later moves leaves this naming a hash nothing matches, which
+            // is how a reader learns the plan is stale.
+            sourceHash: sha256Schema,
+            // Null where the source is not versioned: a synthesis is one
+            // immutable cut, and writing 1 would invent a chain it lacks.
+            sourceVersion: { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+            projectId: idSchema,
+            projectVersionId: idSchema,
+            fps: { type: 'number', exclusiveMinimum: 0 },
+            durationFrames: { type: 'integer', minimum: 1 },
+            clipCount: { type: 'integer', minimum: 1 },
+            compilerVersion: { type: 'string', minLength: 1, maxLength: 128 },
+            // What the cut takes for granted, in the compiler's own words: that
+            // the output runs the reaction and not the reference, that
+            // materialization is cut-only, how much source a synthesis dropped.
+            assumptions: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 512 } },
+            lineageRefs: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 512 } },
+            createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  // -------------------------------------------------------------------------
+  // Wave 20 — F4.016 multicamera and long-form phase gate
+  // -------------------------------------------------------------------------
+  defineSchema(
+    'evaluate-multicam-longform-gate-request',
+    1,
+    'Run the multicamera and long-form phase gate over one project',
+    {
+      type: 'object',
+      additionalProperties: false,
+      // Nothing is required, and nothing else is accepted. The project is in
+      // the path; `sessionId` narrows the capture-side criteria to one session.
+      // There is no field here for a measurement, a criterion result, an
+      // evidence ref or an approval, because the evaluation reads every one of
+      // those from PostgreSQL and the module graph.
+      properties: { sessionId: gateSessionIdRequestSchema },
+    },
+  ),
+  defineSchema(
+    'multicam-longform-gate-evaluated',
+    1,
+    'The immutable phase-gate record one evaluation produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gate', 'replayed'],
+      properties: { gate: gateRecordSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-read',
+    1,
+    'One phase-gate evaluation, with all ten criteria and what each one read',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gate'],
+      properties: { gate: gateRecordSchema },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-list',
+    1,
+    'The phase-gate history of one project, newest evaluation first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gates'],
+      properties: { gates: { type: 'array', items: gateRecordSchema } },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-criteria',
+    1,
+    'What the multicamera and long-form phase gate checks, before any evaluation',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gate', 'total', 'criteria'],
+      properties: {
+        gate: { const: MULTICAM_LONGFORM_GATE_ID },
+        total: { const: MULTICAM_LONGFORM_CRITERIA.length },
+        criteria: {
+          type: 'array',
+          minItems: MULTICAM_LONGFORM_CRITERIA.length,
+          maxItems: MULTICAM_LONGFORM_CRITERIA.length,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['criterion', 'statement', 'checks'],
+            properties: {
+              criterion: gateCriterionSchema,
+              statement: { type: 'string', minLength: 1, maxLength: 512 },
+              checks: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 8,
+                uniqueItems: true,
+                items: gateCheckCodeSchema,
+              },
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-outstanding',
+    1,
+    'What the newest phase-gate evaluation is still missing, first thing first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gateId', 'evaluatedAt', 'gate', 'approved', 'satisfied', 'total', 'outstanding'],
+      properties: {
+        gateId: idSchema,
+        evaluatedAt: dateTimeSchema,
+        gate: { const: MULTICAM_LONGFORM_GATE_ID },
+        approved: { type: 'boolean' },
+        satisfied: gateCriterionCountSchema,
+        total: { const: MULTICAM_LONGFORM_CRITERIA.length },
+        // Criteria nobody has answered come before criteria that answered and
+        // refused: the first is work to start, the second is work to fix.
+        outstanding: {
+          type: 'array',
+          maxItems: MULTICAM_LONGFORM_CRITERIA.length,
+          items: gateOutstandingSchema,
+        },
+      },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-artifact-list',
+    1,
+    'The artifacts one phase-gate evaluation read, with the checks that cited each',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'gateId', 'evaluatedAt', 'approved', 'artifacts', 'unverifiedCount',
+        'unhashedCount', 'filteredOut', 'omittedArtifacts',
+      ],
+      properties: {
+        gateId: idSchema,
+        evaluatedAt: dateTimeSchema,
+        approved: { type: 'boolean' },
+        artifacts: { type: 'array', items: gateArtifactSchema },
+        // Counted over everything the type filter matched, not over the page
+        // this response carries: a `limit` the caller never chose must not be
+        // able to answer "nothing was tampered with" for an evaluation that
+        // recorded tampering.
+        unverifiedCount: { type: 'integer', minimum: 0 },
+        unhashedCount: { type: 'integer', minimum: 0 },
+        // What the type filter and the limit removed. A narrowed list that
+        // reads as complete is an argument the gate looked at less than it did.
+        filteredOut: { type: 'integer', minimum: 0 },
+        omittedArtifacts: { type: 'integer', minimum: 0 },
+      },
+    }),
+  ),
   defineSchema('json-schema-document', 1, 'JSON Schema document', {
     type: 'object',
     required: ['$schema', '$id', 'title'],
