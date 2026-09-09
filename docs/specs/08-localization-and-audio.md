@@ -4,6 +4,60 @@
 > **Versão:** 2.0  
 > **PRD relacionado:** FR-190–205
 
+## Estado parcial da Wave 21
+
+A Wave 21 entrega uma fatia V2 operável, mas não conclui a fase F5. A API e a
+UI autenticadas criam roteiro canônico a partir de alignment humano revisado,
+perfil compacto de locale/mercado/modos e `LocalizationVariant` isolada, com
+revisões imutáveis e direitos atuais. Antes de qualquer envio pago, o preflight
+de tradução vincula revisão, hash, ator atual, direitos atuais, provider/model,
+estimativa, teto de custo e `maxOutputTokens`; configuração ausente bloqueia sem
+submeter ao provider.
+
+O runtime de mídia comprovado nesta fatia é somente `subtitles-only`: uma única
+fonte/identidade, um clip, `rate=1` e proxy derivado com lineage e rights. O
+mapeamento para uma timeline já editada, voz local, upload de áudio localizado,
+TTS, avatar regenerado e lip-sync reais continuam abertos. O timing da fonte
+vem do word alignment exato aprovado; cues traduzidos são estimativas
+proporcionais por bloco, não word alignment medido do áudio traduzido.
+
+A análise musical possui API, worker durável, PostgreSQL e PCM/FFmpeg reais,
+com cache acústico autorizado pelo snapshot de rights atual. Beats são medidos;
+`downbeat-candidate` não é um downbeat medido e sections são heurísticas. A
+publicação atômica do plano de montagem passou em PostgreSQL e o golden de banda
+usa FFmpeg real, mas isso não constitui aceite visual, deploy nem conclusão de
+music-led/audio direction.
+
+### Evidência local de integração — 2026-09-09
+
+- Bootstrap PostgreSQL 16 descartável: 211 migrations aplicadas do zero;
+  validação estrutural: 282 tabelas, 1.302 índices e 966 FKs.
+- `localization-browser.e2e.mjs`: Chrome contra `next start`, sessão humana,
+  criação de perfil e variante via HTTP e recusa de preflight sem provider.
+- `localization-snapshot-proxy.pg.integration.mjs`: contexto inicial arranjado
+  em PostgreSQL, worker concreto, snapshot, materializador e FFmpeg reais;
+  100 frames, 25 fps, 960×540, AAC, quatro segundos, hash do arquivo igual ao
+  manifest, legenda inspecionada visualmente e correlação do áudio original.
+  Aprovação usa critic persistido e IDs reais; critic bloqueado, hash adulterado,
+  head stale e replay com ator/path divergentes são recusados. Não é uma prova
+  de ingestão nem de tradução paga ponta a ponta.
+- Persistência de preflight, análise musical e montagem atômica executadas
+  contra PostgreSQL real; golden musical FFmpeg e análise PCM executados.
+- A regressão interrompida durante um intervalo prolongado do ambiente não foi
+  considerada aprovação. Os testes musicais foram repetidos com sucesso após
+  verificar e reiniciar o cluster local supervisionado.
+
+O provider de tradução foi testado com HTTP controlado, sem chamadas pagas.
+Storage local content-addressed, não MinIO, nesta prova. Main, VPS e produção
+não foram alterados; nenhuma caixa do TODO foi fechada por esta evidência.
+
+O harness histórico `prisma-proxy-review.integration.mjs` foi tentado e recusado
+pelo CHECK de progresso da operação: seu fixture não declara o progresso
+canônico exigido pelo schema atual. Ele não é contado como verde. A regressão
+de idempotência de revisão desta wave está no teste positivo de localização,
+usando a revisão realmente produzida pelo worker, inclusive hashes válidos para
+o retry equivalente e para a identidade conflitante.
+
 ---
 
 # Parte A — Localização
@@ -60,6 +114,20 @@ draft
 → reviewing
 → ready | failed | blocked
 ```
+
+O vocabulário acima descreve as etapas internas observáveis do processamento,
+não uma segunda máquina de estados pública. A persistência usa os estados
+externos mais estáveis `draft`, `translating`, `audio`, `visual`, `review`,
+`approved`, `failed`, `blocked`, `stale` e `cancelled`; o campo `stage` detalha
+em qual etapa interna uma variante ativa está. Somente serviços e workers
+autorizados avançam `stage` a partir de evidência persistida. Um cliente não
+pode declarar tradução, áudio, alinhamento, compilação ou render concluídos no
+corpo de uma ação.
+
+`ready` no diagrama corresponde a `approved` no contrato público. Uma nova
+versão canônica não reescreve silenciosamente variantes existentes: a variante
+passa a `stale` e exige rebase explícito, com fence de revisão, antes de voltar
+ao fluxo.
 
 ## 5. Canonical ScriptBlocks
 

@@ -111,7 +111,7 @@ Os IDs de output na operacao de ingest, proxy e export final sao reservas determ
 | 10.1 | WorkspaceMember | Workspace | table | V2WorkspaceMember | identity membership; workspaceId+identityId |
 | 10.1 | WorkspaceBrandKit | Workspace | planned | gap: brand kit aggregate beyond LUTs | workspace versioned policy |
 | 10.1 | WorkspaceGuardrails | Workspace | planned | gap: workspace guardrail snapshot | immutable policy version |
-| 10.1 | LocaleProfile | Workspace | value-object | src/v2/domain/localization.ts#LocaleProfile | workspace+locale+version |
+| 10.1 | LocaleProfile | Workspace | value-object | src/v2/application/ports/localization-repository.ts#LocalizationProfileSnapshot | PARTIAL persisted policy snapshot in V2LocalizationProfile: target locale, market and allowed modes only; not the full glossary/legal LocaleProfile required by F5.006 |
 | 10.1 | DeliveryProfile | Workspace | planned | gap: reusable delivery profile | workspace+profile+version |
 | 10.2 | Project | Project | table | V2Project | workspace child; id |
 | 10.2 | ProjectVersion | Project | table | V2ProjectVersion | immutable version; projectId+id |
