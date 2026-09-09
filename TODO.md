@@ -1969,8 +1969,20 @@ worker/PG e golden FFmpeg. O runtime localizado comprovado é somente
 `subtitles-only` com uma identidade, um clip e `rate=1`; timeline editada e os
 modos voz local/upload/TTS/avatar/lip-sync continuam abertos. Word timing exato
 existe para a fonte; cues traduzidos são estimativas por bloco. Beats são
-medidos, downbeats não e sections são heurísticas. Não houve aceite visual nem
-deploy; o progresso auditado permanece 380/1.259 e nenhuma caixa abaixo muda.
+medidos, downbeats não e sections são heurísticas. O release de 09/09/2026,
+commit `38caac72`, passou a CI de `main` `34355055776`, um lote integrado de
+15/15 suítes reais sem skips e foi implantado com app e oito workers saudáveis,
+sem reinícios, sobre 212 migrations. Essas provas controladas não constituem
+aceite visual/browser nem fecham F3, F4 ou F5; o progresso auditado permanece
+380/1.259 e nenhuma caixa abaixo muda.
+
+> O diagnóstico público no Chrome 151 autenticou, listou projetos/workspace,
+> abriu o card e carregou mídia 1080×1920 de 79,733333 s (`readyState=4`), mas
+> não exerceu play/pause. A leitura de annotations retornou HTTP 409
+> `PERSISTENCE_CONFLICT`: nove linhas históricas não possuem os campos de
+> auditoria hoje obrigatórios, duas na versão atual, com referências preservadas.
+> O resultado é inconclusivo e o aceite de interface permanece bloqueado; não se
+> apagou histórico, não se fabricou autor e nenhuma caixa muda por essa prova.
 
 ### F5.001 — Music-led montage [FR-094]
 

@@ -470,8 +470,16 @@ downbeats não medidos e sections heurísticas. O preflight pago é fail-closed 
 vincula `maxOutputTokens`, custo máximo, ator e rights atuais. A baseline de
 contrato aprovou uma expansão estritamente aditiva de 20 capabilities e 29
 schemas: os 349 objetos públicos de capability e os 609 objetos públicos de
-schema anteriores permaneceram deep-identical. Esta evidência não equivale a
-aceite, deploy ou gate F5.
+schema anteriores permaneceram deep-identical. O release de 09/09/2026,
+`38caac72`, passou a CI de `main` `34355055776`, 15/15 suítes integradas reais
+sem skips e foi implantado com app e oito workers saudáveis, zero reinícios e
+212 migrations. Isso comprova a implantação do slice controlado, não aceite
+visual/browser nem o gate F5. No Chrome 151, login, leituras, card e mídia
+carregada passaram, mas play/pause não foi testado e `GET annotations` retornou
+HTTP 409 `PERSISTENCE_CONFLICT`: nove registros históricos não possuem os campos
+de auditoria atuais, dois na versão corrente, com referências preservadas. O
+diagnóstico é inconclusivo e o aceite permanece bloqueado sem apagar histórico,
+fabricar autor ou remover guardas.
 | FR-194 | LocaleProfile | S8 | D0,D7,D9 | glossary/CTA/font/RTL | integration |
 | FR-195 | Assets localizáveis | S3,S8 | D1,D2,D9 | OCR decide share/localize/reject | eval |
 | FR-196 | Crítico de localização | S1,S8 | D2,D9 | fidelity/pronunciation/lips/subtitle | eval |

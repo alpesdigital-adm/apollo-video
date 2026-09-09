@@ -1897,9 +1897,21 @@ uma fonte/identidade, um clip e `rate=1`. Voz local, upload, TTS, avatar,
 lip-sync e remapeamento de timeline editada permanecem abertos. Timing de fonte
 usa word alignment exato; cues traduzidos são estimativas proporcionais por
 bloco, não alignment medido. A análise/montagem musical passou por API, worker,
-PostgreSQL e FFmpeg real, porém downbeats não são medidos, sections são
-heurísticas e não houve aceite visual ou deploy. Nenhum requisito F5 é dado
-como concluído por esta nota.
+PostgreSQL e FFmpeg real, porém downbeats não são medidos e sections são
+heurísticas. O release de 09/09/2026, commit `38caac72`, passou a CI de `main`
+`34355055776`, um lote integrado de 15/15 suítes reais sem skips e foi
+implantado com app e oito workers saudáveis, sem reinícios, sobre 212
+migrations. A implantação dessas provas controladas não é aceite visual/browser
+nem demonstra os modos ainda abertos. Nenhum requisito F5 é dado como concluído
+por esta nota.
+
+O diagnóstico público no Chrome 151 aprovou login, leituras de projeto/workspace,
+abertura do card e carregamento da mídia (`readyState=4`), mas não testou
+play/pause. `GET annotations` retornou HTTP 409 `PERSISTENCE_CONFLICT` por nove
+registros históricos sem os campos de auditoria atuais, dois na versão corrente
+e ainda referenciados. O aceite de interface fica bloqueado até recuperar ou
+reemitir esse histórico com autoria rastreável e então provar o fluxo completo;
+nenhum registro ou guarda deve ser removido para mascarar o conflito.
 
 TTS/voice clone autorizado, voz local ou áudio traduzido enviado.
 

@@ -25,8 +25,9 @@ A análise musical possui API, worker durável, PostgreSQL e PCM/FFmpeg reais,
 com cache acústico autorizado pelo snapshot de rights atual. Beats são medidos;
 `downbeat-candidate` não é um downbeat medido e sections são heurísticas. A
 publicação atômica do plano de montagem passou em PostgreSQL e o golden de banda
-usa FFmpeg real, mas isso não constitui aceite visual, deploy nem conclusão de
-music-led/audio direction.
+usa FFmpeg real. Na prova local descrita abaixo isso ainda não constituía
+implantação, e a implantação posterior do slice controlado continua sem
+constituir aceite visual/browser ou conclusão de music-led/audio direction.
 
 ### Evidência local de integração — 2026-09-09
 
@@ -48,8 +49,29 @@ music-led/audio direction.
   verificar e reiniciar o cluster local supervisionado.
 
 O provider de tradução foi testado com HTTP controlado, sem chamadas pagas.
-Storage local content-addressed, não MinIO, nesta prova. Main, VPS e produção
-não foram alterados; nenhuma caixa do TODO foi fechada por esta evidência.
+Storage local content-addressed, não MinIO, nesta prova. Durante esta execução
+local, main, VPS e produção não foram alterados; nenhuma caixa do TODO foi
+fechada por esta evidência.
+
+### Evidência de release — 2026-09-09
+
+O commit `38caac72` passou a CI de `main` `34355055776` e um lote integrado de
+15/15 suítes reais sem skips, com zero backends ou recursos órfãos no
+postflight. O release foi implantado sobre 212 migrations; app e oito workers
+ficaram saudáveis, na mesma imagem e com zero reinícios. Essa implantação
+comprova a presença operacional do slice descrito nesta spec, mas não substitui
+aceite visual/browser, provider real ou prova dos modos de áudio e timeline que
+continuam abertos.
+
+O diagnóstico público no Chrome 151 aprovou login, leituras de projeto/workspace,
+abertura do card e carregamento de mídia 1080×1920 de 79,733333 s
+(`readyState=4`, sem erro de mídia). Play/pause não foi testado. A leitura de
+annotations respondeu HTTP 409 `PERSISTENCE_CONFLICT` porque nove registros
+históricos não têm os campos de auditoria atuais, dois deles na versão corrente,
+com três propostas e dois itens de lote ainda referenciando esse histórico. O
+resultado é inconclusivo e o aceite permanece bloqueado. Recuperar ou reemitir
+com autoria rastreável e render atual é trabalho futuro; apagar registros,
+fabricar autor ou remover guardas não é uma correção aceitável.
 
 O harness histórico `prisma-proxy-review.integration.mjs` foi tentado e recusado
 pelo CHECK de progresso da operação: seu fixture não declara o progresso
