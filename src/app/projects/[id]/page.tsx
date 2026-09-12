@@ -7,6 +7,27 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import LogoutButton from '@/components/LogoutButton'
 import TransformationReviewPanel from '@/components/TransformationReviewPanel'
 import type { VisibleState } from '@/v2/domain/visible-state'
+import { createEditorReads, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
+
+/** What the operator is told about a read that failed — never a stack, a body or a token. */
+function describeReviewFailure(failure: ReadFailure): string {
+  switch (failure.kind) {
+    case 'conflict':
+      return failure.code === 'PERSISTENCE_CONFLICT'
+        ? 'As anotações armazenadas não puderam ser validadas (registro sem auditoria de credencial). Nenhuma anotação é exibida e as ações que dependem desta revisão ficam bloqueadas até a correção dos registros.'
+        : 'A revisão está em conflito com o estado atual do projeto. Recarregue quando o conflito for resolvido.'
+    case 'rate-limited':
+      return 'O servidor pediu uma pausa nas leituras deste projeto. A revisão volta a carregar quando a espera terminar.'
+    case 'forbidden':
+      return 'Esta sessão não tem permissão para abrir a revisão deste projeto.'
+    case 'not-found':
+      return 'A revisão não foi encontrada neste contexto.'
+    case 'auth':
+      return 'A sessão expirou. Entre novamente para continuar.'
+    default:
+      return failure.message
+  }
+}
 import {
   STRATEGIC_OBJECTIVES,
   type StrategicObjectiveId,
@@ -1158,6 +1179,38 @@ export default function ProjectWorkspacePage() {
   const [compareOverlayOpacity, setCompareOverlayOpacity] = useState(0.5)
   const [compareBusy, setCompareBusy] = useState(false)
   const [proxyReview, setProxyReview] = useState<ProxyReviewData | null>(null)
+  // Structured read failures for the review surface. A 409 on the annotations
+  // read is not an empty list and not a dismissable notice: it stays on screen,
+  // names the part that is unavailable, and blocks every action that depends on
+  // that review, while the already-authorised preview stays inspectable.
+  const [reviewFailure, setReviewFailure] = useState<ReadFailure | null>(null)
+  const [proxyReviewFailure, setProxyReviewFailure] = useState<ReadFailure | null>(null)
+  const uploadPhaseRef = useRef<string>('idle')
+  const reviewFailureRef = useRef<ReadFailure | null>(null)
+  // One read coordinator per mounted editor: identical GETs in flight share one
+  // request, a response that arrives after the project or the session changed
+  // is dropped, 401 closes it, and a 429 wait is honoured for every caller.
+  // The scope is the project and the session, deliberately not the version:
+  // the mount-time reads are issued before the version is known, and a scope
+  // change aborts everything in flight. Version identity travels in each
+  // version-bound descriptor instead, and the review loaders keep their own
+  // "which version did I ask for" guard below.
+  const readsRef = useRef<EditorReads | null>(null)
+  if (!readsRef.current) {
+    readsRef.current = createEditorReads({
+      fetch: (url, init) => fetch(url, init),
+      now: () => Date.now(),
+      setTimeout: (handler, ms) => window.setTimeout(handler, ms),
+      clearTimeout: (handle) => window.clearTimeout(handle),
+      isDocumentHidden: () => typeof document !== 'undefined' && document.hidden,
+    })
+  }
+  const reads = readsRef.current
+  const sessionEpochRef = useRef(1)
+  const requestedReviewVersionRef = useRef<string | undefined>(undefined)
+  const activeOperationTerminalRef = useRef(true)
+  const reviewRetryReadyAtRef = useRef<number>(0)
+  const [reviewRetryWaitMs, setReviewRetryWaitMs] = useState(0)
   const [proxyReviewBusy, setProxyReviewBusy] = useState(false)
   const [sourceDeconstructions, setSourceDeconstructions] = useState<SourceDeconstructionReportData[]>([])
   const [selectedSourceDeconstructionId, setSelectedSourceDeconstructionId] = useState<string | null>(null)
@@ -1211,26 +1264,27 @@ export default function ProjectWorkspacePage() {
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
       const encodedProjectId = encodeURIComponent(projectId)
-      const [response, policyResponse] = await Promise.all([
-        fetch(`/v1/projects/${encodedProjectId}/workspace`, { headers: { accept: 'application/json' }, cache: 'no-store' }),
-        fetch(`/v1/projects/${encodedProjectId}/policy-overrides`, { headers: { accept: 'application/json' }, cache: 'no-store' }),
+      const [workspaceRead, policyRead] = await Promise.all([
+        reads.read<WorkspaceData>({ name: 'workspace', url: `/v1/projects/${encodedProjectId}/workspace` }),
+        reads.read<ProjectPolicyOverridesData>({ name: 'policy-overrides', url: `/v1/projects/${encodedProjectId}/policy-overrides` }),
       ])
-      if (response.status === 401) { router.replace('/login'); return }
-      if (policyResponse.status === 401) { router.replace('/login'); return }
-      const payload = await response.json() as ApiEnvelope<WorkspaceData>
-      const policyPayload = await policyResponse.json() as ApiEnvelope<ProjectPolicyOverridesData>
-      if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível carregar o workspace.'))
-      if (!policyResponse.ok || !policyPayload.data) throw new Error(apiError(policyPayload, 'Não foi possível carregar a política do projeto.'))
-      setWorkspace(payload.data)
-      setProjectPolicy(policyPayload.data)
-      const latest = payload.data.operations[0]
+      for (const result of [workspaceRead, policyRead]) {
+        if (result.ok) continue
+        if (result.failure.dropped) return
+        if (result.failure.kind === 'auth') { router.replace('/login'); return }
+        throw new Error(result.failure.message)
+      }
+      if (!workspaceRead.ok || !policyRead.ok) return
+      setWorkspace(workspaceRead.data)
+      setProjectPolicy(policyRead.data)
+      const latest = workspaceRead.data.operations[0]
       if (latest?.type === 'media-ingest' && latest.status === 'succeeded') {
         const pending = pendingUpload.current
         if (pending) window.localStorage.removeItem(`apollo:v2:upload:${projectId}:${pending.checksum}`)
         pendingUpload.current = null
         setUploadPhase('done'); setUploadProgress(100)
       }
-      else if (latest?.type === 'media-ingest' && latest.status === 'failed' && !['hashing', 'uploading', 'verifying'].includes(uploadPhase)) {
+      else if (latest?.type === 'media-ingest' && latest.status === 'failed' && !['hashing', 'uploading', 'verifying'].includes(uploadPhaseRef.current)) {
         const pending = pendingUpload.current
         if (pending) window.localStorage.removeItem(`apollo:v2:upload:${projectId}:${pending.checksum}`)
         pendingUpload.current = null
@@ -1238,7 +1292,7 @@ export default function ProjectWorkspacePage() {
         setUploadLabel(latest.error?.message ?? 'A ingestão falhou. A mídia pode ser enviada novamente após o ajuste.')
         setNotice(latest.error?.message ?? 'A ingestão falhou. Revise o arquivo e tente novamente.')
       }
-      else if (latest?.type === 'media-ingest' && ['queued', 'running', 'waiting', 'retrying'].includes(latest.status) && !['uploading', 'hashing', 'paused', 'verifying'].includes(uploadPhase)) {
+      else if (latest?.type === 'media-ingest' && ['queued', 'running', 'waiting', 'retrying'].includes(latest.status) && !['uploading', 'hashing', 'paused', 'verifying'].includes(uploadPhaseRef.current)) {
         setUploadPhase('processing')
         const completed = latest.progress?.completed ?? 0
         const total = latest.progress?.total ?? 6
@@ -1249,7 +1303,7 @@ export default function ProjectWorkspacePage() {
     } finally {
       if (!quiet) setLoading(false)
     }
-  }, [projectId, router, uploadPhase])
+  }, [projectId, reads, router])
 
   const loadManualTimeline = useCallback(async (quiet = false) => {
     try {
@@ -1278,6 +1332,34 @@ export default function ProjectWorkspacePage() {
     }
   }, [projectId, router])
 
+  useEffect(() => { uploadPhaseRef.current = uploadPhase }, [uploadPhase])
+  useEffect(() => {
+    reads.setScope({ projectId, sessionEpoch: sessionEpochRef.current })
+  }, [projectId, reads])
+  useEffect(() => () => reads.abortAll(), [reads])
+  useEffect(() => {
+    // Observable by the browser E2E: issued / deduplicated / dropped per read.
+    const target = window as typeof window & { __apolloEditorReads?: () => Record<string, unknown> }
+    target.__apolloEditorReads = () => reads.snapshot()
+    return () => { delete target.__apolloEditorReads }
+  }, [reads])
+  useEffect(() => {
+    reviewFailureRef.current = reviewFailure
+    if (reviewFailure?.kind === 'rate-limited' && reviewFailure.retryAfterMs) {
+      // The server's wait is the floor: the retry control opens only after it,
+      // and the automatic reads below honour the same instant.
+      reviewRetryReadyAtRef.current = Math.max(reviewRetryReadyAtRef.current, Date.now() + reviewFailure.retryAfterMs)
+    }
+    const remaining = Math.max(0, reviewRetryReadyAtRef.current - Date.now())
+    setReviewRetryWaitMs(remaining)
+    if (remaining === 0) return
+    const timer = window.setInterval(() => {
+      const left = Math.max(0, reviewRetryReadyAtRef.current - Date.now())
+      setReviewRetryWaitMs(left)
+      if (left === 0) window.clearInterval(timer)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [reviewFailure])
   useEffect(() => { void loadWorkspace() }, [loadWorkspace])
   const loadSourceDeconstructions = useCallback(async (quiet = false) => {
     if (!quiet) setSourceDeconstructionLoading(true)
@@ -1362,24 +1444,16 @@ export default function ProjectWorkspacePage() {
   const loadSourceCleanups = useCallback(async (quiet = false) => {
     if (!quiet) setSourceCleanupsLoading(true)
     try {
-      const response = await fetch(
-        `/v1/projects/${encodeURIComponent(projectId)}/source-cleanups?limit=100`,
-        { headers: { accept: 'application/json' }, cache: 'no-store' },
-      )
-      if (response.status === 401) {
-        router.replace('/login')
-        return
+      const result = await reads.read<{ cleanups: SourceCleanupData[] }>({
+        name: 'source-cleanups',
+        url: `/v1/projects/${encodeURIComponent(projectId)}/source-cleanups?limit=100`,
+      })
+      if (!result.ok) {
+        if (result.failure.dropped) return
+        if (result.failure.kind === 'auth') { router.replace('/login'); return }
+        throw new Error(result.failure.message)
       }
-      const payload = await response.json() as ApiEnvelope<{
-        cleanups: SourceCleanupData[]
-      }>
-      if (!response.ok || !payload.data) {
-        throw new Error(apiError(
-          payload,
-          'Não foi possível carregar as decisões de limpeza da fonte.',
-        ))
-      }
-      setSourceCleanups(payload.data.cleanups)
+      setSourceCleanups(result.data.cleanups)
     } catch (error) {
       if (!quiet) {
         setNotice(error instanceof Error
@@ -1389,7 +1463,7 @@ export default function ProjectWorkspacePage() {
     } finally {
       if (!quiet) setSourceCleanupsLoading(false)
     }
-  }, [projectId, router])
+  }, [projectId, reads, router])
 
   useEffect(() => {
     void loadSourceCleanups()
@@ -1648,69 +1722,103 @@ export default function ProjectWorkspacePage() {
   }, [loadManualTimeline, workspace?.editPlan?.state, workspace?.version])
 
   const loadReview = useCallback(async (quiet = false, projectVersionId?: string) => {
+    void quiet
+    if (reviewRetryReadyAtRef.current > Date.now()) return false
+    requestedReviewVersionRef.current = projectVersionId
     try {
       const query = new URLSearchParams({ limit: '50' })
       if (projectVersionId) query.set('projectVersionId', projectVersionId)
-      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/annotations?${query.toString()}`, {
-        headers: { accept: 'application/json' },
-        cache: 'no-store',
+      const result = await reads.read<ProjectReviewData>({
+        name: 'annotations',
+        url: `/v1/projects/${encodeURIComponent(projectId)}/annotations?${query.toString()}`,
+        versionId: projectVersionId,
+        query: query.toString(),
       })
-      if (response.status === 401) { router.replace('/login'); return }
-      const payload = await response.json() as ApiEnvelope<ProjectReviewData>
-      if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível abrir a revisão deste projeto.'))
-      selectedReviewVersionId.current = payload.data.session.projectVersionId
-      setReview(payload.data)
+      // A newer request for another version supersedes this one: its answer is
+      // not allowed to overwrite what the operator is looking at now.
+      if (requestedReviewVersionRef.current !== projectVersionId) return false
+      if (!result.ok) {
+        if (result.failure.dropped) return false
+        if (result.failure.kind === 'auth') { router.replace('/login'); return }
+        // The failure is kept as data, never folded into an empty review: a 409
+        // PERSISTENCE_CONFLICT means stored annotations could not be hydrated,
+        // and rendering nothing in their place would read as "no annotations".
+        setReviewFailure(result.failure)
+        return false
+      }
+      selectedReviewVersionId.current = result.data.session.projectVersionId
+      setReviewFailure(null)
+      setReview(result.data)
       return true
     } catch (error) {
-      if (!quiet && workspace?.media.length) setNotice(error instanceof Error ? error.message : 'Não foi possível abrir a revisão deste projeto.')
+      setReviewFailure({ kind: 'error', status: 0, message: error instanceof Error ? error.message : 'Não foi possível abrir a revisão deste projeto.' })
       return false
     }
-  }, [projectId, router, workspace?.media.length])
+  }, [projectId, reads, router])
 
   const loadProxyReview = useCallback(async (quiet = false, projectVersionId?: string) => {
+    void quiet
     try {
       const query = new URLSearchParams()
       if (projectVersionId) query.set('projectVersionId', projectVersionId)
       const suffix = query.size ? `?${query.toString()}` : ''
-      const response = await fetch(
-        `/v1/projects/${encodeURIComponent(projectId)}/proxy-reviews${suffix}`,
-        { headers: { accept: 'application/json' }, cache: 'no-store' },
-      )
-      if (response.status === 401) { router.replace('/login'); return }
-      if (response.status === 404) {
+      const result = await reads.read<{ review: ProxyReviewData }>({
+        name: 'proxy-reviews',
+        url: `/v1/projects/${encodeURIComponent(projectId)}/proxy-reviews${suffix}`,
+        versionId: projectVersionId,
+        query: suffix,
+      })
+      if (!result.ok && result.failure.dropped) return
+      if (!result.ok && result.failure.kind === 'auth') { router.replace('/login'); return }
+      if (!result.ok && result.failure.kind === 'not-found') {
+        // The API answers PROJECT_NOT_FOUND both for "no proxy review yet" and for a
+        // project this session cannot see, so the code alone cannot tell them apart.
+        // This loader only runs after the workspace read of the same project succeeded
+        // in this session (see the effect below), which is what makes 404 here mean
+        // "no report for this version" rather than "nothing to show".
         setProxyReview(null)
+        setProxyReviewFailure(null)
         return
       }
-      const payload = await response.json() as ApiEnvelope<{ review: ProxyReviewData }>
-      if (!response.ok || !payload.data?.review) {
-        throw new Error(apiError(payload, 'Não foi possível carregar o laudo do proxy.'))
+      if (!result.ok) {
+        setProxyReviewFailure(result.failure)
+        return
       }
-      setProxyReview(payload.data.review)
+      setProxyReviewFailure(null)
+      setProxyReview(result.data.review)
     } catch (error) {
-      if (!quiet) {
-        setNotice(error instanceof Error ? error.message : 'Não foi possível carregar o laudo do proxy.')
-      }
+      setProxyReviewFailure({ kind: 'error', status: 0, message: error instanceof Error ? error.message : 'Não foi possível carregar o laudo do proxy.' })
     }
-  }, [projectId, router])
+  }, [projectId, reads, router])
 
+  const workspaceVersionId = workspace?.version?.id
+  const workspaceHasMedia = (workspace?.media.length ?? 0) > 0
   useEffect(() => {
-    if (!workspace?.version || workspace.media.length === 0) return
-    void loadReview()
-    void loadProxyReview(true, workspace.version.id)
-  }, [loadProxyReview, loadReview, workspace?.media.length, workspace?.version])
+    if (!workspaceVersionId || !workspaceHasMedia) return
+    void loadReview(false, workspaceVersionId)
+    void loadProxyReview(true, workspaceVersionId)
+  }, [loadProxyReview, loadReview, workspaceVersionId, workspaceHasMedia])
 
   const activeOperation = workspace?.operations[0]
   const operationActive = Boolean(activeOperation && !activeOperation.visibleState.terminal)
+  const activeOperationId = activeOperation?.id
+  const activeOperationTerminal = activeOperation?.visibleState.terminal ?? true
+  activeOperationTerminalRef.current = activeOperationTerminal
   useEffect(() => {
-    if (!activeOperation || activeOperation.visibleState.terminal) return
-    const timer = window.setInterval(() => {
-      void loadWorkspace(true)
-      void loadReview(true, selectedReviewVersionId.current ?? undefined)
-      void loadProxyReview(true, workspace?.version?.id)
-      void loadSourceCleanups(true)
-    }, 2500)
-    return () => window.clearInterval(timer)
-  }, [activeOperation, loadProxyReview, loadReview, loadSourceCleanups, loadWorkspace, workspace?.version?.id])
+    if (!activeOperationId || activeOperationTerminal) return
+    // One round at a time: the next tick is scheduled only after every read of
+    // the previous one settled, so a slow server never stacks rounds, and the
+    // coordinator pauses the cycle while the tab is hidden.
+    const handle = reads.poll(async () => {
+      await Promise.all([
+        loadWorkspace(true),
+        loadReview(true, selectedReviewVersionId.current ?? undefined),
+        loadProxyReview(true, workspaceVersionId),
+        loadSourceCleanups(true),
+      ])
+    }, { intervalMs: 2500, isTerminal: () => activeOperationTerminalRef.current })
+    return () => handle.stop()
+  }, [activeOperationId, activeOperationTerminal, loadProxyReview, loadReview, loadSourceCleanups, loadWorkspace, reads, workspaceVersionId])
 
   const finalOutput = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'final-output'), [workspace])
   const editingProxy = useMemo(() => {
@@ -2451,7 +2559,7 @@ export default function ProjectWorkspacePage() {
   }
 
   function beginReviewMark(event: ReactPointerEvent<HTMLDivElement>): void {
-    if (reviewMode !== 'marking' || review?.session.stale) return
+    if (reviewMode !== 'marking' || review?.session.stale || reviewFailureRef.current) return
     previewVideo.current?.pause()
     const point = normalizedReviewPoint(event)
     reviewPointerStart.current = point
@@ -2503,7 +2611,7 @@ export default function ProjectWorkspacePage() {
 
   function startReview(): void {
     const video = previewVideo.current
-    if (!video || !review || review.session.stale) return
+    if (!video || !review || review.session.stale || reviewFailureRef.current) return
     video.pause()
     readPreviewPosition()
     setReviewText('')
@@ -2546,7 +2654,7 @@ export default function ProjectWorkspacePage() {
 
   async function saveReviewAnnotation(): Promise<void> {
     const video = previewVideo.current
-    if (!review || !video || !reviewText.trim() || review.session.stale) return
+    if (!review || !video || !reviewText.trim() || review.session.stale || reviewFailureRef.current) return
     const fps = review.session.fps
     const frame = Math.max(0, Math.min(review.session.durationFrames - 1, Math.round(video.currentTime * fps)))
     const pointTimeMs = Math.round(frame / fps * 1000)
@@ -3314,8 +3422,13 @@ export default function ProjectWorkspacePage() {
             <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
               <div>
                 <p className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#716d65]">Laudo do proxy</p>
+                {proxyReviewFailure ? (
+                  <p className="mt-1 font-mono text-[10px] text-[#b7857d]" data-testid="proxy-review-unavailable-code">
+                    {proxyReviewFailure.code ?? `HTTP ${proxyReviewFailure.status}`}{proxyReviewFailure.requestId ? ` · request ${proxyReviewFailure.requestId}` : ''}
+                  </p>
+                ) : null}
                 <p className="mt-1 text-xs font-medium text-[#d8d2c8]">
-                  {!proxyReview ? 'Aguardando materialização' : proxyReview.status === 'blocked' ? 'Correção obrigatória' : proxyReview.status === 'warning-ack-required' ? 'Ressalvas para decidir' : 'Liberado para alta'}
+                  {proxyReviewFailure ? 'Laudo indisponível' : !proxyReview ? 'Sem laudo para esta versão' : proxyReview.status === 'blocked' ? 'Correção obrigatória' : proxyReview.status === 'warning-ack-required' ? 'Ressalvas para decidir' : 'Liberado para alta'}
                 </p>
               </div>
               <span
@@ -3914,6 +4027,31 @@ export default function ProjectWorkspacePage() {
             </section>
           ) : null}
 
+          {reviewFailure ? (
+            <section
+              className="mt-5 border-l-2 border-[#d46f63] bg-[#d46f63]/[0.06] px-4 py-3 text-xs leading-5 text-[#d99288]"
+              data-testid="review-unavailable"
+              aria-live="polite"
+            >
+              <p className="font-semibold text-[#e7a59b]">
+                Revisão indisponível{workspaceHasMedia ? ' — a mídia já autorizada continua inspecionável abaixo' : ''}.
+              </p>
+              <p className="mt-1">{describeReviewFailure(reviewFailure)}</p>
+              <p className="mt-1 font-mono text-[10px] text-[#b7857d]" data-testid="review-unavailable-code">
+                {reviewFailure.code ?? `HTTP ${reviewFailure.status}`}{reviewFailure.requestId ? ` · request ${reviewFailure.requestId}` : ''}
+              </p>
+              <button
+                type="button"
+                data-testid="review-retry"
+                disabled={reviewRetryWaitMs > 0}
+                onClick={() => { void loadReview(false, workspaceVersionId) }}
+                className="mt-2 rounded-lg border border-[#d46f63]/40 px-3 py-1.5 text-[11px] font-semibold text-[#e7a59b] disabled:opacity-50"
+              >
+                {reviewRetryWaitMs > 0 ? `Tentar novamente em ${Math.ceil(reviewRetryWaitMs / 1000)} s` : 'Tentar novamente'}
+              </button>
+            </section>
+          ) : null}
+
           {review ? (
             <section className="mt-5 border-y border-white/[0.08] bg-[#090909] py-5" aria-label="Mesa de revisão editorial">
               <div className="flex flex-wrap items-start justify-between gap-4 px-1">
@@ -4038,7 +4176,7 @@ export default function ProjectWorkspacePage() {
                   </div>
                   <div className="flex flex-col justify-between border-l border-white/[0.07] pl-4">
                     <div><p className="font-mono text-[10px] text-[#d8ad49]">{frameTimecode(previewFrame, review.session.fps)}</p>{selectedReviewElement && reviewElementConfirmed ? <p className="mt-2 text-[9px] font-medium uppercase tracking-[0.1em] text-[#a88842]">{RENDER_ELEMENT_LABELS[selectedReviewElement.type]} · {selectedReviewElement.sceneId}</p> : null}<p className="mt-2 text-[10px] leading-4 text-[#6f6b63]">Versão {review.versions.find((version) => version.id === review.session.projectVersionId)?.sequence ?? '—'} · {reviewGlobal ? `${selectedApplicationScopeOption?.affectedCount ?? 0} alvos declarados` : '1 alvo no formato e idioma atuais'}.</p></div>
-                    <div className="mt-5 flex gap-2"><button className="flex-1 border border-white/[0.09] px-3 py-2 text-[10px] text-[#8b867d] hover:text-white" onClick={cancelReview} type="button">Cancelar</button><button className="flex-1 bg-[#dbae3f] px-3 py-2 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-save" disabled={reviewSaving || !reviewText.trim() || !selectedApplicationScopeOption?.enabled || (reviewGlobal && !reviewGlobalConfirmed) || reviewElementResolution === 'loading' || reviewElementResolution === 'error' || (reviewElementCandidates.length > 1 && !reviewElementConfirmed)} onClick={() => void saveReviewAnnotation()} type="button">{reviewSaving ? 'Salvando…' : 'Registrar'}</button></div>
+                    <div className="mt-5 flex gap-2"><button className="flex-1 border border-white/[0.09] px-3 py-2 text-[10px] text-[#8b867d] hover:text-white" onClick={cancelReview} type="button">Cancelar</button><button className="flex-1 bg-[#dbae3f] px-3 py-2 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-save" disabled={reviewFailure !== null || reviewSaving || !reviewText.trim() || !selectedApplicationScopeOption?.enabled || (reviewGlobal && !reviewGlobalConfirmed) || reviewElementResolution === 'loading' || reviewElementResolution === 'error' || (reviewElementCandidates.length > 1 && !reviewElementConfirmed)} onClick={() => void saveReviewAnnotation()} type="button">{reviewSaving ? 'Salvando…' : 'Registrar'}</button></div>
                   </div>
                 </div>
               ) : null}
@@ -4050,7 +4188,7 @@ export default function ProjectWorkspacePage() {
                     <div className="flex items-center gap-3"><span className="grid h-6 w-6 place-items-center rounded-full border border-[#bd8f29]/40 font-mono text-[9px] text-[#e0b852]">{reviewBatchSelection.length}</span><div><p className="text-[9px] font-medium text-[#c5bdaf]">Ajustes selecionados</p><p className="mt-0.5 text-[8px] text-[#666056]">O lote padrão é integral: conflito não altera nenhuma annotation.</p></div></div>
                     <div className="flex flex-wrap gap-2">
                       <button className="border border-white/[0.1] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#a8802f]/50 hover:text-[#dfb752] disabled:opacity-30" disabled={reviewPatchBatchLoading || reviewBatchSelection.length < 2} onClick={() => void prepareReviewPatchBatch('partial-retry')} type="button">Separar conflitos</button>
-                      <button className="bg-[#dbae3f] px-3 py-2 text-[9px] font-bold text-[#171207] disabled:opacity-30" data-testid="review-batch-prepare" disabled={reviewPatchBatchLoading || reviewBatchSelection.length < 2} onClick={() => void prepareReviewPatchBatch('all-or-nothing')} type="button">{reviewPatchBatchLoading ? 'Compilando…' : 'Preparar lote'}</button>
+                      <button className="bg-[#dbae3f] px-3 py-2 text-[9px] font-bold text-[#171207] disabled:opacity-30" data-testid="review-batch-prepare" disabled={reviewFailure !== null || reviewPatchBatchLoading || reviewBatchSelection.length < 2} onClick={() => void prepareReviewPatchBatch('all-or-nothing')} type="button">{reviewPatchBatchLoading ? 'Compilando…' : 'Preparar lote'}</button>
                     </div>
                   </div>
                 ) : null}
@@ -4090,7 +4228,7 @@ export default function ProjectWorkspacePage() {
                     {reviewPatch.impact ? (
                       <div className="grid border-t border-white/[0.07] sm:grid-cols-[1fr_auto]">
                         <div className="px-4 py-4"><div className="flex flex-wrap gap-x-5 gap-y-2 text-[9px]"><span className="text-[#777168]">Custo <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatch.impact.cost}¢</strong></span><span className="text-[#777168]">Ranges <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatch.impact.invalidatedRanges.length}</strong></span><span className="text-[#777168]">Invalida <strong className="ml-1 font-medium text-[#c7c0b5]">{reviewPatch.impact.invalidatedArtifacts.join(' + ')}</strong></span><span className="text-[#777168]">Delta esperado <strong className="ml-1 font-mono font-medium text-[#6db886]">+{reviewPatch.impact.expectedScoreDelta}</strong></span></div><p className="mt-3 truncate font-mono text-[9px] text-[#6b665e]">{reviewPatch.impact.changedTargets.join(', ')}</p></div>
-                        {reviewPatch.status === 'ready' ? <div className="flex items-center border-t border-white/[0.07] px-4 py-3 sm:border-l sm:border-t-0"><button className="bg-[#dbae3f] px-4 py-2.5 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-patch-apply" disabled={reviewPatchApplying} onClick={() => void applyReviewPatch()} type="button">{reviewPatchApplying ? 'Criando versão…' : 'Confirmar e criar versão'}</button></div> : null}
+                        {reviewPatch.status === 'ready' ? <div className="flex items-center border-t border-white/[0.07] px-4 py-3 sm:border-l sm:border-t-0"><button className="bg-[#dbae3f] px-4 py-2.5 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-patch-apply" disabled={reviewFailure !== null || reviewPatchApplying} onClick={() => void applyReviewPatch()} type="button">{reviewPatchApplying ? 'Criando versão…' : 'Confirmar e criar versão'}</button></div> : null}
                       </div>
                     ) : null}
                     {reviewPatch.status === 'applied' && reviewPatch.comparison ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#4e9568]/20 bg-[#4e9568]/[0.04] px-4 py-3" data-testid="review-patch-comparison"><p className="text-[9px] text-[#7ca88b]">Versão imutável criada · <span className="font-mono">{reviewPatch.comparison.beforeVersionId.slice(-8)} → {reviewPatch.comparison.afterVersionId.slice(-8)}</span></p><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f9a7c]">Render {reviewPatch.render?.status ?? 'queued'}</span></div> : null}
@@ -4112,7 +4250,7 @@ export default function ProjectWorkspacePage() {
                     {reviewPatchBatch.impact ? (
                       <div className="grid border-t border-white/[0.07] sm:grid-cols-[1fr_auto]">
                         <div className="px-4 py-4"><div className="flex flex-wrap gap-x-5 gap-y-2 text-[9px]"><span className="text-[#777168]">Operações <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatchBatch.impact.operationCount}</strong></span><span className="text-[#777168]">Custo <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatchBatch.impact.cost}¢</strong></span><span className="text-[#777168]">Ranges <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatchBatch.impact.invalidatedRanges.length}</strong></span><span className="text-[#777168]">Delta <strong className="ml-1 font-mono font-medium text-[#6db886]">+{reviewPatchBatch.impact.expectedScoreDelta}</strong></span></div><p className="mt-3 text-[9px] leading-4 text-[#6b665e]">{reviewPatchBatch.mode === 'all-or-nothing' ? 'Transação integral: qualquer mudança concorrente reverte o lote inteiro.' : 'Retry parcial explícito: itens conflitantes permanecem abertos.'}</p></div>
-                        {['ready', 'partial'].includes(reviewPatchBatch.status) ? <div className="flex items-center border-t border-white/[0.07] px-4 py-3 sm:border-l sm:border-t-0"><button className="bg-[#dbae3f] px-4 py-2.5 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-batch-apply" disabled={reviewPatchBatchApplying} onClick={() => void applyReviewPatchBatch()} type="button">{reviewPatchBatchApplying ? 'Criando versão…' : 'Confirmar lote'}</button></div> : null}
+                        {['ready', 'partial'].includes(reviewPatchBatch.status) ? <div className="flex items-center border-t border-white/[0.07] px-4 py-3 sm:border-l sm:border-t-0"><button className="bg-[#dbae3f] px-4 py-2.5 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-batch-apply" disabled={reviewFailure !== null || reviewPatchBatchApplying} onClick={() => void applyReviewPatchBatch()} type="button">{reviewPatchBatchApplying ? 'Criando versão…' : 'Confirmar lote'}</button></div> : null}
                       </div>
                     ) : <div className="border-t border-[#b05d56]/20 bg-[#b05d56]/[0.04] px-4 py-3"><p className="text-[9px] leading-4 text-[#bd716a]">Nenhuma alteração foi aplicada. Separe os conflitos para gerar um lote parcial explícito.</p></div>}
                     {reviewPatchBatch.status === 'applied' && reviewPatchBatch.comparison ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#4e9568]/20 bg-[#4e9568]/[0.04] px-4 py-3"><p className="text-[9px] text-[#7ca88b]">Versão imutável criada · <span className="font-mono">{reviewPatchBatch.comparison.beforeVersionId.slice(-8)} → {reviewPatchBatch.comparison.afterVersionId.slice(-8)}</span></p><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f9a7c]">Render {reviewPatchBatch.render?.status ?? 'queued'}</span></div> : null}
