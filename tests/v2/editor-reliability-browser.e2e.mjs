@@ -132,8 +132,10 @@ async function stopChild(child) {
 function createRecorder(baseUrl, tokens) {
   const entries = []
   const requestPhase = new WeakMap()
+  const pendingRequestsByPhase = new Map()
   const inFlightByPhase = new Map()
   const maxConcurrentByPhase = new Map()
+  const responseObservedByPhase = new Map()
   let active = false
   let label = null
 
@@ -146,6 +148,25 @@ function createRecorder(baseUrl, tokens) {
       return false
     }
   }
+  const diagnostic = (phase = label) => {
+    const inFlight = inFlightByPhase.get(phase) ?? new Map()
+    const pending = [...(pendingRequestsByPhase.get(phase)?.values() ?? [])]
+    const resources = Object.fromEntries(
+      [...new Set(pending.map((item) => item.resourceType))].sort().map((resourceType) => [
+        resourceType,
+        pending.filter((item) => item.resourceType === resourceType).length,
+      ]),
+    )
+    return {
+      phase,
+      pendingCount: pending.length,
+      pendingKeys: [...inFlight.entries()].filter(([, count]) => count > 0).map(([key, count]) => ({ key, count })),
+      pendingResources: resources,
+      responsesObserved: Object.fromEntries(responseObservedByPhase.get(phase) ?? []),
+      maxConcurrent: Object.fromEntries(maxConcurrentByPhase.get(phase) ?? []),
+      entries: entries.filter((entry) => entry.phase === phase),
+    }
+  }
 
   return {
     start(nextLabel) {
@@ -153,6 +174,8 @@ function createRecorder(baseUrl, tokens) {
       active = true
       inFlightByPhase.set(nextLabel, new Map())
       maxConcurrentByPhase.set(nextLabel, new Map())
+      pendingRequestsByPhase.set(nextLabel, new Map())
+      responseObservedByPhase.set(nextLabel, new Map())
     },
     async stop() {
       const stoppedLabel = label
@@ -170,7 +193,11 @@ function createRecorder(baseUrl, tokens) {
       }
       const remaining = [...(inFlightByPhase.get(stoppedLabel)?.values() ?? [])]
         .reduce((sum, count) => sum + count, 0)
-      assert.equal(drained && remaining === 0, true, `phase ${stoppedLabel} did not drain finite API reads`)
+      assert.equal(
+        drained && remaining === 0,
+        true,
+        `phase ${stoppedLabel} did not drain finite API reads: ${JSON.stringify(diagnostic(stoppedLabel))}`,
+      )
       active = false
       const taken = entries.filter((entry) => entry.phase === stoppedLabel)
       const duplicates = [...(maxConcurrentByPhase.get(stoppedLabel)?.entries() ?? [])]
@@ -183,7 +210,9 @@ function createRecorder(baseUrl, tokens) {
         if (!active || !inScope(request.url())) return
         const phase = label
         const key = `${request.method()} ${keyOf(request.url())}`
-        requestPhase.set(request, { phase, key })
+        const captured = { phase, key, resourceType: request.resourceType() }
+        requestPhase.set(request, captured)
+        pendingRequestsByPhase.get(phase).set(request, captured)
         const inFlight = inFlightByPhase.get(phase)
         const maxConcurrent = maxConcurrentByPhase.get(phase)
         const next = (inFlight.get(key) ?? 0) + 1
@@ -196,6 +225,7 @@ function createRecorder(baseUrl, tokens) {
         const inFlight = inFlightByPhase.get(captured.phase)
         const key = captured.key
         inFlight.set(key, Math.max(0, (inFlight.get(key) ?? 1) - 1))
+        pendingRequestsByPhase.get(captured.phase)?.delete(request)
         requestPhase.delete(request)
       })
       page.on('requestfailed', (request) => {
@@ -212,11 +242,14 @@ function createRecorder(baseUrl, tokens) {
           code: request.failure()?.errorText ?? null,
           at: Date.now(),
         })
+        pendingRequestsByPhase.get(captured.phase)?.delete(request)
         requestPhase.delete(request)
       })
       page.on('response', (response) => {
         const captured = requestPhase.get(response.request())
         if (!captured) return
+        const observed = responseObservedByPhase.get(captured.phase)
+        observed.set(captured.key, (observed.get(captured.key) ?? 0) + 1)
         const entry = {
           phase: captured.phase,
           method: response.request().method(),
@@ -239,6 +272,7 @@ function createRecorder(baseUrl, tokens) {
             })
       })
     },
+    diagnostic,
     all: () => entries,
   }
 }
@@ -246,6 +280,13 @@ function createRecorder(baseUrl, tokens) {
 /** Open a project the way an operator does: from the list, by clicking it. */
 async function openProjectCard(page, baseUrl, projectName) {
   await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' })
+  // Opening a project assumes the shell has finished resolving its current
+  // workspace. Waiting for the rendered value/options keeps that finite
+  // `/v1/session` read in this phase instead of aborting it during navigation.
+  await page.waitForFunction(() => {
+    const select = document.querySelector('[data-testid="workspace-selector"] select#workspace-selector')
+    return select instanceof HTMLSelectElement && select.value.trim().length > 0 && select.options.length > 0
+  }, undefined, { timeout: 20_000 })
   const card = page.locator('article').filter({ hasText: projectName }).first()
   await card.waitFor({ state: 'visible', timeout: 20_000 })
   await card.getByRole('button', { name: 'Abrir', exact: true }).click()
@@ -393,7 +434,7 @@ test(
       evidence.findings.push({ strength, name, ...detail })
     }
 
-    let world, proxy, browser, server, testFailure, serverLogs = ''
+    let world, proxy, browser, server, recorder, testFailure, serverLogs = ''
     const cleanupErrors = []
     try {
       await mkdir(artifactRoot, { recursive: true })
@@ -670,7 +711,7 @@ test(
         [conflict.sourceArtifactId, '{artifactId}'],
         [world.workspaceId, '{workspaceId}'],
       ]
-      const recorder = createRecorder(baseUrl, tokens)
+      recorder = createRecorder(baseUrl, tokens)
       recorder.attach(page)
 
       await page.goto(`${baseUrl}/login?next=${encodeURIComponent('/')}`)
@@ -678,14 +719,35 @@ test(
       await page.locator('input[name="password"]').fill(password)
       await page.getByRole('button', { name: 'Entrar no Apollo' }).click()
       await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 })
+      // Retire the authentication document before the measured navigation so
+      // setup requests cannot begin inside the first editor-open phase.
+      await page.goto('about:blank', { waitUntil: 'load' })
 
       // ---------------------------------------------------------------- STEP 1
       const opens = []
+      evidence.browserMediaBeforeDrain = []
       const openWindowStart = Date.now()
       for (const label of ['open-1', 'open-2']) {
         recorder.start(label)
         await openProjectCard(page, baseUrl, clean.name)
         const settled = await waitForEditorSettle(page)
+        const mediaBeforeDrain = await page.getByTestId('project-preview').first().evaluate((video) => ({
+          tagName: video.tagName.toLowerCase(),
+          readyState: video.readyState,
+          networkState: video.networkState,
+          error: video.error ? { code: video.error.code, message: video.error.message } : null,
+          preload: video.preload,
+          paused: video.paused,
+          duration: Number.isFinite(video.duration) ? video.duration : null,
+          currentTime: video.currentTime,
+          buffered: Array.from({ length: video.buffered.length }, (_, index) => ({
+            start: video.buffered.start(index), end: video.buffered.end(index),
+          })),
+          canPlayH264Aac: video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
+          canPlayH264: video.canPlayType('video/mp4; codecs="avc1.42E01E"'),
+          canPlayAac: video.canPlayType('audio/mp4; codecs="mp4a.40.2"'),
+        })).catch((error) => ({ unavailable: error instanceof Error ? error.message : String(error) }))
+        evidence.browserMediaBeforeDrain.push({ label, settled, ...mediaBeforeDrain })
         const inventory = await recorder.stop()
         inventory.settledOn = settled
         inventory.readLedger = await readLedger(page)
@@ -1289,6 +1351,7 @@ test(
       testFailure = error
       evidence.failure = {
         diagnostic: redactDiagnostic(error),
+        recorder: recorder?.diagnostic() ?? null,
         serverLogTail: redactDiagnostic(typeof serverLogs === 'string' ? serverLogs.slice(-12_000) : ''),
         failedAt: new Date().toISOString(),
       }
