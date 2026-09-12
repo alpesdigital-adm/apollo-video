@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 
 import {
   artifactPath,
+  sha256Of,
   binaryDigest,
   colorMetadataFromStream,
   createProjectRow,
@@ -212,6 +213,8 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
       projectId,
       versionId,
       sourceArtifactId: artifactId,
+      sourceManifestId: `manifest-${artifactId}`,
+      colorMetadata: proxy.colorMetadata,
       sourceKey: key,
       sourcePath: destination,
       durationFrames,
@@ -252,6 +255,51 @@ export async function materialiseProxy({
   serverLogs = () => '',
 }) {
   const startedAt = Date.now()
+  // A video render source without an exact colour pipeline compilation is
+  // refused by `enqueueProjectProxyRenderService` with INVALID_RENDER_INPUT
+  // ("Every video render source requires an exact color pipeline compilation").
+  // Compiled here through the published route, over the colorimetry ffprobe
+  // measured — not invented, and not written straight into the table.
+  const stage = (id, kind, enabled, provider, parameters) => ({
+    id,
+    kind,
+    version: 'v1',
+    enabled,
+    output: project.colorMetadata,
+    implementation: {
+      provider,
+      version: 'v1',
+      parameters,
+      parametersHash: sha256Of(Buffer.from(JSON.stringify(parameters))),
+    },
+  })
+  const compiled = await fetch(
+    `${baseUrl}/v1/projects/${encodeURIComponent(project.projectId)}/color-pipeline-compilations`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        'idempotency-key': `${project.projectId}-color-1`,
+      },
+      body: JSON.stringify({
+        sourceArtifactId: project.sourceArtifactId,
+        sourceManifestId: project.sourceManifestId,
+        outputMetadata: project.colorMetadata,
+        stages: [
+          stage('technical-rec709', 'technical', true, 'ffmpeg-zscale', { mode: 'identity' }),
+          stage('match-source', 'match', false, 'apollo-match', { mode: 'bypass' }),
+          stage('creative-none', 'creative-lut', false, 'apollo-lut', { mode: 'none' }),
+          stage('output-rec709', 'output', true, 'ffmpeg-zscale', { dither: true }),
+        ],
+      }),
+    },
+  )
+  if (compiled.status !== 201)
+    throw new Error(
+      `colour pipeline compilation returned ${compiled.status}: ${(await compiled.text()).slice(0, 400)}\n` +
+        `server log tail:\n${serverLogs().slice(-3_000)}`,
+    )
   const response = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(project.projectId)}/proxy-renders`, {
     method: 'POST',
     headers: {
