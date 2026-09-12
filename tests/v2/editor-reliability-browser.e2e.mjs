@@ -249,15 +249,32 @@ async function refusalBlock(page) {
 
 /** The editor has settled when the preview or a refusal is on screen. */
 async function waitForEditorSettle(page) {
-  const preview = page.getByTestId('project-preview')
-  const refusal = page.getByTestId('review-unavailable')
-  const outcome = await Promise.race([
-    preview.waitFor({ state: 'attached', timeout: 30_000 }).then(() => 'preview'),
-    refusal.waitFor({ state: 'attached', timeout: 30_000 }).then(() => 'review-unavailable'),
-  ])
+  // Settle on what the page actually reaches, not on what it ought to reach:
+  // an inventory of a page that refused to mount its preview is still an
+  // inventory, and swallowing it would hide the very state worth measuring.
+  const markers = ['project-preview', 'review-unavailable', 'proxy-review-gate', 'manual-editor']
+  const deadline = Date.now() + 30_000
+  let reached = null
+  while (Date.now() < deadline && reached === null) {
+    for (const marker of markers) {
+      if ((await page.getByTestId(marker).count()) > 0) {
+        reached = marker
+        break
+      }
+    }
+    if (reached === null) await delay(250)
+  }
   // Let the mount-time fan-out land before the inventory is closed.
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
-  return outcome
+  if (reached === null) {
+    const heading = await page
+      .locator('h1, h2')
+      .first()
+      .innerText()
+      .catch(() => '')
+    return `no-marker(${heading.slice(0, 60).replace(/\s+/g, ' ')})`
+  }
+  return reached
 }
 
 test(
@@ -421,6 +438,14 @@ test(
         anomalyFloor: 20,
       }
       record('browser-real', 'page-open-read-cost', evidence.baseline)
+      // Written and printed HERE, not only at the end: a later assertion that
+      // fails must not take the measurement down with it.
+      await writeFile(
+        join(evidenceDir, 'page-open-inventory.json'),
+        `${JSON.stringify({ suffix, baseline: evidence.baseline, phases: evidence.phases }, null, 2)}\n`,
+        'utf8',
+      )
+      console.log(`editor-reliability BASELINE ${JSON.stringify(evidence.baseline)}`)
       await page.screenshot({ path: join(evidenceDir, 'open-2-editor.png'), fullPage: false })
 
       // ---------------------------------------------------------------- STEP 2
