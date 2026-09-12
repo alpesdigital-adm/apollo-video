@@ -70,7 +70,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-232 | Durable jobs | S6 | D4 | restart retoma job idempotente | resilience |
 | FR-233 | Partial invalidation | S2 | D3,D4 | mudança local enfileira só dependentes | integration |
 | FR-234 | Props/manifest | S2 | D3,D5 | manifest reproduz RenderInput | golden |
-| FR-236 | Estados | S7 | D0,D4,D6 | transições válidas e visíveis | state/e2e |
+| FR-236 | Estados | S7 | D0,D4,D6 | transições válidas e visíveis | state/e2e Wave 22 (2026-09-11): estados de falha de leitura no editor — `review-unavailable`, `review-unavailable-code`, `review-retry`, `proxy-review-unavailable-code`; leituras coordenadas em `editor-reads.ts` com `editor-reads.test.mjs` (20); guarda estrutural `W22` em `project-editor-ui.test.mjs`; jornada de navegador `editor-reliability-browser.e2e.mjs` como passo nomeado do CI. Deploy e aceite pendentes. |
 
 Atualização local de FR-236 — `PublicOperation` agora possui a projeção fechada `visible-state/v1`: queued, in-progress, waiting, retry-scheduled, completed, failed e canceled mapeiam para tone, progresso honesto, ação primária, ações permitidas e terminalidade. Progresso running só é percentual quando `total` existe; waiting/retrying são indeterminados. As transições server-side `running → waiting → running` preservam attempt/progresso e rejeitam retomada para fase anterior. O adapter Prisma exige a lease vigente para entrar em espera, limpa owner/heartbeat/expiração e retoma sob CAS de workspace/status/attempt, adquirindo uma nova lease no mesmo commit sem incrementar attempt. As capabilities `apollo.operations.list`, `dead-letter.list`, `read`, `cancel` e `retry` permanecem em v7, pois a mudança é interna ao worker. Testes locais cobrem os sete estados, estado inventado fail-closed e o adapter controlado; o caso PostgreSQL foi preparado, mas não executado. Writers futuros, deploy e aceite permanecem pendentes.
 
@@ -300,8 +300,8 @@ deploy/aceite e FR-040 ainda precisa incluir segmentos na paginação global.
 | FR-173 | Anchor por percepção | S1,S7 | D2,D3 | legenda evita rosto/elemento | visual golden |
 | FR-174 | Override por segmento | S2,S7 | D3 | override não muda global | integration |
 | FR-175 | Sidecar | S2 | D3,D5 | SRT/VTT seguem alignment | fixture |
-| FR-210 | Preview interativo | S7 | D5,D6 | pause/seek frame-accurate | e2e |
-| FR-211 | ReviewAnnotation | S7 | D0,D3,D6 | annotation persiste contexto | integration |
+| FR-210 | Preview interativo | S7 | D5,D6 | pause/seek frame-accurate | e2e Wave 22 (2026-09-11): a jornada de navegador `editor-reliability-browser.e2e.mjs` está escrita para exercitar play/pause/seek pela interface como smoke, não como prova de frame accuracy editorial; sua execução verde ainda não foi medida nesta wave. |
+| FR-211 | ReviewAnnotation | S7 | D0,D3,D6 | annotation persiste contexto | integration Wave 22 (2026-09-11): leitura recusada (409 `PERSISTENCE_CONFLICT`) fica visível e bloqueia as ações dependentes; a jornada de navegador está escrita para criar uma annotation e provar o replay idempotente pela API pública; sua execução verde ainda não foi medida nesta wave. |
 | FR-212 | Escopos | S7 | D3,D6 | current/all formats/locales | unit/e2e |
 | FR-213 | RenderElementMap | S7 | D3,D5 | hit-test seleciona layer correta | visual/e2e |
 | FR-214 | Patch automático | S1,S7 | D2,D3,D6 | annotation vira proposta gated, command e versão imutável | T-FR-214 unit/API/Postgres/render/visual |

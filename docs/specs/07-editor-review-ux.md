@@ -31,6 +31,7 @@ Definir a experiência IA-first com edição manual, revisão contextual, versõ
 8. Falha parcial deve preservar edições confirmadas e identificar exatamente quais ranges, variants ou recipes não foram atualizados.
 9. A interface não apresenta percentual inventado: quando o provider não informa progresso, mostra fase e estado indeterminado.
 10. Acessibilidade por teclado, foco e leitura de estado deve permanecer funcional mesmo quando painéis forem colapsados.
+11. Leituras do editor são coordenadas, não disparadas por identidade instável de objetos: um GET idêntico em voo é compartilhado; uma resposta que chega depois de o projeto ou a sessão mudarem é descartada; o polling de operação aguarda a própria rodada, para em estado terminal e pausa com a aba oculta; 401 encerra o ciclo; 403 e 409 não entram em nova tentativa automática; 429 preserva o erro estruturado e respeita `Retry-After` como piso. Uma leitura falha da revisão é estado visível com código e request id, mantém o preview já autorizado inspecionável e bloqueia as ações que dependem daquela revisão; nunca é convertida em lista vazia. (Wave 22, 2026-09-11: `src/app/_operator/editor-reads.ts`, `tests/v2/editor-reads.test.mjs`, `tests/v2/editor-reliability-browser.e2e.mjs`.)
 
 ## 4. Information architecture
 
