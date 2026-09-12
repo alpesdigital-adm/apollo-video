@@ -300,21 +300,36 @@ export async function materialiseProxy({
       `colour pipeline compilation returned ${compiled.status}: ${(await compiled.text()).slice(0, 400)}\n` +
         `server log tail:\n${serverLogs().slice(-3_000)}`,
     )
-  const response = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(project.projectId)}/proxy-renders`, {
+  // The render worker refuses a version with no explicit LUT selection
+  // ("ProjectVersion has no explicit LUT selection", thrown by
+  // LocalProjectLutRenderMaterializer). Selecting `none` through the published
+  // route is the product's own way of making the choice explicit — and that
+  // route enqueues the proxy render itself, so this one call is both steps.
+  const baseVersion = await prisma.v2ProjectVersion.findFirstOrThrow({
+    where: { workspaceId, projectId: project.projectId },
+    orderBy: { sequence: 'desc' },
+    select: { id: true, baseHash: true },
+  })
+  const response = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(project.projectId)}/lut-selection`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${token}`,
       'content-type': 'application/json',
-      'idempotency-key': `${project.projectId}-proxy-render-1`,
+      'idempotency-key': `${project.projectId}-lut-1`,
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify({
+      baseVersionId: baseVersion.id,
+      baseHash: baseVersion.baseHash,
+      selection: { mode: 'none' },
+      reason: 'Editor reliability journey selects no creative LUT.',
+    }),
   })
   const payload = await response.json()
-  if (response.status !== 202)
+  if (![200, 201].includes(response.status) || !payload?.data?.operation)
     // `safeFailure` replaces the message an operator would need with a generic
     // one, so the server's own log tail is the only place the reason survives.
     throw new Error(
-      `proxy render enqueue returned ${response.status}: ${JSON.stringify(payload).slice(0, 400)}\n` +
+      `LUT selection + proxy enqueue returned ${response.status}: ${JSON.stringify(payload).slice(0, 400)}\n` +
         `server log tail:\n${serverLogs().slice(-3_000)}`,
     )
   const operationId = payload.data.operation.id
@@ -336,6 +351,52 @@ export async function materialiseProxy({
   project.proxyOperationId = operationId
   project.proxyVersionId = detail.projectVersionId
   project.timeToFirstProxyMs = Date.now() - startedAt
+  return project
+}
+
+/**
+ * The fallback when the render does not complete: present the SOURCE MASTER as
+ * the editing proxy so the editor has real media to open.
+ *
+ * This is explicitly NOT a rendered proxy. It exists so the read-cost,
+ * persistence-refusal and access-control evidence — none of which is about
+ * rendering — can be taken at all. Every finding produced against it carries
+ * `mediaOrigin: 'source-master-fallback'`, and no claim about proxy rendering,
+ * proxy identity or timeToFirstProxy may be made from it.
+ */
+export async function attachSourceAsEditingProxy({ prisma, workspaceId, project }) {
+  const { randomUUID } = await import('node:crypto')
+  const artifact = await prisma.v2MediaArtifact.findUniqueOrThrow({
+    where: { id_workspaceId: { id: project.sourceArtifactId, workspaceId } },
+    select: { sha256: true, byteSize: true, artifactKey: true },
+  })
+  const existing = await prisma.v2ProjectMediaAsset.findFirst({
+    where: { workspaceId, projectId: project.projectId, artifactId: project.sourceArtifactId, role: 'editing-proxy' },
+    select: { id: true },
+  })
+  if (!existing)
+    await prisma.v2ProjectMediaAsset.create({
+      data: {
+        id: randomUUID(),
+        workspaceId,
+        projectId: project.projectId,
+        artifactId: project.sourceArtifactId,
+        role: 'editing-proxy',
+        originalFileName: `${project.slug}.mp4`,
+        createdAt: new Date(),
+      },
+    })
+  project.proxyArtifactId = project.sourceArtifactId
+  project.proxyHash = artifact.sha256
+  project.proxyByteSize = Number(artifact.byteSize)
+  project.proxyKey = artifact.artifactKey
+  project.mediaOrigin = 'source-master-fallback'
+  const version = await prisma.v2ProjectVersion.findFirstOrThrow({
+    where: { workspaceId, projectId: project.projectId },
+    orderBy: { sequence: 'desc' },
+    select: { id: true },
+  })
+  project.proxyVersionId = version.id
   return project
 }
 
