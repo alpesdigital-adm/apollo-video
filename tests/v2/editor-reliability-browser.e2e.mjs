@@ -14,6 +14,7 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { assertIsolatedDatabase, sha256Of } from './helpers/capture-journey.mjs'
 import {
   encodeSharedProxy,
+  materialiseProxy,
   seedEditorReliabilityWorld,
   summarizeInventory,
   tokenizePath,
@@ -252,8 +253,10 @@ async function waitForEditorSettle(page) {
   // Settle on what the page actually reaches, not on what it ought to reach:
   // an inventory of a page that refused to mount its preview is still an
   // inventory, and swallowing it would hide the very state worth measuring.
+  // Capped hard: the second open has to land inside the same 60-second window
+  // as the first, or the request-rate floor is never exercised at all.
   const markers = ['project-preview', 'review-unavailable', 'proxy-review-gate', 'manual-editor']
-  const deadline = Date.now() + 30_000
+  const deadline = Date.now() + 10_000
   let reached = null
   while (Date.now() < deadline && reached === null) {
     for (const marker of markers) {
@@ -265,7 +268,7 @@ async function waitForEditorSettle(page) {
     if (reached === null) await delay(250)
   }
   // Let the mount-time fan-out land before the inventory is closed.
-  await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
+  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
   if (reached === null) {
     const heading = await page
       .locator('h1, h2')
@@ -323,9 +326,9 @@ test(
       const clean = world.bySlug('clean')
       const conflict = world.bySlug('conflict')
       evidence.materialisation = {
-        path: 'ffmpeg-encoded proxy registered as the ingest pipeline would have registered it; the proxy render OPERATION rows are seeded, not driven through enqueue/worker',
-        limit: 'timeToFirstProxyMs is NOT measured by this suite',
-        proxy: { codec: proxy.probe.codec, seconds: proxy.seconds, fps: proxy.fps, byteSize: proxy.byteSize },
+        path: 'POST /v1/projects/{id}/proxy-renders over HTTP + scripts/run-v2-render-worker-once.mjs (the real driver)',
+        seeded: 'source recording artifact/manifest/probe rows and the compiled base version only',
+        source: { codec: proxy.probe.codec, seconds: proxy.seconds, fps: proxy.fps, byteSize: proxy.byteSize },
       }
 
       const username = `editor-ui-${suffix}`
@@ -333,8 +336,14 @@ test(
       const port = await freePort()
       const baseUrl = `http://127.0.0.1:${port}`
       let serverLogs = ''
+      // The build under measurement. Default: this worktree. When
+      // APOLLO_EDITOR_RELIABILITY_APP_ROOT names another checkout, the same
+      // fixture, database and browser are pointed at THAT build instead — which
+      // is the only way a "before" and an "after" are comparable at all.
+      const appRoot = process.env.APOLLO_EDITOR_RELIABILITY_APP_ROOT ?? process.cwd()
+      evidence.appRoot = appRoot
       server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-p', String(port)], {
-        cwd: process.cwd(),
+        cwd: appRoot,
         env: {
           ...process.env,
           NODE_ENV: 'production',
@@ -361,6 +370,36 @@ test(
       })
       await waitForServer(baseUrl, server)
 
+      // The proxy is materialised by the product, through the published route
+      // and the real `--once` driver. Nothing below writes an operation row.
+      const workerEnvironment = {
+        V2_DATABASE_URL: process.env.V2_DATABASE_URL,
+        APOLLO_API_ENVIRONMENT: 'production',
+        APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
+        APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+        // The render worker seals its recipe parameters before it writes a
+        // manifest; without a key it refuses to start rather than storing them
+        // in the clear. This key is generated here, never read from a file.
+        APOLLO_PROTECTED_PAYLOAD_KEY_ID: `editor-reliability-${suffix}`,
+        APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url'),
+      }
+      for (const project of [clean, conflict])
+        await materialiseProxy({
+          prisma,
+          baseUrl,
+          token: world.issued.token,
+          workspaceId: world.workspaceId,
+          project,
+          workerEnvironment,
+          serverLogs: () => serverLogs,
+        })
+      evidence.materialisation.timeToFirstProxyMs = {
+        clean: clean.timeToFirstProxyMs,
+        conflict: conflict.timeToFirstProxyMs,
+      }
+      evidence.materialisation.note =
+        'timeToFirstProxyMs here is the wall clock of enqueue + one driver pass in this harness, not the product metric of the same name'
+
       const executablePath = [
         process.env.PLAYWRIGHT_CHROME_EXECUTABLE,
         'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -383,8 +422,10 @@ test(
         [conflict.projectId, '{projectId}'],
         [clean.versionId, '{versionId}'],
         [conflict.versionId, '{versionId}'],
-        [clean.artifactId, '{artifactId}'],
-        [conflict.artifactId, '{artifactId}'],
+        [clean.proxyArtifactId, '{artifactId}'],
+        [conflict.proxyArtifactId, '{artifactId}'],
+        [clean.sourceArtifactId, '{artifactId}'],
+        [conflict.sourceArtifactId, '{artifactId}'],
         [world.workspaceId, '{workspaceId}'],
       ]
       const recorder = createRecorder(baseUrl, tokens)
@@ -511,7 +552,7 @@ test(
 
       // Media identity + range, proved at the route and against PostgreSQL.
       const authorization = `Bearer ${world.issued.token}`
-      const contentUrl = `${baseUrl}/v1/artifacts/${encodeURIComponent(clean.artifactId)}/content`
+      const contentUrl = `${baseUrl}/v1/artifacts/${encodeURIComponent(clean.proxyArtifactId)}/content`
       const rangeResponse = await fetch(contentUrl, { headers: { authorization, range: 'bytes=0-1023' } })
       const rangeBytes = Buffer.from(await rangeResponse.arrayBuffer())
       const fullResponse = await fetch(contentUrl, { headers: { authorization } })
@@ -519,7 +560,7 @@ test(
       const servedPath = join(evidenceDir, 'served-proxy.mp4')
       await writeFile(servedPath, fullBytes)
       const storedArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({
-        where: { id_workspaceId: { id: clean.artifactId, workspaceId: world.workspaceId } },
+        where: { id_workspaceId: { id: clean.proxyArtifactId, workspaceId: world.workspaceId } },
         select: { sha256: true, byteSize: true, artifactKey: true },
       })
       const media = {
@@ -558,8 +599,8 @@ test(
       const annotationsUrl = `${baseUrl}/v1/projects/${encodeURIComponent(clean.projectId)}/annotations`
       const idempotencyKey = `editor-reliability-${suffix}-annotation`
       const annotationBody = {
-        projectVersionId: clean.versionId,
-        proxyArtifactId: clean.artifactId,
+        projectVersionId: clean.proxyVersionId,
+        proxyArtifactId: clean.proxyArtifactId,
         proxyHash: clean.proxyHash,
         frame: 30,
         timeRangeMs: [1_000, 1_000],
@@ -633,8 +674,8 @@ test(
           id: legacyId,
           workspaceId: world.workspaceId,
           projectId: conflict.projectId,
-          projectVersionId: conflict.versionId,
-          proxyArtifactId: conflict.artifactId,
+          projectVersionId: conflict.proxyVersionId,
+          proxyArtifactId: conflict.proxyArtifactId,
           proxyHash: conflict.proxyHash,
           frame: 10,
           timeStartMs: 333,

@@ -1,38 +1,41 @@
-import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, readFile, stat } from 'node:fs/promises'
+import { copyFile, mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import {
   artifactPath,
+  binaryDigest,
+  colorMetadataFromStream,
+  createProjectRow,
   createWorkspaceRow,
+  drainProxyRenders,
   encodeRecording,
   issueApiClient,
   probeStreams,
-  sha256Of,
 } from './capture-journey.mjs'
 
 /**
  * The smallest project the editor can honestly be opened against.
  *
- * What is REAL here: the proxy bytes (ffmpeg encodes them, ffprobe measures
- * them, the sha256 written to `v2MediaArtifact` is the digest of the file the
- * route will serve), the workspace/API client/project rows (created through
- * the published application services), and the render element map (built by
- * the domain factory over the measured fps/duration).
+ * Nothing here fabricates a succeeded operation. The proxy is materialised the
+ * way the product materialises one: `POST /v1/projects/{id}/proxy-renders`
+ * over HTTP against the running server, then the real `--once` render driver
+ * (`scripts/run-v2-render-worker-once.mjs`) claims it. Every credential-audit
+ * column on the operation is therefore written by the authenticated API call
+ * itself, which is the only way those columns can agree with what
+ * `hydrateExternalActorAudit` recomputes on the way back out.
  *
- * What is SEEDED rather than driven, and must be reported as the limit of any
- * measurement taken against it: the proxy render OPERATION. A real
- * `project-proxy-render` would arrive through `POST .../proxy-renders` and the
- * worker loop; this fixture writes the succeeded operation rows the worker
- * would have left behind, exactly as `tests/v2/prisma-review-annotation.
- * integration.mjs` does, so `timeToFirstProxyMs` is NOT measured by anything
- * that uses this fixture.
+ * What is still SEEDED, named out loud because a reader must be able to tell
+ * arranged from proved: the source recording's artifact/manifest/probe rows
+ * (via `registerRecording`, over numbers MEASURED from the file ffmpeg just
+ * wrote) and the compiled base version (`seedBaseProjectVersion`). Both are the
+ * repository's own journey plumbing, and neither is the subject of any
+ * measurement this suite takes.
  *
  * `.ts` arrives through `await import` at call time, never a static specifier:
  * tsx resolves a static specifier before it transforms the target.
  */
 
-const PROXY_SCOPES = Object.freeze([
+const CLIENT_SCOPES = Object.freeze([
   'projects:read',
   'projects:write',
   'projects:approve',
@@ -58,7 +61,7 @@ export async function encodeSharedProxy({ artifactRoot, key, seconds = 3, fps = 
   })
   const streams = await probeStreams(ffprobePath, outputPath)
   const video = streams.find((stream) => stream.codec_type === 'video')
-  if (!video) throw new Error('encoded proxy carries no video stream')
+  if (!video) throw new Error('the encoded recording carries no video stream')
   return {
     ffmpegPath,
     ffprobePath,
@@ -68,291 +71,162 @@ export async function encodeSharedProxy({ artifactRoot, key, seconds = 3, fps = 
     fps,
     sha256: encoded.sha256,
     byteSize: encoded.byteSize,
+    producerBinaryDigest: await binaryDigest(ffprobePath),
+    colorMetadata: colorMetadataFromStream(video),
+    pixelFormat: String(video.pix_fmt),
     probe: {
       width: Number(video.width),
       height: Number(video.height),
-      durationSeconds: Number(video.duration ?? seconds),
+      duration: Number(video.duration ?? seconds),
       fps,
       codec: String(video.codec_name),
-      frames: Number(video.nb_read_frames ?? video.nb_frames ?? 0),
     },
   }
 }
 
-/**
- * Seed one workspace + one API client + N projects that share the proxy bytes.
- *
- * Each project gets its own artifact row and its own copy of the file, so a
- * negative written against one project cannot corrupt the other's evidence.
- */
-export async function seedEditorReliabilityWorld({
-  prisma,
-  artifactRoot,
-  suffix,
-  proxy,
-  projects,
-}) {
-  const { createProjectService } = await import('../../../src/v2/application/create-project.ts')
-  const { createExternalAuditContext, materializeActorAuditContext } = await import(
-    '../../../src/v2/application/authenticate-api-client.ts'
-  )
-  const { PrismaProjectCreationRepository } = await import(
-    '../../../src/v2/infrastructure/prisma/project-creation-repository.ts'
-  )
-  const { PrismaRenderElementMapRepository } = await import(
-    '../../../src/v2/infrastructure/prisma/render-element-map-repository.ts'
-  )
-  const { buildRenderElementMap } = await import('../../../src/v2/domain/review-system.ts')
+/** Workspace, API client, and the projects with their source recording. */
+export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix, proxy, projects }) {
+  const { registerRecording, seedBaseProjectVersion } = await import('./capture-journey.mjs')
 
   const workspaceId = `editor-reliability-${suffix}`
   const clientId = `editor-reliability-client-${suffix}`
   const createdAt = new Date('2026-09-11T12:00:00.000Z')
-  const createdAtIso = createdAt.toISOString()
 
+  // Ordered by foreign key, not by taste: versions and snapshots reference the
+  // artifacts, so artifacts cannot go first. A swallowed failure here leaves
+  // rows behind that the next run then blames on the product, so each failure
+  // is collected and reported instead of caught and discarded.
+  const CLEANUP_ORDER = [
+    'v2ReviewAnnotation',
+    'v2RenderElementMap',
+    'v2ProxyReview',
+    'v2ProjectProxyRenderOperation',
+    'v2ProjectFinalExportOperation',
+    'v2PublicOperation',
+    'v2EditCommand',
+    'v2ProjectVersion',
+    'v2ProjectSnapshot',
+    'v2ProjectMediaAsset',
+    'v2MediaArtifactManifest',
+    'v2MediaArtifact',
+    'v2PublicEventOutbox',
+    'v2IdempotencyRecord',
+    'v2ProjectCreationCommand',
+    'v2UiSession',
+    'v2WorkspaceUiPrincipal',
+    'v2Project',
+    'v2ApiClient',
+  ]
   const cleanup = async () => {
-    for (const model of [
-      'v2ReviewAnnotation',
-      'v2RenderElementMap',
-      'v2ProjectProxyRenderOperation',
-      'v2PublicOperation',
-      'v2ProjectMediaAsset',
-      'v2MediaArtifactManifest',
-      'v2MediaArtifact',
-      'v2PublicEventOutbox',
-      'v2IdempotencyRecord',
-      'v2ProjectCreationCommand',
-      'v2UiSession',
-      'v2WorkspaceUiPrincipal',
-      'v2Project',
-      'v2ApiClient',
-    ]) {
-      if (prisma[model]) await prisma[model].deleteMany({ where: { workspaceId } })
+    const failures = []
+    for (const model of CLEANUP_ORDER) {
+      if (!prisma[model]) continue
+      try {
+        await prisma[model].deleteMany({ where: { workspaceId } })
+      } catch (error) {
+        failures.push(new Error(`${model}: ${error instanceof Error ? error.message : String(error)}`))
+      }
     }
-    await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    try {
+      await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    } catch (error) {
+      failures.push(new Error(`v2Workspace: ${error instanceof Error ? error.message : String(error)}`))
+    }
+    if (failures.length) throw new AggregateError(failures, `fixture rows survived cleanup in ${workspaceId}`)
   }
 
   await cleanup()
-  await createWorkspaceRow({
-    prisma,
-    workspaceId,
-    name: 'Editor Reliability Workspace',
-    createdAt,
-  })
+  await createWorkspaceRow({ prisma, workspaceId, name: 'Editor Reliability Workspace', createdAt })
   const issued = await issueApiClient({
     prisma,
     workspaceId,
     clientId,
     name: 'Editor Reliability Client',
     createdAt,
-    scopes: PROXY_SCOPES,
+    scopes: CLIENT_SCOPES,
   })
-  const auditContext = createExternalAuditContext({
-    clientId: issued.client.id,
-    credentialId: issued.credential.id,
-    workspaceId,
-    environment: 'production',
-  })
-  const actor = Object.freeze({
-    ...auditContext,
-    scopes: new Set(PROXY_SCOPES),
-    authenticationKind: 'bearer',
-    clientKillSwitchEngaged: false,
-    workspaceKillSwitchEngaged: false,
-    clientAccessStatus: 'active',
-    workspaceAccessStatus: 'active',
-    auditContext,
-  })
-  const authenticationAudit = materializeActorAuditContext(actor)
 
-  // Event ids are globally unique, not workspace-scoped: a counter-derived id
-  // survives this fixture's cleanup only to collide with the next run.
-  let entityCounter = 0
+  const durationFrames = Math.max(1, Math.round(proxy.probe.duration * proxy.fps))
   const created = []
   for (const spec of projects) {
-    const result = await createProjectService({
-      repository: new PrismaProjectCreationRepository(prisma),
-      clock: () => createdAt,
-      createId: (kind) => `${kind}-${suffix}-${++entityCounter}`,
-      createEventId: () => randomUUID(),
-    })({
+    const projectId = `project-${suffix}-${spec.slug}`
+    const versionId = `version-${suffix}-${spec.slug}`
+    const artifactId = `artifact-${suffix}-${spec.slug}`
+    const key = `editor-reliability/${suffix}/${spec.slug}.mp4`
+    const destination = artifactPath(artifactRoot, key)
+    await mkdir(dirname(destination), { recursive: true })
+    await copyFile(proxy.outputPath, destination)
+
+    await createProjectRow({
+      prisma,
       workspaceId,
+      projectId,
       name: spec.name,
-      objective: 'discovery',
-      format: '9:16',
-      actor,
-      idempotency: { clientId, key: `${suffix}-${spec.slug}` },
+      objective: 'warming',
+      format: '16:9',
+      clientId,
+      createdAt,
+    })
+    await registerRecording({
+      prisma,
+      workspaceId,
+      projectId,
+      artifactId,
+      artifactKey: key,
+      mediaType: 'video',
+      container: 'mp4',
+      sha256: proxy.sha256,
+      byteSize: proxy.byteSize,
+      probe: {
+        width: proxy.probe.width,
+        height: proxy.probe.height,
+        duration: proxy.probe.duration,
+        fps: proxy.fps,
+      },
+      colorMetadata: proxy.colorMetadata,
+      pixelFormat: proxy.pixelFormat,
+      producerVersion: 'ffprobe-static',
+      producerBinaryDigest: proxy.producerBinaryDigest,
+      role: 'source-master',
+      originalFileName: `${spec.slug}.mp4`,
+      createdAt,
+      recipeId: 'editor-reliability-ingest',
+    })
+    await seedBaseProjectVersion({
+      prisma,
+      workspaceId,
+      projectId,
+      versionId,
+      clientId,
+      objective: 'warming',
+      sourceArtifactId: artifactId,
+      fps: proxy.fps,
+      durationFrames,
+      transcriptId: `transcript-${suffix}-${spec.slug}`,
+      createdAt,
     })
 
-    const entry = {
+    created.push({
       slug: spec.slug,
       name: spec.name,
-      projectId: result.project.id,
-      versionId: result.version.id,
-      artifactId: null,
-      manifestId: null,
+      projectId,
+      versionId,
+      sourceArtifactId: artifactId,
+      sourceKey: key,
+      sourcePath: destination,
+      durationFrames,
+      // Filled in by materialiseProxy, from the operation the product ran.
+      proxyArtifactId: null,
       proxyHash: null,
-      proxyKey: null,
-      proxyPath: null,
-      byteSize: null,
-    }
-
-    if (spec.withProxy !== false) {
-      const artifactId = `artifact-${suffix}-${spec.slug}`
-      const manifestId = `manifest-${suffix}-${spec.slug}`
-      const key = `editor-reliability/${suffix}/${spec.slug}.mp4`
-      const destination = artifactPath(artifactRoot, key)
-      await mkdir(dirname(destination), { recursive: true })
-      await copyFile(proxy.outputPath, destination)
-      const bytes = await readFile(destination)
-      const sha256 = sha256Of(bytes)
-      const byteSize = (await stat(destination)).size
-
-      await prisma.v2MediaArtifact.create({
-        data: {
-          id: artifactId,
-          workspaceId,
-          artifactKey: key,
-          sha256,
-          byteSize: BigInt(byteSize),
-          mediaType: 'video',
-          container: 'mp4',
-          status: 'available',
-          createdAt,
-        },
-      })
-      await prisma.v2MediaArtifactManifest.create({
-        data: {
-          id: manifestId,
-          workspaceId,
-          artifactId,
-          schemaVersion: 'media-artifact-manifest/v1',
-          manifestHash: sha256Of(Buffer.from(`manifest:${artifactId}:${sha256}`)),
-          recipeId: 'review-proxy',
-          recipeVersion: 'v1',
-          parametersHash: sha256Of(Buffer.from(`parameters:${artifactId}`)),
-          manifestJson: JSON.stringify({
-            probe: {
-              width: proxy.probe.width,
-              height: proxy.probe.height,
-              duration: proxy.probe.durationSeconds,
-              fps: proxy.probe.fps,
-            },
-          }),
-          createdAt,
-        },
-      })
-      await prisma.v2ProjectMediaAsset.create({
-        data: {
-          id: randomUUID(),
-          workspaceId,
-          projectId: result.project.id,
-          artifactId,
-          role: 'editing-proxy',
-          originalFileName: `${spec.slug}.mp4`,
-          createdAt,
-        },
-      })
-      const operationId = `operation-${suffix}-${spec.slug}`
-      await prisma.v2PublicOperation.create({
-        data: {
-          id: operationId,
-          workspaceId,
-          projectId: result.project.id,
-          clientId: issued.client.id,
-          actorCredentialId: authenticationAudit.credentialId,
-          actorEnvironment: authenticationAudit.environment,
-          actorAuthenticationKind: authenticationAudit.authenticationKind,
-          actorContextHash: authenticationAudit.contextHash,
-          type: 'project-proxy-render',
-          status: 'succeeded',
-          phase: 'completed',
-          targetType: 'media-artifact',
-          targetId: artifactId,
-          cancelable: false,
-          retryable: false,
-          attempt: 1,
-          // `public_operations_progress_check` is not decorative: a succeeded
-          // project-proxy-render must carry 4/4 'render'. The older fixture in
-          // prisma-review-annotation.integration.mjs predates that constraint.
-          progressCompleted: 4,
-          progressTotal: 4,
-          progressUnit: 'render',
-          resultJson: JSON.stringify({ artifactId }),
-          idempotencyKey: `${suffix}-${spec.slug}-render`,
-          requestFingerprint: sha256Of(Buffer.from(`fingerprint:${operationId}`)),
-          createdAt,
-          updatedAt: createdAt,
-          startedAt: createdAt,
-          completedAt: createdAt,
-        },
-      })
-      await prisma.v2ProjectProxyRenderOperation.create({
-        data: {
-          operationId,
-          workspaceId,
-          projectId: result.project.id,
-          projectVersionId: result.version.id,
-          editPlanSnapshotId: result.version.snapshotRefs.editPlan,
-          sourceArtifactId: artifactId,
-          sourceManifestId: manifestId,
-          colorPipelineBindingsJson: JSON.stringify([]),
-          inputHash: sha256Of(Buffer.from(`input:${operationId}`)),
-          outputArtifactId: artifactId,
-          outputManifestId: manifestId,
-          originalFileName: `${spec.slug}.mp4`,
-          createdAt,
-        },
-      })
-      const durationFrames = Math.max(1, Math.round(proxy.probe.durationSeconds * proxy.fps))
-      const map = buildRenderElementMap({
-        proxyHash: sha256,
-        fps: proxy.fps,
-        durationFrames,
-        canvas: { width: 1080, height: 1920 },
-        source: { width: proxy.probe.width, height: proxy.probe.height },
-        clips: [
-          {
-            id: `clip-${suffix}-${spec.slug}`,
-            sourceArtifactId: artifactId,
-            timelineInFrame: 0,
-            timelineOutFrame: durationFrames,
-          },
-        ],
-        subtitleCues: [
-          {
-            id: `cue-${suffix}-${spec.slug}`,
-            startFrame: 0,
-            endFrame: durationFrames,
-            text: 'Legenda de verificacao',
-          },
-        ],
-      })
-      await new PrismaRenderElementMapRepository(prisma).persistOrReplay({
-        workspaceId,
-        projectId: result.project.id,
-        projectVersionId: result.version.id,
-        proxyArtifactId: artifactId,
-        map,
-        createdAt: createdAtIso,
-      })
-
-      entry.artifactId = artifactId
-      entry.manifestId = manifestId
-      entry.proxyHash = sha256
-      entry.proxyKey = key
-      entry.proxyPath = destination
-      entry.byteSize = byteSize
-      entry.durationFrames = durationFrames
-    }
-
-    created.push(entry)
+      proxyOperationId: null,
+      timeToFirstProxyMs: null,
+    })
   }
 
   return {
     workspaceId,
     clientId,
     issued,
-    authenticationAudit,
     createdAt,
     projects: created,
     bySlug: (slug) => {
@@ -362,6 +236,59 @@ export async function seedEditorReliabilityWorld({
     },
     cleanup,
   }
+}
+
+/**
+ * Enqueue one proxy render through the published route and let the real driver
+ * claim it. The operation's audit columns come from this request, not from us.
+ */
+export async function materialiseProxy({
+  prisma,
+  baseUrl,
+  token,
+  workspaceId,
+  project,
+  workerEnvironment,
+  serverLogs = () => '',
+}) {
+  const startedAt = Date.now()
+  const response = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(project.projectId)}/proxy-renders`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'idempotency-key': `${project.projectId}-proxy-render-1`,
+    },
+    body: JSON.stringify({}),
+  })
+  const payload = await response.json()
+  if (response.status !== 202)
+    // `safeFailure` replaces the message an operator would need with a generic
+    // one, so the server's own log tail is the only place the reason survives.
+    throw new Error(
+      `proxy render enqueue returned ${response.status}: ${JSON.stringify(payload).slice(0, 400)}\n` +
+        `server log tail:\n${serverLogs().slice(-3_000)}`,
+    )
+  const operationId = payload.data.operation.id
+  const outcomes = await drainProxyRenders({ prisma, workspaceId, environment: workerEnvironment, expected: 1 })
+  if (outcomes.length !== 1 || outcomes[0].operationId !== operationId)
+    throw new Error(`the driver claimed ${JSON.stringify(outcomes)} instead of ${operationId}`)
+  const detail = await prisma.v2ProjectProxyRenderOperation.findUniqueOrThrow({
+    where: { operationId },
+    select: { outputArtifactId: true, projectVersionId: true },
+  })
+  const artifact = await prisma.v2MediaArtifact.findUniqueOrThrow({
+    where: { id_workspaceId: { id: detail.outputArtifactId, workspaceId } },
+    select: { sha256: true, byteSize: true, artifactKey: true },
+  })
+  project.proxyArtifactId = detail.outputArtifactId
+  project.proxyHash = artifact.sha256
+  project.proxyByteSize = Number(artifact.byteSize)
+  project.proxyKey = artifact.artifactKey
+  project.proxyOperationId = operationId
+  project.proxyVersionId = detail.projectVersionId
+  project.timeToFirstProxyMs = Date.now() - startedAt
+  return project
 }
 
 /** The path a page open reduces to: ids replaced by stable tokens. */
@@ -386,7 +313,7 @@ export function summarizeInventory(entries) {
     bucket.statuses[status] = (bucket.statuses[status] ?? 0) + 1
     byKey.set(key, bucket)
   }
-  return [...byKey.values()].sort((left, right) => right.count - left.count || left.key.localeCompare(right.key))
+  return [...byKey.values()].sort(
+    (left, right) => right.count - left.count || left.key.localeCompare(right.key),
+  )
 }
-
-export { join }
