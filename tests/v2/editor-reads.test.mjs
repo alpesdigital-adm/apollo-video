@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   classifyReadFailure,
   createEditorReads,
+  createLatestReadFence,
   parseRetryAfter,
   RATE_LIMIT_FALLBACK_WAIT_MS,
 } from '../../src/app/_operator/editor-reads.ts'
@@ -105,6 +106,16 @@ function createReads({ answer, hidden = () => false, clock = createClock() }) {
 
 const WORKSPACE = { name: 'workspace', url: '/v1/projects/prj-1/workspace' }
 
+test('latest-read fence rejects a slower result even when both target the same scope', () => {
+  const fence = createLatestReadFence()
+  const first = fence.begin()
+  const second = fence.begin()
+  assert.equal(fence.isCurrent(first), false)
+  assert.equal(fence.isCurrent(second), true)
+  fence.invalidate()
+  assert.equal(fence.isCurrent(second), false)
+})
+
 test('parseRetryAfter reads delta-seconds, HTTP-dates and refuses the rest', () => {
   const now = Date.parse('Mon, 01 Sep 2026 12:00:00 GMT')
   assert.equal(parseRetryAfter('3', now), 3_000)
@@ -194,6 +205,109 @@ test('different reads are different requests', async () => {
   assert.equal(transport.calls.length, 3)
   assert.equal(reads.snapshot().review.issued, 2)
   assert.equal(reads.snapshot().review.deduplicated, 0)
+})
+
+test('same name and query do not deduplicate different URLs', async () => {
+  const { reads, transport } = createReads({ answer: () => jsonResponse(200, { data: {} }) })
+  await Promise.all([
+    reads.read({ name: 'resource', url: '/v1/projects/prj-1/first', query: 'limit=1' }),
+    reads.read({ name: 'resource', url: '/v1/projects/prj-1/second', query: 'limit=1' }),
+  ])
+  assert.equal(transport.calls.length, 2)
+})
+
+test('invalidating a read after a mutation fences the old GET and issues a fresh one', async () => {
+  const stale = deferred()
+  const { reads, transport } = createReads({
+    answer: (_call, index) => index === 1 ? stale.promise : jsonResponse(200, { data: { revision: 2 } }),
+  })
+  const beforeMutation = reads.read(WORKSPACE)
+  reads.invalidate('workspace')
+  const afterMutation = await reads.read(WORKSPACE)
+  assert.deepEqual(afterMutation, { ok: true, data: { revision: 2 } })
+  stale.resolve(jsonResponse(200, { data: { revision: 1 } }))
+  const late = await beforeMutation
+  assert.equal(late.ok, false)
+  assert.equal(late.failure.dropped, true)
+  assert.equal(transport.calls.length, 2)
+})
+
+test('invalidating freshness never bypasses a Retry-After gate', async () => {
+  const clock = createClock()
+  const { reads, transport } = createReads({
+    clock,
+    answer: () => jsonResponse(429, { error: { code: 'REQUEST_RATE_ANOMALY' } }, { 'retry-after': '10' }),
+  })
+  await reads.read(WORKSPACE)
+  reads.invalidate('workspace')
+  const gated = await reads.read(WORKSPACE)
+  assert.equal(gated.ok, false)
+  assert.equal(gated.failure.kind, 'rate-limited')
+  assert.equal(gated.failure.retryAfterMs, 10_000)
+  assert.equal(transport.calls.length, 1)
+})
+
+test('a poll preserves 403 and 409 refusals until an explicit retry of that resource', async () => {
+  for (const [status, code] of [[403, 'AUTH_SCOPE_REQUIRED'], [409, 'PERSISTENCE_CONFLICT']]) {
+    const clock = createClock()
+    const { reads, transport } = createReads({ clock, answer: () => jsonResponse(status, { error: { code, requestId: `req-${status}` } }) })
+    const descriptor = { name: `review-${status}`, url: `/v1/projects/prj-1/review-${status}` }
+    const first = await reads.read(descriptor)
+    assert.equal(first.failure.code, code)
+    const handle = reads.poll(async () => { await reads.read(descriptor) }, { intervalMs: 100, isTerminal: () => false })
+    await clock.advance(300)
+    handle.stop()
+    assert.equal(transport.calls.length, 1, `${status} must not be reissued by polling`)
+    const retried = await reads.read(descriptor, { explicitRetry: true })
+    assert.equal(retried.failure.code, code)
+    assert.equal(transport.calls.length, 2, 'only explicit retry reissues that resource')
+  }
+})
+
+test('a blocked 429 read preserves code and request id while recomputing remaining wait', async () => {
+  const clock = createClock()
+  const { reads, transport } = createReads({
+    clock,
+    answer: () => jsonResponse(429, { error: { code: 'REQUEST_RATE_ANOMALY', requestId: 'req-rate-7' } }, { 'retry-after': '7' }),
+  })
+  await reads.read(WORKSPACE)
+  await clock.advance(2_000)
+  const blocked = await reads.read(WORKSPACE)
+  assert.equal(blocked.failure.code, 'REQUEST_RATE_ANOMALY')
+  assert.equal(blocked.failure.requestId, 'req-rate-7')
+  assert.equal(blocked.failure.retryAfterMs, 5_000)
+  assert.equal(transport.calls.length, 1)
+})
+
+test('switching A to B to A cannot bypass the original A Retry-After', async () => {
+  const clock = createClock()
+  const { reads, transport } = createReads({
+    clock,
+    answer: () => jsonResponse(429, { error: { code: 'REQUEST_RATE_ANOMALY', requestId: 'req-a' } }, { 'retry-after': '8' }),
+  })
+  await reads.read(WORKSPACE)
+  reads.setScope({ projectId: 'prj-2', versionId: 'ver-1', sessionEpoch: 1 })
+  reads.setScope({ projectId: 'prj-1', versionId: 'ver-1', sessionEpoch: 1 })
+  await clock.advance(3_000)
+  const blocked = await reads.read(WORKSPACE)
+  assert.equal(blocked.failure.retryAfterMs, 5_000)
+  assert.equal(blocked.failure.requestId, 'req-a')
+  assert.equal(transport.calls.length, 1)
+})
+
+test('a 401 fences responses that were already in flight', async () => {
+  const slow = deferred()
+  const { reads } = createReads({
+    answer: (_call, index) => index === 1 ? slow.promise : jsonResponse(401, { error: { code: 'AUTH_INVALID' } }),
+  })
+  const pending = reads.read(WORKSPACE)
+  const auth = await reads.read({ name: 'policy', url: '/v1/projects/prj-1/policy' })
+  assert.equal(auth.ok, false)
+  assert.equal(auth.failure.kind, 'auth')
+  slow.resolve(jsonResponse(200, { data: { secret: 'must-not-arrive' } }))
+  const fenced = await pending
+  assert.equal(fenced.ok, false)
+  assert.equal(fenced.failure.dropped, true)
 })
 
 test('an answer that arrives after the scope changed is dropped', async () => {

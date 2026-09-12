@@ -112,10 +112,27 @@ export interface EditorReadsDeps {
 
 export interface EditorReads {
   setScope(scope: EditorReadsScope): void
-  read<T>(descriptor: ReadDescriptor): Promise<ReadResult<T>>
+  read<T>(descriptor: ReadDescriptor, options?: { explicitRetry?: boolean }): Promise<ReadResult<T>>
+  invalidate(...names: string[]): void
   poll(round: () => Promise<void>, options: PollOptions): PollHandle
   abortAll(): void
   snapshot(): Record<string, ReadCounters>
+}
+
+export interface LatestReadFence {
+  begin(): number
+  isCurrent(ticket: number): boolean
+  invalidate(): void
+}
+
+/** A tiny generation fence for loaders whose state setter lives in React. */
+export function createLatestReadFence(): LatestReadFence {
+  let generation = 0
+  return {
+    begin: () => ++generation,
+    isCurrent: (ticket) => ticket === generation,
+    invalidate: () => { generation += 1 },
+  }
 }
 
 /**
@@ -296,7 +313,8 @@ export function createEditorReads(deps: EditorReadsDeps): EditorReads {
   let closedFailure: ReadFailure | null = null
 
   const inFlight = new Map<string, InFlight>()
-  const waitUntil = new Map<string, number>()
+  const rateLimits = new Map<string, { until: number; failure: ReadFailure }>()
+  const persistentRefusals = new Map<string, ReadFailure>()
   const counters = new Map<string, ReadCounters>()
   const polls = new Set<PollHandle>()
 
@@ -317,6 +335,7 @@ export function createEditorReads(deps: EditorReadsDeps): EditorReads {
   function keyOf(descriptor: ReadDescriptor): string {
     return [
       descriptor.name,
+      descriptor.url,
       scope.projectId,
       descriptor.versionId ?? scope.versionId ?? '',
       descriptor.query ?? '',
@@ -368,10 +387,23 @@ export function createEditorReads(deps: EditorReadsDeps): EditorReads {
         return { ok: true, data }
       }
       const failure = classifyReadFailure(response.status, envelope, response.headers, deps.now())
-      if (failure.kind === 'auth') closedFailure = failure
-      if (failure.kind === 'rate-limited') {
-        waitUntil.set(key, deps.now() + (failure.retryAfterMs ?? RATE_LIMIT_FALLBACK_WAIT_MS))
+      if (failure.kind === 'auth') {
+        closedFailure = failure
+        // Closing is a fence, not only a refusal for future calls. Responses
+        // already in flight under the invalid session must not reach state.
+        for (const candidate of inFlight.values()) {
+          if (candidate === entry) continue
+          candidate.aborted = true
+          candidate.controller.abort()
+        }
       }
+      if (failure.kind === 'rate-limited') {
+        rateLimits.set(key, {
+          until: deps.now() + (failure.retryAfterMs ?? RATE_LIMIT_FALLBACK_WAIT_MS),
+          failure,
+        })
+      }
+      if (failure.kind === 'forbidden' || failure.kind === 'conflict') persistentRefusals.set(key, failure)
       return { ok: false, failure }
     } catch (error) {
       if (entry.aborted || issuedUnder !== scopeToken) {
@@ -393,7 +425,7 @@ export function createEditorReads(deps: EditorReadsDeps): EditorReads {
     }
   }
 
-  function read<T>(descriptor: ReadDescriptor): Promise<ReadResult<T>> {
+  function read<T>(descriptor: ReadDescriptor, options?: { explicitRetry?: boolean }): Promise<ReadResult<T>> {
     const method = (descriptor.method ?? 'GET').toUpperCase()
     if (method !== 'GET') {
       throw new Error(`editor-reads só emite GET; ${method} foi pedido para "${descriptor.name}".`)
@@ -403,26 +435,27 @@ export function createEditorReads(deps: EditorReadsDeps): EditorReads {
       return Promise.resolve({ ok: false, failure: closed })
     }
     const key = keyOf(descriptor)
+    if (options?.explicitRetry) persistentRefusals.delete(key)
+    const refusal = persistentRefusals.get(key)
+    if (refusal !== undefined) return Promise.resolve({ ok: false, failure: refusal })
     const existing = inFlight.get(key)
     if (existing !== undefined) {
       count(descriptor.name, 'deduplicated')
       return existing.promise as Promise<ReadResult<T>>
     }
-    const until = waitUntil.get(key)
-    if (until !== undefined) {
-      const remaining = until - deps.now()
+    const limited = rateLimits.get(key)
+    if (limited !== undefined) {
+      const remaining = limited.until - deps.now()
       if (remaining > 0) {
         return Promise.resolve({
           ok: false,
           failure: {
-            kind: 'rate-limited',
-            status: 429,
+            ...limited.failure,
             retryAfterMs: remaining,
-            message: baseMessage('rate-limited', 429, undefined),
           },
         })
       }
-      waitUntil.delete(key)
+      rateLimits.delete(key)
     }
     const entry: InFlight = {
       name: descriptor.name,
@@ -443,6 +476,20 @@ export function createEditorReads(deps: EditorReadsDeps): EditorReads {
     if (nextToken === scopeToken) return
     scopeToken = nextToken
     abortInFlight()
+    persistentRefusals.clear()
+  }
+
+  function invalidate(...names: string[]): void {
+    const targets = new Set(names)
+    for (const [key, entry] of inFlight) {
+      if (!targets.has(entry.name)) continue
+      entry.aborted = true
+      entry.controller.abort()
+      inFlight.delete(key)
+    }
+    // Deliberately keep rateLimits and persistentRefusals: a mutation
+    // invalidates cached freshness,
+    // but it is never permission to bypass Retry-After governance.
   }
 
   function poll(round: () => Promise<void>, options: PollOptions): PollHandle {
@@ -513,5 +560,5 @@ export function createEditorReads(deps: EditorReadsDeps): EditorReads {
     return result
   }
 
-  return { setScope, read, poll, abortAll, snapshot }
+  return { setScope, read, invalidate, poll, abortAll, snapshot }
 }

@@ -106,8 +106,11 @@ export function discoverUiNetworkActions(root) {
       // the descriptor's `url`; they are GET by construction (the coordinator
       // throws on any other method).
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
-          node.expression.name.text === 'read' && node.arguments[0] &&
-          ts.isObjectLiteralExpression(node.arguments[0])) {
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === 'reads' &&
+          node.expression.name.text === 'read') {
+        assert.ok(node.arguments[0] && ts.isObjectLiteralExpression(node.arguments[0]),
+          `canonical reads.read descriptor must be an object literal with a static url: ${relative(root, path)}`)
         const urlProperty = objectProperty(node.arguments[0], 'url')
         const pathPattern = urlProperty ? staticUiPath(urlProperty.initializer) : undefined
         assert.ok(pathPattern, `read coordinator descriptor without a static url: ${relative(root, path)}`)
