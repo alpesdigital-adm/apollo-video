@@ -392,11 +392,6 @@ const KNOWN_UNRUN_SUITES = [
   },
   { file: 'tests/v2/output-formats-render.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-asset-selection.integration.mjs', reason: PHASE_1_3 },
-  {
-    file: 'tests/v2/prisma-final-export.integration.mjs',
-    reason: `${PHASE_1_3}; TODO.md cites it as the evidence closing F1-048/T-FR-231`,
-    citedBy: ['TODO.md'],
-  },
   { file: 'tests/v2/prisma-format-quality-by-output.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-hierarchical-processing.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-long-form-moment-catalog.integration.mjs', reason: PHASE_1_3 },
