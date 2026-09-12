@@ -67,6 +67,30 @@ function enclosingFunctionName(node) {
   return undefined
 }
 
+/**
+ * The editor read coordinator (src/app/_operator/editor-reads.ts) receives its
+ * transport as `createEditorReads({ fetch: (url, init) => fetch(url, init), ... })`.
+ * That inner `fetch(url, init)` is not a UI network action of its own: every
+ * path it carries is declared at a `reads.read({ url: ... })` call site, which
+ * the visitor below records. Anything else dynamic stays unclassified.
+ */
+function isReadCoordinatorTransport(node) {
+  let current = node.parent
+  while (current && !ts.isArrowFunction(current) && !ts.isFunctionExpression(current)) current = current.parent
+  if (!current) return false
+  const property = current.parent
+  if (!property || !ts.isPropertyAssignment(property) || property.name.getText() !== 'fetch') return false
+  const options = property.parent
+  const call = options?.parent
+  return Boolean(call && ts.isCallExpression(call) && ts.isIdentifier(call.expression) &&
+    call.expression.text === 'createEditorReads')
+}
+
+function objectProperty(literal, name) {
+  return literal.properties.find((candidate) =>
+    ts.isPropertyAssignment(candidate) && candidate.name.getText().replaceAll(/["']/g, '') === name)
+}
+
 export function discoverUiNetworkActions(root) {
   const cached = uiActionCache.get(root)
   if (cached) return cached
@@ -78,10 +102,34 @@ export function discoverUiNetworkActions(root) {
     const source = readFileSync(path, 'utf8')
     const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     const visit = (node) => {
+      // Reads issued through the editor read coordinator declare their path in
+      // the descriptor's `url`; they are GET by construction (the coordinator
+      // throws on any other method).
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === 'read' && node.arguments[0] &&
+          ts.isObjectLiteralExpression(node.arguments[0])) {
+        const urlProperty = objectProperty(node.arguments[0], 'url')
+        const pathPattern = urlProperty ? staticUiPath(urlProperty.initializer) : undefined
+        assert.ok(pathPattern, `read coordinator descriptor without a static url: ${relative(root, path)}`)
+        if (pathPattern.startsWith('/v1/')) {
+          const line = file.getLineAndCharacterOfPosition(node.getStart()).line + 1
+          actions.push({
+            id: `${relative(root, path).replaceAll('\\', '/')}:${line}`,
+            method: 'GET',
+            path: pathPattern.split('?', 1)[0],
+          })
+        }
+        ts.forEachChild(node, visit)
+        return
+      }
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
           (node.expression.text === 'fetch' || node.expression.text === 'requestJson')) {
         let pathPattern = staticUiPath(node.arguments[0])
         let method = requestMethod(node)
+        if (!pathPattern && node.expression.text === 'fetch' && isReadCoordinatorTransport(node)) {
+          ts.forEachChild(node, visit)
+          return
+        }
         if (!pathPattern && node.expression.text === 'fetch' && enclosingFunctionName(node) !== 'requestJson') {
           const signedUpload = enclosingFunctionName(node) === 'transfer' && (
             (ts.isCallExpression(node.arguments[0]) &&
