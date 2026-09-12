@@ -6,6 +6,8 @@ Este arquivo existe para impedir a repetição de um incidente grave de avaliaç
 
 Se uma tarefa conflitar com estas regras, pare e exponha o conflito. Não contorne estas regras com uma flag, adapter temporário, fallback ou promessa de migração posterior.
 
+A VPS Hostinger de produção compartilhada possui limites operacionais vinculantes próprios; antes de qualquer acesso ou ação remota, leia a seção **Operação segura da VPS Hostinger de produção**.
+
 ## O incidente que não pode ser esquecido
 
 O projeto foi reportado como “100% concluído” porque 1.247 de 1.255 caixas do `TODO.md` estavam marcadas. Essa medição estava errada.
@@ -160,6 +162,77 @@ Não faça deploy do produto novo enquanto qualquer gate falhar:
 9. **Gate de rastreabilidade:** commit, testes, artifacts e TODO apontam para a mesma versão.
 
 Commit e push podem ocorrer por slices coerentes. Deploy somente depois dos gates aplicáveis e nunca para “ver se funciona” em produção.
+
+## Operação segura da VPS Hostinger de produção
+
+Estas regras se aplicam somente à produção compartilhada em
+`srv1512423.hstgr.cloud` / `187.77.245.144`. Ela não é a VPS descartável e
+isolada da DigitalOcean. Autorizações antigas de desenvolvimento ou E2E nunca
+transformam a Hostinger em ambiente de teste.
+
+Segundo o proprietário, o suporte confirmou restrição por uso sustentado; no
+caso relatado ela foi observada com steal elevado. Medir CPU usada e steal
+separadamente; steal baixo não prova margem para a próxima ação. Em 12/09/2026
+um diagnóstico mediu 4 vCPUs, load 208 e steal entre 92% e 95%; isso não prova
+que o PR causou a anomalia nem que uma parada posterior foi concluída.
+
+Regras vinculantes de acesso e coordenação:
+
+1. Os únicos canais autorizados são SSH e a API oficial Hostinger. hPanel,
+   painel web e automação de browser são proibidos.
+2. API oficial não autoriza reboot do host, parada do Docker/PostgreSQL ou de
+   serviços compartilhados, mudança de plano/CPU/segurança nem ação fora do
+   escopo Apollo.
+3. Entre todos os agentes e canais pode existir no máximo uma operação remota
+   mutável, um owner e uma conexão operacional por vez. Monitor leve pode usar
+   o mesmo owner; não pode existir um segundo fluxo paralelo.
+4. Build, instalação de dependências, testes/E2E e FFmpeg/Remotion de
+   desenvolvimento ou validação são proibidos na Hostinger, mesmo sequenciais;
+   devem rodar localmente ou na VPS descartável explicitamente isolada. Deploy,
+   imports e backups permanecem possíveis somente após os gates desta seção.
+5. Restart ou stop é feito em um container Apollo por vez, com identidade
+   verificada; medir novamente antes de avançar ao próximo.
+6. `docker load`, descompressão, hash e backup também consomem CPU/I/O e passam
+   pelos mesmos gates. `nice` e `ionice` não são teto de CPU.
+7. Limites consideram a carga agregada do app Apollo, workers, filhos e margem
+   para os demais serviços do host, nunca somente o processo lançado pelo run.
+
+Todo trabalho autorizado exige preflight de 60 segundos com amostras a cada 10
+segundos, monitoramento durante o trabalho a cada 10 segundos e postflight de
+60 segundos. Registrar separadamente CPU usada pelo host, steal, iowait, load1,
+quantidade de CPUs, memória disponível, conexões PostgreSQL e latência/erros da
+aplicação. A coleta deve ser leve, sob o mesmo owner e sem subir browser, worker
+ou pool novo. Falha do monitor fecha o gate.
+
+Os limiares abaixo são internos e conservadores, propostos para proteger a
+produção; não são política da Hostinger nem orçamento para consumir até o teto:
+
+- bloquear início ou interromper se CPU host busy ficar em 50% ou mais por 30
+  segundos, ou atingir 70% em qualquer amostra;
+- bloquear/interromper se `load1 / número de CPUs >= 0,75`, steal atingir 10%,
+  memória disponível cair abaixo de 2 GiB, houver OOM recente ou conexões
+  PostgreSQL ultrapassarem 50% do limite;
+- latência anormal, erro de aplicação, métrica inconclusiva ou qualquer anomalia
+  de qualquer origem também interrompe o Apollo antes de tentar provar culpa.
+
+Contenção segura continua autorizada mesmo quando a carga bloqueia trabalho:
+parar admissão e novas ações, preservar estado, encerrar somente processos do
+run e pausar somente containers Apollo com identidade verificada. Não resetar,
+deletar, reiniciar o host nem parar Docker, PostgreSQL ou serviço compartilhado.
+Nunca afirmar que algo parou sem verificar estado terminal e ausência dos
+processos/conexões pertencentes ao run.
+
+Timeout sem confirmação proíbe empilhar comandos ou retries. Se SSH estiver
+indisponível, a API oficial pode executar somente ação equivalente já autorizada
+de contenção Apollo, com alvo e estado verificados. Se ela oferecer apenas ação
+sobre o host inteiro, bloquear e pedir direção; nunca usar o segundo canal para
+contornar gate de carga ou exclusividade.
+
+Durante incidente ou pausa do owner não há deploy, teste ou restart automático.
+Retomada exige autorização explícita do owner e cinco minutos de estabilidade
+com as mesmas métricas; contenção ou diagnóstico específico solicitado pelo
+owner continua permitido. Esta seção é regra operacional e documentação: ela
+não afirma que exista monitor runtime implementado.
 
 ## Segurança obrigatória para E2E remoto e processos efêmeros
 
