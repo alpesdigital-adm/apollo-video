@@ -436,6 +436,62 @@ test(
         ? 'elapsedMs is the wall clock of enqueue + one driver pass in this harness, not the product metric timeToFirstProxyMs'
         : 'the proxy render did not complete; every finding below is labelled source-master-fallback and says nothing about rendering'
 
+      // Why the editor refuses, in the envelope's own words. The public API
+      // carries the DomainError message, so this needs no service wiring — and
+      // a 409 here means no page can render, whatever the UI does.
+      const bearer = `Bearer ${world.issued.token}`
+      const probeWorkspace = async (label) => {
+        const response = await fetch(
+          `${baseUrl}/v1/projects/${encodeURIComponent(clean.projectId)}/workspace`,
+          { headers: { authorization: bearer } },
+        )
+        const body = await response.json().catch(() => ({}))
+        return {
+          label,
+          status: response.status,
+          code: body?.error?.code ?? null,
+          message: body?.error?.message ?? null,
+          requestId: body?.error?.requestId ?? null,
+        }
+      }
+      evidence.workspaceProbe = [await probeWorkspace('after-materialisation')]
+      console.log(`editor-reliability WORKSPACE_PROBE ${JSON.stringify(evidence.workspaceProbe[0])}`)
+
+      // A render that failed leaves an operation in `retrying`. If that is what
+      // the workspace read refuses, the only legitimate way out is the product's
+      // own cancel route — never an UPDATE on the row.
+      if (evidence.workspaceProbe[0].status === 409) {
+        const stuck = await prisma.v2PublicOperation.findMany({
+          where: {
+            workspaceId: world.workspaceId,
+            status: { notIn: ['succeeded', 'failed', 'canceled'] },
+          },
+          select: { id: true, status: true, phase: true, attempt: true, errorCode: true, errorMessage: true, errorRetryable: true },
+        })
+        evidence.stuckOperations = stuck
+        evidence.cancelAttempts = []
+        for (const operation of stuck) {
+          const response = await fetch(`${baseUrl}/v1/operations/${encodeURIComponent(operation.id)}/cancel`, {
+            method: 'POST',
+            headers: { authorization: bearer, 'content-type': 'application/json', 'idempotency-key': `cancel-${operation.id}` },
+            body: JSON.stringify({}),
+          })
+          const body = await response.json().catch(() => ({}))
+          evidence.cancelAttempts.push({
+            operationId: operation.id,
+            status: response.status,
+            code: body?.error?.code ?? null,
+            message: body?.error?.message ?? null,
+            resultingStatus: body?.data?.operation?.status ?? null,
+          })
+        }
+        evidence.workspaceProbe.push(await probeWorkspace('after-cancel'))
+        console.log(
+          `editor-reliability CANCEL ${JSON.stringify(evidence.cancelAttempts)} ` +
+            `THEN ${JSON.stringify(evidence.workspaceProbe[1])}`,
+        )
+      }
+
       // Before a single page opens: which rows in this workspace carry
       // credential audit and are missing part of it. Every one of them is a row
       // some read will refuse with PERSISTENCE_CONFLICT, and knowing which

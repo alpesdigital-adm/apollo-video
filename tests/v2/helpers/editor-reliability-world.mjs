@@ -41,6 +41,9 @@ const CLIENT_SCOPES = Object.freeze([
   'projects:write',
   'projects:approve',
   'artifacts:read',
+  // Cancelling a render that failed is a product action, not a database edit:
+  // `POST /v1/operations/{id}/cancel` requires this scope.
+  'operations:cancel',
 ])
 
 export async function encodeSharedProxy({ artifactRoot, key, seconds = 3, fps = 30 }) {
