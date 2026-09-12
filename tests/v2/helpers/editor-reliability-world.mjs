@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict'
 import { copyFile, mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
@@ -8,19 +9,60 @@ import {
   colorMetadataFromStream,
   createProjectRow,
   createWorkspaceRow,
-  drainProxyRenders,
   encodeRecording,
   issueApiClient,
   probeStreams,
+  sweepSamples,
+  writePcm,
 } from './capture-journey.mjs'
+
+function diagnosticJson(value) {
+  return JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item)
+}
+
+async function runRealFactoryOnceWithDiagnostic({ prisma, workspaceId, operationId, environment }) {
+  const waiting = await prisma.v2PublicOperation.count({
+    where: { workspaceId, type: 'project-proxy-render', status: { in: ['queued', 'running', 'retrying'] } },
+  })
+  if (waiting !== 1) throw new Error(`the queue was holding ${waiting} proxy renders, not 1`)
+  const importedFactory = await import('../../../src/v2/infrastructure/repository-factory.ts')
+  const factory = importedFactory.createProjectProxyRenderWorker ? importedFactory : importedFactory.default
+  const { disconnectV2PostgresClient } = await import('../../../src/v2/infrastructure/prisma-postgres/client.ts')
+  let diagnostic = null
+  try {
+    const worker = factory.createProjectProxyRenderWorker(
+      environment,
+      () => new Date(),
+      ({ operationId: failedOperationId, error }) => {
+        diagnostic = {
+          operationId: failedOperationId,
+          name: error instanceof Error ? error.name : typeof error,
+          code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : null,
+          message: error instanceof Error ? error.message : String(error),
+          details: typeof error === 'object' && error !== null && 'details' in error ? error.details : null,
+          stack: error instanceof Error ? error.stack : null,
+          cause: error instanceof Error && error.cause ? String(error.cause) : null,
+        }
+      },
+    )
+    const outcome = await worker(`editor-reliability-test-driver:${process.pid}`, { workspaceId, operationId })
+    if (outcome?.status !== 'succeeded')
+      throw new Error(
+        `real worker factory test-driver ended ${diagnosticJson(outcome)}; first failure=${diagnosticJson(diagnostic)}`,
+      )
+    return [outcome]
+  } finally {
+    await disconnectV2PostgresClient()
+  }
+}
 
 /**
  * The smallest project the editor can honestly be opened against.
  *
  * Nothing here fabricates a succeeded operation. The proxy is materialised the
  * way the product materialises one: `POST /v1/projects/{id}/proxy-renders`
- * over HTTP against the running server, then the real `--once` render driver
- * (`scripts/run-v2-render-worker-once.mjs`) claims it. Every credential-audit
+ * over HTTP against the running server, then a test driver calls the real
+ * worker factory once with failure diagnostics enabled. Every credential-audit
  * column on the operation is therefore written by the authenticated API call
  * itself, which is the only way those columns can agree with what
  * `hydrateExternalActorAudit` recomputes on the way back out.
@@ -53,19 +95,26 @@ export async function encodeSharedProxy({ artifactRoot, key, seconds = 3, fps = 
   const ffmpegPath = resolveFfmpegBinary()
   const ffprobePath = resolveFfprobeBinaryPath(undefined, undefined)
   const outputPath = artifactPath(artifactRoot, key)
+  const pcmPath = `${outputPath}.pcm`
   await mkdir(dirname(outputPath), { recursive: true })
+  await writePcm(pcmPath, sweepSamples({ seconds }))
   const encoded = await encodeRecording({
     ffmpegPath,
     outputPath,
     seconds,
     fps,
+    pcmPath,
     videoInput: `testsrc=size=320x180:rate=${fps}`,
     width: 320,
     height: 180,
   })
   const streams = await probeStreams(ffprobePath, outputPath)
   const video = streams.find((stream) => stream.codec_type === 'video')
+  const audio = streams.find((stream) => stream.codec_type === 'audio')
   if (!video) throw new Error('the encoded recording carries no video stream')
+  if (!audio || audio.codec_name !== 'aac') throw new Error('the encoded recording carries no AAC audio stream')
+  if (Number(video.nb_read_frames) !== seconds * fps)
+    throw new Error(`the encoded recording has ${video.nb_read_frames} frames, expected ${seconds * fps}`)
   return {
     ffmpegPath,
     ffprobePath,
@@ -84,6 +133,9 @@ export async function encodeSharedProxy({ artifactRoot, key, seconds = 3, fps = 
       duration: Number(video.duration ?? seconds),
       fps,
       codec: String(video.codec_name),
+      audioCodec: String(audio.codec_name),
+      audioSampleRate: Number(audio.sample_rate),
+      decodedFrames: Number(video.nb_read_frames),
     },
   }
 }
@@ -92,10 +144,14 @@ export async function encodeSharedProxy({ artifactRoot, key, seconds = 3, fps = 
 export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix, proxy, projects }) {
   const { registerRecording, seedBaseProjectVersion } = await import('./capture-journey.mjs')
   const { calculateCanonicalHash, stableSerialize } = await import('../../../src/v2/domain/canonical-hash.ts')
+  const { createProductionBrief } = await import('../../../src/v2/domain/production-brief.ts')
+  const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../../src/v2/domain/asset-rights.ts')
+  const { createAssetRightsChangeIntent } = await import('../../../src/v2/domain/asset-rights-change.ts')
+  const { PrismaAssetRightsRepository } = await import('../../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
 
   const workspaceId = `editor-reliability-${suffix}`
   const clientId = `editor-reliability-client-${suffix}`
-  const createdAt = new Date('2026-09-11T12:00:00.000Z')
+  const createdAt = new Date()
 
   // Ordered by foreign key, not by taste: versions and snapshots reference the
   // artifacts, so artifacts cannot go first. A swallowed failure here leaves
@@ -242,6 +298,37 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
       createdAt,
       recipeId: 'editor-reliability-ingest',
     })
+    // This master is generated by the fixture itself, so its ownership and
+    // permitted uses are known rather than inferred. Automatic cataloging of
+    // the rendered proxy must inherit this persisted source evidence.
+    const rights = createAssetRightsSnapshot({
+      id: `rights-${artifactId}`,
+      workspaceId,
+      artifactId,
+      sequence: 1,
+      draft: {
+        status: 'approved',
+        allowedUses: ['rendering', 'editorial-reuse'],
+        prohibitedUses: [],
+        allowedMarkets: ['BRA'],
+        allowedLocales: ['pt-BR'],
+        consent: { status: 'not-required', allowedUses: [] },
+      },
+      createdBy: { type: 'api-client', id: clientId },
+      createdAt: createdAt.toISOString(),
+    })
+    await new PrismaAssetRightsRepository(prisma).setCurrent(
+      rights,
+      assetRightsRevision(artifactId, 0),
+      createAssetRightsChangeIntent({
+        workspaceId,
+        artifactId,
+        snapshotHash: rights.snapshotHash,
+        baseRevision: assetRightsRevision(artifactId, 0),
+        actor: { kind: 'internal', actorType: 'api-client', actorId: clientId },
+        changedAt: createdAt.toISOString(),
+      }),
+    )
     await seedBaseProjectVersion({
       prisma,
       workspaceId,
@@ -254,6 +341,25 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
       durationFrames,
       transcriptId: `transcript-${suffix}-${spec.slug}`,
       createdAt,
+    })
+
+    // The shared capture helper deliberately seeds only a placeholder brief.
+    // The editor workspace is stricter: it hydrates `productionBrief`, so this
+    // fixture must carry the same canonical value the product creates.
+    const briefContent = {
+      schemaVersion: 1,
+      productionBrief: createProductionBrief({
+        ownerText: 'Público geral. Oferta de boas-vindas. Tom direto e natural.',
+      }),
+      createdAt: createdAt.toISOString(),
+    }
+    await prisma.v2ProjectSnapshot.update({
+      where: { id: `${projectId}-snapshot-brief` },
+      data: {
+        schemaVersion: Number(briefContent.schemaVersion),
+        contentJson: stableSerialize(briefContent),
+        contentHash: calculateCanonicalHash(briefContent),
+      },
     })
 
     // `seedBaseProjectVersion` writes the policies snapshot as `{kind:'policies'}`
@@ -281,18 +387,19 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
         contentHash: calculateCanonicalHash(policiesContent),
       },
     })
-    // The same identity check guards the other snapshots, and the seeder hashes
-    // with `calculateVersionHash` while the readers verify with
-    // `calculateCanonicalHash`. Re-hash every snapshot with the reader's
-    // function over the content already stored — the content is not touched.
+    // The shared seeder and the readers use the same canonical hasher. Keep all
+    // untouched snapshots byte-for-byte intact and prove their stored identity
+    // instead of rewriting evidence that this fixture did not create.
     for (const snapshot of await prisma.v2ProjectSnapshot.findMany({
       where: { workspaceId, projectId },
-      select: { id: true, contentJson: true },
-    }))
-      await prisma.v2ProjectSnapshot.update({
-        where: { id: snapshot.id },
-        data: { contentHash: calculateCanonicalHash(JSON.parse(snapshot.contentJson)) },
-      })
+      select: { id: true, contentJson: true, contentHash: true },
+    })) {
+      assert.equal(
+        snapshot.contentHash,
+        calculateCanonicalHash(JSON.parse(snapshot.contentJson)),
+        `seeded snapshot ${snapshot.id} is not canonically hashed`,
+      )
+    }
 
     created.push({
       slug: spec.slug,
@@ -330,8 +437,8 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
 }
 
 /**
- * Enqueue one proxy render through the published route and let the real driver
- * claim it. The operation's audit columns come from this request, not from us.
+ * Enqueue one proxy render through the published route and let the test driver
+ * of the real factory claim it. Audit columns come from the request, not us.
  */
 export async function materialiseProxy({
   prisma,
@@ -398,6 +505,8 @@ export async function materialiseProxy({
     orderBy: { sequence: 'desc' },
     select: { id: true, baseHash: true },
   })
+  project.lutBaseVersionId = baseVersion.id
+  project.lutBaseHash = baseVersion.baseHash
   const response = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(project.projectId)}/lut-selection`, {
     method: 'POST',
     headers: {
@@ -421,71 +530,63 @@ export async function materialiseProxy({
         `server log tail:\n${serverLogs().slice(-3_000)}`,
     )
   const operationId = payload.data.operation.id
-  const outcomes = await drainProxyRenders({ prisma, workspaceId, environment: workerEnvironment, expected: 1 })
+  const outcomes = await runRealFactoryOnceWithDiagnostic({
+    prisma,
+    workspaceId,
+    operationId,
+    environment: workerEnvironment,
+  })
   if (outcomes.length !== 1 || outcomes[0].operationId !== operationId)
-    throw new Error(`the driver claimed ${JSON.stringify(outcomes)} instead of ${operationId}`)
+    throw new Error(`the real factory test-driver claimed ${JSON.stringify(outcomes)} instead of ${operationId}`)
   const detail = await prisma.v2ProjectProxyRenderOperation.findUniqueOrThrow({
     where: { operationId },
-    select: { outputArtifactId: true, projectVersionId: true },
+    select: { outputArtifactId: true, outputManifestId: true, projectVersionId: true, version: { select: { projectId: true } } },
   })
   const artifact = await prisma.v2MediaArtifact.findUniqueOrThrow({
     where: { id_workspaceId: { id: detail.outputArtifactId, workspaceId } },
     select: { sha256: true, byteSize: true, artifactKey: true },
   })
   project.proxyArtifactId = detail.outputArtifactId
+  project.proxyManifestId = detail.outputManifestId
   project.proxyHash = artifact.sha256
   project.proxyByteSize = Number(artifact.byteSize)
   project.proxyKey = artifact.artifactKey
   project.proxyOperationId = operationId
   project.proxyVersionId = detail.projectVersionId
+  project.proxyVersionProjectId = detail.version.projectId
+  project.proxyManifest = await prisma.v2MediaArtifactManifest.findUniqueOrThrow({
+    where: { id_workspaceId: { id: detail.outputManifestId, workspaceId } },
+    select: { id: true, artifactId: true, recipeId: true, recipeVersion: true, manifestHash: true },
+  })
+  project.proxyLineage = await prisma.v2MediaArtifactLineage.findMany({
+    where: { workspaceId, manifestId: detail.outputManifestId },
+    orderBy: { ordinal: 'asc' },
+    select: { sourceArtifactId: true, role: true, ordinal: true },
+  })
   project.timeToFirstProxyMs = Date.now() - startedAt
   return project
 }
 
-/**
- * The fallback when the render does not complete: present the SOURCE MASTER as
- * the editing proxy so the editor has real media to open.
- *
- * This is explicitly NOT a rendered proxy. It exists so the read-cost,
- * persistence-refusal and access-control evidence — none of which is about
- * rendering — can be taken at all. Every finding produced against it carries
- * `mediaOrigin: 'source-master-fallback'`, and no claim about proxy rendering,
- * proxy identity or timeToFirstProxy may be made from it.
- */
-export async function attachSourceAsEditingProxy({ prisma, workspaceId, project }) {
-  const { randomUUID } = await import('node:crypto')
-  const artifact = await prisma.v2MediaArtifact.findUniqueOrThrow({
-    where: { id_workspaceId: { id: project.sourceArtifactId, workspaceId } },
-    select: { sha256: true, byteSize: true, artifactKey: true },
+export async function replayProxyEnqueue({ prisma, baseUrl, token, workspaceId, project }) {
+  const response = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(project.projectId)}/lut-selection`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'idempotency-key': `${project.projectId}-lut-1`,
+    },
+    body: JSON.stringify({
+      baseVersionId: project.lutBaseVersionId,
+      baseHash: project.lutBaseHash,
+      selection: { mode: 'none' },
+      reason: 'Editor reliability journey selects no creative LUT.',
+    }),
   })
-  const existing = await prisma.v2ProjectMediaAsset.findFirst({
-    where: { workspaceId, projectId: project.projectId, artifactId: project.sourceArtifactId, role: 'editing-proxy' },
-    select: { id: true },
-  })
-  if (!existing)
-    await prisma.v2ProjectMediaAsset.create({
-      data: {
-        id: randomUUID(),
-        workspaceId,
-        projectId: project.projectId,
-        artifactId: project.sourceArtifactId,
-        role: 'editing-proxy',
-        originalFileName: `${project.slug}.mp4`,
-        createdAt: new Date(),
-      },
-    })
-  project.proxyArtifactId = project.sourceArtifactId
-  project.proxyHash = artifact.sha256
-  project.proxyByteSize = Number(artifact.byteSize)
-  project.proxyKey = artifact.artifactKey
-  project.mediaOrigin = 'source-master-fallback'
-  const version = await prisma.v2ProjectVersion.findFirstOrThrow({
+  const payload = await response.json()
+  const operations = await prisma.v2ProjectProxyRenderOperation.count({
     where: { workspaceId, projectId: project.projectId },
-    orderBy: { sequence: 'desc' },
-    select: { id: true },
   })
-  project.proxyVersionId = version.id
-  return project
+  return { status: response.status, operationId: payload?.data?.operation?.id ?? null, operations }
 }
 
 /**
@@ -501,19 +602,23 @@ export async function auditCensus({ prisma, workspaceId }) {
     `SELECT c.table_name,
             EXISTS (SELECT 1 FROM information_schema.columns w
                     WHERE w.table_schema = 'public' AND w.table_name = c.table_name
-                      AND w.column_name = 'workspaceId') AS has_workspace
+                      AND w.column_name = 'workspaceId') AS has_workspace,
+            EXISTS (SELECT 1 FROM information_schema.columns a
+                    WHERE a.table_schema = 'public' AND a.table_name = c.table_name
+                      AND a.column_name = 'actorKind') AS has_actor_kind
        FROM information_schema.columns c
       WHERE c.table_schema = 'public' AND c.column_name = 'actorCredentialId'
       ORDER BY c.table_name`,
   )
   const incomplete = []
-  for (const { table_name: table, has_workspace: scoped } of tables) {
+  for (const { table_name: table, has_workspace: scoped, has_actor_kind: actorKindScoped } of tables) {
     const where =
       `"actorCredentialId" IS NULL OR "actorContextHash" IS NULL ` +
       `OR "actorEnvironment" IS NULL OR "actorAuthenticationKind" IS NULL`
+    const auditScope = actorKindScoped ? `"actorKind" = 'external' AND (${where})` : where
     const sql = scoped
-      ? `SELECT count(*)::int AS n FROM "${table}" WHERE ("${'workspaceId'}" = $1) AND (${where})`
-      : `SELECT count(*)::int AS n FROM "${table}" WHERE ${where}`
+      ? `SELECT count(*)::int AS n FROM "${table}" WHERE ("${'workspaceId'}" = $1) AND (${auditScope})`
+      : `SELECT count(*)::int AS n FROM "${table}" WHERE ${auditScope}`
     const rows = scoped
       ? await prisma.$queryRawUnsafe(sql, workspaceId)
       : await prisma.$queryRawUnsafe(sql)

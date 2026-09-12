@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 
@@ -14,13 +14,15 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { assertIsolatedDatabase, sha256Of } from './helpers/capture-journey.mjs'
 import {
   encodeSharedProxy,
-  attachSourceAsEditingProxy,
   auditCensus,
   materialiseProxy,
+  replayProxyEnqueue,
   seedEditorReliabilityWorld,
   summarizeInventory,
   tokenizePath,
 } from './helpers/editor-reliability-world.mjs'
+
+const { stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
 
 /**
  * "Editor confiável" — what one open of the editor actually costs, and what it
@@ -48,6 +50,20 @@ import {
 const enabled = process.env.APOLLO_EDITOR_RELIABILITY_E2E === '1'
 const execFileAsync = promisify(execFile)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const serializePrismaRow = (row) => stableSerialize(JSON.parse(JSON.stringify(row)))
+
+function redactDiagnostic(value) {
+  const text = value instanceof Error
+    ? [value.name, value.message, value.stack, value.cause ? `cause: ${redactDiagnostic(value.cause)}` : '']
+        .filter(Boolean)
+        .join('\n')
+    : String(value)
+  return text
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/postgres(?:ql)?:\/\/[^\s@/]+@/gi, 'postgresql://[redacted]@')
+    .replace(/(password|token|secret|authorization)(["'=:\s]+)[^\s,"'}]+/gi, '$1$2[redacted]')
+    .replace(/([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD))=\S+/g, '$1=[redacted]')
+}
 
 async function freePort() {
   return new Promise((resolve, reject) => {
@@ -115,8 +131,9 @@ async function stopChild(child) {
  */
 function createRecorder(baseUrl, tokens) {
   const entries = []
-  const inFlight = new Map()
-  const maxConcurrent = new Map()
+  const requestPhase = new WeakMap()
+  const inFlightByPhase = new Map()
+  const maxConcurrentByPhase = new Map()
   let active = false
   let label = null
 
@@ -134,47 +151,74 @@ function createRecorder(baseUrl, tokens) {
     start(nextLabel) {
       label = nextLabel
       active = true
-      inFlight.clear()
-      maxConcurrent.clear()
+      inFlightByPhase.set(nextLabel, new Map())
+      maxConcurrentByPhase.set(nextLabel, new Map())
     },
-    stop() {
+    async stop() {
+      const stoppedLabel = label
+      const deadline = Date.now() + 10_000
+      let quietSince = null
+      let drained = false
+      while (Date.now() < deadline) {
+        const remaining = [...(inFlightByPhase.get(stoppedLabel)?.values() ?? [])]
+          .reduce((sum, count) => sum + count, 0)
+        if (remaining === 0) {
+          quietSince ??= Date.now()
+          if (Date.now() - quietSince >= 200) { drained = true; break }
+        } else quietSince = null
+        await delay(25)
+      }
+      const remaining = [...(inFlightByPhase.get(stoppedLabel)?.values() ?? [])]
+        .reduce((sum, count) => sum + count, 0)
+      assert.equal(drained && remaining === 0, true, `phase ${stoppedLabel} did not drain finite API reads`)
       active = false
-      const taken = entries.filter((entry) => entry.phase === label)
-      const duplicates = [...maxConcurrent.entries()]
+      const taken = entries.filter((entry) => entry.phase === stoppedLabel)
+      const duplicates = [...(maxConcurrentByPhase.get(stoppedLabel)?.entries() ?? [])]
         .filter(([, value]) => value > 1)
         .map(([key, value]) => ({ path: key, maxConcurrent: value }))
-      return { label, entries: taken, summary: summarizeInventory(taken), duplicates }
+      return { label: stoppedLabel, entries: taken, summary: summarizeInventory(taken), duplicates }
     },
     attach(page) {
       page.on('request', (request) => {
         if (!active || !inScope(request.url())) return
+        const phase = label
         const key = `${request.method()} ${keyOf(request.url())}`
+        requestPhase.set(request, { phase, key })
+        const inFlight = inFlightByPhase.get(phase)
+        const maxConcurrent = maxConcurrentByPhase.get(phase)
         const next = (inFlight.get(key) ?? 0) + 1
         inFlight.set(key, next)
         maxConcurrent.set(key, Math.max(maxConcurrent.get(key) ?? 0, next))
       })
       page.on('requestfinished', (request) => {
-        if (!active || !inScope(request.url())) return
-        const key = `${request.method()} ${keyOf(request.url())}`
+        const captured = requestPhase.get(request)
+        if (!captured) return
+        const inFlight = inFlightByPhase.get(captured.phase)
+        const key = captured.key
         inFlight.set(key, Math.max(0, (inFlight.get(key) ?? 1) - 1))
+        requestPhase.delete(request)
       })
       page.on('requestfailed', (request) => {
-        if (!active || !inScope(request.url())) return
-        const key = `${request.method()} ${keyOf(request.url())}`
+        const captured = requestPhase.get(request)
+        if (!captured) return
+        const inFlight = inFlightByPhase.get(captured.phase)
+        const key = captured.key
         inFlight.set(key, Math.max(0, (inFlight.get(key) ?? 1) - 1))
         entries.push({
-          phase: label,
+          phase: captured.phase,
           method: request.method(),
           path: keyOf(request.url()),
           status: 'request-failed',
           code: request.failure()?.errorText ?? null,
           at: Date.now(),
         })
+        requestPhase.delete(request)
       })
       page.on('response', (response) => {
-        if (!active || !inScope(response.url())) return
+        const captured = requestPhase.get(response.request())
+        if (!captured) return
         const entry = {
-          phase: label,
+          phase: captured.phase,
           method: response.request().method(),
           path: keyOf(response.url()),
           status: response.status(),
@@ -229,6 +273,43 @@ async function dependentActionState(page) {
     ? await page.getByTestId('project-preview').first().evaluate((node) => node.tagName.toLowerCase() === 'video')
     : false
   return state
+}
+
+async function assertWorkspaceFixtureHydrates(prisma, workspaceId, projectId, phase) {
+  const { PrismaProjectWorkspaceQueryRepository } = await import(
+    '../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts'
+  )
+  try {
+    const workspace = await new PrismaProjectWorkspaceQueryRepository(prisma).read({ workspaceId, projectId })
+    assert.ok(workspace, `workspace fixture disappeared during ${phase}`)
+    return { phase, status: 'hydrated', currentVersionId: workspace.project.currentVersionId ?? null }
+  } catch (error) {
+    throw new Error(
+      `workspace fixture failed repository hydration during ${phase}: ` +
+        String(error instanceof Error ? `${error.name}: ${error.message}` : error),
+      { cause: error },
+    )
+  }
+}
+
+async function assertTimelineFixtureHydrates(prisma, workspaceId, projectId, phase) {
+  const { PrismaManualEditRepository } = await import(
+    '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
+  )
+  const { readManualTimelineService } = await import('../../src/v2/application/manual-edit.ts')
+  try {
+    const timeline = await readManualTimelineService({ repository: new PrismaManualEditRepository(prisma) })({
+      workspaceId,
+      projectId,
+    })
+    return { phase, status: 'hydrated', editPlanHash: timeline.editPlanHash }
+  } catch (error) {
+    throw new Error(
+      `timeline fixture failed repository hydration during ${phase}: ` +
+        String(error instanceof Error ? `${error.name}: ${error.message}` : error),
+      { cause: error },
+    )
+  }
 }
 
 /** The refusal block, read exactly through the ids the fix published. */
@@ -312,7 +393,7 @@ test(
       evidence.findings.push({ strength, name, ...detail })
     }
 
-    let world, proxy, browser, server, testFailure
+    let world, proxy, browser, server, testFailure, serverLogs = ''
     const cleanupErrors = []
     try {
       await mkdir(artifactRoot, { recursive: true })
@@ -327,26 +408,43 @@ test(
         projects: [
           { slug: 'clean', name: `Editor confiavel ${suffix}` },
           { slug: 'conflict', name: `Editor conflito ${suffix}` },
+          { slug: 'no-review', name: `Editor sem laudo ${suffix}` },
         ],
       })
       const clean = world.bySlug('clean')
       const conflict = world.bySlug('conflict')
+      const noReview = world.bySlug('no-review')
+      evidence.fixtureHydration = [
+        await assertWorkspaceFixtureHydrates(prisma, world.workspaceId, clean.projectId, 'after-seed'),
+        await assertWorkspaceFixtureHydrates(prisma, world.workspaceId, conflict.projectId, 'after-seed'),
+        await assertWorkspaceFixtureHydrates(prisma, world.workspaceId, noReview.projectId, 'after-seed'),
+      ]
       evidence.materialisation = {
-        path: 'POST /v1/projects/{id}/proxy-renders over HTTP + scripts/run-v2-render-worker-once.mjs (the real driver)',
+        path: 'POST color-pipeline-compilations + POST lut-selection (enqueue) + test driver of the real worker factory with diagnostics enabled',
         seeded: 'source recording artifact/manifest/probe rows and the compiled base version only',
-        source: { codec: proxy.probe.codec, seconds: proxy.seconds, fps: proxy.fps, byteSize: proxy.byteSize },
+        source: {
+          codec: proxy.probe.codec,
+          audioCodec: proxy.probe.audioCodec,
+          audioSampleRate: proxy.probe.audioSampleRate,
+          decodedFrames: proxy.probe.decodedFrames,
+          seconds: proxy.seconds,
+          fps: proxy.fps,
+          byteSize: proxy.byteSize,
+        },
       }
 
       const username = `editor-ui-${suffix}`
       const password = `Editor-${suffix}-secure-passphrase`
       const port = await freePort()
       const baseUrl = `http://127.0.0.1:${port}`
-      let serverLogs = ''
-      // The build under measurement. Default: this worktree. When
-      // APOLLO_EDITOR_RELIABILITY_APP_ROOT names another checkout, the same
-      // fixture, database and browser are pointed at THAT build instead — which
-      // is the only way a "before" and an "after" are comparable at all.
+      // Acceptance evidence cannot mix a server build from one checkout with
+      // the worker factory imported from another revision.
       const appRoot = process.env.APOLLO_EDITOR_RELIABILITY_APP_ROOT ?? process.cwd()
+      assert.equal(
+        resolve(appRoot),
+        resolve(process.cwd()),
+        'acceptance E2E requires the server build and worker factory from the same checkout',
+      )
       evidence.appRoot = appRoot
       server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-p', String(port)], {
         cwd: appRoot,
@@ -377,7 +475,7 @@ test(
       await waitForServer(baseUrl, server)
 
       // The proxy is materialised by the product, through the published route
-      // and the real `--once` driver. Nothing below writes an operation row.
+      // and the test driver of the real worker factory. Nothing below writes an operation row.
       const workerEnvironment = {
         V2_DATABASE_URL: process.env.V2_DATABASE_URL,
         APOLLO_API_ENVIRONMENT: 'production',
@@ -389,10 +487,27 @@ test(
         APOLLO_PROTECTED_PAYLOAD_KEY_ID: `editor-reliability-${suffix}`,
         APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url'),
       }
-      // The render is ATTEMPTED, never faked. If it does not complete, the
-      // attempt's outcome is recorded verbatim and the journey continues on the
-      // source master, which carries no claim about rendering whatsoever.
+      // A real rendered proxy is a prerequisite of this acceptance journey.
+      // Source-master bytes cannot stand in for a proxy or make the positive
+      // playback/annotation checks optional.
       evidence.materialisation.renderAttempts = []
+      const immutableBases = new Map()
+      for (const project of [clean, conflict]) {
+        const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({
+          where: { id: project.versionId },
+          include: { editPlanSnapshot: true },
+        })
+        const serializedBaseVersion = serializePrismaRow(baseVersion)
+        assert.notEqual(
+          serializePrismaRow({ ...baseVersion, createdAt: new Date(baseVersion.createdAt.getTime() + 1) }),
+          serializedBaseVersion,
+          'the immutable-row comparison is insensitive to a changed timestamp',
+        )
+        immutableBases.set(project.projectId, {
+          version: serializedBaseVersion,
+          editPlanSnapshot: serializePrismaRow(baseVersion.editPlanSnapshot),
+        })
+      }
       for (const project of [clean, conflict]) {
         try {
           await materialiseProxy({
@@ -404,6 +519,23 @@ test(
             workerEnvironment,
             serverLogs: () => serverLogs,
           })
+          const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({
+            where: { id: project.versionId },
+            include: { editPlanSnapshot: true },
+          })
+          const currentProject = await prisma.v2Project.findUniqueOrThrow({
+            where: { id: project.projectId },
+            include: { currentVersion: { include: { editPlanSnapshot: true } } },
+          })
+          const captured = immutableBases.get(project.projectId)
+          assert.equal(serializePrismaRow(baseVersion), captured.version, `${project.slug} LUT selection mutated its base version`)
+          assert.equal(serializePrismaRow(baseVersion.editPlanSnapshot), captured.editPlanSnapshot, `${project.slug} LUT selection mutated its base EditPlan snapshot`)
+          assert.notEqual(currentProject.currentVersion.editPlanSnapshotId, baseVersion.editPlanSnapshotId, `${project.slug} LUT selection reused its base EditPlan snapshot`)
+          assert.equal(
+            JSON.parse(currentProject.currentVersion.editPlanSnapshot.contentJson).projectVersionId,
+            currentProject.currentVersion.id,
+            `${project.slug} LUT result EditPlan names another version`,
+          )
           evidence.materialisation.renderAttempts.push({
             project: project.slug,
             status: 'succeeded',
@@ -418,27 +550,68 @@ test(
           })
           evidence.materialisation.renderAttempts.push({
             project: project.slug,
-            status: 'not-executed',
+            status: 'failed',
             operation: row,
-            failure: String(error instanceof Error ? error.message : error).slice(0, 600),
+            failure: redactDiagnostic(error),
+            serverLogTail: redactDiagnostic(serverLogs.slice(-12_000)),
           })
-          await attachSourceAsEditingProxy({ prisma, workspaceId: world.workspaceId, project })
+          throw new Error(
+            `required proxy render failed for ${project.slug}: ${JSON.stringify(row)}; ` +
+              redactDiagnostic(error),
+            { cause: error },
+          )
         }
-      }
-      evidence.materialisation.mediaOrigin = {
-        clean: clean.mediaOrigin ?? 'rendered-proxy',
-        conflict: conflict.mediaOrigin ?? 'rendered-proxy',
       }
       const renderExecuted = evidence.materialisation.renderAttempts.every(
         (attempt) => attempt.status === 'succeeded',
       )
-      evidence.materialisation.note = renderExecuted
-        ? 'elapsedMs is the wall clock of enqueue + one driver pass in this harness, not the product metric timeToFirstProxyMs'
-        : 'the proxy render did not complete; every finding below is labelled source-master-fallback and says nothing about rendering'
+      assert.equal(renderExecuted, true, 'both projects must have a real rendered proxy')
+      assert.equal(clean.proxyHash, conflict.proxyHash, 'identical measured inputs did not produce identical proxy bytes')
+      assert.notEqual(clean.proxyArtifactId, conflict.proxyArtifactId, 'equal bytes collapsed two project artifact identities')
+      assert.notEqual(clean.proxyManifestId, conflict.proxyManifestId, 'equal bytes collapsed two project manifest identities')
+      for (const project of [clean, conflict]) {
+        assert.equal(project.proxyManifest.artifactId, project.proxyArtifactId, `${project.slug} manifest names another artifact`)
+        assert.equal(project.proxyManifest.recipeId, 'editorial-proxy', `${project.slug} used an unexpected recipe`)
+        assert.equal(project.proxyVersionProjectId, project.projectId, `${project.slug} output names another project's version`)
+        assert.deepEqual(
+          project.proxyLineage.map((edge) => edge.sourceArtifactId),
+          [project.sourceArtifactId],
+          `${project.slug} lineage resolved equal bytes to another project's source`,
+        )
+      }
+      evidence.equalBytesIsolation = {
+        sha256: clean.proxyHash,
+        clean: { artifactId: clean.proxyArtifactId, manifestId: clean.proxyManifestId, lineage: clean.proxyLineage },
+        conflict: { artifactId: conflict.proxyArtifactId, manifestId: conflict.proxyManifestId, lineage: conflict.proxyLineage },
+      }
+      const replayCountsBefore = {
+        snapshots: await prisma.v2ProjectSnapshot.count({ where: { workspaceId: world.workspaceId, projectId: clean.projectId } }),
+        versions: await prisma.v2ProjectVersion.count({ where: { workspaceId: world.workspaceId, projectId: clean.projectId } }),
+      }
+      evidence.enqueueReplay = await replayProxyEnqueue({
+        prisma, baseUrl, token: world.issued.token, workspaceId: world.workspaceId, project: clean,
+      })
+      assert.ok([200, 201].includes(evidence.enqueueReplay.status), 'proxy enqueue replay was refused')
+      assert.equal(evidence.enqueueReplay.operationId, clean.proxyOperationId, 'enqueue replay changed operation identity')
+      assert.equal(evidence.enqueueReplay.operations, 1, 'enqueue replay created another render operation')
+      const replayCountsAfter = {
+        snapshots: await prisma.v2ProjectSnapshot.count({ where: { workspaceId: world.workspaceId, projectId: clean.projectId } }),
+        versions: await prisma.v2ProjectVersion.count({ where: { workspaceId: world.workspaceId, projectId: clean.projectId } }),
+      }
+      assert.deepEqual(replayCountsAfter, replayCountsBefore, 'LUT replay created another snapshot or project version')
+      evidence.enqueueReplay.snapshotAndVersionCounts = { before: replayCountsBefore, after: replayCountsAfter }
+      evidence.fixtureHydration.push(
+        await assertWorkspaceFixtureHydrates(prisma, world.workspaceId, clean.projectId, 'after-render'),
+        await assertWorkspaceFixtureHydrates(prisma, world.workspaceId, conflict.projectId, 'after-render'),
+      )
+      evidence.fixtureHydration.push(
+        await assertTimelineFixtureHydrates(prisma, world.workspaceId, clean.projectId, 'after-render'),
+        await assertTimelineFixtureHydrates(prisma, world.workspaceId, conflict.projectId, 'after-render'),
+      )
+      evidence.materialisation.note = 'elapsedMs is the wall clock of enqueue + one real-factory test-driver pass, not the product metric timeToFirstProxyMs'
 
-      // Why the editor refuses, in the envelope's own words. The public API
-      // carries the DomainError message, so this needs no service wiring — and
-      // a 409 here means no page can render, whatever the UI does.
+      // Prove the clean project is readable before the browser opens. A 409 is
+      // a hard fixture/product failure, never a condition this journey repairs.
       const bearer = `Bearer ${world.issued.token}`
       const probeWorkspace = async (label) => {
         const response = await fetch(
@@ -456,46 +629,15 @@ test(
       }
       evidence.workspaceProbe = [await probeWorkspace('after-materialisation')]
       console.log(`editor-reliability WORKSPACE_PROBE ${JSON.stringify(evidence.workspaceProbe[0])}`)
+      assert.equal(
+        evidence.workspaceProbe[0].status,
+        200,
+        `the seeded clean project must hydrate before the browser opens: ${JSON.stringify(evidence.workspaceProbe[0])}`,
+      )
 
-      // A render that failed leaves an operation in `retrying`. If that is what
-      // the workspace read refuses, the only legitimate way out is the product's
-      // own cancel route — never an UPDATE on the row.
-      if (evidence.workspaceProbe[0].status === 409) {
-        const stuck = await prisma.v2PublicOperation.findMany({
-          where: {
-            workspaceId: world.workspaceId,
-            status: { notIn: ['succeeded', 'failed', 'canceled'] },
-          },
-          select: { id: true, status: true, phase: true, attempt: true, errorCode: true, errorMessage: true, errorRetryable: true },
-        })
-        evidence.stuckOperations = stuck
-        evidence.cancelAttempts = []
-        for (const operation of stuck) {
-          const response = await fetch(`${baseUrl}/v1/operations/${encodeURIComponent(operation.id)}/cancel`, {
-            method: 'POST',
-            headers: { authorization: bearer, 'content-type': 'application/json', 'idempotency-key': `cancel-${operation.id}` },
-            body: JSON.stringify({}),
-          })
-          const body = await response.json().catch(() => ({}))
-          evidence.cancelAttempts.push({
-            operationId: operation.id,
-            status: response.status,
-            code: body?.error?.code ?? null,
-            message: body?.error?.message ?? null,
-            resultingStatus: body?.data?.operation?.status ?? null,
-          })
-        }
-        evidence.workspaceProbe.push(await probeWorkspace('after-cancel'))
-        console.log(
-          `editor-reliability CANCEL ${JSON.stringify(evidence.cancelAttempts)} ` +
-            `THEN ${JSON.stringify(evidence.workspaceProbe[1])}`,
-        )
-      }
-
-      // Before a single page opens: which rows in this workspace carry
-      // credential audit and are missing part of it. Every one of them is a row
-      // some read will refuse with PERSISTENCE_CONFLICT, and knowing which
-      // table it is separates a fixture defect from a product one.
+      // Before a single page opens, identify incomplete credential audit. For
+      // tables with actorKind, only external rows require those credential
+      // fields; internal rows legitimately leave them null.
       evidence.auditCensus = await auditCensus({ prisma, workspaceId: world.workspaceId })
       console.log(`editor-reliability AUDIT_CENSUS ${JSON.stringify(evidence.auditCensus)}`)
 
@@ -519,6 +661,7 @@ test(
       const tokens = [
         [clean.projectId, '{projectId}'],
         [conflict.projectId, '{projectId}'],
+        [noReview.projectId, '{projectId}'],
         [clean.versionId, '{versionId}'],
         [conflict.versionId, '{versionId}'],
         [clean.proxyArtifactId, '{artifactId}'],
@@ -543,7 +686,7 @@ test(
         recorder.start(label)
         await openProjectCard(page, baseUrl, clean.name)
         const settled = await waitForEditorSettle(page)
-        const inventory = recorder.stop()
+        const inventory = await recorder.stop()
         inventory.settledOn = settled
         inventory.readLedger = await readLedger(page)
         inventory.gets = inventory.entries.filter((entry) => entry.method === 'GET').length
@@ -578,6 +721,12 @@ test(
         anomalyFloor: 20,
       }
       record('browser-real', 'page-open-read-cost', evidence.baseline)
+      assert.deepEqual(opens.flatMap((entry) => entry.refusals), [], 'clean editor opens contained refused API reads')
+      assert.equal(sameMinute, true, 'the two measured opens did not occur inside one governance window')
+      assert.ok(
+        opens.every((entry) => entry.settledOn === 'project-preview'),
+        `the editor did not mount its preview on both opens: ${opens.map((entry) => entry.settledOn).join(', ')}`,
+      )
       // Written and printed HERE, not only at the end: a later assertion that
       // fails must not take the measurement down with it.
       await writeFile(
@@ -593,6 +742,7 @@ test(
       const preview = page.getByTestId('project-preview')
       const previewPresent = (await preview.count()) > 0
       playback.previewPresent = previewPresent
+      assert.equal(previewPresent, true, 'project-preview did not mount; playback was not executed')
       if (previewPresent) {
         await preview.first().scrollIntoViewIfNeeded().catch(() => {})
         playback.ready = await preview.first().evaluate(async (video) => {
@@ -692,6 +842,8 @@ test(
         height: Number(probedStream.height ?? 0),
       }
       assert.ok(media.ffprobe.frames > 0, 'ffprobe counted zero frames in the served file')
+      assert.equal(media.ffprobe.frames, 90, 'the served three-second/30fps proxy did not contain exactly 90 frames')
+      assert.ok(Math.abs(media.ffprobe.duration - 3) < 0.05, `proxy duration was ${media.ffprobe.duration}, expected 3s`)
       record('api-real+pg-real', 'media-identity-and-range', media)
 
       // One valid annotation, created once and replayed once.
@@ -717,23 +869,12 @@ test(
         })
       const firstResponse = await postAnnotation()
       const firstPayload = await firstResponse.json()
-      // Without a rendered proxy there is no proxy for the review session to
-      // bind an annotation to, and the route says so. That is recorded as
-      // not-executed rather than asserted away, and rather than taking the
-      // negatives — which do not need a proxy — down with it.
       const annotationExecuted = firstResponse.status === 201
-      if (!annotationExecuted)
-        record('api-real', 'annotation-idempotency', {
-          status: 'not-executed',
-          firstStatus: firstResponse.status,
-          code: firstPayload?.error?.code ?? null,
-          requestId: firstPayload?.error?.requestId ?? null,
-          mediaOrigin: clean.mediaOrigin ?? 'rendered-proxy',
-          reason:
-            clean.mediaOrigin === 'source-master-fallback'
-              ? 'no rendered proxy: the review session has nothing to bind an annotation to'
-              : 'the annotations route refused an otherwise valid annotation',
-        })
+      assert.equal(
+        annotationExecuted,
+        true,
+        `annotation creation was not executed: ${firstResponse.status} ${firstPayload?.error?.code ?? ''}`,
+      )
       const replayResponse = await postAnnotation()
       const replayPayload = await replayResponse.json()
       const storedAnnotations = await prisma.v2ReviewAnnotation.findMany({
@@ -751,6 +892,7 @@ test(
         ).length,
       }
       if (annotationExecuted) {
+        assert.equal(annotation.replayStatus, 200, 'annotation replay did not return HTTP 200')
         assert.equal(annotation.replayedFlag, true, 'the replay was not reported as a replay')
         assert.equal(annotation.sameId, true, 'the replay produced a different annotation id')
         assert.equal(annotation.rowsInDatabase, 1, 'the replay duplicated the annotation row')
@@ -765,7 +907,7 @@ test(
       recorder.start('open-3-after-annotation')
       await openProjectCard(page, baseUrl, clean.name)
       const thirdSettle = await waitForEditorSettle(page)
-      const third = recorder.stop()
+      const third = await recorder.stop()
       third.settledOn = thirdSettle
       third.readLedger = await readLedger(page)
       third.gets = third.entries.filter((entry) => entry.method === 'GET').length
@@ -776,6 +918,7 @@ test(
         (entry) => typeof entry.status === 'number' && [401, 403, 409, 429].includes(entry.status),
       )
       evidence.phases.push(third)
+      assert.equal(third.settledOn, 'project-preview', 'the editor did not reopen on the persisted annotation')
       record('browser-real', 'reopen-after-annotation', {
         gets: third.gets,
         distinctEndpoints: third.distinctEndpoints,
@@ -787,11 +930,10 @@ test(
       await page.screenshot({ path: join(evidenceDir, 'clean-editor-after-annotation.png') })
 
       // ---------------------------------------------------------------- STEP 3
-      // PG-real: a legacy annotation with no credential audit blocks the read.
+      // PG-real: probe whether PostgreSQL accepts a null credential-audit row.
       const legacyId = randomUUID()
-      // If PostgreSQL itself refuses this row, that is the finding: the legacy
-      // shape can no longer be created, so the 409 can only come from rows that
-      // predate the constraint — which is exactly the production incident.
+      // This probe establishes only whether PostgreSQL accepts the null-audit
+      // shape. The independent hash-tamper scenario below exercises hydration.
       let legacyInsert = { inserted: false, refusedBy: null }
       try {
       await prisma.v2ReviewAnnotation.create({
@@ -839,7 +981,40 @@ test(
         ...legacyInsert,
         meaning: legacyInsert.inserted
           ? 'the legacy shape can still be written, so the 409 is reachable for new rows too'
-          : 'PostgreSQL refuses a review annotation with no credential audit: the 409 is reachable only from rows that predate the constraint',
+          : 'PostgreSQL refuses a review annotation with no credential audit; the separate hash-tamper scenario proves the hydrated 409 path',
+      })
+      assert.equal(legacyInsert.inserted, false, 'PostgreSQL accepted an annotation with null credential audit')
+
+      // Create an otherwise valid annotation through the public API, then
+      // corrupt only its context hash inside this disposable fixture. A valid
+      // 64-hex value passes the storage CHECK while hydration must detect that
+      // it no longer matches the authenticated actor projection.
+      const conflictCreate = await fetch(
+        `${baseUrl}/v1/projects/${encodeURIComponent(conflict.projectId)}/annotations`,
+        {
+          method: 'POST',
+          headers: {
+            authorization,
+            'content-type': 'application/json',
+            'idempotency-key': `editor-reliability-${suffix}-conflict-annotation`,
+          },
+          body: JSON.stringify({
+            ...annotationBody,
+            projectVersionId: conflict.proxyVersionId,
+            proxyArtifactId: conflict.proxyArtifactId,
+            proxyHash: conflict.proxyHash,
+            text: 'Anotação válida cuja projeção de auditoria será corrompida.',
+          }),
+        },
+      )
+      const conflictCreatePayload = await conflictCreate.json()
+      assert.equal(conflictCreate.status, 201, `could not create the conflict fixture through API: ${conflictCreate.status}`)
+      const conflictAnnotationId = conflictCreatePayload?.data?.annotation?.id
+      assert.ok(conflictAnnotationId, 'conflict annotation API response omitted its id')
+      const corruptedActorContextHash = 'e'.repeat(64)
+      await prisma.v2ReviewAnnotation.update({
+        where: { id: conflictAnnotationId },
+        data: { actorContextHash: corruptedActorContextHash },
       })
       const conflictApi = await fetch(
         `${baseUrl}/v1/projects/${encodeURIComponent(conflict.projectId)}/annotations?limit=10`,
@@ -853,19 +1028,18 @@ test(
       recorder.start('open-conflict-project')
       await openProjectCard(page, baseUrl, conflict.name)
       const conflictSettle = await waitForEditorSettle(page)
-      const conflictPhase = recorder.stop()
+      const conflictPhase = await recorder.stop()
       conflictPhase.settledOn = conflictSettle
       conflictPhase.gets = conflictPhase.entries.filter((entry) => entry.method === 'GET').length
       evidence.phases.push(conflictPhase)
       await page.screenshot({ path: join(evidenceDir, 'conflict-editor.png') })
 
-      const legacyRowAfter = await prisma.v2ReviewAnnotation.findUnique({ where: { id: legacyId } })
+      const corruptedRowAfter = await prisma.v2ReviewAnnotation.findUnique({ where: { id: conflictAnnotationId } })
       const conflictBlock = {
         apiStatus: conflictApi.status,
         apiCode: conflictPayload?.error?.code ?? null,
-        legacyRowStillPresent: legacyRowAfter !== null,
-        legacyRowStillWithoutAudit:
-          legacyRowAfter !== null && legacyRowAfter.actorCredentialId === null && legacyRowAfter.actorContextHash === null,
+        corruptedRowStillPresent: corruptedRowAfter !== null,
+        corruptedHashStillPresent: corruptedRowAfter?.actorContextHash === corruptedActorContextHash,
         annotationRowsOnConflictProject: await prisma.v2ReviewAnnotation.count({
           where: { workspaceId: world.workspaceId, projectId: conflict.projectId },
         }),
@@ -882,30 +1056,22 @@ test(
           ? (await page.getByTestId('proxy-review-gate').first().innerText()).slice(0, 200)
           : null,
       }
-      if (legacyInsert.inserted) {
-      assert.equal(conflictApi.status, 409, `the legacy annotation did not block the read: ${conflictApi.status}`)
+      assert.equal(conflictApi.status, 409, `the corrupted audit projection did not block the read: ${conflictApi.status}`)
       assert.equal(conflictBlock.apiCode, 'PERSISTENCE_CONFLICT', 'the refusal did not name PERSISTENCE_CONFLICT')
-      assert.equal(conflictBlock.legacyRowStillPresent, true, 'the refusal deleted the row it refused')
-      assert.equal(conflictBlock.legacyRowStillWithoutAudit, true, 'the row was rewritten instead of refused')
+      assert.equal(conflictBlock.corruptedRowStillPresent, true, 'the refusal deleted the row it refused')
+      assert.equal(conflictBlock.corruptedHashStillPresent, true, 'the corrupted audit hash was silently rewritten')
       assert.equal(conflictBlock.annotationRowsOnConflictProject, 1, 'the refused read created or removed rows')
       assert.equal(conflictBlock.versionsAfter, versionsBefore, 'a refused read created a project version')
       assert.equal(conflictBlock.exportOperations, 0, 'a refused read created an export/edit operation')
-      }
-      // The UI half of this negative can only be asserted on a page that
-      // mounted. When the editor never mounts, the browser-side expectations
-      // are recorded as not-executed instead of being quietly dropped — the
-      // PG-real half below is asserted either way.
       const editorMounted = conflictPhase.settledOn !== null && !String(conflictPhase.settledOn).startsWith('no-marker')
-      conflictBlock.uiEvidence = editorMounted ? 'browser-real' : 'not-executed'
-      conflictBlock.uiNotExecutedReason = editorMounted
-        ? null
-        : 'the editor never mounted: GET workspace answered 409 PERSISTENCE_CONFLICT before any review state rendered'
-      if (editorMounted) {
+      assert.equal(editorMounted, true, 'the editor did not mount the real 409 refusal state')
+      conflictBlock.uiEvidence = 'browser-real'
       assert.ok(conflictBlock.ui.blockVisible > 0, 'the refusal was not shown as review-unavailable')
       assert.ok(
         (conflictBlock.ui.codeText ?? '').includes('PERSISTENCE_CONFLICT'),
         `review-unavailable-code did not name the code: ${conflictBlock.ui.codeText}`,
       )
+      assert.equal(conflictBlock.ui.codeNamesRequestId, true, 'the 409 warning omitted its request id')
       assert.ok(conflictBlock.ui.retryPresent > 0, 'no review-retry was offered on a refused read')
       assert.equal(
         conflictBlock.ui.dependentActions.previewVideoPresent,
@@ -918,27 +1084,31 @@ test(
         'project-preview is no longer a <video>',
       )
       for (const id of ['review-save', 'review-patch-apply', 'review-batch-apply', 'review-batch-prepare'])
-        assert.notEqual(
+        assert.equal(
           conflictBlock.ui.dependentActions[id],
-          'enabled',
-          `${id} stayed enabled while the review read was refused`,
+          'absent',
+          `${id} existed while the review read was refused`,
         )
-      assert.ok(
-        /Laudo indispon|Sem laudo para esta vers/i.test(conflictBlock.proxyGateLabel ?? ''),
-        `unexpected proxy gate label: ${conflictBlock.proxyGateLabel}`,
+      const conflictReviewResponse = await fetch(
+        `${baseUrl}/v1/projects/${encodeURIComponent(conflict.projectId)}/proxy-reviews?projectVersionId=${encodeURIComponent(conflict.proxyVersionId)}`,
+        { headers: { authorization } },
       )
-      }
+      const conflictReviewPayload = await conflictReviewResponse.json()
+      assert.equal(conflictReviewResponse.status, 200, 'annotation 409 also made the independent proxy review unreadable')
+      assert.equal(conflictReviewPayload?.data?.review?.finalAllowed, true, 'fixture proxy review is not independently approved')
+      assert.ok(/Liberado para alta/i.test(conflictBlock.proxyGateLabel ?? ''), 'approved proxy review disappeared during annotation 409')
       record(
-        editorMounted ? 'pg-real+browser-real' : 'pg-real (ui not-executed)',
-        'legacy-audit-conflict-blocks-review',
+        'pg-real+browser-real',
+        'corrupted-audit-context-blocks-review',
         conflictBlock,
       )
 
       // State-real: media without a proxy review must not read as approved.
-      const proxyReviewRows = (await prisma.v2ProxyReview?.count({
-        where: { workspaceId: world.workspaceId, projectId: clean.projectId },
-      }).catch(() => null)) ?? null
-      await openProjectCard(page, baseUrl, clean.name)
+      const proxyReviewRows = await prisma.v2ProxyReview.count({
+        where: { workspaceId: world.workspaceId, projectId: noReview.projectId },
+      })
+      assert.equal(proxyReviewRows, 0, 'the dedicated no-review project unexpectedly has a proxy review')
+      await openProjectCard(page, baseUrl, noReview.name)
       await waitForEditorSettle(page)
       const gateText = (await page.getByTestId('proxy-review-gate').count())
         ? await page.getByTestId('proxy-review-gate').first().innerText()
@@ -952,6 +1122,8 @@ test(
       }
       assert.equal(emptyReview.saysReleasedForHigh, false, 'a project with no proxy review reads as released')
       assert.equal(emptyReview.approvedWordAnywhereOnPage, false, 'a project with no proxy review reads as approved')
+      assert.equal(emptyReview.gatePresent, true, 'the no-review gate did not render')
+      assert.equal(emptyReview.saysNoReportForThisVersion, true, 'the no-review gate did not explicitly name the absent report')
       emptyReview.note = emptyReview.gatePresent
         ? null
         : 'the proxy gate never rendered, so "not approved" here is the absence of the whole page, not a verdict the page took'
@@ -978,11 +1150,20 @@ test(
       await waitForEditorSettle(page)
       stub.rateLimited = await refusalBlock(page)
       stub.rateLimited.readLedger = await readLedger(page)
+      assert.ok(stub.rateLimited.blockVisible > 0, '429 did not render the review-unavailable warning')
+      assert.ok((stub.rateLimited.codeText ?? '').includes('RATE_LIMITED'), '429 warning omitted RATE_LIMITED')
+      assert.ok((stub.rateLimited.codeText ?? '').includes('stub-429'), '429 warning omitted its request id')
+      assert.equal(stub.rateLimited.retryPresent > 0, true, '429 warning omitted retry control')
+      assert.equal(stub.rateLimited.retryDisabled, true, '429 retry was enabled before Retry-After elapsed')
+      assert.equal(stub.rateLimited.retryCountsDown, true, '429 retry did not expose its countdown')
       await page.screenshot({ path: join(evidenceDir, 'stub-429.png') })
       await page.unroute(annotationsGlob)
 
+      let unauthorizedServed = 0
       await page.route(annotationsGlob, async (route) => {
         if (route.request().method() !== 'GET') return route.fallback()
+        unauthorizedServed += 1
+        await context.clearCookies({ name: 'apollo_session' })
         await route.fulfill({
           status: 401,
           headers: { 'content-type': 'application/json' },
@@ -992,7 +1173,18 @@ test(
       await openProjectCard(page, baseUrl, clean.name)
       await waitForEditorSettle(page)
       stub.unauthorized = await refusalBlock(page)
+      stub.unauthorized.stubbedResponses = unauthorizedServed
+      stub.unauthorized.url = page.url()
+      assert.ok(unauthorizedServed > 0, 'the controlled 401 transport response was not exercised')
+      assert.equal(stub.unauthorized.retryPresent, 0, '401 exposed a retry action after the coordinator closed')
+      assert.ok(page.url().includes('/login'), `401 did not close the session: ${page.url()}`)
       await page.unroute(annotationsGlob)
+
+      // Sign in again so the project-switch assertion starts from an accepted session.
+      await page.locator('input[name="username"]').fill(username)
+      await page.locator('input[name="password"]').fill(password)
+      await page.getByRole('button', { name: 'Entrar no Apollo' }).click()
+      await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 })
 
       // A late answer that lands after the operator already switched project.
       let slowServed = false
@@ -1014,6 +1206,8 @@ test(
         readLedger: await readLedger(page),
         ...(await refusalBlock(page)),
       }
+      assert.equal(stub.lateAnswerAfterSwitch.urlIsConflictProject, true, 'late response switched back to the prior project')
+      assert.equal(stub.lateAnswerAfterSwitch.staleBannerVisible, 0, 'late response installed stale review state')
       await page.unroute(annotationsGlob)
       record('transport-stub', 'stubbed-refusals', stub)
 
@@ -1070,6 +1264,7 @@ test(
       await prisma.v2Workspace.deleteMany({ where: { id: otherWorkspaceId } })
 
       evidence.jsErrors = jsErrors
+      assert.deepEqual(jsErrors, [], `browser emitted page errors: ${jsErrors.join(' | ')}`)
       evidence.serverLogTail = serverLogs.slice(-1_200).replace(/Bearer\s+\S+/g, 'Bearer [redacted]')
       evidence.finishedAt = new Date().toISOString()
       const evidencePath = join(evidenceDir, 'editor-reliability-evidence.json')
@@ -1085,13 +1280,24 @@ test(
           `refusals=${JSON.stringify([...first.refusals, ...second.refusals])}`,
           `range=${media.rangeStatus}/${media.contentRange} ffprobeFrames=${media.ffprobe.frames}`,
           `annotation=${annotation.firstStatus}/${annotation.replayStatus} rows=${annotation.rowsInDatabase}`,
-          `conflict=${conflictBlock.apiStatus}/${conflictBlock.apiCode} ui.unavailable=${conflictBlock.ui.reviewUnavailableVisible} ui.retry=${conflictBlock.ui.reviewRetryVisible}`,
+          `conflict=${conflictBlock.apiStatus}/${conflictBlock.apiCode} ui.unavailable=${conflictBlock.ui.blockVisible} ui.retry=${conflictBlock.ui.retryPresent}`,
           `cross=${crossWorkspace.annotationsStatus}/${crossWorkspace.artifactStatus}`,
           `jsErrors=${jsErrors.length} serverPid=${server.pid} evidence=${evidencePath}`,
         ].join(' | '),
       )
     } catch (error) {
       testFailure = error
+      evidence.failure = {
+        diagnostic: redactDiagnostic(error),
+        serverLogTail: redactDiagnostic(typeof serverLogs === 'string' ? serverLogs.slice(-12_000) : ''),
+        failedAt: new Date().toISOString(),
+      }
+      await mkdir(evidenceDir, { recursive: true }).catch(() => {})
+      await writeFile(
+        join(evidenceDir, 'editor-reliability-failure.json'),
+        `${JSON.stringify(evidence, null, 2)}\n`,
+        'utf8',
+      ).catch(() => {})
       throw error
     } finally {
       if (browser)
