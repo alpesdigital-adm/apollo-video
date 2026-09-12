@@ -278,6 +278,18 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
         contentHash: calculateCanonicalHash(policiesContent),
       },
     })
+    // The same identity check guards the other snapshots, and the seeder hashes
+    // with `calculateVersionHash` while the readers verify with
+    // `calculateCanonicalHash`. Re-hash every snapshot with the reader's
+    // function over the content already stored — the content is not touched.
+    for (const snapshot of await prisma.v2ProjectSnapshot.findMany({
+      where: { workspaceId, projectId },
+      select: { id: true, contentJson: true },
+    }))
+      await prisma.v2ProjectSnapshot.update({
+        where: { id: snapshot.id },
+        data: { contentHash: calculateCanonicalHash(JSON.parse(snapshot.contentJson)) },
+      })
 
     created.push({
       slug: spec.slug,
