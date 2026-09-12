@@ -24,12 +24,45 @@ import { SUBTITLE_ANCHOR_PERCEPTION_FIXTURES, subtitleAnchorDecisionFor } from '
 import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { evaluateColorCriticService } from '../../src/v2/application/color-critic.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
+import { contentAddressedArtifactKey } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { buildMeasurement } from './wave20-fixtures.mjs'
 
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
   sourceManifestId: 'manifest-project-proxy-source', compilationHash: '8'.repeat(64),
   pipeline: Object.freeze({ pipelineHash: '9'.repeat(64) }),
+})
+
+test('byte-identical outputs from two projects retain distinct storage and replay identities', () => {
+  const sha256 = 'd'.repeat(64)
+  const firstId = 'artifact-project-one-output'
+  const secondId = 'artifact-project-two-output'
+  const firstPrefix = artifactOutputStoragePrefix('editorial-proxy', firstId)
+  const secondPrefix = artifactOutputStoragePrefix('editorial-proxy', secondId)
+  const key = (prefix) => contentAddressedArtifactKey({ workspaceId: 'workspace-shared', prefix, sha256, extension: 'mp4' })
+
+  assert.match(firstPrefix, /^[a-f0-9]{32}$/)
+  assert.notEqual(firstPrefix, secondPrefix)
+  assert.notEqual(firstPrefix, artifactOutputStoragePrefix('final-export', firstId), 'artifact kind participates in the canonical identity')
+  assert.notEqual(key(firstPrefix), key(secondPrefix), 'same bytes must not merge output identities across projects')
+  assert.equal(key(firstPrefix), key(artifactOutputStoragePrefix('editorial-proxy', firstId)), 'replay must resolve the same reserved identity')
+  assert.ok(key(firstPrefix).endsWith(`${sha256}.mp4`), 'the physical key still carries the verified content digest')
+})
+
+test('output storage identity rejects non-canonical or unsupported identities', () => {
+  for (const [kind, outputArtifactId] of [
+    ['unsupported-output', 'artifact-output'],
+    ['editorial-proxy', ''],
+    ['editorial-proxy', ' artifact-output'],
+    ['editorial-proxy', 'artifact-output '],
+    ['editorial-proxy', 'artifact\noutput'],
+  ]) {
+    assert.throws(
+      () => artifactOutputStoragePrefix(kind, outputArtifactId),
+      (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+    )
+  }
 })
 const colorPipelineBindings = Object.freeze([Object.freeze({
   sourceArtifactId: colorCompilation.sourceArtifactId, sourceManifestId: colorCompilation.sourceManifestId,
@@ -216,8 +249,9 @@ function dependencies(operations, overrides = {}) {
       },
     },
     storage: {
-      async promoteDerived() {
-        return { key: 'workspaces/project-proxy-test/editorial-proxies/output.mp4', sha256: 'd'.repeat(64), byteSize: 4096 }
+      async promoteDerived(input) {
+        assert.equal(input.prefix, artifactOutputStoragePrefix('editorial-proxy', 'artifact-project-proxy-output'))
+        return { key: `workspaces/project-proxy-test/${input.prefix}/output.mp4`, sha256: 'd'.repeat(64), byteSize: 4096 }
       },
     },
     renderer: {

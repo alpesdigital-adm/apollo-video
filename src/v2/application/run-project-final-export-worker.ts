@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { artifactOutputStoragePrefix } from '../domain/artifact-storage-identity.ts'
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { createReconstructableMediaArtifactManifest } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -349,7 +350,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         sourcePath: rendered.outputPath,
         sha256: rendered.sha256,
         extension: 'mp4',
-        prefix: 'final-exports',
+        prefix: artifactOutputStoragePrefix('final-export', context.outputArtifactId),
       })
       if (
         stored.sha256 !== rendered.sha256 ||
