@@ -88,6 +88,7 @@ export async function encodeSharedProxy({ artifactRoot, key, seconds = 3, fps = 
 /** Workspace, API client, and the projects with their source recording. */
 export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix, proxy, projects }) {
   const { registerRecording, seedBaseProjectVersion } = await import('./capture-journey.mjs')
+  const { calculateCanonicalHash, stableSerialize } = await import('../../../src/v2/domain/canonical-hash.ts')
 
   const workspaceId = `editor-reliability-${suffix}`
   const clientId = `editor-reliability-client-${suffix}`
@@ -119,21 +120,66 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
     'v2ApiClient',
   ]
   const cleanup = async () => {
-    const failures = []
-    for (const model of CLEANUP_ORDER) {
-      if (!prisma[model]) continue
-      try {
-        await prisma[model].deleteMany({ where: { workspaceId } })
-      } catch (error) {
-        failures.push(new Error(`${model}: ${error instanceof Error ? error.message : String(error)}`))
+    // Every public table with a workspaceId, swept until a pass deletes nothing.
+    // A hand-maintained order cannot keep up with the tables the real routes
+    // write (colour pipeline compilations, the LUT selection command, render
+    // element maps…), and the one that fell out of date is what left rows
+    // behind for the next run to trip over. Foreign keys decide the order: a
+    // delete that a child blocks simply retries on the next pass.
+    const tables = (
+      await prisma.$queryRawUnsafe(
+        `SELECT table_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND column_name = 'workspaceId'
+          ORDER BY table_name`,
+      )
+    ).map((row) => row.table_name)
+    let remaining = new Set(tables)
+    let lastErrors = new Map()
+    for (let pass = 0; pass < tables.length + 2 && remaining.size; pass += 1) {
+      const stillBlocked = new Set()
+      lastErrors = new Map()
+      for (const table of remaining) {
+        try {
+          await prisma.$executeRawUnsafe(`DELETE FROM "${table}" WHERE "workspaceId" = $1`, workspaceId)
+        } catch (error) {
+          stillBlocked.add(table)
+          lastErrors.set(table, error instanceof Error ? error.message.split('\n').pop() : String(error))
+        }
       }
+      if (stillBlocked.size === remaining.size) break
+      remaining = stillBlocked
     }
+    const failures = [...lastErrors].map(([table, message]) => new Error(`${table}: ${message}`))
     try {
-      await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
+      await prisma.$executeRawUnsafe(`DELETE FROM workspaces WHERE id = $1`, workspaceId)
     } catch (error) {
-      failures.push(new Error(`v2Workspace: ${error instanceof Error ? error.message : String(error)}`))
+      failures.push(new Error(`workspaces: ${error instanceof Error ? error.message.split('\n').pop() : String(error)}`))
     }
-    if (failures.length) throw new AggregateError(failures, `fixture rows survived cleanup in ${workspaceId}`)
+    if (failures.length)
+      throw new AggregateError(
+        failures,
+        `fixture rows survived cleanup in ${workspaceId}: ${failures.map((error) => error.message).join(' | ')}`,
+      )
+  }
+
+  /** What is still in this workspace — the proof cleanup left nothing. */
+  const residue = async () => {
+    const tables = (
+      await prisma.$queryRawUnsafe(
+        `SELECT table_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND column_name = 'workspaceId' ORDER BY table_name`,
+      )
+    ).map((row) => row.table_name)
+    const left = []
+    for (const table of tables) {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT count(*)::int AS n FROM "${table}" WHERE "workspaceId" = $1`,
+        workspaceId,
+      )
+      const count = Number(rows?.[0]?.n ?? 0)
+      if (count > 0) left.push({ table, count })
+    }
+    return { tablesChecked: tables.length, left, clean: left.length === 0 }
   }
 
   await cleanup()
@@ -207,6 +253,32 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
       createdAt,
     })
 
+    // `seedBaseProjectVersion` writes the policies snapshot as `{kind:'policies'}`
+    // with row schemaVersion 1. `hydratePolicySnapshot` requires
+    // `Number(content.schemaVersion) === row.schemaVersion`, and Number(undefined)
+    // is NaN, so every read of that project refuses with PERSISTENCE_CONFLICT
+    // ("Stored project policy snapshot identity is invalid"). Rewritten here with
+    // the content shape `createProjectService` itself writes (create-project.ts
+    // 149-155), hashed with the same function the reader verifies with.
+    // capture-journey.mjs is shared with the Wave 18 journey and is not touched;
+    // the version's baseHash does not include the policies hash, so it stands.
+    const policiesContent = {
+      schemaVersion: 1,
+      workspaceId,
+      state: 'unconfigured',
+      brandKitMode: 'inherit',
+      guardrails: [],
+      createdAt: createdAt.toISOString(),
+    }
+    await prisma.v2ProjectSnapshot.update({
+      where: { id: `${projectId}-snapshot-policies` },
+      data: {
+        schemaVersion: Number(policiesContent.schemaVersion),
+        contentJson: stableSerialize(policiesContent),
+        contentHash: calculateCanonicalHash(policiesContent),
+      },
+    })
+
     created.push({
       slug: spec.slug,
       name: spec.name,
@@ -238,6 +310,7 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
       return found
     },
     cleanup,
+    residue,
   }
 }
 

@@ -74,9 +74,13 @@ async function waitForServer(url, child) {
 /** SIGTERM, 5s grace, SIGKILL, 2s grace — and refuse to pretend it stopped. */
 async function stopChild(child) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return
-  const exited = new Promise((resolve, reject) => {
-    child.once('exit', resolve)
-    child.once('error', reject)
+  // On Linux `next start` leaves on the SIGTERM itself: exitCode stays null and
+  // signalCode becomes 'SIGTERM' (or the code is 143). Both are a clean stop.
+  // This promise never rejects — a rejection settled after the race below would
+  // surface as an unhandled rejection instead of a cleanup error.
+  const exited = new Promise((resolve) => {
+    child.once('exit', () => resolve('exit'))
+    child.once('error', () => resolve('error'))
   })
   child.kill('SIGTERM')
   let timer
@@ -1064,9 +1068,13 @@ test(
         cleanupErrors.push(error)
       }
       if (cleanupErrors.length)
+        // node prints an AggregateError's own message and NOT its inner ones,
+        // so a CI failure here was invisible. The causes go in the message.
         throw new AggregateError(
           testFailure ? [testFailure, ...cleanupErrors] : cleanupErrors,
-          'Editor reliability browser E2E cleanup failed',
+          `Editor reliability browser E2E cleanup failed: ${cleanupErrors
+            .map((error) => (error instanceof Error ? error.message : String(error)))
+            .join(' | ')}`,
         )
     }
   },
