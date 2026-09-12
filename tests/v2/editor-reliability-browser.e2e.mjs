@@ -201,6 +201,52 @@ async function openProjectCard(page, baseUrl, projectName) {
   await page.waitForURL('**/projects/**', { timeout: 20_000 })
 }
 
+/** The page's own read ledger, when the build exposes one. */
+async function readLedger(page) {
+  return page
+    .evaluate(() => (typeof window.__apolloEditorReads === 'function' ? window.__apolloEditorReads() : null))
+    .catch((error) => ({ unavailable: error instanceof Error ? error.name : 'unknown' }))
+}
+
+/** What the page must not let anyone do while the review read is refused. */
+async function dependentActionState(page) {
+  const state = {}
+  for (const id of ['review-save', 'review-patch-apply', 'review-batch-apply', 'review-batch-prepare']) {
+    const locator = page.getByTestId(id)
+    const count = await locator.count()
+    state[id] = count === 0 ? 'absent' : (await locator.first().isDisabled().catch(() => null)) ? 'disabled' : 'enabled'
+  }
+  const previewCount = await page.getByTestId('project-preview').count()
+  state.previewVideoPresent = previewCount > 0
+  state.previewIsVideoElement = previewCount
+    ? await page.getByTestId('project-preview').first().evaluate((node) => node.tagName.toLowerCase() === 'video')
+    : false
+  return state
+}
+
+/** The refusal block, read exactly through the ids the fix published. */
+async function refusalBlock(page) {
+  const block = page.getByTestId('review-unavailable')
+  const code = page.getByTestId('review-unavailable-code')
+  const retry = page.getByTestId('review-retry')
+  const proxyCode = page.getByTestId('proxy-review-unavailable-code')
+  const codeText = (await code.count()) ? (await code.first().innerText()).slice(0, 160) : null
+  const retryText = (await retry.count()) ? (await retry.first().innerText()).slice(0, 80) : null
+  return {
+    blockVisible: await block.count(),
+    codeText,
+    codeNamesRequestId: codeText !== null && /request\s+\S+/i.test(codeText),
+    retryPresent: await retry.count(),
+    retryText,
+    retryDisabled: (await retry.count()) ? await retry.first().isDisabled().catch(() => null) : null,
+    retryCountsDown: retryText !== null && /Tentar novamente em \d+\s*s/i.test(retryText),
+    proxyReviewUnavailableCode: (await proxyCode.count())
+      ? (await proxyCode.first().innerText()).slice(0, 160)
+      : null,
+    dependentActions: await dependentActionState(page),
+  }
+}
+
 /** The editor has settled when the preview or a refusal is on screen. */
 async function waitForEditorSettle(page) {
   const preview = page.getByTestId('project-preview')
@@ -342,6 +388,7 @@ test(
         const settled = await waitForEditorSettle(page)
         const inventory = recorder.stop()
         inventory.settledOn = settled
+        inventory.readLedger = await readLedger(page)
         inventory.gets = inventory.entries.filter((entry) => entry.method === 'GET').length
         inventory.distinctEndpoints = new Set(
           inventory.entries.filter((entry) => entry.method === 'GET').map((entry) => entry.path),
@@ -362,6 +409,7 @@ test(
           gets: entry.gets,
           distinctEndpoints: entry.distinctEndpoints,
           duplicates: entry.duplicates,
+          readLedger: entry.readLedger,
           refusals: entry.refusals.map((refusal) => ({
             path: refusal.path,
             status: refusal.status,
@@ -533,6 +581,7 @@ test(
       const thirdSettle = await waitForEditorSettle(page)
       const third = recorder.stop()
       third.settledOn = thirdSettle
+      third.readLedger = await readLedger(page)
       third.gets = third.entries.filter((entry) => entry.method === 'GET').length
       third.distinctEndpoints = new Set(
         third.entries.filter((entry) => entry.method === 'GET').map((entry) => entry.path),
@@ -546,6 +595,7 @@ test(
         distinctEndpoints: third.distinctEndpoints,
         duplicates: third.duplicates,
         settledOn: third.settledOn,
+        readLedger: third.readLedger,
         refusals: third.refusals.map((entry) => ({ path: entry.path, status: entry.status, code: entry.code ?? null })),
       })
       await page.screenshot({ path: join(evidenceDir, 'clean-editor-after-annotation.png') })
@@ -624,16 +674,11 @@ test(
         exportOperations: await prisma.v2PublicOperation.count({
           where: { workspaceId: world.workspaceId, projectId: conflict.projectId, type: { not: 'project-proxy-render' } },
         }),
-        // The "before" the coordinator's fix will change: what the BASE page shows.
-        ui: {
-          reviewUnavailableVisible: await page.getByTestId('review-unavailable').count(),
-          reviewUnavailableCodeText: (await page.getByTestId('review-unavailable-code').count())
-            ? (await page.getByTestId('review-unavailable-code').first().innerText()).slice(0, 120)
-            : null,
-          reviewRetryVisible: await page.getByTestId('review-retry').count(),
-          previewStillInspectable: await page.getByTestId('project-preview').count(),
-          proxyReviewGateVisible: await page.getByTestId('proxy-review-gate').count(),
-        },
+        ui: await refusalBlock(page),
+        readLedger: await readLedger(page),
+        proxyGateLabel: (await page.getByTestId('proxy-review-gate').count())
+          ? (await page.getByTestId('proxy-review-gate').first().innerText()).slice(0, 200)
+          : null,
       }
       assert.equal(conflictApi.status, 409, `the legacy annotation did not block the read: ${conflictApi.status}`)
       assert.equal(conflictBlock.apiCode, 'PERSISTENCE_CONFLICT', 'the refusal did not name PERSISTENCE_CONFLICT')
@@ -642,6 +687,32 @@ test(
       assert.equal(conflictBlock.annotationRowsOnConflictProject, 1, 'the refused read created or removed rows')
       assert.equal(conflictBlock.versionsAfter, versionsBefore, 'a refused read created a project version')
       assert.equal(conflictBlock.exportOperations, 0, 'a refused read created an export/edit operation')
+      assert.ok(conflictBlock.ui.blockVisible > 0, 'the refusal was not shown as review-unavailable')
+      assert.ok(
+        (conflictBlock.ui.codeText ?? '').includes('PERSISTENCE_CONFLICT'),
+        `review-unavailable-code did not name the code: ${conflictBlock.ui.codeText}`,
+      )
+      assert.ok(conflictBlock.ui.retryPresent > 0, 'no review-retry was offered on a refused read')
+      assert.equal(
+        conflictBlock.ui.dependentActions.previewVideoPresent,
+        true,
+        'the refused review also removed the preview',
+      )
+      assert.equal(
+        conflictBlock.ui.dependentActions.previewIsVideoElement,
+        true,
+        'project-preview is no longer a <video>',
+      )
+      for (const id of ['review-save', 'review-patch-apply', 'review-batch-apply', 'review-batch-prepare'])
+        assert.notEqual(
+          conflictBlock.ui.dependentActions[id],
+          'enabled',
+          `${id} stayed enabled while the review read was refused`,
+        )
+      assert.ok(
+        /Laudo indispon|Sem laudo para esta vers/i.test(conflictBlock.proxyGateLabel ?? ''),
+        `unexpected proxy gate label: ${conflictBlock.proxyGateLabel}`,
+      )
       record('pg-real+browser-real', 'legacy-audit-conflict-blocks-review', conflictBlock)
 
       // State-real: media without a proxy review must not read as approved.
@@ -679,14 +750,8 @@ test(
       })
       await openProjectCard(page, baseUrl, clean.name)
       await waitForEditorSettle(page)
-      stub.rateLimited = {
-        reviewUnavailable: await page.getByTestId('review-unavailable').count(),
-        code: (await page.getByTestId('review-unavailable-code').count())
-          ? (await page.getByTestId('review-unavailable-code').first().innerText()).slice(0, 120)
-          : null,
-        retryOffered: await page.getByTestId('review-retry').count(),
-        previewStillInspectable: await page.getByTestId('project-preview').count(),
-      }
+      stub.rateLimited = await refusalBlock(page)
+      stub.rateLimited.readLedger = await readLedger(page)
       await page.screenshot({ path: join(evidenceDir, 'stub-429.png') })
       await page.unroute(annotationsGlob)
 
@@ -700,13 +765,7 @@ test(
       })
       await openProjectCard(page, baseUrl, clean.name)
       await waitForEditorSettle(page)
-      stub.unauthorized = {
-        reviewUnavailable: await page.getByTestId('review-unavailable').count(),
-        code: (await page.getByTestId('review-unavailable-code').count())
-          ? (await page.getByTestId('review-unavailable-code').first().innerText()).slice(0, 120)
-          : null,
-        retryOffered: await page.getByTestId('review-retry').count(),
-      }
+      stub.unauthorized = await refusalBlock(page)
       await page.unroute(annotationsGlob)
 
       // A late answer that lands after the operator already switched project.
@@ -724,12 +783,10 @@ test(
       await delay(5_000)
       stub.lateAnswerAfterSwitch = {
         urlIsConflictProject: page.url().includes(conflict.projectId),
-        reviewUnavailable: await page.getByTestId('review-unavailable').count(),
-        code: (await page.getByTestId('review-unavailable-code').count())
-          ? (await page.getByTestId('review-unavailable-code').first().innerText()).slice(0, 120)
-          : null,
         // The defect a stale answer causes: the OTHER project's review shown here.
         staleBannerVisible: await page.getByTestId('review-stale-banner').count(),
+        readLedger: await readLedger(page),
+        ...(await refusalBlock(page)),
       }
       await page.unroute(annotationsGlob)
       record('transport-stub', 'stubbed-refusals', stub)

@@ -164,15 +164,16 @@ export async function seedEditorReliabilityWorld({
   })
   const authenticationAudit = materializeActorAuditContext(actor)
 
+  // Event ids are globally unique, not workspace-scoped: a counter-derived id
+  // survives this fixture's cleanup only to collide with the next run.
   let entityCounter = 0
-  let eventCounter = 0
   const created = []
   for (const spec of projects) {
     const result = await createProjectService({
       repository: new PrismaProjectCreationRepository(prisma),
       clock: () => createdAt,
       createId: (kind) => `${kind}-${suffix}-${++entityCounter}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(++eventCounter).padStart(12, '0')}`,
+      createEventId: () => randomUUID(),
     })({
       workspaceId,
       name: spec.name,
@@ -258,7 +259,6 @@ export async function seedEditorReliabilityWorld({
           workspaceId,
           projectId: result.project.id,
           clientId: issued.client.id,
-          actorClientId: authenticationAudit.clientId,
           actorCredentialId: authenticationAudit.credentialId,
           actorEnvironment: authenticationAudit.environment,
           actorAuthenticationKind: authenticationAudit.authenticationKind,
@@ -271,6 +271,12 @@ export async function seedEditorReliabilityWorld({
           cancelable: false,
           retryable: false,
           attempt: 1,
+          // `public_operations_progress_check` is not decorative: a succeeded
+          // project-proxy-render must carry 4/4 'render'. The older fixture in
+          // prisma-review-annotation.integration.mjs predates that constraint.
+          progressCompleted: 4,
+          progressTotal: 4,
+          progressUnit: 'render',
           resultJson: JSON.stringify({ artifactId }),
           idempotencyKey: `${suffix}-${spec.slug}-render`,
           requestFingerprint: sha256Of(Buffer.from(`fingerprint:${operationId}`)),
@@ -289,6 +295,7 @@ export async function seedEditorReliabilityWorld({
           editPlanSnapshotId: result.version.snapshotRefs.editPlan,
           sourceArtifactId: artifactId,
           sourceManifestId: manifestId,
+          colorPipelineBindingsJson: JSON.stringify([]),
           inputHash: sha256Of(Buffer.from(`input:${operationId}`)),
           outputArtifactId: artifactId,
           outputManifestId: manifestId,

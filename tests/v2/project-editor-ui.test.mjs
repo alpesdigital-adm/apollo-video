@@ -593,3 +593,18 @@ test('T-FR-010 project editor governs all strategic objectives and preserves ret
   assert.match(projectEditorSource, /supersedesRunId/)
   assert.match(projectEditorSource, /rubricRef/)
 })
+
+test('W22 the editor reads go through the coordinator and the review failure stays on screen', () => {
+  // Wave 22. These are structural guards over the wiring; the behaviour is
+  // proved by tests/v2/editor-reads.test.mjs (fake network and clock) and by
+  // tests/v2/editor-reliability-browser.e2e.mjs (real browser, API, PostgreSQL).
+  assert.match(projectEditorSource, /createEditorReads\(\{/, 'the page builds the read coordinator')
+  assert.match(projectEditorSource, /reads\.poll\(async \(\) => \{/, 'the operation poll is a cycle that awaits its own round')
+  assert.doesNotMatch(projectEditorSource, /window\.setInterval\(\(\) => \{\s*void loadWorkspace\(true\)/, 'the old interval that stacked four reads every 2.5 s is gone')
+  assert.match(projectEditorSource, /data-testid="review-unavailable"/, 'a failed review read is rendered as its own block')
+  assert.match(projectEditorSource, /data-testid="review-unavailable-code"/, 'the block names the error code and request id')
+  assert.match(projectEditorSource, /data-testid="review-retry"/, 'the retry is localised to the review read')
+  assert.match(projectEditorSource, /disabled=\{reviewFailure !== null \|\| reviewSaving/, 'saving an annotation is disabled while the review read failed')
+  assert.doesNotMatch(projectEditorSource, /\}, \[projectId, router, uploadPhase\]\)/, 'loadWorkspace no longer changes identity on every upload phase')
+  assert.doesNotMatch(projectEditorSource, /\[loadProxyReview, loadReview, workspace\?\.media\.length, workspace\?\.version\]/, 'the review effect no longer depends on a fresh version object')
+})
