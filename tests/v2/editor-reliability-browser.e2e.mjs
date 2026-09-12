@@ -729,6 +729,11 @@ test(
       // ---------------------------------------------------------------- STEP 3
       // PG-real: a legacy annotation with no credential audit blocks the read.
       const legacyId = randomUUID()
+      // If PostgreSQL itself refuses this row, that is the finding: the legacy
+      // shape can no longer be created, so the 409 can only come from rows that
+      // predate the constraint — which is exactly the production incident.
+      let legacyInsert = { inserted: false, refusedBy: null }
+      try {
       await prisma.v2ReviewAnnotation.create({
         data: {
           id: legacyId,
@@ -764,6 +769,17 @@ test(
           createdAt: world.createdAt,
           updatedAt: world.createdAt,
         },
+      })
+      legacyInsert.inserted = true
+      } catch (error) {
+        const message = String(error instanceof Error ? error.message : error)
+        legacyInsert.refusedBy = (message.match(/constraint "([^"]+)"/) ?? [])[1] ?? message.slice(0, 200)
+      }
+      record('pg-real', 'legacy-annotation-insertability', {
+        ...legacyInsert,
+        meaning: legacyInsert.inserted
+          ? 'the legacy shape can still be written, so the 409 is reachable for new rows too'
+          : 'PostgreSQL refuses a review annotation with no credential audit: the 409 is reachable only from rows that predate the constraint',
       })
       const conflictApi = await fetch(
         `${baseUrl}/v1/projects/${encodeURIComponent(conflict.projectId)}/annotations?limit=10`,
@@ -806,6 +822,7 @@ test(
           ? (await page.getByTestId('proxy-review-gate').first().innerText()).slice(0, 200)
           : null,
       }
+      if (legacyInsert.inserted) {
       assert.equal(conflictApi.status, 409, `the legacy annotation did not block the read: ${conflictApi.status}`)
       assert.equal(conflictBlock.apiCode, 'PERSISTENCE_CONFLICT', 'the refusal did not name PERSISTENCE_CONFLICT')
       assert.equal(conflictBlock.legacyRowStillPresent, true, 'the refusal deleted the row it refused')
@@ -813,6 +830,17 @@ test(
       assert.equal(conflictBlock.annotationRowsOnConflictProject, 1, 'the refused read created or removed rows')
       assert.equal(conflictBlock.versionsAfter, versionsBefore, 'a refused read created a project version')
       assert.equal(conflictBlock.exportOperations, 0, 'a refused read created an export/edit operation')
+      }
+      // The UI half of this negative can only be asserted on a page that
+      // mounted. When the editor never mounts, the browser-side expectations
+      // are recorded as not-executed instead of being quietly dropped — the
+      // PG-real half below is asserted either way.
+      const editorMounted = conflictPhase.settledOn !== null && !String(conflictPhase.settledOn).startsWith('no-marker')
+      conflictBlock.uiEvidence = editorMounted ? 'browser-real' : 'not-executed'
+      conflictBlock.uiNotExecutedReason = editorMounted
+        ? null
+        : 'the editor never mounted: GET workspace answered 409 PERSISTENCE_CONFLICT before any review state rendered'
+      if (editorMounted) {
       assert.ok(conflictBlock.ui.blockVisible > 0, 'the refusal was not shown as review-unavailable')
       assert.ok(
         (conflictBlock.ui.codeText ?? '').includes('PERSISTENCE_CONFLICT'),
@@ -839,7 +867,12 @@ test(
         /Laudo indispon|Sem laudo para esta vers/i.test(conflictBlock.proxyGateLabel ?? ''),
         `unexpected proxy gate label: ${conflictBlock.proxyGateLabel}`,
       )
-      record('pg-real+browser-real', 'legacy-audit-conflict-blocks-review', conflictBlock)
+      }
+      record(
+        editorMounted ? 'pg-real+browser-real' : 'pg-real (ui not-executed)',
+        'legacy-audit-conflict-blocks-review',
+        conflictBlock,
+      )
 
       // State-real: media without a proxy review must not read as approved.
       const proxyReviewRows = (await prisma.v2ProxyReview?.count({
@@ -859,7 +892,14 @@ test(
       }
       assert.equal(emptyReview.saysReleasedForHigh, false, 'a project with no proxy review reads as released')
       assert.equal(emptyReview.approvedWordAnywhereOnPage, false, 'a project with no proxy review reads as approved')
-      record('pg-real+browser-real', 'no-proxy-review-is-not-approved', emptyReview)
+      emptyReview.note = emptyReview.gatePresent
+        ? null
+        : 'the proxy gate never rendered, so "not approved" here is the absence of the whole page, not a verdict the page took'
+      record(
+        emptyReview.gatePresent ? 'pg-real+browser-real' : 'pg-real (ui not-executed)',
+        'no-proxy-review-is-not-approved',
+        emptyReview,
+      )
       await page.screenshot({ path: join(evidenceDir, 'empty-review-state.png') })
 
       // Transport-controlled: stubbed refusals. NOT evidence about governance.
