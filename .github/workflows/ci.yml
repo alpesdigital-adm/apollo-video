@@ -531,7 +531,7 @@ jobs:
         id: editor-reliability
         run: npm run test:e2e:editor-reliability
         env:
-          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-editor-reliability-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-editor-reliability-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_EDITOR_RELIABILITY_E2E: "1"
           APOLLO_EDITOR_RELIABILITY_EVIDENCE_DIR: ${{ runner.temp }}/editor-reliability
           APOLLO_EDITOR_RELIABILITY_KEEP_EVIDENCE: "1"
