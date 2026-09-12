@@ -1,6 +1,7 @@
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { ProjectLutSelection, ProjectLutSelectionRequest } from '../../domain/project-lut-selection.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { WorkspaceLutVersion } from '../../domain/workspace-lut.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
@@ -15,6 +16,8 @@ export type ProjectLutSelectionCommandPayloadV2 = ProjectLutSelectionRequest & R
 
 export interface ProjectLutSelectionContext {
   currentVersion: Readonly<ProjectVersion>
+  currentEditPlan: Readonly<Record<string, unknown>>
+  currentEditPlanSchemaVersion: number
   workspaceDefaultRevision?: number
   resolvedLutVersion?: Readonly<WorkspaceLutVersion>
   currentDurationFrames: number
@@ -37,6 +40,7 @@ export interface ProjectLutSelectionCommit {
   command: Readonly<EditCommand<ProjectLutSelectionCommandPayloadV2>>
   authenticationAudit?: Readonly<ApiAccessAuditContext>
   version: Readonly<ProjectVersion>
+  editPlanSnapshot: Readonly<ProjectSnapshot>
   selection: Readonly<ProjectLutSelection>
   requestFingerprint: string
   event: Readonly<PublicEvent>

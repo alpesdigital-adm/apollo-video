@@ -1,8 +1,9 @@
-import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
+import { calculateCanonicalHash, stableSerialize } from '../domain/canonical-hash.ts'
 import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createProjectLutSelection, projectLutRef, type ProjectLutSelectionRequest } from '../domain/project-lut-selection.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
+import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createProjectLutSelectionImpact } from '../domain/project-lut-selection-impact.ts'
 import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
@@ -53,7 +54,7 @@ function commandActor(
 
 export function setProjectLutSelectionService(dependencies: {
   repository: ProjectLutSelectionRepository
-  createId: (kind: 'command' | 'version' | 'selection') => string
+  createId: (kind: 'command' | 'version' | 'selection' | 'snapshot') => string
   createEventId: () => string
   clock?: () => Date
 }) {
@@ -92,7 +93,7 @@ export function setProjectLutSelectionService(dependencies: {
     const context = await dependencies.repository.readContext({ workspaceId, projectId, requested })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project LUT selection context was not found')
     if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== baseHash) throw new DomainError('VERSION_CONFLICT', 'Project LUT selection base version is stale')
-    const createdAt = clock().toISOString(); const commandId = id(dependencies.createId('command'), 'commandId'); const versionId = id(dependencies.createId('version'), 'versionId')
+    const createdAt = clock().toISOString(); const commandId = id(dependencies.createId('command'), 'commandId'); const versionId = id(dependencies.createId('version'), 'versionId'); const snapshotId = id(dependencies.createId('snapshot'), 'snapshotId')
     const intensity = request.intensity ?? context.resolvedLutVersion?.intensity.default ?? 1
     const resolved = context.resolvedLutVersion ? Object.freeze({ mode: 'lut-version' as const, lut: projectLutRef(context.resolvedLutVersion) }) : Object.freeze({ mode: 'none' as const })
     const selection = createProjectLutSelection({
@@ -112,10 +113,18 @@ export function setProjectLutSelectionService(dependencies: {
     })
     const payload = Object.freeze({ schemaVersion: 2 as const, ...requested, intensity, impact })
     const command = createEditCommand({ id: commandId, workspaceId, projectId, baseVersionId, baseHash, author: actor.author, type: 'set-project-lut-selection', scope: { project: true }, payload, ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}), idempotencyKey, createdAt })
+    const editPlan = Object.freeze({ ...context.currentEditPlan, projectVersionId: versionId })
+    const editPlanJson = stableSerialize(editPlan)
+    const editPlanHash = calculateCanonicalHash(editPlan)
+    const editPlanSnapshot = createProjectSnapshot({
+      id: snapshotId, workspaceId, projectId, kind: 'edit-plan',
+      contentSchemaVersion: context.currentEditPlanSchemaVersion,
+      contentJson: editPlanJson, contentHash: editPlanHash, createdAt,
+    })
     const version = createProjectVersion({
       id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1, parentVersionId: context.currentVersion.id,
-      snapshotRefs: context.currentVersion.snapshotRefs,
-      baseHash: calculateCanonicalHash({ schemaVersion: 'project-version-lut-selection/v2', previousBaseHash: context.currentVersion.baseHash, commandId, selectionHash: selection.selectionHash, impactHash: impact.impactHash }),
+      snapshotRefs: { ...context.currentVersion.snapshotRefs, editPlan: snapshotId },
+      baseHash: calculateCanonicalHash({ schemaVersion: 'project-version-lut-selection/v2', previousBaseHash: context.currentVersion.baseHash, commandId, selectionHash: selection.selectionHash, impactHash: impact.impactHash, editPlanHash }),
       createdBy: actor.author.id, commandId, createdAt,
     })
     const event = createPublicEvent({
@@ -126,7 +135,7 @@ export function setProjectLutSelectionService(dependencies: {
     return dependencies.repository.commitOrReplay({
       command,
       ...(actor.authenticationAudit ? { authenticationAudit: actor.authenticationAudit } : {}),
-      version, selection, requestFingerprint, event,
+      version, editPlanSnapshot, selection, requestFingerprint, event,
     })
   }
 }
