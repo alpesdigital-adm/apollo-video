@@ -176,7 +176,9 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       const snapshots = {
         brief: `matrix-brief-${key}-${suffix}`, policies: `matrix-policies-${key}-${suffix}`,
         perception: `matrix-perception-${key}-${suffix}`, treatment: `matrix-treatment-${key}-${suffix}`,
-        story: `matrix-story-${key}-${suffix}`, editPlan: `matrix-edit-plan-${key}-${suffix}`,
+        story: `matrix-story-${key}-${suffix}`,
+        baseEditPlan: `matrix-base-edit-plan-${key}-${suffix}`,
+        editPlan: `matrix-edit-plan-${key}-${suffix}`,
         quality: `matrix-quality-${key}-${suffix}`,
       }
       const editPlan = {
@@ -191,6 +193,11 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
           layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
           faceSafeFallback: [0.08, 0.08, 0.84, 0.84], subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22],
         },
+      }
+      const baseEditPlan = {
+        ...editPlan,
+        id: `matrix-base-plan-${key}-${suffix}`,
+        projectVersionId: baseVersionId,
       }
       const quality = {
         schemaVersion: 'director-quality-report/v1', id: `matrix-quality-report-${key}-${suffix}`,
@@ -207,6 +214,7 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
         [snapshots.perception, 'perception', 1, { schemaVersion: 1, state: 'complete' }],
         [snapshots.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
         [snapshots.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
+        [snapshots.baseEditPlan, 'edit-plan', 2, baseEditPlan],
         [snapshots.editPlan, 'edit-plan', 2, editPlan],
         [snapshots.quality, 'quality-report', 1, quality],
       ]) {
@@ -218,7 +226,7 @@ test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics 
       const baseHash = calculateVersionHash({ projectId, version: baseVersionId })
       await client.v2ProjectVersion.create({ data: {
         id: baseVersionId, workspaceId, projectId, sequence: 1, briefSnapshotId: snapshots.brief,
-        editPlanSnapshotId: snapshots.editPlan, policiesSnapshotId: snapshots.policies,
+        editPlanSnapshotId: snapshots.baseEditPlan, policiesSnapshotId: snapshots.policies,
         baseHash, createdBy: issued.client.id, createdAt,
       } })
       await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })

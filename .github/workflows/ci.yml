@@ -522,6 +522,63 @@ jobs:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-wave20-browser-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_WAVE20_BROWSER_E2E: "1"
 
+      # Wave 22: the journey a person actually meets — login, list, card,
+      # play/pause/seek, one annotation and its replay, the reads each open
+      # costs under production governance defaults, and the 409 / 429 / 401
+      # boundaries. Evidence JSON and screenshots are uploaded below; nothing
+      # in them is a cookie, a token or a signed URL.
+      - name: Run Wave 22 editor reliability browser journey
+        id: editor-reliability
+        run: npm run test:e2e:editor-reliability
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-editor-reliability-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_EDITOR_RELIABILITY_E2E: "1"
+          APOLLO_EDITOR_RELIABILITY_EVIDENCE_DIR: ${{ runner.temp }}/editor-reliability
+          APOLLO_EDITOR_RELIABILITY_KEEP_EVIDENCE: "1"
+
+      - name: Publish Wave 22 editor reliability evidence
+        if: always() && steps.editor-reliability.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-editor-reliability-${{ github.sha }}
+          path: ${{ runner.temp }}/editor-reliability
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Run final export integration against the migrated capture database
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          existing="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" \
+            psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname = 'apollo_v2_e2e_capture' and application_name like 'apollo-video-e2e-%'")"
+          test "$existing" = 0
+          npm run test:integration:final-export
+        env:
+          APOLLO_FINAL_EXPORT_E2E: "1"
+          APOLLO_FINAL_EXPORT_APP_NAME: apollo-video-e2e-final-export-ci
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+          APOLLO_V2_ARTIFACT_ROOT: ${{ runner.temp }}/final-export-artifacts-${{ github.run_id }}
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-final-export-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan final export integration backends
+        if: always()
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          for _ in $(seq 1 15); do
+            orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" \
+              psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname = 'apollo_v2_e2e_capture' and application_name = '$APOLLO_FINAL_EXPORT_APP_NAME'")"
+            test "$orphans" != 0 || exit 0
+            sleep 1
+          done
+          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" \
+            psql -U apollo -d postgres -Atc "select pid, application_name, state from pg_stat_activity where datname = 'apollo_v2_e2e_capture' and application_name = '$APOLLO_FINAL_EXPORT_APP_NAME'"
+          exit 1
+        env:
+          APOLLO_FINAL_EXPORT_APP_NAME: apollo-video-e2e-final-export-ci
+
       - name: Run Wave 18 capture sessions browser journey
         run: npm run test:e2e:capture-sessions-browser
         env:

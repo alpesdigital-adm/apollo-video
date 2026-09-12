@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { artifactOutputStoragePrefix } from '../domain/artifact-storage-identity.ts'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
@@ -419,7 +420,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         }
       }
       await enter('persisting')
-      const stored = await dependencies.storage.promoteDerived({ workspaceId: operation.workspaceId, sourcePath: rendered.outputPath, sha256: rendered.sha256, extension: 'mp4', prefix: 'editorial-proxies' })
+      const stored = await dependencies.storage.promoteDerived({ workspaceId: operation.workspaceId, sourcePath: rendered.outputPath, sha256: rendered.sha256, extension: 'mp4', prefix: artifactOutputStoragePrefix('editorial-proxy', context.outputArtifactId) })
       const toolDigest = createHash('sha256')
         .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`)
         .digest('hex')

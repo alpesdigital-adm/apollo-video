@@ -10,6 +10,7 @@ const storage = read('infra/object-storage/compose.yml')
 const workflow = read('infra/workflow/compose.yml')
 const envExample = read('.env.local.example')
 const ci = read('.github/workflows/ci.yml')
+const versions = JSON.parse(read('config/platform-versions.json'))
 
 function requires(source, pattern, message) {
   assert.match(source, pattern, message)
@@ -29,7 +30,9 @@ requires(postgres, /pg_isready -U \$\$POSTGRES_USER -d \$\$POSTGRES_DB/, 'Postgr
 requires(postgres, /no-new-privileges:true/, 'PostgreSQL must prevent privilege escalation')
 forbids(postgres, /(?:^|["'])0\.0\.0\.0:/m, 'PostgreSQL must not publish on every interface')
 
-requires(storage, /image: minio\/minio:RELEASE\.[0-9T-]+Z/, 'MinIO must use a pinned release')
+requires(storage, /image: quay\.io\/minio\/minio:RELEASE\.[0-9T-]+Z@sha256:[a-f0-9]{64}/, 'MinIO must use the official Quay registry with a release and digest pin')
+forbids(storage, /image: minio\/minio:|image: quay\.io\/minio\/minio:(?:latest|RELEASE\.[0-9T-]+Z)(?:\s|$)/m, 'MinIO must not use Docker Hub, latest, or a tag without a digest')
+assert.deepEqual([...storage.matchAll(/^\s+image:\s+(\S+)$/gm)].map((match) => match[1]), [versions.storage.minioImage, versions.storage.minioImage], 'MinIO server and initializer must use the same canonical tag-and-digest pin')
 requires(storage, /127\.0\.0\.1:\$\{MINIO_API_PORT:-59000\}:9000/, 'MinIO API must be loopback-only')
 requires(storage, /127\.0\.0\.1:\$\{MINIO_CONSOLE_PORT:-59001\}:9001/, 'MinIO console must be loopback-only')
 for (const name of ['MINIO_ROOT_USER', 'MINIO_ROOT_PASSWORD']) {

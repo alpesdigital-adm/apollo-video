@@ -11,6 +11,9 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
+// The Director result, reviewed proxy, and Rec.709 color probe (including its
+// producer identity) are controlled upstream seeds. The final-export API,
+// color compilation, worker, FFmpeg render, validation, and download are real.
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
 const ffmpegStatic = require('ffmpeg-static')
@@ -51,11 +54,15 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
+  const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
   const { reconstructFinal } = await import('../../src/v2/application/render-workflow.ts')
+  const { setProjectLutSelectionService } = await import('../../src/v2/application/project-lut-selections.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
   const { createProjectFinalExportWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
+  const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
 
@@ -96,6 +103,9 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     ], { windowsHide: true, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 })
     const sourceBytes = await readFile(sourcePath)
     const sourceSha256 = sha256(sourceBytes)
+    const colorMetadata = {
+      colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8,
+    }
 
     await client.v2Workspace.create({
       data: {
@@ -118,6 +128,19 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       environment: 'production',
       scopes: ['projects:read', 'projects:write', 'operations:read', 'artifacts:read'],
     })
+    const authenticationAudit = createApiAccessAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+      authenticationKind: 'bearer',
+    })
+    assert.equal(authenticationAudit.clientId, issued.client.id)
+    assert.equal(authenticationAudit.credentialId, issued.credential.id)
+    assert.equal(authenticationAudit.workspaceId, workspaceId)
+    assert.equal(authenticationAudit.environment, 'production')
+    assert.equal(authenticationAudit.authenticationKind, 'bearer')
+    assert.match(authenticationAudit.contextHash, /^[a-f0-9]{64}$/)
     await client.v2Project.create({
       data: {
         id: projectId,
@@ -142,6 +165,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       perception: `final-export-perception-${suffix}`,
       treatment: `final-export-treatment-${suffix}`,
       story: `final-export-story-${suffix}`,
+      baseEditPlan: `final-export-base-edit-plan-${suffix}`,
       editPlan: editPlanSnapshotId,
       quality: qualitySnapshotId,
     }
@@ -177,6 +201,11 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22],
       },
     }
+    const baseEditPlan = {
+      ...editPlan,
+      id: `final-export-base-plan-${suffix}`,
+      projectVersionId: baseVersionId,
+    }
     const qualityReport = {
       schemaVersion: 'director-quality-report/v1',
       id: `final-export-quality-report-${suffix}`,
@@ -191,6 +220,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
+      [snapshotIds.baseEditPlan, 'edit-plan', 2, baseEditPlan],
       [snapshotIds.editPlan, 'edit-plan', 2, editPlan],
       [snapshotIds.quality, 'quality-report', 1, qualityReport],
     ]
@@ -216,26 +246,47 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         projectId,
         sequence: 1,
         briefSnapshotId: snapshotIds.brief,
-        editPlanSnapshotId,
+        editPlanSnapshotId: snapshotIds.baseEditPlan,
         policiesSnapshotId: snapshotIds.policies,
         baseHash: baseVersionHash,
         createdBy: issued.client.id,
         createdAt,
       },
     })
+    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
+    const noLut = await setProjectLutSelectionService({
+      repository: new PrismaProjectLutSelectionRepository(client),
+      createId: (kind) => `final-export-lut-${kind}-${suffix}`,
+      createEventId: randomUUID,
+      clock: () => createdAt,
+    })({
+      workspaceId,
+      projectId,
+      baseVersionId,
+      baseHash: baseVersionHash,
+      selection: { mode: 'none' },
+      actor: { type: 'system', id: 'final-export-e2e-system' },
+      idempotencyKey: `final-export-lut-none-${suffix}`,
+      reason: 'Keep this final-export fixture colorimetrically neutral.',
+    })
+    assert.equal(noLut.selection.resolved.mode, 'none')
     await client.v2EditCommand.create({
       data: {
         id: commandId,
         workspaceId,
         projectId,
-        baseVersionId,
-        baseHash: baseVersionHash,
+        baseVersionId: noLut.version.id,
+        baseHash: noLut.version.baseHash,
         type: 'run-director',
         scopeJson: stableSerialize({ kind: 'video', targetIds: [] }),
         payloadJson: stableSerialize({ schemaVersion: 1, directorRunId }),
         reason: 'E2E final render',
         actorType: 'api-client',
         actorId: issued.client.id,
+        actorCredentialId: authenticationAudit.credentialId,
+        actorEnvironment: authenticationAudit.environment,
+        actorAuthenticationKind: authenticationAudit.authenticationKind,
+        actorContextHash: authenticationAudit.contextHash,
         idempotencyKey: `final-export-director-${suffix}`,
         requestFingerprint: calculateVersionHash({ commandId }),
         createdAt,
@@ -247,8 +298,8 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         id: projectVersionId,
         workspaceId,
         projectId,
-        sequence: 2,
-        parentVersionId: baseVersionId,
+        sequence: 3,
+        parentVersionId: noLut.version.id,
         briefSnapshotId: snapshotIds.brief,
         treatmentSnapshotId: snapshotIds.treatment,
         storySnapshotId: snapshotIds.story,
@@ -266,7 +317,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         workspaceId,
         projectId,
         commandId,
-        baseVersionId,
+        baseVersionId: noLut.version.id,
         resultVersionId: projectVersionId,
         status: 'succeeded',
         objective: 'discovery',
@@ -334,6 +385,22 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         createdAt,
       },
     })
+    const colorProbe = createMediaColorProbe({
+      id: `final-export-color-probe-${suffix}`,
+      workspaceId,
+      artifactId: sourceArtifactId,
+      manifestId: sourceManifestId,
+      detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+      producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha256('final-export-ffprobe') },
+      createdAt: createdAt.toISOString(),
+    })
+    await client.v2MediaColorProbe.create({ data: {
+      id: colorProbe.id, workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId,
+      schemaVersion: colorProbe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata),
+      pixelFormat: 'yuv420p', hdrMode: 'sdr', reasonsJson: stableSerialize([]), producerProvider: 'ffprobe',
+      producerVersion: colorProbe.producer.version, producerBinaryDigest: colorProbe.producer.binaryDigest,
+      createdAt, probeHash: colorProbe.probeHash,
+    } })
     await client.v2ProjectMediaAsset.create({
       data: {
         id: randomUUID(),
@@ -355,7 +422,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       baseRevision: assetRightsRevision(sourceArtifactId, 0),
       draft: {
         status: 'approved',
-        allowedUses: ['rendering'],
+        allowedUses: ['rendering', 'editorial-reuse'],
         prohibitedUses: [],
         allowedLocales: ['pt-BR'],
         consent: { status: 'not-required', allowedUses: [] },
@@ -414,12 +481,19 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         type: 'project-proxy-render',
         status: 'succeeded',
         phase: 'completed',
+        progressCompleted: 4,
+        progressTotal: 4,
+        progressUnit: 'render',
         targetType: 'media-artifact',
         targetId: proxyArtifactId,
         cancelable: false,
         retryable: false,
         attempt: 1,
         maxAttempts: 3,
+        actorCredentialId: authenticationAudit.credentialId,
+        actorEnvironment: authenticationAudit.environment,
+        actorAuthenticationKind: authenticationAudit.authenticationKind,
+        actorContextHash: authenticationAudit.contextHash,
         resultJson: stableSerialize({
           resource: { type: 'media-artifact', id: proxyArtifactId, manifestId: proxyManifestId },
         }),
@@ -441,7 +515,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         sourceArtifactId,
         sourceManifestId,
         inputHash: proxyInputHash,
-        outputSpecId: 'preset-9x16',
+        colorPipelineBindingsJson: stableSerialize([]),
         outputArtifactId: proxyArtifactId,
         outputManifestId: proxyManifestId,
         originalFileName: 'final-export-proxy.mp4',
@@ -508,6 +582,30 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     server.stderr.on('data', (chunk) => { serverLogs += String(chunk) })
     await waitForServer(baseUrl, server)
     const authorization = `Bearer ${issued.token}`
+    const stage = (id, kind, enabled, output, provider, parameters) => ({
+      id, kind, version: 'v1', enabled, output,
+      implementation: { provider, version: 'v1', parameters, parametersHash: sha256(JSON.stringify(parameters)) },
+    })
+    const compilationResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/color-pipeline-compilations`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': `final-export-color-${suffix}`,
+      },
+      body: JSON.stringify({
+        sourceArtifactId,
+        sourceManifestId,
+        outputMetadata: colorMetadata,
+        stages: [
+          stage('technical-rec709', 'technical', true, colorMetadata, 'ffmpeg-zscale', { mode: 'identity' }),
+          stage('match-source', 'match', false, colorMetadata, 'apollo-match', { mode: 'bypass' }),
+          stage('creative-none', 'creative-lut', false, colorMetadata, 'apollo-lut', { mode: 'none' }),
+          stage('output-rec709', 'output', true, colorMetadata, 'ffmpeg-zscale', { dither: true }),
+        ],
+      }),
+    })
+    assert.equal(compilationResponse.status, 201, `${await compilationResponse.text()}\n${serverLogs.slice(-4_000)}`)
     const exportBody = {
       projectVersionId,
       projectVersionHash,

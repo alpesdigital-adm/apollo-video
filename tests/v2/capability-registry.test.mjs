@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
@@ -382,6 +384,47 @@ test('T-F0-034-ui-capability-binding every operable UI network action resolves t
     () => bindUiNetworkActionsToCapabilities([actions[0], actions[0]], FOUNDATION_CAPABILITIES),
     'CAPABILITY_PARITY_MISSING',
   )
+})
+
+test('T-F0-034 scanner fails closed when canonical reads.read hides its descriptor in a variable', async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-falsification-'))
+  try {
+    await mkdir(resolve(fixtureRoot, 'src/app/probe'), { recursive: true })
+    await mkdir(resolve(fixtureRoot, 'src/components'), { recursive: true })
+    await writeFile(resolve(fixtureRoot, 'src/app/probe/page.tsx'), `
+'use client'
+export default function Probe() {
+  const descriptor = { name: 'annotations', url: '/v1/projects/example/annotations' }
+  void reads.read(descriptor)
+  return null
+}
+`)
+    assert.throws(
+      () => discoverUiNetworkActions(fixtureRoot),
+      /canonical reads\.read descriptor must be an object literal with a static url/,
+    )
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
+})
+
+test('T-F0-034 scanner does not treat unrelated library read methods as Apollo transport', async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-library-read-'))
+  try {
+    await mkdir(resolve(fixtureRoot, 'src/app/probe'), { recursive: true })
+    await mkdir(resolve(fixtureRoot, 'src/components'), { recursive: true })
+    await writeFile(resolve(fixtureRoot, 'src/app/probe/page.tsx'), `
+'use client'
+export default function Probe() {
+  const descriptor = { offset: 0 }
+  void library.read(descriptor)
+  return null
+}
+`)
+    assert.deepEqual(discoverUiNetworkActions(fixtureRoot), [])
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
 })
 
 test('T-F0-034-shared-service-boundary UI and external API converge on the same application service boundary', () => {

@@ -10,6 +10,7 @@ import { projectRenderSourcesFingerprint } from '../../src/v2/application/projec
 import { runNextProjectFinalExportOperationService } from '../../src/v2/application/run-project-final-export-worker.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   advancePublicOperationPhase,
@@ -410,8 +411,8 @@ function workerDependencies(
       },
       storage: {
         async promoteDerived(input) {
-          assert.equal(input.prefix, 'final-exports')
-          return { key: 'workspaces/final-export/final-exports/output.mp4', sha256: '6'.repeat(64), byteSize: 8192 }
+          assert.equal(input.prefix, artifactOutputStoragePrefix('final-export', 'artifact-final-output'))
+          return { key: `workspaces/final-export/${input.prefix}/output.mp4`, sha256: '6'.repeat(64), byteSize: 8192 }
         },
       },
       renderer: {

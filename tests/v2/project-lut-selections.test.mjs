@@ -58,6 +58,25 @@ function baseVersion(overrides = {}) {
   })
 }
 
+function baseEditPlan(version = baseVersion(), overrides = {}) {
+  return Object.freeze({
+    schemaVersion: 2,
+    state: 'compiled',
+    id: `edit-plan-${version.id}`,
+    projectVersionId: version.id,
+    storyPlanId: 'story-plan-project-lut',
+    fps: 30,
+    durationFrames: 180,
+    sources: [{ artifactId: 'artifact-project-lut-source', sourceStartFrame: 0, sourceEndFrame: 180 }],
+    videoTracks: [], overlayTracks: [], subtitleTracks: [], audioTracks: [], effectTracks: [],
+    markers: [], protectedElements: [], localeVariantRefs: [], formatVariantRefs: [],
+    lineageRefs: [{ kind: 'source-artifact', id: 'artifact-project-lut-source' }],
+    extensionField: { preserved: true },
+    createdAt: '2026-07-31T17:00:00.000Z',
+    ...overrides,
+  })
+}
+
 function lutVersion() {
   return createWorkspaceLutVersion({
     id: 'workspace-lut-version-project-2', workspaceId: 'workspace-project-lut', lutId: 'workspace-lut-project', version: 2,
@@ -76,6 +95,8 @@ function memoryRepository(context) {
     async readContext() {
       return {
         currentDurationFrames: 180,
+        currentEditPlan: baseEditPlan(context.currentVersion),
+        currentEditPlanSchemaVersion: 2,
         proxyVariantId: '9:16',
         outputReferences: [{ artifactId: 'artifact-project-lut-proxy-base', kind: 'proxy', sourceVersionId: context.currentVersion.id, variantId: '9:16' }],
         ...context,
@@ -94,7 +115,7 @@ function memoryRepository(context) {
 }
 
 function service(repository) {
-  const ids = { command: 0, version: 0, selection: 0 }
+  const ids = { command: 0, version: 0, selection: 0, snapshot: 0 }
   return setProjectLutSelectionService({
     repository, createId: (kind) => `project-lut-${kind}-test-${++ids[kind]}`, createEventId: () => '00000000-0000-4000-8000-000000000181',
     clock: () => new Date('2026-07-31T17:01:00.000Z'),
@@ -103,7 +124,9 @@ function service(repository) {
 
 test('T-FR-181 workspace default resolves to an exact immutable LUT in a Command and new ProjectVersion', async () => {
   const base = baseVersion(); const lut = lutVersion()
-  const repository = memoryRepository({ currentVersion: base, workspaceDefaultRevision: 3, resolvedLutVersion: lut })
+  const originalPlan = baseEditPlan(base)
+  const originalPlanJson = stableSerialize(originalPlan)
+  const repository = memoryRepository({ currentVersion: base, currentEditPlan: originalPlan, workspaceDefaultRevision: 3, resolvedLutVersion: lut })
   const apply = service(repository)
   const request = {
     workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, baseHash: base.baseHash,
@@ -118,7 +141,18 @@ test('T-FR-181 workspace default resolves to an exact immutable LUT in a Command
   assert.equal(result.command.payload.intensity, 0.65)
   assert.equal(result.version.sequence, 2)
   assert.equal(result.version.parentVersionId, base.id)
-  assert.deepEqual(result.version.snapshotRefs, base.snapshotRefs)
+  assert.notEqual(result.version.snapshotRefs.editPlan, base.snapshotRefs.editPlan)
+  assert.deepEqual(
+    { ...result.version.snapshotRefs, editPlan: base.snapshotRefs.editPlan },
+    base.snapshotRefs,
+  )
+  const committedSnapshot = repository.commits[0].editPlanSnapshot
+  const committedPlan = JSON.parse(committedSnapshot.contentJson)
+  assert.equal(committedPlan.projectVersionId, result.version.id)
+  assert.deepEqual(committedPlan.extensionField, { preserved: true })
+  assert.equal(committedSnapshot.contentHash, calculateCanonicalHash(committedPlan))
+  assert.equal(committedSnapshot.id, result.version.snapshotRefs.editPlan)
+  assert.equal(stableSerialize(originalPlan), originalPlanJson)
   assert.equal(result.version.commandId, result.command.id)
   assert.equal(result.selection.workspaceDefaultRevision, 3)
   assert.equal(result.selection.resolved.mode, 'lut-version')
@@ -172,7 +206,10 @@ test('T-FR-233 LUT selection requests a full proxy without fabricating stale row
 
 test('T-FR-233 LUT selection before a timeline defers rendering without fabricating impact', async () => {
   const base = baseVersion()
-  const repository = memoryRepository({ currentVersion: base, currentDurationFrames: 0, outputReferences: [] })
+  const uncompiledPlan = baseEditPlan(base, {
+    state: 'uncompiled', storyPlanId: null, durationFrames: 0, sources: [], lineageRefs: [],
+  })
+  const repository = memoryRepository({ currentVersion: base, currentEditPlan: uncompiledPlan, currentDurationFrames: 0, outputReferences: [] })
   const result = await service(repository)({
     workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, baseHash: base.baseHash,
     selection: { mode: 'none' }, actor: externalActor(),
@@ -184,6 +221,31 @@ test('T-FR-233 LUT selection before a timeline defers rendering without fabricat
   assert.deepEqual(result.impact.affectedArtifacts, [])
   assert.deepEqual(result.impact.minimalRenders, [])
   assert.deepEqual(result.invalidations, [])
+  const persistedPlan = JSON.parse(repository.commits[0].editPlanSnapshot.contentJson)
+  assert.equal(persistedPlan.state, 'uncompiled')
+  assert.equal(persistedPlan.durationFrames, 0)
+  assert.equal(persistedPlan.projectVersionId, result.version.id)
+})
+
+test('T-FR-181 rejects an inconsistent result EditPlan snapshot before opening a transaction', async () => {
+  const base = baseVersion()
+  const memory = memoryRepository({ currentVersion: base })
+  await service(memory)({
+    workspaceId: base.workspaceId, projectId: base.projectId,
+    baseVersionId: base.id, baseHash: base.baseHash,
+    selection: { mode: 'none' }, actor: externalActor(),
+    idempotencyKey: 'project-lut-invalid-snapshot',
+  })
+  const committed = memory.commits[0]
+  let transactionOpened = false
+  const repository = new PrismaProjectLutSelectionRepository({
+    async $transaction() { transactionOpened = true; throw new Error('must not run') },
+  })
+  await assert.rejects(repository.commitOrReplay({
+    ...committed,
+    editPlanSnapshot: { ...committed.editPlanSnapshot, contentHash: 'f'.repeat(64) },
+  }), /result EditPlan snapshot is inconsistent/)
+  assert.equal(transactionOpened, false)
 })
 
 test('T-FR-242 project LUT selection rejects an unauthenticated external actor', async () => {
