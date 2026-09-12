@@ -51,6 +51,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { reconstructFinal } = await import('../../src/v2/application/render-workflow.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
   const { createProjectFinalExportWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
@@ -118,6 +119,12 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       environment: 'production',
       scopes: ['projects:read', 'projects:write', 'operations:read', 'artifacts:read'],
     })
+    const authenticationAudit = createExternalAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+    })
     await client.v2Project.create({
       data: {
         id: projectId,
@@ -142,6 +149,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       perception: `final-export-perception-${suffix}`,
       treatment: `final-export-treatment-${suffix}`,
       story: `final-export-story-${suffix}`,
+      baseEditPlan: `final-export-base-edit-plan-${suffix}`,
       editPlan: editPlanSnapshotId,
       quality: qualitySnapshotId,
     }
@@ -177,6 +185,11 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22],
       },
     }
+    const baseEditPlan = {
+      ...editPlan,
+      id: `final-export-base-plan-${suffix}`,
+      projectVersionId: baseVersionId,
+    }
     const qualityReport = {
       schemaVersion: 'director-quality-report/v1',
       id: `final-export-quality-report-${suffix}`,
@@ -191,6 +204,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
+      [snapshotIds.baseEditPlan, 'edit-plan', 2, baseEditPlan],
       [snapshotIds.editPlan, 'edit-plan', 2, editPlan],
       [snapshotIds.quality, 'quality-report', 1, qualityReport],
     ]
@@ -216,7 +230,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         projectId,
         sequence: 1,
         briefSnapshotId: snapshotIds.brief,
-        editPlanSnapshotId,
+        editPlanSnapshotId: snapshotIds.baseEditPlan,
         policiesSnapshotId: snapshotIds.policies,
         baseHash: baseVersionHash,
         createdBy: issued.client.id,
@@ -236,6 +250,10 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         reason: 'E2E final render',
         actorType: 'api-client',
         actorId: issued.client.id,
+        actorCredentialId: authenticationAudit.credentialId,
+        actorEnvironment: authenticationAudit.environment,
+        actorAuthenticationKind: authenticationAudit.authenticationKind,
+        actorContextHash: authenticationAudit.contextHash,
         idempotencyKey: `final-export-director-${suffix}`,
         requestFingerprint: calculateVersionHash({ commandId }),
         createdAt,
@@ -355,7 +373,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       baseRevision: assetRightsRevision(sourceArtifactId, 0),
       draft: {
         status: 'approved',
-        allowedUses: ['rendering'],
+        allowedUses: ['rendering', 'editorial-reuse'],
         prohibitedUses: [],
         allowedLocales: ['pt-BR'],
         consent: { status: 'not-required', allowedUses: [] },
@@ -414,12 +432,19 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         type: 'project-proxy-render',
         status: 'succeeded',
         phase: 'completed',
+        progressCompleted: 4,
+        progressTotal: 4,
+        progressUnit: 'render',
         targetType: 'media-artifact',
         targetId: proxyArtifactId,
         cancelable: false,
         retryable: false,
         attempt: 1,
         maxAttempts: 3,
+        actorCredentialId: authenticationAudit.credentialId,
+        actorEnvironment: authenticationAudit.environment,
+        actorAuthenticationKind: authenticationAudit.authenticationKind,
+        actorContextHash: authenticationAudit.contextHash,
         resultJson: stableSerialize({
           resource: { type: 'media-artifact', id: proxyArtifactId, manifestId: proxyManifestId },
         }),
