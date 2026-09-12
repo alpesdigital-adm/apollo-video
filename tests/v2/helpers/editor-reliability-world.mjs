@@ -400,6 +400,45 @@ export async function attachSourceAsEditingProxy({ prisma, workspaceId, project 
   return project
 }
 
+/**
+ * Every row in this workspace that carries credential audit and is missing any
+ * of it — i.e. every row `hydrateExternalActorAudit` will refuse on the way out
+ * with PERSISTENCE_CONFLICT.
+ *
+ * Read straight from `information_schema`, so it needs no list of tables to
+ * maintain and cannot silently miss one a migration added.
+ */
+export async function auditCensus({ prisma, workspaceId }) {
+  const tables = await prisma.$queryRawUnsafe(
+    `SELECT c.table_name,
+            EXISTS (SELECT 1 FROM information_schema.columns w
+                    WHERE w.table_schema = 'public' AND w.table_name = c.table_name
+                      AND w.column_name = 'workspaceId') AS has_workspace
+       FROM information_schema.columns c
+      WHERE c.table_schema = 'public' AND c.column_name = 'actorCredentialId'
+      ORDER BY c.table_name`,
+  )
+  const incomplete = []
+  for (const { table_name: table, has_workspace: scoped } of tables) {
+    const where =
+      `"actorCredentialId" IS NULL OR "actorContextHash" IS NULL ` +
+      `OR "actorEnvironment" IS NULL OR "actorAuthenticationKind" IS NULL`
+    const sql = scoped
+      ? `SELECT count(*)::int AS n FROM "${table}" WHERE ("${'workspaceId'}" = $1) AND (${where})`
+      : `SELECT count(*)::int AS n FROM "${table}" WHERE ${where}`
+    const rows = scoped
+      ? await prisma.$queryRawUnsafe(sql, workspaceId)
+      : await prisma.$queryRawUnsafe(sql)
+    const count = Number(rows?.[0]?.n ?? 0)
+    if (count > 0) incomplete.push({ table, count, workspaceScoped: Boolean(scoped) })
+  }
+  return {
+    tablesWithCredentialAudit: tables.length,
+    incomplete,
+    clean: incomplete.length === 0,
+  }
+}
+
 /** The path a page open reduces to: ids replaced by stable tokens. */
 export function tokenizePath(pathname, tokens) {
   let result = pathname

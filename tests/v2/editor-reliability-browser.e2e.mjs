@@ -15,6 +15,7 @@ import { assertIsolatedDatabase, sha256Of } from './helpers/capture-journey.mjs'
 import {
   encodeSharedProxy,
   attachSourceAsEditingProxy,
+  auditCensus,
   materialiseProxy,
   seedEditorReliabilityWorld,
   summarizeInventory,
@@ -257,7 +258,7 @@ async function waitForEditorSettle(page) {
   // Capped hard: the second open has to land inside the same 60-second window
   // as the first, or the request-rate floor is never exercised at all.
   const markers = ['project-preview', 'review-unavailable', 'proxy-review-gate', 'manual-editor']
-  const deadline = Date.now() + 10_000
+  const deadline = Date.now() + 8_000
   let reached = null
   while (Date.now() < deadline && reached === null) {
     for (const marker of markers) {
@@ -269,7 +270,7 @@ async function waitForEditorSettle(page) {
     if (reached === null) await delay(250)
   }
   // Let the mount-time fan-out land before the inventory is closed.
-  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
+  await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => {})
   if (reached === null) {
     const heading = await page
       .locator('h1, h2')
@@ -430,6 +431,13 @@ test(
       evidence.materialisation.note = renderExecuted
         ? 'elapsedMs is the wall clock of enqueue + one driver pass in this harness, not the product metric timeToFirstProxyMs'
         : 'the proxy render did not complete; every finding below is labelled source-master-fallback and says nothing about rendering'
+
+      // Before a single page opens: which rows in this workspace carry
+      // credential audit and are missing part of it. Every one of them is a row
+      // some read will refuse with PERSISTENCE_CONFLICT, and knowing which
+      // table it is separates a fixture defect from a product one.
+      evidence.auditCensus = await auditCensus({ prisma, workspaceId: world.workspaceId })
+      console.log(`editor-reliability AUDIT_CENSUS ${JSON.stringify(evidence.auditCensus)}`)
 
       const executablePath = [
         process.env.PLAYWRIGHT_CHROME_EXECUTABLE,
