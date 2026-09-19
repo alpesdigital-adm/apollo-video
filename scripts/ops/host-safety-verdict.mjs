@@ -121,7 +121,7 @@ const catalog = JSON.parse(await readFile(resolve(root, options.catalog), 'utf8'
 const resolution = resolveHostSafetyPolicy({ catalog, profile: options.profile })
 if (!resolution.ok) {
   for (const error of resolution.errors) console.error(`host-safety-verdict: ${error}`)
-  emit({ admit: false, reasons: ['policy-unconfigured'], gate: null, window: null })
+  emit({ admit: false, reasons: ['policy-unconfigured'], gate: null, window: null, observation: null })
   process.exit(1)
 }
 
@@ -159,7 +159,7 @@ if (options.requireZeroBackends !== null) {
   }
 }
 const admit = verdict.admit && gate.admit && backendsClear
-emit({ admit, reasons, gate, window: verdict.window })
+emit({ admit, reasons, gate, window: verdict.window, observation: policy.observation })
 process.exit(admit ? 0 : 1)
 
 function newestPostgresObservation(candidates) {
@@ -191,6 +191,10 @@ function emit(payload) {
       `coveredMs=${Math.round(window.coveredMs ?? 0)}`,
       `requiredMs=${Math.round(window.requiredMs ?? 0)}`,
       `sustainedBusyMs=${Math.round(window.sustainedBusyMs ?? 0)}`,
+      // The bash side needs these two to perform the checks that live on the host:
+      // the per-container OOM inspection and the decision freshness bound.
+      `oomRecentWindowMs=${payload.observation?.oomRecentWindowMs ?? 0}`,
+      `sampleFreshnessMs=${payload.observation?.sampleFreshnessMs ?? 0}`,
     ].join('\n') + '\n',
   )
 }
