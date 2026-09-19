@@ -1,84 +1,94 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const deployScriptUrl = new URL('../../infra/deploy/apollo-vps.sh', import.meta.url)
+const deployLibraryUrls = {
+  common: new URL('../../infra/deploy/lib/common.sh', import.meta.url),
+  state: new URL('../../infra/deploy/lib/state.sh', import.meta.url),
+  docker: new URL('../../infra/deploy/lib/docker.sh', import.meta.url),
+  ops: new URL('../../infra/deploy/lib/ops.sh', import.meta.url),
+}
+const workerRoles = [
+  'ingest-worker',
+  'render-worker',
+  'webhook-worker',
+  'long-form-worker',
+  'provider-worker',
+  'capture-sync-worker',
+  'music-analysis-worker',
+  'localization-translation-worker',
+  'localization-media-worker',
+]
 const dockerfileUrl = new URL('../../Dockerfile', import.meta.url)
 const workflowComposeUrl = new URL('../../infra/workflow/compose.yml', import.meta.url)
 const nextConfigUrl = new URL('../../next.config.js', import.meta.url)
 const agentInstructionsUrl = new URL('../../AGENTS.md', import.meta.url)
 
-test('production deploy waits for PostgreSQL before migrating or replacing containers', async () => {
-  const script = await readFile(deployScriptUrl, 'utf8')
-  const uploadConfiguration = script.indexOf('APOLLO_MEDIA_UPLOAD_SIGNING_SECRET must contain at least 32 characters')
-  const waitForPostgres = script.indexOf('const deadline = Date.now() + 30_000')
-  const migration = script.indexOf('npm run db:v2:migrate:deploy')
-  const firstReplacement = script.indexOf('remove_container "${CONTAINER}"')
+test('production deploy gates every mutation behind lock, budget, monitor and preflight', async () => {
+  const [script, common, state, docker, ops] = await Promise.all([
+    readFile(deployScriptUrl, 'utf8'),
+    readFile(deployLibraryUrls.common, 'utf8'),
+    readFile(deployLibraryUrls.state, 'utf8'),
+    readFile(deployLibraryUrls.docker, 'utf8'),
+    readFile(deployLibraryUrls.ops, 'utf8'),
+  ])
 
+  // The order inside `cmd_deploy` is the invariant, not the order of definitions:
+  // lock, no latch, image present, budget, cgroup capability, policy, container OOM,
+  // monitor, preflight — and only then directories, configuration, migrations and the
+  // per-container loop.
+  const deployBody = script.slice(script.indexOf('cmd_deploy() {'))
+  const at = (needle) => {
+    const index = deployBody.indexOf(needle)
+    assert.ok(index >= 0, `cmd_deploy does not contain ${needle}`)
+    return index
+  }
+  const gateSequence = [
+    'apollo_lock_acquire deploy',
+    'apollo_latch_engaged',
+    'apollo_require_image_present',
+    'apollo_resolve_budget',
+    'apollo_cgroup_capability',
+    'apollo_load_policy_observation',
+    'apollo_preflight_container_oom',
+    'apollo_monitor_start',
+    'apollo_await_phase preflight',
+    'install -d',
+    'apollo_validate_configuration',
+    'apollo_wait_for_postgres_and_migrate',
+    'for role in "${APOLLO_ROLES[@]}"',
+    'apollo_await_phase postflight',
+  ]
+  for (let index = 1; index < gateSequence.length; index += 1) {
+    assert.ok(
+      at(gateSequence[index]) > at(gateSequence[index - 1]),
+      `${gateSequence[index]} must come after ${gateSequence[index - 1]}`,
+    )
+  }
+  // The end of a green run, in order: publish the open state by removing gate.json,
+  // stop the run's own monitor, release the lock. (`apollo_lock_release` also appears
+  // in the containment paths above, so this tail is matched as a whole.)
+  assert.match(
+    deployBody,
+    /apollo_gate_clear 'postflight established[\s\S]*?apollo_monitor_stop[\s\S]*?apollo_lock_release[\s\S]*?trap - EXIT/,
+  )
+  // Containment after an inconclusive step: latch, stop only the run's own monitor,
+  // release the lock, and start nothing.
+  assert.match(script, /apollo_contain_and_latch\(\) \{\s*\n[^}]*apollo_latch_engage[\s\S]*?apollo_monitor_stop[\s\S]*?apollo_lock_release/)
+  assert.ok(!/docker start|docker restart/.test(script), 'containment never starts a container')
+
+  // The PostgreSQL wait still precedes the migration inside the same container, and the
+  // configuration is still validated by the image because the host has no Node.
   assert.match(script, /APOLLO_MEDIA_UPLOAD_BASE_URL must be a clean HTTPS origin/)
-  assert.ok(uploadConfiguration >= 0)
-  assert.ok(waitForPostgres > uploadConfiguration)
-  assert.match(script, /--add-host host\.docker\.internal:host-gateway/)
-  assert.match(script, /--network easypanel/)
+  assert.ok(script.indexOf('const deadline = Date.now() + 30_000') < script.indexOf('npm run db:v2:migrate:deploy'))
   assert.match(script, /socket\.once\(\\"connect\\"/)
   assert.match(script, /setTimeout\(connect, 500\)/)
-  assert.ok(waitForPostgres >= 0)
-  assert.ok(migration > waitForPostgres)
-  assert.ok(firstReplacement > migration)
-  assert.match(
-    script,
-    /LONG_FORM_WORKER=.*long-form-worker/,
-  )
-  assert.match(
-    script,
-    /run-v2-long-form-worker\.mjs/,
-  )
-  assert.match(
-    script,
-    /PROVIDER_WORKER=.*provider-worker/,
-  )
-  assert.match(
-    script,
-    /run-v2-provider-worker\.mjs/,
-  )
-  assert.match(
-    script,
-    /PROVIDER_WORK_ROOT="\$\{APOLLO_V2_PROVIDER_WORK_ROOT:-\/app\/tmp\/provider-results\}"/,
-  )
-  assert.match(
-    script,
-    /--env APOLLO_V2_PROVIDER_WORK_ROOT="\$\{PROVIDER_WORK_ROOT\}"/,
-  )
-  assert.match(
-    script,
-    /install -d -o 1000 -g 1000 "\$\{APP_ROOT\}\/tmp\/provider-results"/,
-  )
-  assert.match(script, /sleep 20\nfor worker in/)
-  assert.match(
-    script,
-    /GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR.*must be a positive integer/s,
-  )
-  assert.match(
-    script,
-    /Long-form provider credentials are not configured/,
-  )
-  assert.match(script, /APOLLO_LOCALIZATION_WORKER_ENABLED \?\? "false"/)
-  assert.match(script, /localizationFlag !== "true" && localizationFlag !== "false"/)
-  assert.match(script, /if \(localizationFlag === "true"\) \{[\s\S]*APOLLO_LOCALIZATION_PROVIDER_BASE_URL must be a clean HTTPS base URL/)
-  assert.match(script, /APOLLO_LOCALIZATION_PROVIDER_API_KEY is not configured/)
-  assert.match(script, /APOLLO_LOCALIZATION_PROVIDER_MODEL is not configured/)
-  assert.match(script, /boundedInteger\("APOLLO_LOCALIZATION_MAX_COST_MICROS", 0, Number\.MAX_SAFE_INTEGER\)/)
-  assert.match(script, /APOLLO_V2_CAPTURE_SYNC_LEASE_MS\?\.trim\(\)[\s\S]*boundedInteger\("APOLLO_V2_CAPTURE_SYNC_LEASE_MS", 300_000, 3_600_000\)[\s\S]*: 300_000/)
-  for (const [container, entrypoint] of [
-    ['CAPTURE_SYNC_WORKER', 'run-v2-capture-sync-worker.mjs'],
-    ['MUSIC_ANALYSIS_WORKER', 'run-v2-music-analysis-worker.mjs'],
-    ['LOCALIZATION_TRANSLATION_WORKER', 'run-v2-localization-translation-worker.mjs'],
-    ['LOCALIZATION_MEDIA_WORKER', 'run-v2-localization-media-worker.mjs'],
-  ]) {
-    assert.match(script, new RegExp(`${container}=.*-worker`))
-    assert.match(script, new RegExp(entrypoint.replaceAll('.', '\\.')))
-    assert.match(script, new RegExp(`remove_container "\\$\\{${container}\\}"`))
-  }
+  assert.match(script, /--add-host host\.docker\.internal:host-gateway/)
+  assert.match(script, /--network easypanel/)
+
+  // Every long-running container keeps the environment the previous version passed, and
+  // gains a read-only view of the host gate plus a name in pg_stat_activity.
   for (const binary of [
     '--env APOLLO_V2_FFMPEG_PATH=/usr/bin/ffmpeg',
     '--env APOLLO_FFMPEG_PATH=/usr/bin/ffmpeg',
@@ -86,17 +96,85 @@ test('production deploy waits for PostgreSQL before migrating or replacing conta
     '--env APOLLO_FFPROBE_PATH=/usr/bin/ffprobe',
     '--env FFPROBE_PATH=/usr/bin/ffprobe',
   ]) assert.ok(script.includes(binary), `${binary} must override the env file inside every runtime container`)
-  assert.match(script, /remove_container "\$\{LOCALIZATION_TRANSLATION_WORKER\}"/)
-  assert.match(script, /if \[\[ "\$\{LOCALIZATION_WORKER_ENABLED\}" == "true" \]\]; then[\s\S]*run-v2-localization-translation-worker\.mjs[\s\S]*fi/)
-  assert.match(script, /WORKERS=\([\s\S]*"\$\{LOCALIZATION_MEDIA_WORKER\}"[\s\S]*\)/)
-  assert.match(script, /WORKERS\+=\("\$\{LOCALIZATION_TRANSLATION_WORKER\}"\)/)
-  assert.match(script, /for worker in "\$\{WORKERS\[@\]\}"/)
-  for (const [name, fallback] of [
-    ['APOLLO_CAPTURE_SYNC_WORKER_MEMORY', '768m'],
-    ['APOLLO_MUSIC_ANALYSIS_WORKER_MEMORY', '768m'],
-    ['APOLLO_LOCALIZATION_TRANSLATION_WORKER_MEMORY', '512m'],
-    ['APOLLO_LOCALIZATION_MEDIA_WORKER_MEMORY', '2g'],
-  ]) assert.ok(script.includes(`memoryLimit("${name}", "${fallback}")`))
+  assert.match(script, /--env APOLLO_OPS_STATE_DIR=\/app\/ops-state/)
+  assert.match(script, /-v "\$\(apollo_ops_state_mount_ro\)"/)
+  assert.match(ops, /printf '%s:\/app\/ops-state:ro'/)
+  assert.match(script, /--env "APOLLO_PROCESS_ROLE=\$\{role\}"/)
+  assert.match(script, /PROVIDER_WORK_ROOT="\$\{APOLLO_V2_PROVIDER_WORK_ROOT:-\/app\/tmp\/provider-results\}"/)
+  assert.match(script, /--env "APOLLO_V2_PROVIDER_WORK_ROOT=\$\{PROVIDER_WORK_ROOT\}"/)
+  assert.match(script, /install -d -o 1000 -g 1000 "\$\{APP_ROOT\}\/tmp\/provider-results"/)
+  assert.match(script, /--restart unless-stopped/)
+  assert.match(script, /--init/)
+
+  // Roles are declared once and the entrypoint is derived from the role, so the proof
+  // that every worker still has one is the file on disk, not a string in this script.
+  for (const role of workerRoles) {
+    assert.match(script, new RegExp(`^  ${role}$`, 'm'), `${role} is not in APOLLO_ROLES`)
+    assert.match(script, new RegExp(`${role}\\) printf '%s' "\\$\\{`), `${role} has no container name mapping`)
+    await access(new URL(`../../scripts/run-v2-${role}.mjs`, import.meta.url))
+  }
+  assert.match(script, /\.\/node_modules\/\.bin\/tsx "scripts\/run-v2-\$\{role\}\.mjs"/)
+  // The paid translation worker is still opt-in, now through the role gate.
+  assert.match(script, /\[\[ "\$1" != 'localization-translation-worker' \]\] && return 0/)
+  assert.match(script, /\[\[ "\$\{APOLLO_LOCALIZATION_ENABLED\}" == 'true' \]\]/)
+  assert.match(script, /APOLLO_LOCALIZATION_WORKER_ENABLED \?\? "false"/)
+  assert.match(script, /localizationFlag !== "true" && localizationFlag !== "false"/)
+  assert.match(script, /if \(localizationFlag === "true"\) \{[\s\S]*APOLLO_LOCALIZATION_PROVIDER_BASE_URL must be a clean HTTPS base URL/)
+  assert.match(script, /APOLLO_LOCALIZATION_PROVIDER_API_KEY is not configured/)
+  assert.match(script, /APOLLO_LOCALIZATION_PROVIDER_MODEL is not configured/)
+  assert.match(script, /boundedInteger\("APOLLO_LOCALIZATION_MAX_COST_MICROS", 0, Number\.MAX_SAFE_INTEGER\)/)
+  assert.match(script, /APOLLO_V2_CAPTURE_SYNC_LEASE_MS\?\.trim\(\)[\s\S]*boundedInteger\("APOLLO_V2_CAPTURE_SYNC_LEASE_MS", 300_000, 3_600_000\)[\s\S]*: 300_000/)
+  assert.match(script, /GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR.*must be a positive integer/s)
+  assert.match(script, /Long-form provider credentials are not configured/)
+
+  // The two `|| true` that used to swallow every stop and rm failure are gone, and the
+  // whole file no longer silences any Docker verb that changes state.
+  // Comments are stripped first: the header of the script quotes the old idiom in order
+  // to explain why it is gone, and an assertion that cannot tell prose from code would
+  // be satisfied by deleting the explanation.
+  const withoutComments = (text) =>
+    text
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n')
+  assert.ok(
+    !/docker (stop|rm)[^\n]*\|\| true/.test(withoutComments(`${script}\n${docker}`)),
+    'no failure of a stop or rm of an Apollo container may be swallowed',
+  )
+  // The one place a failure may still be ignored is the run's OWN monitor at the end of a
+  // green run: it is this operation's container, it is being torn down on purpose, and a
+  // stubborn removal must not turn a finished deploy into an incident.
+  assert.match(ops, /apollo_monitor_stop\(\)[\s\S]*?docker stop --timeout 15 "\$\{name\}" >\/dev\/null \|\| true/)
+  assert.ok(!/remove_container/.test(script), 'the unconditional teardown helper is gone')
+  // An invocation, not a mention: the script names these verbs in the message that
+  // explains why it refuses to perform them, so the check is anchored to a command.
+  assert.ok(
+    !/^\s*docker (load|pull|system prune)/m.test(withoutComments(`${script}\n${docker}\n${ops}`)),
+    'this operation never imports an image and never prunes the daemon',
+  )
+  assert.match(script, /This script never imports an image: docker load, docker pull/)
+  assert.match(script, /uncoveredHostWork/)
+
+  // A stop is a claim only once status, pid and PostgreSQL backends agree.
+  assert.match(docker, /docker stop --timeout 30 "\$\{name\}"/)
+  assert.match(docker, /\[\[ "\$\{status\}" != 'exited' && "\$\{status\}" != 'dead' \]\]/)
+  assert.match(docker, /\[\[ "\$\{pid\}" != '0' \]\]/)
+  assert.match(docker, /apollo_await_zero_backends "apollo-video-\$\{role\}"/)
+  assert.match(docker, /apollo\.managed/)
+  assert.match(docker, /--adopt-unlabelled/)
+  assert.match(docker, /limit-readback-mismatch/)
+  assert.match(docker, /State\.OOMKilled/)
+  assert.match(docker, /cgroup v2/)
+
+  // The host operational state is a lock by mkdir, a latch that is archived and never
+  // removed, and a journal that never receives an environment value.
+  assert.match(state, /mkdir "\$\{APOLLO_LOCK_DIR\}"/)
+  assert.match(state, /bootId/)
+  assert.match(state, /APOLLO_LOCK_ORPHAN_AFTER_MS=600000/)
+  assert.match(state, /apollo-ops-latch\/v1/)
+  assert.match(state, /released\.json/)
+  assert.ok(!/rm -f "\$\{APOLLO_LATCH_FILE\}"/.test(state), 'a latch is archived, never deleted')
+  assert.match(common, /never a wall clock|CLOCK_BOOTTIME/)
 })
 
 test('production image materializes the Remotion bundle and runtime media binaries are deterministic', async () => {
