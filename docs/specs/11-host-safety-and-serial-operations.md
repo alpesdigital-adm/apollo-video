@@ -4,7 +4,7 @@ Companion of ADR-159 and of the section "Operação segura da VPS Hostinger de p
 
 ## 1. Operational state directory
 
-`APOLLO_OPS_STATE_DIR` — host: `/var/lib/apollo-ops`; inside every Apollo container: `/app/ops-state`, mounted read-only. Contents, and nothing else:
+`APOLLO_OPS_STATE_DIR` — host: `/var/lib/apollo-ops`; inside every Apollo container: `/app/ops-state`, mounted read-only (the run's monitor is the only container that mounts it read-write). Ownership: the deploy, under the lock and immediately before it starts the monitor, makes the directory and `journal/` `root:1000` mode `1770` — group-writable and sticky — so the monitor (uid 1000 in the image) can create and replace its own entries (`gate.json`, `journal/<runId>.monitor.ndjson`) and cannot unlink or rename root's (`latch.json`, `lock/`, the operation journal). The first run against a real daemon (CI run 35453455143) failed with `EACCES` on a root-owned directory; handing the directory to uid 1000 outright was rejected because write permission on a directory is permission to delete the latch. `latch release` and `gate open` never change permissions. Contents, and nothing else:
 
 | Path | Writer | Readers | Meaning |
 |---|---|---|---|
