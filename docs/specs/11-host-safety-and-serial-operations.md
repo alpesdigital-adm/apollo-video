@@ -31,6 +31,8 @@ Worker reading rules (`src/v2/infrastructure/ops-state/file-admission-gate.ts`):
 
 ### latch.json (`apollo-ops-latch/v1`)
 
+Integration correction (2026-09-19): the filesystem adapter maps only `ENOENT` to absence. Permission, I/O or file-type failures when reading latch/gate close admission with `incident-latch-unreadable` / `gate-unreadable`; a future file mtime is inconclusive and closes as `stale-gate`. Regression tests first reproduced admission through an unreadable latch (a real directory at `latch.json`), then proved refusal after the correction. This does not change the deliberate absent-gate lifecycle described above and does not claim continuous post-deploy monitoring.
+
 Engaged by the deploy on any inconclusive step (`stop-timeout`, `step-inconclusive`, `gate-closed`, `postflight-inconclusive`). Released only by `apollo-vps.sh latch release --reason "<text>"`, which archives the document into `journal/` with the operator's reason. After a release the next deploy still requires the stability window (30 samples covering 300 s). Container restart policies, supervisor restarts and reboots do not touch the latch.
 
 ### lock/

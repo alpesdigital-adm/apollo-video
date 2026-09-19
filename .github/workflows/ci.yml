@@ -1014,6 +1014,8 @@ jobs:
       - name: Run synthetic production, criticism and cache reuse journey against /v1, durable workers and PostgreSQL
         run: npm run test:e2e:synthetic-production-journey
         env:
+          # Preserve bounded server/worker diagnostics for unexpected HTTP 500s.
+          APOLLO_PRODUCTION_JOURNEY_DEBUG: '1'
           # Local artifact storage on purpose: this journey rewrites stored
           # bytes to prove a tampered blob is never reused, and reads them back
           # with ffprobe through the real critic adapters.
