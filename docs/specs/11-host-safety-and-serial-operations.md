@@ -81,6 +81,8 @@ Covered by executable mechanisms: the deploy path of `apollo-vps.sh`; worker adm
 
 Written for a future, separately authorised operation; nothing below was run in Wave 23.
 
+**Where a rehearsal may happen.** Any rehearsal, load experiment or destructive test of this procedure runs on a disposable DigitalOcean host, never on the shared Hostinger VPS: that machine is production, it is the subject of these protections and not a test substrate (`AGENTS.md`, "Operação segura da VPS Hostinger de produção" and "Segurança obrigatória para E2E remoto"). Wave 23 used neither: every proof came from this repository's CI runners and a local machine.
+
 1. Owner's explicit release in writing; `apollo-vps.sh latch release --reason "<owner text>"` if a latch is engaged.
 2. Owner sets the three observation values for `shared-production` in `config/host-safety-policy.json` and approves a budget document; `apollo-vps.sh plan --with-budget` must print the exact targets, image id/digests and quotas, and refuse nothing.
 3. Stability measured, not assumed: the monitor runs for five minutes with every sample inside the thresholds before any mutation.
