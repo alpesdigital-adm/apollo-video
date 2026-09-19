@@ -138,6 +138,23 @@ jobs:
       - name: Run unit and contract tests
         run: npm test
 
+      # Wave 23. The deploy sequence is proven against a Docker that records every
+      # verb and answers from a scenario: mutation order, lock, latch, budget refusal
+      # before the first mutation, stop timeout => latch, readback mismatch =>
+      # inconclusive. No container runs here; the real daemon is exercised in the
+      # Isolated Compose job below.
+      - name: Run Wave 23 deploy sequence against a recording fake Docker
+        run: npm run test:e2e:deploy-fake-docker
+        env:
+          APOLLO_DEPLOY_FAKE_DOCKER_E2E: "1"
+
+      # The Linux collector reads the runner's real /proc: this is the only place
+      # the arithmetic meets a kernel. It measures the runner, never the VPS.
+      - name: Run Wave 23 host safety collector against the runner's real /proc
+        run: npm run test:e2e:host-safety-linux
+        env:
+          APOLLO_HOST_SAFETY_LINUX_E2E: "1"
+
       - name: Validate public API contracts
         run: npm run api:v1:validate
 
@@ -1175,6 +1192,75 @@ jobs:
           done
           $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pid, application_name, state, query_start from pg_stat_activity where application_name like 'apollo-video-e2e-%'"
           exit 1
+
+      # Wave 23. Real workers and real FFmpeg against a disposable database of this
+      # job, with the admission gate and the latch written as files: interruption
+      # between claims, during a render, an authorised restart that promotes exactly
+      # once, a latch that survives a restart, and a monitor that dies. Metric
+      # anomalies are injected at the collector boundary; nothing here measures a
+      # host under load.
+      - name: Create the disposable runtime safety database
+        run: |
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE apollo_v2_e2e_runtime_safety"
+          npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_runtime_safety?schema=public&application_name=apollo-video-e2e-runtime-safety-migrate&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run Wave 23 worker interruption and resume journeys against PostgreSQL and versioned MinIO
+        run: npm run test:e2e:runtime-safety-workers
+        env:
+          APOLLO_RUNTIME_SAFETY_E2E: "1"
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: ci-protected-payload
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+          APOLLO_V2_S3_BUCKET: apollo-runtime-safety-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_RUNTIME_SAFETY_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_runtime_safety?schema=public&application_name=apollo-video-e2e-runtime-safety&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan runtime safety backends
+        if: always()
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-runtime-safety%'")"
+            printf 'postflight attempt=%s backends=%s\n' "$attempt" "$backends"
+            if test "$backends" = 0; then
+              exit 0
+            fi
+            sleep 3
+          done
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pid, application_name, state, query_start from pg_stat_activity where application_name like 'apollo-video-e2e-runtime-safety%'"
+          exit 1
+
+      # Wave 23. The same deploy script against the real daemon of this runner and
+      # the image the supervised step built: stop confirmation, identity blocking,
+      # lock exclusivity, a sentinel container that must survive untouched, and the
+      # quotas read back from docker inspect and from the cgroup files inside the
+      # container. It proves the mechanism on a disposable host, nothing about the
+      # shared VPS.
+      - name: Run Wave 23 deploy against real Docker containers, a sentinel and read-back limits
+        run: npm run test:e2e:deploy-real-docker
+        env:
+          APOLLO_DEPLOY_DOCKER_E2E: "1"
+          APOLLO_DEPLOY_E2E_IMAGE: apollo-video-local:compose-ci
+          APOLLO_RESOURCE_PROFILE: isolated-ci
+          APOLLO_OPS_STATE_DIR: ${{ runner.temp }}/apollo-ops
+
+      - name: Verify zero leftover Wave 23 managed containers
+        if: always()
+        run: |
+          leftovers="$(docker ps -aq --filter label=apollo.managed=true)"
+          if test -n "$leftovers"; then
+            docker ps -a --filter label=apollo.managed=true
+            exit 1
+          fi
 
       - name: Stop isolated infrastructure
         if: always()
