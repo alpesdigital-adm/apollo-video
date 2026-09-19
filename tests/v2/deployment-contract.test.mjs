@@ -11,6 +11,7 @@ const deployLibraryUrls = {
 }
 const monitorScriptUrl = new URL('../../scripts/ops/host-safety-monitor.mjs', import.meta.url)
 const verdictScriptUrl = new URL('../../scripts/ops/host-safety-verdict.mjs', import.meta.url)
+const budgetScriptUrl = new URL('../../scripts/ops/resource-budget.mjs', import.meta.url)
 const workerRoles = [
   'ingest-worker',
   'render-worker',
@@ -220,6 +221,21 @@ test('production deploy gates every mutation behind lock, budget, monitor and pr
     assert.match(source, /--catalog must be \$\{SHIPPED_CATALOG\} when --profile is shared-production/)
   }
 
+  // Every ops program resolves its configuration against the IMAGE root, which is what
+  // makes the `config/` copy above load-bearing rather than decorative.
+  const budgetScript = await readFile(budgetScriptUrl, 'utf8')
+  for (const [name, source] of [
+    ['host-safety-monitor.mjs', monitorScript],
+    ['host-safety-verdict.mjs', verdictScript],
+    ['resource-budget.mjs', budgetScript],
+  ]) {
+    assert.match(source, /const root = resolve\(import\.meta\.dirname, '\.\.', '\.\.'\)/, `${name} does not resolve against the image root`)
+    assert.match(source, /resolve\(root, (options\.catalog|path)\)/, `${name} does not read its configuration from the image root`)
+  }
+  assert.match(monitorScript, /config\/host-safety-policy\.json/)
+  assert.match(verdictScript, /config\/host-safety-policy\.json/)
+  assert.match(budgetScript, /config\/resource-budget\.json/)
+
   // The run's own monitor may be stopped, but "stopped" is confirmed like every other
   // stop: a monitor left running keeps publishing a gate for a run that is over.
   assert.match(ops, /monitor-stop-inconclusive/)
@@ -240,6 +256,19 @@ test('production image materializes the Remotion bundle and runtime media binari
   assert.ok(remotionBuild >= 0, 'the image never creates remotion/build')
   assert.ok(nextBuild > remotionBuild, 'the Remotion bundle must be built before the application image')
   assert.ok(runtimeCopy > remotionBuild, 'the built Remotion tree is not copied into the runtime stage')
+  // The runtime stage must carry `config/`.
+  //
+  // It did not, and nothing noticed until a container of the real image tried to run:
+  // the monitor, the verdict and the budget all resolve their catalog relative to the
+  // image root, so every one of them died with ENOENT on
+  // /app/config/host-safety-policy.json — in CI and in production alike (CI run
+  // 35450914276). A fake Docker cannot show this, because a fake has no filesystem.
+  const runtimeStage = dockerfile.slice(dockerfile.lastIndexOf('FROM '))
+  assert.match(
+    runtimeStage,
+    /COPY --from=build --chown=node:node \/app\/config \.\/config/,
+    'the runtime image has no config/, so the host safety policy and the resource budget cannot be read',
+  )
   assert.match(dockerfile, /ensureBrowser\(\{logLevel:'error'\}\)/)
   for (const dependency of ['libnss3', 'libgbm1', 'libasound2', 'fonts-dejavu-core', 'fonts-liberation']) {
     assert.ok(dockerfile.includes(dependency), `${dependency} is required by the bundled Remotion browser`)

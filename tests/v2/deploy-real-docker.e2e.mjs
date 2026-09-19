@@ -16,7 +16,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, test } from 'node:test'
@@ -129,10 +129,12 @@ function runDeployFunction(stateDir, snippet, overrides = {}) {
     `. '${join(repositoryRoot, 'infra/deploy/lib/state.sh')}'`,
     `. '${join(repositoryRoot, 'infra/deploy/lib/docker.sh')}'`,
     `. '${join(repositoryRoot, 'infra/deploy/lib/ops.sh')}'`,
-    `APOLLO_RUN_ID='${runId}'`,
+    // Overridable so the concurrency case can give its two racers different identities;
+    // with one shared id a lock "held by us" would look like a win to both of them.
+    `APOLLO_RUN_ID="\${APOLLO_RUN_ID_OVERRIDE:-${runId}}"`,
     "APOLLO_ADOPT_UNLABELLED=''",
     'APOLLO_ROLES=(app)',
-    'apollo_state_paths',
+    'apollo_state_prepare',
     'apollo_container_for_role() { printf "%s" "$APOLLO_E2E_TARGET"; }',
   ].join('\n')
   return new Promise((resolveRun) => {
@@ -184,13 +186,18 @@ test('a stop is a claim only after the daemon confirms a terminal state', { skip
   assert.equal(inspect(name, '{{.State.Pid}}'), '0', 'the daemon reports no process left')
   assert.equal(inspect(name, '{{.Id}}'), id, 'it is the same container we started')
   // The backends check ran inside a real container of the image under test, reading the
-  // mounted state directory: the verdict is the production code, not a stub.
+  // mounted state directory: the verdict is the production code, not a stub. What it does
+  // NOT prove is a real backend disappearing — these containers open no database
+  // connection, so the samples say zero because zero is the truth about them. The rule
+  // that a non-zero count blocks is proven against fabricated samples in the fake suite.
   const journal = await readFile(join(stateDir, 'journal', `${runId}.ndjson`), 'utf8')
   assert.match(journal, /"step":"stop"[\s\S]*"backends":0/)
 
   const removed = await runDeployFunction(stateDir, 'apollo_remove_confirmed "$APOLLO_E2E_TARGET"', { APOLLO_E2E_TARGET: name })
   assert.equal(removed.status, 0, removed.stderr)
-  assert.equal(docker('inspect', name).status !== 0, true, 'the container is gone')
+  const gone = docker('inspect', name)
+  assert.notEqual(gone.status, 0, 'the container is gone')
+  assert.match(gone.stderr ?? '', /No such object|No such container/)
 })
 
 test('a container that ignores SIGTERM is only terminal after the grace period', { skip: !RUN }, async (t) => {
@@ -267,7 +274,18 @@ test('an unlabelled container is never touched, and a sentinel survives the run'
   })
   assert.equal(adopted.status, 0, adopted.stderr)
   const journal = await readFile(join(stateDir, 'journal', `${runId}.ndjson`), 'utf8')
-  assert.match(journal, /"event":"adopt-unlabelled"/)
+  const adoption = journal
+    .split('\n')
+    .filter((line) => line.includes('"event":"adopt-unlabelled"'))
+    .map((line) => JSON.parse(line))
+    .at(-1)
+  assert.ok(adoption, 'the adoption must leave evidence')
+  assert.equal(adoption.data.target.name, legacy)
+  assert.equal(adoption.data.observed.image, IMAGE)
+  // The evidence names whatever networks the daemon actually reports. It is NOT asserted
+  // to be `easypanel`: these containers are started by this suite on the runner's default
+  // bridge, and a fake that answered `easypanel` hid that difference.
+  assert.match(adoption.data.observed.inspected, new RegExp(`^${IMAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\|\\S+`))
 
   // The sentinel was never a target and is untouched, same id, still running.
   assert.equal(inspect(sentinel, '{{.Id}}'), sentinelId)
@@ -277,6 +295,10 @@ test('an unlabelled container is never touched, and a sentinel survives the run'
 
 test('a quota accepted on the command line is visible in the container cgroup', { skip: !RUN }, async (t) => {
   const stateDir = await stateDirectory(t)
+  // The cgroup paths below are v2 only. The deploy refuses anything else, so a runner on
+  // v1 must say so plainly rather than fail on a missing file.
+  const cgroupVersion = docker('info', '--format', '{{.CgroupVersion}}').stdout.trim()
+  assert.equal(cgroupVersion, '2', `this runner reports cgroup version ${cgroupVersion}; the budget requires v2`)
   const name = `apollo-e2e-limits-${runId}`
   const cpus = 0.5
   const memoryBytes = 268_435_456
@@ -326,20 +348,38 @@ test('a quota accepted on the command line is visible in the container cgroup', 
 test('two invocations cannot hold the operation lock at once', { skip: !RUN }, async (t) => {
   const stateDir = await stateDirectory(t)
   const acquire = (owner) =>
-    runDeployFunction(stateDir, 'apollo_lock_acquire deploy && sleep 2', { APOLLO_RUN_ID_OVERRIDE: owner })
-  // Both invocations race for the same mkdir; exactly one may win.
+    runDeployFunction(stateDir, 'apollo_lock_acquire deploy && sleep 2', { APOLLO_RUN_ID_OVERRIDE: `${runId}-${owner}` })
+  // Both invocations race for the same mkdir with DIFFERENT identities, so a loser that
+  // took the lock over would be visible as a second winner and as a foreign owner.
   const [first, second] = await Promise.all([acquire('a'), acquire('b')])
   const winners = [first, second].filter((result) => result.status === 0)
   const losers = [first, second].filter((result) => result.status !== 0)
-  assert.equal(winners.length, 1, `${first.stderr}\n${second.stderr}`)
+  assert.equal(winners.length, 1, `two winners: ${first.stderr}\n${second.stderr}`)
   assert.equal(losers.length, 1)
-  assert.match(losers[0].stderr, /another operation holds the lock/)
+  // Either refusal is correct: the loser found a complete owner, or it arrived while the
+  // winner's owner.json was still being written. What it may never do is take over.
+  assert.match(losers[0].stderr, /another operation holds the lock|still being written/)
+  assert.ok(!/orphan/i.test(losers[0].stderr), 'a live lock may never be declared an orphan')
   const holder = await readLockOwner(stateDir)
   assert.equal(holder.held, true)
-  assert.equal(holder.owner.runId, runId)
+  assert.ok([`${runId}-a`, `${runId}-b`].includes(holder.owner.runId), `unexpected holder ${holder.owner.runId}`)
+  // And nothing was archived as an orphan.
+  const journalEntries = await readdir(join(stateDir, 'journal')).catch(() => [])
+  assert.deepEqual(journalEntries.filter((entry) => entry.includes('orphaned')), [])
 })
 
 test('every container this suite created is gone', { skip: !RUN }, async () => {
   for (const id of containersWithRunLabel()) docker('rm', '-f', id)
   assert.deepEqual(containersWithRunLabel(), [], 'the postflight must find no container with this run label')
+  // The verdict containers the deploy library starts are not labelled by this suite —
+  // they are `--rm` and carry the run id in their name, so their absence is checked too.
+  const named = docker('ps', '-a', '--filter', `name=apollo-ops-verdict-${runId}`, '--format', '{{.Names}}').stdout ?? ''
+  assert.deepEqual(
+    named
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0),
+    [],
+    'a verdict container outlived its --rm',
+  )
 })

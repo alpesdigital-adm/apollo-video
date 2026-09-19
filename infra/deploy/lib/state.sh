@@ -38,6 +38,13 @@ apollo_journal() {
   # `plan` and `status` are read-only commands: they never write a journal line, so
   # "the plan mutated nothing" is true of the state directory as well as of Docker.
   [[ "${APOLLO_JOURNAL_ENABLED:-1}" == '1' ]] || return 0
+  # Self-sufficient on purpose. The journal is the evidence that a step happened, and
+  # the first thing several paths journal is the refusal that stopped them — so it must
+  # not depend on an earlier step having prepared the directory. Both calls are cheap
+  # and idempotent; a caller that sourced the libraries directly gets the same trail as
+  # the orchestrator.
+  [[ -n "${APOLLO_JOURNAL_DIR:-}" ]] || apollo_state_paths
+  mkdir -p "${APOLLO_JOURNAL_DIR}"
   local event="$1"
   local data="${2:-null}"
   local line
@@ -128,16 +135,27 @@ apollo_lock_acquire() {
     apollo_journal 'lock-acquired' "{\"command\":\"$(apollo_json_escape "${command}")\",\"pid\":$$,\"tookOverOrphan\":null}"
     return 0
   fi
-  if [[ ! -r "${APOLLO_LOCK_OWNER}" ]]; then
-    apollo_fail "the operation lock ${APOLLO_LOCK_DIR} exists with no readable owner.json; inspect it by hand before continuing"
+  # The loser of a `mkdir` race can arrive between the winner's `mkdir` and the moment
+  # its owner.json is in place. Reading that half-written file and comparing its empty
+  # `bootId` with the real one used to "prove" the lock was from another boot, and the
+  # loser took it over: two deploys, both believing they held the lock (CI run
+  # 35450914276). A few short re-reads cover the window; after that an incomplete owner
+  # is a HELD lock whose owner is unreadable, never an orphan.
+  local holder_run holder_pid holder_boot holder_started holder_host
+  local attempt
+  for attempt in 1 2 3; do
+    holder_run="$(apollo_lock_field runId)"
+    holder_pid="$(apollo_lock_field pid)"
+    holder_boot="$(apollo_lock_field bootId)"
+    holder_started="$(apollo_lock_field startedAtIso)"
+    holder_host="$(apollo_lock_field hostname)"
+    [[ -n "${holder_run}" && -n "${holder_pid}" && -n "${holder_boot}" && -n "${holder_started}" ]] && break
+    sleep 0.2
+  done
+  if [[ -z "${holder_run}" || -z "${holder_pid}" || -z "${holder_boot}" || -z "${holder_started}" ]]; then
+    apollo_fail "the operation lock ${APOLLO_LOCK_DIR} is held and its owner.json is missing, empty or still being written; it is never treated as an orphan"
     return 1
   fi
-  local holder_run holder_pid holder_boot holder_started holder_host
-  holder_run="$(apollo_lock_field runId)"
-  holder_pid="$(apollo_lock_field pid)"
-  holder_boot="$(apollo_lock_field bootId)"
-  holder_started="$(apollo_lock_field startedAtIso)"
-  holder_host="$(apollo_lock_field hostname)"
   local orphan_because=''
   if [[ "${holder_boot}" != "${boot_id}" ]]; then
     orphan_because='different-boot-id'
@@ -165,10 +183,16 @@ apollo_lock_acquire() {
   apollo_log "took over an orphaned lock (${orphan_because}) from run ${holder_run}"
 }
 
+# Publishes the owner atomically.
+#
+# `cat > owner.json` makes the file appear empty and then fill up, which is precisely
+# the state another racer must never read as evidence. A temporary file inside the lock
+# directory followed by `mv` means the file either is not there or is complete.
 apollo_lock_write_owner() {
   local command="$1"
   local boot_id="$2"
-  cat > "${APOLLO_LOCK_OWNER}" <<JSON
+  local temporary="${APOLLO_LOCK_DIR}/.owner.$$.tmp"
+  cat > "${temporary}" <<JSON
 {
   "schemaVersion": "apollo-ops-lock/v1",
   "runId": "$(apollo_json_escape "${APOLLO_RUN_ID}")",
@@ -179,9 +203,11 @@ apollo_lock_write_owner() {
   "hostname": "$(apollo_json_escape "$(hostname)")"
 }
 JSON
+  mv "${temporary}" "${APOLLO_LOCK_OWNER}"
 }
 
 apollo_lock_field() {
+  [[ -r "${APOLLO_LOCK_OWNER}" ]] || return 0
   sed -n "s/.*\"$1\": *\"\{0,1\}\([^\",}]*\)\"\{0,1\},\{0,1\}.*/\1/p" "${APOLLO_LOCK_OWNER}" | head -n 1
 }
 

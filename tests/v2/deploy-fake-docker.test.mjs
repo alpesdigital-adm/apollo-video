@@ -128,6 +128,49 @@ test('a second invocation is refused by the lock with the holder identity', asyn
   assert.equal(mutatingVerbs(await dockerLog(world)).length, 0)
 })
 
+test('a lock whose owner is still being written is held, never taken over', async (t) => {
+  const world = await createWorld(t)
+  await mkdir(join(world.stateDir, 'lock'))
+  // Exactly what the loser of a `mkdir` race sees for a few milliseconds: the directory
+  // exists and the owner file is not complete yet. Reading an empty bootId out of it and
+  // calling it "another boot" is how two deploys once both believed they held the lock.
+  await writeFile(join(world.stateDir, 'lock', 'owner.json'), '{\n  "schemaVersion": "apollo-ops-lock/v1",\n  "runId": "deploy-2026', 'utf8')
+  const refused = await runDeployFunction(world, 'apollo_state_prepare && apollo_lock_acquire deploy')
+  assert.notEqual(refused.status, 0)
+  assert.match(refused.stderr, /is held and its owner\.json is missing, empty or still being written/)
+  assert.match(refused.stderr, /never treated as an orphan/)
+  // Nothing was archived and the holder's file was not replaced.
+  await assert.rejects(() => readdir(join(world.stateDir, 'journal')).then((entries) => {
+    if (entries.some((entry) => entry.includes('orphaned'))) return entries
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+  }), /ENOENT/)
+  assert.match(await readFile(join(world.stateDir, 'lock', 'owner.json'), 'utf8'), /"runId": "deploy-2026$/)
+
+  // The deploy itself refuses for the same reason, before touching Docker.
+  const deploy = await runDeploy(world, ['deploy'])
+  assert.notEqual(deploy.status, 0)
+  assert.match(deploy.stderr, /still being written/)
+  assert.equal(mutatingVerbs(await dockerLog(world)).length, 0)
+
+  // An owner written the way the script writes it is complete when it appears, so the
+  // normal refusal still names the holder.
+  await writeFile(
+    join(world.stateDir, 'lock', 'owner.json'),
+    JSON.stringify({
+      schemaVersion: 'apollo-ops-lock/v1',
+      runId: 'deploy-already-running',
+      pid: process.pid,
+      startedAtIso: new Date().toISOString(),
+      bootId,
+      command: 'deploy',
+      hostname: 'test-host',
+    }),
+    'utf8',
+  )
+  const named = await runDeploy(world, ['deploy'])
+  assert.match(named.stderr, /another operation holds the lock: run deploy-already-running/)
+})
+
 test('an engaged latch refuses the deploy before anything is interrogated', async (t) => {
   const world = await createWorld(t)
   await writeFile(
@@ -361,7 +404,7 @@ test('the state the shell writes is exactly what the TypeScript readers accept',
   await mkdir(join(world.stateDir, 'lock'), { recursive: true })
   const blocked = await runDeploy(world, ['gate', 'open', '--reason', 'monitor died without a postflight'])
   assert.notEqual(blocked.status, 0)
-  assert.match(blocked.stderr, /exists with no readable owner\.json/)
+  assert.match(blocked.stderr, /is held and its owner\.json is missing, empty or still being written/)
   await rm(join(world.stateDir, 'lock'), { recursive: true, force: true })
 
   await writeGateFile({

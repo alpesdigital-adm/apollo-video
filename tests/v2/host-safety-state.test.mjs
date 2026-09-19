@@ -322,6 +322,60 @@ test('a lock is an orphan by identity, never by age alone', async (t) => {
   assert.equal(JSON.parse(await readFile(rebooted.tookOverOrphan, 'utf8')).orphanedBecause, 'different-boot-id')
 })
 
+test('an owner file that is still being written is held, never an orphan', async (t) => {
+  const stateDir = await stateDirectory(t)
+  const startedAtMs = Date.parse('2026-09-18T23:00:00.000Z')
+  const attempt = (contents) =>
+    writeFile(join(stateDir, 'lock', 'owner.json'), contents, 'utf8').then(() =>
+      acquireOperationLock({
+        stateDir,
+        owner: owner({ runId: 'challenger' }),
+        // Everything here argues FOR taking over: a different boot, a dead pid, and a
+        // start far outside the grace window. The only thing that must stop it is that
+        // the owner cannot be read.
+        currentBootId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+        nowMs: startedAtMs + 10 * 3_600_000,
+        processExists: () => false,
+        ownerReadAttempts: 2,
+        delay: async () => {},
+      }),
+    )
+  await mkdir(join(stateDir, 'lock'), { recursive: true })
+
+  for (const [description, contents] of [
+    ['empty', ''],
+    ['half written', '{\n  "schemaVersion": "apollo-ops-lock/v1",\n  "runId": "deploy-2026'],
+    ['no bootId', JSON.stringify({ schemaVersion: 'apollo-ops-lock/v1', runId: 'r', pid: 5, startedAtIso: '2026-09-18T23:00:00.000Z' })],
+    ['no pid', JSON.stringify({ schemaVersion: 'apollo-ops-lock/v1', runId: 'r', bootId: BOOT_ID, startedAtIso: '2026-09-18T23:00:00.000Z' })],
+    ['no runId', JSON.stringify({ schemaVersion: 'apollo-ops-lock/v1', pid: 5, bootId: BOOT_ID, startedAtIso: '2026-09-18T23:00:00.000Z' })],
+  ]) {
+    const result = await attempt(contents)
+    assert.equal(result.acquired, false, `an ${description} owner.json was taken over`)
+    assert.equal(result.reason, 'lock-held-by-unknown-owner')
+    assert.match(result.holderDescription, /still being written; it is never treated as an orphan/)
+  }
+  // The journal must not contain an orphan record: nothing was taken over.
+  await assert.rejects(() => readdir(join(stateDir, 'journal')), /ENOENT/)
+
+  // A complete owner with the same evidence IS an orphan, so the refusal above is about
+  // readability and not about some other precondition failing.
+  await writeFile(
+    join(stateDir, 'lock', 'owner.json'),
+    JSON.stringify({ ...owner({ runId: 'complete' }), schemaVersion: 'apollo-ops-lock/v1' }),
+    'utf8',
+  )
+  const takenOver = await acquireOperationLock({
+    stateDir,
+    owner: owner({ runId: 'challenger' }),
+    currentBootId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+    nowMs: startedAtMs + 10 * 3_600_000,
+    processExists: () => false,
+    delay: async () => {},
+  })
+  assert.equal(takenOver.acquired, true)
+  assert.equal(JSON.parse(await readFile(takenOver.tookOverOrphan, 'utf8')).orphanedBecause, 'different-boot-id')
+})
+
 test('a lock directory with no readable owner is held, not free', async (t) => {
   const stateDir = await stateDirectory(t)
   await mkdir(join(stateDir, 'lock'))

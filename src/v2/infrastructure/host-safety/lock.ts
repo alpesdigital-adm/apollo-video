@@ -59,6 +59,10 @@ export interface AcquireOperationLockInput {
   /** Whether a PID exists on this host; injected so the rule is testable. */
   readonly processExists: (pid: number) => boolean
   readonly orphanAfterMs?: number
+  /** Re-reads of a lock whose owner is absent or incomplete before refusing. */
+  readonly ownerReadAttempts?: number
+  /** Waits between those re-reads; injected so tests do not sleep. */
+  readonly delay?: (milliseconds: number) => Promise<void>
 }
 
 export type AcquireOperationLockResult =
@@ -115,14 +119,30 @@ export async function acquireOperationLock(input: AcquireOperationLockInput): Pr
     return { acquired: true, path: lockDirectory, owner, tookOverOrphan: null }
   }
 
-  const holder = await readLockOwner(input.stateDir)
-  const holderOwner = holder.held ? holder.owner : null
+  // The loser of the `mkdir` race can arrive between the winner's `mkdir` and the moment
+  // its owner.json is in place. A few short re-reads cover that window; after them, an
+  // owner that is absent, empty or missing any of runId/pid/bootId/startedAtIso means
+  // the lock is HELD by someone whose identity cannot be read — never an orphan. The
+  // opposite reading is how two deploys once both believed they held it: the incomplete
+  // file's empty bootId "differed" from the current boot.
+  const attempts = Math.max(1, input.ownerReadAttempts ?? 3)
+  const delay = input.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
+  let holderOwner: OpsLockOwner | null = null
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const holder = await readLockOwner(input.stateDir)
+    holderOwner = holder.held ? holder.owner : null
+    if (holderOwner) break
+    if (attempt < attempts - 1) await delay(200)
+  }
   if (!holderOwner) {
     return {
       acquired: false,
       reason: 'lock-held-by-unknown-owner',
       holder: null,
-      holderDescription: describeHolder(null, `${lockDirectory} exists with no readable owner.json`),
+      holderDescription: describeHolder(
+        null,
+        `${lockDirectory} is held and its owner.json is missing, empty or still being written; it is never treated as an orphan`,
+      ),
     }
   }
   const differentBoot = holderOwner.bootId !== input.currentBootId

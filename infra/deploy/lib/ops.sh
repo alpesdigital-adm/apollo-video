@@ -26,6 +26,10 @@
 # policy unit tests and by the assertion that the shipped catalog declares 60 s.
 APOLLO_POLICY_CATALOG="${APOLLO_OPS_POLICY_CATALOG:-config/host-safety-policy.json}"
 
+# Defaulted here so the libraries work when sourced directly (the e2e suites drive one
+# function at a time), not only when the orchestrator has initialised everything.
+APOLLO_VERDICT_SEQUENCE="${APOLLO_VERDICT_SEQUENCE:-1}"
+
 APOLLO_BOOTSTRAP_CPUS="${APOLLO_OPS_BOOTSTRAP_CPUS:-0.25}"
 APOLLO_BOOTSTRAP_MEMORY_BYTES="${APOLLO_OPS_BOOTSTRAP_MEMORY_BYTES:-268435456}"
 APOLLO_BOOTSTRAP_PIDS="${APOLLO_OPS_BOOTSTRAP_PIDS:-64}"
