@@ -50,8 +50,12 @@ export const APP_ROLES = [
   'localization-media-worker',
 ]
 
-/** The boot id the deploy's own helper reports on this machine. */
-export const bootId = spawnSync('bash', ['-c', `. '${join(repositoryRoot, 'infra/deploy/lib/common.sh')}'; apollo_boot_id`], {
+// Use the same host identity for lock fixtures and the deploy. Git Bash has no
+// /proc boot ID, so common.sh includes hostname in its fallback boot identity.
+const hostFixture = 'hostname() { if [[ "${1:-}" == "-I" ]]; then printf "198.51.100.23\\n"; else printf "apollo-isolated-fixture\\n"; fi; }; export -f hostname;'
+
+/** The boot id the deploy's own helper reports in this isolated world. */
+export const bootId = spawnSync('bash', ['-c', `${hostFixture} . '${join(repositoryRoot, 'infra/deploy/lib/common.sh')}'; apollo_boot_id`], {
   encoding: 'utf8',
 }).stdout.trim()
 
@@ -86,7 +90,7 @@ export const TEST_CATALOG = {
       healthLatencyMs: 2_000,
       oomRecentWindowMs: 600_000,
     },
-    'shared-production': { sampleIntervalMs: 200, maxSampleGapMs: 8_000 },
+    'digitalocean-production': { sampleIntervalMs: 200, maxSampleGapMs: 8_000 },
   },
 }
 
@@ -94,7 +98,7 @@ export const BASE_SCENARIO = {
   cgroupVersion: '2',
   cgroupDriver: 'systemd',
   infoWarnings: [],
-  networks: ['easypanel'],
+  networks: ['apollo-test-network'],
   appContainer: 'apollo-video',
   image: { reference: 'apollo-video:test', id: 'sha256:1111', repoDigests: ['apollo-video@sha256:2222'] },
   configCheckOutput: 'false|300000',
@@ -149,6 +153,8 @@ export function environmentFor(world, overrides = {}) {
     PATH: `${fakeDockerDirectory}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
     APOLLO_OPS_STATE_DIR: world.stateDir,
     APOLLO_RESOURCE_PROFILE: 'isolated-ci',
+    APOLLO_HOSTING_PROVIDER: 'digitalocean',
+    APOLLO_DOCKER_NETWORK: 'apollo-test-network',
     APOLLO_OPS_HEALTH_URL: 'http://127.0.0.1:3333/v1/health',
     APOLLO_ENV_FILE: world.envFile,
     APOLLO_IMAGE: 'apollo-video:test',
@@ -209,7 +215,10 @@ export function withoutSeams(overrides = {}) {
  */
 export function runDeploy(world, args, overrides = {}) {
   return new Promise((resolveRun) => {
-    const child = spawn('bash', [deployScript, ...args, '--run-id', world.runId], {
+    // The fake-Docker world also has a synthetic host identity. Export a function:
+    // Git Bash prepends /usr/bin ahead of PATH, where its hostname lacks -I.
+    // This is confined to this harness, never an environment bypass in production.
+    const child = spawn('bash', ['-c', `${hostFixture} exec bash "$@"`, 'apollo-host-fixture', deployScript, ...args, '--run-id', world.runId], {
       env: environmentFor(world, overrides),
       cwd: repositoryRoot,
     })
@@ -238,6 +247,7 @@ export function runDeploy(world, args, overrides = {}) {
  */
 export function runDeployFunction(world, snippet, overrides = {}) {
   const preamble = [
+    hostFixture,
     `. '${join(repositoryRoot, 'infra/deploy/lib/common.sh')}'`,
     `. '${join(repositoryRoot, 'infra/deploy/lib/state.sh')}'`,
     `. '${join(repositoryRoot, 'infra/deploy/lib/docker.sh')}'`,

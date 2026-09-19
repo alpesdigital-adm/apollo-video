@@ -24,7 +24,7 @@ function clone(value) {
 function approvedBudget(overrides = {}) {
   const base = {
     schemaVersion: RESOURCE_BUDGET_APPROVAL_SCHEMA_VERSION,
-    profile: 'shared-production',
+    profile: 'digitalocean-production',
     approvedBy: 'owner',
     approvedAtIso: '2026-09-18T20:00:00.000Z',
     host: { cpus: 4, memory: '16g' },
@@ -129,18 +129,18 @@ test('T-W23-C a sum over the envelope is refused even when every individual quot
   assert.match(hostResolution.errors.join('\n'), /envelope\.cpus: 5 exceeds the 4 host CPUs/)
 })
 
-test('T-W23-C the shared-production profile has no default and refuses to run without an approved budget', () => {
-  const resolution = resolveResourceBudget({ catalog, profile: 'shared-production', enabledFeatures: { localization: false } })
+test('T-W23-C the digitalocean-production profile has no default and refuses to run without an approved budget', () => {
+  const resolution = resolveResourceBudget({ catalog, profile: 'digitalocean-production', enabledFeatures: { localization: false } })
   assert.equal(resolution.ok, false)
   assert.match(resolution.errors.join('\n'), /requires an operator-approved budget document; none was provided/)
-  assert.equal(catalog.profiles['shared-production'].containers, undefined)
-  assert.equal(catalog.profiles['shared-production'].envelope, undefined)
+  assert.equal(catalog.profiles['digitalocean-production'].containers, undefined)
+  assert.equal(catalog.profiles['digitalocean-production'].envelope, undefined)
 })
 
-test('T-W23-C an approved shared-production budget must keep the margin for the other services of the host', () => {
+test('T-W23-C an approved digitalocean-production budget must keep the margin for the other services of the host', () => {
   const valid = resolveResourceBudget({
     catalog,
-    profile: 'shared-production',
+    profile: 'digitalocean-production',
     enabledFeatures: { localization: false },
     approvedBudget: approvedBudget(),
   })
@@ -150,7 +150,7 @@ test('T-W23-C an approved shared-production budget must keep the margin for the 
 
   const noMargin = resolveResourceBudget({
     catalog,
-    profile: 'shared-production',
+    profile: 'digitalocean-production',
     enabledFeatures: { localization: false },
     approvedBudget: approvedBudget({ envelope: { cpus: 4, memory: '8g', pids: 4096 } }),
   })
@@ -159,7 +159,7 @@ test('T-W23-C an approved shared-production budget must keep the margin for the 
 
   const noReserve = resolveResourceBudget({
     catalog,
-    profile: 'shared-production',
+    profile: 'digitalocean-production',
     enabledFeatures: { localization: false },
     approvedBudget: approvedBudget({ host: { cpus: 4, memory: '8g' }, envelope: { cpus: 3, memory: '7g', pids: 4096 } }),
   })
@@ -170,11 +170,11 @@ test('T-W23-C an approved shared-production budget must keep the margin for the 
     ['wrong schema', { schemaVersion: 'apollo-resource-budget-approval/v0' }, /approvedBudget\.schemaVersion/],
     ['no approver', { approvedBy: '  ' }, /approvedBudget\.approvedBy/],
     ['bad timestamp', { approvedAtIso: 'yesterday' }, /approvedBudget\.approvedAtIso/],
-    ['other profile', { profile: 'isolated-ci' }, /approvedBudget\.profile: must be "shared-production"/],
+    ['other profile', { profile: 'isolated-ci' }, /approvedBudget\.profile: must be "digitalocean-production"/],
   ]) {
     const resolution = resolveResourceBudget({
       catalog,
-      profile: 'shared-production',
+      profile: 'digitalocean-production',
       enabledFeatures: { localization: false },
       approvedBudget: approvedBudget(overrides),
     })

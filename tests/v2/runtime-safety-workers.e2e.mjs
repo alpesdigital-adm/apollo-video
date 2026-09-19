@@ -55,7 +55,7 @@ const execFileAsync = promisify(execFile)
  * files standing in for a monitor's writes, and (journey 7b) a back-dated gate mtime
  * standing in for a monitor that stopped writing.
  *
- * Nothing here measures load. The Hostinger thresholds are not exercised and no
+ * Nothing here measures load. The production thresholds are not exercised and no
  * metric is claimed: these journeys ask what the workers do when admission is
  * refused or a stop arrives, which is a question about control flow and persistence.
  *

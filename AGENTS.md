@@ -6,7 +6,7 @@ Este arquivo existe para impedir a repetição de um incidente grave de avaliaç
 
 Se uma tarefa conflitar com estas regras, pare e exponha o conflito. Não contorne estas regras com uma flag, adapter temporário, fallback ou promessa de migração posterior.
 
-A VPS Hostinger de produção compartilhada possui limites operacionais vinculantes próprios; antes de qualquer acesso ou ação remota, leia a seção **Operação segura da VPS Hostinger de produção**.
+A DigitalOcean é o único provedor autorizado para hospedar o Apollo, inclusive produção. Antes de qualquer acesso ou ação remota, leia a seção **Infraestrutura DigitalOcean e operação segura**.
 
 ## O incidente que não pode ser esquecido
 
@@ -163,12 +163,33 @@ Não faça deploy do produto novo enquanto qualquer gate falhar:
 
 Commit e push podem ocorrer por slices coerentes. Deploy somente depois dos gates aplicáveis e nunca para “ver se funciona” em produção.
 
-## Operação segura da VPS Hostinger de produção
+## Infraestrutura DigitalOcean e operação segura
 
-Estas regras se aplicam somente à produção compartilhada em
-`srv1512423.hstgr.cloud` / `187.77.245.144`. Ela não é a VPS descartável e
-isolada da DigitalOcean. Autorizações antigas de desenvolvimento ou E2E nunca
-transformam a Hostinger em ambiente de teste.
+Decisão do proprietário em 19/09/2026: **remover o uso da VPS Hostinger deste
+projeto; usar somente DigitalOcean daqui por diante, inclusive em produção**.
+Esta decisão substitui permissões anteriores de acesso, deploy, diagnóstico,
+teste e retomada do Apollo na Hostinger.
+
+- `srv1512423.hstgr.cloud` / `187.77.245.144` não é mais um destino autorizado
+  do Apollo. Não acessar esse host por SSH, API, painel ou browser para este
+  projeto; não usar seu banco, storage, Docker, CPU ou workers como fallback.
+- Não apagar nem desligar recursos antigos ou serviços compartilhados por
+  inferência. Uma eventual retirada de dados ou desativação residual exige
+  operação separada, com alvos e autorização explícitos.
+- Testes locais e CI isolado continuam permitidos. Recursos remotos do Apollo
+  devem estar na DigitalOcean, com produção separada do ambiente descartável
+  de desenvolvimento/E2E. Um novo provedor não transforma produção em teste.
+- Antes de provisionar ou implantar, confirmar droplet/ambiente, região, plano,
+  orçamento, acesso, persistência, backup/restore, rede e destino DNS. Não
+  presumir que um IP, snapshot ou droplet histórico ainda exista ou seja o alvo.
+- O perfil operacional é `digitalocean-production`, sem alias do antigo
+  `shared-production`. Rede Docker deve ser explícita; não depender de
+  Easypanel/Traefik instalados no host antigo. A configuração de provedor não
+  substitui a confirmação da identidade real do droplet.
+
+As proteções abaixo continuam obrigatórias na DigitalOcean; a troca de
+provedor não relaxa limites, gates de entrega, cleanup ou observabilidade.
+Elas também preservam o aprendizado do incidente histórico da Hostinger:
 
 Segundo o proprietário, o suporte confirmou restrição por uso sustentado; no
 caso relatado ela foi observada com steal elevado. Medir CPU usada e steal
@@ -178,8 +199,8 @@ que o PR causou a anomalia nem que uma parada posterior foi concluída.
 
 Regras vinculantes de acesso e coordenação:
 
-1. Os únicos canais autorizados são SSH e a API oficial Hostinger. hPanel,
-   painel web e automação de browser são proibidos.
+1. Os canais operacionais são SSH e a API oficial DigitalOcean, restritos ao
+   droplet/ambiente Apollo confirmado. Hostinger/hPanel não participam do fluxo.
 2. API oficial não autoriza reboot do host, parada do Docker/PostgreSQL ou de
    serviços compartilhados, mudança de plano/CPU/segurança nem ação fora do
    escopo Apollo.
@@ -187,8 +208,9 @@ Regras vinculantes de acesso e coordenação:
    mutável, um owner e uma conexão operacional por vez. Monitor leve pode usar
    o mesmo owner; não pode existir um segundo fluxo paralelo.
 4. Build, instalação de dependências, testes/E2E e FFmpeg/Remotion de
-   desenvolvimento ou validação são proibidos na Hostinger, mesmo sequenciais;
-   devem rodar localmente ou na VPS descartável explicitamente isolada. Deploy,
+   desenvolvimento ou validação são proibidos na VPS de produção, mesmo
+   sequenciais; devem rodar localmente, no CI ou na DigitalOcean descartável
+   explicitamente isolada. Deploy,
    imports e backups permanecem possíveis somente após os gates desta seção.
 5. Restart ou stop é feito em um container Apollo por vez, com identidade
    verificada; medir novamente antes de avançar ao próximo.

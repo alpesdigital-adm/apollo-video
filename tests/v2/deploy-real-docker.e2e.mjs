@@ -170,7 +170,7 @@ publishHealthyWindow.gateSeq = 1
  * published one window up front and then went quiet made the product close the gate on
  * `sample-stale,gate-decision-too-old`, which is the product being right and the test
  * being absent (CI run 35455581011). This suite is not running the monitor container —
- * that needs an env file, the easypanel network, a database and a health endpoint none
+ * that needs an env file, the configured network, a database and a health endpoint none
  * of which exist here — so it keeps the stream alive itself: it extends the fabricated
  * timeline at the profile's exact cadence and refreshes the decision every 5 s, which is
  * inside the 20 s the caller demands. The interval is ref'd and cleared in `finally`, so
@@ -216,7 +216,7 @@ function runDeployFunction(stateDir, snippet, overrides = {}) {
         APOLLO_IMAGE: IMAGE,
         // The runner is not root, so it cannot chown the state directory to root:1000 the
         // way the VPS deploy does; the suite widened its own temp directory instead. The
-        // seam is refused on shared-production, where the real grant is the only path.
+        // seam is refused on digitalocean-production, where the real grant is the only path.
         APOLLO_DEPLOY_SKIP_CHOWN: '1',
         APOLLO_OPS_BACKEND_WAIT_ATTEMPTS: '2',
         APOLLO_OPS_BACKEND_WAIT_SLEEP_S: '1',
@@ -372,8 +372,8 @@ test('an unlabelled container is never touched, and a sentinel survives the run'
   assert.equal(adoption.data.target.name, legacy)
   assert.equal(adoption.data.observed.image, IMAGE)
   // The evidence names whatever networks the daemon actually reports. It is NOT asserted
-  // to be `easypanel`: these containers are started by this suite on the runner's default
-  // bridge, and a fake that answered `easypanel` hid that difference.
+  // to be the production network: these containers use the runner's default bridge,
+  // and a fake that answered the production network hid that difference.
   assert.match(adoption.data.observed.inspected, new RegExp(`^${IMAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\|\\S+`))
 
   // The sentinel was never a target and is untouched, same id, still running.

@@ -336,12 +336,12 @@ test('the shipped catalog reproduces the AGENTS.md thresholds and leaves product
 
   // Production deliberately ships without the three values that are the owner's
   // call; the resolution fails and the deploy therefore cannot start there yet.
-  const production = resolveHostSafetyPolicy({ catalog, profile: 'shared-production' })
+  const production = resolveHostSafetyPolicy({ catalog, profile: 'digitalocean-production' })
   assert.equal(production.ok, false)
   for (const key of ['sampleFreshnessMs', 'healthLatencyMs', 'oomRecentWindowMs']) {
     assert.ok(
       production.errors.some((error) => error.includes(key)),
-      `${key} must be reported as unconfigured for shared-production`,
+      `${key} must be reported as unconfigured for digitalocean-production`,
     )
   }
   assert.equal(resolveHostSafetyPolicy({ catalog, profile: 'nowhere' }).ok, false)

@@ -5,5 +5,5 @@
   "startedAtIso": "2026-09-18T23:59:00.000Z",
   "bootId": "7f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
   "command": "deploy",
-  "hostname": "srv1512423"
+  "hostname": "apollo-isolated-fixture"
 }

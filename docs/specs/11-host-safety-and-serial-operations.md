@@ -1,6 +1,8 @@
 # 11 — Host safety, serial operations and worker shutdown
 
-Companion of ADR-159 and of the section "Operação segura da VPS Hostinger de produção" of `AGENTS.md`. This document specifies the executable mechanisms of Wave 23. It does not claim that any of them is deployed: the fifth state (implantado e aceito) remains false until the owner says otherwise.
+Companion of ADR-159 and of the section "Infraestrutura DigitalOcean e operação segura" of `AGENTS.md`. This document specifies the executable mechanisms of Wave 23. It does not claim that any of them is deployed: the fifth state (implantado e aceito) remains false until the owner says otherwise.
+
+Hosting amendment, 2026-09-19: DigitalOcean is the only remote hosting provider for Apollo, including production. The former Hostinger host is forbidden. Local development and isolated CI remain supported. The deploy and backup entrypoints reject the former host's known hostname/IP before Docker, PostgreSQL, locks or filesystem mutations. The production profile is now `digitalocean-production`, with no alias for `shared-production`, and requires `APOLLO_HOSTING_PROVIDER=digitalocean`. This declaration and the local denylist are guards against accidental reuse, not cloud identity attestation: the actual droplet must be independently confirmed before any deployment. The required `APOLLO_DOCKER_NETWORK` replaces the old implicit network. No VPS, DNS, database or remote service was migrated by this amendment.
 
 ## 1. Operational state directory
 
@@ -53,13 +55,13 @@ Thresholds reproduce `AGENTS.md` and are internal and conservative, not a budget
 
 CPU formula, from the delta of the aggregate `cpu` line of `/proc/stat`: `total = user+nice+system+idle+iowait+irq+softirq+steal`; `busy = (user+nice+system+irq+softirq)/total`; `steal = steal/total`; `iowait = iowait/total`; `guest`/`guest_nice` are excluded because the kernel already counts them inside `user`/`nice`. The CPU count is the number of `cpuN` lines (the host, even inside a container), never the container quota.
 
-Windows: preflight and postflight require ≥ 60 s of coverage at the 10 s cadence; the stability window after a latch release requires 30 samples covering ≥ 300 s; during work every sample is judged. Coverage = span of the samples + one cadence, computed on the monotonic clock. `sampleFreshnessMs`, `healthLatencyMs` and `oomRecentWindowMs` have no code default: the `shared-production` profile ships without them and therefore answers `policy-unconfigured` until the owner sets them.
+Windows: preflight and postflight require ≥ 60 s of coverage at the 10 s cadence; the stability window after a latch release requires 30 samples covering ≥ 300 s; during work every sample is judged. Coverage = span of the samples + one cadence, computed on the monotonic clock. `sampleFreshnessMs`, `healthLatencyMs` and `oomRecentWindowMs` have no code default: the `digitalocean-production` profile ships without them and therefore answers `policy-unconfigured` until the owner sets them.
 
 Collector (`linux-collector.ts`): four `/proc` files, one bounded HTTP GET (≤ 2 s) of `APOLLO_OPS_HEALTH_URL`, and three statements on one observation connection (`select count(*) from pg_stat_activity`, `show max_connections`, `select application_name, count(*) … group by 1`). No browser, worker or pool per sample. The first read primes the CPU delta and yields no sample.
 
 ## 3. Aggregate budget (`config/resource-budget.json`, `src/v2/infrastructure/resource-budget/`)
 
-Profiles `isolated-ci` and `local-dev` carry numbers; `shared-production` carries none and requires `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` (`apollo-resource-budget-approval/v1`: `approvedBy`, `approvedAtIso`, `host`, `envelope`, `containers`, `auxiliaries`), whose envelope must leave ≥ 25 % of the host CPUs and ≥ 2 GiB of memory. Charged sum = enabled containers (the localization translation worker only when `APOLLO_LOCALIZATION_WORKER_ENABLED=true`) + concurrent auxiliaries (monitor) + the largest sequential auxiliary (config check, migrate). Enforcement per container: `--cpus`, `--memory`, `--memory-swap` = memory, `--pids-limit`, read back from `docker inspect`. Uncovered by construction: `docker load`, `docker pull`, image decompression, image hashing, backups.
+Profiles `isolated-ci` and `local-dev` carry numbers; `digitalocean-production` carries none and requires `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` (`apollo-resource-budget-approval/v1`: `approvedBy`, `approvedAtIso`, `host`, `envelope`, `containers`, `auxiliaries`), whose envelope must leave ≥ 25 % of the host CPUs and ≥ 2 GiB of memory. Charged sum = enabled containers (the localization translation worker only when `APOLLO_LOCALIZATION_WORKER_ENABLED=true`) + concurrent auxiliaries (monitor) + the largest sequential auxiliary (config check, migrate). Enforcement per container: `--cpus`, `--memory`, `--memory-swap` = memory, `--pids-limit`, read back from `docker inspect`. Uncovered by construction: `docker load`, `docker pull`, image decompression, image hashing, backups.
 
 ## 4. Deploy (`infra/deploy/apollo-vps.sh`)
 
@@ -82,7 +84,7 @@ Covered by executable mechanisms: the deploy path of `apollo-vps.sh`; worker adm
 Written for a future, separately authorised operation; nothing below was run in Wave 23.
 
 1. Owner's explicit release in writing; `apollo-vps.sh latch release --reason "<owner text>"` if a latch is engaged.
-2. Owner sets the three observation values for `shared-production` in `config/host-safety-policy.json` and approves a budget document; `apollo-vps.sh plan --with-budget` must print the exact targets, image id/digests and quotas, and refuse nothing.
+2. Owner sets the three observation values for `digitalocean-production` in `config/host-safety-policy.json` and approves a budget document; `apollo-vps.sh plan --with-budget` must print the exact targets, image id/digests and quotas, and refuse nothing.
 3. Stability measured, not assumed: the monitor runs for five minutes with every sample inside the thresholds before any mutation.
 4. One action at a time: `apollo-vps.sh deploy` replaces one container per step, confirming terminal state, PID 0 and zero backends before the next; the operator watches `apollo-vps.sh status` and the journal between steps.
 5. Postflight of 60 s after the last replacement; only then is the gate removed.

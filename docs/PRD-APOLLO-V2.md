@@ -2979,6 +2979,8 @@ Preview deve usar proxies. Processamento pesado nunca deve bloquear a UI.
 
 Fila e workers independentes para ingest, IA, providers e render.
 
+Decisão operacional do proprietário em 19/09/2026: DigitalOcean é o único provedor remoto autorizado para o Apollo, inclusive em produção. Desenvolvimento/E2E remotos permanecem isolados de produção; testes locais e CI continuam permitidos. Hostinger deixa de ser destino de app, workers, banco, storage ou fallback. A alteração de provedor não comprova migração nem libera gates de carga, backup/restore, persistência e aceite. Procedimento e limites: `AGENTS.md`, ADR-159 e `docs/runbooks/OPERATIONS.md`.
+
 ### NFR-007 — Segurança
 
 Credenciais fora de prompts e banco em claro; acesso por workspace; URLs assinadas; auditoria de mídia sintética.

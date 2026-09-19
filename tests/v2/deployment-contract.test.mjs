@@ -90,7 +90,10 @@ test('production deploy gates every mutation behind lock, budget, monitor and pr
   assert.match(script, /socket\.once\(\\"connect\\"/)
   assert.match(script, /setTimeout\(connect, 500\)/)
   assert.match(script, /--add-host host\.docker\.internal:host-gateway/)
-  assert.match(script, /--network easypanel/)
+  assert.match(script, /--network "\$\{APOLLO_DOCKER_NETWORK\}"/)
+  assert.match(script, /apollo_require_env APOLLO_DOCKER_NETWORK/)
+  assert.ok(!script.includes('easypanel'), 'the old Hostinger network must not be implicit')
+  assert.ok(script.indexOf('apollo_assert_hosting_policy') < script.indexOf('APOLLO_RUN_ID='))
 
   // Every long-running container keeps the environment the previous version passed, and
   // gains a read-only view of the host gate plus a name in pg_stat_activity.
@@ -218,7 +221,7 @@ test('production deploy gates every mutation behind lock, budget, monitor and pr
   )
   // And in Node, for the two programs that read the policy.
   for (const source of [monitorScript, verdictScript]) {
-    assert.match(source, /--catalog must be \$\{SHIPPED_CATALOG\} when --profile is shared-production/)
+    assert.match(source, /--catalog must be \$\{SHIPPED_CATALOG\} when --profile is digitalocean-production/)
   }
 
   // Every ops program resolves its configuration against the IMAGE root, which is what

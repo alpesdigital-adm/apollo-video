@@ -67,8 +67,8 @@
         "migrate": { "cpus": 0.5, "memory": "512m", "pidsLimit": 64 }
       }
     },
-    "shared-production": {
-      "description": "Shared Hostinger VPS. No quota is defaulted here: an operator-approved budget file must supply host size, envelope and every quota; the envelope must leave the declared margin for the other services of the host.",
+    "digitalocean-production": {
+      "description": "DigitalOcean production only. No quota is defaulted here: an operator-approved budget file must supply host size, envelope and every quota; the envelope must leave the declared host margin.",
       "requiresApprovedBudget": true,
       "minimumCpuMarginRatio": 0.25,
       "minimumMemoryReserve": "2g"

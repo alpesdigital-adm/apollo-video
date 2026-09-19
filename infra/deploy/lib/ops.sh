@@ -69,7 +69,7 @@ apollo_ops_state_mount_ro() {
 apollo_resolve_budget() {
   local arguments=(--profile "${APOLLO_RESOURCE_PROFILE}" --localization-enabled "${APOLLO_LOCALIZATION_ENABLED}" --format shell)
   local mounts=()
-  if [[ "${APOLLO_RESOURCE_PROFILE}" == 'shared-production' ]]; then
+  if [[ "${APOLLO_RESOURCE_PROFILE}" == 'digitalocean-production' ]]; then
     mounts+=(-v "${APOLLO_RESOURCE_BUDGET_APPROVED_FILE}:/app/ops-budget/approved.json:ro")
     arguments+=(--approved-file /app/ops-budget/approved.json)
   fi
@@ -162,7 +162,7 @@ apollo_monitor_start() {
     --init \
     --env-file "${APOLLO_ENV_FILE}" \
     --add-host host.docker.internal:host-gateway \
-    --network easypanel \
+    --network "${APOLLO_DOCKER_NETWORK}" \
     -v "${APOLLO_OPS_STATE_DIR}:/app/ops-state" \
     -e APOLLO_OPS_STATE_DIR=/app/ops-state \
     -e "APOLLO_OPS_HEALTH_URL=${APOLLO_OPS_HEALTH_URL}" \

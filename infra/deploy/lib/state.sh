@@ -55,7 +55,7 @@ apollo_state_grant_monitor_access() {
   local target
   for target in "${APOLLO_OPS_STATE_DIR}" "${APOLLO_JOURNAL_DIR}"; do
     if [[ "${APOLLO_DEPLOY_SKIP_CHOWN:-0}" == '1' ]]; then
-      # Test seam (refused on shared-production): the suite's throwaway directory is not
+      # Test seam (refused on digitalocean-production): the suite's throwaway directory is not
       # owned by root and there is no gid 1000 to grant, so the sticky bit is kept and
       # the write bit is widened. Never the shape a real host gets.
       chmod 1777 "${target}"

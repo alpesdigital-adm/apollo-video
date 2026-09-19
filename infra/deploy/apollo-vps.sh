@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Apollo production orchestrator for the shared Hostinger VPS.
+# Apollo production orchestrator for DigitalOcean (isolated local/CI tests allowed).
 #
 #   apollo-vps.sh plan [--with-budget]
 #   apollo-vps.sh deploy [--adopt-unlabelled <container>]
@@ -29,6 +29,9 @@ set -euo pipefail
 APOLLO_DEPLOY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
 # shellcheck source=lib/common.sh
 . "${APOLLO_DEPLOY_LIB_DIR}/common.sh"
+# shellcheck source=lib/hosting.sh
+. "${APOLLO_DEPLOY_LIB_DIR}/hosting.sh"
+apollo_assert_hosting_policy
 # shellcheck source=lib/state.sh
 . "${APOLLO_DEPLOY_LIB_DIR}/state.sh"
 # shellcheck source=lib/docker.sh
@@ -162,11 +165,11 @@ apollo_parse_arguments() {
 apollo_validate_environment() {
   apollo_require_command docker
   apollo_require_env APOLLO_OPS_STATE_DIR 'host directory holding gate.json, latch.json, lock/ and journal/'
-  apollo_require_env APOLLO_RESOURCE_PROFILE 'isolated-ci | local-dev | shared-production'
+  apollo_require_env APOLLO_RESOURCE_PROFILE 'isolated-ci | local-dev | digitalocean-production'
   case "${APOLLO_RESOURCE_PROFILE}" in
-    isolated-ci|local-dev|shared-production) ;;
+    isolated-ci|local-dev|digitalocean-production) ;;
     *)
-      apollo_fail "APOLLO_RESOURCE_PROFILE must be isolated-ci, local-dev or shared-production, not '${APOLLO_RESOURCE_PROFILE}'"
+      apollo_fail "APOLLO_RESOURCE_PROFILE must be isolated-ci, local-dev or digitalocean-production, not '${APOLLO_RESOURCE_PROFILE}'"
       return 1
       ;;
   esac
@@ -175,11 +178,12 @@ apollo_validate_environment() {
   # policy would print numbers nobody is going to enforce.
   apollo_refuse_production_seams "${APOLLO_RESOURCE_PROFILE}"
   if [[ "${APOLLO_COMMAND}" == 'plan' || "${APOLLO_COMMAND}" == 'deploy' ]]; then
+    apollo_require_env APOLLO_DOCKER_NETWORK 'existing Apollo network on the confirmed DigitalOcean target or isolated test host'
     apollo_require_env APOLLO_ENV_FILE 'path of the environment file handed to the containers'
     apollo_require_env APOLLO_IMAGE 'image the fleet runs; it must already be present on the host'
     apollo_require_env APOLLO_OPS_HEALTH_URL 'URL of /v1/health the monitor probes'
     test -f "${ENV_FILE}"
-    if [[ "${APOLLO_RESOURCE_PROFILE}" == 'shared-production' ]]; then
+    if [[ "${APOLLO_RESOURCE_PROFILE}" == 'digitalocean-production' ]]; then
       apollo_require_env APOLLO_RESOURCE_BUDGET_APPROVED_FILE 'operator-approved budget document; the shared profile defaults no quota'
       test -f "${APOLLO_RESOURCE_BUDGET_APPROVED_FILE}"
     fi
@@ -227,7 +231,7 @@ apollo_common_runtime_arguments() {
     --init \
     --env-file "${ENV_FILE}" \
     --add-host host.docker.internal:host-gateway \
-    --network easypanel \
+    --network "${APOLLO_DOCKER_NETWORK}" \
     --env "APOLLO_V2_PROVIDER_WORK_ROOT=${PROVIDER_WORK_ROOT}" \
     --env "APOLLO_V2_CAPTURE_SYNC_LEASE_MS=${CAPTURE_SYNC_LEASE_MS}" \
     --env APOLLO_V2_FFMPEG_PATH=/usr/bin/ffmpeg \
@@ -365,7 +369,7 @@ apollo_wait_for_postgres_and_migrate() {
     $(apollo_budget_limit_arguments migrate) \
     --env-file "${ENV_FILE}" \
     --add-host host.docker.internal:host-gateway \
-    --network easypanel \
+    --network "${APOLLO_DOCKER_NETWORK}" \
     "${IMAGE}" \
     sh -lc '
       set -e
@@ -427,7 +431,7 @@ apollo_start_container() {
       --health-retries 5 \
       --health-start-period 30s \
       --label traefik.enable=true \
-      --label traefik.docker.network=easypanel \
+      --label "traefik.docker.network=${APOLLO_DOCKER_NETWORK}" \
       --label "traefik.http.middlewares.apollo-buffer.buffering.maxRequestBodyBytes=4294967296" \
       --label "traefik.http.middlewares.apollo-buffer.buffering.memRequestBodyBytes=67108864" \
       --label traefik.http.middlewares.apollo-redirect.redirectscheme.scheme=https \
@@ -604,7 +608,7 @@ cmd_plan() {
   printf '     zero PostgreSQL backends, rm, run with quotas, limit readback, health, re-read gate\n'
   printf ' 10. 60s of postflight, then remove gate.json, stop the monitor and release the lock\n'
   printf '\nBlocked on this profile\n'
-  if [[ "${APOLLO_RESOURCE_PROFILE}" == 'shared-production' ]]; then
+  if [[ "${APOLLO_RESOURCE_PROFILE}" == 'digitalocean-production' ]]; then
     printf '  docker load, docker pull, image decompression, image hashing and backups run in the\n'
     printf '  daemon, outside every container cgroup, so no --cpus/--memory bounds them\n'
     printf '  (uncoveredHostWork). This script never performs them: the image must already be\n'
@@ -668,7 +672,7 @@ cmd_deploy() {
   fi
   apollo_require_image_present
   apollo_journal 'plan' "{\"profile\":\"$(apollo_json_escape "${APOLLO_RESOURCE_PROFILE}")\",\"image\":\"$(apollo_json_escape "${IMAGE}")\",\"imageId\":\"$(apollo_json_escape "${APOLLO_IMAGE_ID}")\",\"digests\":\"$(apollo_json_escape "${APOLLO_IMAGE_DIGESTS}")\"}"
-  docker network inspect easypanel >/dev/null
+  docker network inspect "${APOLLO_DOCKER_NETWORK}" >/dev/null
 
   apollo_resolve_budget
   apollo_cgroup_capability
