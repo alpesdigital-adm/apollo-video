@@ -80,13 +80,13 @@ function inspect(name, format) {
 }
 
 /**
- * Writes a complete, fresh window of samples and an open gate.
+ * Appends host samples at the given monotonic instants.
  *
  * The values are fabricated, but the clock is not: `hostMonotonicNowMs` is
  * CLOCK_MONOTONIC, shared with every container on this host, so the verdict running
  * inside a real container reads these samples as genuinely recent.
  */
-async function publishHealthyWindow(stateDir) {
+async function appendSamples(stateDir, monotonicTimes) {
   const journal = await createOperationJournal({
     stateDir,
     runId,
@@ -94,11 +94,10 @@ async function publishHealthyWindow(stateDir) {
     now: () => new Date(),
     monotonicNow: hostMonotonicNowMs,
   })
-  const now = hostMonotonicNowMs()
-  for (let index = 6; index >= 0; index -= 1) {
+  for (const monotonicMs of monotonicTimes) {
     await journal.append('host-sample', {
       seq: publishHealthyWindow.seq++,
-      monotonicMs: now - index * 10_000,
+      monotonicMs,
       capturedAtIso: new Date().toISOString(),
       cpu: { busy: 0.05, steal: 0.01, iowait: 0.01 },
       hostCpus: 4,
@@ -109,6 +108,9 @@ async function publishHealthyWindow(stateDir) {
       health: { ok: true, statusCode: 200, latencyMs: 8, error: null },
     })
   }
+}
+
+async function republishGate(stateDir) {
   await writeGateFile({
     stateDir,
     state: 'open',
@@ -120,8 +122,71 @@ async function publishHealthyWindow(stateDir) {
     owner: { runId, kind: 'monitor', pid: process.pid },
   })
 }
+
+/**
+ * The shipped profile's cadence, which the fabricated timeline must match exactly.
+ *
+ * The policy credits each sample with one cadence of coverage, so the `during` window it
+ * judges — 30 s — is only covered when samples sit 10 s apart: three of them span 20 s
+ * and cover 30. Publishing "more often to be safe" makes the trailing window span less
+ * than 20 s and answers `window-incomplete`, which is the policy being right about a
+ * timeline that was never 30 s long.
+ */
+const SAMPLE_CADENCE_MS = 10_000
+let lastSampleMonotonicMs = 0
+
+async function publishHealthyWindow(stateDir) {
+  const now = hostMonotonicNowMs()
+  await appendSamples(
+    stateDir,
+    Array.from({ length: 7 }, (unused, index) => now - (6 - index) * SAMPLE_CADENCE_MS),
+  )
+  lastSampleMonotonicMs = now
+  await republishGate(stateDir)
+}
+
+/** Extends the timeline at the cadence up to now, and refreshes the decision. */
+async function publishHealthySample(stateDir) {
+  const now = hostMonotonicNowMs()
+  const times = []
+  while (lastSampleMonotonicMs + SAMPLE_CADENCE_MS <= now) {
+    lastSampleMonotonicMs += SAMPLE_CADENCE_MS
+    times.push(lastSampleMonotonicMs)
+  }
+  if (times.length > 0) await appendSamples(stateDir, times)
+  // The gate is republished on every tick regardless: the caller demands a decision no
+  // older than 20 s, which is shorter than the cadence.
+  await republishGate(stateDir)
+}
 publishHealthyWindow.seq = 1
 publishHealthyWindow.gateSeq = 1
+
+/**
+ * Plays the monitor's part for as long as the action runs.
+ *
+ * The deploy asks the verdict for a FRESH decision before it believes anything, and a
+ * stop plus its confirmation takes tens of seconds — longer than the shipped profile's
+ * 25 s sample freshness and the 20 s decision age the caller demands. A test that
+ * published one window up front and then went quiet made the product close the gate on
+ * `sample-stale,gate-decision-too-old`, which is the product being right and the test
+ * being absent (CI run 35455581011). This suite is not running the monitor container —
+ * that needs an env file, the easypanel network, a database and a health endpoint none
+ * of which exist here — so it keeps the stream alive itself: it extends the fabricated
+ * timeline at the profile's exact cadence and refreshes the decision every 5 s, which is
+ * inside the 20 s the caller demands. The interval is ref'd and cleared in `finally`, so
+ * node:test never sees a live handle after the test resolves.
+ */
+async function withLiveSamples(stateDir, action) {
+  await publishHealthyWindow(stateDir)
+  const timer = setInterval(() => {
+    void publishHealthySample(stateDir).catch(() => {})
+  }, 5_000)
+  try {
+    return await action()
+  } finally {
+    clearInterval(timer)
+  }
+}
 
 /** Runs a snippet against the deploy's own libraries, with the real Docker on PATH. */
 function runDeployFunction(stateDir, snippet, overrides = {}) {
@@ -190,9 +255,20 @@ test('a stop is a claim only after the daemon confirms a terminal state', { skip
   assert.equal(inspect(name, '{{.State.Running}}'), 'true')
   assert.ok(Number(inspect(name, '{{.State.Pid}}')) > 0, 'a running container has a pid')
 
-  await publishHealthyWindow(stateDir)
-  const stopped = await runDeployFunction(stateDir, 'apollo_stop_confirmed "$APOLLO_E2E_TARGET" app', { APOLLO_E2E_TARGET: name })
-  assert.equal(stopped.status, 0, `${stopped.stdout}\n${stopped.stderr}`)
+  const startedAt = Date.now()
+  const stopped = await withLiveSamples(stateDir, () =>
+    runDeployFunction(stateDir, 'apollo_stop_confirmed "$APOLLO_E2E_TARGET" app', { APOLLO_E2E_TARGET: name }),
+  )
+  assert.equal(
+    stopped.status,
+    0,
+    [
+      `apollo_stop_confirmed refused after ${Date.now() - startedAt}ms`,
+      `samples published: ${publishHealthyWindow.seq - 1}, gate decisions: ${publishHealthyWindow.gateSeq - 1}`,
+      stopped.stdout,
+      stopped.stderr,
+    ].join('\n'),
+  )
 
   // The three facts the script refuses to assume.
   assert.ok(['exited', 'dead'].includes(inspect(name, '{{.State.Status}}')), 'the container reached a terminal state')

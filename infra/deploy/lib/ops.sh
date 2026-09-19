@@ -256,6 +256,7 @@ apollo_phase_verdict() {
   APOLLO_VERDICT_GATE_SEQ="$(printf '%s\n' "${output}" | sed -n 's/^gateSeq=//p' | head -n 1)"
   APOLLO_VERDICT_COVERED_MS="$(printf '%s\n' "${output}" | sed -n 's/^coveredMs=//p' | head -n 1)"
   APOLLO_VERDICT_OOM_WINDOW_MS="$(printf '%s\n' "${output}" | sed -n 's/^oomRecentWindowMs=//p' | head -n 1)"
+  APOLLO_VERDICT_GATE_AGE_MS="$(printf '%s\n' "${output}" | sed -n 's/^gateAgeMs=//p' | head -n 1)"
   [[ "${APOLLO_VERDICT_ADMIT}" == 'true' ]] && return 0
   return 1
 }
@@ -294,7 +295,7 @@ apollo_await_phase() {
     fi
     if (( waited >= timeout_s )); then
       apollo_journal "${phase}-verdict" "{\"admit\":false,\"reasons\":\"$(apollo_json_escape "${APOLLO_VERDICT_REASONS}")\",\"waitedSeconds\":${waited}}"
-      apollo_fail "${phase} was not established within ${timeout_s}s: ${APOLLO_VERDICT_REASONS}"
+      apollo_fail "${phase} was not established within ${timeout_s}s: reasons=${APOLLO_VERDICT_REASONS} gateSeq=${APOLLO_VERDICT_GATE_SEQ:-?} gateAgeMs=${APOLLO_VERDICT_GATE_AGE_MS:-?} coveredMs=${APOLLO_VERDICT_COVERED_MS:-?}"
       return 1
     fi
     sleep "${sleep_s}"
@@ -334,13 +335,16 @@ apollo_await_zero_backends() {
         # The only retryable answer: the backends are closing.
         ;;
       *)
-        apollo_log "the gate closed while waiting for ${application_name} backends: ${APOLLO_VERDICT_REASONS}"
+        # Print what the decision actually said, not only that it said no: the reasons,
+        # the seq and the age the verdict judged separate "the host is busy" from "nobody
+        # published a sample for twenty seconds".
+        apollo_log "the gate closed while waiting for ${application_name} backends: reasons=${APOLLO_VERDICT_REASONS} gateSeq=${APOLLO_VERDICT_GATE_SEQ:-?} gateAgeMs=${APOLLO_VERDICT_GATE_AGE_MS:-?} coveredMs=${APOLLO_VERDICT_COVERED_MS:-?}"
         return 1
         ;;
     esac
     sleep "${sleep_s}"
     attempt=$(( attempt + 1 ))
   done
-  apollo_log "backends of ${application_name} did not reach zero: ${APOLLO_VERDICT_REASONS}"
+  apollo_log "backends of ${application_name} did not reach zero after ${attempts} attempts: reasons=${APOLLO_VERDICT_REASONS} gateAgeMs=${APOLLO_VERDICT_GATE_AGE_MS:-?}"
   return 1
 }
