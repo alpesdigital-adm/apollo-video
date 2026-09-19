@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
-export const REPOSITORY_ROOT = new URL('../../../', import.meta.url).pathname
-  .replace(/^\/([A-Za-z]:)/, '$1')
+// `fileURLToPath`, not `.pathname`: the latter keeps the leading slash of a Windows
+// drive and leaves %20 in any path with a space, and this value is the `cwd` of every
+// process this suite spawns.
+export const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 
 /**
  * The world for Wave 23 slice E: real workers, real FFmpeg, real PostgreSQL.
@@ -36,16 +40,19 @@ const PG_BIN_CANDIDATES = [
   '/usr/local/opt/postgresql@16/bin',
 ].filter(Boolean)
 
+/**
+ * The PostgreSQL CLI to run, or the bare name for `PATH` to resolve.
+ *
+ * The first version returned the first candidate without checking it existed, so on
+ * Linux it would have handed back a `C:/Program Files/...` path. It is never reached
+ * in CI — the compose job supplies its database, so no cluster is created — but a
+ * helper that only works where it is never used is a trap for the next run.
+ */
 function pgCommand(name) {
   const suffix = process.platform === 'win32' ? '.exe' : ''
   for (const directory of PG_BIN_CANDIDATES) {
     const candidate = join(directory, `${name}${suffix}`)
-    try {
-      // `execFile` resolves the path itself; existence is checked by trying it.
-      return candidate
-    } catch {
-      continue
-    }
+    if (existsSync(candidate)) return candidate
   }
   return name
 }
@@ -305,16 +312,18 @@ async function findFreePort() {
  */
 export function runtimeSafetyStorageEnvironment({ artifactRoot }) {
   const driver = process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER?.trim() || 'local'
+  // The names the compose job actually exports, read from its own step env rather
+  // than guessed: the first list invented `APOLLO_V2_ARTIFACT_S3_*`/`AWS_*`, which
+  // exist nowhere. A spawned worker inherits `process.env` anyway, so this list is
+  // the explicit contract, not the only route — but a wrong one documents a lie.
   const passthrough = [
-    'APOLLO_V2_ARTIFACT_S3_BUCKET',
-    'APOLLO_V2_ARTIFACT_S3_REGION',
-    'APOLLO_V2_ARTIFACT_S3_ENDPOINT',
-    'APOLLO_V2_ARTIFACT_S3_FORCE_PATH_STYLE',
-    'AWS_ACCESS_KEY_ID',
-    'AWS_SECRET_ACCESS_KEY',
-    'AWS_REGION',
-    'AWS_ENDPOINT_URL',
-    'AWS_ENDPOINT_URL_S3',
+    'APOLLO_V2_S3_BUCKET',
+    'APOLLO_V2_S3_REGION',
+    'APOLLO_V2_S3_ENDPOINT',
+    'APOLLO_V2_S3_ACCESS_KEY_ID',
+    'APOLLO_V2_S3_SECRET_ACCESS_KEY',
+    'APOLLO_V2_S3_FORCE_PATH_STYLE',
+    'APOLLO_V2_S3_ALLOW_INSECURE_HTTP',
   ]
   const environment = { APOLLO_V2_ARTIFACT_STORAGE_DRIVER: driver, APOLLO_V2_ARTIFACT_ROOT: artifactRoot }
   for (const name of passthrough) {
@@ -393,6 +402,45 @@ export function spawnSupervised({ script, environment, runId, label, deadlineMs 
     get exit() { return exit },
     stdout: () => stdout,
     stderr: () => stderr,
+    /**
+     * Resolves once the process has proved it is running, rejects if it dies first.
+     *
+     * Without this a worker that threw at import looked exactly like a worker that
+     * was simply slow: the journey polled an in-memory array, nothing was left
+     * referenced, and the run was torn down with an event-loop message that named
+     * neither the process nor its error. Here the child's own stderr is the message.
+     */
+    async waitForFirstEvent({ timeoutMs = 60_000, matches = () => true } = {}) {
+      const startedAt = Date.now()
+      while (Date.now() - startedAt < timeoutMs) {
+        const seen = `${stdout}\n${stderr}`
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.startsWith('{'))
+          .map((line) => { try { return JSON.parse(line) } catch { return null } })
+          .filter((entry) => entry && typeof entry.event === 'string')
+        if (seen.some(matches)) return seen
+        if (exit !== null) {
+          throw new Error(
+            `${label} (pid ${child.pid}) exited ${JSON.stringify(exit)} before it logged anything.\n` +
+            `stdout:\n${stdout.slice(-2_000)}\nstderr:\n${stderr.slice(-4_000)}`,
+          )
+        }
+        await delay(100)
+      }
+      throw new Error(
+        `${label} (pid ${child.pid}) logged no matching event within ${timeoutMs}ms.\n` +
+        `stdout:\n${stdout.slice(-2_000)}\nstderr:\n${stderr.slice(-4_000)}`,
+      )
+    },
+    /** Throws with the process's own output if it has already exited. */
+    assertStillRunning(context) {
+      if (exit === null) return
+      throw new Error(
+        `${label} (pid ${child.pid}) exited ${JSON.stringify(exit)} during ${context}.\n` +
+        `stdout:\n${stdout.slice(-2_000)}\nstderr:\n${stderr.slice(-4_000)}`,
+      )
+    },
     /** Structured log lines the worker printed, parsed. Unparseable lines are ignored. */
     events: () => `${stdout}\n${stderr}`
       .split('\n')
@@ -558,10 +606,20 @@ export async function backendsFor(prisma, applicationName, { attempts = 20, inte
   return last
 }
 
-export function delay(milliseconds) {
+/**
+ * A referenced sleep. Never `unref` a timer that is the only thing resolving an await.
+ *
+ * The first Linux CI run died with "Promise resolution is still pending but the event
+ * loop has already resolved": this timer was unref'd, so whenever nothing else was
+ * ref'd — between two polls of an in-memory value — Node decided it had no work left
+ * and tore the run down mid-journey. An unref'd timer is only ever safe as the loser
+ * of a race against something referenced, which is why the deadline timers below keep
+ * theirs and this one does not.
+ */
+export function delay(milliseconds, { unref = false } = {}) {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, milliseconds)
-    timer.unref?.()
+    if (unref) timer.unref?.()
   })
 }
 
@@ -571,12 +629,17 @@ export function delay(milliseconds) {
  * The failure message carries the last value seen, because "timed out" alone cannot
  * tell a worker that never claimed from a worker that claimed and failed.
  */
-export async function pollUntil({ read, until, what, timeoutMs = 60_000, intervalMs = 150 }) {
+export async function pollUntil({
+  read, until, what, timeoutMs = 60_000, intervalMs = 150, whileAlive,
+}) {
   const startedAt = Date.now()
   let last
   while (Date.now() - startedAt < timeoutMs) {
     last = await read()
     if (until(last)) return last
+    // A process that has died will never satisfy the condition, and waiting out the
+    // whole timeout only replaces its error message with a stopwatch.
+    whileAlive?.(`waiting for ${what}`)
     await delay(intervalMs)
   }
   throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}; last reading: ${JSON.stringify(last)}`)

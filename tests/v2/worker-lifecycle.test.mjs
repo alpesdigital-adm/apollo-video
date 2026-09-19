@@ -166,23 +166,47 @@ test('linkAbortSignal does not leak a listener per claim on a long-lived signal'
 
 test('terminateChild escalates to SIGKILL and awaits the real exit', async () => {
   // A child that installs its own SIGTERM handler and keeps running is the case the
-  // grace deadline exists for. POSIX-only for the signal semantics; on Windows
-  // `kill` terminates regardless, so the escalation flag is not asserted there.
+  // grace deadline exists for — but only once the handler is actually installed.
+  // `spawn` resolves when the process exists, not when its script has run, so on
+  // Linux the first CI run delivered a real SIGTERM to a child still starting up: it
+  // died on the default action, nothing needed escalating, and the test failed on a
+  // race rather than on the behaviour. The child now announces itself AFTER
+  // registering the handler, and that line is what is waited for.
   const child = spawn(
     process.execPath,
-    ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"],
-    { stdio: 'ignore', shell: false },
+    [
+      '-e',
+      "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000)",
+    ],
+    { stdio: ['ignore', 'pipe', 'ignore'], shell: false },
   )
-  await new Promise((resolve) => child.once('spawn', resolve))
+  await new Promise((resolve, reject) => {
+    let announced = ''
+    child.stdout.on('data', (chunk) => {
+      announced += String(chunk)
+      if (announced.includes('ready')) resolve()
+    })
+    child.once('error', reject)
+    child.once('exit', () => reject(new Error('the child exited before announcing readiness')))
+  })
+
   const result = await terminateChild(child, { graceMs: 250 })
+
   assert.equal(result.alreadyExited, false)
-  // The contract that matters on every platform: the promise settles only after the
+  // The contract that holds on every platform: the promise settles only after the
   // process has actually exited, so the caller cannot race the child's file handles.
-  assert.notEqual(child.exitCode === null && child.signalCode === null, true)
-  if (process.platform !== 'win32') {
-    assert.equal(result.escalated, true)
-    assert.equal(child.signalCode, 'SIGKILL')
+  assert.ok(
+    child.exitCode !== null || child.signalCode !== null,
+    'terminateChild resolved before the child had exited',
+  )
+  if (process.platform === 'win32') {
+    // Windows has no deliverable SIGTERM: `kill` ends the process outright, so the
+    // handler never runs and there is nothing to escalate. Asserting the signal name
+    // here would be asserting the platform.
+    return
   }
+  assert.equal(result.escalated, true, 'a child ignoring SIGTERM must be escalated to SIGKILL')
+  assert.equal(child.signalCode, 'SIGKILL', 'the exit must have come from SIGKILL')
 })
 
 test('terminateChild waits for a cooperative child without escalating', async () => {

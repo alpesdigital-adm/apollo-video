@@ -368,6 +368,14 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     })
     handle.spawnedAt = spawnedAt
     spawned.push(handle)
+    // Wait for the worker to say something before the journey starts expecting things
+    // of it. Its first line is an admission-gate reading, so this also proves it read
+    // the ops-state directory this journey prepared — and if it died at import, the
+    // failure carries its stderr instead of an event-loop message.
+    await handle.waitForFirstEvent({
+      timeoutMs: 90_000,
+      matches: (entry) => entry.event?.startsWith('worker-admission-gate'),
+    })
     return handle
   }
 
@@ -395,6 +403,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       until: (reasons) => reasons.some((entry) => entry.event === 'worker-admission-gate-closed'),
       what: 'the worker to log a closed admission gate',
       timeoutMs: 30_000,
+      whileAlive: (context) => worker.assertStillRunning(context),
     })
 
     // Five polls at 200 ms, and the row must be untouched in every one: `attempt`
@@ -502,6 +511,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       until: (rows) => rows.first.status === 'running' || rows.second.status === 'running',
       what: 'the worker to claim its first proxy render',
       timeoutMs: 60_000,
+      whileAlive: (context) => worker.assertStillRunning(context),
     })
     const claimedFirst = claimed.first.status === 'running' ? first : second
     const untouched = claimedFirst === first ? second : first
@@ -583,8 +593,10 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       // the render it is meant to interrupt.
       until: (children) => children.length > 0,
       what: "the worker's own FFmpeg child to exist",
-      timeoutMs: 75_000,
+      // Inside the 120 s per-journey cap once the spawn and the stop are added.
+      timeoutMs: 60_000,
       intervalMs: 100,
+      whileAlive: (context) => worker.assertStillRunning(context),
     })).map((child) => child.pid)
 
     const exit = await worker.terminate({ graceMs: 45_000 })
@@ -658,8 +670,9 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       read: () => readOperation(prisma, world.workspaceId, project.projectId),
       until: (row) => ['succeeded', 'failed'].includes(row.status),
       what: 'the restarted worker to settle the resumed render',
-      timeoutMs: 110_000,
+      timeoutMs: 90_000,
       intervalMs: 250,
+      whileAlive: (context) => worker.assertStillRunning(context),
     })
     const exit = await worker.terminate({ graceMs: 20_000 })
 
@@ -764,6 +777,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       until: (reasons) => reasons.some((entry) => /incident-latch/.test(entry.reason ?? '')),
       what: 'the worker to refuse admission because of the latch',
       timeoutMs: 30_000,
+      whileAlive: (context) => worker.assertStillRunning(context),
     })
     const refusedReadings = await holdsAcross({
       read: () => readOperation(prisma, world.workspaceId, project.projectId),
@@ -782,6 +796,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       what: 'the same worker to resume claiming after the latch was released',
       timeoutMs: 20_000,
       intervalMs: 100,
+      whileAlive: (context) => worker.assertStillRunning(context),
     })
     assert.ok(await processIsAlive(worker.pid), 'the worker must not have restarted to resume')
 
@@ -874,6 +889,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
         what: 'the real monitor to publish a gate',
         timeoutMs: 40_000,
         intervalMs: 250,
+        whileAlive: (context) => monitor.assertStillRunning(context),
       })
       const journalFiles = await readdir(join(opsStateDir, 'journal')).catch(() => [])
 
@@ -917,6 +933,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       until: (row) => row.status === 'running' || row.attempt > 0,
       what: 'the worker to claim while the gate is fresh and open',
       timeoutMs: 60_000,
+      whileAlive: (context) => worker.assertStillRunning(context),
     })
 
     // The monitor is gone, so nothing refreshes the file: the same open verdict, now
@@ -929,6 +946,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       until: (reasons) => reasons.some((entry) => /stale-gate/.test(entry.reason ?? '')),
       what: 'the worker to read the gate as stale',
       timeoutMs: 40_000,
+      whileAlive: (context) => worker.assertStillRunning(context),
     })
 
     // A NEW operation, enqueued after the gate went stale, must not be claimed — and
