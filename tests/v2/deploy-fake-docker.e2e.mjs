@@ -17,8 +17,8 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { readLatch } from '../../src/v2/infrastructure/host-safety/latch.ts'
-import { readLockOwner } from '../../src/v2/infrastructure/host-safety/lock.ts'
+import * as importedLatch from '../../src/v2/infrastructure/host-safety/latch.ts'
+import * as importedLock from '../../src/v2/infrastructure/host-safety/lock.ts'
 import {
   APP_ROLES,
   BASE_SCENARIO,
@@ -30,6 +30,14 @@ import {
   runDeploy,
   startOpsSimulator,
 } from '../fixtures/host-safety/fake-docker/harness.mjs'
+
+// This suite runs under `tsx`, which transpiles the TypeScript modules to CommonJS
+// under this package, so a named import of a `.ts` file fails at import time. Namespace
+// import, then unwrap — the idiom the worker scripts use for the same reason.
+const latchModule = importedLatch.readLatch ? importedLatch : importedLatch.default
+const lockModule = importedLock.readLockOwner ? importedLock : importedLock.default
+const { readLatch } = latchModule
+const { readLockOwner } = lockModule
 
 const RUN = process.env.APOLLO_DEPLOY_FAKE_DOCKER_E2E === '1'
 

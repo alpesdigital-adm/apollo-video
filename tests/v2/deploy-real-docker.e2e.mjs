@@ -21,11 +21,25 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, test } from 'node:test'
 
-import { hostMonotonicNowMs } from '../../src/v2/infrastructure/host-safety/host-clock.ts'
-import { writeGateFile } from '../../src/v2/infrastructure/host-safety/gate-file.ts'
-import { createOperationJournal } from '../../src/v2/infrastructure/host-safety/journal.ts'
-import { readLatch } from '../../src/v2/infrastructure/host-safety/latch.ts'
-import { readLockOwner } from '../../src/v2/infrastructure/host-safety/lock.ts'
+import * as importedClock from '../../src/v2/infrastructure/host-safety/host-clock.ts'
+import * as importedGateFile from '../../src/v2/infrastructure/host-safety/gate-file.ts'
+import * as importedJournal from '../../src/v2/infrastructure/host-safety/journal.ts'
+import * as importedLatch from '../../src/v2/infrastructure/host-safety/latch.ts'
+import * as importedLock from '../../src/v2/infrastructure/host-safety/lock.ts'
+
+// This suite runs under `tsx`, which transpiles the TypeScript modules to CommonJS
+// under this package, so a named import of a `.ts` file fails at import time. Namespace
+// import, then unwrap — the idiom the worker scripts use for the same reason.
+const clockModule = importedClock.hostMonotonicNowMs ? importedClock : importedClock.default
+const gateModule = importedGateFile.writeGateFile ? importedGateFile : importedGateFile.default
+const journalModule = importedJournal.createOperationJournal ? importedJournal : importedJournal.default
+const latchModule = importedLatch.readLatch ? importedLatch : importedLatch.default
+const lockModule = importedLock.readLockOwner ? importedLock : importedLock.default
+const { hostMonotonicNowMs } = clockModule
+const { writeGateFile } = gateModule
+const { createOperationJournal } = journalModule
+const { readLatch } = latchModule
+const { readLockOwner } = lockModule
 
 const RUN = process.env.APOLLO_DEPLOY_DOCKER_E2E === '1'
 const IMAGE = process.env.APOLLO_DEPLOY_E2E_IMAGE ?? 'apollo-video-local:compose-ci'
@@ -39,7 +53,9 @@ function docker(...args) {
 
 function containersWithRunLabel() {
   const listed = docker('ps', '-aq', '--filter', `label=${RUN_LABEL}`)
-  return listed.stdout
+  // `spawnSync` reports a missing binary in `error` and leaves `stdout` undefined rather
+  // than throwing, so a host without Docker must not crash the cleanup hook.
+  return (listed.stdout ?? '')
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)

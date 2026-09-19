@@ -3,10 +3,10 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { hostMonotonicNowMs } from '../../src/v2/infrastructure/host-safety/host-clock.ts'
-import { writeGateFile } from '../../src/v2/infrastructure/host-safety/gate-file.ts'
-import { readLatch } from '../../src/v2/infrastructure/host-safety/latch.ts'
-import { readLockOwner } from '../../src/v2/infrastructure/host-safety/lock.ts'
+import * as importedClock from '../../src/v2/infrastructure/host-safety/host-clock.ts'
+import * as importedGateFile from '../../src/v2/infrastructure/host-safety/gate-file.ts'
+import * as importedLatch from '../../src/v2/infrastructure/host-safety/latch.ts'
+import * as importedLock from '../../src/v2/infrastructure/host-safety/lock.ts'
 import {
   BASE_SCENARIO,
   PRODUCTION_FORBIDDEN_SEAMS,
@@ -21,6 +21,20 @@ import {
   runDeployFunction,
   withoutSeams,
 } from '../fixtures/host-safety/fake-docker/harness.mjs'
+
+// Namespace imports, then unwrap. This file runs under `node --test`, where native type
+// stripping exposes named exports, but the same modules are imported by suites that run
+// under `tsx` — which transpiles them to CommonJS under this package and puts the named
+// exports behind `default`. One idiom everywhere means moving a case between the two
+// files can never reintroduce the import-time failure of CI run 35446572591.
+const clockModule = importedClock.hostMonotonicNowMs ? importedClock : importedClock.default
+const gateModule = importedGateFile.writeGateFile ? importedGateFile : importedGateFile.default
+const latchModule = importedLatch.readLatch ? importedLatch : importedLatch.default
+const lockModule = importedLock.readLockOwner ? importedLock : importedLock.default
+const { hostMonotonicNowMs } = clockModule
+const { writeGateFile } = gateModule
+const { readLatch } = latchModule
+const { readLockOwner } = lockModule
 
 // The real deploy script, driven by a `docker` that answers from a scenario and records
 // every invocation (tests/fixtures/host-safety/fake-docker/docker).

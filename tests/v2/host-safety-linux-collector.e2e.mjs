@@ -16,15 +16,17 @@ import { readFile, stat } from 'node:fs/promises'
 import { platform } from 'node:os'
 import { test } from 'node:test'
 
-import {
-  cpuDeltaRatios,
-  createLinuxHostSampler,
-  parseLoadAverage,
-  parseMemoryAvailableBytes,
-  parseOomKillTotal,
-  parseProcStat,
-} from '../../src/v2/infrastructure/host-safety/linux-collector.ts'
-import { hostMonotonicNowMs } from '../../src/v2/infrastructure/host-safety/host-clock.ts'
+import * as importedCollector from '../../src/v2/infrastructure/host-safety/linux-collector.ts'
+import * as importedClock from '../../src/v2/infrastructure/host-safety/host-clock.ts'
+
+// This suite runs under `tsx`, which transpiles the TypeScript modules to CommonJS
+// under this package, so a named import of a `.ts` file fails at import time. Namespace
+// import, then unwrap — the idiom the worker scripts use for the same reason.
+const collectorModule = importedCollector.createLinuxHostSampler ? importedCollector : importedCollector.default
+const clockModule = importedClock.hostMonotonicNowMs ? importedClock : importedClock.default
+const { cpuDeltaRatios, createLinuxHostSampler, parseLoadAverage, parseMemoryAvailableBytes, parseOomKillTotal, parseProcStat } =
+  collectorModule
+const { hostMonotonicNowMs } = clockModule
 
 const RUN = process.env.APOLLO_HOST_SAFETY_LINUX_E2E === '1'
 const LINUX = platform() === 'linux'

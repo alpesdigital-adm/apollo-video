@@ -8,13 +8,30 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
-import { hostMonotonicNowMs } from '../../../../src/v2/infrastructure/host-safety/host-clock.ts'
-import { writeGateFile } from '../../../../src/v2/infrastructure/host-safety/gate-file.ts'
-import { createOperationJournal, readJournalLines } from '../../../../src/v2/infrastructure/host-safety/journal.ts'
+import * as importedClock from '../../../../src/v2/infrastructure/host-safety/host-clock.ts'
+import * as importedGateFile from '../../../../src/v2/infrastructure/host-safety/gate-file.ts'
+import * as importedJournal from '../../../../src/v2/infrastructure/host-safety/journal.ts'
 
-export const repositoryRoot = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..', '..', '..')
+// Namespace imports, then unwrap. The suites that use this helper run two ways: under
+// `node --test` (native type stripping, which exposes named exports) and under `tsx`
+// (which transpiles the TypeScript module to CommonJS under this package, since it
+// declares no `"type": "module"` — and then the named exports sit behind `default`). A
+// plain `import { createOperationJournal }` works in the first and fails at import time
+// in the second, which is exactly how CI run 35446572591 failed. Same idiom as the
+// worker scripts and scripts/ops/resource-budget.mjs.
+const clockModule = importedClock.hostMonotonicNowMs ? importedClock : importedClock.default
+const gateModule = importedGateFile.writeGateFile ? importedGateFile : importedGateFile.default
+const journalModule = importedJournal.createOperationJournal ? importedJournal : importedJournal.default
+const { hostMonotonicNowMs } = clockModule
+const { writeGateFile } = gateModule
+const { createOperationJournal, readJournalLines } = journalModule
+
+// `import.meta.dirname` rather than a hand-decoded file URL: the previous form stripped
+// a leading drive letter, which is a Windows shape that does nothing on Linux and would
+// mangle any path containing a percent-encoded character.
+export const repositoryRoot = resolve(import.meta.dirname, '..', '..', '..', '..')
 export const deployScript = join(repositoryRoot, 'infra', 'deploy', 'apollo-vps.sh')
 export const fakeDockerDirectory = join(repositoryRoot, 'tests', 'fixtures', 'host-safety', 'fake-docker')
 
