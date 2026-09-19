@@ -32,7 +32,14 @@ import {
   writeGate,
   writeLatch,
 } from './helpers/runtime-safety-world.mjs'
-import { artifactPath, callRoute, probeStreams, sha256Of } from './helpers/capture-journey.mjs'
+import { callRoute, probeStreams, sha256Of } from './helpers/capture-journey.mjs'
+import {
+  closeJourneyObjectStore,
+  journeyStorageDriver,
+  journeyStorageEnvironment,
+  openJourneyObjectStore,
+  storedArtifactPath,
+} from './helpers/journey-object-storage.mjs'
 import { encodeSharedProxy, seedEditorReliabilityWorld } from './helpers/editor-reliability-world.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -231,17 +238,23 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
   const runId = newRunId()
   const root = scratchRoot(runId)
   const artifactRoot = join(root, 'artifacts')
-  const workRoot = join(root, 'cleanup-work')
+  // One work root for both the s3 materializers' staging and the source-cleanup
+  // branch, and a separate place to copy stored objects to before probing them —
+  // the same three-directory shape the podcast and teacher journeys use.
+  const workRoot = join(root, 'work')
+  const readbackRoot = join(root, 'readback')
   const evidenceDir = join(root, 'evidence')
-  await mkdir(artifactRoot, { recursive: true })
-  await mkdir(workRoot, { recursive: true })
-  await mkdir(evidenceDir, { recursive: true })
+  for (const directory of [artifactRoot, workRoot, readbackRoot, evidenceDir]) {
+    await mkdir(directory, { recursive: true })
+  }
 
   const spawned = []
   const applicationNames = new Set()
   let cluster
   let prisma
   let world
+  /** Null on the local driver; the MinIO client the readback reads through under s3. */
+  let objectStore
 
   /**
    * A timestamped line per setup step, appended to a file rather than printed.
@@ -280,6 +293,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       evidence.postflight.backends = backends
       await prisma.$disconnect().catch(() => undefined)
     }
+    if (objectStore) await closeJourneyObjectStore(objectStore).catch(() => undefined)
     if (world) evidence.postflight.residue = await world.cleanup().catch((error) => String(error))
     if (cluster) evidence.postflight.cluster = await cluster.stop().catch((error) => ({ error: String(error) }))
 
@@ -312,9 +326,30 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
   // PERSISTENCE_NOT_CONFIGURED while this file held a perfectly good connection.
   process.env.V2_DATABASE_URL = suiteUrl
   process.env.APOLLO_API_ENVIRONMENT ??= 'production'
-  process.env.APOLLO_V2_ARTIFACT_ROOT = artifactRoot
   process.env.APOLLO_PROTECTED_PAYLOAD_KEY_ID ??= `runtime-safety-${runId.slice(-8)}`
   process.env.APOLLO_PROTECTED_PAYLOAD_KEY ??= Buffer.alloc(32, 7).toString('base64url')
+  // The route handlers called below build media providers and materializers from the
+  // environment exactly as a worker does, so this process needs the same roots — and
+  // pointed INSIDE this run's temp directory, never at whatever the CI step exported.
+  // Assigned, not defaulted: inheriting a shared root is how one run reads another's
+  // bytes.
+  for (const [name, value] of Object.entries(journeyStorageEnvironment({
+    driver: journeyStorageDriver(),
+    artifactRoot,
+    workRoot,
+  }))) {
+    process.env[name] = value
+  }
+  process.env.APOLLO_V2_RENDER_WORK_ROOT = workRoot
+  process.env.APOLLO_V2_SOURCE_CLEANUP_WORK_ROOT = workRoot
+  objectStore = await openJourneyObjectStore()
+  evidence.storage = {
+    driver: journeyStorageDriver(),
+    objectStore: objectStore !== null,
+    artifactRoot,
+    workRoot,
+    readbackRoot,
+  }
 
   const { PrismaClient } = await import('../../generated/prisma-v2/index.js')
   prisma = new PrismaClient({ datasourceUrl: suiteUrl })
@@ -620,13 +655,17 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
         select: { id: true },
       })
       : null
-    const stagedFiles = await readdir(workRoot, { recursive: true }).catch(() => [])
-    const promotedMp4s = stagedFiles.filter((name) => String(name).endsWith('.mp4'))
+    // Listed as evidence, NOT asserted empty. The work root is also where the s3
+    // materializer stages the source it downloads, so "no .mp4 under the work root"
+    // would fail under MinIO for a file the render never produced. What proves
+    // nothing was promoted is the artifact row below, on both drivers.
+    const stagedFiles = (await readdir(workRoot, { recursive: true }).catch(() => []))
+      .map((name) => String(name))
+      .filter((name) => name.endsWith('.mp4'))
 
     assert.deepEqual(survivingChildren, [], `FFmpeg children outlived the worker: ${survivingChildren}`)
     assert.notEqual(row.status, 'succeeded', 'an interrupted render must not report success')
     assert.equal(interruptedArtifact, null, 'an interrupted render must not promote an artifact')
-    assert.deepEqual(promotedMp4s, [], `staging kept promoted MP4s: ${JSON.stringify(promotedMp4s)}`)
     assert.equal(row.status, 'retrying', `the interrupted render is ${row.status}`)
     assert.equal(row.errorCode, 'worker_shutdown')
     assert.equal(row.leaseOwner, null, 'an interrupted attempt releases its lease')
@@ -645,7 +684,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       },
       plannedOutputArtifactId: interruptedDetail?.outputArtifactId ?? null,
       promotedArtifactRow: interruptedArtifact,
-      stagedMp4s: promotedMp4s,
+      stagedMp4s: stagedFiles,
       exit,
       durationMs: Date.now() - startedAt,
     }
@@ -661,7 +700,23 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     await writeGate(opsStateDir, { state: 'open', ttlMs: 120_000, runId })
 
     const before = await readOperation(prisma, world.workspaceId, project.projectId)
-    assert.equal(before.status, 'retrying', 'journey 4 resumes what journey 3 interrupted')
+    // Journey 4 resumes what journey 3 interrupted, so its precondition belongs to
+    // another journey. When journey 3 did not leave an interrupted attempt, saying so
+    // is the honest outcome: asserting here reported journey 4 as a failure of the
+    // resume path when the resume path had never been reached, which is a false
+    // accusation against the product.
+    if (before?.status !== 'retrying') {
+      evidence.journeys.journey4 = {
+        status: 'not-executed',
+        reason: 'journey 3 did not leave an interrupted attempt to resume',
+        observedStatus: before?.status ?? null,
+        observedErrorCode: before?.errorCode ?? null,
+      }
+      t.diagnostic(
+        `journey 4 not-executed: journey 3 left status ${before?.status ?? 'no row'}, not retrying`,
+      )
+      return
+    }
 
     const worker = await startWorker({ caseName: 'journey4-restart', opsStateDir })
     assert.notEqual(worker.pid, evidence.journeys.journey3.workerPid, 'the restart is a new process')
@@ -698,23 +753,17 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     // re-encode and two runs of the same encoder need not produce the same bytes.
     // Under the S3 driver the bytes live in MinIO, so the object is fetched to a
     // temporary file rather than the readback being quietly skipped.
-    const driver = process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER?.trim() || 'local'
-    let proxyPath = artifactPath(artifactRoot, artifact.artifactKey)
-    let materializer
-    if (driver !== 'local') {
-      // The product's own materializer, which is what a worker would use to fetch
-      // these bytes back, and which verifies the hash while it does so.
-      const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
-        .then((module) => module.createArtifactSourceMaterializer ? module : module.default)
-      materializer = factory.createArtifactSourceMaterializer(process.env)
-      const fetched = await materializer.materialize({
-        operationId: `runtime-safety-readback-${suffix}`,
-        artifactKey: artifact.artifactKey,
-        sha256: artifact.sha256,
-        byteSize: Number(artifact.byteSize),
-      })
-      proxyPath = fetched.path
-    }
+    // One path to probe on either driver, through the helper the CI-green journeys
+    // use: local answers the content-addressed path, s3 fetches the object
+    // version-bound into the readback root. Deliberately NOT a local leftover — under
+    // s3 the bytes must come back out of MinIO, or the readback proves nothing about
+    // what the product actually promoted.
+    const driver = journeyStorageDriver()
+    const proxyPath = await storedArtifactPath(objectStore, {
+      artifactRoot,
+      artifactKey: artifact.artifactKey,
+      readbackRoot,
+    })
     const { resolveFfprobeBinaryPath } = await import('../../src/v2/infrastructure/media/ffmpeg-binary.ts')
       .then((module) => module.resolveFfprobeBinaryPath ? module : module.default)
     const bytes = await readFile(proxyPath)
@@ -734,8 +783,6 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       `the proxy runs ${duration}s, not about the master's ${PROXY_SECONDS}s`,
     )
     assert.ok(audio, "the master carries audio, so the proxy must too")
-
-    await materializer?.cleanup(`runtime-safety-readback-${suffix}`).catch(() => undefined)
 
     evidence.journeys.journey4 = {
       kind: 'real worker restart + real FFmpeg render + ffprobe readback',

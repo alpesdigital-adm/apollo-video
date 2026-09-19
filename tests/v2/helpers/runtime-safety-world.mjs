@@ -8,6 +8,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
+import { journeyStorageDriver, journeyStorageEnvironment } from './journey-object-storage.mjs'
+
 const execFileAsync = promisify(execFile)
 
 // `fileURLToPath`, not `.pathname`: the latter keeps the leading slash of a Windows
@@ -303,55 +305,46 @@ async function findFreePort() {
 }
 
 /**
- * The artifact storage the journeys write through.
- *
- * Local driver by default; the compose job sets `APOLLO_V2_ARTIFACT_STORAGE_DRIVER=s3`
- * with MinIO and the S3 variables the capture journeys already use, and those are
- * passed straight through rather than re-derived, so the two environments cannot
- * drift apart on which bucket a render lands in.
- */
-export function runtimeSafetyStorageEnvironment({ artifactRoot }) {
-  const driver = process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER?.trim() || 'local'
-  // The names the compose job actually exports, read from its own step env rather
-  // than guessed: the first list invented `APOLLO_V2_ARTIFACT_S3_*`/`AWS_*`, which
-  // exist nowhere. A spawned worker inherits `process.env` anyway, so this list is
-  // the explicit contract, not the only route — but a wrong one documents a lie.
-  const passthrough = [
-    'APOLLO_V2_S3_BUCKET',
-    'APOLLO_V2_S3_REGION',
-    'APOLLO_V2_S3_ENDPOINT',
-    'APOLLO_V2_S3_ACCESS_KEY_ID',
-    'APOLLO_V2_S3_SECRET_ACCESS_KEY',
-    'APOLLO_V2_S3_FORCE_PATH_STYLE',
-    'APOLLO_V2_S3_ALLOW_INSECURE_HTTP',
-  ]
-  const environment = { APOLLO_V2_ARTIFACT_STORAGE_DRIVER: driver, APOLLO_V2_ARTIFACT_ROOT: artifactRoot }
-  for (const name of passthrough) {
-    if (process.env[name] !== undefined) environment[name] = process.env[name]
-  }
-  return environment
-}
-
-/**
  * Everything the real render worker refuses to start without.
  *
- * Discovered by starting it: the source-cleanup branch demands its own work root and
- * the proxy branch demands an artifact root, so a journey that omitted either would
- * "prove" a gate closed when the process had actually died at import time.
- * `APOLLO_V2_RENDER_OUTPUT_ROOT` is deliberately left unset, which makes the
- * artifact-render branch the script's own no-op — the proxy branch is what these
- * journeys interrupt.
+ * Each entry here is a process that died at import until it was added, which is why
+ * none of them is optional:
+ *
+ * - `APOLLO_V2_ARTIFACT_ROOT` and `APOLLO_V2_SOURCE_CLEANUP_WORK_ROOT`: the proxy and
+ *   source-cleanup branches refuse to be constructed without them.
+ * - `APOLLO_V2_RENDER_WORK_ROOT`: only the s3 driver demands it — "Render work root
+ *   is required for S3 artifact materialization" — and the first Linux run against
+ *   MinIO died on exactly that guard while Windows, on the local driver, never
+ *   reached it. It is set on BOTH drivers now: a variable that is only correct on one
+ *   platform is a variable that will be wrong on the other.
+ *
+ * The storage half is `journeyStorageEnvironment`, the same helper the podcast and
+ * teacher journeys hand their spawned workers. Reused rather than reimplemented
+ * because the list I wrote by hand was missing `APOLLO_V2_S3_SESSION_TOKEN` and
+ * `APOLLO_V2_S3_SIGNED_URL_TTL_SECONDS`, and a second copy of a list like this drifts
+ * by definition.
+ *
+ * `APOLLO_V2_RENDER_OUTPUT_ROOT` stays unset on purpose: that is what makes the
+ * artifact-render branch the script's own no-op, so these journeys interrupt the
+ * proxy branch. It is not required by the proxy or source-cleanup paths.
  */
-export function renderWorkerEnvironment({ databaseUrl, artifactRoot, workRoot, opsStateDir, pollMs = 200, suffix }) {
+export function renderWorkerEnvironment({
+  databaseUrl, artifactRoot, workRoot, opsStateDir, pollMs = 200, suffix,
+}) {
   return {
     V2_DATABASE_URL: databaseUrl,
     APOLLO_API_ENVIRONMENT: 'production',
     APOLLO_V2_SOURCE_CLEANUP_WORK_ROOT: workRoot,
+    APOLLO_V2_RENDER_WORK_ROOT: workRoot,
     APOLLO_PROTECTED_PAYLOAD_KEY_ID: `runtime-safety-${suffix}`,
     APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url'),
     APOLLO_V2_WORKER_POLL_MS: String(pollMs),
     ...(opsStateDir ? { APOLLO_OPS_STATE_DIR: opsStateDir } : {}),
-    ...runtimeSafetyStorageEnvironment({ artifactRoot }),
+    ...journeyStorageEnvironment({
+      driver: journeyStorageDriver(),
+      artifactRoot,
+      workRoot,
+    }),
   }
 }
 
