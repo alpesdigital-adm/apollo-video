@@ -1273,6 +1273,10 @@ jobs:
       # anomalies are injected at the collector boundary; nothing here measures a
       # host under load.
       - name: Create the disposable runtime safety database
+        # Runs even when the real-Docker proof above failed: the two proofs are
+        # independent and each run should leave evidence for both. The failed step
+        # still fails the job.
+        if: ${{ !cancelled() }}
         run: |
           docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE apollo_v2_e2e_runtime_safety"
           npm run db:v2:migrate:deploy
@@ -1281,6 +1285,7 @@ jobs:
 
       - name: Run Wave 23 worker interruption and resume journeys against PostgreSQL and versioned MinIO
         id: runtime-safety-s3
+        if: ${{ !cancelled() }}
         run: npm run test:e2e:runtime-safety-workers
         env:
           # The suite writes its evidence and the workers' stdout/stderr under
