@@ -60,6 +60,52 @@ apollo_json_escape() {
   printf '%s' "$value"
 }
 
+# Variables that exist so a test can exercise the sequence in seconds, and that would
+# quietly weaken a production run if an operator exported them.
+#
+# Each one either shortens a window, reduces a bounded wait, replaces the policy the
+# host is judged by, lowers a container's quota, or skips a step. None of them has any
+# business on the shared VPS, and "nobody would export that" is not a gate — so on
+# `shared-production` the presence of ANY of them aborts before anything is read. The
+# list lives here, in one place, because a seam added later and forgotten here is
+# exactly the hole this closes.
+APOLLO_PRODUCTION_FORBIDDEN_SEAMS=(
+  APOLLO_OPS_POLICY_CATALOG
+  APOLLO_OPS_MONITOR_MODE
+  APOLLO_OPS_POLL_SLEEP_S
+  APOLLO_OPS_PREFLIGHT_TIMEOUT_S
+  APOLLO_OPS_POSTFLIGHT_TIMEOUT_S
+  APOLLO_OPS_BACKEND_WAIT_ATTEMPTS
+  APOLLO_OPS_BACKEND_WAIT_SLEEP_S
+  APOLLO_OPS_HEALTH_ATTEMPTS
+  APOLLO_OPS_HEALTH_SLEEP_S
+  APOLLO_OPS_BOOTSTRAP_CPUS
+  APOLLO_OPS_BOOTSTRAP_MEMORY_BYTES
+  APOLLO_OPS_BOOTSTRAP_PIDS
+  APOLLO_OPS_PROC_ROOT
+  APOLLO_DEPLOY_SKIP_CHOWN
+)
+
+# Aborts when a test seam is set and the profile is the shared production host.
+#
+# `set`, not `non-empty`: an exported empty value is still an operator reaching for a
+# seam, and `APOLLO_DEPLOY_SKIP_CHOWN=` would read as "skip" to no rule and as
+# "present" to every future one. Nothing is journalled here — the refusal happens
+# before the run has an identity, and the variable's NAME is the whole message.
+apollo_refuse_production_seams() {
+  local profile="$1"
+  [[ "${profile}" == 'shared-production' ]] || return 0
+  local name
+  for name in "${APOLLO_PRODUCTION_FORBIDDEN_SEAMS[@]}"; do
+    if [[ -n "${!name+set}" ]]; then
+      apollo_log "${name} is a test seam: it shortens a window, weakens a wait, replaces the"
+      apollo_log 'policy or skips a step. It is accepted on isolated-ci and local-dev only.'
+      apollo_fail "${name} is set and APOLLO_RESOURCE_PROFILE is shared-production"
+      return 1
+    fi
+  done
+}
+
 apollo_require_env() {
   local name="$1"
   local description="$2"

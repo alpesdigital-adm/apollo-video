@@ -9,6 +9,8 @@ const deployLibraryUrls = {
   docker: new URL('../../infra/deploy/lib/docker.sh', import.meta.url),
   ops: new URL('../../infra/deploy/lib/ops.sh', import.meta.url),
 }
+const monitorScriptUrl = new URL('../../scripts/ops/host-safety-monitor.mjs', import.meta.url)
+const verdictScriptUrl = new URL('../../scripts/ops/host-safety-verdict.mjs', import.meta.url)
 const workerRoles = [
   'ingest-worker',
   'render-worker',
@@ -26,12 +28,14 @@ const nextConfigUrl = new URL('../../next.config.js', import.meta.url)
 const agentInstructionsUrl = new URL('../../AGENTS.md', import.meta.url)
 
 test('production deploy gates every mutation behind lock, budget, monitor and preflight', async () => {
-  const [script, common, state, docker, ops] = await Promise.all([
+  const [script, common, state, docker, ops, monitorScript, verdictScript] = await Promise.all([
     readFile(deployScriptUrl, 'utf8'),
     readFile(deployLibraryUrls.common, 'utf8'),
     readFile(deployLibraryUrls.state, 'utf8'),
     readFile(deployLibraryUrls.docker, 'utf8'),
     readFile(deployLibraryUrls.ops, 'utf8'),
+    readFile(monitorScriptUrl, 'utf8'),
+    readFile(verdictScriptUrl, 'utf8'),
   ])
 
   // The order inside `cmd_deploy` is the invariant, not the order of definitions:
@@ -141,10 +145,14 @@ test('production deploy gates every mutation behind lock, budget, monitor and pr
     !/docker (stop|rm)[^\n]*\|\| true/.test(withoutComments(`${script}\n${docker}`)),
     'no failure of a stop or rm of an Apollo container may be swallowed',
   )
-  // The one place a failure may still be ignored is the run's OWN monitor at the end of a
-  // green run: it is this operation's container, it is being torn down on purpose, and a
-  // stubborn removal must not turn a finished deploy into an incident.
-  assert.match(ops, /apollo_monitor_stop\(\)[\s\S]*?docker stop --timeout 15 "\$\{name\}" >\/dev\/null \|\| true/)
+  // The run's own monitor is no exception: its stop is confirmed too. The only failure
+  // still tolerated is a removal, because an exited container publishes nothing and its
+  // name carries this run's id.
+  assert.ok(
+    !/docker stop[^\n]*\|\| true/.test(withoutComments(ops)),
+    'even the run monitor may not have its stop failure swallowed',
+  )
+  assert.match(ops, /apollo_monitor_stop\(\)[\s\S]*?docker rm "\$\{name\}" >\/dev\/null 2>&1/)
   assert.ok(!/remove_container/.test(script), 'the unconditional teardown helper is gone')
   // An invocation, not a mention: the script names these verbs in the message that
   // explains why it refuses to perform them, so the check is anchored to a command.
@@ -175,6 +183,50 @@ test('production deploy gates every mutation behind lock, budget, monitor and pr
   assert.match(state, /released\.json/)
   assert.ok(!/rm -f "\$\{APOLLO_LATCH_FILE\}"/.test(state), 'a latch is archived, never deleted')
   assert.match(common, /never a wall clock|CLOCK_BOOTTIME/)
+
+  // Every seam that could shorten a window, weaken a wait, replace the policy, lower a
+  // quota or skip a step is declared in one list and refused on the shared host.
+  for (const seam of [
+    'APOLLO_OPS_POLICY_CATALOG',
+    'APOLLO_OPS_MONITOR_MODE',
+    'APOLLO_OPS_POLL_SLEEP_S',
+    'APOLLO_OPS_PREFLIGHT_TIMEOUT_S',
+    'APOLLO_OPS_POSTFLIGHT_TIMEOUT_S',
+    'APOLLO_OPS_BACKEND_WAIT_ATTEMPTS',
+    'APOLLO_OPS_BACKEND_WAIT_SLEEP_S',
+    'APOLLO_OPS_HEALTH_ATTEMPTS',
+    'APOLLO_OPS_HEALTH_SLEEP_S',
+    'APOLLO_OPS_BOOTSTRAP_CPUS',
+    'APOLLO_OPS_BOOTSTRAP_MEMORY_BYTES',
+    'APOLLO_OPS_BOOTSTRAP_PIDS',
+    'APOLLO_OPS_PROC_ROOT',
+    'APOLLO_DEPLOY_SKIP_CHOWN',
+  ]) {
+    assert.match(common, new RegExp(`^  ${seam}$`, 'm'), `${seam} is not declared as a production-forbidden seam`)
+  }
+  assert.match(common, /\[\[ -n "\$\{!name\+set\}" \]\]/, 'a seam that is set but empty must still be refused')
+  // It runs during environment validation — before the lock, the image or the budget —
+  // so it applies to every subcommand, `plan` included.
+  assert.match(
+    script,
+    /apollo_validate_environment\(\) \{[\s\S]*?apollo_refuse_production_seams "\$\{APOLLO_RESOURCE_PROFILE\}"/,
+  )
+  assert.ok(
+    script.indexOf('apollo_refuse_production_seams "${APOLLO_RESOURCE_PROFILE}"') < script.indexOf('cmd_deploy() {'),
+    'the seam refusal is validation, not a step of the deploy',
+  )
+  // And in Node, for the two programs that read the policy.
+  for (const source of [monitorScript, verdictScript]) {
+    assert.match(source, /--catalog must be \$\{SHIPPED_CATALOG\} when --profile is shared-production/)
+  }
+
+  // The run's own monitor may be stopped, but "stopped" is confirmed like every other
+  // stop: a monitor left running keeps publishing a gate for a run that is over.
+  assert.match(ops, /monitor-stop-inconclusive/)
+  assert.match(ops, /monitor-remove-inconclusive/)
+  assert.match(ops, /apollo_monitor_stop\(\)[\s\S]*?\[\[ "\$\{status\}" != 'exited' && "\$\{status\}" != 'dead' \]\]/)
+  assert.match(script, /if ! apollo_monitor_stop; then[\s\S]*?the run monitor did not reach a terminal state/)
+  assert.match(script, /apollo_monitor_stop \|\| apollo_log 'containment continued/)
 })
 
 test('production image materializes the Remotion bundle and runtime media binaries are deterministic', async () => {

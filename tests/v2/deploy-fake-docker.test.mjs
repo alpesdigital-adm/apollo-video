@@ -9,6 +9,7 @@ import { readLatch } from '../../src/v2/infrastructure/host-safety/latch.ts'
 import { readLockOwner } from '../../src/v2/infrastructure/host-safety/lock.ts'
 import {
   BASE_SCENARIO,
+  PRODUCTION_FORBIDDEN_SEAMS,
   SECRET_VALUE,
   bootId,
   createWorld,
@@ -18,6 +19,7 @@ import {
   operationJournalLines,
   runDeploy,
   runDeployFunction,
+  withoutSeams,
 } from '../fixtures/host-safety/fake-docker/harness.mjs'
 
 // The real deploy script, driven by a `docker` that answers from a scenario and records
@@ -60,7 +62,12 @@ test('plan performs no mutation at all', async (t) => {
 
 test('plan names the steps the shared profile blocks and why', async (t) => {
   const world = await createWorld(t)
-  const result = await runDeploy(world, ['plan'], { APOLLO_RESOURCE_PROFILE: 'shared-production', APOLLO_RESOURCE_BUDGET_APPROVED_FILE: world.envFile })
+  // `withoutSeams` because the shared profile refuses every test seam, plan included.
+  const result = await runDeploy(
+    world,
+    ['plan'],
+    withoutSeams({ APOLLO_RESOURCE_PROFILE: 'shared-production', APOLLO_RESOURCE_BUDGET_APPROVED_FILE: world.envFile }),
+  )
   assert.equal(result.status, 0, result.stderr)
   assert.match(result.stdout, /docker load, docker pull, image decompression, image hashing and backups/)
   assert.match(result.stdout, /uncoveredHostWork/)
@@ -135,10 +142,11 @@ test('a refused budget aborts before the first mutation', async (t) => {
   const approved = join(world.directory, 'approved.json')
   // A document that names no approver: the budget refuses it with exit 2.
   await writeFile(approved, JSON.stringify({ schemaVersion: 'apollo-resource-budget-approval/v1', profile: 'shared-production' }), 'utf8')
-  const result = await runDeploy(world, ['deploy'], {
-    APOLLO_RESOURCE_PROFILE: 'shared-production',
-    APOLLO_RESOURCE_BUDGET_APPROVED_FILE: approved,
-  })
+  const result = await runDeploy(
+    world,
+    ['deploy'],
+    withoutSeams({ APOLLO_RESOURCE_PROFILE: 'shared-production', APOLLO_RESOURCE_BUDGET_APPROVED_FILE: approved }),
+  )
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /aggregate resource budget was refused/)
   const entries = await dockerLog(world)
@@ -190,6 +198,118 @@ test('a container the daemon OOM killed recently closes the gate before the moni
   // A fleet with nothing OOM killed passes.
   const clean = await createWorld(t)
   assert.equal((await runDeployFunction(clean, 'apollo_preflight_container_oom 600000')).status, 0)
+})
+
+test('a test seam in the environment refuses a shared production operation', async (t) => {
+  const world = await createWorld(t)
+  const approved = join(world.directory, 'approved.json')
+  await writeFile(approved, JSON.stringify({ schemaVersion: 'apollo-resource-budget-approval/v1', profile: 'shared-production' }), 'utf8')
+  const shared = {
+    APOLLO_RESOURCE_PROFILE: 'shared-production',
+    APOLLO_RESOURCE_BUDGET_APPROVED_FILE: approved,
+  }
+
+  // Every seam, in one shell: each shortens a window, weakens a wait, replaces the
+  // policy, lowers a quota or skips a step, and each must name itself in the refusal.
+  // The shell's own list is printed back, so a seam added there and forgotten in this
+  // test — or the reverse — fails instead of passing quietly.
+  const sweep = await runDeployFunction(
+    world,
+    [
+      'printf "declared:%s\\n" "${APOLLO_PRODUCTION_FORBIDDEN_SEAMS[*]}"',
+      'for seam in "${APOLLO_PRODUCTION_FORBIDDEN_SEAMS[@]}"; do',
+      '  outcome="$(export "${seam}=1"; apollo_refuse_production_seams shared-production >/dev/null 2>&1; printf "%s" "$?")"',
+      '  printf "%s=%s\\n" "${seam}" "${outcome}"',
+      '  empty="$(export "${seam}="; apollo_refuse_production_seams shared-production >/dev/null 2>&1; printf "%s" "$?")"',
+      '  printf "%s(empty)=%s\\n" "${seam}" "${empty}"',
+      'done',
+      'apollo_refuse_production_seams isolated-ci && printf "isolated-ci=accepted\\n"',
+      'apollo_refuse_production_seams local-dev && printf "local-dev=accepted\\n"',
+    ].join('\n'),
+    withoutSeams(),
+  )
+  assert.equal(sweep.status, 0, sweep.stderr)
+  const declared = /declared:(.*)/.exec(sweep.stdout)[1].trim().split(/\s+/)
+  assert.deepEqual(declared, PRODUCTION_FORBIDDEN_SEAMS, 'the shell list and this test must name the same seams')
+  for (const seam of declared) {
+    assert.match(sweep.stdout, new RegExp(`^${seam}=1$`, 'm'), `${seam} was accepted on shared-production`)
+    // Set but empty is still set: an exported empty value is an operator reaching for a
+    // seam, and no rule should have to guess what an empty seam means.
+    assert.match(sweep.stdout, new RegExp(`^${seam}\\(empty\\)=1$`, 'm'), `${seam}= was accepted on shared-production`)
+  }
+  assert.match(sweep.stdout, /^isolated-ci=accepted$/m)
+  assert.match(sweep.stdout, /^local-dev=accepted$/m)
+
+  // And through the whole script: a seam refuses the deploy by name.
+  const refused = await runDeploy(world, ['deploy'], withoutSeams({ ...shared, APOLLO_OPS_POLL_SLEEP_S: '1' }))
+  assert.notEqual(refused.status, 0)
+  assert.match(refused.stderr, /APOLLO_OPS_POLL_SLEEP_S is set and APOLLO_RESOURCE_PROFILE is shared-production/)
+  assert.match(refused.stderr, /accepted on isolated-ci and local-dev only/)
+  // The refusal happens before anything is read: not even `plan` proceeds.
+  const plan = await runDeploy(world, ['plan'], withoutSeams({ ...shared, APOLLO_OPS_POLICY_CATALOG: world.catalogPath }))
+  assert.notEqual(plan.status, 0)
+  assert.equal((await dockerLog(world)).length, 0, 'a refused seam interrogates nothing')
+
+  // With no seam set, the shared profile gets as far as the budget it cannot resolve.
+  const clean = await runDeploy(world, ['deploy'], withoutSeams(shared))
+  assert.match(clean.stderr, /aggregate resource budget was refused/)
+
+  // And the same seams are accepted on a disposable profile.
+  const isolated = await createWorld(t)
+  const accepted = await runDeploy(isolated, ['plan'])
+  assert.equal(accepted.status, 0, accepted.stderr)
+})
+
+test('a run monitor that will not stop leaves the deploy non-zero and journalled', async (t) => {
+  const world = await createWorld(t)
+  const monitor = `apollo-ops-monitor-${world.runId}`
+  // The monitor is this run's own container, so stopping it is allowed — but the claim
+  // that it stopped is confirmed like every other stop. One that stays up would keep
+  // republishing gate.json for a run that is over.
+  const hanging = await createWorld(t, {
+    scenario: {
+      ...BASE_SCENARIO,
+      containers: { [monitor]: { id: 'monitor-1', labels: { 'apollo.managed': 'true', 'apollo.role': 'monitor' }, status: 'running', pid: 900 } },
+      behaviour: { stopHangs: [monitor] },
+    },
+  })
+  hanging.runId = world.runId
+  const refused = await runDeployFunction(hanging, 'apollo_state_prepare && apollo_monitor_stop', { APOLLO_JOURNAL_ENABLED: '1' })
+  assert.notEqual(refused.status, 0)
+  assert.match(refused.stderr, new RegExp(`the run monitor ${monitor} is still running after docker stop`))
+  const lines = await operationJournalLines(hanging)
+  const inconclusive = lines.find((line) => line.event === 'monitor-stop-inconclusive')
+  assert.equal(inconclusive.data.reason, 'not-terminal')
+  assert.equal(inconclusive.data.verify.status, 'running')
+  const entries = await dockerLog(hanging)
+  assert.ok(!entries.some((entry) => entry.verb === 'rm'), 'a monitor that did not stop is not removed')
+
+  // A monitor that stops but refuses removal is journalled and not fatal: an exited
+  // container publishes nothing and its name carries this run's id.
+  const stubborn = await createWorld(t, {
+    scenario: {
+      ...BASE_SCENARIO,
+      containers: { [monitor]: { id: 'monitor-2', labels: { 'apollo.role': 'monitor' }, status: 'running', pid: 901 } },
+      behaviour: { rmFails: [monitor] },
+    },
+  })
+  stubborn.runId = world.runId
+  const tolerated = await runDeployFunction(stubborn, 'apollo_state_prepare && apollo_monitor_stop', { APOLLO_JOURNAL_ENABLED: '1' })
+  assert.equal(tolerated.status, 0, tolerated.stderr)
+  assert.ok((await journalEvents(stubborn)).includes('monitor-remove-inconclusive'))
+
+  // The happy path confirms the terminal state before calling the monitor stopped.
+  const clean = await createWorld(t, {
+    scenario: {
+      ...BASE_SCENARIO,
+      containers: { [monitor]: { id: 'monitor-3', labels: { 'apollo.role': 'monitor' }, status: 'running', pid: 902 } },
+    },
+  })
+  clean.runId = world.runId
+  const stopped = await runDeployFunction(clean, 'apollo_state_prepare && apollo_monitor_stop', { APOLLO_JOURNAL_ENABLED: '1' })
+  assert.equal(stopped.status, 0, stopped.stderr)
+  const stoppedLine = (await operationJournalLines(clean)).find((line) => line.event === 'monitor-stopped')
+  assert.equal(stoppedLine.data.verify.status, 'exited')
 })
 
 test('the state the shell writes is exactly what the TypeScript readers accept', async (t) => {
@@ -265,7 +385,7 @@ test('the deploy refuses an unusable request before it touches anything', async 
   assert.match(withoutState.stderr, /APOLLO_OPS_STATE_DIR is required/)
   const withoutHealth = await runDeploy(world, ['deploy'], { APOLLO_OPS_HEALTH_URL: '' })
   assert.match(withoutHealth.stderr, /APOLLO_OPS_HEALTH_URL is required/)
-  const sharedWithoutApproval = await runDeploy(world, ['deploy'], { APOLLO_RESOURCE_PROFILE: 'shared-production' })
+  const sharedWithoutApproval = await runDeploy(world, ['deploy'], withoutSeams({ APOLLO_RESOURCE_PROFILE: 'shared-production' }))
   assert.match(sharedWithoutApproval.stderr, /APOLLO_RESOURCE_BUDGET_APPROVED_FILE is required/)
   const unknownCommand = await runDeploy(world, ['restart'])
   assert.match(unknownCommand.stderr, /unknown command 'restart'/)

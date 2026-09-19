@@ -170,6 +170,10 @@ apollo_validate_environment() {
       return 1
       ;;
   esac
+  # Before anything else is read: no test seam may be in the environment of a shared
+  # production operation, whichever subcommand it is. A plan that read a substituted
+  # policy would print numbers nobody is going to enforce.
+  apollo_refuse_production_seams "${APOLLO_RESOURCE_PROFILE}"
   if [[ "${APOLLO_COMMAND}" == 'plan' || "${APOLLO_COMMAND}" == 'deploy' ]]; then
     apollo_require_env APOLLO_ENV_FILE 'path of the environment file handed to the containers'
     apollo_require_env APOLLO_IMAGE 'image the fleet runs; it must already be present on the host'
@@ -526,7 +530,10 @@ apollo_contain_and_latch() {
   local reason="$1"
   local detail="$2"
   apollo_latch_engage "${reason}" "${detail}"
-  apollo_monitor_stop
+  # On this path an unconfirmed monitor stop is recorded and does not abort the
+  # containment: the latch is already the answer, and leaving the lock held would lock
+  # the operator out of `status` and `latch release`.
+  apollo_monitor_stop || apollo_log 'containment continued with the monitor stop unconfirmed (journalled)'
   apollo_lock_release
 }
 
@@ -673,7 +680,9 @@ cmd_deploy() {
 
   apollo_monitor_start
   if ! apollo_await_phase preflight "${APOLLO_OPS_PREFLIGHT_TIMEOUT_S:-180}"; then
-    apollo_monitor_stop
+    # Nothing was mutated, so there is nothing to latch; the monitor is the only
+    # container this run started and an unconfirmed stop of it is journalled.
+    apollo_monitor_stop || apollo_log 'the monitor stop was not confirmed after a refused preflight (journalled)'
     return 1
   fi
 
@@ -708,7 +717,7 @@ cmd_deploy() {
     if (( replacement == 2 )); then
       # Blocked before any mutation: no latch, because nothing is half-done. The
       # operator decides, and the next deploy starts from the same clean state.
-      apollo_monitor_stop
+      apollo_monitor_stop || apollo_log 'the monitor stop was not confirmed after a blocked identity check (journalled)'
       apollo_lock_release
       apollo_fail "blocked at ${role}: the container's identity could not be proven"
       return 1
@@ -724,7 +733,12 @@ cmd_deploy() {
     return 1
   fi
   apollo_gate_clear 'postflight established; the run is over'
-  apollo_monitor_stop
+  # A green deploy whose monitor is still running is not green: it would keep
+  # republishing a gate for a run that is over.
+  if ! apollo_monitor_stop; then
+    apollo_fail 'the run monitor did not reach a terminal state; the deploy is not complete'
+    return 1
+  fi
   apollo_lock_release
   trap - EXIT
   apollo_log "deploy ${APOLLO_RUN_ID} complete; journal at ${APOLLO_JOURNAL_DIR}/${APOLLO_RUN_ID}.ndjson"

@@ -178,6 +178,17 @@ apollo_monitor_alive() {
   [[ "$(apollo_inspect "${name}" '{{.State.Running}}')" == 'true' ]]
 }
 
+# Stops the run's own monitor and confirms it, like every other stop.
+#
+# The monitor belongs to this operation, so stopping it is allowed where stopping a
+# foreign container is not — but "stopped" is still a claim. A monitor left running
+# keeps republishing gate.json for a run that is over, which is how a finished deploy
+# would leave the workers' admission gate under the control of a process nobody owns.
+# Returns non-zero when the stop was not confirmed; the caller decides whether that
+# ends a green run (it does) or is recorded on the way to a latch (it is).
+#
+# A removal that fails is journalled and not fatal: an exited container publishes
+# nothing and its name carries this run's id, so it collides with no future run.
 apollo_monitor_stop() {
   [[ "${APOLLO_OPS_MONITOR_MODE:-container}" == 'external' ]] && {
     apollo_journal 'monitor-stopped' '{"mode":"external"}'
@@ -186,9 +197,24 @@ apollo_monitor_stop() {
   local name
   name="$(apollo_monitor_container_name)"
   apollo_container_exists "${name}" || return 0
-  docker stop --timeout 15 "${name}" >/dev/null || true
-  docker rm "${name}" >/dev/null 2>&1 || true
-  apollo_journal 'monitor-stopped' "{\"name\":\"$(apollo_json_escape "${name}")\"}"
+  if ! docker stop --timeout 15 "${name}" >/dev/null; then
+    apollo_journal 'monitor-stop-inconclusive' "{\"name\":\"$(apollo_json_escape "${name}")\",\"reason\":\"docker-stop-failed\"}"
+    apollo_log "the run monitor ${name} did not answer docker stop"
+    return 1
+  fi
+  local status
+  status="$(apollo_inspect "${name}" '{{.State.Status}}')"
+  if [[ "${status}" != 'exited' && "${status}" != 'dead' ]]; then
+    apollo_journal 'monitor-stop-inconclusive' "{\"name\":\"$(apollo_json_escape "${name}")\",\"verify\":{\"status\":\"$(apollo_json_escape "${status}")\"},\"reason\":\"not-terminal\"}"
+    apollo_log "the run monitor ${name} is still ${status:-unknown} after docker stop"
+    return 1
+  fi
+  if ! docker rm "${name}" >/dev/null 2>&1; then
+    apollo_journal 'monitor-remove-inconclusive' "{\"name\":\"$(apollo_json_escape "${name}")\",\"verify\":{\"status\":\"$(apollo_json_escape "${status}")\"},\"reason\":\"docker-rm-failed\"}"
+    apollo_log "the run monitor ${name} stopped but could not be removed"
+    return 0
+  fi
+  apollo_journal 'monitor-stopped' "{\"name\":\"$(apollo_json_escape "${name}")\",\"verify\":{\"status\":\"$(apollo_json_escape "${status}")\"}}"
 }
 
 # Asks the verdict container about one phase. Sets APOLLO_VERDICT_ADMIT and

@@ -126,7 +126,7 @@ export async function createWorld(t, overrides = {}) {
 const compileCache = join(tmpdir(), 'apollo-deploy-suite-compile-cache')
 
 export function environmentFor(world, overrides = {}) {
-  return {
+  const environment = {
     ...process.env,
     NODE_COMPILE_CACHE: compileCache,
     PATH: `${fakeDockerDirectory}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
@@ -151,6 +151,35 @@ export function environmentFor(world, overrides = {}) {
     APOLLO_FAKE_DOCKER_REPO: repositoryRoot,
     ...overrides,
   }
+  // A `null` override REMOVES the variable instead of setting it to the string "null".
+  // The shared profile refuses a seam that is merely *set*, so a test of that refusal
+  // needs the seams genuinely absent from the environment, not emptied.
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === null) delete environment[name]
+  }
+  return environment
+}
+
+/** The seams the harness injects, so a test can ask for an environment without them. */
+export const PRODUCTION_FORBIDDEN_SEAMS = [
+  'APOLLO_OPS_POLICY_CATALOG',
+  'APOLLO_OPS_MONITOR_MODE',
+  'APOLLO_OPS_POLL_SLEEP_S',
+  'APOLLO_OPS_PREFLIGHT_TIMEOUT_S',
+  'APOLLO_OPS_POSTFLIGHT_TIMEOUT_S',
+  'APOLLO_OPS_BACKEND_WAIT_ATTEMPTS',
+  'APOLLO_OPS_BACKEND_WAIT_SLEEP_S',
+  'APOLLO_OPS_HEALTH_ATTEMPTS',
+  'APOLLO_OPS_HEALTH_SLEEP_S',
+  'APOLLO_OPS_BOOTSTRAP_CPUS',
+  'APOLLO_OPS_BOOTSTRAP_MEMORY_BYTES',
+  'APOLLO_OPS_BOOTSTRAP_PIDS',
+  'APOLLO_OPS_PROC_ROOT',
+  'APOLLO_DEPLOY_SKIP_CHOWN',
+]
+
+export function withoutSeams(overrides = {}) {
+  return { ...Object.fromEntries(PRODUCTION_FORBIDDEN_SEAMS.map((name) => [name, null])), ...overrides }
 }
 
 /**
@@ -186,7 +215,9 @@ export function runDeploy(world, args, overrides = {}) {
  *
  * It exists so a single host-side rule can be exercised in half a second instead of
  * through a whole deploy: the rule is the same function the deploy calls, sourced from
- * the same file, with journalling switched off.
+ * the same file. Journalling is off unless the case asks for it with
+ * `APOLLO_JOURNAL_ENABLED: '1'`, in which case the snippet must call
+ * `apollo_state_prepare` first so `journal/` exists.
  */
 export function runDeployFunction(world, snippet, overrides = {}) {
   const preamble = [
@@ -194,10 +225,11 @@ export function runDeployFunction(world, snippet, overrides = {}) {
     `. '${join(repositoryRoot, 'infra/deploy/lib/state.sh')}'`,
     `. '${join(repositoryRoot, 'infra/deploy/lib/docker.sh')}'`,
     `. '${join(repositoryRoot, 'infra/deploy/lib/ops.sh')}'`,
-    'APOLLO_JOURNAL_ENABLED=0',
+    'APOLLO_JOURNAL_ENABLED="${APOLLO_JOURNAL_ENABLED:-0}"',
     `APOLLO_RUN_ID='${world.runId}'`,
     "APOLLO_ADOPT_UNLABELLED=''",
     'APOLLO_ROLES=(app render-worker)',
+    'apollo_state_paths',
     'apollo_container_for_role() { case "$1" in app) printf apollo-video ;; *) printf "apollo-video-%s" "$1" ;; esac; }',
   ].join('\n')
   return new Promise((resolveRun) => {

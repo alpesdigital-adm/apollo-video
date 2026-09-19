@@ -36,6 +36,7 @@ const { readMonitorSamples } = journalModule
 const { readLatch } = latchModule
 const { hostMonotonicNowMs } = clockModule
 
+const SHIPPED_CATALOG = 'config/host-safety-policy.json'
 const root = resolve(import.meta.dirname, '..', '..')
 const PHASES = ['preflight', 'during', 'postflight', 'stability']
 
@@ -45,7 +46,7 @@ function parseArguments(argv) {
     profile: null,
     phase: null,
     stateDir: process.env.APOLLO_OPS_STATE_DIR ?? null,
-    catalog: 'config/host-safety-policy.json',
+    catalog: SHIPPED_CATALOG,
     format: 'shell',
     lastSeenSeq: undefined,
     maxDecisionAgeMs: 20_000,
@@ -100,6 +101,12 @@ function parseArguments(argv) {
   if (!PHASES.includes(options.phase)) throw new Error(`--phase must be one of ${PHASES.join('|')}`)
   if (!options.stateDir) throw new Error('--state-dir or APOLLO_OPS_STATE_DIR is required')
   if (!['shell', 'json'].includes(options.format)) throw new Error('--format must be shell or json')
+  // Belt and braces with the shell's seam refusal: even if something managed to pass a
+  // substituted catalog here, the shared production host is judged by the policy that
+  // shipped in the image and by nothing else.
+  if (options.profile === 'shared-production' && options.catalog !== SHIPPED_CATALOG) {
+    throw new Error(`--catalog must be ${SHIPPED_CATALOG} when --profile is shared-production`)
+  }
   if (options.lastSeenSeq !== undefined && !Number.isSafeInteger(options.lastSeenSeq)) {
     throw new Error('--last-seen-seq must be an integer')
   }

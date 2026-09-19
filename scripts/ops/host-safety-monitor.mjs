@@ -51,6 +51,7 @@ const { readLatch } = latchModule
 const { hostMonotonicNowMs } = clockModule
 const { createV2PostgresClient } = prismaModule
 
+const SHIPPED_CATALOG = 'config/host-safety-policy.json'
 const root = resolve(import.meta.dirname, '..', '..')
 const MAXIMUM_DURATION_LIMIT_MS = 6 * 60 * 60 * 1000
 
@@ -60,7 +61,7 @@ function parseArguments(argv) {
     profile: null,
     stateDir: process.env.APOLLO_OPS_STATE_DIR ?? null,
     healthUrl: process.env.APOLLO_OPS_HEALTH_URL ?? null,
-    catalog: 'config/host-safety-policy.json',
+    catalog: SHIPPED_CATALOG,
     maxDurationMs: 3_600_000,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -100,6 +101,12 @@ function parseArguments(argv) {
   if (!options.profile) throw new Error('--profile is required')
   if (!options.stateDir) throw new Error('--state-dir or APOLLO_OPS_STATE_DIR is required')
   if (!options.healthUrl) throw new Error('--health-url or APOLLO_OPS_HEALTH_URL is required')
+  // Belt and braces with the shell's seam refusal: even if something managed to pass a
+  // substituted catalog here, the shared production host is judged by the policy that
+  // shipped in the image and by nothing else.
+  if (options.profile === 'shared-production' && options.catalog !== SHIPPED_CATALOG) {
+    throw new Error(`--catalog must be ${SHIPPED_CATALOG} when --profile is shared-production`)
+  }
   if (!Number.isFinite(options.maxDurationMs) || options.maxDurationMs <= 0 || options.maxDurationMs > MAXIMUM_DURATION_LIMIT_MS) {
     throw new Error(`--max-duration-ms must be in (0, ${MAXIMUM_DURATION_LIMIT_MS}]`)
   }

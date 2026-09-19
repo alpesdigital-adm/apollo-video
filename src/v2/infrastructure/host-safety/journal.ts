@@ -33,6 +33,8 @@ export type OperationJournalEvent =
   | 'plan'
   | 'monitor-started'
   | 'monitor-stopped'
+  | 'monitor-stop-inconclusive'
+  | 'monitor-remove-inconclusive'
   | 'host-sample'
   | 'preflight-verdict'
   | 'during-verdict'
