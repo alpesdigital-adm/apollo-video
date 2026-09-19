@@ -2614,14 +2614,17 @@ export function createCaptureSyncWorker(environment: NodeJS.ProcessEnv = process
   const configuredLease = Number(
     environment.APOLLO_V2_CAPTURE_SYNC_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS,
   )
-  return async (owner: string) => runCaptureSyncWorker({
+  // `signal` is optional so every existing caller — `(owner)` from the driver and
+  // from the persistence E2E — stays valid, while the driver can now hand its
+  // shutdown signal down to the one boundary the cascade can be stopped at.
+  return async (owner: string, signal?: AbortSignal) => runCaptureSyncWorker({
     sessions,
     runs,
     signals,
     owner,
     clock: () => new Date(),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseMs: configuredLease } : {}),
-  })()
+  })(signal)
 }
 
 /**

@@ -116,7 +116,14 @@ export interface CaptureSyncWorkerResult {
    * the run: the track reaches `insufficient-evidence` and the pass continues.
    */
   readonly mediaUnavailable: number
-  readonly abandonedBecause?: 'lease-lost' | 'superseded' | 'session-moved'
+  /**
+   * `worker-shutdown` is the Wave 23 addition: the operator stopped this worker
+   * between tracks. The run stays claimed and unsettled, exactly as it does on a
+   * lost lease, because this repository has no way to release a lease and the
+   * port's own contract names reclaiming an expired one as the recovery path —
+   * not a failure mode. Settling it `failed` would turn a deploy into a verdict.
+   */
+  readonly abandonedBecause?: 'lease-lost' | 'superseded' | 'session-moved' | 'worker-shutdown'
 }
 
 /**
@@ -461,7 +468,17 @@ export function runCaptureSyncWorker(dependencies: {
 }) {
   const leaseMs = dependencies.leaseMs ?? DEFAULT_LEASE_MS
 
-  return async (): Promise<Readonly<CaptureSyncWorkerResult>> => {
+  return async (signal?: AbortSignal): Promise<Readonly<CaptureSyncWorkerResult>> => {
+    // No claim once the worker has been told to stop. This is the only place a
+    // shutdown can be honoured for free: one audio correlation at the adapter's
+    // analysis cap measures over a minute of uninterruptible CPU, so a run
+    // admitted here will hold its lease until the correlation returns.
+    if (signal?.aborted) {
+      return Object.freeze({
+        claimed: false, runId: null, workspaceId: null, settled: false, resolved: 0, review: 0, insufficient: 0,
+        coverageDerived: 0, coverageRefused: 0, mapRefused: 0, mediaUnavailable: 0,
+      })
+    }
     const claim = await dependencies.runs.claim({
       owner: dependencies.owner,
       now: dependencies.clock().toISOString(),
@@ -615,6 +632,18 @@ export function runCaptureSyncWorker(dependencies: {
         coverageDerived, coverageRefused, mapRefused, mediaUnavailable,
         abandonedBecause: 'lease-lost' as const,
       })
+      // Between tracks is the one interruptible boundary in the cascade. Stopping
+      // here keeps every coverage row and every map already written — they are
+      // real measurements — and leaves the rest of the run to whichever worker
+      // reclaims the expired lease.
+      if (signal?.aborted) {
+        return Object.freeze({
+          claimed: true, runId: run.id, workspaceId: run.workspaceId, settled: false,
+          resolved, review, insufficient,
+          coverageDerived, coverageRefused, mapRefused, mediaUnavailable,
+          abandonedBecause: 'worker-shutdown' as const,
+        })
+      }
       await beat()
       if (!leaseAlive) return abandonForLostLease()
 

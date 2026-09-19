@@ -43,6 +43,11 @@ import {
   calculatePublicOperationRetryDelayMs,
   type PublicOperationWorkerOutcome,
 } from './run-public-operation-worker.ts'
+import {
+  immediateNextAttemptAt,
+  linkAbortSignal,
+  workerShutdownFailure,
+} from './worker-lifecycle.ts'
 
 const NON_RETRYABLE_CODES = new Set([
   'ASSET_RIGHTS_BLOCKED',
@@ -114,7 +119,9 @@ export function runNextSourceCleanupOperationService(dependencies: {
 
   return async function runNext(
     leaseOwner: string,
+    signal?: AbortSignal,
   ): Promise<Readonly<PublicOperationWorkerOutcome> | null> {
+    if (signal?.aborted) return null
     const claimedAt = clock()
     const claimed = await dependencies.operations.claimNext({
       leaseOwner,
@@ -132,6 +139,10 @@ export function runNextSourceCleanupOperationService(dependencies: {
     const { operation, context } = claimed
     const attempt = claimed.lease.attempt
     const abortController = new AbortController()
+    // Source cleanup shells out to FFmpeg and, for separation, to an external
+    // voice-isolation provider. Both take this signal; before Wave 23 only a lost
+    // lease could reach them.
+    const ownerLink = linkAbortSignal(signal, abortController)
     let stopped = false
     let leaseLost = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -575,10 +586,13 @@ export function runNextSourceCleanupOperationService(dependencies: {
         })
       }
       const failedAt = clock()
-      const failure = safeFailure(error)
+      const shuttingDown = signal?.aborted === true
+      const failure = shuttingDown ? workerShutdownFailure() : safeFailure(error)
       const nextAttemptAt =
         failure.retryable && attempt < operation.maxAttempts
-          ? new Date(
+          ? shuttingDown
+            ? immediateNextAttemptAt(failedAt)
+            : new Date(
               failedAt.getTime() +
               calculatePublicOperationRetryDelayMs({
                 attempt,
@@ -609,6 +623,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
       })
     } finally {
       stopHeartbeat()
+      ownerLink.dispose()
       await dependencies.sources.cleanup(operation.id).catch(() => undefined)
     }
   }

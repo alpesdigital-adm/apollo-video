@@ -27,6 +27,11 @@ import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { calculateVersionHash } from './version-hash.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
+import {
+  immediateNextAttemptAt,
+  linkAbortSignal,
+  workerShutdownFailure,
+} from './worker-lifecycle.ts'
 
 const NON_RETRYABLE_CODES = new Set([
   'INVALID_RENDER_INPUT',
@@ -79,7 +84,11 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   ) throw new DomainError('INVALID_PUBLIC_OPERATION', 'Final export worker lease configuration is invalid')
   const leaseWindow = (now: Date) => new Date(now.getTime() + leaseDurationMs).toISOString()
 
-  return async function runNext(leaseOwner: string): Promise<Readonly<PublicOperationWorkerOutcome> | null> {
+  return async function runNext(
+    leaseOwner: string,
+    signal?: AbortSignal,
+  ): Promise<Readonly<PublicOperationWorkerOutcome> | null> {
+    if (signal?.aborted) return null
     const claimedAt = clock()
     const claimed = await dependencies.operations.claimNext({
       leaseOwner,
@@ -93,6 +102,10 @@ export function runNextProjectFinalExportOperationService(dependencies: {
     const attempt = claimed.lease.attempt
     const attemptStartedAt = claimedAt.toISOString()
     const abortController = new AbortController()
+    // Until Wave 23 this controller only ever fired on lease loss, so a SIGTERM
+    // during a final export (the longest encode Apollo runs) was not observed by
+    // the renderer at all.
+    const ownerLink = linkAbortSignal(signal, abortController)
     let stopped = false
     let leaseLost = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -545,7 +558,11 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       stopHeartbeat()
       if (leaseLost) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       const failedAt = clock()
-      const failure = safeFailure(error)
+      // An operator stopping this worker is not the export being rejected: it stays
+      // retryable and comes back immediately, and the attempt record below says so
+      // rather than blaming a validator that never ran.
+      const shuttingDown = signal?.aborted === true
+      const failure = shuttingDown ? workerShutdownFailure() : safeFailure(error)
       if (!attemptRecorded) {
         if (validators.length === 0) {
           validators = [{
@@ -573,7 +590,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         }
       }
       const nextAttemptAt = failure.retryable && attempt < operation.maxAttempts
-        ? new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString()
+        ? shuttingDown
+          ? immediateNextAttemptAt(failedAt)
+          : new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString()
         : undefined
       const failed = await withLeaseCommand(() =>
         dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) }))
@@ -582,6 +601,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })
     } finally {
       stopHeartbeat()
+      ownerLink.dispose()
       await Promise.allSettled([
         dependencies.renderer.cleanup(operation.id),
         dependencies.luts.cleanup(operation.id),
