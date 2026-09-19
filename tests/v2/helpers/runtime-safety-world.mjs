@@ -536,22 +536,37 @@ export async function childProcessDetails(pid, { since } = {}) {
   }
 }
 
-/** Every descendant PID of `pid`, breadth-first, so a wrapper's grandchild still counts. */
-export async function descendantProcessIds(pid, { depth = 3, since } = {}) {
-  const found = new Set()
+/**
+ * Every descendant of `pid`, breadth-first, with names — FFmpeg is a grandchild.
+ *
+ * The worker is started as `node node_modules/tsx/dist/cli.mjs <script>`, and tsx
+ * runs the script in a CHILD node process. So the render's FFmpeg hangs off that
+ * inner node, not off the PID this suite spawned: asking `ps --ppid <spawned>` found
+ * only `node`, and journey 3 concluded no FFmpeg existed while a fifteen-second
+ * render was underway one level below.
+ *
+ * Still strictly this run's own tree — the walk is rooted at a PID we started and
+ * follows parent links down from it. Never a name scan of the machine.
+ */
+export async function descendantProcessDetails(pid, { depth = 4, since } = {}) {
+  const found = new Map()
   let frontier = [pid]
   for (let level = 0; level < depth && frontier.length; level += 1) {
     const next = []
     for (const parent of frontier) {
-      for (const child of await childProcessIds(parent, { since })) {
-        if (found.has(child) || child === pid) continue
-        found.add(child)
-        next.push(child)
+      for (const child of await childProcessDetails(parent, { since })) {
+        if (found.has(child.pid) || child.pid === pid) continue
+        found.set(child.pid, child)
+        next.push(child.pid)
       }
     }
     frontier = next
   }
-  return [...found]
+  return [...found.values()]
+}
+
+export async function descendantProcessIds(pid, options = {}) {
+  return (await descendantProcessDetails(pid, options)).map((child) => child.pid)
 }
 
 /**

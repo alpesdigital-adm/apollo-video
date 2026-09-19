@@ -13,9 +13,9 @@ import {
   RUNTIME_SAFETY_ENABLED,
   RUNTIME_SAFETY_SKIP_REASON,
   backendsFor,
-  childProcessDetails,
   createOpsStateDir,
   delay,
+  descendantProcessDetails,
   descendantProcessIds,
   encodeInterruptibleMaster,
   holdsAcross,
@@ -88,6 +88,14 @@ const PROXY_FPS = 30
 const PROXY_WIDTH = 960
 const PROXY_HEIGHT = 540
 const POLL_MS = 200
+/**
+ * `runNextPublicOperationService`'s default `retryBaseDelayMs`, unset in this suite.
+ *
+ * The lower bound a genuine render failure's backoff would have taken, and therefore
+ * the ceiling a shutdown hand-back must stay under — the only thing that tells the
+ * two apart on a `retrying` row, since the domain clears the error there.
+ */
+const RETRY_BASE_DELAY_MS = 5_000
 
 const evidence = {
   label: 'wave23-slice-e-workers',
@@ -97,6 +105,25 @@ const evidence = {
     'FFmpeg encode of the master and FFmpeg proxy render by the worker',
     'ffprobe reopening the promoted MP4',
   ],
+  /**
+   * Where the shutdown code can be read back, answered by reading the code.
+   *
+   * Nowhere, on a retrying row. Recorded here so the next reader of this evidence
+   * does not repeat the assertion that failed in run 5.
+   */
+  shutdownCodeObservability: {
+    onRetryingRow: false,
+    onFailedRow: true,
+    inStatusEvent: false,
+    inTelemetryEvent: false,
+    why: [
+      'domain/public-operation.ts retryOrFailPublicOperation sets error: undefined on the retrying branch',
+      'prisma/public-operation-repository.ts writes errorCode: next.error?.code ?? null',
+      'domain/public-operation-event.ts status event data carries no error field',
+      'application/ports/operation-telemetry.ts PublicOperationTelemetryEvent has no error field',
+    ],
+    discriminator: 'nextAttemptAt - updatedAt: ~1ms for a shutdown hand-back, the exponential backoff otherwise',
+  },
   controlled: [
     'gate.json and latch.json written by the test instead of a monitor',
     'journey 7b back-dates the gate mtime to simulate a monitor that stopped writing',
@@ -181,7 +208,7 @@ async function readOperation(prisma, workspaceId, projectId) {
       id: true, status: true, phase: true, attempt: true, maxAttempts: true,
       leaseOwner: true, leaseExpiresAt: true, errorCode: true, errorMessage: true,
       errorRetryable: true, nextAttemptAt: true, deadLetteredAt: true,
-      startedAt: true, completedAt: true,
+      startedAt: true, completedAt: true, updatedAt: true,
     },
   })
   return row
@@ -537,6 +564,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
   const journey = async (name, body) => {
     const startedAt = Date.now()
     const record = {}
+    const before = spawned.length
     try {
       await body(record)
     } catch (error) {
@@ -546,6 +574,29 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       }
       throw error
     } finally {
+      // Every process this journey started is stopped HERE, not only in `t.after`.
+      // Journey 3's worker outlived its own failure, kept its lease, and journey 5
+      // then watched that worker claim the render it was asserting nobody would
+      // touch — so journey 5 reported a defect belonging to journey 3. A journey that
+      // throws still owns its processes until they are gone.
+      const mine = spawned.slice(before)
+      record.processCleanup = []
+      for (const handle of mine) {
+        const stop = await handle.terminate({ graceMs: 20_000 })
+          .catch((error) => ({ error: String(error) }))
+        const survivors = []
+        for (const pid of [handle.pid, ...await descendantProcessIds(handle.pid, { since: handle.spawnedAt })]) {
+          if (await processIsAlive(pid)) survivors.push(pid)
+        }
+        record.processCleanup.push({ label: handle.label, pid: handle.pid, stop, survivors })
+      }
+      // And nothing this journey queued may still be claimable when the next one
+      // starts: a leftover row is what a later worker picks up instead of its own.
+      // Journey 3 is the exception it declares itself — the interrupted attempt it
+      // leaves behind is precisely what journey 4 resumes.
+      if (prisma && !record.keepQueue) {
+        record.queueCleanup = await resetProxyRenderQueue(prisma).catch((error) => String(error))
+      }
       record.durationMs ??= Date.now() - startedAt
       evidence.journeys[name] = { ...(evidence.journeys[name] ?? {}), ...record }
     }
@@ -592,7 +643,9 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       what: 'the latched worker claiming nothing',
     })
 
-    const children = await childProcessDetails(worker.pid, { since: worker.spawnedAt })
+    // The whole subtree, not just the direct children: tsx runs the worker in a child
+    // node, so anything the render starts is a grandchild of the PID spawned here.
+    const children = await descendantProcessDetails(worker.pid, { since: worker.spawnedAt })
     const rendering = mediaChildren(children)
     // Both the detail row AND its `outputArtifactId` are written when the
     // LUT-selection route ENQUEUES the render: the id is planned up front. Neither is
@@ -727,11 +780,10 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     }
 
     // The Slice D contract, whichever branch the timing took: the claim either
-    // finished or came back claimable, and never became a permanent failure.
-    // The contract is "succeeded, or retrying with worker_shutdown". Any other status
-    // is a failure of this journey, and the row is what says why: the first Linux run
-    // reported only "retry reason was null", which is what a `failed` row looks like
-    // through an assertion that had already assumed it was retrying.
+    // finished or came back claimable, and never became a permanent failure. Any
+    // other status fails with the row, because the first Linux run reported only
+    // "retry reason was null" — which is what a settled row looks like through an
+    // assertion that had already assumed how it settled.
     const settledSummary = JSON.stringify({
       status: settled.status, phase: settled.phase, attempt: settled.attempt,
       errorCode: settled.errorCode, errorMessage: settled.errorMessage,
@@ -742,16 +794,33 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       `the claimed render settled outside the shutdown contract: ${settledSummary}`,
     )
     if (settled.status === 'retrying') {
-      assert.equal(settled.errorCode, 'worker_shutdown', `retry reason was not a shutdown: ${settledSummary}`)
       assert.equal(settled.leaseOwner, null, `a returned operation holds no lease: ${settledSummary}`)
       assert.equal(settled.deadLetteredAt, null, `a shutdown is not a dead letter: ${settledSummary}`)
+      assert.equal(settled.attempt, atSignal.attempt, `the hand-back consumed an attempt: ${settledSummary}`)
       assert.ok(settled.nextAttemptAt !== null, `a returned operation carries a next attempt: ${settledSummary}`)
-      // Immediately claimable, not an exponential backoff and not a lease window:
-      // Slice D sets nextAttemptAt one millisecond after the settle.
+
+      // `errorCode` is NOT the discriminator, and asserting it here was wrong: the
+      // domain clears the error on a retrying row by design
+      // (`retryOrFailPublicOperation`, public-operation.ts:936 — `error: undefined`),
+      // and the repository writes `errorCode: next.error?.code ?? null`, so
+      // `worker_shutdown` reaches the row only on the terminal attempt. The public
+      // status event and the telemetry event carry no error field at all. What DOES
+      // distinguish a shutdown hand-back from a render failure is the schedule: Slice
+      // D asks for `failedAt + 1 ms`, where `safeFailure` would have taken the
+      // exponential backoff whose base is seconds.
+      const scheduledInMs = settled.nextAttemptAt.getTime() - settled.updatedAt.getTime()
+      record.settled.scheduledInMs = scheduledInMs
+      record.shutdownCodePersisted = false
       assert.ok(
-        settled.nextAttemptAt.getTime() <= Date.now() + 1_000,
-        `nextAttemptAt is ${settled.nextAttemptAt.toISOString()}, further than a second out`,
+        scheduledInMs >= 0 && scheduledInMs <= 250,
+        `nextAttemptAt is ${scheduledInMs}ms after the settle, not the immediate hand-back: ${settledSummary}`,
       )
+      assert.ok(
+        scheduledInMs < RETRY_BASE_DELAY_MS,
+        `nextAttemptAt is ${scheduledInMs}ms out, at or beyond the ${RETRY_BASE_DELAY_MS}ms retry backoff a ` +
+        `render failure would have taken: ${settledSummary}`,
+      )
+      assert.equal(settled.errorCode, null, `a retrying row carries no error by design: ${settledSummary}`)
     }
     assert.equal(other.status, 'queued', `the unclaimed render moved to ${other.status}`)
     assert.equal(other.attempt, 0, 'the unclaimed render was never attempted')
@@ -783,6 +852,8 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     Object.assign(record, {
       kind: 'real worker + real FFmpeg child + real PostgreSQL, CONTROLLED open gate',
       operationId,
+      // The interrupted attempt is this journey's product, and journey 4's subject.
+      keepQueue: true,
     })
     // The worker claims whatever is claimable, so "it claimed the one under test" is
     // only a fact when there is nothing else to claim.
@@ -797,7 +868,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     // ffmpeg" includes other people's.
     const renderChildren = (await pollUntil({
       read: async () => mediaChildren(
-        await childProcessDetails(worker.pid, { since: worker.spawnedAt }),
+        await descendantProcessDetails(worker.pid, { since: worker.spawnedAt }),
       ),
       // An operation that has already settled will never spawn FFmpeg, so waiting the
       // full minute only replaces the render's own error with a stopwatch — which is
@@ -858,10 +929,17 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     assert.notEqual(row.status, 'succeeded', 'an interrupted render must not report success')
     assert.equal(interruptedArtifact, null, 'an interrupted render must not promote an artifact')
     assert.equal(row.status, 'retrying', `the interrupted render is ${row.status}`)
-    assert.equal(row.errorCode, 'worker_shutdown')
     assert.equal(row.leaseOwner, null, 'an interrupted attempt releases its lease')
     assert.equal(row.deadLetteredAt, null)
     assert.equal(row.attempt, 1, 'exactly one attempt was consumed')
+    // Same discriminator as journey 2: the domain clears the error on a retrying row,
+    // so the hand-back is recognised by its immediate schedule, not by a code.
+    const scheduledInMs = row.nextAttemptAt.getTime() - row.updatedAt.getTime()
+    record.scheduledInMs = scheduledInMs
+    assert.ok(
+      scheduledInMs >= 0 && scheduledInMs < RETRY_BASE_DELAY_MS,
+      `the interrupted render is scheduled ${scheduledInMs}ms out, not handed straight back`,
+    )
 
     Object.assign(record, {
       survivingChildren,
