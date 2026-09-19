@@ -623,16 +623,19 @@ export function delay(milliseconds, { unref = false } = {}) {
  * tell a worker that never claimed from a worker that claimed and failed.
  */
 export async function pollUntil({
-  read, until, what, timeoutMs = 60_000, intervalMs = 150, whileAlive,
+  read, until, what, timeoutMs = 60_000, intervalMs = 150, whileAlive, failIf,
 }) {
   const startedAt = Date.now()
   let last
   while (Date.now() - startedAt < timeoutMs) {
     last = await read()
     if (until(last)) return last
-    // A process that has died will never satisfy the condition, and waiting out the
-    // whole timeout only replaces its error message with a stopwatch.
+    // A process that has died, or a state the condition can no longer be reached
+    // from, will never satisfy it — and waiting out the whole timeout only replaces
+    // the real reason with a stopwatch.
     whileAlive?.(`waiting for ${what}`)
+    const reason = await failIf?.(last)
+    if (reason) throw new Error(`stopped waiting for ${what}: ${reason}`)
     await delay(intervalMs)
   }
   throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}; last reading: ${JSON.stringify(last)}`)

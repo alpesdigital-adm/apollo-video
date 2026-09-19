@@ -157,8 +157,8 @@ async function readOperation(prisma, workspaceId, projectId) {
     orderBy: { createdAt: 'desc' },
     select: {
       id: true, status: true, phase: true, attempt: true, maxAttempts: true,
-      leaseOwner: true, leaseExpiresAt: true, errorCode: true, errorRetryable: true,
-      nextAttemptAt: true, deadLetteredAt: true, completedAt: true,
+      leaseOwner: true, leaseExpiresAt: true, errorCode: true, errorMessage: true,
+      errorRetryable: true, nextAttemptAt: true, deadLetteredAt: true, completedAt: true,
     },
   })
   return row
@@ -276,6 +276,44 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
    * Order matters and is the one AGENTS.md fixes: processes first, then the Prisma
    * client, then the cluster — a client still open is what blocks a shutdown.
    */
+  /**
+   * Every spawned process's full output, on disk, whatever the outcome.
+   *
+   * A CI-only failure has to be explainable from the artefacts of the run that
+   * produced it. Runs 1 and 2 were diagnosed by adding instrumentation and paying for
+   * another twenty-five minute round trip each time; the worker's own stderr is what
+   * ended both, so it is written unconditionally rather than only on the path that
+   * happens to raise.
+   */
+  const writeProcessLogs = async () => {
+    const written = []
+    for (const handle of spawned) {
+      const base = `${handle.label.replaceAll(/[^a-z0-9]+/gi, '-')}-${handle.pid}`
+      for (const [stream, body] of [['stdout', handle.stdout()], ['stderr', handle.stderr()]]) {
+        const path = join(evidenceDir, `${base}.${stream}.log`)
+        await writeFile(path, body ?? '')
+        written.push(path)
+      }
+    }
+    return written
+  }
+
+  /** The operation row as it finally stands, for the evidence of every journey. */
+  const finalRow = async (projectId) => {
+    const row = await readOperation(prisma, world.workspaceId, projectId).catch(() => null)
+    if (!row) return null
+    return {
+      id: row.id,
+      status: row.status,
+      phase: row.phase,
+      attempt: row.attempt,
+      errorCode: row.errorCode,
+      errorMessage: row.errorMessage,
+      leaseOwner: row.leaseOwner,
+      nextAttemptAt: row.nextAttemptAt,
+    }
+  }
+
   t.after(async () => {
     const survivors = []
     for (const handle of spawned) {
@@ -286,6 +324,17 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       }
     }
     evidence.postflight.processSurvivors = survivors
+    evidence.postflight.processLogs = await writeProcessLogs().catch((error) => String(error))
+
+    // Swept here rather than inside each journey so a journey that THREW still leaves
+    // the row that explains why — which is the case that costs a CI round trip.
+    if (prisma && world) {
+      evidence.finalOperationRows = {}
+      for (const project of world.projects) {
+        evidence.finalOperationRows[project.slug] = await finalRow(project.projectId)
+          .catch((error) => String(error))
+      }
+    }
 
     if (prisma) {
       const backends = {}
@@ -386,6 +435,28 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     ],
   })
   await step('world:seeded')
+
+  // Under s3 the seeded masters exist only under the local artifact root, and the
+  // worker resolves every source through `S3ArtifactSourceMaterializer` — so without
+  // this the render fails to materialize, settles in a couple of seconds and never
+  // spawns FFmpeg at all. That is exactly what the first Linux run against MinIO did.
+  // The upload is `objectStore.put`, which attaches the `ChecksumSHA256` and
+  // `apollo-sha256` the materializer verifies before it downloads anything; an object
+  // without them is one no worker in this repository can open.
+  if (objectStore) {
+    for (const project of world.projects) {
+      await objectStore.put(project.sourceKey, project.sourcePath)
+    }
+    const stored = await objectStore.keys()
+    for (const project of world.projects) {
+      assert.ok(
+        stored.includes(project.sourceKey),
+        `object storage is missing the seeded master ${project.sourceKey}`,
+      )
+    }
+    evidence.storage.seededSourceKeys = world.projects.map((project) => project.sourceKey)
+    await step(`sources:uploaded count=${world.projects.length}`)
+  }
 
   /** Spawns the real render worker, remembered so the postflight can prove it ended. */
   const startWorker = async ({ caseName, opsStateDir, pollMs = POLL_MS }) => {
@@ -547,6 +618,17 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       what: 'the worker to claim its first proxy render',
       timeoutMs: 60_000,
       whileAlive: (context) => worker.assertStillRunning(context),
+      // A render that failed before this poll ever saw `running` can never satisfy
+      // it; report the row rather than the minute.
+      failIf: (rows) => {
+        const settled = [rows.first, rows.second]
+          .filter((row) => ['failed', 'canceled'].includes(row.status))
+        if (settled.length === 0) return null
+        return settled
+          .map((row) => `${row.id} settled ${row.status}: ${row.errorCode ?? 'no code'} / ` +
+            `${row.errorMessage ?? 'no message'} (attempt ${row.attempt})`)
+          .join('; ')
+      },
     })
     const claimedFirst = claimed.first.status === 'running' ? first : second
     const untouched = claimedFirst === first ? second : first
@@ -558,19 +640,30 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
 
     // The Slice D contract, whichever branch the timing took: the claim either
     // finished or came back claimable, and never became a permanent failure.
+    // The contract is "succeeded, or retrying with worker_shutdown". Any other status
+    // is a failure of this journey, and the row is what says why: the first Linux run
+    // reported only "retry reason was null", which is what a `failed` row looks like
+    // through an assertion that had already assumed it was retrying.
+    const settledSummary = JSON.stringify({
+      status: settled.status, phase: settled.phase, attempt: settled.attempt,
+      errorCode: settled.errorCode, errorMessage: settled.errorMessage,
+      leaseOwner: settled.leaseOwner, nextAttemptAt: settled.nextAttemptAt,
+    })
+    assert.ok(
+      ['succeeded', 'retrying'].includes(settled.status),
+      `the claimed render settled outside the shutdown contract: ${settledSummary}`,
+    )
     if (settled.status === 'retrying') {
-      assert.equal(settled.errorCode, 'worker_shutdown', `retry reason was ${settled.errorCode}`)
-      assert.equal(settled.leaseOwner, null, 'a returned operation holds no lease')
-      assert.equal(settled.deadLetteredAt, null, 'a shutdown is not a dead letter')
-      assert.ok(settled.nextAttemptAt !== null, 'a returned operation carries a next attempt')
+      assert.equal(settled.errorCode, 'worker_shutdown', `retry reason was not a shutdown: ${settledSummary}`)
+      assert.equal(settled.leaseOwner, null, `a returned operation holds no lease: ${settledSummary}`)
+      assert.equal(settled.deadLetteredAt, null, `a shutdown is not a dead letter: ${settledSummary}`)
+      assert.ok(settled.nextAttemptAt !== null, `a returned operation carries a next attempt: ${settledSummary}`)
       // Immediately claimable, not an exponential backoff and not a lease window:
       // Slice D sets nextAttemptAt one millisecond after the settle.
       assert.ok(
         settled.nextAttemptAt.getTime() <= Date.now() + 1_000,
         `nextAttemptAt is ${settled.nextAttemptAt.toISOString()}, further than a second out`,
       )
-    } else {
-      assert.equal(settled.status, 'succeeded', `the claimed render settled ${settled.status}`)
     }
     assert.equal(other.status, 'queued', `the unclaimed render moved to ${other.status}`)
     assert.equal(other.attempt, 0, 'the unclaimed render was never attempted')
@@ -623,6 +716,15 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       read: async () => mediaChildren(
         await childProcessDetails(worker.pid, { since: worker.spawnedAt }),
       ),
+      // An operation that has already settled will never spawn FFmpeg, so waiting the
+      // full minute only replaces the render's own error with a stopwatch — which is
+      // precisely how a materialization failure reported itself as "last reading: []".
+      failIf: async () => {
+        const row = await readOperation(prisma, world.workspaceId, project.projectId)
+        if (!row || ['queued', 'running', 'retrying'].includes(row.status)) return null
+        return `the render settled ${row.status} before any FFmpeg child existed: ` +
+          `${row.errorCode ?? 'no code'} / ${row.errorMessage ?? 'no message'} (attempt ${row.attempt})`
+      },
       // Media children specifically: waiting for "any child" would be satisfied by a
       // console host before FFmpeg had started, and the stop would then arrive before
       // the render it is meant to interrupt.
