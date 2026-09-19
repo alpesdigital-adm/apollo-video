@@ -1162,7 +1162,14 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     const startedAt = Date.now()
     const project = world.bySlug('monitor')
     await resetProxyRenderQueue(prisma)
-    const opsStateDir = await createOpsStateDir(root, 'journey7')
+    // Two directories, because 7a and 7b are two different gate states and one
+    // directory cannot hold both. Sharing one made 7b non-deterministic: the real
+    // monitor's last word was `closed: [sample-missing]`, a closed gate is closed
+    // whatever its age, and so the back-dated OPEN gate 7b writes was never the
+    // reading the worker acted on — `stale-gate` could not appear, and the journey
+    // timed out against its own leftover.
+    const opsStateDir = await createOpsStateDir(root, 'journey7-monitor')
+    const staleStateDir = await createOpsStateDir(root, 'journey7-stale')
 
     // 7a — the REAL monitor, with a controlled /proc tree and a health stub this test
     // owns. What this proves: the monitor runs, publishes a real gate.json with a
@@ -1243,6 +1250,27 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       assert.ok(journalFiles.length > 0, 'the real monitor wrote no journal')
       assert.equal(typeof published.ttlMs, 'number', 'the real monitor published no ttl')
       assert.ok(await processIsAlive(monitor.pid) === false, 'the killed monitor is gone')
+
+      // What 7a can assert on every platform, whatever verdict the fixture /proc
+      // produced: a worker pointed at the dead monitor's directory refuses admission,
+      // and names the reason that monitor published.
+      const afterMonitor = await startWorker({
+        caseName: 'journey7-dead-monitor', opsStateDir,
+      })
+      const refusal = await pollUntil({
+        read: () => gateReasons(afterMonitor),
+        until: (reasons) => reasons.some((entry) => entry.event === 'worker-admission-gate-closed'),
+        what: "the worker to refuse admission on the dead monitor's gate",
+        timeoutMs: 30_000,
+        whileAlive: (context) => afterMonitor.assertStillRunning(context),
+      })
+      monitorEvidence.workerRefusalReasons = refusal
+      monitorEvidence.deadMonitorWorkerExit = await afterMonitor.terminate({ graceMs: 30_000 })
+      assert.ok(
+        refusal.some((entry) => (entry.reason ?? '').includes(afterKill.reasons?.[0] ?? 'gate-closed')),
+        `the worker did not name the monitor's own reason: ${JSON.stringify(refusal)} ` +
+        `against gate ${JSON.stringify(afterKill.reasons)}`,
+      )
     } finally {
       await new Promise((resolve) => health.close(resolve))
     }
@@ -1253,8 +1281,9 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     // The ttl must outlast the worker's own start-up. At 3 s the gate was already
     // stale by the time tsx finished loading, so the worker never claimed and the
     // journey "failed" on a clock, not on the behaviour it exists to measure.
-    await writeGate(opsStateDir, { state: 'open', reasons: [], ttlMs: 60_000, seq: 99, runId })
-    const worker = await startWorker({ caseName: 'journey7-stale-gate', opsStateDir })
+    // Its OWN directory, holding nothing but this gate — see the note above.
+    await writeGate(staleStateDir, { state: 'open', reasons: [], ttlMs: 60_000, seq: 99, runId })
+    const worker = await startWorker({ caseName: 'journey7-stale-gate', opsStateDir: staleStateDir })
 
     const operationId = await enqueueProxyRender({ prisma, world, project, routes })
     await pollUntil({
@@ -1267,7 +1296,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
 
     // The monitor is gone, so nothing refreshes the file: the same open verdict, now
     // older than its own ttl. That is exactly what a worker sees when a monitor dies.
-    await writeGate(opsStateDir, {
+    await writeGate(staleStateDir, {
       state: 'open', reasons: [], ttlMs: 60_000, seq: 99, runId, ageMs: 180_000,
     })
     await pollUntil({
