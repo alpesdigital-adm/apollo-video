@@ -17,6 +17,7 @@ import {
   createOpsStateDir,
   delay,
   descendantProcessIds,
+  encodeInterruptibleMaster,
   holdsAcross,
   mediaChildren,
   migrateRuntimeSafetyCluster,
@@ -40,7 +41,7 @@ import {
   openJourneyObjectStore,
   storedArtifactPath,
 } from './helpers/journey-object-storage.mjs'
-import { encodeSharedProxy, seedEditorReliabilityWorld } from './helpers/editor-reliability-world.mjs'
+import { seedEditorReliabilityWorld } from './helpers/editor-reliability-world.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -63,8 +64,29 @@ const execFileAsync = promisify(execFile)
  * descendants of the PIDs this run spawned — never a scan of the machine.
  */
 const RUN = RUNTIME_SAFETY_ENABLED
-const PROXY_SECONDS = 6
+/**
+ * The master, sized so its proxy render LASTS.
+ *
+ * Run 4 proved the previous fixture — 6 s at 320x180 — was rendered faster than
+ * journey 3 could see an FFmpeg child, and journey 4 found the operation already
+ * `succeeded`: the interruption journeys were interrupting nothing.
+ *
+ * Sized by measurement. Claim to `succeeded` on the development machine: 60 s at
+ * 960x540 took 10.8 s (N=1), and since FFmpeg is only part of that — materializing,
+ * probing, the colour critic and persistence take the rest — the child itself would
+ * have been near or under the ten seconds a stop needs to land inside. 90 s at the
+ * same frame size measured 10.7 s and 19.8 s (N=2), the spread being CPU contention
+ * from a unit run sharing the machine; the slower figure is the honest expectation
+ * for a CI runner with fewer cores.
+ *
+ * Either end of that range is interruptible: journey 3 polls for the child every
+ * 100 ms, so seconds of FFmpeg remain after it is seen. And either end fits journey
+ * 4's 100 s poll and the 120 s per-journey cap.
+ */
+const PROXY_SECONDS = 90
 const PROXY_FPS = 30
+const PROXY_WIDTH = 960
+const PROXY_HEIGHT = 540
 const POLL_MS = 200
 
 const evidence = {
@@ -158,7 +180,8 @@ async function readOperation(prisma, workspaceId, projectId) {
     select: {
       id: true, status: true, phase: true, attempt: true, maxAttempts: true,
       leaseOwner: true, leaseExpiresAt: true, errorCode: true, errorMessage: true,
-      errorRetryable: true, nextAttemptAt: true, deadLetteredAt: true, completedAt: true,
+      errorRetryable: true, nextAttemptAt: true, deadLetteredAt: true,
+      startedAt: true, completedAt: true,
     },
   })
   return row
@@ -311,6 +334,13 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       errorMessage: row.errorMessage,
       leaseOwner: row.leaseOwner,
       nextAttemptAt: row.nextAttemptAt,
+      startedAt: row.startedAt,
+      completedAt: row.completedAt,
+      // How long the product actually took, which is the number that decides whether
+      // this fixture is interruptible at all and whether journey 4 fits its cap.
+      elapsedMs: row.startedAt && row.completedAt
+        ? row.completedAt.getTime() - row.startedAt.getTime()
+        : null,
     }
   }
 
@@ -410,13 +440,23 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
 
   await step('routes:imported')
   const suffix = runId.slice(-8)
-  const master = await encodeSharedProxy({
+  const master = await encodeInterruptibleMaster({
     artifactRoot,
     key: `runtime-safety/${suffix}/source.mp4`,
     seconds: PROXY_SECONDS,
     fps: PROXY_FPS,
+    width: PROXY_WIDTH,
+    height: PROXY_HEIGHT,
   })
-  evidence.master = { key: master.key, seconds: master.seconds, fps: master.fps }
+  evidence.master = {
+    key: master.key,
+    seconds: master.seconds,
+    fps: master.fps,
+    width: master.probe.width,
+    height: master.probe.height,
+    frames: master.probe.decodedFrames,
+    encodeMs: master.encodeMs,
+  }
   await step('master:encoded')
 
   world = await seedEditorReliabilityWorld({
@@ -485,12 +525,41 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     return handle
   }
 
+  /**
+   * Runs a journey and records what it collected, whether or not it threw.
+   *
+   * Journeys 2 and 3 wrote no evidence at all in run 4 because they threw before
+   * their assignment to `evidence.journeys[…]` at the bottom of the body — so the one
+   * artefact that would have named the cause had to be inferred from journey 4's
+   * diagnostic instead. The journey now fills a record it is handed, and this writes
+   * that record plus the error in a `finally`.
+   */
+  const journey = async (name, body) => {
+    const startedAt = Date.now()
+    const record = {}
+    try {
+      await body(record)
+    } catch (error) {
+      record.error = {
+        name: error?.name ?? 'Error',
+        message: error?.message ?? String(error),
+      }
+      throw error
+    } finally {
+      record.durationMs ??= Date.now() - startedAt
+      evidence.journeys[name] = { ...(evidence.journeys[name] ?? {}), ...record }
+    }
+  }
+
+  /** `t.test` body that records through `journey`, so a throw still leaves evidence. */
+  const journeyTest = (name, body) => async () => journey(name, body)
+
   /** The gate reasons a worker logged, in order, one entry per transition. */
   const gateReasons = (handle) => handle.events()
     .filter((entry) => entry.event?.startsWith('worker-admission-gate'))
     .map((entry) => ({ event: entry.event, reason: entry.reason }))
 
-  await t.test('journey 1: a latched gate admits nothing and the worker still stops cleanly', async () => {
+  await t.test('journey 1: a latched gate admits nothing and the worker still stops cleanly', journeyTest('journey1', async (record) => {
     const startedAt = Date.now()
     const project = world.bySlug('gate-closed')
     await resetProxyRenderQueue(prisma)
@@ -572,7 +641,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       assert.equal(exit.signal, 'SIGTERM', `the worker did not end: ${JSON.stringify(exit)}`)
     }
 
-    evidence.journeys.journey1 = {
+    Object.assign(record, {
       kind: 'real worker + real PostgreSQL, CONTROLLED latch fixture',
       operationId,
       polls: readings.length,
@@ -589,12 +658,12 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       durationMs: Date.now() - startedAt,
       exitCodeAsserted: GRACEFUL_SIGNALS_AVAILABLE,
       cleared: await clearQueuedProxyRenders(prisma, world.workspaceId, project.projectId),
-    }
-  })
+    })
+  }))
 
   await t.test('journey 2: SIGTERM between claims settles the first and leaves the second queued', {
     skip: signalJourney,
-  }, async () => {
+  }, journeyTest('journey2', async (record) => {
     const startedAt = Date.now()
     const first = world.bySlug('sigterm-first')
     const second = world.bySlug('sigterm-second')
@@ -605,8 +674,14 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
 
     const firstId = await enqueueProxyRender({ prisma, world, project: first, routes })
     const secondId = await enqueueProxyRender({ prisma, world, project: second, routes })
+    Object.assign(record, {
+      kind: 'real worker + real PostgreSQL, CONTROLLED open gate',
+      firstId,
+      secondId,
+    })
 
     const worker = await startWorker({ caseName: 'journey2-sigterm', opsStateDir })
+    record.workerPid = worker.pid
     // The stop is sent once PostgreSQL itself says a row is running: the only
     // moment at which "between claims" is a fact rather than a hope.
     const claimed = await pollUntil({
@@ -632,11 +707,24 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     })
     const claimedFirst = claimed.first.status === 'running' ? first : second
     const untouched = claimedFirst === first ? second : first
+    record.claimedSlug = claimedFirst.slug
 
+    // The signal goes out the instant the row reads `running`, and what the row said
+    // at that instant is recorded: if the render had already finished, the contract
+    // below still holds but the journey interrupted nothing, and the evidence has to
+    // say which of the two happened rather than leaving it to be inferred.
+    const atSignal = await readOperation(prisma, world.workspaceId, claimedFirst.projectId)
+    record.statusWhenSignalled = atSignal?.status ?? null
+    record.phaseWhenSignalled = atSignal?.phase ?? null
     const exit = await worker.terminate({ graceMs: 45_000 })
 
     const settled = await readOperation(prisma, world.workspaceId, claimedFirst.projectId)
     const other = await readOperation(prisma, world.workspaceId, untouched.projectId)
+    record.settled = {
+      status: settled.status, phase: settled.phase, attempt: settled.attempt,
+      errorCode: settled.errorCode, errorMessage: settled.errorMessage,
+      leaseOwner: settled.leaseOwner, nextAttemptAt: settled.nextAttemptAt,
+    }
 
     // The Slice D contract, whichever branch the timing took: the claim either
     // finished or came back claimable, and never became a permanent failure.
@@ -670,30 +758,21 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     assert.equal(other.leaseOwner, null)
     assert.ok([0, null].includes(exit.code) || exit.signal, `worker exit ${JSON.stringify(exit)}`)
 
-    evidence.journeys.journey2 = {
-      kind: 'real worker + real PostgreSQL, CONTROLLED open gate',
-      firstId,
-      secondId,
-      claimedSlug: claimedFirst.slug,
-      settled: {
-        status: settled.status, attempt: settled.attempt, errorCode: settled.errorCode,
-        leaseOwner: settled.leaseOwner, nextAttemptAt: settled.nextAttemptAt,
-      },
+    Object.assign(record, {
       untouched: { status: other.status, attempt: other.attempt },
       exit,
-      durationMs: Date.now() - startedAt,
-    }
-    // Both rows go, including the one that settled: journey 3 must be the only
-    // claimable render in the database when its worker starts.
-    evidence.journeys.journey2.cleared = [
-      ...await clearQueuedProxyRenders(prisma, world.workspaceId, first.projectId),
-      ...await clearQueuedProxyRenders(prisma, world.workspaceId, second.projectId),
-    ]
-  })
+      // Both rows go, including the one that settled: journey 3 must be the only
+      // claimable render in the database when its worker starts.
+      cleared: [
+        ...await clearQueuedProxyRenders(prisma, world.workspaceId, first.projectId),
+        ...await clearQueuedProxyRenders(prisma, world.workspaceId, second.projectId),
+      ],
+    })
+  }))
 
   await t.test('journey 3: a stop during the render ends the FFmpeg child and promotes nothing', {
     skip: signalJourney,
-  }, async () => {
+  }, journeyTest('journey3', async (record) => {
     const startedAt = Date.now()
     const project = world.bySlug('mid-render')
     await resetProxyRenderQueue(prisma)
@@ -701,6 +780,10 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     await writeGate(opsStateDir, { state: 'open', ttlMs: 60_000, runId })
 
     const operationId = await enqueueProxyRender({ prisma, world, project, routes })
+    Object.assign(record, {
+      kind: 'real worker + real FFmpeg child + real PostgreSQL, CONTROLLED open gate',
+      operationId,
+    })
     // The worker claims whatever is claimable, so "it claimed the one under test" is
     // only a fact when there is nothing else to claim.
     const queue = await claimableProxyRenders(prisma)
@@ -735,7 +818,13 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       intervalMs: 100,
       whileAlive: (context) => worker.assertStillRunning(context),
     })).map((child) => child.pid)
+    record.workerPid = worker.pid
+    record.ffmpegChildPids = renderChildren
+    record.rowWhenSignalled = await readOperation(prisma, world.workspaceId, project.projectId)
+      .then((row) => (row ? { status: row.status, phase: row.phase, attempt: row.attempt } : null))
 
+    // The stop goes out the moment the child is seen, which is the whole point: any
+    // delay here is time the render might use to finish.
     const exit = await worker.terminate({ graceMs: 45_000 })
     await delay(500)
 
@@ -774,28 +863,24 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     assert.equal(row.deadLetteredAt, null)
     assert.equal(row.attempt, 1, 'exactly one attempt was consumed')
 
-    evidence.journeys.journey3 = {
-      kind: 'real worker + real FFmpeg child + real PostgreSQL, CONTROLLED open gate',
-      operationId,
-      workerPid: worker.pid,
-      ffmpegChildPids: renderChildren,
+    Object.assign(record, {
       survivingChildren,
       row: {
-        status: row.status, attempt: row.attempt, errorCode: row.errorCode,
+        status: row.status, phase: row.phase, attempt: row.attempt,
+        errorCode: row.errorCode, errorMessage: row.errorMessage,
         leaseOwner: row.leaseOwner, nextAttemptAt: row.nextAttemptAt,
       },
       plannedOutputArtifactId: interruptedDetail?.outputArtifactId ?? null,
       promotedArtifactRow: interruptedArtifact,
       stagedMp4s: stagedFiles,
       exit,
-      durationMs: Date.now() - startedAt,
-    }
-  })
+    })
+  }))
 
   // Journey 4 resumes what journey 3 interrupted, so it can only run where journey 3 did.
   await t.test('journey 4: an authorised restart resumes the same operation and promotes exactly once', {
     skip: signalJourney,
-  }, async () => {
+  }, journeyTest('journey4', async (record) => {
     const startedAt = Date.now()
     const project = world.bySlug('mid-render')
     const opsStateDir = await createOpsStateDir(root, 'journey4')
@@ -808,12 +893,13 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     // resume path when the resume path had never been reached, which is a false
     // accusation against the product.
     if (before?.status !== 'retrying') {
-      evidence.journeys.journey4 = {
+      Object.assign(record, {
         status: 'not-executed',
         reason: 'journey 3 did not leave an interrupted attempt to resume',
         observedStatus: before?.status ?? null,
         observedErrorCode: before?.errorCode ?? null,
-      }
+        observedErrorMessage: before?.errorMessage ?? null,
+      })
       t.diagnostic(
         `journey 4 not-executed: journey 3 left status ${before?.status ?? 'no row'}, not retrying`,
       )
@@ -821,19 +907,29 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     }
 
     const worker = await startWorker({ caseName: 'journey4-restart', opsStateDir })
-    assert.notEqual(worker.pid, evidence.journeys.journey3.workerPid, 'the restart is a new process')
+    assert.notEqual(worker.pid, evidence.journeys.journey3?.workerPid, 'the restart is a new process')
+    // Measured, because the whole journey has to fit the 120 s cap and this render is
+    // the part that grew when the master did.
+    const renderStartedAt = Date.now()
 
     const finished = await pollUntil({
       read: () => readOperation(prisma, world.workspaceId, project.projectId),
       until: (row) => ['succeeded', 'failed'].includes(row.status),
       what: 'the restarted worker to settle the resumed render',
-      timeoutMs: 90_000,
+      // 19.8 s here; the margin is for a runner several times slower, and the journey
+      // still fits its 120 s cap once the ~7 s spawn and the stop are added.
+      timeoutMs: 100_000,
       intervalMs: 250,
       whileAlive: (context) => worker.assertStillRunning(context),
     })
+    const renderMs = Date.now() - renderStartedAt
+    record.renderMs = renderMs
     const exit = await worker.terminate({ graceMs: 20_000 })
 
-    assert.equal(finished.status, 'succeeded', `the resumed render settled ${finished.status} (${finished.errorCode})`)
+    assert.equal(
+      finished.status, 'succeeded',
+      `the resumed render settled ${finished.status}: ${finished.errorCode} / ${finished.errorMessage}`,
+    )
     assert.equal(finished.attempt, before.attempt + 1, 'the resume consumed exactly one more attempt')
 
     const details = await prisma.v2ProjectProxyRenderOperation.findMany({
@@ -879,18 +975,26 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     assert.equal(manifest.artifactId, details[0].outputArtifactId, 'the manifest names another artifact')
     assert.ok(manifest.manifestHash, 'the promotion recorded a manifest hash')
     assert.ok(video, 'the promoted proxy has no video stream')
+    // Scaled to whatever master this run encoded rather than to a literal, so the
+    // fixture and its expectations cannot drift apart again.
     const duration = Number(video.duration ?? streams[0]?.duration ?? 0)
     assert.ok(
-      duration >= PROXY_SECONDS - 1 && duration <= PROXY_SECONDS + 1,
-      `the proxy runs ${duration}s, not about the master's ${PROXY_SECONDS}s`,
+      duration >= master.seconds - 1 && duration <= master.seconds + 1,
+      `the proxy runs ${duration}s, not about the master's ${master.seconds}s`,
+    )
+    const frames = Number(video.nb_read_frames ?? 0)
+    assert.ok(
+      Math.abs(frames - master.probe.decodedFrames) <= master.fps,
+      `the proxy decoded ${frames} frames, not about the master's ${master.probe.decodedFrames}`,
     )
     assert.ok(audio, "the master carries audio, so the proxy must too")
 
-    evidence.journeys.journey4 = {
+    Object.assign(record, {
       kind: 'real worker restart + real FFmpeg render + ffprobe readback',
       storageDriver: driver,
       workerPid: worker.pid,
-      previousWorkerPid: evidence.journeys.journey3.workerPid,
+      previousWorkerPid: evidence.journeys.journey3?.workerPid ?? null,
+      renderMs,
       attemptBefore: before.attempt,
       attemptAfter: finished.attempt,
       promotions: details.length,
@@ -904,11 +1008,10 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
         audioCodec: audio?.codec_name ?? null,
       },
       exit,
-      durationMs: Date.now() - startedAt,
-    }
-  })
+    })
+  }))
 
-  await t.test('journey 5: a latch outranks a healthy gate until an operator releases it', async () => {
+  await t.test('journey 5: a latch outranks a healthy gate until an operator releases it', journeyTest('journey5', async (record) => {
     const startedAt = Date.now()
     const project = world.bySlug('unauthorised')
     await resetProxyRenderQueue(prisma)
@@ -964,7 +1067,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
     assert.equal(reasons.filter((entry) => entry.event === 'worker-admission-gate-closed').length, 1)
     assert.equal(reasons.filter((entry) => entry.event === 'worker-admission-gate-open').length, 1)
 
-    evidence.journeys.journey5 = {
+    Object.assign(record, {
       kind: 'real worker, CONTROLLED latch + fresh open gate',
       operationId,
       workerPid: worker.pid,
@@ -973,12 +1076,11 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       resumedAttempt: resumed.attempt,
       gateReasons: reasons,
       exit,
-      durationMs: Date.now() - startedAt,
       cleared: await clearQueuedProxyRenders(prisma, world.workspaceId, project.projectId),
-    }
-  })
+    })
+  }))
 
-  await t.test('journey 7: a monitor that stops writing makes the gate stale and closes admission', async () => {
+  await t.test('journey 7: a monitor that stops writing makes the gate stale and closes admission', journeyTest('journey7', async (record) => {
     const startedAt = Date.now()
     const project = world.bySlug('monitor')
     await resetProxyRenderQueue(prisma)
@@ -1124,7 +1226,7 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
       `the worker did not report a stale gate: ${JSON.stringify(reasons)}`,
     )
 
-    evidence.journeys.journey7 = {
+    Object.assign(record, {
       realMonitor: monitorEvidence,
       staleGate: {
         kind: 'real worker + real PostgreSQL, CONTROLLED back-dated gate mtime',
@@ -1136,9 +1238,8 @@ test('Wave 23 runtime safety — worker interruption and resume journeys', {
         gateReasons: reasons,
         exit,
       },
-      durationMs: Date.now() - startedAt,
-    }
-  })
+    })
+  }))
 
   if (!GRACEFUL_SIGNALS_AVAILABLE) {
     for (const name of ['journey2', 'journey3', 'journey4']) {

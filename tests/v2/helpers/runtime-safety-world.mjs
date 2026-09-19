@@ -712,6 +712,83 @@ export async function writeGate(directory, { state, reasons = [], ttlMs = 3_000,
   return path
 }
 
+/**
+ * The master these journeys interrupt: long enough that a stop lands mid-render.
+ *
+ * `encodeSharedProxy` is 3 s at 320x180, and on Linux the product rendered its proxy
+ * so fast that journey 3 never saw an FFmpeg child and journey 4 found the operation
+ * already `succeeded` — the interruption journeys were measuring a render that had
+ * finished before the stop arrived. A render has to LAST to be interruptible, so this
+ * encodes the same shape at a size and duration that take real time to transcode.
+ *
+ * Deliberately a separate encoder rather than a parameter on the shared one: that
+ * helper belongs to the editor-reliability journey, whose 3 s fixture is exactly what
+ * it wants. Same primitives, same colour tagging, same returned shape, so
+ * `seedEditorReliabilityWorld` cannot tell the difference.
+ */
+export async function encodeInterruptibleMaster({ artifactRoot, key, seconds, fps, width, height }) {
+  const helpers = await import('./capture-journey.mjs')
+  const { resolveFfmpegBinary, resolveFfprobeBinaryPath } = await import(
+    '../../../src/v2/infrastructure/media/ffmpeg-binary.ts'
+  )
+  const ffmpegPath = resolveFfmpegBinary()
+  const ffprobePath = resolveFfprobeBinaryPath(undefined, undefined)
+  const outputPath = helpers.artifactPath(artifactRoot, key)
+  const pcmPath = `${outputPath}.pcm`
+  await mkdir(join(outputPath, '..'), { recursive: true })
+  await helpers.writePcm(pcmPath, helpers.sweepSamples({ seconds }))
+
+  const startedAt = Date.now()
+  const encoded = await helpers.encodeRecording({
+    ffmpegPath,
+    outputPath,
+    seconds,
+    fps,
+    pcmPath,
+    // `testsrc` at this size is genuinely expensive to transcode, unlike a still or a
+    // flat colour: the proxy render has to decode and re-encode every frame of it.
+    videoInput: `testsrc=size=${width}x${height}:rate=${fps}`,
+    width,
+    height,
+  })
+  const encodeMs = Date.now() - startedAt
+
+  const streams = await helpers.probeStreams(ffprobePath, outputPath)
+  const video = streams.find((stream) => stream.codec_type === 'video')
+  const audio = streams.find((stream) => stream.codec_type === 'audio')
+  assert.ok(video, 'the encoded master carries no video stream')
+  assert.equal(audio?.codec_name, 'aac', 'the encoded master carries no AAC audio stream')
+  assert.equal(
+    Number(video.nb_read_frames), seconds * fps,
+    `the encoded master has ${video.nb_read_frames} frames, expected ${seconds * fps}`,
+  )
+
+  return {
+    ffmpegPath,
+    ffprobePath,
+    outputPath,
+    key,
+    seconds,
+    fps,
+    encodeMs,
+    sha256: encoded.sha256,
+    byteSize: encoded.byteSize,
+    producerBinaryDigest: await helpers.binaryDigest(ffprobePath),
+    colorMetadata: helpers.colorMetadataFromStream(video),
+    pixelFormat: String(video.pix_fmt),
+    probe: {
+      width: Number(video.width),
+      height: Number(video.height),
+      duration: Number(video.duration ?? seconds),
+      fps,
+      codec: String(video.codec_name),
+      audioCodec: String(audio.codec_name),
+      audioSampleRate: Number(audio.sample_rate),
+      decodedFrames: Number(video.nb_read_frames),
+    },
+  }
+}
+
 export function scratchRoot(runId) {
   // Outside the repository: build tracing must never see a run's logs, and an
   // `.apollo/` log is what a previous wave had to be told twice not to create.
