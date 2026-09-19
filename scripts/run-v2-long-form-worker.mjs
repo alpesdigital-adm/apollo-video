@@ -18,7 +18,14 @@ const { disconnectV2PostgresClient } = prismaClient
 const lifecycle = importedLifecycle.createWorkerShutdown
   ? importedLifecycle
   : importedLifecycle.default
-const { createWorkerShutdown, runWithCleanup } = lifecycle
+const {
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
+  awaitWithShutdownDeadline,
+  createWorkerShutdown,
+  isShutdownDeadlineError,
+  resolveWorkerShutdownGraceMs,
+  runWithCleanup,
+} = lifecycle
 const opsState = importedOpsState.createFileAdmissionGate
   ? importedOpsState
   : importedOpsState.default
@@ -40,6 +47,8 @@ if (
     'APOLLO_V2_LONG_FORM_POLL_MS must be between 100 and 60000ms',
   )
 }
+
+const shutdownGraceMs = resolveWorkerShutdownGraceMs(process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS)
 
 const host = hostname()
   .replace(/[^A-Za-z0-9._:-]/g, '-')
@@ -65,36 +74,48 @@ function waitForPoll() {
   })
 }
 
-await runWithCleanup(
-  async () => {
-    while (!shutdown.stopping()) {
-      try {
-        const admission = await shutdown.admits()
-        if (!admission.admits) {
-          if (!shutdown.stopping()) await waitForPoll()
-          continue
-        }
-        const outcome = await runNext(workerId, shutdown.signal)
-        if (outcome) {
-          console.info(JSON.stringify({
-            operationId: outcome.operationId,
-            workflowId: outcome.workflowId,
-            status: outcome.status,
-          }))
-        } else if (!shutdown.stopping()) {
-          await waitForPoll()
-        }
-      } catch {
-        if (!shutdown.stopping()) {
-          console.error('Long-form worker iteration failed safely')
-          await waitForPoll()
+const guard = (branch, work) => awaitWithShutdownDeadline(work, shutdown, {
+  branch,
+  graceMs: shutdownGraceMs,
+  onDeadline: (event) => console.error(JSON.stringify({ worker: 'long-form', ...event })),
+})
+
+try {
+  await runWithCleanup(
+    async () => {
+      while (!shutdown.stopping()) {
+        try {
+          const admission = await shutdown.admits()
+          if (!admission.admits) {
+            if (!shutdown.stopping()) await waitForPoll()
+            continue
+          }
+          const outcome = await guard('long-form-index', runNext(workerId, shutdown.signal))
+          if (outcome) {
+            console.info(JSON.stringify({
+              operationId: outcome.operationId,
+              workflowId: outcome.workflowId,
+              status: outcome.status,
+            }))
+          } else if (!shutdown.stopping()) {
+            await waitForPoll()
+          }
+        } catch (error) {
+          if (isShutdownDeadlineError(error)) throw error
+          if (!shutdown.stopping()) {
+            console.error('Long-form worker iteration failed safely')
+            await waitForPoll()
+          }
         }
       }
-    }
-  },
-  [
-    { name: 'shutdown-listeners', run: () => shutdown.dispose() },
-    { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
-  ],
-  (event) => console.error(JSON.stringify({ worker: 'long-form', ...event, error: String(event.error) })),
-)
+    },
+    [
+      { name: 'shutdown-listeners', run: () => shutdown.dispose() },
+      { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
+    ],
+    (event) => console.error(JSON.stringify({ worker: 'long-form', ...event, error: String(event.error) })),
+  )
+} catch (error) {
+  if (!isShutdownDeadlineError(error)) throw error
+  process.exit(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE)
+}

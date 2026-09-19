@@ -25,7 +25,14 @@ const {
 const lifecycle = importedLifecycle.createWorkerShutdown
   ? importedLifecycle
   : importedLifecycle.default
-const { createWorkerShutdown, runWithCleanup } = lifecycle
+const {
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
+  awaitWithShutdownDeadline,
+  createWorkerShutdown,
+  isShutdownDeadlineError,
+  resolveWorkerShutdownGraceMs,
+  runWithCleanup,
+} = lifecycle
 const opsState = importedOpsState.createFileAdmissionGate
   ? importedOpsState
   : importedOpsState.default
@@ -73,6 +80,7 @@ const poolId = (process.env.APOLLO_V2_WEBHOOK_POOL_ID ?? 'webhook-delivery').tri
 if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(poolId)) {
   throw new Error('APOLLO_V2_WEBHOOK_POOL_ID is invalid')
 }
+const shutdownGraceMs = resolveWorkerShutdownGraceMs(process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS)
 const host = hostname().replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 40) || 'unknown-host'
 const leaseOwner = `webhook:${host}:${process.pid}:${randomUUID()}`
 const secrets = createConfiguredWebhookSigningSecretProvider(process.env)
@@ -89,8 +97,17 @@ const admits = async () => (await shutdown.admits()).admits
 // this script never had was a Prisma disconnect, so every stop left a backend for
 // the process teardown to reap — and a `docker stop` that times out never gets
 // there.
-await runWithCleanup(
-  () => runCoordinatedWebhookDeliveryWorkerLoop({
+// The delivery HTTP call is the one leaf in this worker that takes no signal, so an
+// outbound request to a slow customer endpoint is exactly what this bounds.
+const guard = (branch, work) => awaitWithShutdownDeadline(work, shutdown, {
+  branch,
+  graceMs: shutdownGraceMs,
+  onDeadline: (event) => console.error(JSON.stringify({ worker: 'webhook', ...event })),
+})
+
+try {
+  await runWithCleanup(
+    () => guard('webhook-delivery', runCoordinatedWebhookDeliveryWorkerLoop({
     claimShard: () => coordinator.claim({ poolId, shardCount, leaseOwner }),
     heartbeatShard: (lease) => coordinator.heartbeat(lease),
     releaseShard: (lease) => coordinator.release(lease),
@@ -113,10 +130,14 @@ await runWithCleanup(
         onIterationError: () => console.error('Webhook worker iteration failed safely'),
         onDiscoveryError: () => console.error('Webhook worker discovery failed safely'),
       }),
-  }),
-  [
-    { name: 'shutdown-listeners', run: () => shutdown.dispose() },
-    { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
-  ],
-  (event) => console.error(JSON.stringify({ worker: 'webhook', ...event, error: String(event.error) })),
-)
+    })),
+    [
+      { name: 'shutdown-listeners', run: () => shutdown.dispose() },
+      { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
+    ],
+    (event) => console.error(JSON.stringify({ worker: 'webhook', ...event, error: String(event.error) })),
+  )
+} catch (error) {
+  if (!isShutdownDeadlineError(error)) throw error
+  process.exit(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE)
+}

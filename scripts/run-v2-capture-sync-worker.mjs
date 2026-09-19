@@ -29,7 +29,14 @@ const { createCaptureSyncWorker, createCaptureSyncRunRepository } = repositoryFa
 const lifecycle = importedLifecycle.createWorkerShutdown
   ? importedLifecycle
   : importedLifecycle.default
-const { createWorkerShutdown, runWithCleanup } = lifecycle
+const {
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
+  awaitWithShutdownDeadline,
+  createWorkerShutdown,
+  isShutdownDeadlineError,
+  resolveWorkerShutdownGraceMs,
+  runWithCleanup,
+} = lifecycle
 const opsState = importedOpsState.createFileAdmissionGate
   ? importedOpsState
   : importedOpsState.default
@@ -47,6 +54,8 @@ if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 100) {
   throw new Error('APOLLO_V2_WORKER_POLL_MS must be an integer of at least 100ms')
 }
 
+const shutdownGraceMs = resolveWorkerShutdownGraceMs(process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS)
+
 const workerId = `capture-sync:${hostname().slice(0, 32)}:${process.pid}:${randomUUID()}`
 const runNext = createCaptureSyncWorker()
 const shutdown = createWorkerShutdown({
@@ -60,6 +69,14 @@ const cleanups = [
 ]
 const onCleanupFailure = (event) =>
   console.error(JSON.stringify({ worker: 'capture-sync', ...event, error: String(event.error) }))
+// The cascade's correlation is one synchronous search and cannot be interrupted, so
+// this is the deadline that stops a decode-plus-correlation pass from outliving the
+// container's own stop timeout.
+const guard = (branch, work) => awaitWithShutdownDeadline(work, shutdown, {
+  branch,
+  graceMs: shutdownGraceMs,
+  onDeadline: (event) => console.error(JSON.stringify({ worker: 'capture-sync', ...event })),
+})
 
 const emptyOutcome = {
   claimed: null,
@@ -79,7 +96,7 @@ if (once) {
       async () => {
         const admission = await shutdown.admits()
         if (!admission.admits) return { refused: admission.reason }
-        const outcome = await runNext(workerId, shutdown.signal)
+        const outcome = await guard('capture-sync', runNext(workerId, shutdown.signal))
         // The worker's own result cannot distinguish a run that was settled with a
         // verdict from one settled as failed — both are `settled: true`. The row can,
         // so the row is read rather than the failure being inferred.
@@ -121,7 +138,7 @@ if (once) {
       failureReason: error instanceof Error ? error.message : String(error),
     })}\n`)
     console.error(error)
-    process.exit(1)
+    process.exit(isShutdownDeadlineError(error) ? WORKER_SHUTDOWN_DEADLINE_EXIT_CODE : 1)
   }
 }
 
@@ -137,7 +154,8 @@ function waitForPoll() {
   })
 }
 
-await runWithCleanup(
+try {
+  await runWithCleanup(
   async () => {
     while (!shutdown.stopping()) {
       try {
@@ -146,7 +164,7 @@ await runWithCleanup(
           if (!shutdown.stopping()) await waitForPoll()
           continue
         }
-        const outcome = await runNext(workerId, shutdown.signal)
+        const outcome = await guard('capture-sync', runNext(workerId, shutdown.signal))
         if (outcome.claimed) {
           console.info(JSON.stringify({
             runId: outcome.runId,
@@ -163,16 +181,21 @@ await runWithCleanup(
         } else if (!shutdown.stopping()) {
           await waitForPoll()
         }
-      } catch {
+      } catch (error) {
         // Same shape as the other drivers: one iteration failing must not take the
         // worker down, because the run it was holding is already back in the queue
         // once its lease expires.
+        if (isShutdownDeadlineError(error)) throw error
         if (shutdown.stopping()) break
         console.error('Capture sync worker iteration failed safely')
         await waitForPoll()
       }
     }
   },
-  cleanups,
-  onCleanupFailure,
-)
+    cleanups,
+    onCleanupFailure,
+  )
+} catch (error) {
+  if (!isShutdownDeadlineError(error)) throw error
+  process.exit(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE)
+}

@@ -11,7 +11,14 @@ const factory = importedFactory.createMusicAnalysisRuntime
 const lifecycle = importedLifecycle.createWorkerShutdown
   ? importedLifecycle
   : importedLifecycle.default;
-const { createWorkerShutdown, runWithCleanup } = lifecycle;
+const {
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
+  awaitWithShutdownDeadline,
+  createWorkerShutdown,
+  isShutdownDeadlineError,
+  resolveWorkerShutdownGraceMs,
+  runWithCleanup,
+} = lifecycle;
 const opsState = importedOpsState.createFileAdmissionGate
   ? importedOpsState
   : importedOpsState.default;
@@ -29,6 +36,9 @@ if (!Number.isSafeInteger(pollMs) || pollMs < 100 || pollMs > 60_000)
   throw new Error(
     "APOLLO_V2_WORKER_POLL_MS must be an integer between 100ms and 60000ms",
   );
+const shutdownGraceMs = resolveWorkerShutdownGraceMs(
+  process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS,
+);
 const workerId = `music-analysis:${hostname().slice(0, 32)}:${process.pid}:${randomUUID()}`;
 const shutdown = createWorkerShutdown({
   process,
@@ -49,12 +59,21 @@ function waitForPoll() {
   });
 }
 
-await runWithCleanup(
+const guard = (branch, work) =>
+  awaitWithShutdownDeadline(work, shutdown, {
+    branch,
+    graceMs: shutdownGraceMs,
+    onDeadline: (event) =>
+      console.error(JSON.stringify({ worker: "music-analysis", ...event })),
+  });
+
+try {
+  await runWithCleanup(
   async () => {
     if (once) {
       const admission = await shutdown.admits();
       const outcome = admission.admits
-        ? await runtime.runNext(workerId, shutdown.signal)
+        ? await guard("music-analysis", runtime.runNext(workerId, shutdown.signal))
         : null;
       process.stdout.write(
         `APOLLO_MUSIC_ANALYSIS_OUTCOME=${JSON.stringify(outcome)}\n`,
@@ -69,7 +88,10 @@ await runWithCleanup(
           if (!shutdown.stopping()) await waitForPoll();
           continue;
         }
-        const outcome = await runtime.runNext(workerId, shutdown.signal);
+        const outcome = await guard(
+          "music-analysis",
+          runtime.runNext(workerId, shutdown.signal),
+        );
         if (outcome)
           console.info(
             JSON.stringify({
@@ -80,6 +102,7 @@ await runWithCleanup(
           );
         else if (!shutdown.stopping()) await waitForPoll();
       } catch (error) {
+        if (isShutdownDeadlineError(error)) throw error;
         if (!shutdown.stopping()) {
           console.error(
             error instanceof Error
@@ -93,13 +116,17 @@ await runWithCleanup(
       }
     }
   },
-  [
-    { name: "shutdown-listeners", run: () => shutdown.dispose() },
-    { name: "runtime-close", run: () => runtime.close() },
-    { name: "prisma-disconnect", run: () => disconnectV2PostgresClient() },
-  ],
-  (event) =>
-    console.error(
-      JSON.stringify({ worker: "music-analysis", ...event, error: String(event.error) }),
-    ),
-);
+    [
+      { name: "shutdown-listeners", run: () => shutdown.dispose() },
+      { name: "runtime-close", run: () => runtime.close() },
+      { name: "prisma-disconnect", run: () => disconnectV2PostgresClient() },
+    ],
+    (event) =>
+      console.error(
+        JSON.stringify({ worker: "music-analysis", ...event, error: String(event.error) }),
+      ),
+  );
+} catch (error) {
+  if (!isShutdownDeadlineError(error)) throw error;
+  process.exit(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE);
+}

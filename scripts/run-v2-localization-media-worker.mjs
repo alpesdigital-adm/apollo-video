@@ -7,7 +7,14 @@ import * as importedPrismaClient from '../src/v2/infrastructure/prisma-postgres/
 
 const factory = importedFactory.createLocalizationMediaRuntime ? importedFactory : importedFactory.default
 const lifecycle = importedLifecycle.createWorkerShutdown ? importedLifecycle : importedLifecycle.default
-const { createWorkerShutdown, runWithCleanup } = lifecycle
+const {
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
+  awaitWithShutdownDeadline,
+  createWorkerShutdown,
+  isShutdownDeadlineError,
+  resolveWorkerShutdownGraceMs,
+  runWithCleanup,
+} = lifecycle
 const opsState = importedOpsState.createFileAdmissionGate ? importedOpsState : importedOpsState.default
 const { createFileAdmissionGate } = opsState
 const prismaClient = importedPrismaClient.disconnectV2PostgresClient
@@ -20,6 +27,7 @@ process.env.APOLLO_PROCESS_ROLE ??= 'localization-media-worker'
 const once = process.argv.includes('--once')
 const pollMs = Number(process.env.APOLLO_V2_WORKER_POLL_MS ?? 1000)
 if (!Number.isSafeInteger(pollMs) || pollMs < 100 || pollMs > 60_000) throw new Error('APOLLO_V2_WORKER_POLL_MS must be between 100 and 60000')
+const shutdownGraceMs = resolveWorkerShutdownGraceMs(process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS)
 const workerId = `localization-media:${hostname().slice(0, 24)}:${process.pid}:${randomUUID()}`
 const shutdown = createWorkerShutdown({
   process,
@@ -40,30 +48,45 @@ function waitForPoll() {
   })
 }
 
-await runWithCleanup(
-  async () => {
-    if (once) {
-      const admission = await shutdown.admits()
-      const outcome = admission.admits ? await runtime.runNext(workerId, shutdown.signal) : null
-      process.stdout.write(`APOLLO_LOCALIZATION_MEDIA_OUTCOME=${JSON.stringify(outcome)}\n`)
-      process.exitCode = outcome?.status === 'failed' || outcome?.status === 'blocked' ? 1 : 0
-      return
-    }
-    while (!shutdown.stopping()) {
-      const admission = await shutdown.admits()
-      if (!admission.admits) {
-        if (!shutdown.stopping()) await waitForPoll()
-        continue
+// This runtime can drive a nested proxy render, so the branch it admits reaches the
+// same FFmpeg work the render worker does and needs the same last-resort bound.
+const guard = (branch, work) => awaitWithShutdownDeadline(work, shutdown, {
+  branch,
+  graceMs: shutdownGraceMs,
+  onDeadline: (event) => console.error(JSON.stringify({ worker: 'localization-media', ...event })),
+})
+
+try {
+  await runWithCleanup(
+    async () => {
+      if (once) {
+        const admission = await shutdown.admits()
+        const outcome = admission.admits
+          ? await guard('localization-media', runtime.runNext(workerId, shutdown.signal))
+          : null
+        process.stdout.write(`APOLLO_LOCALIZATION_MEDIA_OUTCOME=${JSON.stringify(outcome)}\n`)
+        process.exitCode = outcome?.status === 'failed' || outcome?.status === 'blocked' ? 1 : 0
+        return
       }
-      const outcome = await runtime.runNext(workerId, shutdown.signal)
-      if (outcome) console.info(JSON.stringify({ runId: outcome.id, status: outcome.status }))
-      else if (!shutdown.stopping()) await waitForPoll()
-    }
-  },
-  [
-    { name: 'shutdown-listeners', run: () => shutdown.dispose() },
-    { name: 'runtime-close', run: () => runtime.close() },
-    { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
-  ],
-  (event) => console.error(JSON.stringify({ worker: 'localization-media', ...event, error: String(event.error) })),
-)
+      while (!shutdown.stopping()) {
+        const admission = await shutdown.admits()
+        if (!admission.admits) {
+          if (!shutdown.stopping()) await waitForPoll()
+          continue
+        }
+        const outcome = await guard('localization-media', runtime.runNext(workerId, shutdown.signal))
+        if (outcome) console.info(JSON.stringify({ runId: outcome.id, status: outcome.status }))
+        else if (!shutdown.stopping()) await waitForPoll()
+      }
+    },
+    [
+      { name: 'shutdown-listeners', run: () => shutdown.dispose() },
+      { name: 'runtime-close', run: () => runtime.close() },
+      { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
+    ],
+    (event) => console.error(JSON.stringify({ worker: 'localization-media', ...event, error: String(event.error) })),
+  )
+} catch (error) {
+  if (!isShutdownDeadlineError(error)) throw error
+  process.exit(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE)
+}

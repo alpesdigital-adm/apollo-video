@@ -60,6 +60,136 @@ export function immediateNextAttemptAt(failedAt: Date): string {
   return new Date(failedAt.getTime() + 1).toISOString()
 }
 
+/**
+ * How long an admitted branch may keep running after the stop signal.
+ *
+ * Below the 30 s `docker stop` timeout on purpose. A worker that overruns its own
+ * deadline still gets to run its cleanups and say why; a worker that overruns
+ * Docker's is SIGKILLed with its connections open, which is the failure this whole
+ * slice exists to prevent.
+ */
+export const DEFAULT_WORKER_SHUTDOWN_GRACE_MS = 20_000
+const MAXIMUM_WORKER_SHUTDOWN_GRACE_MS = 29_000
+
+/** Exit code for a worker that stopped without its admitted work settling. */
+export const WORKER_SHUTDOWN_DEADLINE_EXIT_CODE = 2
+
+export function resolveWorkerShutdownGraceMs(
+  configured: string | undefined,
+  defaultValue = DEFAULT_WORKER_SHUTDOWN_GRACE_MS,
+): number {
+  if (configured === undefined || configured.trim() === '') return defaultValue
+  const graceMs = Number(configured)
+  if (
+    !Number.isSafeInteger(graceMs) ||
+    graceMs < 100 ||
+    graceMs > MAXIMUM_WORKER_SHUTDOWN_GRACE_MS
+  ) {
+    throw new Error(
+      `APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS must be an integer between 100 and ${MAXIMUM_WORKER_SHUTDOWN_GRACE_MS}ms, below the container stop timeout`,
+    )
+  }
+  return graceMs
+}
+
+export interface ShutdownDeadlineReached extends Error {
+  readonly workerShutdownDeadline: true
+  readonly branch: string
+  readonly graceMs: number
+}
+
+/**
+ * Waits for an admitted branch, but not forever once the worker has been told to stop.
+ *
+ * **This is the only place a worker gives up on work it admitted.** Every other path
+ * in this module hands the operation back deliberately — `retrying` with an immediate
+ * next attempt, or claimed-and-unsettled for a repository with no release. This one
+ * cannot, because it is reached precisely when the branch is not answering: the
+ * director branch has no abortable port at all, and an FFmpeg child that ignores
+ * SIGTERM is not obliged to return.
+ *
+ * So it stops measuring, logs a structured `worker-shutdown-deadline` naming the
+ * branch, and lets the caller run its cleanups and exit 2. The branch's promise is
+ * left dangling on purpose: awaiting it is the thing that just failed. Whatever it
+ * still owns is reaped by the container's `--init` as PID 1, and the operation
+ * recovers the way it always did before this wave — by lease expiry. That is a
+ * worse outcome than a graceful settle and a better one than being SIGKILLed with
+ * open PostgreSQL backends, which is what happened until now.
+ *
+ * The timer starts at the stop signal, not at the call, so a branch admitted one
+ * second before SIGTERM gets the same window as one admitted a minute before.
+ */
+export async function awaitWithShutdownDeadline<T>(
+  work: Promise<T>,
+  shutdown: Readonly<{ signal: AbortSignal; reason: string | null }>,
+  options: {
+    branch: string
+    graceMs?: number
+    onDeadline?: (event: Readonly<{
+      event: 'worker-shutdown-deadline'
+      branch: string
+      graceMs: number
+      reason: string | null
+    }>) => void
+    setTimer?: (callback: () => void, delayMs: number) => { clear(): void }
+  },
+): Promise<T> {
+  const graceMs = options.graceMs ?? DEFAULT_WORKER_SHUTDOWN_GRACE_MS
+  if (!Number.isSafeInteger(graceMs) || graceMs < 0) {
+    throw new Error('awaitWithShutdownDeadline requires a non-negative integer graceMs')
+  }
+  const setTimer = options.setTimer ?? ((callback, delayMs) => {
+    const timer = setTimeout(callback, delayMs)
+    timer.unref?.()
+    return { clear: () => clearTimeout(timer) }
+  })
+
+  let timer: { clear(): void } | undefined
+  let armListener: (() => void) | undefined
+  let settled = false
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      const expire = () => {
+        if (settled) return
+        settled = true
+        const event = Object.freeze({
+          event: 'worker-shutdown-deadline' as const,
+          branch: options.branch,
+          graceMs,
+          reason: shutdown.reason,
+        })
+        options.onDeadline?.(event)
+        const error = new Error(
+          `Worker stopped before ${options.branch} settled: no outcome within ${graceMs}ms of ${shutdown.reason ?? 'the stop signal'}`,
+        ) as Error & { workerShutdownDeadline: true; branch: string; graceMs: number }
+        error.workerShutdownDeadline = true
+        error.branch = options.branch
+        error.graceMs = graceMs
+        reject(error)
+      }
+      const arm = () => { timer = setTimer(expire, graceMs) }
+      if (shutdown.signal.aborted) arm()
+      else {
+        armListener = arm
+        shutdown.signal.addEventListener('abort', arm, { once: true })
+      }
+      work.then(
+        (value) => { if (!settled) { settled = true; resolve(value) } },
+        (error) => { if (!settled) { settled = true; reject(error) } },
+      )
+    })
+  } finally {
+    timer?.clear()
+    if (armListener) shutdown.signal.removeEventListener('abort', armListener)
+  }
+}
+
+export function isShutdownDeadlineError(error: unknown): error is ShutdownDeadlineReached {
+  return Boolean(error) &&
+    typeof error === 'object' &&
+    (error as { workerShutdownDeadline?: unknown }).workerShutdownDeadline === true
+}
+
 export interface AbortSignalLink {
   /** Removes the listener. Idempotent. */
   dispose(): void

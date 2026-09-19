@@ -16,7 +16,14 @@ const {
 const lifecycle = importedLifecycle.createWorkerShutdown
   ? importedLifecycle
   : importedLifecycle.default
-const { createWorkerShutdown, runWithCleanup } = lifecycle
+const {
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
+  awaitWithShutdownDeadline,
+  createWorkerShutdown,
+  isShutdownDeadlineError,
+  resolveWorkerShutdownGraceMs,
+  runWithCleanup,
+} = lifecycle
 const opsState = importedOpsState.createFileAdmissionGate
   ? importedOpsState
   : importedOpsState.default
@@ -32,6 +39,8 @@ if (!['proxy', 'final'].includes(kind)) {
 }
 
 process.env.APOLLO_PROCESS_ROLE ??= `render-worker-once-${kind}`
+
+const shutdownGraceMs = resolveWorkerShutdownGraceMs(process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS)
 
 const workerId = [
   'worker-once',
@@ -59,19 +68,37 @@ const shutdown = createWorkerShutdown({
   log: (event) => console.info(JSON.stringify({ worker: `render-once:${kind}`, ...event })),
 })
 
-const outcome = await runWithCleanup(
-  async () => {
-    const admission = await shutdown.admits()
-    if (!admission.admits) return null
-    return kind === 'proxy'
-      ? await run(workerId, { signal: shutdown.signal })
-      : await run(workerId, shutdown.signal)
-  },
-  [
-    { name: 'shutdown-listeners', run: () => shutdown.dispose() },
-    { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
-  ],
-  (event) => console.error(JSON.stringify({ worker: `render-once:${kind}`, ...event, error: String(event.error) })),
-)
+const guard = (branch, work) => awaitWithShutdownDeadline(work, shutdown, {
+  branch,
+  graceMs: shutdownGraceMs,
+  onDeadline: (event) => console.error(JSON.stringify({ worker: `render-once:${kind}`, ...event })),
+})
+
+let outcome
+try {
+  outcome = await runWithCleanup(
+    async () => {
+      const admission = await shutdown.admits()
+      if (!admission.admits) return null
+      return await guard(
+        kind === 'proxy' ? 'project-proxy-render' : 'project-final-export',
+        kind === 'proxy'
+          ? run(workerId, { signal: shutdown.signal })
+          : run(workerId, shutdown.signal),
+      )
+    },
+    [
+      { name: 'shutdown-listeners', run: () => shutdown.dispose() },
+      { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
+    ],
+    (event) => console.error(JSON.stringify({ worker: `render-once:${kind}`, ...event, error: String(event.error) })),
+  )
+} catch (error) {
+  if (!isShutdownDeadlineError(error)) throw error
+  // The journeys that spawn this read the outcome line, so it is written even here —
+  // null, because the claim genuinely did not settle.
+  process.stdout.write(`APOLLO_WORKER_OUTCOME=${JSON.stringify(null)}\n`)
+  process.exit(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE)
+}
 
 process.stdout.write(`APOLLO_WORKER_OUTCOME=${JSON.stringify(outcome)}\n`)

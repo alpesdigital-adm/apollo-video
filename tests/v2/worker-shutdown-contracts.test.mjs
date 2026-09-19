@@ -46,19 +46,18 @@ const SCRIPTS = fileURLToPath(new URL('../../scripts/', import.meta.url))
  *    graceful shutdown leaves behind: claimable, not dead-lettered, not promoted.
  */
 const ENTRYPOINTS = [
-  { file: 'run-v2-render-worker.mjs', role: 'render-worker', loops: true },
-  { file: 'run-v2-render-worker-once.mjs', role: 'render-worker-once', loops: false },
-  { file: 'run-v2-ingest-worker.mjs', role: 'ingest-worker', loops: true },
-  { file: 'run-v2-capture-sync-worker.mjs', role: 'capture-sync-worker', loops: true },
-  { file: 'run-v2-long-form-worker.mjs', role: 'long-form-worker', loops: true },
-  { file: 'run-v2-provider-worker.mjs', role: 'provider-worker', loops: true },
-  { file: 'run-v2-webhook-worker.mjs', role: 'webhook-worker', loops: true },
-  { file: 'run-v2-music-analysis-worker.mjs', role: 'music-analysis-worker', loops: true },
-  { file: 'run-v2-localization-media-worker.mjs', role: 'localization-media-worker', loops: true },
+  { file: 'run-v2-render-worker.mjs', role: 'render-worker' },
+  { file: 'run-v2-render-worker-once.mjs', role: 'render-worker-once' },
+  { file: 'run-v2-ingest-worker.mjs', role: 'ingest-worker' },
+  { file: 'run-v2-capture-sync-worker.mjs', role: 'capture-sync-worker' },
+  { file: 'run-v2-long-form-worker.mjs', role: 'long-form-worker' },
+  { file: 'run-v2-provider-worker.mjs', role: 'provider-worker' },
+  { file: 'run-v2-webhook-worker.mjs', role: 'webhook-worker' },
+  { file: 'run-v2-music-analysis-worker.mjs', role: 'music-analysis-worker' },
+  { file: 'run-v2-localization-media-worker.mjs', role: 'localization-media-worker' },
   {
     file: 'run-v2-localization-translation-worker.mjs',
     role: 'localization-translation-worker',
-    loops: true,
   },
 ]
 
@@ -158,6 +157,55 @@ test('every worker entrypoint names its PostgreSQL backends before building a cl
     assert.ok(
       source.includes(entrypoint.role),
       `${entrypoint.file} must default its role to ${entrypoint.role}`,
+    )
+  }
+})
+
+test('every worker entrypoint bounds its admitted branch with the shutdown deadline', async () => {
+  for (const entrypoint of ENTRYPOINTS) {
+    const source = await entrypointSource(entrypoint.file)
+    assert.match(
+      source,
+      /resolveWorkerShutdownGraceMs\(\s*process\.env\.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS,?\s*\)/,
+      `${entrypoint.file} must validate its grace window from the env like its poll interval`,
+    )
+    assert.match(
+      source,
+      /awaitWithShutdownDeadline\(work, shutdown, \{/,
+      `${entrypoint.file} must bound the branch it admits with the shared deadline`,
+    )
+    // Every claim goes through the guard: an unguarded one is a branch that can
+    // outlive the container's stop timeout. Called as `await guard(...)` by the
+    // scripts that own their loop and as `() => guard(loop)` by the two whose loop
+    // lives in the application layer, so the call site is what is asserted.
+    assert.ok(
+      (source.match(/[=\s(]guard\(/g) ?? []).length >= 1,
+      `${entrypoint.file} must route its claim through the deadline guard`,
+    )
+    // The deadline must reach the top: a `catch` that swallowed it would keep the loop
+    // polling after the worker had already given up on the branch. Derived from the
+    // source rather than declared, so a script that gains an iteration catch later
+    // gains the obligation with it — the exemptions are the scripts that genuinely
+    // have none (provider and webhook guard their application-layer loop from
+    // outside; localization-media and the one-shot catch nothing per iteration).
+    const catchSites = (source.match(/\}\s*catch\b/g) ?? []).length
+    if (catchSites > 1) {
+      assert.match(
+        source,
+        /if \(isShutdownDeadlineError\(error\)\) throw error/,
+        `${entrypoint.file} must rethrow a deadline instead of treating it as an iteration failure`,
+      )
+    }
+    assert.match(
+      source,
+      /process\.exit\((isShutdownDeadlineError\(error\) \? )?WORKER_SHUTDOWN_DEADLINE_EXIT_CODE/,
+      `${entrypoint.file} must end with the documented last-resort exit code`,
+    )
+    // And the exit must come after the cleanups, never instead of them.
+    const exitIndex = source.indexOf('WORKER_SHUTDOWN_DEADLINE_EXIT_CODE)')
+    assert.ok(
+      source.lastIndexOf('runWithCleanup(') < exitIndex,
+      `${entrypoint.file} must run its cleanups before exiting on a deadline`,
     )
   }
 })
@@ -603,6 +651,22 @@ const captureAt = (second) =>
   new Date(Date.parse('2029-04-01T09:00:00.000Z') + second * 1000).toISOString()
 const captureHash = (n) => String(n).repeat(64).slice(0, 64)
 
+/** The clock a 90 kHz session must have persisted for the worker to proceed. */
+function captureSessionClock() {
+  return createSessionClock({
+    sessionId: 'capture-session-1',
+    timebase: timebaseFromRate(90_000),
+    frameRate: rational(30_000n, 1_001n),
+    authority: {
+      origin: 'primary-camera',
+      sourceId: 'track-camera-main',
+      provenance: 'original-capture',
+      evidenceRef: 'probe-reference-camera',
+    },
+    establishedAt: captureAt(0),
+  })
+}
+
 /** A reference camera and one phone, enough to enter the per-track cascade. */
 function captureSessionWithTwoTracks() {
   const part = (overrides = {}) => ({
@@ -677,20 +741,7 @@ test('capture-sync abandons at the track boundary on shutdown, keeping coverage 
   const worker = runCaptureSyncWorker({
     sessions: {
       async readHead() { return session },
-      async readClock() {
-        return createSessionClock({
-          sessionId: 'capture-session-1',
-          timebase: timebaseFromRate(90_000),
-          frameRate: rational(30_000n, 1_001n),
-          authority: {
-            origin: 'primary-camera',
-            sourceId: 'track-camera-main',
-            provenance: 'original-capture',
-            evidenceRef: 'probe-reference-camera',
-          },
-          establishedAt: captureAt(0),
-        })
-      },
+      async readClock() { return captureSessionClock() },
       async persistCoverage() {
         // The operator stops the worker while the coverage pass is still running,
         // which is before the cascade's first FFmpeg measurement.
@@ -726,6 +777,79 @@ test('capture-sync abandons at the track boundary on shutdown, keeping coverage 
   assert.equal(observed, 0, 'the cascade must not start a measurement it cannot finish')
   // The coverage rows written before the stop are real measurements and are reported.
   assert.equal(outcome.coverageDerived, 2)
+})
+
+test('capture-sync hands its abort to the signal source so the adapter can end its own ffmpeg', async () => {
+  const session = captureSessionWithTwoTracks()
+  const controller = new AbortController()
+  const observed = []
+  const worker = runCaptureSyncWorker({
+    sessions: {
+      async readHead() { return session },
+      // A 90 kHz timebase is a media clock, not a frame duration, so the worker
+      // refuses the run outright unless a persisted clock names the frame rate.
+      async readClock() { return captureSessionClock() },
+      async persistCoverage() { return undefined },
+      async persistSyncEvidence() { return undefined },
+      async persistClockMap() { throw new Error('not reached') },
+    },
+    runs: {
+      async claim() {
+        return {
+          leaseToken: 'capture-sync-lease-token',
+          run: {
+            id: 'capture-sync-run-1',
+            workspaceId: 'workspace-1',
+            sessionId: 'capture-session-1',
+            baseSessionHash: session.sessionHash,
+          },
+        }
+      },
+      async heartbeat() { return true },
+      async settle() { throw new Error('a shutdown must not settle a capture sync run') },
+      async read() { return null },
+    },
+    signals: {
+      async observe(input) {
+        observed.push(input.signal)
+        // The stop arrives while the decode is running, which is where the adapter's
+        // `execFile({ signal })` ends its child by handle and rethrows the abort.
+        controller.abort(new Error('Worker received SIGTERM'))
+        throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
+      },
+    },
+    owner: 'capture-sync:test:3',
+    clock: () => new Date(captureAt(10)),
+  })
+
+  const outcome = await worker(controller.signal)
+  assert.equal(observed.length, 1)
+  assert.equal(observed[0], controller.signal, 'the worker must pass its own signal to the port')
+  // The abort is not settled as a failure: the run stays claimed and unsettled and is
+  // recovered by lease expiry, which is the only route this repository offers.
+  assert.equal(outcome.abandonedBecause, 'worker-shutdown')
+  assert.equal(outcome.settled, false)
+})
+
+test('the audio sync adapter carries the abort into its ffmpeg decode and rethrows it', async () => {
+  const media = fileURLToPath(new URL('../../src/v2/infrastructure/media/', import.meta.url))
+  const source = await readFile(join(media, 'ffmpeg-audio-sync-signal-source.ts'), 'utf8')
+  // Exactly one child process in this adapter, and it must receive the signal.
+  const spawnSites = source.match(/execFileAsync\(/g) ?? []
+  assert.equal(spawnSites.length, 1, 'a new child process here needs the signal too')
+  assert.match(
+    source,
+    /timeout: AUDIO_SYNC_SIGNAL_DEFAULTS\.decodeTimeoutMs,\s*\/\/[\s\S]*?\.\.\.\(signal \? \{ signal \} : \{\}\),/,
+    'the decode must pass the abort signal to execFile',
+  )
+  // And a cancelled decode must not be reclassified as "this session has no audio",
+  // which is the misreading that would file a verdict about a deploy.
+  assert.match(source, /if \(signal\?\.aborted\) throw error/)
+  assert.ok(
+    source.indexOf('if (signal?.aborted) throw error') <
+      source.indexOf('does not contain any stream'),
+    'the abort check must come before the no-audio-stream classification',
+  )
 })
 
 test('capture-sync refuses a claim on shutdown', async () => {

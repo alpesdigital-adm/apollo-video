@@ -4,10 +4,15 @@ import { EventEmitter } from 'node:events'
 import { spawn } from 'node:child_process'
 
 import {
+  DEFAULT_WORKER_SHUTDOWN_GRACE_MS,
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
   WORKER_SHUTDOWN_ERROR_CODE,
+  awaitWithShutdownDeadline,
   createWorkerShutdown,
   immediateNextAttemptAt,
+  isShutdownDeadlineError,
   linkAbortSignal,
+  resolveWorkerShutdownGraceMs,
   runWithCleanup,
   terminateChild,
   workerShutdownFailure,
@@ -259,6 +264,159 @@ test('runWithCleanup returns the primary result and reports cleanup-only failure
       return true
     },
   )
+})
+
+/** A timer under the test's control, so a 20 s deadline costs no wall-clock time. */
+function fakeTimer() {
+  const scheduled = []
+  return {
+    scheduled,
+    setTimer: (callback, delayMs) => {
+      const entry = { callback, delayMs, cleared: false }
+      scheduled.push(entry)
+      return { clear: () => { entry.cleared = true } }
+    },
+    fire: (index = 0) => scheduled[index].callback(),
+  }
+}
+
+test('the deadline only starts at the stop signal, not when the branch was admitted', async () => {
+  const controller = new AbortController()
+  const timer = fakeTimer()
+  let resolveWork
+  const work = new Promise((resolve) => { resolveWork = resolve })
+  const pending = awaitWithShutdownDeadline(
+    work,
+    { signal: controller.signal, reason: null },
+    { branch: 'project-director', graceMs: 20_000, setTimer: timer.setTimer },
+  )
+  // Nothing armed: the worker has not been told to stop, so a long branch is simply
+  // a long branch and must not be cut off.
+  assert.equal(timer.scheduled.length, 0)
+  controller.abort(new Error('Worker received SIGTERM'))
+  assert.equal(timer.scheduled.length, 1)
+  assert.equal(timer.scheduled[0].delayMs, 20_000)
+  resolveWork('settled in time')
+  assert.equal(await pending, 'settled in time')
+  assert.equal(timer.scheduled[0].cleared, true, 'a settled branch must disarm its deadline')
+})
+
+test('a branch that never settles after the stop signal reaches the deadline and names itself', async () => {
+  const controller = new AbortController()
+  const timer = fakeTimer()
+  const deadlines = []
+  // The case this exists for: the director branch has no abortable port, so this
+  // promise is one that genuinely cannot be made to settle.
+  const never = new Promise(() => {})
+  const pending = awaitWithShutdownDeadline(
+    never,
+    { signal: controller.signal, reason: 'SIGTERM' },
+    {
+      branch: 'project-director',
+      graceMs: 20_000,
+      onDeadline: (event) => deadlines.push(event),
+      setTimer: timer.setTimer,
+    },
+  )
+  controller.abort(new Error('Worker received SIGTERM'))
+  timer.fire()
+
+  const error = await pending.then(() => null, (thrown) => thrown)
+  assert.equal(isShutdownDeadlineError(error), true)
+  assert.equal(error.branch, 'project-director')
+  assert.equal(error.graceMs, 20_000)
+  assert.match(error.message, /no outcome within 20000ms of SIGTERM/)
+  assert.deepEqual(deadlines, [{
+    event: 'worker-shutdown-deadline',
+    branch: 'project-director',
+    graceMs: 20_000,
+    reason: 'SIGTERM',
+  }])
+})
+
+test('a branch admitted after the stop signal is bounded from the first moment', async () => {
+  const controller = new AbortController()
+  controller.abort(new Error('Worker received SIGINT'))
+  const timer = fakeTimer()
+  const pending = awaitWithShutdownDeadline(
+    new Promise(() => {}),
+    { signal: controller.signal, reason: 'SIGINT' },
+    { branch: 'artifact-render', graceMs: 5_000, setTimer: timer.setTimer },
+  )
+  assert.equal(timer.scheduled.length, 1, 'an already-aborted signal arms immediately')
+  timer.fire()
+  const error = await pending.then(() => null, (thrown) => thrown)
+  assert.equal(isShutdownDeadlineError(error), true)
+})
+
+test('a branch that fails on its own surfaces its own error, not the deadline', async () => {
+  const controller = new AbortController()
+  const timer = fakeTimer()
+  const own = new Error('ffmpeg exited 1')
+  const pending = awaitWithShutdownDeadline(
+    Promise.reject(own),
+    { signal: controller.signal, reason: null },
+    { branch: 'project-proxy-render', graceMs: 20_000, setTimer: timer.setTimer },
+  )
+  const error = await pending.then(() => null, (thrown) => thrown)
+  assert.equal(error, own)
+  assert.equal(isShutdownDeadlineError(error), false)
+})
+
+test('the deadline never fires for work that settled before the signal arrived', async () => {
+  const controller = new AbortController()
+  const timer = fakeTimer()
+  assert.equal(
+    await awaitWithShutdownDeadline(
+      Promise.resolve('done'),
+      { signal: controller.signal, reason: null },
+      { branch: 'source-cleanup', graceMs: 20_000, setTimer: timer.setTimer },
+    ),
+    'done',
+  )
+  controller.abort()
+  // The listener was removed in `finally`, so a later abort arms nothing at all.
+  assert.equal(timer.scheduled.length, 0)
+})
+
+test('awaitWithShutdownDeadline refuses a negative or fractional grace window', async () => {
+  const controller = new AbortController()
+  for (const graceMs of [-1, 1.5]) {
+    await assert.rejects(
+      () => awaitWithShutdownDeadline(
+        Promise.resolve(1),
+        { signal: controller.signal, reason: null },
+        { branch: 'x', graceMs },
+      ),
+      /non-negative integer graceMs/,
+    )
+  }
+})
+
+test('the grace window is validated like the poll interval and stays under the container stop timeout', () => {
+  assert.equal(resolveWorkerShutdownGraceMs(undefined), DEFAULT_WORKER_SHUTDOWN_GRACE_MS)
+  assert.equal(resolveWorkerShutdownGraceMs(''), DEFAULT_WORKER_SHUTDOWN_GRACE_MS)
+  assert.equal(DEFAULT_WORKER_SHUTDOWN_GRACE_MS, 20_000)
+  assert.equal(DEFAULT_WORKER_SHUTDOWN_GRACE_MS < 30_000, true)
+  assert.equal(resolveWorkerShutdownGraceMs('100'), 100)
+  assert.equal(resolveWorkerShutdownGraceMs('29000'), 29_000)
+  // 30 s is `docker stop`'s own timeout: a worker deadline at or above it would be
+  // SIGKILLed before it ever got to run its cleanups.
+  for (const invalid of ['30000', '99', '0', '-1', '1.5', 'soon', '29001']) {
+    assert.throws(
+      () => resolveWorkerShutdownGraceMs(invalid),
+      /between 100 and 29000ms, below the container stop timeout/,
+      `${invalid} must be refused`,
+    )
+  }
+})
+
+test('the deadline exit code is the documented last-resort code', () => {
+  assert.equal(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE, 2)
+  assert.equal(isShutdownDeadlineError(new Error('plain')), false)
+  assert.equal(isShutdownDeadlineError(null), false)
+  assert.equal(isShutdownDeadlineError(undefined), false)
+  assert.equal(isShutdownDeadlineError('string'), false)
 })
 
 test('the shutdown failure is retryable and its next attempt is the earliest the domain accepts', () => {

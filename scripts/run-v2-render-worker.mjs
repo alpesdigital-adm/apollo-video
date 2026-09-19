@@ -19,7 +19,14 @@ const {
 const lifecycle = importedLifecycle.createWorkerShutdown
   ? importedLifecycle
   : importedLifecycle.default
-const { createWorkerShutdown, runWithCleanup } = lifecycle
+const {
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
+  awaitWithShutdownDeadline,
+  createWorkerShutdown,
+  isShutdownDeadlineError,
+  resolveWorkerShutdownGraceMs,
+  runWithCleanup,
+} = lifecycle
 const opsState = importedOpsState.createFileAdmissionGate
   ? importedOpsState
   : importedOpsState.default
@@ -38,6 +45,7 @@ const pollIntervalMs = Number(process.env.APOLLO_V2_WORKER_POLL_MS ?? 1_000)
 if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 100) {
   throw new Error('APOLLO_V2_WORKER_POLL_MS must be an integer of at least 100ms')
 }
+const shutdownGraceMs = resolveWorkerShutdownGraceMs(process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS)
 
 const workerId = `worker:${hostname().slice(0, 40)}:${process.pid}:${randomUUID()}`
 const runNextProjectProxy = createProjectProxyRenderWorker()
@@ -85,31 +93,49 @@ const branches = [
   { name: 'artifact-render', run: (signal) => runNext(workerId, signal) },
 ]
 
-await runWithCleanup(
-  async () => {
-    while (!shutdown.stopping()) {
-      try {
-        let outcome = null
-        for (const branch of branches) {
-          const admission = await shutdown.admits()
-          if (!admission.admits) {
-            outcome = null
-            break
+// The director branch is why this exists: it has no port that takes a signal, so a
+// stop cannot reach it at all once it is running. The deadline is the last resort
+// after that — never instead of the graceful settle every other branch gets.
+const guard = (branch, work) => awaitWithShutdownDeadline(work, shutdown, {
+  branch,
+  graceMs: shutdownGraceMs,
+  onDeadline: (event) => console.error(JSON.stringify({ worker: 'render', ...event })),
+})
+
+try {
+  await runWithCleanup(
+    async () => {
+      while (!shutdown.stopping()) {
+        try {
+          let outcome = null
+          for (const branch of branches) {
+            const admission = await shutdown.admits()
+            if (!admission.admits) {
+              outcome = null
+              break
+            }
+            outcome = await guard(branch.name, branch.run(shutdown.signal))
+            if (outcome) break
           }
-          outcome = await branch.run(shutdown.signal)
-          if (outcome) break
+          if (!outcome && !shutdown.stopping()) await waitForPoll()
+        } catch (error) {
+          if (isShutdownDeadlineError(error)) throw error
+          if (shutdown.stopping()) break
+          console.error('Render worker iteration failed safely')
+          await waitForPoll()
         }
-        if (!outcome && !shutdown.stopping()) await waitForPoll()
-      } catch {
-        if (shutdown.stopping()) break
-        console.error('Render worker iteration failed safely')
-        await waitForPoll()
       }
-    }
-  },
-  [
-    { name: 'shutdown-listeners', run: () => shutdown.dispose() },
-    { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
-  ],
-  (event) => console.error(JSON.stringify({ worker: 'render', ...event, error: String(event.error) })),
-)
+    },
+    [
+      { name: 'shutdown-listeners', run: () => shutdown.dispose() },
+      { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
+    ],
+    (event) => console.error(JSON.stringify({ worker: 'render', ...event, error: String(event.error) })),
+  )
+} catch (error) {
+  if (!isShutdownDeadlineError(error)) throw error
+  // `process.exit`, not `process.exitCode`: the branch that overran is still holding
+  // the event loop, which is exactly why the deadline fired. The cleanups above have
+  // already run, so the connections are closed before this returns.
+  process.exit(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE)
+}
