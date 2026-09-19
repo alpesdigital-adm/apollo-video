@@ -71,7 +71,7 @@ Sequence of `deploy`: lock → no latch → image present (id/digests journaled;
 
 Every continuous entrypoint (`scripts/run-v2-*-worker.mjs`) and the one-shot render entrypoint use `createWorkerShutdown` (SIGINT/SIGTERM → one AbortController), check `admits()` before every claim (and before each of the render chain's five branches), pass the signal into `runNext`, bound the admitted branch with `awaitWithShutdownDeadline` (`APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS`, default 20 000 ms, must stay below the 30 s container stop timeout; on expiry: `worker-shutdown-deadline` event, cleanups, exit code 2), and end with `runWithCleanup` (listeners disposed, Prisma disconnected, cleanup failures recorded next to the primary error). PostgreSQL backends are named `apollo-video-<APOLLO_PROCESS_ROLE>` unless the URL already declares an `application_name`.
 
-Persisted outcome of a graceful shutdown of a PublicOperation attempt: `retrying`, `error.code = worker_shutdown`, `retryable = true`, `nextAttemptAt = failedAt + 1 ms`, lease cleared — claimable immediately by another worker. Final attempt: `failed`/dead-lettered as lease expiry would; manual retry recovers. Provider jobs: `submitting` is never resubmitted.
+Persisted outcome of a graceful shutdown of a PublicOperation attempt: `retrying`, lease cleared, `nextAttemptAt = failedAt + 1 ms` (no backoff) and **no error on the row** — the domain clears `error` on `retrying`, so the `worker_shutdown` code the worker reports is not visible there; it is persisted only when the final attempt dead-letters (`failed`, `error.code = worker_shutdown`), as lease expiry would have done; manual retry recovers. Provider jobs: `submitting` is never resubmitted.
 
 ## 6. What is covered and what is not
 
