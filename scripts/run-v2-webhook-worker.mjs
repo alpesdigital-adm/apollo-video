@@ -3,6 +3,9 @@ import { hostname } from 'node:os'
 
 import * as importedWebhookWorker from '../src/v2/application/run-webhook-delivery-worker.ts'
 import * as importedRepositoryFactory from '../src/v2/infrastructure/repository-factory.ts'
+import * as importedLifecycle from '../src/v2/application/worker-lifecycle.ts'
+import * as importedOpsState from '../src/v2/infrastructure/ops-state/file-admission-gate.ts'
+import * as importedPrismaClient from '../src/v2/infrastructure/prisma-postgres/client.ts'
 
 const webhookWorker = importedWebhookWorker.runCoordinatedWebhookDeliveryWorkerLoop
   ? importedWebhookWorker
@@ -19,6 +22,20 @@ const {
   createWebhookDeliveryScheduler,
   createWebhookWorkerShardCoordinator,
 } = repositoryFactory
+const lifecycle = importedLifecycle.createWorkerShutdown
+  ? importedLifecycle
+  : importedLifecycle.default
+const { createWorkerShutdown, runWithCleanup } = lifecycle
+const opsState = importedOpsState.createFileAdmissionGate
+  ? importedOpsState
+  : importedOpsState.default
+const { createFileAdmissionGate } = opsState
+const prismaClient = importedPrismaClient.disconnectV2PostgresClient
+  ? importedPrismaClient
+  : importedPrismaClient.default
+const { disconnectV2PostgresClient } = prismaClient
+
+process.env.APOLLO_PROCESS_ROLE ??= 'webhook-worker'
 
 function configuredInteger(name, defaultValue, minimum, maximum) {
   const value = Number(process.env[name] ?? defaultValue)
@@ -61,30 +78,45 @@ const leaseOwner = `webhook:${host}:${process.pid}:${randomUUID()}`
 const secrets = createConfiguredWebhookSigningSecretProvider(process.env)
 const scheduler = createWebhookDeliveryScheduler(secrets, process.env)
 const coordinator = createWebhookWorkerShardCoordinator(process.env)
-const controller = new AbortController()
-
-process.once('SIGINT', () => controller.abort())
-process.once('SIGTERM', () => controller.abort())
-
-await runCoordinatedWebhookDeliveryWorkerLoop({
-  claimShard: () => coordinator.claim({ poolId, shardCount, leaseOwner }),
-  heartbeatShard: (lease) => coordinator.heartbeat(lease),
-  releaseShard: (lease) => coordinator.release(lease),
-  signal: controller.signal,
-  heartbeatIntervalMs: shardHeartbeatMs,
-  retryIntervalMs: coordinationRetryMs,
-  onCoordinationError: () => console.error('Webhook worker coordination failed safely'),
-  runAssignedShard: ({ shardIndex, shardCount: assignedShardCount, signal }) =>
-    runDiscoveredWebhookDeliveryWorkerLoop({
-      discover: scheduler.discover,
-      runNext: scheduler.runNext,
-      shardIndex,
-      shardCount: assignedShardCount,
-      scanLimit,
-      pollIntervalMs,
-      leaseOwner,
-      signal,
-      onIterationError: () => console.error('Webhook worker iteration failed safely'),
-      onDiscoveryError: () => console.error('Webhook worker discovery failed safely'),
-    }),
+const shutdown = createWorkerShutdown({
+  process,
+  gate: createFileAdmissionGate(),
+  log: (event) => console.info(JSON.stringify({ worker: 'webhook', ...event })),
 })
+const admits = async () => (await shutdown.admits()).admits
+
+// The coordinated loop already releases its shard lease in its own `finally`; what
+// this script never had was a Prisma disconnect, so every stop left a backend for
+// the process teardown to reap — and a `docker stop` that times out never gets
+// there.
+await runWithCleanup(
+  () => runCoordinatedWebhookDeliveryWorkerLoop({
+    claimShard: () => coordinator.claim({ poolId, shardCount, leaseOwner }),
+    heartbeatShard: (lease) => coordinator.heartbeat(lease),
+    releaseShard: (lease) => coordinator.release(lease),
+    signal: shutdown.signal,
+    heartbeatIntervalMs: shardHeartbeatMs,
+    retryIntervalMs: coordinationRetryMs,
+    admits,
+    onCoordinationError: () => console.error('Webhook worker coordination failed safely'),
+    runAssignedShard: ({ shardIndex, shardCount: assignedShardCount, signal }) =>
+      runDiscoveredWebhookDeliveryWorkerLoop({
+        discover: scheduler.discover,
+        runNext: scheduler.runNext,
+        shardIndex,
+        shardCount: assignedShardCount,
+        scanLimit,
+        pollIntervalMs,
+        leaseOwner,
+        signal,
+        admits,
+        onIterationError: () => console.error('Webhook worker iteration failed safely'),
+        onDiscoveryError: () => console.error('Webhook worker discovery failed safely'),
+      }),
+  }),
+  [
+    { name: 'shutdown-listeners', run: () => shutdown.dispose() },
+    { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
+  ],
+  (event) => console.error(JSON.stringify({ worker: 'webhook', ...event, error: String(event.error) })),
+)

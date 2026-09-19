@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 
 import * as importedRepositoryFactory from '../src/v2/infrastructure/repository-factory.ts'
+import * as importedLifecycle from '../src/v2/application/worker-lifecycle.ts'
+import * as importedOpsState from '../src/v2/infrastructure/ops-state/file-admission-gate.ts'
+import * as importedPrismaClient from '../src/v2/infrastructure/prisma-postgres/client.ts'
 
 const repositoryFactory = importedRepositoryFactory.createProjectProxyRenderWorker
   ? importedRepositoryFactory
@@ -10,11 +13,25 @@ const {
   createProjectFinalExportWorker,
   createProjectProxyRenderWorker,
 } = repositoryFactory
+const lifecycle = importedLifecycle.createWorkerShutdown
+  ? importedLifecycle
+  : importedLifecycle.default
+const { createWorkerShutdown, runWithCleanup } = lifecycle
+const opsState = importedOpsState.createFileAdmissionGate
+  ? importedOpsState
+  : importedOpsState.default
+const { createFileAdmissionGate } = opsState
+const prismaClient = importedPrismaClient.disconnectV2PostgresClient
+  ? importedPrismaClient
+  : importedPrismaClient.default
+const { disconnectV2PostgresClient } = prismaClient
 
 const kind = process.env.APOLLO_V2_WORKER_ONCE_KIND?.trim()
 if (!['proxy', 'final'].includes(kind)) {
   throw new Error('APOLLO_V2_WORKER_ONCE_KIND must be proxy or final')
 }
+
+process.env.APOLLO_PROCESS_ROLE ??= `render-worker-once-${kind}`
 
 const workerId = [
   'worker-once',
@@ -26,6 +43,35 @@ const workerId = [
 const run = kind === 'proxy'
   ? createProjectProxyRenderWorker()
   : createProjectFinalExportWorker()
-const outcome = await run(workerId)
+
+/**
+ * One claim and exit — but the guarantees are the loop's, not the loop's alone.
+ *
+ * This entrypoint is spawned as a child by three E2E journeys, which means it is
+ * on the receiving end of the same SIGTERM the harness sends when a journey times
+ * out or is interrupted. Before Wave 23 it had no signal handler and no Prisma
+ * disconnect at all, so an interrupted journey left a backend behind — the exact
+ * shape of the 29 July 2026 orphan-connection incident.
+ */
+const shutdown = createWorkerShutdown({
+  process,
+  gate: createFileAdmissionGate(),
+  log: (event) => console.info(JSON.stringify({ worker: `render-once:${kind}`, ...event })),
+})
+
+const outcome = await runWithCleanup(
+  async () => {
+    const admission = await shutdown.admits()
+    if (!admission.admits) return null
+    return kind === 'proxy'
+      ? await run(workerId, { signal: shutdown.signal })
+      : await run(workerId, shutdown.signal)
+  },
+  [
+    { name: 'shutdown-listeners', run: () => shutdown.dispose() },
+    { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
+  ],
+  (event) => console.error(JSON.stringify({ worker: `render-once:${kind}`, ...event, error: String(event.error) })),
+)
 
 process.stdout.write(`APOLLO_WORKER_OUTCOME=${JSON.stringify(outcome)}\n`)
