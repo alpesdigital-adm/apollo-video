@@ -244,7 +244,10 @@ export function runDeployFunction(world, snippet, overrides = {}) {
     `. '${join(repositoryRoot, 'infra/deploy/lib/ops.sh')}'`,
     'APOLLO_JOURNAL_ENABLED="${APOLLO_JOURNAL_ENABLED:-0}"',
     `APOLLO_RUN_ID='${world.runId}'`,
-    "APOLLO_ADOPT_UNLABELLED=''",
+    // Honour an override instead of clearing it: the adopt flag is a global that the
+    // main script's argument parser sets, and a preamble that hardcoded it empty made
+    // the "adoption succeeds" leg silently take the blocked path (CI run 35453455143).
+    'APOLLO_ADOPT_UNLABELLED="${APOLLO_ADOPT_UNLABELLED:-}"',
     'APOLLO_ROLES=(app render-worker)',
     'apollo_state_paths',
     'apollo_container_for_role() { case "$1" in app) printf apollo-video ;; *) printf "apollo-video-%s" "$1" ;; esac; }',

@@ -238,6 +238,18 @@ test('production deploy gates every mutation behind lock, budget, monitor and pr
 
   // The run's own monitor may be stopped, but "stopped" is confirmed like every other
   // stop: a monitor left running keeps publishing a gate for a run that is over.
+  // The monitor is the only container that mounts the state directory writable, and it
+  // runs as uid 1000; it is granted exactly that, under the lock, immediately before it
+  // starts — and the grant keeps the sticky bit so the container cannot unlink the latch
+  // or the lock that exist to stop it.
+  assert.match(ops, /apollo_state_grant_monitor_access[\s\S]*?docker run -d/)
+  assert.match(state, /chown "root:\$\{APOLLO_RUNTIME_GID\}"/)
+  assert.match(state, /chmod 1770/)
+  const prepareBody = state.slice(state.indexOf('apollo_state_prepare() {'))
+  assert.ok(
+    !prepareBody.slice(0, prepareBody.indexOf('\n}')).includes('apollo_state_grant_monitor_access'),
+    'latch release and gate open prepare the directory but must not touch its permissions',
+  )
   assert.match(ops, /monitor-stop-inconclusive/)
   assert.match(ops, /monitor-remove-inconclusive/)
   assert.match(ops, /apollo_monitor_stop\(\)[\s\S]*?\[\[ "\$\{status\}" != 'exited' && "\$\{status\}" != 'dead' \]\]/)

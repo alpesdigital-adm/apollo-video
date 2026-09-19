@@ -14,6 +14,10 @@
 # PostgreSQL.
 
 APOLLO_LOCK_ORPHAN_AFTER_MS=600000
+# The `node` user of the runtime image: the uid every Apollo container runs as, and the
+# only non-root identity that is ever given write access to this directory.
+APOLLO_RUNTIME_UID=1000
+APOLLO_RUNTIME_GID=1000
 
 apollo_state_paths() {
   APOLLO_LOCK_DIR="${APOLLO_OPS_STATE_DIR}/lock"
@@ -30,6 +34,39 @@ apollo_state_prepare() {
     return 1
   }
   mkdir -p "${APOLLO_JOURNAL_DIR}"
+}
+
+# Lets the monitor write what it owns, and nothing else.
+#
+# The monitor is the only container that mounts this directory writable — it publishes
+# gate.json and appends its own journal — and it runs as the image's `node` user, uid
+# 1000. The directory belongs to whoever created it on the host (root on the VPS), so
+# without this the monitor cannot write at all: the first real run died with EACCES on
+# its own journal, in CI and on production alike.
+#
+# The obvious fix, handing uid 1000 the directory, would also hand it `latch.json` and
+# `lock/`: write permission on a directory is permission to unlink its entries, so the
+# monitor container could clear the incident latch that exists to stop it. Instead the
+# state directory and `journal/` are made group-writable for gid 1000 AND sticky, so
+# uid 1000 may create and replace its OWN entries (gate.json, <run>.monitor.ndjson) and
+# may not unlink or rename root's (latch.json, lock/, the operation journal). Every
+# contract path stays exactly where the contract puts it.
+apollo_state_grant_monitor_access() {
+  local target
+  for target in "${APOLLO_OPS_STATE_DIR}" "${APOLLO_JOURNAL_DIR}"; do
+    if [[ "${APOLLO_DEPLOY_SKIP_CHOWN:-0}" == '1' ]]; then
+      # Test seam (refused on shared-production): the suite's throwaway directory is not
+      # owned by root and there is no gid 1000 to grant, so the sticky bit is kept and
+      # the write bit is widened. Never the shape a real host gets.
+      chmod 1777 "${target}"
+      continue
+    fi
+    if ! chown "root:${APOLLO_RUNTIME_GID}" "${target}"; then
+      apollo_fail "cannot give gid ${APOLLO_RUNTIME_GID} write access to ${target}; the monitor runs as uid ${APOLLO_RUNTIME_UID} and could not publish the gate"
+      return 1
+    fi
+    chmod 1770 "${target}"
+  done
 }
 
 # Appends one event to journal/<runId>.ndjson. `data` is a JSON fragment the caller

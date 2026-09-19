@@ -148,6 +148,10 @@ apollo_monitor_start() {
   fi
   local name
   name="$(apollo_monitor_container_name)"
+  # The monitor is the only container that mounts the state directory writable, and it
+  # runs as uid 1000; the grant happens here, under the lock, because this is the one
+  # step that needs it. `latch release` and `gate open` never touch the permissions.
+  apollo_state_grant_monitor_access
   # shellcheck disable=SC2046
   docker run -d \
     --name "${name}" \

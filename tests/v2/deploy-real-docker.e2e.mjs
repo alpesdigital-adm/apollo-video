@@ -15,8 +15,9 @@
 // postflight asserts that zero containers with that label remain.
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, test } from 'node:test'
@@ -132,7 +133,10 @@ function runDeployFunction(stateDir, snippet, overrides = {}) {
     // Overridable so the concurrency case can give its two racers different identities;
     // with one shared id a lock "held by us" would look like a win to both of them.
     `APOLLO_RUN_ID="\${APOLLO_RUN_ID_OVERRIDE:-${runId}}"`,
-    "APOLLO_ADOPT_UNLABELLED=''",
+    // Honour an override instead of clearing it: the adopt flag is a global that the
+    // main script's argument parser sets, and a preamble that hardcoded it empty made
+    // the "adoption succeeds" leg silently take the blocked path (CI run 35453455143).
+    'APOLLO_ADOPT_UNLABELLED="${APOLLO_ADOPT_UNLABELLED:-}"',
     'APOLLO_ROLES=(app)',
     'apollo_state_prepare',
     'apollo_container_for_role() { printf "%s" "$APOLLO_E2E_TARGET"; }',
@@ -145,6 +149,10 @@ function runDeployFunction(stateDir, snippet, overrides = {}) {
         APOLLO_OPS_STATE_DIR: stateDir,
         APOLLO_RESOURCE_PROFILE: 'isolated-ci',
         APOLLO_IMAGE: IMAGE,
+        // The runner is not root, so it cannot chown the state directory to root:1000 the
+        // way the VPS deploy does; the suite widened its own temp directory instead. The
+        // seam is refused on shared-production, where the real grant is the only path.
+        APOLLO_DEPLOY_SKIP_CHOWN: '1',
         APOLLO_OPS_BACKEND_WAIT_ATTEMPTS: '2',
         APOLLO_OPS_BACKEND_WAIT_SLEEP_S: '1',
         ...overrides,
@@ -167,6 +175,11 @@ function runDeployFunction(stateDir, snippet, overrides = {}) {
 async function stateDirectory(t) {
   const directory = await mkdtemp(join(tmpdir(), 'apollo-real-docker-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
+  // The runner creates this as its own user, and every container mounting it runs as the
+  // image's `node` user (uid 1000). On the VPS the deploy grants that access itself, with
+  // ownership it has as root; here the suite widens its own throwaway directory instead —
+  // keeping the sticky bit, which is the half that actually protects the latch.
+  await chmod(directory, 0o1777)
   return directory
 }
 
@@ -343,6 +356,61 @@ test('a quota accepted on the command line is visible in the container cgroup', 
   assert.notEqual(mismatch.status, 0)
   const journal = await readFile(join(stateDir, 'journal', `${runId}.ndjson`), 'utf8')
   assert.match(journal, /"reason":"limit-readback-mismatch"/)
+})
+
+test("the monitor's uid can publish the gate and cannot touch the latch", { skip: !RUN }, async (t) => {
+  const stateDir = await stateDirectory(t)
+  // The same call the deploy makes immediately before starting the monitor container.
+  const prepared = await runDeployFunction(stateDir, 'apollo_state_grant_monitor_access')
+  assert.equal(prepared.status, 0, prepared.stderr)
+  // The latch belongs to the host side, exactly as it would on the VPS.
+  await writeFile(
+    join(stateDir, 'latch.json'),
+    JSON.stringify({
+      schemaVersion: 'apollo-ops-latch/v1',
+      engagedAtIso: new Date().toISOString(),
+      runId: 'earlier-run',
+      reason: 'stop-timeout',
+      detail: 'written by the host side',
+      evidence: { journal: 'journal/earlier-run.ndjson', lastSampleSeq: 1 },
+    }),
+    'utf8',
+  )
+
+  // One container, mounted the way the monitor is mounted, doing exactly what the
+  // monitor does — and then trying what it must never be able to do.
+  const probe = docker(
+    'run',
+    '--rm',
+    '--label',
+    RUN_LABEL,
+    '-v',
+    `${stateDir}:/app/ops-state`,
+    IMAGE,
+    'sh',
+    '-c',
+    [
+      'printf "uid=%s gid=%s\\n" "$(id -u)" "$(id -g)"',
+      'printf \'{"seq":1}\\n\' >> /app/ops-state/journal/probe.monitor.ndjson && echo journal=written',
+      'printf \'{"state":"open"}\' > /app/ops-state/gate.json.tmp && mv /app/ops-state/gate.json.tmp /app/ops-state/gate.json && echo gate=published',
+      'rm -f /app/ops-state/latch.json; echo latch-rm-exit=$?',
+      'rm -rf /app/ops-state/lock; echo lock-rm-exit=$?',
+    ].join('\n'),
+  )
+  assert.equal(probe.status, 0, `${probe.stdout}\n${probe.stderr}`)
+  assert.match(probe.stdout, /uid=1000 gid=1000/, 'the image must still run as the node user')
+  // This is the EACCES that killed the first real run: without the grant, neither of
+  // these lines can be printed.
+  assert.match(probe.stdout, /journal=written/, 'the monitor could not append its journal')
+  assert.match(probe.stdout, /gate=published/, 'the monitor could not publish gate.json atomically')
+  assert.match(probe.stdout, /latch-rm-exit=[1-9]/, 'a container was able to delete the incident latch')
+  assert.ok(existsSync(join(stateDir, 'latch.json')), 'the latch survived a container trying to remove it')
+  assert.ok(existsSync(join(stateDir, 'journal', 'probe.monitor.ndjson')))
+  assert.ok(existsSync(join(stateDir, 'gate.json')))
+  // The workers mount the same directory read-only, so they can read what it published.
+  const reader = docker('run', '--rm', '--label', RUN_LABEL, '-v', `${stateDir}:/app/ops-state:ro`, IMAGE, 'sh', '-c', 'cat /app/ops-state/gate.json')
+  assert.equal(reader.status, 0, reader.stderr)
+  assert.match(reader.stdout, /"state":"open"/)
 })
 
 test('two invocations cannot hold the operation lock at once', { skip: !RUN }, async (t) => {
