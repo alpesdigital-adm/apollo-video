@@ -155,6 +155,56 @@ jobs:
         env:
           APOLLO_HOST_SAFETY_LINUX_E2E: "1"
 
+      # Wave 23. The interruption/resume journeys once more, on the local artifact
+      # driver against this job's PostgreSQL service: real worker, real FFmpeg,
+      # real SIGTERM, no object store. The Compose job runs the same suite over
+      # versioned MinIO; this run keeps the shutdown semantics measured on Linux
+      # independently of the storage driver.
+      - name: Provision and migrate the disposable runtime safety database
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE apollo_v2_e2e_runtime_safety"
+          npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_runtime_safety?schema=public&application_name=apollo-video-e2e-runtime-safety-migrate&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run Wave 23 worker interruption and resume journeys against PostgreSQL on the local artifact driver
+        id: runtime-safety-local
+        run: npm run test:e2e:runtime-safety-workers
+        env:
+          TMPDIR: ${{ runner.temp }}/runtime-safety-local
+          APOLLO_RUNTIME_SAFETY_E2E: "1"
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: ci-protected-payload
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+          APOLLO_RUNTIME_SAFETY_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_runtime_safety?schema=public&application_name=apollo-video-e2e-runtime-safety&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Publish Wave 23 runtime safety evidence (local driver run)
+        if: always() && steps.runtime-safety-local.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-runtime-safety-local-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-safety-local/apollo-runtime-safety
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Verify zero orphan runtime safety backends on the local driver run
+        if: always()
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-runtime-safety%'")"
+            printf 'postflight attempt=%s backends=%s\n' "$attempt" "$orphans"
+            if test "$orphans" = 0; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+
       - name: Validate public API contracts
         run: npm run api:v1:validate
 
@@ -1207,8 +1257,14 @@ jobs:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_runtime_safety?schema=public&application_name=apollo-video-e2e-runtime-safety-migrate&connection_limit=5&pool_timeout=10&connect_timeout=10
 
       - name: Run Wave 23 worker interruption and resume journeys against PostgreSQL and versioned MinIO
+        id: runtime-safety-s3
         run: npm run test:e2e:runtime-safety-workers
         env:
+          # The suite writes its evidence and the workers' stdout/stderr under
+          # os.tmpdir(); pointing TMPDIR into runner.temp lets the artifact step
+          # below publish them, so a failure that only happens on this runner can
+          # be read without another run.
+          TMPDIR: ${{ runner.temp }}/runtime-safety-s3
           APOLLO_RUNTIME_SAFETY_E2E: "1"
           APOLLO_API_ENVIRONMENT: production
           APOLLO_PROTECTED_PAYLOAD_KEY_ID: ci-protected-payload
@@ -1222,6 +1278,15 @@ jobs:
           APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
           APOLLO_V2_S3_BUCKET: apollo-runtime-safety-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_RUNTIME_SAFETY_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_runtime_safety?schema=public&application_name=apollo-video-e2e-runtime-safety&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Publish Wave 23 runtime safety evidence (versioned MinIO run)
+        if: always() && steps.runtime-safety-s3.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-runtime-safety-s3-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-safety-s3/apollo-runtime-safety
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Verify zero orphan runtime safety backends
         if: always()
