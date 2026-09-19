@@ -1012,7 +1012,14 @@ jobs:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-master-reuse-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
       - name: Run synthetic production, criticism and cache reuse journey against /v1, durable workers and PostgreSQL
-        run: npm run test:e2e:synthetic-production-journey
+        # Require consecutive passes. This is not retry-until-green: the first
+        # failure ends the step and retains the server diagnostics below.
+        run: |
+          set -euo pipefail
+          for pass in 1 2 3; do
+            echo "Synthetic production journey: consecutive pass ${pass}/3"
+            npm run test:e2e:synthetic-production-journey
+          done
         env:
           # Preserve bounded server/worker diagnostics for unexpected HTTP 500s.
           APOLLO_PRODUCTION_JOURNEY_DEBUG: '1'
