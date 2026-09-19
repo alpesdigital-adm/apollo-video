@@ -15,8 +15,9 @@
 # machine it was mutating. On a shared VPS whose support confirmed throttling under
 # sustained use — 4 vCPUs, load 208 and steal between 92% and 95% were measured on
 # 12 September 2026 — that is a deploy that can neither prove what it stopped nor
-# notice that it is the reason the host is unwell. AGENTS.md lines 166-236 spell out
-# what has to be true instead; this script is that section, executable.
+# notice that it is the reason the host is unwell. AGENTS.md's infrastructure
+# section defines the binding rules. This script implements the deploy gates;
+# docs/specs/11-host-safety-and-serial-operations.md also names its coverage gaps.
 #
 # The order is not negotiable: lock, then no latch, then an aggregate budget, then
 # proof that the daemon can enforce it, then a monitor of our own, then sixty real

@@ -2,7 +2,7 @@
 
 Companion of ADR-159 and of the section "Infraestrutura DigitalOcean e operação segura" of `AGENTS.md`. This document specifies the executable mechanisms of Wave 23. It does not claim that any of them is deployed: the fifth state (implantado e aceito) remains false until the owner says otherwise.
 
-Hosting amendment, 2026-09-19: DigitalOcean is the only remote hosting provider for Apollo, including production. The former Hostinger host is forbidden. Local development and isolated CI remain supported. The deploy and backup entrypoints reject the former host's known hostname/IP before Docker, PostgreSQL, locks or filesystem mutations. The production profile is now `digitalocean-production`, with no alias for `shared-production`, and requires `APOLLO_HOSTING_PROVIDER=digitalocean`. This declaration and the local denylist are guards against accidental reuse, not cloud identity attestation: the actual droplet must be independently confirmed before any deployment. The required `APOLLO_DOCKER_NETWORK` replaces the old implicit network. No VPS, DNS, database or remote service was migrated by this amendment.
+Hosting amendment, 2026-09-19: DigitalOcean is the only remote hosting provider for Apollo, including production. The former Hostinger host is forbidden. Local development and isolated CI remain supported. The deploy and backup entrypoints reject the former host's known hostname/IP before Docker, PostgreSQL, locks or filesystem mutations. The production profile is now `digitalocean-production`, with no alias for `shared-production`, and requires `APOLLO_HOSTING_PROVIDER=digitalocean`. Production refuses an explicit remote Docker endpoint and exports the default local context/socket so child processes cannot inherit a remote context saved by `docker context use`. This declaration and the local denylist are guards against accidental reuse, not cloud identity attestation: the actual droplet must be independently confirmed before any deployment. The required `APOLLO_DOCKER_NETWORK` replaces the old implicit network. No VPS, DNS, database or remote service was migrated by this amendment.
 
 ## 1. Operational state directory
 
@@ -67,7 +67,7 @@ Profiles `isolated-ci` and `local-dev` carry numbers; `digitalocean-production` 
 
 ## 4. Deploy (`infra/deploy/apollo-vps.sh`)
 
-Commands: `plan [--with-budget]` (read-only), `deploy [--adopt-unlabelled <name>]`, `status`, `latch release --reason`, `gate open --reason`. Required environment, no defaults: `APOLLO_OPS_STATE_DIR`, `APOLLO_RESOURCE_PROFILE`, `APOLLO_ENV_FILE`, `APOLLO_IMAGE`, `APOLLO_OPS_HEALTH_URL` (+ `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` on the shared profile).
+Commands: `plan [--with-budget]` (read-only), `deploy [--adopt-unlabelled <name>]`, `status`, `latch release --reason`, `gate open --reason`. Required environment, no defaults: `APOLLO_OPS_STATE_DIR`, `APOLLO_RESOURCE_PROFILE`, `APOLLO_ENV_FILE`, `APOLLO_IMAGE`, `APOLLO_OPS_HEALTH_URL` (+ `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` on the DigitalOcean production profile).
 
 Sequence of `deploy`: lock → no latch → image present (id/digests journaled; never imported) → budget resolved in a `--rm` container (exit 2 aborts) → cgroup v2 and no limit-support warning → policy observation values present → no Apollo container OOM-killed inside the recency window → monitor container started → preflight established (60 s of samples, monitor alive, gate seq advancing, decision ≤ 20 s old) → host directories → config-check container → migrate container → for each enabled role, one at a time (app first): identity by labels → `docker stop --timeout 30` → terminal status → PID 0 → zero backends for `apollo-video-<role>` → `docker rm` → `docker run -d` with labels, quotas, `-v $APOLLO_OPS_STATE_DIR:/app/ops-state:ro`, `APOLLO_OPS_STATE_DIR`, `APOLLO_PROCESS_ROLE` → limit readback → health → gate re-read → postflight (60 s) → `gate.json` removed → monitor stopped → lock released. Blocked identity ⇒ no mutation, no latch. Any inconclusive step ⇒ latch, journal, nothing else touched, exit ≠ 0, no rollback.
 
@@ -79,7 +79,7 @@ Persisted outcome of a graceful shutdown of a PublicOperation attempt: `retrying
 
 ## 6. What is covered and what is not
 
-Covered by executable mechanisms: the deploy path of `apollo-vps.sh`; worker admission and shutdown in the ten entrypoints; budget resolution and readback; the policy's thresholds and windows. Not covered: the Compose workflow (CI/local) is not gated or quota-bound; image import on the shared host; host-wide kernel-log OOM detection; abortable webhook delivery HTTP; the director branch mid-work; capture-sync recovery after a hard kill (lease expiry). None of this is "proteção completa do servidor".
+Covered by executable mechanisms: the deploy path of `apollo-vps.sh`; worker admission and shutdown in the ten entrypoints; budget resolution and readback; the policy's thresholds and windows. Not covered: the Compose workflow (CI/local) is not gated or quota-bound; image import on the production droplet; host-wide kernel-log OOM detection; abortable webhook delivery HTTP; the director branch mid-work; capture-sync recovery after a hard kill (lease expiry). None of this is "proteção completa do servidor".
 
 ## 7. Controlled resumption and rollback — procedure, NOT executed
 
