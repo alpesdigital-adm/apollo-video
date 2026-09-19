@@ -85,6 +85,10 @@ Covered by executable mechanisms: the deploy path of `apollo-vps.sh`; worker adm
 
 Written for a future, separately authorised operation; nothing below was run in Wave 23.
 
+**Where a rehearsal may happen.** Any remote rehearsal, load experiment or destructive test of this procedure runs on a disposable DigitalOcean host, separate from production. The former Hostinger VPS is forbidden for Apollo, including diagnostics and deployment (`AGENTS.md`, "Infraestrutura DigitalOcean e operação segura" and "Segurança obrigatória para E2E remoto"). The original Wave 23 delivery used only this repository's CI runners and a local machine; that is not proof of a later VPS rehearsal.
+
+**An enabled E2E is mandatory.** `APOLLO_DEPLOY_DOCKER_E2E=1` requires a responding Docker daemon; absence or a failed probe makes the suite fail with the cause, not skip. Without opt-in the suite may skip. Docker calls are bounded to 30 seconds and a failed inventory cannot count as zero leftover containers. A subprocess regression test removes Docker from PATH and checks both modes.
+
 1. Owner's explicit release in writing; `apollo-vps.sh latch release --reason "<owner text>"` if a latch is engaged.
 2. Owner sets the three observation values for `digitalocean-production` in `config/host-safety-policy.json` and approves a budget document; `apollo-vps.sh plan --with-budget` must print the exact targets, image id/digests and quotas, and refuse nothing.
 3. Stability measured, not assumed: the monitor runs for five minutes with every sample inside the thresholds before any mutation.

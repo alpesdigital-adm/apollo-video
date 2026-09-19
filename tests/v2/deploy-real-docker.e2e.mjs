@@ -48,22 +48,61 @@ const repositoryRoot = resolve(import.meta.dirname, '..', '..')
 const runId = `e2e-${randomUUID().slice(0, 8)}`
 const RUN_LABEL = `apollo.e2e.run=${runId}`
 
+/**
+ * Runs docker and normalises the result.
+ *
+ * `spawnSync` does not throw when the binary is absent: it returns a result whose
+ * `error` is set and whose `stdout` is undefined. Reading `.stdout.trim()` on that gives
+ * a TypeError pointing at the reader instead of at the missing binary, which is how five
+ * of these tests once failed with `Cannot read properties of undefined`.
+ */
 function docker(...args) {
-  return spawnSync('docker', args, { encoding: 'utf8' })
+  const result = spawnSync('docker', args, { encoding: 'utf8', timeout: 30_000, windowsHide: true })
+  return { ...result, stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status ?? null }
+}
+
+/** Says why a docker call failed, naming the cause rather than the symptom. */
+function describeDockerFailure(result) {
+  if (result.error) return `docker could not be executed: ${result.error.message}`
+  return `docker exited ${result.status}: ${result.stderr.trim() || '<no stderr>'}`
+}
+
+/**
+ * The precondition of this whole suite, probed once.
+ *
+ * Returns `false` when a daemon answered, and otherwise why the prerequisite failed. Only the
+ * probe itself counts: `docker version` failing means the client could not reach a
+ * server at all. Every other call keeps asserting, so a daemon that answers a `docker
+ * run` with an error still fails the test — this path is for "there is no Docker here",
+ * never a way to make a real failure look like an absence. Explicit opt-in requires
+ * this prerequisite; an unavailable daemon must fail the gate, not skip seven cases.
+ */
+function dockerUnavailableReason() {
+  const probe = docker('version', '--format', '{{.Server.Version}}')
+  if (probe.error) return `no docker on this host (${probe.error.message})`
+  if (probe.status !== 0) return `the docker daemon did not answer (${describeDockerFailure(probe)})`
+  const version = probe.stdout.trim()
+  if (version.length === 0) return 'the docker daemon reported no server version'
+  return false
+}
+
+// Only a run that was not requested may skip. CI sets RUN and must prove Docker.
+const SKIP = !RUN ? 'APOLLO_DEPLOY_DOCKER_E2E is not 1' : false
+if (RUN) {
+  const unavailable = dockerUnavailableReason()
+  assert.equal(unavailable, false, `Docker E2E was explicitly enabled: ${unavailable}`)
 }
 
 function containersWithRunLabel() {
   const listed = docker('ps', '-aq', '--filter', `label=${RUN_LABEL}`)
-  // `spawnSync` reports a missing binary in `error` and leaves `stdout` undefined rather
-  // than throwing, so a host without Docker must not crash the cleanup hook.
-  return (listed.stdout ?? '')
-    .split('\n')
+  assert.equal(listed.status, 0, `Cannot verify owned containers: ${describeDockerFailure(listed)}`)
+  return listed.stdout.split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
 }
 
 after(() => {
-  if (!RUN) return
+  if (SKIP) return
   for (const id of containersWithRunLabel()) docker('rm', '-f', id)
 })
 
@@ -71,7 +110,7 @@ after(() => {
 function startContainer(name, labels, extra = []) {
   const labelArguments = Object.entries(labels).flatMap(([key, value]) => ['--label', `${key}=${value}`])
   const created = docker('run', '-d', '--name', name, '--label', RUN_LABEL, ...labelArguments, ...extra, IMAGE, 'sleep', '600')
-  assert.equal(created.status, 0, `could not start ${name}: ${created.stderr}`)
+  assert.equal(created.status, 0, `could not start ${name}: ${describeDockerFailure(created)}`)
   return created.stdout.trim()
 }
 
@@ -248,7 +287,7 @@ async function stateDirectory(t) {
   return directory
 }
 
-test('a stop is a claim only after the daemon confirms a terminal state', { skip: !RUN }, async (t) => {
+test('a stop is a claim only after the daemon confirms a terminal state', { skip: SKIP }, async (t) => {
   const stateDir = await stateDirectory(t)
   const name = `apollo-e2e-app-${runId}`
   const id = startContainer(name, { 'apollo.managed': 'true', 'apollo.role': 'app', 'apollo.deployment': runId })
@@ -289,7 +328,7 @@ test('a stop is a claim only after the daemon confirms a terminal state', { skip
   assert.match(gone.stderr ?? '', /No such object|No such container/)
 })
 
-test('a container that ignores SIGTERM is only terminal after the grace period', { skip: !RUN }, async (t) => {
+test('a container that ignores SIGTERM is only terminal after the grace period', { skip: SKIP }, async (t) => {
   const stateDir = await stateDirectory(t)
   const name = `apollo-e2e-stubborn-${runId}`
   const created = docker(
@@ -308,12 +347,12 @@ test('a container that ignores SIGTERM is only terminal after the grace period',
     '-c',
     'trap "" TERM; sleep 600',
   )
-  assert.equal(created.status, 0, created.stderr)
+  assert.equal(created.status, 0, describeDockerFailure(created))
 
   const startedAt = Date.now()
   const result = docker('stop', '--timeout', '2', name)
   const elapsed = Date.now() - startedAt
-  assert.equal(result.status, 0)
+  assert.equal(result.status, 0, describeDockerFailure(result))
   // The daemon honoured the grace period before killing: a script that assumed the
   // container was gone the moment it issued the command would have been wrong for
   // those seconds, which is exactly what the confirmation exists to catch.
@@ -339,7 +378,7 @@ test('a container that ignores SIGTERM is only terminal after the grace period',
   assert.ok(!/"event":"step-done","data":\{"step":"remove"/.test(journal), 'no removal followed the unconfirmed stop')
 })
 
-test('an unlabelled container is never touched, and a sentinel survives the run', { skip: !RUN }, async (t) => {
+test('an unlabelled container is never touched, and a sentinel survives the run', { skip: SKIP }, async (t) => {
   const stateDir = await stateDirectory(t)
   const sentinel = `apollo-e2e-sentinel-${runId}`
   // Not Apollo-labelled: it stands for somebody else's container on the shared host.
@@ -382,7 +421,7 @@ test('an unlabelled container is never touched, and a sentinel survives the run'
   assert.equal(inspect(sentinel, '{{.RestartCount}}'), '0')
 })
 
-test('a quota accepted on the command line is visible in the container cgroup', { skip: !RUN }, async (t) => {
+test('a quota accepted on the command line is visible in the container cgroup', { skip: SKIP }, async (t) => {
   const stateDir = await stateDirectory(t)
   // The cgroup paths below are v2 only. The deploy refuses anything else, so a runner on
   // v1 must say so plainly rather than fail on a missing file.
@@ -434,7 +473,7 @@ test('a quota accepted on the command line is visible in the container cgroup', 
   assert.match(journal, /"reason":"limit-readback-mismatch"/)
 })
 
-test("the monitor's uid can publish the gate and cannot touch the latch", { skip: !RUN }, async (t) => {
+test("the monitor's uid can publish the gate and cannot touch the latch", { skip: SKIP }, async (t) => {
   const stateDir = await stateDirectory(t)
   // The same call the deploy makes immediately before starting the monitor container.
   const prepared = await runDeployFunction(stateDir, 'apollo_state_grant_monitor_access')
@@ -485,11 +524,11 @@ test("the monitor's uid can publish the gate and cannot touch the latch", { skip
   assert.ok(existsSync(join(stateDir, 'gate.json')))
   // The workers mount the same directory read-only, so they can read what it published.
   const reader = docker('run', '--rm', '--label', RUN_LABEL, '-v', `${stateDir}:/app/ops-state:ro`, IMAGE, 'sh', '-c', 'cat /app/ops-state/gate.json')
-  assert.equal(reader.status, 0, reader.stderr)
+  assert.equal(reader.status, 0, describeDockerFailure(reader))
   assert.match(reader.stdout, /"state":"open"/)
 })
 
-test('two invocations cannot hold the operation lock at once', { skip: !RUN }, async (t) => {
+test('two invocations cannot hold the operation lock at once', { skip: SKIP }, async (t) => {
   const stateDir = await stateDirectory(t)
   const acquire = (owner) =>
     runDeployFunction(stateDir, 'apollo_lock_acquire deploy && sleep 2', { APOLLO_RUN_ID_OVERRIDE: `${runId}-${owner}` })
@@ -512,7 +551,7 @@ test('two invocations cannot hold the operation lock at once', { skip: !RUN }, a
   assert.deepEqual(journalEntries.filter((entry) => entry.includes('orphaned')), [])
 })
 
-test('every container this suite created is gone', { skip: !RUN }, async () => {
+test('every container this suite created is gone', { skip: SKIP }, async () => {
   for (const id of containersWithRunLabel()) docker('rm', '-f', id)
   assert.deepEqual(containersWithRunLabel(), [], 'the postflight must find no container with this run label')
   // The verdict containers the deploy library starts are not labelled by this suite —
