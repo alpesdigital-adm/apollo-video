@@ -1243,6 +1243,29 @@ jobs:
           $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pid, application_name, state, query_start from pg_stat_activity where application_name like 'apollo-video-e2e-%'"
           exit 1
 
+      # Wave 23. The same deploy script against the real daemon of this runner and
+      # the image the supervised step built: stop confirmation, identity blocking,
+      # lock exclusivity, a sentinel container that must survive untouched, and the
+      # quotas read back from docker inspect and from the cgroup files inside the
+      # container. It proves the mechanism on a disposable host, nothing about the
+      # shared VPS.
+      - name: Run Wave 23 deploy against real Docker containers, a sentinel and read-back limits
+        run: npm run test:e2e:deploy-real-docker
+        env:
+          APOLLO_DEPLOY_DOCKER_E2E: "1"
+          APOLLO_DEPLOY_E2E_IMAGE: apollo-video-local:compose-ci
+          APOLLO_RESOURCE_PROFILE: isolated-ci
+          APOLLO_OPS_STATE_DIR: ${{ runner.temp }}/apollo-ops
+
+      - name: Verify zero leftover Wave 23 managed containers
+        if: always()
+        run: |
+          leftovers="$(docker ps -aq --filter label=apollo.managed=true)"
+          if test -n "$leftovers"; then
+            docker ps -a --filter label=apollo.managed=true
+            exit 1
+          fi
+
       # Wave 23. Real workers and real FFmpeg against a disposable database of this
       # job, with the admission gate and the latch written as files: interruption
       # between claims, during a render, an authorised restart that promotes exactly
@@ -1303,29 +1326,6 @@ jobs:
           done
           $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pid, application_name, state, query_start from pg_stat_activity where application_name like 'apollo-video-e2e-runtime-safety%'"
           exit 1
-
-      # Wave 23. The same deploy script against the real daemon of this runner and
-      # the image the supervised step built: stop confirmation, identity blocking,
-      # lock exclusivity, a sentinel container that must survive untouched, and the
-      # quotas read back from docker inspect and from the cgroup files inside the
-      # container. It proves the mechanism on a disposable host, nothing about the
-      # shared VPS.
-      - name: Run Wave 23 deploy against real Docker containers, a sentinel and read-back limits
-        run: npm run test:e2e:deploy-real-docker
-        env:
-          APOLLO_DEPLOY_DOCKER_E2E: "1"
-          APOLLO_DEPLOY_E2E_IMAGE: apollo-video-local:compose-ci
-          APOLLO_RESOURCE_PROFILE: isolated-ci
-          APOLLO_OPS_STATE_DIR: ${{ runner.temp }}/apollo-ops
-
-      - name: Verify zero leftover Wave 23 managed containers
-        if: always()
-        run: |
-          leftovers="$(docker ps -aq --filter label=apollo.managed=true)"
-          if test -n "$leftovers"; then
-            docker ps -a --filter label=apollo.managed=true
-            exit 1
-          fi
 
       - name: Stop isolated infrastructure
         if: always()
