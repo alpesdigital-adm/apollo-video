@@ -46,6 +46,11 @@ apollo_assert_hosting_policy() {
         printf '%s\n' 'Apollo: production requires APOLLO_HOSTING_PROVIDER=digitalocean' >&2
         return 1
       fi
+      # An unset DOCKER_CONTEXT does not mean "default": docker context use
+      # persists a selection in the user's config. Pin both values for every
+      # child process without changing that user's saved configuration.
+      export DOCKER_CONTEXT=default
+      export DOCKER_HOST=unix:///var/run/docker.sock
       ;;
     isolated-ci|local-dev)
       case "${APOLLO_HOSTING_PROVIDER:-local}" in

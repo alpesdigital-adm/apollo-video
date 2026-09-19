@@ -28,6 +28,7 @@ function runGuard(overrides = {}, entrypoint = null) {
       source infra/deploy/lib/hosting.sh
       apollo_assert_hosting_policy || exit $?
       printf 'ADMITTED\\n'
+      bash -c 'printf "DOCKER_CONTEXT=%s\\nDOCKER_HOST=%s\\n" "\${DOCKER_CONTEXT:-unset}" "\${DOCKER_HOST:-unset}"'
     fi
   `
   return spawnSync('bash', ['-c', script], {
@@ -78,6 +79,13 @@ test('retired, absent or unknown production/provider configuration fails closed'
     assert.equal(result.status, 1, result.stderr || result.error?.message)
     assert.doesNotMatch(result.stdout, /ADMITTED|UNEXPECTED_EFFECT/)
   }
+})
+
+test('production pins the Docker endpoint for child processes instead of inheriting a saved remote context', () => {
+  const result = runGuard()
+  assert.equal(result.status, 0, result.stderr || result.error?.message)
+  assert.match(result.stdout, /^DOCKER_CONTEXT=default$/m)
+  assert.match(result.stdout, /^DOCKER_HOST=unix:\/\/\/var\/run\/docker.sock$/m)
 })
 
 test('the former Hostinger identity is rejected even with a local test profile or DigitalOcean declaration', () => {
