@@ -119,6 +119,11 @@ test('the deploy refuses an absent, stale, frozen, closed or undecodable gate', 
   const closed = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_005_000), requirePresent: true })
   assert.deepEqual(closed.reasons, ['cpu-busy-peak', 'steal'])
 
+  await writeGateFile(gateInput(stateDir, { state: 'closed', reasons: [], seq: 9 }))
+  const closedWithoutExplanation = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_005_000), requirePresent: true })
+  assert.equal(closedWithoutExplanation.admit, false, 'closed state cannot depend on explanatory reasons')
+  assert.deepEqual(closedWithoutExplanation.reasons, ['gate-closed'])
+
   await writeFile(join(stateDir, 'gate.json'), '{ not json', 'utf8')
   const unreadable = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_005_000), requirePresent: true })
   assert.match(unreadable.reasons[0], /^gate-unreadable/)

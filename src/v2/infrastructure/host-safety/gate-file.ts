@@ -149,7 +149,7 @@ export async function readGateForDeploy(
   if (ageMs > document.ttlMs) reasons.push('stale-gate')
   if (ageMs > input.maximumDecisionAgeMs) reasons.push('gate-decision-too-old')
   if (input.lastSeenSeq !== undefined && document.seq <= input.lastSeenSeq) reasons.push('gate-seq-not-advancing')
-  if (document.state === 'closed') reasons.push(...document.reasons)
+  if (document.state === 'closed') reasons.push(...(document.reasons.length ? document.reasons : ['gate-closed']))
   return {
     admit: reasons.length === 0,
     present: true,

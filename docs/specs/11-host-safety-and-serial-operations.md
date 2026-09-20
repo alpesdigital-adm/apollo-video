@@ -71,6 +71,7 @@ atomic replacement cannot refresh an old open decision with a new file's mtime.
 Deterministic regressions in `host-safety-state.test.mjs` and
 `ops-state-admission-gate.test.mjs` fail when either ordering defect is restored.
 These corrections do not make the read and a later claim one atomic operation.
+A closed decision without explanatory reasons still refuses with `gate-closed`.
 
 Profiles `isolated-ci` and `local-dev` carry numbers; `digitalocean-production` carries none and requires `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` (`apollo-resource-budget-approval/v1`: `approvedBy`, `approvedAtIso`, `host`, `envelope`, `containers`, `auxiliaries`), whose envelope must leave ≥ 25 % of the host CPUs and ≥ 2 GiB of memory. Charged sum = enabled containers (the localization translation worker only when `APOLLO_LOCALIZATION_WORKER_ENABLED=true`) + concurrent auxiliaries (monitor) + the largest sequential auxiliary (config check, migrate). Enforcement per container: `--cpus`, `--memory`, `--memory-swap` = memory, `--pids-limit`, read back from `docker inspect`. Uncovered by construction: `docker load`, `docker pull`, image decompression, image hashing, backups.
 
