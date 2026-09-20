@@ -66,7 +66,7 @@ apollo_json_escape() {
 # Each one either shortens a window, reduces a bounded wait, replaces the policy the
 # host is judged by, lowers a container's quota, or skips a step. None of them has any
 # business on the shared VPS, and "nobody would export that" is not a gate — so on
-# `shared-production` the presence of ANY of them aborts before anything is read. The
+# `digitalocean-production` the presence of ANY of them aborts before anything is read. The
 # list lives here, in one place, because a seam added later and forgotten here is
 # exactly the hole this closes.
 APOLLO_PRODUCTION_FORBIDDEN_SEAMS=(
@@ -94,13 +94,13 @@ APOLLO_PRODUCTION_FORBIDDEN_SEAMS=(
 # before the run has an identity, and the variable's NAME is the whole message.
 apollo_refuse_production_seams() {
   local profile="$1"
-  [[ "${profile}" == 'shared-production' ]] || return 0
+  [[ "${profile}" == 'digitalocean-production' ]] || return 0
   local name
   for name in "${APOLLO_PRODUCTION_FORBIDDEN_SEAMS[@]}"; do
     if [[ -n "${!name+set}" ]]; then
       apollo_log "${name} is a test seam: it shortens a window, weakens a wait, replaces the"
       apollo_log 'policy or skips a step. It is accepted on isolated-ci and local-dev only.'
-      apollo_fail "${name} is set and APOLLO_RESOURCE_PROFILE is shared-production"
+      apollo_fail "${name} is set and APOLLO_RESOURCE_PROFILE is digitalocean-production"
       return 1
     fi
   done

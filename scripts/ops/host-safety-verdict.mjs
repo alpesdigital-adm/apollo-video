@@ -104,8 +104,8 @@ function parseArguments(argv) {
   // Belt and braces with the shell's seam refusal: even if something managed to pass a
   // substituted catalog here, the shared production host is judged by the policy that
   // shipped in the image and by nothing else.
-  if (options.profile === 'shared-production' && options.catalog !== SHIPPED_CATALOG) {
-    throw new Error(`--catalog must be ${SHIPPED_CATALOG} when --profile is shared-production`)
+  if (options.profile === 'digitalocean-production' && options.catalog !== SHIPPED_CATALOG) {
+    throw new Error(`--catalog must be ${SHIPPED_CATALOG} when --profile is digitalocean-production`)
   }
   if (options.lastSeenSeq !== undefined && !Number.isSafeInteger(options.lastSeenSeq)) {
     throw new Error('--last-seen-seq must be an integer')

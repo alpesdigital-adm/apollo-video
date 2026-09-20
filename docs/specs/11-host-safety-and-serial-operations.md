@@ -1,6 +1,8 @@
 # 11 — Host safety, serial operations and worker shutdown
 
-Companion of ADR-159 and of the section "Operação segura da VPS Hostinger de produção" of `AGENTS.md`. This document specifies the executable mechanisms of Wave 23. It does not claim that any of them is deployed: the fifth state (implantado e aceito) remains false until the owner says otherwise.
+Companion of ADR-159 and of the section "Infraestrutura DigitalOcean e operação segura" of `AGENTS.md`. This document specifies the executable mechanisms of Wave 23. It does not claim that any of them is deployed: the fifth state (implantado e aceito) remains false until the owner says otherwise.
+
+Hosting amendment, 2026-09-19: DigitalOcean is the only remote hosting provider for Apollo, including production. The former Hostinger host is forbidden. Local development and isolated CI remain supported. The deploy and backup entrypoints reject the former host's known hostname/IP before Docker, PostgreSQL, locks or filesystem mutations. The production profile is now `digitalocean-production`, with no alias for `shared-production`, and requires `APOLLO_HOSTING_PROVIDER=digitalocean`. Production refuses an explicit remote Docker endpoint and exports the default local context/socket so child processes cannot inherit a remote context saved by `docker context use`. This declaration and the local denylist are guards against accidental reuse, not cloud identity attestation: the actual droplet must be independently confirmed before any deployment. The required `APOLLO_DOCKER_NETWORK` replaces the old implicit network. No VPS, DNS, database or remote service was migrated by this amendment.
 
 ## 1. Operational state directory
 
@@ -29,6 +31,8 @@ Worker reading rules (`src/v2/infrastructure/ops-state/file-admission-gate.ts`):
 
 ### latch.json (`apollo-ops-latch/v1`)
 
+Integration correction (2026-09-19): the filesystem adapter maps only `ENOENT` to absence. Permission, I/O or file-type failures when reading latch/gate close admission with `incident-latch-unreadable` / `gate-unreadable`; a future file mtime is inconclusive and closes as `stale-gate`. Regression tests first reproduced admission through an unreadable latch (a real directory at `latch.json`), then proved refusal after the correction. This does not change the deliberate absent-gate lifecycle described above and does not claim continuous post-deploy monitoring.
+
 Engaged by the deploy on any inconclusive step (`stop-timeout`, `step-inconclusive`, `gate-closed`, `postflight-inconclusive`). Released only by `apollo-vps.sh latch release --reason "<text>"`, which archives the document into `journal/` with the operator's reason. After a release the next deploy still requires the stability window (30 samples covering 300 s). Container restart policies, supervisor restarts and reboots do not touch the latch.
 
 ### lock/
@@ -53,17 +57,17 @@ Thresholds reproduce `AGENTS.md` and are internal and conservative, not a budget
 
 CPU formula, from the delta of the aggregate `cpu` line of `/proc/stat`: `total = user+nice+system+idle+iowait+irq+softirq+steal`; `busy = (user+nice+system+irq+softirq)/total`; `steal = steal/total`; `iowait = iowait/total`; `guest`/`guest_nice` are excluded because the kernel already counts them inside `user`/`nice`. The CPU count is the number of `cpuN` lines (the host, even inside a container), never the container quota.
 
-Windows: preflight and postflight require ≥ 60 s of coverage at the 10 s cadence; the stability window after a latch release requires 30 samples covering ≥ 300 s; during work every sample is judged. Coverage = span of the samples + one cadence, computed on the monotonic clock. `sampleFreshnessMs`, `healthLatencyMs` and `oomRecentWindowMs` have no code default: the `shared-production` profile ships without them and therefore answers `policy-unconfigured` until the owner sets them.
+Windows: preflight and postflight require ≥ 60 s of coverage at the 10 s cadence; the stability window after a latch release requires 30 samples covering ≥ 300 s; during work every sample is judged. Coverage = span of the samples + one cadence, computed on the monotonic clock. `sampleFreshnessMs`, `healthLatencyMs` and `oomRecentWindowMs` have no code default: the `digitalocean-production` profile ships without them and therefore answers `policy-unconfigured` until the owner sets them.
 
 Collector (`linux-collector.ts`): four `/proc` files, one bounded HTTP GET (≤ 2 s) of `APOLLO_OPS_HEALTH_URL`, and three statements on one observation connection (`select count(*) from pg_stat_activity`, `show max_connections`, `select application_name, count(*) … group by 1`). No browser, worker or pool per sample. The first read primes the CPU delta and yields no sample.
 
 ## 3. Aggregate budget (`config/resource-budget.json`, `src/v2/infrastructure/resource-budget/`)
 
-Profiles `isolated-ci` and `local-dev` carry numbers; `shared-production` carries none and requires `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` (`apollo-resource-budget-approval/v1`: `approvedBy`, `approvedAtIso`, `host`, `envelope`, `containers`, `auxiliaries`), whose envelope must leave ≥ 25 % of the host CPUs and ≥ 2 GiB of memory. Charged sum = enabled containers (the localization translation worker only when `APOLLO_LOCALIZATION_WORKER_ENABLED=true`) + concurrent auxiliaries (monitor) + the largest sequential auxiliary (config check, migrate). Enforcement per container: `--cpus`, `--memory`, `--memory-swap` = memory, `--pids-limit`, read back from `docker inspect`. Uncovered by construction: `docker load`, `docker pull`, image decompression, image hashing, backups.
+Profiles `isolated-ci` and `local-dev` carry numbers; `digitalocean-production` carries none and requires `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` (`apollo-resource-budget-approval/v1`: `approvedBy`, `approvedAtIso`, `host`, `envelope`, `containers`, `auxiliaries`), whose envelope must leave ≥ 25 % of the host CPUs and ≥ 2 GiB of memory. Charged sum = enabled containers (the localization translation worker only when `APOLLO_LOCALIZATION_WORKER_ENABLED=true`) + concurrent auxiliaries (monitor) + the largest sequential auxiliary (config check, migrate). Enforcement per container: `--cpus`, `--memory`, `--memory-swap` = memory, `--pids-limit`, read back from `docker inspect`. Uncovered by construction: `docker load`, `docker pull`, image decompression, image hashing, backups.
 
 ## 4. Deploy (`infra/deploy/apollo-vps.sh`)
 
-Commands: `plan [--with-budget]` (read-only), `deploy [--adopt-unlabelled <name>]`, `status`, `latch release --reason`, `gate open --reason`. Required environment, no defaults: `APOLLO_OPS_STATE_DIR`, `APOLLO_RESOURCE_PROFILE`, `APOLLO_ENV_FILE`, `APOLLO_IMAGE`, `APOLLO_OPS_HEALTH_URL` (+ `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` on the shared profile).
+Commands: `plan [--with-budget]` (read-only), `deploy [--adopt-unlabelled <name>]`, `status`, `latch release --reason`, `gate open --reason`. Required environment, no defaults: `APOLLO_OPS_STATE_DIR`, `APOLLO_RESOURCE_PROFILE`, `APOLLO_ENV_FILE`, `APOLLO_IMAGE`, `APOLLO_OPS_HEALTH_URL` (+ `APOLLO_RESOURCE_BUDGET_APPROVED_FILE` on the DigitalOcean production profile).
 
 Sequence of `deploy`: lock → no latch → image present (id/digests journaled; never imported) → budget resolved in a `--rm` container (exit 2 aborts) → cgroup v2 and no limit-support warning → policy observation values present → no Apollo container OOM-killed inside the recency window → monitor container started → preflight established (60 s of samples, monitor alive, gate seq advancing, decision ≤ 20 s old) → host directories → config-check container → migrate container → for each enabled role, one at a time (app first): identity by labels → `docker stop --timeout 30` → terminal status → PID 0 → zero backends for `apollo-video-<role>` → `docker rm` → `docker run -d` with labels, quotas, `-v $APOLLO_OPS_STATE_DIR:/app/ops-state:ro`, `APOLLO_OPS_STATE_DIR`, `APOLLO_PROCESS_ROLE` → limit readback → health → gate re-read → postflight (60 s) → `gate.json` removed → monitor stopped → lock released. Blocked identity ⇒ no mutation, no latch. Any inconclusive step ⇒ latch, journal, nothing else touched, exit ≠ 0, no rollback.
 
@@ -75,16 +79,18 @@ Persisted outcome of a graceful shutdown of a PublicOperation attempt: `retrying
 
 ## 6. What is covered and what is not
 
-Covered by executable mechanisms: the deploy path of `apollo-vps.sh`; worker admission and shutdown in the ten entrypoints; budget resolution and readback; the policy's thresholds and windows. Not covered: the Compose workflow (CI/local) is not gated or quota-bound; image import on the shared host; host-wide kernel-log OOM detection; abortable webhook delivery HTTP; the director branch mid-work; capture-sync recovery after a hard kill (lease expiry). None of this is "proteção completa do servidor".
+Covered by executable mechanisms: the deploy path of `apollo-vps.sh`; worker admission and shutdown in the ten entrypoints; budget resolution and readback; the policy's thresholds and windows. Not covered: the Compose workflow (CI/local) is not gated or quota-bound; image import on the production droplet; host-wide kernel-log OOM detection; abortable webhook delivery HTTP; the director branch mid-work; capture-sync recovery after a hard kill (lease expiry). None of this is "proteção completa do servidor".
 
 ## 7. Controlled resumption and rollback — procedure, NOT executed
 
 Written for a future, separately authorised operation; nothing below was run in Wave 23.
 
-**Where a rehearsal may happen.** Any rehearsal, load experiment or destructive test of this procedure runs on a disposable DigitalOcean host, never on the shared Hostinger VPS: that machine is production, it is the subject of these protections and not a test substrate (`AGENTS.md`, "Operação segura da VPS Hostinger de produção" and "Segurança obrigatória para E2E remoto"). Wave 23 used neither: every proof came from this repository's CI runners and a local machine.
+**Where a rehearsal may happen.** Any remote rehearsal, load experiment or destructive test of this procedure runs on a disposable DigitalOcean host, separate from production. The former Hostinger VPS is forbidden for Apollo, including diagnostics and deployment (`AGENTS.md`, "Infraestrutura DigitalOcean e operação segura" and "Segurança obrigatória para E2E remoto"). The original Wave 23 delivery used only this repository's CI runners and a local machine; that is not proof of a later VPS rehearsal.
+
+**An enabled E2E is mandatory.** `APOLLO_DEPLOY_DOCKER_E2E=1` requires a responding Docker daemon; absence or a failed probe makes the suite fail with the cause, not skip. Without opt-in the suite may skip. Docker calls are bounded to 30 seconds and a failed inventory cannot count as zero leftover containers. A subprocess regression test removes Docker from PATH and checks both modes.
 
 1. Owner's explicit release in writing; `apollo-vps.sh latch release --reason "<owner text>"` if a latch is engaged.
-2. Owner sets the three observation values for `shared-production` in `config/host-safety-policy.json` and approves a budget document; `apollo-vps.sh plan --with-budget` must print the exact targets, image id/digests and quotas, and refuse nothing.
+2. Owner sets the three observation values for `digitalocean-production` in `config/host-safety-policy.json` and approves a budget document; `apollo-vps.sh plan --with-budget` must print the exact targets, image id/digests and quotas, and refuse nothing.
 3. Stability measured, not assumed: the monitor runs for five minutes with every sample inside the thresholds before any mutation.
 4. One action at a time: `apollo-vps.sh deploy` replaces one container per step, confirming terminal state, PID 0 and zero backends before the next; the operator watches `apollo-vps.sh status` and the journal between steps.
 5. Postflight of 60 s after the last replacement; only then is the gate removed.

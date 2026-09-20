@@ -212,7 +212,7 @@ test('an unlabelled container can be adopted once, with evidence', { skip: !RUN 
   const adoption = lines.find((line) => line.event === 'adopt-unlabelled')
   assert.ok(adoption, 'the adoption must leave evidence')
   assert.equal(adoption.data.observed.image, 'apollo-video:legacy')
-  assert.match(adoption.data.observed.inspected, /easypanel/)
+  assert.match(adoption.data.observed.inspected, /apollo-test-network/)
   // The adoption is for one named container only: it does not become a general licence.
   assert.equal(adoption.data.target.name, 'apollo-video')
 })

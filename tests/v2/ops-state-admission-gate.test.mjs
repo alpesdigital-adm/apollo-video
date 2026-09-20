@@ -42,6 +42,7 @@ function gateFor(directory, options = {}) {
         ? new Date(NOW.getTime() - 1_000)
         : null
     )),
+    readText: options.readText,
   })
 }
 
@@ -76,6 +77,39 @@ test('a configured directory that cannot be read is closed', async () => {
 test('an absent gate.json is open: absence is the contract default', async () => {
   await withStateDir(async (directory) => {
     assert.deepEqual(await gateFor(directory).read(), { admits: true, reason: null })
+  })
+})
+
+test('an unreadable latch or gate on the real filesystem is not an absent file', async () => {
+  for (const [name, reason] of [['latch.json', 'incident-latch-unreadable'], ['gate.json', 'gate-unreadable']]) {
+    await withStateDir(async (directory) => {
+      // readFile on a directory fails on Windows and Linux, even when running
+      // as root; this exercises the real adapter without chmod-based skips.
+      await mkdir(join(directory, name))
+      assert.deepEqual(await gateFor(directory).read(), { admits: false, reason })
+    })
+  }
+})
+
+test('permission and I/O errors close admission instead of becoming absence', async () => {
+  for (const code of ['EACCES', 'EIO']) {
+    for (const [name, reason] of [['latch.json', 'incident-latch-unreadable'], ['gate.json', 'gate-unreadable']]) {
+      await withStateDir(async (directory) => {
+        const gate = gateFor(directory, { readText: async (path) => {
+          if (path === join(directory, name)) throw Object.assign(new Error('unreadable'), { code })
+          return null
+        } })
+        assert.deepEqual(await gate.read(), { admits: false, reason })
+      })
+    }
+  }
+})
+
+test('an open gate dated in the future is inconclusive, not fresh', async () => {
+  await withStateDir(async (directory) => {
+    await copyFixture(directory, 'gate-open.json', 'gate.json')
+    const gate = gateFor(directory, { statMtime: async () => new Date(NOW.getTime() + 1) })
+    assert.deepEqual(await gate.read(), { admits: false, reason: 'stale-gate' })
   })
 })
 

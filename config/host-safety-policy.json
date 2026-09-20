@@ -4,7 +4,7 @@
     "Thresholds reproduce AGENTS.md lines 210-214 exactly and are internal and conservative:",
     "they protect the shared host, they are not a budget to spend up to.",
     "The three observation values with no code default (sampleFreshnessMs, healthLatencyMs,",
-    "oomRecentWindowMs) are deliberately absent from shared-production: what counts as abnormal",
+    "oomRecentWindowMs) are deliberately absent from digitalocean-production: what counts as abnormal",
     "latency, how long an OOM stays recent and how old a sample may be on that host are the",
     "owner's call. While they are absent the policy answers policy-unconfigured and the gate stays",
     "closed, which is the fail-closed behaviour the section demands. Do not invent values here."
@@ -40,8 +40,8 @@
       "healthLatencyMs": 3000,
       "oomRecentWindowMs": 600000
     },
-    "shared-production": {
-      "description": "Shared Hostinger VPS. sampleFreshnessMs, healthLatencyMs and oomRecentWindowMs are intentionally absent: until the owner sets them the policy answers policy-unconfigured and every phase is closed.",
+    "digitalocean-production": {
+      "description": "DigitalOcean production only. sampleFreshnessMs, healthLatencyMs and oomRecentWindowMs are intentionally absent: until the owner sets them the policy answers policy-unconfigured and every phase is closed.",
       "sampleIntervalMs": 10000,
       "maxSampleGapMs": 25000
     }

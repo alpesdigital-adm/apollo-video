@@ -62,7 +62,7 @@ function seededContainer(name) {
     health: seeded.health ?? null,
     restartCount: seeded.restartCount ?? 0,
     image: seeded.image ?? scenario.image?.reference ?? 'apollo-video:unlabelled',
-    networks: seeded.networks ?? { easypanel: {} },
+    networks: seeded.networks ?? { 'apollo-test-network': {} },
     hostConfig: seeded.hostConfig ?? { NanoCpus: 0, Memory: 0, MemorySwap: 0, PidsLimit: 0 },
     oomKilled: seeded.oomKilled === true,
     finishedAt: seeded.finishedAt ?? '0001-01-01T00:00:00Z',
@@ -213,7 +213,7 @@ if (verb === 'info') {
 if (verb === 'network') {
   record({ verb: 'network' })
   const name = argv[argv.length - 1]
-  exit((scenario.networks ?? ['easypanel']).includes(name) ? 0 : 1, '', `Error: No such network: ${name}`)
+  exit((scenario.networks ?? ['apollo-test-network']).includes(name) ? 0 : 1, '', `Error: No such network: ${name}`)
 }
 
 if (verb === 'image') {
@@ -263,7 +263,7 @@ if (verb === 'run') {
     health: parsed.name === (scenario.appContainer ?? 'apollo-video') ? (behaviour('startUnhealthy').includes(parsed.name) ? 'unhealthy' : 'healthy') : null,
     restartCount: behaviour('restartLooping').includes(parsed.name) ? 3 : 0,
     image: parsed.image,
-    networks: { easypanel: {} },
+    networks: { 'apollo-test-network': {} },
     hostConfig: {
       NanoCpus: Math.round(cpus * 1e9) + (mismatch ? 1 : 0),
       Memory: bytesOf(parsed.limits.memory),

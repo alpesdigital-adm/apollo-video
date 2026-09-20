@@ -49,8 +49,11 @@ async function defaultStatMtime(path: string): Promise<Date | null> {
 async function defaultReadText(path: string): Promise<string | null> {
   try {
     return await readFile(path, 'utf8')
-  } catch {
-    return null
+  } catch (error) {
+    // Only a genuinely absent file has the contract's default meaning. Treating
+    // permission/I/O/type failures as absence can erase an engaged incident latch.
+    if (isRecord(error) && error.code === 'ENOENT') return null
+    throw error
   }
 }
 
@@ -89,7 +92,12 @@ export function createFileAdmissionGate(
       // The latch outranks every metric and every gate file: it survives
       // container restarts and reboots because it lives on the host, and only an
       // operator command releases it.
-      const latchText = await readText(join(configured, 'latch.json'))
+      let latchText: string | null
+      try {
+        latchText = await readText(join(configured, 'latch.json'))
+      } catch {
+        return closed('incident-latch-unreadable')
+      }
       if (latchText !== null) {
         const latch = parseJson(latchText)
         if (!isRecord(latch) || latch.schemaVersion !== LATCH_SCHEMA_VERSION) {
@@ -103,7 +111,12 @@ export function createFileAdmissionGate(
       }
 
       const gatePath = join(configured, 'gate.json')
-      const gateText = await readText(gatePath)
+      let gateText: string | null
+      try {
+        gateText = await readText(gatePath)
+      } catch {
+        return closed('gate-unreadable')
+      }
       if (gateText === null) return ADMISSION_GATE_OPEN
 
       const gate = parseJson(gateText)
@@ -126,7 +139,7 @@ export function createFileAdmissionGate(
       const mtime = await statMtime(gatePath)
       if (!mtime) return closed('stale-gate')
       const age = now().getTime() - mtime.getTime()
-      if (!Number.isFinite(age) || age > ttlMs) return closed('stale-gate')
+      if (!Number.isFinite(age) || age < 0 || age > ttlMs) return closed('stale-gate')
       return ADMISSION_GATE_OPEN
     },
   })
