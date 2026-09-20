@@ -31,6 +31,7 @@ import {
   readJournalLines,
   readMonitorSamples,
 } from '../../src/v2/infrastructure/host-safety/journal.ts'
+import { readJsonFile } from '../../src/v2/infrastructure/host-safety/state-files.ts'
 
 const repositoryRoot = resolve(import.meta.dirname, '..', '..')
 const opsStateFixtures = resolve(import.meta.dirname, '..', 'fixtures', 'ops-state')
@@ -68,6 +69,8 @@ const gateInput = (stateDir, overrides = {}) => ({
   ...overrides,
 })
 
+const monotonicClock = (nowMonotonicMs) => () => nowMonotonicMs
+
 test('a gate decision is written atomically and leaves no temporary file behind', async (t) => {
   const stateDir = await stateDirectory(t)
   const document = await writeGateFile(gateInput(stateDir))
@@ -92,41 +95,79 @@ test('the deploy refuses an absent, stale, frozen, closed or undecodable gate', 
   const stateDir = await stateDirectory(t)
   const base = { stateDir, maximumDecisionAgeMs: 20_000 }
 
-  const finished = await readGateForDeploy({ ...base, nowMonotonicMs: 1_000_000 })
+  const finished = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_000_000) })
   assert.equal(finished.admit, true, 'no gate file means no supervised operation is in flight')
-  const inFlight = await readGateForDeploy({ ...base, nowMonotonicMs: 1_000_000, requirePresent: true })
+  const inFlight = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_000_000), requirePresent: true })
   assert.deepEqual(inFlight.reasons, ['gate-absent'])
 
   await writeGateFile(gateInput(stateDir, { seq: 7 }))
-  const fresh = await readGateForDeploy({ ...base, nowMonotonicMs: 1_005_000, requirePresent: true, lastSeenSeq: 6 })
+  const fresh = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_005_000), requirePresent: true, lastSeenSeq: 6 })
   assert.equal(fresh.admit, true)
   assert.equal(fresh.ageMs, 5_000)
 
-  const tooOld = await readGateForDeploy({ ...base, nowMonotonicMs: 1_020_001, requirePresent: true })
+  const tooOld = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_020_001), requirePresent: true })
   assert.deepEqual(tooOld.reasons, ['gate-decision-too-old'])
-  const stale = await readGateForDeploy({ ...base, nowMonotonicMs: 1_040_000, requirePresent: true })
+  const stale = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_040_000), requirePresent: true })
   assert.deepEqual(stale.reasons, ['stale-gate', 'gate-decision-too-old'])
-  const backwards = await readGateForDeploy({ ...base, nowMonotonicMs: 999_999, requirePresent: true })
+  const backwards = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(999_999), requirePresent: true })
   assert.deepEqual(backwards.reasons, ['gate-clock-reset'])
   // A monitor that hung republishes nothing: mtime looks recent, seq does not move.
-  const frozen = await readGateForDeploy({ ...base, nowMonotonicMs: 1_005_000, requirePresent: true, lastSeenSeq: 7 })
+  const frozen = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_005_000), requirePresent: true, lastSeenSeq: 7 })
   assert.deepEqual(frozen.reasons, ['gate-seq-not-advancing'])
 
   await writeGateFile(gateInput(stateDir, { state: 'closed', reasons: ['cpu-busy-peak', 'steal'], seq: 8 }))
-  const closed = await readGateForDeploy({ ...base, nowMonotonicMs: 1_005_000, requirePresent: true })
+  const closed = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_005_000), requirePresent: true })
   assert.deepEqual(closed.reasons, ['cpu-busy-peak', 'steal'])
 
   await writeFile(join(stateDir, 'gate.json'), '{ not json', 'utf8')
-  const unreadable = await readGateForDeploy({ ...base, nowMonotonicMs: 1_005_000, requirePresent: true })
+  const unreadable = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_005_000), requirePresent: true })
   assert.match(unreadable.reasons[0], /^gate-unreadable/)
 
   await writeFile(join(stateDir, 'gate.json'), JSON.stringify({ schemaVersion: 'apollo-ops-gate/v2', state: 'open' }), 'utf8')
-  const malformed = await readGateForDeploy({ ...base, nowMonotonicMs: 1_005_000, requirePresent: true })
+  const malformed = await readGateForDeploy({ ...base, monotonicNowMs: monotonicClock(1_005_000), requirePresent: true })
   assert.deepEqual(malformed.reasons, ['gate-malformed'])
 
   await removeGateFile(stateDir)
   assert.deepEqual(await readdir(stateDir), [])
   await removeGateFile(stateDir)
+})
+
+test('the deploy samples its clock after reading a gate published during the read interval', async (t) => {
+  const stateDir = await stateDirectory(t)
+  const readStartedAtMonotonicMs = 999_999
+  let observedTime = readStartedAtMonotonicMs
+
+  let clockSamples = 0
+  const decision = await readGateForDeploy(
+    {
+      stateDir,
+      monotonicNowMs: () => {
+        clockSamples += 1
+        return observedTime
+      },
+      maximumDecisionAgeMs: 20_000,
+      requirePresent: true,
+    },
+    async (path) => {
+      await writeGateFile(gateInput(stateDir, { issuedAtMonotonicMs: 1_000_000 }))
+      const result = await readJsonFile(path)
+      observedTime = 1_000_001
+      return result
+    },
+  )
+
+  assert.ok(decision.document.issuedAtMonotonicMs > readStartedAtMonotonicMs)
+  assert.equal(clockSamples, 1)
+  assert.equal(decision.admit, true)
+  assert.equal(decision.ageMs, 1)
+
+  const actuallyFuture = await readGateForDeploy({
+    stateDir,
+    monotonicNowMs: monotonicClock(999_999),
+    maximumDecisionAgeMs: 20_000,
+    requirePresent: true,
+  })
+  assert.deepEqual(actuallyFuture.reasons, ['gate-clock-reset'])
 })
 
 test('the published gate fixtures are exactly what the reader accepts', async (t) => {
@@ -138,7 +179,7 @@ test('the published gate fixtures are exactly what the reader accepts', async (t
     await copyFile(join(opsStateFixtures, fixture), join(stateDir, 'gate.json'))
     const decision = await readGateForDeploy({
       stateDir,
-      nowMonotonicMs: JSON.parse(await readFile(join(stateDir, 'gate.json'), 'utf8')).issuedAtMonotonicMs + 1_000,
+      monotonicNowMs: monotonicClock(JSON.parse(await readFile(join(stateDir, 'gate.json'), 'utf8')).issuedAtMonotonicMs + 1_000),
       maximumDecisionAgeMs: 20_000,
       requirePresent: true,
     })

@@ -43,4 +43,11 @@ The Gate Zero inventory of this wave confirmed it: `infra/deploy/apollo-vps.sh` 
 Recorded in `docs/REQUIREMENTS-TRACEABILITY.md` (FR-232, FR-236 rows and the Wave 23 note) and in the wave's draft PR. In summary: policy, collector, state files, lock/latch/gate, budget and worker lifecycle are proven by unit suites under `npm test`; the deploy sequence is proven against a recording fake Docker; real containers, a sentinel, stop confirmation and limit readback are proven only in the CI job "Isolated Compose infrastructure"; worker interruption and resume journeys run against a throwaway PostgreSQL with real workers and FFmpeg; metric anomalies are injected at the collector boundary and are not measurements of the Hostinger host. CI runs `35453455143` and `35455581011` (Linux) hold the first real measurements: the six worker journeys green on both storage drivers, the collector against the runner's `/proc`, and the deploy library against a real daemon — where three defects invisible to the fake were found and fixed (no `config/` in the image, a lock takeover race on a half-written `owner.json`, a state directory the uid-1000 monitor could not write).
 ## Hosting amendment — 2026-09-19
 
+Validation amendment (2026-09-20): a disposable DigitalOcean rehearsal exposed
+a false `gate-clock-reset` when publication raced the deploy reader's I/O.
+The observation clock is now sampled after the read. Adjacent review found
+worker content/mtime could refer to different files after an atomic rename;
+both now come from one opened handle. Regression tests are falsified by
+restoring each race. No freshness tolerance, latch bypass or acceptance is added.
+
 The owner removed Hostinger from Apollo's infrastructure and selected DigitalOcean for all future remote environments, including production. The operational profile is `digitalocean-production`; no compatibility alias preserves `shared-production`. Deploy/backup reject the former host's known identity, production requires an explicit DigitalOcean declaration, and Docker network selection is explicit. Safety limits, isolation of development/E2E from production, incident latches and owner release remain in force. This changes supported configuration and policy; it does not assert that a droplet was provisioned or data/services were migrated. See the hosting section of `docs/runbooks/OPERATIONS.md`.
