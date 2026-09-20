@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, open, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { createFileAdmissionGate } from '../../src/v2/infrastructure/ops-state/file-admission-gate.ts'
+import { createFileAdmissionGate, readGateFileSnapshot } from '../../src/v2/infrastructure/ops-state/file-admission-gate.ts'
 
 const FIXTURES = fileURLToPath(new URL('../fixtures/ops-state/', import.meta.url))
 const NOW = new Date('2026-09-18T23:59:25.000Z')
@@ -43,6 +43,13 @@ function gateFor(directory, options = {}) {
         : null
     )),
     readText: options.readText,
+    readGateSnapshot: async (path) => {
+      const snapshot = await readGateFileSnapshot(path)
+      const text = options.readText ? await options.readText(path) : snapshot?.text ?? null
+      if (text === null) return null
+      const mtime = options.statMtime ? await options.statMtime(path) : new Date(NOW.getTime() - 1_000)
+      return { text, mtime }
+    },
   })
 }
 
@@ -151,13 +158,50 @@ test('an open gate older than its ttl is stale and therefore closed', async () =
   })
 })
 
-test('an open gate whose file vanishes between read and stat is stale', async () => {
+test('an open gate without snapshot metadata is stale', async () => {
   await withStateDir(async (directory) => {
     await copyFixture(directory, 'gate-open.json', 'gate.json')
     const racing = gateFor(directory, {
       statMtime: async (path) => (path === directory ? NOW : null),
     })
     assert.deepEqual(await racing.read(), { admits: false, reason: 'stale-gate' })
+  })
+})
+
+test('atomic replacement cannot refresh an old open decision with a new file mtime', async () => {
+  await withStateDir(async (directory) => {
+    const path = join(directory, 'gate.json')
+    const replacement = join(directory, 'replacement.json')
+    await copyFixture(directory, 'gate-open.json', 'gate.json')
+    const staleTime = new Date(NOW.getTime() - 60_000)
+    await utimes(path, staleTime, staleTime)
+    await copyFixture(directory, 'gate-closed.json', 'replacement.json')
+    await utimes(replacement, NOW, NOW)
+    let closedHandle = false
+    const gate = createFileAdmissionGate({
+      directory,
+      now: () => NOW,
+      readGateSnapshot: (target) => readGateFileSnapshot(target, async (...args) => {
+        const handle = await open(...args)
+        return {
+          async readFile(...readArgs) {
+            const text = await handle.readFile(...readArgs)
+            // Windows cannot replace an open destination. Release the real
+            // handle after its complete snapshot but before returning the read;
+            // the replacement still precedes admission/freshness evaluation.
+            await handle.close()
+            await rename(replacement, path)
+            return text
+          },
+          stat: () => handle.stat(),
+          async close() { await handle.close(); closedHandle = true },
+        }
+      }),
+    })
+    assert.deepEqual(await gate.read(), { admits: false, reason: 'stale-gate' })
+    assert.equal(closedHandle, true)
+    assert.equal((await stat(path)).mtime.getTime(), NOW.getTime(), 'path now names the fresh replacement')
+    assert.equal(JSON.parse(await readFile(path, 'utf8')).state, 'closed')
   })
 })
 

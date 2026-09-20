@@ -21,6 +21,7 @@
 import { rm } from 'node:fs/promises'
 
 import type { HostSafetyReason } from './policy.ts'
+import type { JsonFileRead } from './state-files.ts'
 import { atomicWriteJson, gateFilePath, readJsonFile } from './state-files.ts'
 
 export const OPS_GATE_SCHEMA_VERSION = 'apollo-ops-gate/v1'
@@ -88,7 +89,8 @@ export interface DeployGateDecision {
 
 export interface ReadGateForDeployInput {
   readonly stateDir: string
-  readonly nowMonotonicMs: number
+  /** Sampled after `gate.json` is read so a concurrently published gate cannot appear future-dated. */
+  readonly monotonicNowMs: () => number
   /** Largest tolerated age of the decision the deploy is about to act on. */
   readonly maximumDecisionAgeMs: number
   /** Highest `seq` this run has already seen; the next read must exceed it. */
@@ -122,9 +124,13 @@ function parseGateDocument(value: unknown): OpsGateDocument | null {
  * that stopped writing keeps publishing the same seq, which looks fresh by mtime
  * and is not.
  */
-export async function readGateForDeploy(input: ReadGateForDeployInput): Promise<DeployGateDecision> {
+export async function readGateForDeploy(
+  input: ReadGateForDeployInput,
+  readGateDocument: (path: string) => Promise<JsonFileRead> = readJsonFile,
+): Promise<DeployGateDecision> {
   const reasons: string[] = []
-  const read = await readJsonFile(gateFilePath(input.stateDir))
+  const read = await readGateDocument(gateFilePath(input.stateDir))
+  const nowMonotonicMs = input.monotonicNowMs()
   if (!read.present) {
     if (input.requirePresent === true) {
       return { admit: false, present: false, document: null, ageMs: null, reasons: ['gate-absent'] }
@@ -138,12 +144,12 @@ export async function readGateForDeploy(input: ReadGateForDeployInput): Promise<
   if (!document) {
     return { admit: false, present: true, document: null, ageMs: null, reasons: ['gate-malformed'] }
   }
-  const ageMs = input.nowMonotonicMs - document.issuedAtMonotonicMs
+  const ageMs = nowMonotonicMs - document.issuedAtMonotonicMs
   if (ageMs < 0) reasons.push('gate-clock-reset')
   if (ageMs > document.ttlMs) reasons.push('stale-gate')
   if (ageMs > input.maximumDecisionAgeMs) reasons.push('gate-decision-too-old')
   if (input.lastSeenSeq !== undefined && document.seq <= input.lastSeenSeq) reasons.push('gate-seq-not-advancing')
-  if (document.state === 'closed') reasons.push(...document.reasons)
+  if (document.state === 'closed') reasons.push(...(document.reasons.length ? document.reasons : ['gate-closed']))
   return {
     admit: reasons.length === 0,
     present: true,

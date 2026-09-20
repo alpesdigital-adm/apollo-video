@@ -144,7 +144,7 @@ const verdict = evaluateHostSafety({
 })
 const gate = await readGateForDeploy({
   stateDir: options.stateDir,
-  nowMonotonicMs: hostMonotonicNowMs(),
+  monotonicNowMs: hostMonotonicNowMs,
   maximumDecisionAgeMs: options.maxDecisionAgeMs,
   lastSeenSeq: options.lastSeenSeq,
   requirePresent: options.requireGate,

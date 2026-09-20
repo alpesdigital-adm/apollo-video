@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises'
+import { open, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import {
@@ -21,10 +21,9 @@ import {
  * a gate that was never configured is open, because a laptop and a unit test
  * have no host contract to honour.
  *
- * Clock and mtime are injected so the staleness rule can be tested without
- * sleeping: `issuedAtMonotonicMs` inside the file belongs to the monitor's
- * process and is meaningless here, so freshness is measured from the file's own
- * mtime on this host.
+ * Freshness uses the file's mtime on this host. Content and mtime must come from
+ * the same opened file: the monitor publishes by atomic rename, so two pathname
+ * reads could combine an old open decision with a newer decision's fresh mtime.
  */
 const GATE_SCHEMA_VERSION = 'apollo-ops-gate/v1'
 const LATCH_SCHEMA_VERSION = 'apollo-ops-latch/v1'
@@ -33,9 +32,36 @@ export interface FileAdmissionGateOptions {
   /** Defaults to `process.env.APOLLO_OPS_STATE_DIR`. */
   readonly directory?: string | undefined
   readonly now?: () => Date
-  /** Injected for tests; defaults to `stat`. Returns null when the file is absent. */
+  /** Directory existence check; defaults to `stat`. */
   readonly statMtime?: (path: string) => Promise<Date | null>
   readonly readText?: (path: string) => Promise<string | null>
+  readonly readGateSnapshot?: (path: string) => Promise<GateFileSnapshot | null>
+}
+
+export interface GateFileSnapshot {
+  readonly text: string
+  readonly mtime: Date | null
+}
+
+/** The handle pins the inode across a concurrent atomic publication. */
+export async function readGateFileSnapshot(
+  path: string,
+  openFile: typeof open = open,
+): Promise<GateFileSnapshot | null> {
+  let handle
+  try {
+    handle = await openFile(path, 'r')
+  } catch (error) {
+    if (isRecord(error) && error.code === 'ENOENT') return null
+    throw error
+  }
+  try {
+    const metadata = await handle.stat()
+    const text = await handle.readFile('utf8')
+    return { text, mtime: metadata.mtime }
+  } finally {
+    await handle.close()
+  }
 }
 
 async function defaultStatMtime(path: string): Promise<Date | null> {
@@ -80,6 +106,7 @@ export function createFileAdmissionGate(
   const now = options.now ?? (() => new Date())
   const statMtime = options.statMtime ?? defaultStatMtime
   const readText = options.readText ?? defaultReadText
+  const readGateSnapshot = options.readGateSnapshot ?? readGateFileSnapshot
 
   return Object.freeze({
     async read(): Promise<Readonly<AdmissionGateReading>> {
@@ -111,15 +138,15 @@ export function createFileAdmissionGate(
       }
 
       const gatePath = join(configured, 'gate.json')
-      let gateText: string | null
+      let snapshot: GateFileSnapshot | null
       try {
-        gateText = await readText(gatePath)
+        snapshot = await readGateSnapshot(gatePath)
       } catch {
         return closed('gate-unreadable')
       }
-      if (gateText === null) return ADMISSION_GATE_OPEN
+      if (snapshot === null) return ADMISSION_GATE_OPEN
 
-      const gate = parseJson(gateText)
+      const gate = parseJson(snapshot.text)
       if (!isRecord(gate)) return closed('gate-unparseable')
       if (gate.schemaVersion !== GATE_SCHEMA_VERSION) return closed('gate-schema-unknown')
       if (gate.state !== 'open' && gate.state !== 'closed') return closed('gate-state-unknown')
@@ -136,7 +163,7 @@ export function createFileAdmissionGate(
 
       // An open gate is only as good as the monitor that keeps rewriting it. A
       // monitor that died leaves the last open sample behind, so age decides.
-      const mtime = await statMtime(gatePath)
+      const mtime = snapshot.mtime
       if (!mtime) return closed('stale-gate')
       const age = now().getTime() - mtime.getTime()
       if (!Number.isFinite(age) || age < 0 || age > ttlMs) return closed('stale-gate')
