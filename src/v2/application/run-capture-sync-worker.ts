@@ -78,6 +78,21 @@ export interface SyncSignalSource {
      * returns, and stops there rather than inside the media layer.
      */
     heartbeat?: () => Promise<void>
+    /**
+     * Ends the adapter's own child processes when the worker is stopped (Wave 23).
+     *
+     * The heartbeat above keeps a lease alive across a long measurement; this is the
+     * opposite errand. A SIGTERM cannot interrupt the correlation itself — that is
+     * one synchronous search — but the decode in front of it is FFmpeg, and an
+     * adapter holding an aborted signal ends that child by its handle instead of
+     * leaving it to the container's 30 s kill.
+     *
+     * The run's persisted outcome is unchanged by this: `capture_sync_runs` has no
+     * release method and its port names reclaiming an expired lease as the recovery
+     * path, so an aborted run stays claimed and unsettled and comes back when the
+     * lease expires, exactly as it does on a lost lease.
+     */
+    signal?: AbortSignal
   }): Promise<readonly Readonly<SyncSignalObservation>[]>
 }
 
@@ -116,7 +131,14 @@ export interface CaptureSyncWorkerResult {
    * the run: the track reaches `insufficient-evidence` and the pass continues.
    */
   readonly mediaUnavailable: number
-  readonly abandonedBecause?: 'lease-lost' | 'superseded' | 'session-moved'
+  /**
+   * `worker-shutdown` is the Wave 23 addition: the operator stopped this worker
+   * between tracks. The run stays claimed and unsettled, exactly as it does on a
+   * lost lease, because this repository has no way to release a lease and the
+   * port's own contract names reclaiming an expired one as the recovery path —
+   * not a failure mode. Settling it `failed` would turn a deploy into a verdict.
+   */
+  readonly abandonedBecause?: 'lease-lost' | 'superseded' | 'session-moved' | 'worker-shutdown'
 }
 
 /**
@@ -461,7 +483,17 @@ export function runCaptureSyncWorker(dependencies: {
 }) {
   const leaseMs = dependencies.leaseMs ?? DEFAULT_LEASE_MS
 
-  return async (): Promise<Readonly<CaptureSyncWorkerResult>> => {
+  return async (signal?: AbortSignal): Promise<Readonly<CaptureSyncWorkerResult>> => {
+    // No claim once the worker has been told to stop. This is the only place a
+    // shutdown can be honoured for free: one audio correlation at the adapter's
+    // analysis cap measures over a minute of uninterruptible CPU, so a run
+    // admitted here will hold its lease until the correlation returns.
+    if (signal?.aborted) {
+      return Object.freeze({
+        claimed: false, runId: null, workspaceId: null, settled: false, resolved: 0, review: 0, insufficient: 0,
+        coverageDerived: 0, coverageRefused: 0, mapRefused: 0, mediaUnavailable: 0,
+      })
+    }
     const claim = await dependencies.runs.claim({
       owner: dependencies.owner,
       now: dependencies.clock().toISOString(),
@@ -615,6 +647,18 @@ export function runCaptureSyncWorker(dependencies: {
         coverageDerived, coverageRefused, mapRefused, mediaUnavailable,
         abandonedBecause: 'lease-lost' as const,
       })
+      const abandonForShutdown = () => Object.freeze({
+        claimed: true, runId: run.id, workspaceId: run.workspaceId, settled: false,
+        resolved, review, insufficient,
+        coverageDerived, coverageRefused, mapRefused, mediaUnavailable,
+        abandonedBecause: 'worker-shutdown' as const,
+      })
+      // Between tracks is the one boundary the cascade can be stopped at cleanly.
+      // Stopping here keeps every coverage row and every map already written — they
+      // are real measurements — and leaves the rest of the run to whichever worker
+      // reclaims the expired lease. A stop that arrives mid-track is caught by the
+      // abort the adapter now carries into its decode.
+      if (signal?.aborted) return abandonForShutdown()
       await beat()
       if (!leaseAlive) return abandonForLostLease()
 
@@ -644,8 +688,17 @@ export function runCaptureSyncWorker(dependencies: {
           sessionFrameRate,
           sessionBounds,
           heartbeat: beat,
+          // Ends this run's own FFmpeg decode by its handle when the worker is
+          // stopped. Nothing here scans the host: the adapter holds the child.
+          ...(signal ? { signal } : {}),
         })
       } catch (error) {
+        // A measurement this worker itself cancelled is not the signal source
+        // failing. Settling `failed` here would make a deploy look like a verdict
+        // about the session, and it would burn an attempt per restart. The run stays
+        // claimed and unsettled, recovered by lease expiry — the same route a lost
+        // lease takes, and the only one this repository offers.
+        if (signal?.aborted) return abandonForShutdown()
         if (!isAbsentMediaError(error)) {
           return failWith(
             `the sync signal source failed on track ${track.trackId}: ${error instanceof Error ? error.message : String(error)}`,

@@ -78,6 +78,9 @@ COPY --from=build --chown=node:node /app/public ./public
 COPY --from=build --chown=node:node /app/prisma ./prisma
 COPY --from=build --chown=node:node /app/generated ./generated
 COPY --from=build --chown=node:node /app/scripts ./scripts
+# The host-safety policy and the aggregate resource budget are read from inside the
+# image by the deploy's monitor, verdict and budget containers (the host has no Node).
+COPY --from=build --chown=node:node /app/config ./config
 COPY --from=build --chown=node:node /app/src ./src
 COPY --from=build --chown=node:node /app/remotion ./remotion
 

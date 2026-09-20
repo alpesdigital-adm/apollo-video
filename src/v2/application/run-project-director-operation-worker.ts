@@ -6,6 +6,7 @@ import type {
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
 import { runProjectDirectorService } from './run-project-director.ts'
 import type { BriefCompilation } from './compile-brief.ts'
+import { immediateNextAttemptAt, workerShutdownFailure } from './worker-lifecycle.ts'
 
 export interface ProjectDirectorOperationWorkerOutcome {
   operationId: string
@@ -55,7 +56,13 @@ export function runNextProjectDirectorOperationService(dependencies: {
 
   return async function runNext(
     leaseOwner: string,
+    signal?: AbortSignal,
   ): Promise<Readonly<ProjectDirectorOperationWorkerOutcome> | null> {
+    // Admission stops here on shutdown. The director's own work is in-process
+    // decision logic with no port that takes a signal and no child process, so
+    // an attempt already admitted runs to its settle rather than being abandoned
+    // half-committed — there is nothing to contain and nothing to kill.
+    if (signal?.aborted) return null
     const claimedAt = clock()
     const claimed = await dependencies.operations.claimNext({
       leaseOwner,
@@ -179,7 +186,9 @@ export function runNextProjectDirectorOperationService(dependencies: {
       if (leaseLost) {
         return Object.freeze({ operationId, status: 'lease-lost' as const })
       }
-      const retryable = retryableDirectorError(error)
+      const shuttingDown = signal?.aborted === true
+      const shutdown = workerShutdownFailure()
+      const retryable = shuttingDown ? true : retryableDirectorError(error)
       const canRetry = retryable && attempt < claimed.operation.maxAttempts
       const failedAt = clock()
       const delay = Math.min(
@@ -188,17 +197,23 @@ export function runNextProjectDirectorOperationService(dependencies: {
       )
       const settled = await dependencies.operations.failOrRetry({
         ...command(failedAt),
-        error: {
-          code: error instanceof DomainError
-            ? error.code.toLowerCase().replaceAll('_', '-')
-            : 'director-operation-failed',
-          message: error instanceof DomainError
-            ? error.message
-            : 'Director operation failed',
-          retryable,
-        },
+        error: shuttingDown
+          ? { code: shutdown.code, message: shutdown.message, retryable: true }
+          : {
+            code: error instanceof DomainError
+              ? error.code.toLowerCase().replaceAll('_', '-')
+              : 'director-operation-failed',
+            message: error instanceof DomainError
+              ? error.message
+              : 'Director operation failed',
+            retryable,
+          },
         ...(canRetry
-          ? { nextAttemptAt: new Date(failedAt.getTime() + delay).toISOString() }
+          ? {
+            nextAttemptAt: shuttingDown
+              ? immediateNextAttemptAt(failedAt)
+              : new Date(failedAt.getTime() + delay).toISOString(),
+          }
           : {}),
       })
       if (!settled) {

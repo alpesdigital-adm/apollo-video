@@ -4,6 +4,11 @@ import { DomainError } from '../domain/errors.ts'
 import type { AuthorizedRenderCompletion } from './render-authorized-input.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
+import {
+  immediateNextAttemptAt,
+  linkAbortSignal,
+  workerShutdownFailure,
+} from './worker-lifecycle.ts'
 
 type RenderAuthorized = (request: {
   workspaceId: string
@@ -94,7 +99,12 @@ export function runNextPublicOperationService(dependencies: {
 
   return async function runNextPublicOperation(
     leaseOwner: string,
+    signal?: AbortSignal,
   ): Promise<Readonly<PublicOperationWorkerOutcome> | null> {
+    // Refuse before the claim, not after: an aborted worker that claims anyway
+    // has taken a lease it is about to abandon, and the row would then wait out
+    // the whole lease window before anyone else could pick it up.
+    if (signal?.aborted) return null
     const claimedAt = clock()
     const claimed = await dependencies.operations.claimNext({
       leaseOwner,
@@ -115,6 +125,10 @@ export function runNextPublicOperationService(dependencies: {
     const operationId = claimed.operation.id
     const attempt = claimed.lease.attempt
     const abortController = new AbortController()
+    // The union of "the operator stopped this worker" and "this worker lost its
+    // lease". Both must reach the Remotion child process; only the first leaves
+    // the lease valid enough to hand the operation back deliberately.
+    const ownerLink = linkAbortSignal(signal, abortController)
     let stopped = false
     let leaseLost = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -262,16 +276,22 @@ export function runNextPublicOperationService(dependencies: {
         return Object.freeze({ operationId, status: 'lease-lost' })
       }
       const failedAt = clock()
-      const failure = safeFailure(error)
+      // A shutdown is not this render failing. Recording it as `render_execution_failed`
+      // would bill the operation an exponential backoff it did not earn and, on the
+      // last attempt, dead-letter a render nobody rejected.
+      const shuttingDown = signal?.aborted === true
+      const failure = shuttingDown ? workerShutdownFailure() : safeFailure(error)
       const nextAttemptAt = failure.retryable && attempt < claimed.operation.maxAttempts
-        ? new Date(
-            failedAt.getTime() +
-              calculatePublicOperationRetryDelayMs({
-                attempt,
-                baseDelayMs: retryBaseDelayMs,
-                maxDelayMs: retryMaxDelayMs,
-              }),
-          ).toISOString()
+        ? shuttingDown
+          ? immediateNextAttemptAt(failedAt)
+          : new Date(
+              failedAt.getTime() +
+                calculatePublicOperationRetryDelayMs({
+                  attempt,
+                  baseDelayMs: retryBaseDelayMs,
+                  maxDelayMs: retryMaxDelayMs,
+                }),
+            ).toISOString()
         : undefined
       const failed = await dependencies.operations.failOrRetry({
         ...command(failedAt),
@@ -287,6 +307,7 @@ export function runNextPublicOperationService(dependencies: {
       })
     } finally {
       stopHeartbeat()
+      ownerLink.dispose()
     }
   }
 }

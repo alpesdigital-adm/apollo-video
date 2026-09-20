@@ -289,6 +289,17 @@ export async function runProviderJobWorkerLoop(input: {
   pollIntervalMs?: number
   onIterationError?: () => void
   wait?: (signal: AbortSignal, milliseconds: number) => Promise<void>
+  /**
+   * Host admission gate, asked once per iteration. A closed gate idles at the same
+   * poll interval instead of exiting: the worker keeps its connections and comes
+   * back the moment the gate reopens, which is what makes stopping admission a
+   * cheap operator move rather than a restart.
+   *
+   * It is asked before the claim and never after: provider work already admitted
+   * is never abandoned by the gate, because a submitted provider job may already
+   * have been charged.
+   */
+  admits?: () => Promise<boolean>
 }): Promise<void> {
   const workerId = identity(input.workerId, 'workerId')
   const pollIntervalMs = input.pollIntervalMs ?? 1_000
@@ -296,6 +307,10 @@ export async function runProviderJobWorkerLoop(input: {
   const wait = input.wait ?? waitForProviderPoll
   while (!input.signal.aborted) {
     try {
+      if (input.admits && !(await input.admits())) {
+        await wait(input.signal, pollIntervalMs)
+        continue
+      }
       const outcome = await input.runNext(workerId, input.signal)
       if (!outcome) await wait(input.signal, pollIntervalMs)
     } catch {

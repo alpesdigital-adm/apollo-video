@@ -38,6 +38,7 @@ import { projectProxyRenderInputHash } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import { immediateNextAttemptAt, workerShutdownFailure } from './worker-lifecycle.ts'
 
 const NON_RETRYABLE_CODES = new Set(['INVALID_RENDER_INPUT', 'RENDER_OUTPUT_INVALID', 'PERSISTENCE_CONFLICT', 'PERSISTENCE_NOT_CONFIGURED'])
 
@@ -536,8 +537,13 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       dependencies.onFailureDiagnostic?.(Object.freeze({ operationId: operation.id, error }))
       if (leaseLost) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       const failedAt = clock()
-      const failure = safeFailure(error)
-      const nextAttemptAt = failure.retryable && attempt < operation.maxAttempts ? new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString() : undefined
+      const shuttingDown = target.signal?.aborted === true
+      const failure = shuttingDown ? workerShutdownFailure() : safeFailure(error)
+      const nextAttemptAt = failure.retryable && attempt < operation.maxAttempts
+        ? shuttingDown
+          ? immediateNextAttemptAt(failedAt)
+          : new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString()
+        : undefined
       const failed = await withLeaseCommand(() =>
         dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) }))
       if (!failed) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "apollo-resource-budget/v1",
+  "roles": {
+    "containers": [
+      "app",
+      "ingest-worker",
+      "render-worker",
+      "webhook-worker",
+      "long-form-worker",
+      "provider-worker",
+      "capture-sync-worker",
+      "music-analysis-worker",
+      "localization-translation-worker",
+      "localization-media-worker"
+    ],
+    "optional": {
+      "localization-translation-worker": "localization"
+    },
+    "auxiliaries": {
+      "monitor": { "concurrent": true },
+      "config-check": { "concurrent": false },
+      "migrate": { "concurrent": false }
+    }
+  },
+  "profiles": {
+    "isolated-ci": {
+      "description": "Disposable CI runner: PostgreSQL and MinIO of the run share the host with the Apollo fleet.",
+      "host": { "cpus": 4, "memory": "16g" },
+      "envelope": { "cpus": 3, "memory": "6g", "pids": 4096 },
+      "containers": {
+        "app": { "cpus": 0.5, "memory": "768m", "pidsLimit": 256 },
+        "ingest-worker": { "cpus": 0.25, "memory": "512m", "pidsLimit": 128 },
+        "render-worker": { "cpus": 0.5, "memory": "1g", "pidsLimit": 256 },
+        "webhook-worker": { "cpus": 0.1, "memory": "256m", "pidsLimit": 64 },
+        "long-form-worker": { "cpus": 0.25, "memory": "512m", "pidsLimit": 128 },
+        "provider-worker": { "cpus": 0.1, "memory": "384m", "pidsLimit": 64 },
+        "capture-sync-worker": { "cpus": 0.25, "memory": "512m", "pidsLimit": 128 },
+        "music-analysis-worker": { "cpus": 0.25, "memory": "512m", "pidsLimit": 128 },
+        "localization-translation-worker": { "cpus": 0.1, "memory": "256m", "pidsLimit": 64 },
+        "localization-media-worker": { "cpus": 0.25, "memory": "512m", "pidsLimit": 128 }
+      },
+      "auxiliaries": {
+        "monitor": { "cpus": 0.1, "memory": "128m", "pidsLimit": 32 },
+        "config-check": { "cpus": 0.25, "memory": "256m", "pidsLimit": 64 },
+        "migrate": { "cpus": 0.25, "memory": "512m", "pidsLimit": 64 }
+      }
+    },
+    "local-dev": {
+      "description": "Developer machine running the Compose workflow; nothing else on the host is protected.",
+      "host": { "cpus": 8, "memory": "32g" },
+      "envelope": { "cpus": 6, "memory": "12g", "pids": 8192 },
+      "containers": {
+        "app": { "cpus": 1, "memory": "2g", "pidsLimit": 512 },
+        "ingest-worker": { "cpus": 0.5, "memory": "1g", "pidsLimit": 256 },
+        "render-worker": { "cpus": 1, "memory": "2g", "pidsLimit": 512 },
+        "webhook-worker": { "cpus": 0.25, "memory": "512m", "pidsLimit": 128 },
+        "long-form-worker": { "cpus": 0.5, "memory": "1g", "pidsLimit": 256 },
+        "provider-worker": { "cpus": 0.25, "memory": "1g", "pidsLimit": 128 },
+        "capture-sync-worker": { "cpus": 0.5, "memory": "768m", "pidsLimit": 256 },
+        "music-analysis-worker": { "cpus": 0.5, "memory": "768m", "pidsLimit": 256 },
+        "localization-translation-worker": { "cpus": 0.25, "memory": "512m", "pidsLimit": 128 },
+        "localization-media-worker": { "cpus": 0.5, "memory": "1g", "pidsLimit": 256 }
+      },
+      "auxiliaries": {
+        "monitor": { "cpus": 0.1, "memory": "128m", "pidsLimit": 32 },
+        "config-check": { "cpus": 0.25, "memory": "256m", "pidsLimit": 64 },
+        "migrate": { "cpus": 0.5, "memory": "512m", "pidsLimit": 64 }
+      }
+    },
+    "shared-production": {
+      "description": "Shared Hostinger VPS. No quota is defaulted here: an operator-approved budget file must supply host size, envelope and every quota; the envelope must leave the declared margin for the other services of the host.",
+      "requiresApprovedBudget": true,
+      "minimumCpuMarginRatio": 0.25,
+      "minimumMemoryReserve": "2g"
+    }
+  }
+}

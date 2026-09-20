@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "apollo-ops-gate/v1",
+  "state": "open",
+  "reasons": [],
+  "seq": 43,
+  "issuedAtIso": "2026-09-18T23:59:20.000Z",
+  "issuedAtMonotonicMs": 133456.7,
+  "ttlMs": 30000,
+  "owner": { "runId": "deploy-20260918T2359Z-ab12", "kind": "monitor", "pid": 4242 }
+}

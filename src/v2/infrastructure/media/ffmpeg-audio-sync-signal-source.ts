@@ -261,6 +261,15 @@ export class FfmpegAudioSyncSignalSource {
     sessionFrameRate: Rational
     sessionBounds: Readonly<TickInterval>
     heartbeat?: () => Promise<void>
+    /**
+     * Ends this observation's own FFmpeg decode when the worker is stopped.
+     *
+     * The correlation is a single synchronous search and cannot be interrupted; the
+     * decode in front of it is a child process, and that is what this reaches. Node's
+     * `execFile({ signal })` signals the handle it spawned, so a PID the operating
+     * system recycled between the abort and the delivery cannot be hit.
+     */
+    signal?: AbortSignal
   }): Promise<readonly Readonly<SyncSignalObservation>[]> {
     const observations: Readonly<SyncSignalObservation>[] = []
     observations.push(...await this.observeAudio(input))
@@ -303,6 +312,7 @@ export class FfmpegAudioSyncSignalSource {
     referenceTrack: Readonly<CaptureTrack>
     sessionTimebase: Readonly<Timebase>
     heartbeat?: () => Promise<void>
+    signal?: AbortSignal
   }): Promise<readonly Readonly<SyncSignalObservation>[]> {
     const sampleTimebase = timebaseFromRate(this.sampleRate)
     const candidateParts = byOrdinal(input.track.parts)
@@ -319,13 +329,21 @@ export class FfmpegAudioSyncSignalSource {
       await beat()
       referenceAudio.set(
         referencePart.partId,
-        await this.decode({ workspaceId: input.session.workspaceId, part: referencePart }),
+        await this.decode({
+          workspaceId: input.session.workspaceId,
+          part: referencePart,
+          ...(input.signal ? { signal: input.signal } : {}),
+        }),
       )
     }
 
     for (const candidatePart of candidateParts) {
       await beat()
-      const candidate = await this.decode({ workspaceId: input.session.workspaceId, part: candidatePart })
+      const candidate = await this.decode({
+        workspaceId: input.session.workspaceId,
+        part: candidatePart,
+        ...(input.signal ? { signal: input.signal } : {}),
+      })
       if (!candidate.hasAudio || candidate.samples.length === 0) continue
 
       for (const referencePart of referenceParts) {
@@ -715,11 +733,15 @@ export class FfmpegAudioSyncSignalSource {
   private async decode(input: {
     workspaceId: string
     part: Readonly<CaptureTrackPart>
+    signal?: AbortSignal
   }): Promise<DecodedAudio> {
-    const materialized = await this.media.resolve(input)
+    const materialized = await this.media.resolve({
+      workspaceId: input.workspaceId,
+      part: input.part,
+    })
     const scratch = await mkdtemp(join(tmpdir(), 'apollo-audio-sync-'))
     try {
-      return await this.extractPcm(materialized.path, join(scratch, 'audio.pcm'))
+      return await this.extractPcm(materialized.path, join(scratch, 'audio.pcm'), input.signal)
     } finally {
       await materialized.release()
       await rm(scratch, { recursive: true, force: true }).catch((error: unknown) => {
@@ -730,7 +752,11 @@ export class FfmpegAudioSyncSignalSource {
     }
   }
 
-  private async extractPcm(mediaPath: string, pcmPath: string): Promise<DecodedAudio> {
+  private async extractPcm(
+    mediaPath: string,
+    pcmPath: string,
+    signal?: AbortSignal,
+  ): Promise<DecodedAudio> {
     try {
       await execFileAsync(this.ffmpegPath, [
         '-hide_banner', '-nostdin', '-y',
@@ -738,8 +764,20 @@ export class FfmpegAudioSyncSignalSource {
         '-i', mediaPath,
         '-vn', '-ac', '1', '-ar', String(this.sampleRate),
         '-f', 's16le', pcmPath,
-      ], { maxBuffer: 64 * 1024 * 1024, timeout: AUDIO_SYNC_SIGNAL_DEFAULTS.decodeTimeoutMs })
+      ], {
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: AUDIO_SYNC_SIGNAL_DEFAULTS.decodeTimeoutMs,
+        // Wave 23: the decode is the only child this adapter owns, and this is what
+        // ends it when the worker is stopped. Same mechanism the editorial proxy
+        // renderer uses; Node signals the handle, never a PID it looked up.
+        ...(signal ? { signal } : {}),
+      })
     } catch (error) {
+      // A cancelled decode is neither of the two cases below: it is not a session
+      // with no audio stream and not a broken codec. It must surface as an abort so
+      // the worker can abandon its run instead of filing "no evidence found" or
+      // failing the session over a deploy.
+      if (signal?.aborted) throw error
       // A file with no audio stream and a broken decode both make FFmpeg exit
       // non-zero, and they are opposite facts: the first is something to
       // report about the session, the second is something wrong with the run.

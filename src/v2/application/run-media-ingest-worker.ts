@@ -24,6 +24,11 @@ import { compileInitialSourceEditPlan } from './apply-editorial-cut-command.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { analyzeImageArtifactService } from './analyze-image-artifact.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
+import {
+  immediateNextAttemptAt,
+  linkAbortSignal,
+  workerShutdownFailure,
+} from './worker-lifecycle.ts'
 
 const NON_RETRYABLE_CODES = new Set([
   'INVALID_ARGUMENT', 'INVALID_MEDIA_ARTIFACT', 'MEDIA_UPLOAD_TRANSITION_REJECTED',
@@ -81,7 +86,8 @@ export function runNextMediaIngestOperationService(dependencies: {
   }
   const leaseUntil = (now: Date) => new Date(now.getTime() + leaseDurationMs).toISOString()
 
-  return async function runNext(leaseOwner: string) {
+  return async function runNext(leaseOwner: string, signal?: AbortSignal) {
+    if (signal?.aborted) return null
     const claimedAt = clock()
     const claimed = await dependencies.operations.claimNext({
       leaseOwner, now: claimedAt.toISOString(), leaseUntil: leaseUntil(claimedAt), type: 'media-ingest',
@@ -91,6 +97,10 @@ export function runNextMediaIngestOperationService(dependencies: {
     const { operation, context } = claimed
     const attempt = claimed.lease.attempt
     const abortController = new AbortController()
+    // The internal half already reached inspect/probe/normalize/transcribe on lease
+    // loss; this is the outer half, so an operator's SIGTERM reaches the same ports
+    // and the FFmpeg child `execFile({ signal })` already watches.
+    const ownerLink = linkAbortSignal(signal, abortController)
     let leaseLost = false
     let stopped = false
     let failProjectOnTerminal = false
@@ -405,9 +415,12 @@ export function runNextMediaIngestOperationService(dependencies: {
       stopHeartbeat()
       if (leaseLost) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       const failedAt = clock()
-      const failure = safeFailure(error)
+      const shuttingDown = signal?.aborted === true
+      const failure = shuttingDown ? workerShutdownFailure() : safeFailure(error)
       const nextAttemptAt = failure.retryable && attempt < operation.maxAttempts
-        ? new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString()
+        ? shuttingDown
+          ? immediateNextAttemptAt(failedAt)
+          : new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString()
         : undefined
       const failed = await dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) })
       if (!failed) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
@@ -417,6 +430,7 @@ export function runNextMediaIngestOperationService(dependencies: {
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })
     } finally {
       stopHeartbeat()
+      ownerLink.dispose()
     }
   }
 }

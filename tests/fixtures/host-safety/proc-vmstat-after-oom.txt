@@ -1,0 +1,8 @@
+nr_free_pages 131072
+nr_zone_inactive_anon 1024
+pgpgin 1087654
+pgpgout 173456
+pswpin 0
+pswpout 0
+oom_kill 9
+compact_stall 3

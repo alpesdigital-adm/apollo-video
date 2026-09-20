@@ -227,6 +227,12 @@ export async function runDiscoveredWebhookDeliveryWorkerLoop(dependencies: {
   onIterationError?: (event: Readonly<{ workspaceId: string }>) => void
   onDiscoveryError?: () => void
   wait?: (delayMs: number, signal: AbortSignal) => Promise<void>
+  /**
+   * Host admission gate, asked before each workspace's delivery claim — the same
+   * boundary the abort check already uses, because a scan of 100 workspaces is the
+   * unit of work an operator can actually interrupt.
+   */
+  admits?: () => Promise<boolean>
 }): Promise<void> {
   const scanLimit = dependencies.scanLimit ?? 100
   const pollIntervalMs = dependencies.pollIntervalMs ?? 1_000
@@ -274,6 +280,7 @@ export async function runDiscoveredWebhookDeliveryWorkerLoop(dependencies: {
       }
       for (const workspaceId of page.workspaceIds) {
         if (dependencies.signal.aborted) break
+        if (dependencies.admits && !(await dependencies.admits())) break
         if (seenWorkspaceIds.has(workspaceId)) continue
         seenWorkspaceIds.add(workspaceId)
         try {
@@ -331,6 +338,12 @@ export async function runCoordinatedWebhookDeliveryWorkerLoop(dependencies: {
   retryIntervalMs?: number
   onCoordinationError?: () => void
   wait?: (delayMs: number, signal: AbortSignal) => Promise<void>
+  /**
+   * Host admission gate. A shard lease is itself an admission: taking one behind a
+   * closed gate would make this process the owner of workspaces it is not going to
+   * serve, so the gate is asked before the claim and the shard is left for later.
+   */
+  admits?: () => Promise<boolean>
 }): Promise<void> {
   const heartbeatIntervalMs = dependencies.heartbeatIntervalMs ?? 10_000
   const retryIntervalMs = dependencies.retryIntervalMs ?? 1_000
@@ -347,6 +360,10 @@ export async function runCoordinatedWebhookDeliveryWorkerLoop(dependencies: {
   const wait = dependencies.wait ?? waitForPoll
 
   while (!dependencies.signal.aborted) {
+    if (dependencies.admits && !(await dependencies.admits())) {
+      if (!dependencies.signal.aborted) await wait(retryIntervalMs, dependencies.signal)
+      continue
+    }
     let lease: Readonly<{ shardIndex: number; shardCount: number }> | null = null
     try {
       lease = await dependencies.claimShard()

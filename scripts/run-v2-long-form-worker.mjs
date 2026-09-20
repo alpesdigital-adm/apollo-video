@@ -3,6 +3,8 @@ import { hostname } from 'node:os'
 
 import * as importedRepositoryFactory from '../src/v2/infrastructure/repository-factory.ts'
 import * as importedPrismaClient from '../src/v2/infrastructure/prisma-postgres/client.ts'
+import * as importedLifecycle from '../src/v2/application/worker-lifecycle.ts'
+import * as importedOpsState from '../src/v2/infrastructure/ops-state/file-admission-gate.ts'
 
 const repositoryFactory =
   importedRepositoryFactory.createLongFormIndexWorker
@@ -13,6 +15,23 @@ const prismaClient = importedPrismaClient.disconnectV2PostgresClient
   ? importedPrismaClient
   : importedPrismaClient.default
 const { disconnectV2PostgresClient } = prismaClient
+const lifecycle = importedLifecycle.createWorkerShutdown
+  ? importedLifecycle
+  : importedLifecycle.default
+const {
+  WORKER_SHUTDOWN_DEADLINE_EXIT_CODE,
+  awaitWithShutdownDeadline,
+  createWorkerShutdown,
+  isShutdownDeadlineError,
+  resolveWorkerShutdownGraceMs,
+  runWithCleanup,
+} = lifecycle
+const opsState = importedOpsState.createFileAdmissionGate
+  ? importedOpsState
+  : importedOpsState.default
+const { createFileAdmissionGate } = opsState
+
+process.env.APOLLO_PROCESS_ROLE ??= 'long-form-worker'
 
 const pollIntervalMs = Number(
   process.env.APOLLO_V2_LONG_FORM_POLL_MS ??
@@ -29,49 +48,74 @@ if (
   )
 }
 
+const shutdownGraceMs = resolveWorkerShutdownGraceMs(process.env.APOLLO_V2_WORKER_SHUTDOWN_GRACE_MS)
+
 const host = hostname()
   .replace(/[^A-Za-z0-9._:-]/g, '-')
   .slice(0, 36) || 'unknown-host'
 const workerId =
   `long-form:${host}:${process.pid}:${randomUUID()}`
-const controller = new AbortController()
 const runNext = createLongFormIndexWorker()
-
-process.once('SIGINT', () => controller.abort())
-process.once('SIGTERM', () => controller.abort())
+const shutdown = createWorkerShutdown({
+  process,
+  gate: createFileAdmissionGate(),
+  log: (event) => console.info(JSON.stringify({ worker: 'long-form', ...event })),
+})
 
 function waitForPoll() {
   return new Promise((resolve) => {
     const finish = () => {
       clearTimeout(timeout)
-      controller.signal.removeEventListener('abort', finish)
+      shutdown.signal.removeEventListener('abort', finish)
       resolve()
     }
     const timeout = setTimeout(finish, pollIntervalMs)
-    controller.signal.addEventListener('abort', finish, { once: true })
+    shutdown.signal.addEventListener('abort', finish, { once: true })
   })
 }
 
+const guard = (branch, work) => awaitWithShutdownDeadline(work, shutdown, {
+  branch,
+  graceMs: shutdownGraceMs,
+  onDeadline: (event) => console.error(JSON.stringify({ worker: 'long-form', ...event })),
+})
+
 try {
-  while (!controller.signal.aborted) {
-    try {
-      const outcome = await runNext(workerId, controller.signal)
-      if (outcome) {
-        console.info(JSON.stringify({
-          operationId: outcome.operationId,
-          workflowId: outcome.workflowId,
-          status: outcome.status,
-        }))
-      } else if (!controller.signal.aborted) {
-        await waitForPoll()
+  await runWithCleanup(
+    async () => {
+      while (!shutdown.stopping()) {
+        try {
+          const admission = await shutdown.admits()
+          if (!admission.admits) {
+            if (!shutdown.stopping()) await waitForPoll()
+            continue
+          }
+          const outcome = await guard('long-form-index', runNext(workerId, shutdown.signal))
+          if (outcome) {
+            console.info(JSON.stringify({
+              operationId: outcome.operationId,
+              workflowId: outcome.workflowId,
+              status: outcome.status,
+            }))
+          } else if (!shutdown.stopping()) {
+            await waitForPoll()
+          }
+        } catch (error) {
+          if (isShutdownDeadlineError(error)) throw error
+          if (!shutdown.stopping()) {
+            console.error('Long-form worker iteration failed safely')
+            await waitForPoll()
+          }
+        }
       }
-    } catch {
-      if (!controller.signal.aborted) {
-        console.error('Long-form worker iteration failed safely')
-        await waitForPoll()
-      }
-    }
-  }
-} finally {
-  await disconnectV2PostgresClient()
+    },
+    [
+      { name: 'shutdown-listeners', run: () => shutdown.dispose() },
+      { name: 'prisma-disconnect', run: () => disconnectV2PostgresClient() },
+    ],
+    (event) => console.error(JSON.stringify({ worker: 'long-form', ...event, error: String(event.error) })),
+  )
+} catch (error) {
+  if (!isShutdownDeadlineError(error)) throw error
+  process.exit(WORKER_SHUTDOWN_DEADLINE_EXIT_CODE)
 }
