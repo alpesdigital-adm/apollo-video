@@ -117,7 +117,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const { FfprobeSyntheticCriticMediaEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-media-integrity.ts')
     const { AlignmentSyntheticCriticPronunciationEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
     const { DeterministicSyntheticCriticControlledEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
-    const { S3ArtifactSourceMaterializer, S3VerifiedMediaStorage, createArtifactS3ClientFromEnvironment } = await import('../../src/v2/infrastructure/media/s3-artifact-storage.ts')
+    const { S3ArtifactContentStorage, S3ArtifactSourceMaterializer, S3VerifiedMediaStorage, createArtifactS3ClientFromEnvironment } = await import('../../src/v2/infrastructure/media/s3-artifact-storage.ts')
     const { probeAudioDurationSeconds, probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
     const { HeyGenV3AsyncMediaProviderAdapter } = await import('../../src/v2/infrastructure/heygen-v3-provider.ts')
@@ -357,9 +357,12 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       audioProber: { probeDurationSeconds: (path, options) => probeAudioDurationSeconds(path, options) },
       clock: () => new Date(at(3)),
     })
+    const contentStorage = objectStore
+      ? new S3ArtifactContentStorage({ bucket: objectStore.bucket, client: objectStore.client })
+      : new LocalArtifactContentStorage(artifactRoot)
     const alignment = new StoredSyntheticMasterAlignmentReader({
       artifacts: artifactRepository,
-      storage: new LocalArtifactContentStorage(artifactRoot),
+      storage: contentStorage,
     })
     const evaluateSynthetic = evaluateSyntheticCriticCore({
       reports: criticReports,
