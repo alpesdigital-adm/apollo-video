@@ -28,6 +28,7 @@ import {
   type ProviderJob,
 } from '../../domain/provider-job.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { hydrateSyntheticPresenterProfile } from './synthetic-production-repository.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -274,6 +275,52 @@ async function assertAuthority(
   }
 }
 
+async function assertCurrentSyntheticConsent(
+  transaction: Prisma.TransactionClient,
+  job: Readonly<ProviderJob>,
+  at: Date,
+): Promise<void> {
+  const binding = job.input.criticBinding
+  if (typeof binding !== 'object' || binding === null || Array.isArray(binding)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Synthetic provider job lost its critic authorization scope')
+  }
+  const scope = binding as Record<string, unknown>
+  if (typeof scope.use !== 'string' || typeof scope.market !== 'string' || typeof scope.locale !== 'string') {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Synthetic provider job critic scope is invalid')
+  }
+  const authorizedSnapshot = await transaction.v2SyntheticPresenterProfile.findFirst({
+    where: { id: job.authorization.profileSnapshotId, workspaceId: job.workspaceId },
+    select: { profileId: true },
+  })
+  const head = authorizedSnapshot
+    ? await transaction.v2SyntheticPresenterProfileHead.findUnique({
+        where: { workspaceId_profileId: { workspaceId: job.workspaceId, profileId: authorizedSnapshot.profileId } },
+        include: { currentSnapshot: true },
+      })
+    : null
+  if (!authorizedSnapshot || !head) {
+    throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Synthetic presenter authorization changed before approval')
+  }
+
+  const hydratedCurrent = hydrateSyntheticPresenterProfile(head.currentSnapshot)
+  const current = hydratedCurrent.snapshot
+  if (
+    current.id !== authorizedSnapshot.profileId ||
+    current.version !== head.currentVersion ||
+    hydratedCurrent.profileSnapshotId !== head.currentSnapshotId
+  ) {
+    throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Synthetic presenter head changed identity before approval')
+  }
+  const consent = current.consent
+  const approved = current.status === 'active' && consent.granted === true &&
+    consent.revokedAt === undefined && Date.parse(consent.expiresAt) > at.getTime() &&
+    consent.allowedUses.includes(scope.use) &&
+    consent.allowedMarkets.includes(scope.market) &&
+    consent.allowedLocales.includes(scope.locale) &&
+    consent.allowedOperations.some((operation) => operation === job.operation)
+  if (!approved) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Synthetic presenter consent changed before approval')
+}
+
 export class PrismaProviderJobRepository implements ProviderJobRepository {
   private readonly prisma: PrismaClient
 
@@ -381,6 +428,16 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
   async read(input: Parameters<ProviderJobRepository['read']>[0]) {
     const row = await this.prisma.v2ProviderJob.findFirst({
       where: { id: input.jobId, workspaceId: input.workspaceId, projectId: input.projectId },
+      include: { transportState: true },
+    })
+    if (!row) return null
+    const { transportState, ...jobRow } = row
+    return Object.freeze({ ...parseJob(jobRow), transportState: transportState ? parseTransportState(transportState) : null })
+  }
+
+  async readById(input: Parameters<ProviderJobRepository['readById']>[0]) {
+    const row = await this.prisma.v2ProviderJob.findFirst({
+      where: { id: input.jobId, workspaceId: input.workspaceId },
       include: { transportState: true },
     })
     if (!row) return null
@@ -531,6 +588,38 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   }
 
+  async renewLease(input: Parameters<ProviderJobRepository['renewLease']>[0]) {
+    if (input.leaseExpiresAt.getTime() <= input.now.getTime()) {
+      throw new DomainError('INVALID_ARGUMENT', 'Renewed provider lease must expire in the future')
+    }
+    const renewed = await this.prisma.v2ProviderJob.updateMany({
+      where: {
+        id: input.current.job.id,
+        workspaceId: input.current.job.workspaceId,
+        projectId: input.current.job.projectId,
+        jobHash: input.current.job.jobHash,
+        status: input.current.job.status,
+        leaseOwner: input.current.lease.owner,
+        leaseToken: input.current.lease.token,
+        leaseExpiresAt: { gt: input.now },
+      },
+      // A lease heartbeat is infrastructure metadata. Rewriting jobJson,
+      // jobHash, updatedAt or the domain heartbeat would manufacture a state
+      // transition that never occurred.
+      data: { leaseExpiresAt: input.leaseExpiresAt },
+    })
+    if (renewed.count !== 1) {
+      throw new DomainError('VERSION_CONFLICT', 'Provider job lease was lost before renewal')
+    }
+    return Object.freeze({
+      ...input.current,
+      lease: Object.freeze({
+        ...input.current.lease,
+        expiresAt: input.leaseExpiresAt.toISOString(),
+      }),
+    }) as Readonly<ClaimedProviderJob>
+  }
+
   async advance(input: Parameters<ProviderJobRepository['advance']>[0]) {
     return this.prisma.$transaction(async (transaction) => {
       const row = await transaction.v2ProviderJob.findUnique({ where: { id: input.current.job.id } })
@@ -538,6 +627,12 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
         row.leaseToken !== input.current.lease.token || row.leaseOwner !== input.current.lease.owner ||
         !row.leaseExpiresAt || row.leaseExpiresAt.getTime() < input.occurredAt.getTime()) {
         throw new DomainError('VERSION_CONFLICT', 'Provider job lease or version was lost')
+      }
+      if (input.next.status === 'approved') {
+        await assertAuthority(transaction, input.next, input.occurredAt)
+        if (!input.next.transformation && ['tts', 'audio-avatar'].includes(input.next.operation)) {
+          await assertCurrentSyntheticConsent(transaction, input.next, input.occurredAt)
+        }
       }
       if (input.next.status === 'submitted') await assertAuthority(transaction, input.next, input.occurredAt)
       if (input.next.resultArtifact) {

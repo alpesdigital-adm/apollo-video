@@ -110,6 +110,13 @@ export interface SyntheticCriticReport {
   scriptHash: string
   profileSnapshotId: string
   expectedIdentityRef: string
+  /** Hash of the complete authoritative expectation used for this verdict.
+   * Absent only on historical reports minted before W24.1. */
+  expectationHash?: string
+  /** Hash of every authoritative input that made this evaluation one question.
+   * Absent only on historical reports minted before the context identity was
+   * made durable. */
+  evaluationContextHash?: string
   evaluators: readonly Readonly<SyntheticCriticEvaluator>[]
   measurements: readonly Readonly<SyntheticCriticMeasurement>[]
   issues: readonly Readonly<SyntheticCriticIssue>[]
@@ -235,6 +242,8 @@ export function calculateSyntheticCriticReportHash(report: Omit<SyntheticCriticR
     scriptHash: report.scriptHash,
     profileSnapshotId: report.profileSnapshotId,
     expectedIdentityRef: report.expectedIdentityRef,
+    ...(report.expectationHash ? { expectationHash: report.expectationHash } : {}),
+    ...(report.evaluationContextHash ? { evaluationContextHash: report.evaluationContextHash } : {}),
     evaluators: report.evaluators.map((evaluator) => ({ ...evaluator })),
     measurements: report.measurements.map((measurement) => ({
       ...measurement,
@@ -278,6 +287,8 @@ export function createSyntheticCriticReport(
     'report.alignmentArtifactId is invalid',
   )
   assertDomain(input.expectedIdentityRef.trim().length > 0, 'INVALID_ARGUMENT', 'report.expectedIdentityRef is required')
+  assertDomain(input.expectationHash === undefined || HASH.test(input.expectationHash), 'INVALID_ARGUMENT', 'report.expectationHash is invalid')
+  assertDomain(input.evaluationContextHash === undefined || HASH.test(input.evaluationContextHash), 'INVALID_ARGUMENT', 'report.evaluationContextHash is invalid')
   assertDomain(input.thresholdsVersion.trim().length > 0, 'INVALID_ARGUMENT', 'report.thresholdsVersion is required')
   assertDomain(input.evaluators.length > 0, 'INVALID_ARGUMENT', 'report.evaluators is required')
   for (const evaluator of input.evaluators) {
@@ -368,6 +379,8 @@ export function createSyntheticCriticReport(
     scriptHash: input.scriptHash,
     profileSnapshotId: input.profileSnapshotId,
     expectedIdentityRef: input.expectedIdentityRef,
+    ...(input.expectationHash ? { expectationHash: input.expectationHash } : {}),
+    ...(input.evaluationContextHash ? { evaluationContextHash: input.evaluationContextHash } : {}),
     evaluators: Object.freeze(input.evaluators.map((evaluator) => Object.freeze({ ...evaluator }))),
     measurements,
     issues,

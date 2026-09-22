@@ -89,6 +89,7 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
       'critic-video-b': ['video', 'mp4', hash('b')],
       'critic-audio': ['audio', 'wav', hash('c')],
       'critic-alignment': ['data', 'json', hash('d')],
+      'critic-alignment-b': ['data', 'json', hash('f')],
       'critic-consent': ['data', 'json', hash('e')],
     }
     for (const [id, [mediaType, container, sha256]] of Object.entries(artifacts)) {
@@ -180,6 +181,7 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
       artifactId: 'critic-video', artifactSha256: artifacts['critic-video'][2],
       audioArtifactId: 'critic-audio', alignmentArtifactId: 'critic-alignment',
       scriptHash: hash('7'), profileSnapshotId, expectedIdentityRef: 'avatar_critic',
+      expectationHash: hash('8'), evaluationContextHash: hash('9'),
       evaluators, measurements, issues: [],
       decision: 'approved', recommendedAction: 'none',
       thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/heygen-v3/v1',
@@ -224,6 +226,7 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
         artifactId: 'critic-video-b',
         artifactSha256: artifacts['critic-video-b'][2],
         blockId: 'critic-block-2',
+        evaluationContextHash: hash('0'),
         measurements: measurements.map((entry) =>
           entry.dimension === 'pronunciation' ? { ...entry, value: 1 } : entry),
         issues: [{
@@ -261,12 +264,64 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
     )
     assert.equal((await repository.listByProject({ workspaceId, projectId, decision: 'rejected', limit: 10 })).length, 1)
 
-    // 5. Cross-workspace invisibility.
+    // 5. The same block, bytes and policy can be judged against a new durable
+    // alignment. It is a new opinion, while a caller that falsely claims the
+    // old context hash with altered metadata is rejected on the P2002 path.
+    const newAlignment = await repository.record({
+      report: report({
+        id: 'critic-report-new-alignment',
+        alignmentArtifactId: 'critic-alignment-b',
+        evaluationContextHash: hash('a'),
+        decidedAt: at(30),
+      }),
+    })
+    assert.equal(newAlignment.replayed, false)
+    assert.notEqual(newAlignment.value.reportHash, recorded.value.reportHash)
+    assert.notEqual(newAlignment.value.evaluationContextHash, recorded.value.evaluationContextHash)
+    assert.equal(
+      (await repository.readByBlock({
+        workspaceId,
+        blockId: 'critic-block',
+        artifactId: 'critic-video',
+        thresholdsVersion: report().thresholdsVersion,
+      })).length,
+      2,
+    )
+    await assert.rejects(
+      repository.record({
+        report: report({
+          id: 'critic-report-false-context',
+          adapterVersion: '3.0.1',
+          evaluationContextHash: recorded.value.evaluationContextHash,
+          decidedAt: at(31),
+        }),
+      }),
+      /same evaluation context already carries different critic evidence/,
+    )
+
+    const historical = await repository.record({
+      report: report({
+        id: 'critic-report-historical',
+        blockId: 'critic-block-2',
+        artifactId: 'critic-video-b',
+        artifactSha256: artifacts['critic-video-b'][2],
+        expectationHash: undefined,
+        evaluationContextHash: undefined,
+        decidedAt: at(32),
+      }),
+    })
+    assert.equal(historical.value.evaluationContextHash, undefined)
+    assert.deepEqual(
+      await repository.read({ workspaceId, reportId: historical.value.id }),
+      historical.value,
+    )
+
+    // 6. Cross-workspace invisibility.
     assert.equal(await repository.read({ workspaceId: foreignWorkspaceId, reportId: 'critic-report-1' }), null)
     assert.equal((await repository.readByBlock({ workspaceId: foreignWorkspaceId, blockId: 'critic-block' })).length, 0)
     assert.equal((await repository.readByArtifact({ workspaceId: foreignWorkspaceId, artifactId: 'critic-video' })).length, 0)
 
-    // 6. The database refuses a dishonest row on its own, without the
+    // 7. The database refuses a dishonest row on its own, without the
     //    application being in the loop.
     await assert.rejects(
       client.v2SyntheticCriticMeasurement.update({
@@ -305,7 +360,7 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
       /synthetic_critic_reports_decision_action_check/,
     )
 
-    // 7. Hydration fails closed when a row is edited behind the application.
+    // 8. Hydration fails closed when a row is edited behind the application.
     await client.v2SyntheticCriticReport.update({
       where: { id: 'critic-report-1' },
       data: { expectedIdentityRef: 'avatar_de_outra_pessoa' },

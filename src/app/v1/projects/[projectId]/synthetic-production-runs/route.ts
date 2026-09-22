@@ -9,6 +9,8 @@ import {
   createMediaArtifactQueryRepository,
   createProjectWorkspaceQueryRepository,
   createSyntheticProductionRepository,
+  createSyntheticCriticReportRepository,
+  createProviderJobRepository,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import {
@@ -45,6 +47,8 @@ export async function POST(
       projects: createProjectWorkspaceQueryRepository(),
       artifacts: createMediaArtifactQueryRepository(),
       rights: createAssetRightsRepository(),
+      criticReports: createSyntheticCriticReportRepository(),
+      providerJobs: createProviderJobRepository(),
       clock: () => new Date(),
       createRunId: () => `synthetic-run-${randomUUID()}`,
       createSnapshotId: () => `snapshot-${randomUUID()}`,

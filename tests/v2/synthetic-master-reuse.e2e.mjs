@@ -134,6 +134,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
     const { catalogSyntheticSpeechSegmentsService } = await import('../../src/v2/application/synthetic-speech-segments.ts')
     const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
+    const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
     const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
@@ -286,15 +287,21 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       clock: () => new Date(at(0)),
       createId: () => `master-reuse-rights-${++entity}`,
     })
+    const rightsDecisions = []
     for (const role of Object.keys(roleFiles)) {
-      await setRights({
+      const granted = await setRights({
         workspaceId, artifactId: artifactIds[role], baseRevision: assetRightsRevision(artifactIds[role], 0),
         draft: {
           status: 'approved', allowedUses: ['ads'], prohibitedUses: [],
           allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+          allowedSyntheticOperations: ['audio-avatar'],
           consent: { status: 'not-required', allowedUses: [] },
         },
         actor: { type: 'api-client', id: clientId },
+      })
+      rightsDecisions.push({
+        artifactId: artifactIds[role], rightsSnapshotId: granted.snapshot.id,
+        rightsSnapshotHash: granted.snapshot.snapshotHash, validUntil: '2030-01-01T00:00:00.000Z',
       })
     }
 
@@ -315,16 +322,22 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       actor, idempotencyKey: 'master-reuse-profile-v1',
     })
     const profileSnapshotId = profile.profile.profileSnapshotId
+    const authorization = {
+      id: 'master-reuse-authorization', profileSnapshotId,
+      profileSnapshotHash: profile.profile.snapshot.snapshotHash,
+      artifactDecisions: rightsDecisions, evaluatedAt: at(0), expiresAt: '2030-01-01T00:00:00.000Z',
+    }
+    authorization.authorizationHash = calculateCanonicalHash(authorization)
 
     // 3. The approved provider job and its result ledger. This is the fixture:
     //    the generation already happened and was approved by a critic.
-    const criticResultHash = hash('f')
+    let criticResultHash = hash('f')
     await client.v2ProviderJob.create({
       data: {
         id: providerJobId, workspaceId, projectId, originProjectVersionId: projectVersionId,
         schemaVersion: 'provider-job/v1', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         providerJobId: 'heygen_job_reuse', inputJson: '{}', inputHash: hash('1'),
-        authorizationJson: '{}', authorizationHash: hash('2'), status: 'approved',
+        authorizationJson: JSON.stringify(authorization), authorizationHash: authorization.authorizationHash, status: 'approved',
         resultArtifactId: artifactIds['provider-original'], resultArtifactSha256: bytes['provider-original'].sha256,
         criticResultHash, jobJson: '{}', jobHash: hash('3'), requestFingerprint: hash('4'),
         idempotencyKey: 'master-reuse-job-key', createdByClientId: clientId, actorContextHash: auditContext.contextHash,
@@ -400,7 +413,19 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
         capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         artifactId: artifactIds['provider-original'], artifactSha256: bytes['provider-original'].sha256,
         audioArtifactId: artifactIds['final-audio'], alignmentArtifactId: artifactIds.alignment,
-        scriptHash: hash('7'), profileSnapshotId, expectedIdentityRef: 'avatar_reuse',
+        scriptHash: createHash('sha256').update(scriptText, 'utf8').digest('hex'), profileSnapshotId, expectedIdentityRef: 'avatar_reuse',
+        expectationHash: calculateCanonicalHash({
+          durationMs: 4_000, durationMode: 'fixed', fps: null,
+          videoCodec: null, audioCodec: null, audioSampleRateHz: null,
+          identityRef: 'avatar_reuse', declaredIdentityRef: null,
+          rights: { withinGrantedScope: true, reason: null }, previousBlock: null,
+        }),
+        evaluationContextHash: calculateCanonicalHash({
+          fixture: 'master-reuse-evaluation-context/v1',
+          workspaceId, projectId, providerJobId,
+          blockId: 'master-reuse-block', artifactId: artifactIds['provider-original'],
+          artifactSha256: bytes['provider-original'].sha256,
+        }),
         evaluators: [
           { id: 'ffprobe-media-integrity', version: '1.0.0', kind: 'measured', scope: 'timeline and signal read from the artifact' },
           { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
@@ -426,6 +451,11 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       }),
     })
     assert.equal(criticVerdict.value.decision, 'approved')
+    criticResultHash = criticVerdict.value.reportHash
+    await client.v2ProviderJob.update({
+      where: { id: providerJobId },
+      data: { criticResultHash },
+    })
 
     // 4. A loopback provider boundary nothing in this journey may touch. Every
     //    request that reaches it is a paid call the reuse claim would have to
@@ -553,11 +583,10 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     assert.equal(view.provenance.adapterId, 'heygen-v3')
     assert.equal(view.provenance.capability, 'audio-avatar')
     assert.equal(view.critic.decision, 'approved')
-    // The lineage points at the persisted verdict, not at the provider job's
-    // own critic hash — the master's approval is a document, not a claim.
+    // The lineage and approved job carry the same specialized report seal.
     assert.equal(view.critic.reportId, criticVerdict.value.id)
     assert.equal(view.critic.reportHash, criticVerdict.value.reportHash)
-    assert.notEqual(view.critic.reportHash, criticResultHash)
+    assert.equal(view.critic.reportHash, criticResultHash)
 
     // 8. Cataloguing the master's speech segments. F3.007 ships no HTTP route
     //    for this write, so the application service is driven directly against

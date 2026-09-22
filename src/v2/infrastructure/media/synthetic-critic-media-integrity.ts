@@ -1,10 +1,11 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
 
 import type { ArtifactSourceMaterializer } from '../../application/ports/media-ingest.ts'
+import { terminateChild } from '../../application/worker-lifecycle.ts'
 import type {
   SyntheticCriticArtifactRef,
   SyntheticCriticEvaluationContext,
@@ -33,10 +34,10 @@ const FPS_TOLERANCE = 0.01
 
 export const SYNTHETIC_CRITIC_MEDIA_EVALUATOR: Readonly<SyntheticCriticEvaluator> = Object.freeze({
   id: 'ffprobe-media-integrity',
-  version: '1.0.0',
+  version: '1.1.0',
   kind: 'measured' as const,
   scope:
-    'duration, frame rate, frame count, codecs, sample rate, audio presence, silence and freeze windows read from the artifact itself with ffprobe and ffmpeg',
+    'decoded PCM sample duration for free-form TTS; container/video duration, frame rate, frame count, codecs, sample rate, audio presence, silence and freeze windows read with ffprobe and ffmpeg',
 })
 
 const DIMENSIONS: readonly SyntheticCriticDimension[] = Object.freeze([
@@ -73,6 +74,63 @@ function finiteNumber(value: unknown): number | null {
 
 function milliseconds(seconds: number): number {
   return Math.round(seconds * 1_000)
+}
+
+/** Counts decoded mono PCM samples instead of MP3 container padding. Output is
+ * streamed and discarded, so duration measurement has a fixed memory bound. */
+export async function decodedPcmDurationMs(
+  filePath: string,
+  environment: NodeJS.ProcessEnv,
+  signal?: AbortSignal,
+): Promise<number> {
+  const sampleRate = 16_000
+  return await new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic critic was cancelled'))
+      return
+    }
+    const child = spawn(resolveFfmpeg(environment), [
+      '-nostdin', '-hide_banner', '-v', 'error', '-i', filePath,
+      '-vn', '-ac', '1', '-ar', String(sampleRate), '-f', 's16le', '-c:a', 'pcm_s16le', '-',
+    ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let bytes = 0
+    let stderr = ''
+    let processError: Error | null = null
+    let aborted = false
+    let timedOut = false
+    let termination: Promise<unknown> | null = null
+    const stop = () => {
+      termination ??= terminateChild(child, { graceMs: 1_000 }).catch((error) => { processError = error as Error })
+    }
+    const onAbort = () => { aborted = true; stop() }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const timer = setTimeout(() => { timedOut = true; stop() }, DEFAULT_TIMEOUT_MS)
+    timer.unref?.()
+    child.stdout.on('data', (chunk: Buffer) => { bytes += chunk.length })
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      if (stderr.length < 4_096) stderr += chunk.slice(0, 4_096 - stderr.length)
+    })
+    child.once('error', (error) => { processError = error })
+    child.once('close', async (code, killedBySignal) => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      if (termination) await termination
+      if (aborted) {
+        reject(new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic critic was cancelled'))
+        return
+      }
+      if (timedOut) {
+        reject(new DomainError('RENDER_EXECUTION_FAILED', 'Critic PCM decode timed out'))
+        return
+      }
+      if (code !== 0 || killedBySignal || bytes <= 0 || bytes % 2 !== 0) {
+        reject(new DomainError('RENDER_EXECUTION_FAILED', `Critic PCM decode failed${processError ? `: ${processError.message}` : stderr ? `: ${stderr.trim()}` : ''}`))
+        return
+      }
+      resolve(Math.round(bytes * 1_000 / (sampleRate * 2)))
+    })
+  })
 }
 
 /**
@@ -168,7 +226,8 @@ export class FfprobeSyntheticCriticMediaEvaluator implements SyntheticCriticMedi
     this.environment = dependencies.environment ?? process.env
   }
 
-  private async materialize(operationId: string, artifact: Readonly<SyntheticCriticArtifactRef>): Promise<string> {
+  private async materialize(operationId: string, artifact: Readonly<SyntheticCriticArtifactRef>, signal?: AbortSignal): Promise<string> {
+    if (signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic critic was cancelled')
     const materialized = await this.sources.materialize({
       operationId,
       artifactKey: artifact.artifactKey,
@@ -178,6 +237,7 @@ export class FfprobeSyntheticCriticMediaEvaluator implements SyntheticCriticMedi
     if (!isAbsolute(materialized.path)) {
       throw new DomainError('INVALID_ARGUMENT', 'Materialized critic artifact path must be absolute')
     }
+    if (signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic critic was cancelled')
     return materialized.path
   }
 
@@ -186,6 +246,7 @@ export class FfprobeSyntheticCriticMediaEvaluator implements SyntheticCriticMedi
     durationMs: number,
     hasVideo: boolean,
     hasAudio: boolean,
+    signal?: AbortSignal,
   ): Promise<Readonly<{ silence: readonly DetectedWindow[]; freeze: readonly DetectedWindow[] }>> {
     if (!hasVideo && !hasAudio) return Object.freeze({ silence: [], freeze: [] })
     const filters = [
@@ -199,7 +260,7 @@ export class FfprobeSyntheticCriticMediaEvaluator implements SyntheticCriticMedi
         '-i', filePath,
         ...filters,
         '-f', 'null', '-',
-      ], { windowsHide: true, timeout: DEFAULT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, encoding: 'utf8' })
+      ], { windowsHide: true, timeout: DEFAULT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, signal, encoding: 'utf8' })
       report = stderr
     } catch (error) {
       // A detector that could not run must not be reported as "no dead signal".
@@ -232,20 +293,20 @@ export class FfprobeSyntheticCriticMediaEvaluator implements SyntheticCriticMedi
     let undecodable: string | null = null
 
     try {
-      const filePath = await this.materialize(operationId, target)
+      const filePath = await this.materialize(operationId, target, context.signal)
       try {
-        const details = await probeStreamDetails(filePath, this.environment)
+        const details = await probeStreamDetails(filePath, this.environment, context.signal)
         if (subject.video) {
-          const probe = await probeVideo(filePath, { environment: this.environment, requireAudio: false })
+          const probe = await probeVideo(filePath, { environment: this.environment, requireAudio: false, signal: context.signal })
           // The audio timeline must come from the audio itself. Reading the
           // container duration twice would make every offset zero by
           // construction, which is a measurement that cannot fail — and
           // therefore is not a measurement.
           const separateAudio = subject.audio && subject.audio.artifactId !== subject.video.artifactId
-            ? await this.materialize(operationId, subject.audio)
+            ? await this.materialize(operationId, subject.audio, context.signal)
             : null
           const audioDurationMs = separateAudio
-            ? milliseconds(await probeAudioDurationSeconds(separateAudio, { environment: this.environment }))
+            ? milliseconds(await probeAudioDurationSeconds(separateAudio, { environment: this.environment, signal: context.signal }))
             : details.audioStreamSeconds !== null
               ? milliseconds(details.audioStreamSeconds)
               : null
@@ -262,8 +323,9 @@ export class FfprobeSyntheticCriticMediaEvaluator implements SyntheticCriticMedi
             height: probe.height,
           })
         } else {
-          const audioSeconds = await probeAudioDurationSeconds(filePath, { environment: this.environment })
-          const audioDurationMs = milliseconds(audioSeconds)
+          const audioDurationMs = subject.expected.durationMode === 'alignment'
+            ? await decodedPcmDurationMs(filePath, this.environment, context.signal)
+            : milliseconds(await probeAudioDurationSeconds(filePath, { environment: this.environment, signal: context.signal }))
           media = Object.freeze({
             durationMs: audioDurationMs,
             audioDurationMs,
@@ -282,6 +344,7 @@ export class FfprobeSyntheticCriticMediaEvaluator implements SyntheticCriticMedi
           media.durationMs,
           Boolean(subject.video),
           details.hasAudioStream,
+          context.signal,
         )
       } catch (error) {
         if (error instanceof DomainError && error.code === 'RENDER_EXECUTION_FAILED') throw error
@@ -353,9 +416,16 @@ export class FfprobeSyntheticCriticMediaEvaluator implements SyntheticCriticMedi
         // ffprobe reports a reading, not a probability; there is no confidence
         // model behind it, so none is claimed.
         confidence: null,
-        evidenceRefs: evidence,
+        evidenceRefs: Object.freeze([
+          ...evidence,
+          ...(expected.durationMode === 'alignment' && subject.alignmentArtifactId
+            ? [`artifact://${subject.alignmentArtifactId}`]
+            : []),
+        ]),
         range: null,
-        note: null,
+        note: expected.durationMode === 'alignment'
+          ? 'audio duration counted from decoded mono 16 kHz PCM samples against the independently persisted provider alignment end; this excludes container padding and does not claim live calibration or a pre-generation duration target'
+          : null,
       }))
     }
 

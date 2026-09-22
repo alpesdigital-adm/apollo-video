@@ -13956,6 +13956,20 @@ const syntheticAudioMasterSchema: JsonSchema = {
     createdAt: dateTimeSchema, masterHash: sha256Schema,
   },
 }
+const syntheticAudioWordSchemaV2: JsonSchema = {
+  ...syntheticAudioWordSchema,
+  properties: {
+    ...(syntheticAudioWordSchema as { properties: Record<string, JsonSchema> }).properties,
+    confidence: { oneOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }] },
+  },
+}
+const syntheticAudioMasterSchemaV2: JsonSchema = {
+  ...syntheticAudioMasterSchema,
+  properties: {
+    ...(syntheticAudioMasterSchema as { properties: Record<string, JsonSchema> }).properties,
+    words: { type: 'array', minItems: 1, maxItems: 100000, items: syntheticAudioWordSchemaV2 },
+  },
+}
 const syntheticMasterArtifactRefProperties = {
   artifactId: idSchema, sha256: sha256Schema,
   byteSize: { type: 'integer', minimum: 1 },
@@ -14259,6 +14273,14 @@ const syntheticCriticReportSchema: JsonSchema = {
     recommendedAction: { enum: ['retry', 'fallback', 'manual-review', 'none'] },
     thresholdsVersion: { type: 'string', minLength: 3, maxLength: 128 },
     decidedAt: dateTimeSchema, reportHash: sha256Schema,
+  },
+}
+const syntheticCriticReportSchemaV2: JsonSchema = {
+  ...syntheticCriticReportSchema,
+  properties: {
+    ...(syntheticCriticReportSchema as { properties: Record<string, JsonSchema> }).properties,
+    expectationHash: sha256Schema,
+    evaluationContextHash: sha256Schema,
   },
 }
 const syntheticCacheDecisionSummarySchema: JsonSchema = {
@@ -25562,8 +25584,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('synthetic-audio-master-mutated', 1, 'Created or replayed immutable synthetic audio master',
     successSchema({ type: 'object', additionalProperties: false, required: ['audioMaster', 'replayed'], properties: { audioMaster: syntheticAudioMasterSchema, replayed: { type: 'boolean' } } }),
   ),
+  defineSchema('synthetic-audio-master-mutated', 2, 'Created or replayed immutable synthetic audio master with explicit unavailable alignment confidence',
+    successSchema({ type: 'object', additionalProperties: false, required: ['audioMaster', 'replayed'], properties: { audioMaster: syntheticAudioMasterSchemaV2, replayed: { type: 'boolean' } } }),
+  ),
   defineSchema('synthetic-audio-master-read', 1, 'Read one immutable synthetic audio master',
     successSchema({ type: 'object', additionalProperties: false, required: ['audioMaster'], properties: { audioMaster: syntheticAudioMasterSchema } }),
+  ),
+  defineSchema('synthetic-audio-master-read', 2, 'Read one immutable synthetic audio master with explicit unavailable alignment confidence',
+    successSchema({ type: 'object', additionalProperties: false, required: ['audioMaster'], properties: { audioMaster: syntheticAudioMasterSchemaV2 } }),
   ),
   defineSchema('create-synthetic-script-plan-request', 1, 'Segment an approved script into one immutable block plan', {
     type: 'object', additionalProperties: false,
@@ -25804,17 +25832,26 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { reports: { type: 'array', maxItems: 100, items: syntheticCriticReportSchema } },
     }),
   ),
+  defineSchema('synthetic-critic-report-list', 2, 'Critic verdicts including authoritative expectation hashes',
+    successSchema({ type: 'object', additionalProperties: false, required: ['reports'], properties: { reports: { type: 'array', maxItems: 100, items: syntheticCriticReportSchemaV2 } } }),
+  ),
   defineSchema('synthetic-critic-report-read', 1, 'One immutable synthetic critic verdict with its evidence',
     successSchema({
       type: 'object', additionalProperties: false, required: ['report'],
       properties: { report: syntheticCriticReportSchema },
     }),
   ),
+  defineSchema('synthetic-critic-report-read', 2, 'One immutable synthetic critic verdict including its expectation hash',
+    successSchema({ type: 'object', additionalProperties: false, required: ['report'], properties: { report: syntheticCriticReportSchemaV2 } }),
+  ),
   defineSchema('synthetic-critic-block-evidence', 1, 'The critic verdict currently in force for one script block',
     successSchema({
       type: 'object', additionalProperties: false, required: ['report'],
       properties: { report: syntheticCriticReportSchema },
     }),
+  ),
+  defineSchema('synthetic-critic-block-evidence', 2, 'The critic verdict currently in force for one block including its expectation hash',
+    successSchema({ type: 'object', additionalProperties: false, required: ['report'], properties: { report: syntheticCriticReportSchemaV2 } }),
   ),
   defineSchema('enqueue-provider-job-request', 1, 'Enqueue one authorized durable TTS or audio-avatar job', {
     type: 'object', additionalProperties: false,
@@ -25833,6 +25870,33 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         required: ['projectVersionId','profileSnapshotId','operation','adapterId','adapterVersion','providerInput','sourceArtifactIds','use','market','locale'],
         properties: {
           projectVersionId: idSchema, profileSnapshotId: idSchema, operation: { const: 'tts' }, adapterId: idSchema, adapterVersion: idSchema,
+          providerInput: { type: 'object', maxProperties: 100, additionalProperties: true },
+          sourceArtifactIds: { type: 'array', maxItems: 64, uniqueItems: true, items: idSchema },
+          use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 }, locale: { type: 'string', minLength: 2, maxLength: 35 },
+        },
+      },
+      {
+        type: 'object', additionalProperties: false,
+        required: ['projectVersionId','profileSnapshotId','operation','adapterId','adapterVersion','providerInput','sourceArtifactIds','audioMasterId','audioRange','use','market','locale'],
+        properties: {
+          projectVersionId: idSchema, profileSnapshotId: idSchema, operation: { const: 'audio-avatar' }, adapterId: idSchema, adapterVersion: idSchema,
+          providerInput: { type: 'object', additionalProperties: false, properties: { aspectRatio: { enum: ['16:9', '9:16'] } } },
+          sourceArtifactIds: { type: 'array', minItems: 1, maxItems: 1, uniqueItems: true, items: idSchema },
+          audioMasterId: idSchema,
+          audioRange: { type: 'object', additionalProperties: false, required: ['startWordIndex', 'endWordIndex'], properties: { startWordIndex: { type: 'integer', minimum: 0, maximum: 99999 }, endWordIndex: { type: 'integer', minimum: 1, maximum: 100000 } } },
+          use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 }, locale: { type: 'string', minLength: 2, maxLength: 35 },
+        },
+      },
+    ],
+  }),
+  defineSchema('enqueue-provider-job-request', 3, 'Enqueue a script-bound TTS job or an audio-first avatar range from an approved master', {
+    oneOf: [
+      {
+        type: 'object', additionalProperties: false,
+        required: ['projectVersionId','profileSnapshotId','operation','adapterId','adapterVersion','providerInput','sourceArtifactIds','scriptPlanId','scriptBlockId','use','market','locale'],
+        properties: {
+          projectVersionId: idSchema, profileSnapshotId: idSchema, operation: { const: 'tts' }, adapterId: idSchema, adapterVersion: idSchema,
+          scriptPlanId: idSchema, scriptBlockId: idSchema,
           providerInput: { type: 'object', maxProperties: 100, additionalProperties: true },
           sourceArtifactIds: { type: 'array', maxItems: 64, uniqueItems: true, items: idSchema },
           use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 }, locale: { type: 'string', minLength: 2, maxLength: 35 },

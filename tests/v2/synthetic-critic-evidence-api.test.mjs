@@ -52,6 +52,7 @@ function report(overrides = {}) {
     audioArtifactId: 'critic-api-audio', alignmentArtifactId: 'critic-api-alignment',
     scriptHash: digest('7'), profileSnapshotId: 'critic-api-presenter:v1',
     expectedIdentityRef: 'avatar_critic_api',
+    expectationHash: digest('8'), evaluationContextHash: digest('9'),
     evaluators, measurements, issues: [],
     decision: 'approved', recommendedAction: 'none',
     thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/heygen-v3/v1',
@@ -155,6 +156,8 @@ test('T-FR-106 the critic presenter exposes how a verdict was reached and hides 
   // material crosses the boundary at all.
   const serialized = JSON.stringify(projected)
   assert.equal(projected.scriptHash, digest('7'))
+  assert.equal(projected.expectationHash, digest('8'))
+  assert.equal(projected.evaluationContextHash, digest('9'))
   assert.doesNotMatch(serialized, /scriptText|consent|providerInput|apiKey|credential/i)
   assert.equal(Object.hasOwn(projected, 'scriptText'), false)
 })

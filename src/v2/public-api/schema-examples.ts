@@ -5692,6 +5692,10 @@ const syntheticAudioMasterExample = {
   words: [{ word: 'Olá', startMs: 0, endMs: 600, confidence: 0.99 }, { word: 'mundo', startMs: 700, endMs: 1800, confidence: 0.98 }],
   wordsHash: '3'.repeat(64), approvedAt: createdAt, approvalCriticHash: '4'.repeat(64), createdAt, masterHash: '5'.repeat(64),
 }
+const syntheticAudioMasterV2Example = {
+  ...syntheticAudioMasterExample,
+  words: syntheticAudioMasterExample.words.map((word) => ({ ...word, confidence: null })),
+}
 
 const scriptBlockExample = {
   schemaVersion: 'synthetic-script-block/v1',
@@ -7443,11 +7447,23 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       data: { reports: [syntheticCriticReportExample, syntheticCriticRejectedReportExample] },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/synthetic-critic-report-list/v2': [{
+      data: { reports: [
+        { ...syntheticCriticReportExample, expectationHash: '8'.repeat(64) },
+        { ...syntheticCriticRejectedReportExample, expectationHash: '9'.repeat(64) },
+      ] }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/synthetic-critic-report-read/v1': [{
       data: { report: syntheticCriticReportExample }, meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/synthetic-critic-report-read/v2': [{
+      data: { report: { ...syntheticCriticReportExample, expectationHash: '8'.repeat(64) } }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/synthetic-critic-block-evidence/v1': [{
       data: { report: syntheticCriticRejectedReportExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-critic-block-evidence/v2': [{
+      data: { report: { ...syntheticCriticRejectedReportExample, expectationHash: '9'.repeat(64) } }, meta: { apiVersion: 'v1' },
     }],
     'apollo://schemas/synthetic-cache-decision-list/v1': [{
       data: { decisions: [syntheticCacheDecisionHitExample, syntheticCacheDecisionBlockedExample] },
@@ -7628,6 +7644,8 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     }],
     'apollo://schemas/synthetic-audio-master-mutated/v1': [{ data: { audioMaster: syntheticAudioMasterExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/synthetic-audio-master-read/v1': [{ data: { audioMaster: syntheticAudioMasterExample }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/synthetic-audio-master-mutated/v2': [{ data: { audioMaster: syntheticAudioMasterV2Example, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/synthetic-audio-master-read/v2': [{ data: { audioMaster: syntheticAudioMasterV2Example }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/create-synthetic-production-run-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1',
       audio: { artifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR', scriptHash: 'e'.repeat(64), alignment: [{ text: 'Olá mundo', startMs: 0, endMs: 2000 }] },
@@ -7649,6 +7667,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'audio-avatar',
       adapterId: 'controlled-avatar', adapterVersion: 'version-1', providerInput: { aspectRatio: '9:16' },
       sourceArtifactIds: ['artifact-audio-example-1'], audioMasterId: 'synthetic-audio-master-example-1', audioRange: { startWordIndex: 0, endWordIndex: 2 },
+      use: 'ads', market: 'BRA', locale: 'pt-BR',
+    }],
+    'apollo://schemas/enqueue-provider-job-request/v3': [{
+      projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'tts',
+      adapterId: 'controlled-tts', adapterVersion: 'version-1', providerInput: { outputFormat: 'wav' },
+      sourceArtifactIds: [], scriptPlanId: 'synthetic-script-plan-example-1', scriptBlockId: 'synthetic-script-block-example-1',
       use: 'ads', market: 'BRA', locale: 'pt-BR',
     }],
     'apollo://schemas/provider-job-mutated/v1': [{ data: { job: providerJobExample, replayed: false }, meta: { apiVersion: 'v1' } }],

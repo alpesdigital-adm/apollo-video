@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
@@ -9,6 +10,7 @@ import {
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 
 const hash = (character) => character.repeat(64)
+const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex')
 const workspaceId = 'workspace-synthetic-service'
 const projectId = 'project-synthetic-service'
 const projectVersionId = 'version-synthetic-service'
@@ -165,7 +167,56 @@ function fixture() {
       ]))
     },
   }
-  return { repository, artifacts, rights, artifactRepository, rightsRepository }
+  const reports = new Map([
+    [hash('1'), Object.freeze({
+      id: 'critic-service-one', reportHash: hash('1'), decision: 'approved',
+      blockId: 'block-service-one', artifactId: 'avatar-block-one', artifactSha256: hash('c'),
+      capability: 'audio-avatar', projectId, scriptHash: sha256('Olá'),
+      adapterId: 'controlled-avatar', thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1', expectationHash: hash('9'),
+      evaluationContextHash: sha256('synthetic-production-service-context:one'),
+    })],
+    [hash('3'), Object.freeze({
+      id: 'critic-service-two', reportHash: hash('3'), decision: 'approved',
+      blockId: 'block-service-two', artifactId: 'avatar-block-two', artifactSha256: hash('d'),
+      capability: 'audio-avatar', projectId, scriptHash: sha256('mundo'),
+      adapterId: 'controlled-avatar', thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1', expectationHash: hash('9'),
+      evaluationContextHash: sha256('synthetic-production-service-context:two'),
+    })],
+  ])
+  const criticReports = {
+    async readByHash({ workspaceId: requestedWorkspaceId, reportHash }) {
+      const report = reports.get(reportHash)
+      return requestedWorkspaceId === workspaceId && report
+        ? Object.freeze({ ...report, profileSnapshotId: repository.profiles[0]?.profile.snapshot.id ?? '' })
+        : null
+    },
+  }
+  const providerJobs = {
+    async readById({ workspaceId: requestedWorkspaceId, jobId }) {
+      const one = jobId === 'provider-job-service-one'
+      const two = jobId === 'provider-job-service-two'
+      if (requestedWorkspaceId !== workspaceId || (!one && !two)) return null
+      const text = one ? 'Olá' : 'mundo'
+      const blockId = one ? 'block-service-one' : 'block-service-two'
+      const artifactId = one ? 'avatar-block-one' : 'avatar-block-two'
+      const artifactSha256 = one ? hash('c') : hash('d')
+      const reportHash = one ? hash('1') : hash('3')
+      const range = one ? [0, 1_000] : [1_000, 2_000]
+      const profileSnapshotId = repository.profiles[0]?.profile.snapshot.id ?? ''
+      return { job: {
+        id: jobId, workspaceId, projectId, status: 'approved', operation: 'audio-avatar',
+        criticResultHash: reportHash,
+        resultArtifact: { artifactId, artifactSha256 },
+        authorization: { profileSnapshotId },
+        input: {
+          audioArtifactId: 'audio-master',
+          audioRange: { startMs: range[0], endMs: range[1] },
+          criticBinding: { blockId, scriptText: text, scriptHash: sha256(text), profileSnapshotId },
+        },
+      } }
+    },
+  }
+  return { repository, artifacts, rights, artifactRepository, rightsRepository, criticReports, providerJobs }
 }
 
 async function registerProfile(dependencies) {
@@ -270,6 +321,8 @@ test('T-FR-092 persists authoritative profile and complete synthetic EditPlan', 
     },
     artifacts: dependencies.artifactRepository,
     rights: dependencies.rightsRepository,
+    criticReports: dependencies.criticReports,
+    providerJobs: dependencies.providerJobs,
     clock: () => new Date(now),
     createRunId: () => 'synthetic-run-service',
     createSnapshotId: () => 'snapshot-synthetic-service',
@@ -283,6 +336,36 @@ test('T-FR-092 persists authoritative profile and complete synthetic EditPlan', 
   const replay = await execute(runRequest(registered.profile.snapshot.id))
   assert.equal(replay.replayed, true)
   assert.equal(dependencies.repository.runs.length, 1)
+})
+
+test('W24.1 refuses synthetic block text and provider-job lineage swaps', async () => {
+  const dependencies = fixture()
+  const registered = await registerProfile(dependencies)
+  const execute = createSyntheticProductionRunService({
+    repository: dependencies.repository,
+    projects: { async read() { return {
+      project: { id: projectId, workspaceId, currentVersionId: projectVersionId },
+      version: { id: projectVersionId, sequence: 1, baseHash: hash('4'), createdAt: now },
+      commands: [], directorRuns: [], media: [], transcripts: [], operationIds: [],
+    } } },
+    artifacts: dependencies.artifactRepository,
+    rights: dependencies.rightsRepository,
+    criticReports: dependencies.criticReports,
+    providerJobs: dependencies.providerJobs,
+    clock: () => new Date(now),
+    createRunId: () => 'synthetic-run-lineage-negative',
+    createSnapshotId: () => 'snapshot-synthetic-lineage-negative',
+  })
+  const base = runRequest(registered.profile.snapshot.id)
+  await assert.rejects(
+    execute({ ...base, blocks: [{ ...base.blocks[0], text: 'texto trocado' }, base.blocks[1]], idempotencyKey: 'synthetic-run-text-swapped' }),
+    /exact lineage/,
+  )
+  await assert.rejects(
+    execute({ ...base, blocks: [{ ...base.blocks[0], providerJobId: base.blocks[1].providerJobId }, base.blocks[1]], idempotencyKey: 'synthetic-run-job-swapped' }),
+    /exact lineage/,
+  )
+  assert.equal(dependencies.repository.runs.length, 0)
 })
 
 test('T-FR-092 blocks before persistence when one generated artifact loses rights', async () => {
@@ -302,6 +385,8 @@ test('T-FR-092 blocks before persistence when one generated artifact loses right
     },
     artifacts: dependencies.artifactRepository,
     rights: dependencies.rightsRepository,
+    criticReports: dependencies.criticReports,
+    providerJobs: dependencies.providerJobs,
     clock: () => new Date(now),
     createRunId: () => 'synthetic-run-blocked',
     createSnapshotId: () => 'snapshot-synthetic-blocked',

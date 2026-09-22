@@ -64,6 +64,7 @@ function hydrate(row: ReportRow): Readonly<SyntheticCriticReport> {
     report.scriptHash !== row.scriptHash ||
     report.profileSnapshotId !== row.profileSnapshotId ||
     report.expectedIdentityRef !== row.expectedIdentityRef ||
+    report.evaluationContextHash !== (row.evaluationContextHash ?? undefined) ||
     report.decision !== row.decision ||
     report.recommendedAction !== row.recommendedAction ||
     report.thresholdsVersion !== row.thresholdsVersion ||
@@ -165,6 +166,7 @@ export class PrismaSyntheticCriticReportRepository implements SyntheticCriticRep
             scriptHash: report.scriptHash,
             profileSnapshotId: report.profileSnapshotId,
             expectedIdentityRef: report.expectedIdentityRef,
+            evaluationContextHash: report.evaluationContextHash ?? null,
             decision: report.decision,
             recommendedAction: report.recommendedAction,
             thresholdsVersion: report.thresholdsVersion,
@@ -232,24 +234,35 @@ export class PrismaSyntheticCriticReportRepository implements SyntheticCriticRep
         reportHash: report.reportHash,
       })
       if (sealed) return Object.freeze({ value: sealed, replayed: true })
-      // The same take was already judged under the same published policy. The
-      // stored verdict is the answer — unless it disagrees with this one, which
-      // would mean the critic is not deterministic and must not be papered over.
+      if (!report.evaluationContextHash) {
+        throw new DomainError(
+          'VERSION_CONFLICT',
+          'Synthetic critic report identity already exists without a replayable evaluation context',
+        )
+      }
+      // The complete authoritative context was already judged. It is a replay
+      // only when every evaluator result and localized issue agrees; comparing
+      // decision/action alone could attach old evidence to a new provider job.
       const [existing] = await this.readByBlock({
         workspaceId: report.workspaceId,
         blockId: report.blockId,
-        artifactId: report.artifactId,
-        thresholdsVersion: report.thresholdsVersion,
+        evaluationContextHash: report.evaluationContextHash,
         limit: 1,
       })
       if (!existing) {
         throw new DomainError('VERSION_CONFLICT', 'Synthetic critic report identity already exists')
       }
-      if (
-        existing.decision !== report.decision ||
-        existing.recommendedAction !== report.recommendedAction
-      ) {
-        conflict('The same take already carries a different critic verdict under the same thresholds version')
+      const evidenceBody = (value: Readonly<SyntheticCriticReport>) => {
+        const {
+          id: _id,
+          decidedAt: _decidedAt,
+          reportHash: _reportHash,
+          ...body
+        } = value
+        return body
+      }
+      if (stableSerialize(evidenceBody(existing)) !== stableSerialize(evidenceBody(report))) {
+        conflict('The same evaluation context already carries different critic evidence')
       }
       return Object.freeze({ value: existing, replayed: true })
     }
@@ -278,6 +291,7 @@ export class PrismaSyntheticCriticReportRepository implements SyntheticCriticRep
         blockId: input.blockId,
         ...(input.artifactId ? { artifactId: input.artifactId } : {}),
         ...(input.thresholdsVersion ? { thresholdsVersion: input.thresholdsVersion } : {}),
+        ...(input.evaluationContextHash ? { evaluationContextHash: input.evaluationContextHash } : {}),
       },
       include: INCLUDE,
       orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],

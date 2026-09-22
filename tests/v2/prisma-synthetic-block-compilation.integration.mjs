@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -8,6 +7,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -34,6 +34,10 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
 
   const cleanup = async () => {
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockConcatenation.deleteMany({ where: { workspaceId } })
@@ -70,6 +74,8 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const { enqueueProviderJobService, runProviderJobWorkerOnce } = await import('../../src/v2/application/provider-jobs.ts')
     const { createSyntheticScriptPlanService, mutateSyntheticScriptPlanService } = await import('../../src/v2/application/synthetic-script-plans.ts')
     const { ensureSyntheticBlockGenerationsService, settleSyntheticBlockGenerationsService } = await import('../../src/v2/application/synthetic-block-generations.ts')
+    const { evaluateSyntheticCriticCore } = await import('../../src/v2/application/synthetic-critic.ts')
+    const { SpecializedSyntheticProviderResultCritic } = await import('../../src/v2/application/synthetic-provider-critic.ts')
     const { compileSyntheticBlockAudioService } = await import('../../src/v2/application/synthetic-block-audio-compilation.ts')
     const { createSyntheticAudioMasterService } = await import('../../src/v2/application/synthetic-audio-masters.ts')
     const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../src/v2/domain/asset-rights.ts')
@@ -92,7 +98,13 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
     const { PrismaSyntheticCacheSubmissionClaimRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-submission-claim-repository.ts')
     const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
+    const { PrismaSyntheticCriticRuntimeContextResolver } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-runtime-context.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
+    const { LocalArtifactContentStorage } = await import('../../src/v2/infrastructure/media/local-artifact-content-storage.ts')
+    const { StoredSyntheticMasterAlignmentReader } = await import('../../src/v2/infrastructure/media/synthetic-master-alignment-reader.ts')
+    const { FfprobeSyntheticCriticMediaEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-media-integrity.ts')
+    const { AlignmentSyntheticCriticPronunciationEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
+    const { DeterministicSyntheticCriticControlledEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { concatenateBlockAudio } = await import('../../src/v2/infrastructure/media/audio-concatenation.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
@@ -187,6 +199,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const projects = new PrismaProjectWorkspaceQueryRepository(client)
     const plans = new PrismaSyntheticScriptPlanRepository(client)
     const generations = new PrismaSyntheticBlockGenerationRepository(client)
+    const criticReports = new PrismaSyntheticCriticReportRepository(client)
     const concatenations = new PrismaSyntheticBlockConcatenationRepository(client)
     const audioMasterRepository = new PrismaSyntheticAudioMasterRepository(client)
     let providerTransition = 0
@@ -199,9 +212,10 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
       createJobId: () => `compile-job-${++entity}`,
       createTransitionId: () => `compile-transition-${++providerTransition}`,
     })
+    const sourceMaterializer = new LocalArtifactSourceMaterializer(artifactRoot)
     const materializer = new AuthorizedProviderSubmissionInputMaterializer({
       profiles: syntheticRepository, artifacts: artifactRepository,
-      sources: new LocalArtifactSourceMaterializer(artifactRoot), clock: () => new Date(at(2)),
+      sources: sourceMaterializer, clock: () => new Date(at(2)),
     })
     const ttsIngestor = new VerifiedTtsResultIngestor({
       workRoot, storage, artifacts: artifactRepository, artifactQuery: artifactRepository,
@@ -209,7 +223,25 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
       audioProber: { probeDurationSeconds: (path, options) => probeAudioDurationSeconds(path, options) },
       clock: () => new Date(at(3)),
     })
-    const ttsCritic = new PersistedTtsResultCritic(artifactRepository, resultArtifactRepository)
+    const alignment = new StoredSyntheticMasterAlignmentReader({
+      artifacts: artifactRepository, storage: new LocalArtifactContentStorage(artifactRoot),
+    })
+    const ttsCritic = new SpecializedSyntheticProviderResultCritic({
+      transport: new PersistedTtsResultCritic(artifactRepository, resultArtifactRepository),
+      context: new PrismaSyntheticCriticRuntimeContextResolver({
+        client, artifacts: artifactRepository, resultArtifacts: resultArtifactRepository,
+        generations, plans, profiles: syntheticRepository, rights: rightsRepository,
+        alignment, clock: () => new Date(at(8)),
+      }),
+      evaluate: evaluateSyntheticCriticCore({
+        reports: criticReports,
+        media: new FfprobeSyntheticCriticMediaEvaluator({ sources: sourceMaterializer, environment: { ...process.env, FFMPEG_PATH: ffmpegPath, FFPROBE_PATH: ffprobePath } }),
+        pronunciation: new AlignmentSyntheticCriticPronunciationEvaluator({ alignment }),
+        controlled: new DeterministicSyntheticCriticControlledEvaluator(),
+        clock: () => new Date(at(8)),
+        createId: ({ evaluationContextHash }) => `compile-critic-${evaluationContextHash.slice(0, 40)}`,
+      }),
+    })
     const drainWorkers = async () => {
       for (let quiet = 0; quiet < 2;) {
         const worked = await runProviderJobWorkerOnce({
@@ -234,24 +266,49 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
       rights: rightsRepository, cacheDecisions: new PrismaSyntheticCacheDecisionRepository(client),
       providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
-      criticReports: new PrismaSyntheticCriticReportRepository(client),
+      criticReports,
       submissionClaims: new PrismaSyntheticCacheSubmissionClaimRepository(client),
       enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
     })
     const settle = settleSyntheticBlockGenerationsService({
       generations, providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
+      criticReports,
       clock: () => new Date(at(9)),
     })
+    const grantRightsForApprovedArtifacts = async (targetPlanId) => {
+      const approved = await generations.listByPlan({ workspaceId, planId: targetPlanId, statuses: ['approved'] })
+      for (const generation of approved) {
+        for (const artifactId of [generation.audioArtifactId, generation.alignmentArtifactId]) {
+          assert.ok(artifactId, 'approved TTS generation must persist audio and alignment artifacts')
+          const revision = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId }, select: { rightsRevision: true } })
+          if (revision.rightsRevision > 0) continue
+          const snapshot = createAssetRightsSnapshot({
+            id: `compile-rights-${artifactId}`, workspaceId, artifactId, sequence: 1,
+            draft: {
+              status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+              allowedSyntheticOperations: ['tts'], expiresAt: '2030-01-01T00:00:00.000Z',
+              consent: { status: 'not-required', allowedUses: [] },
+            },
+            createdBy: { type: 'api-client', id: clientId }, createdAt: at(10),
+          })
+          await rightsRepository.setCurrent(snapshot, assetRightsRevision(artifactId, 0), createAssetRightsChangeIntent({
+            workspaceId, artifactId, snapshotHash: snapshot.snapshotHash, baseRevision: assetRightsRevision(artifactId, 0),
+            actor: { kind: 'internal', actorType: 'api-client', actorId: clientId }, changedAt: at(10),
+          }))
+        }
+      }
+    }
     const createAudioMaster = createSyntheticAudioMasterService({
       repository: audioMasterRepository, projects, profiles: syntheticRepository,
       providerJobs: providerRepository, artifacts: artifactRepository, rights: rightsRepository,
+      criticReports,
       clock: () => new Date(at(20)), createId: () => `compile-master-${++entity}`,
     })
     const compile = compileSyntheticBlockAudioService({
-      plans, generations, profiles: syntheticRepository,
+      plans, generations, providerJobs: providerRepository, profiles: syntheticRepository,
       artifacts: artifactRepository, artifactPersistence: artifactRepository,
-      rights: rightsRepository, concatenations,
-      sources: new LocalArtifactSourceMaterializer(artifactRoot),
+      rights: rightsRepository, criticReports, concatenations,
+      sources: sourceMaterializer,
       storage,
       mutatePlan,
       createAudioMaster,
@@ -281,6 +338,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     await ensure({ workspaceId, projectId, projectVersionId, planId, use: 'ads', market: 'BRA', actor })
     await drainWorkers()
     await settle({ workspaceId, projectId, planId, actor })
+    await grantRightsForApprovedArtifacts(planId)
     const currentPlan = await plans.readPlan({ workspaceId, projectId, planId })
 
     const compiled = await compile({
@@ -330,6 +388,79 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const afterCompile = await plans.readPlan({ workspaceId, projectId, planId })
     assert.equal(afterCompile.version.commandType, 'compile-audio')
     assert.equal(afterCompile.version.impact.renderSemantics, 'no-render')
+
+    // The report and artifact can remain intact while the originating job is
+    // changed to name another critic result. Compile must re-read that durable
+    // origin and reject the generation instead of trusting its copied status.
+    const [originGeneration] = await generations.listByPlan({ workspaceId, planId, statuses: ['approved'] })
+    const originJobRow = await client.v2ProviderJob.findUniqueOrThrow({ where: { id: originGeneration.providerJobId } })
+    const changedJob = { ...JSON.parse(originJobRow.jobJson), criticResultHash: hash('9') }
+    const { jobHash: _originJobHash, ...changedJobBody } = changedJob
+    changedJob.jobHash = calculateCanonicalHash(changedJobBody)
+    await client.v2ProviderJob.update({
+      where: { id: originJobRow.id },
+      data: { criticResultHash: changedJob.criticResultHash, jobJson: stableSerialize(changedJob), jobHash: changedJob.jobHash },
+    })
+    try {
+      await assert.rejects(compile({
+        workspaceId, projectId, projectVersionId, planId,
+        baseVersionId: afterCompile.version.id, baseHash: afterCompile.version.planVersionHash,
+        settings: { gapMs: 200, outputFormat: 'mp3' }, use: 'ads', market: 'BRA', actor,
+        idempotencyKey: 'compile-provider-job-critic-drift',
+      }), (error) => error.code === 'PRECONDITION_REQUIRED' && /approved specialized critic report/.test(error.message))
+    } finally {
+      await client.v2ProviderJob.update({
+        where: { id: originJobRow.id },
+        data: {
+          criticResultHash: originJobRow.criticResultHash,
+          jobJson: originJobRow.jobJson,
+          jobHash: originJobRow.jobHash,
+        },
+      })
+    }
+
+    // Explicit corruption fixture: remove one worker-authored report without
+    // changing its approved job or artifact. Every downstream gate must refuse
+    // that apparently healthy take; no test helper invents a replacement.
+    const [corruptGeneration] = await generations.listByPlan({ workspaceId, planId, statuses: ['approved'] })
+    assert.ok(corruptGeneration?.audioArtifactId)
+    const corruptBlock = afterCompile.blocks.find(({ id }) => id === corruptGeneration.blockId)
+    assert.ok(corruptBlock)
+    const missingReport = await client.v2SyntheticCriticReport.findFirstOrThrow({
+      where: { workspaceId, artifactId: corruptGeneration.audioArtifactId },
+    })
+    await client.v2SyntheticCriticReport.delete({ where: { id: missingReport.id } })
+    await assert.rejects(compile({
+      workspaceId, projectId, projectVersionId, planId,
+      baseVersionId: afterCompile.version.id, baseHash: afterCompile.version.planVersionHash,
+      settings: { gapMs: 200, outputFormat: 'mp3' }, use: 'ads', market: 'BRA', actor,
+      idempotencyKey: 'compile-missing-critic-report',
+    }), (error) => error.code === 'PRECONDITION_REQUIRED' && /no approved specialized critic report/.test(error.message))
+
+    const duplicated = await mutatePlan({
+      workspaceId, projectId, projectVersionId, planId,
+      baseVersionId: afterCompile.version.id, baseHash: afterCompile.version.planVersionHash,
+      mutation: { kind: 'insert-block', position: afterCompile.version.blockSequence.length, text: corruptBlock.exactText },
+      actor, idempotencyKey: 'compile-missing-report-duplicate',
+    })
+    const duplicatedBlockId = duplicated.plan.version.blockSequence.find((blockId) => !afterCompile.version.blockSequence.includes(blockId))
+    assert.ok(duplicatedBlockId)
+    const cacheOutcomes = await ensure({
+      workspaceId, projectId, projectVersionId, planId, use: 'ads', market: 'BRA', actor,
+    })
+    assert.ok(
+      cacheOutcomes.some(({ blockId, action }) => blockId === duplicatedBlockId && action === 'enqueued'),
+      'cache must pay for fresh evidence instead of reusing audio whose mandatory report is absent',
+    )
+
+    await client.v2SyntheticBlockGeneration.update({
+      where: { id: corruptGeneration.id },
+      data: { status: 'pending', updatedAt: new Date(at(30)) },
+    })
+    await assert.rejects(
+      settle({ workspaceId, projectId, planId, actor }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT' && /no matching specialized synthetic critic report/.test(error.message),
+    )
   } finally {
     await cleanup()
     await client.$disconnect()

@@ -40,12 +40,29 @@ export interface ProviderJobRepository {
     projectId: string
     jobId: string
   }): Promise<Readonly<PersistedProviderJob> | null>
+  /** Workspace-scoped origin lookup for consumers that intentionally reuse an
+   * approved result in another project. The parsed job still supplies and
+   * integrity-checks its authoritative origin project. */
+  readById(input: {
+    workspaceId: string
+    jobId: string
+  }): Promise<Readonly<PersistedProviderJob> | null>
   claimNext(input: {
     workerId: string
     leaseToken: string
     now: Date
     leaseExpiresAt: Date
   }): Promise<Readonly<ClaimedProviderJob> | null>
+  /**
+   * Extend an active worker lease without changing the durable job document.
+   * The owner/token pair is the fencing capability; an expired or replaced
+   * lease must fail with VERSION_CONFLICT.
+   */
+  renewLease(input: {
+    current: Readonly<ClaimedProviderJob>
+    now: Date
+    leaseExpiresAt: Date
+  }): Promise<Readonly<ClaimedProviderJob>>
   beginSubmission(input: {
     current: Readonly<ClaimedProviderJob>
     next: Readonly<ProviderJob>

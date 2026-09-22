@@ -1,5 +1,6 @@
 import { type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
+import { DomainError } from '../../domain/errors.ts'
 import type {
   PromotableProviderJob,
   PromotableProviderJobReader,
@@ -35,12 +36,27 @@ export class PrismaPromotableProviderJobReader implements PromotableProviderJobR
         providerJobId: true,
         status: true,
         criticResultHash: true,
+        authorizationJson: true,
+        resultArtifactId: true,
+        resultArtifactSha256: true,
         authorizationHash: true,
         submittedAt: true,
         completedAt: true,
       },
     })
     if (!row) return null
+    let authorization: unknown
+    try {
+      authorization = JSON.parse(row.authorizationJson)
+    } catch {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored provider job authorization JSON is invalid')
+    }
+    if (
+      typeof authorization !== 'object' || authorization === null ||
+      typeof (authorization as { profileSnapshotId?: unknown }).profileSnapshotId !== 'string'
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored provider job authorization has no presenter snapshot')
+    }
     return Object.freeze({
       id: row.id,
       workspaceId: row.workspaceId,
@@ -52,6 +68,12 @@ export class PrismaPromotableProviderJobReader implements PromotableProviderJobR
       providerJobId: row.providerJobId,
       status: row.status,
       criticResultHash: row.criticResultHash,
+      authorization: Object.freeze({
+        profileSnapshotId: (authorization as { profileSnapshotId: string }).profileSnapshotId,
+      }),
+      resultArtifact: row.resultArtifactId && row.resultArtifactSha256
+        ? Object.freeze({ artifactId: row.resultArtifactId, artifactSha256: row.resultArtifactSha256 })
+        : null,
       authorizationHash: row.authorizationHash,
       submittedAt: row.submittedAt ? row.submittedAt.toISOString() : null,
       completedAt: row.completedAt ? row.completedAt.toISOString() : null,

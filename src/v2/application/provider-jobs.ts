@@ -32,6 +32,7 @@ import type {
   ProviderResultIngestor,
   ProviderSubmissionInputMaterializer,
 } from './ports/provider-job-runtime.ts'
+import { runWithProviderJobLease } from './with-provider-job-lease.ts'
 import type { SyntheticProductionRepository } from './ports/synthetic-production-repository.ts'
 import type { SyntheticAudioMasterRepository } from './ports/synthetic-audio-master-repository.ts'
 
@@ -76,6 +77,45 @@ export function enqueueProviderJobService(dependencies: {
   clock: () => Date
   createJobId: () => string
   createTransitionId: () => string
+  resolveAvatarCriticBinding?: (input: {
+    workspaceId: string
+    projectId: string
+    profileSnapshotId: string
+    audioMaster: Readonly<import('../domain/synthetic-audio-master.ts').SyntheticAudioMaster>
+    audioRange: Readonly<import('../domain/synthetic-audio-master.ts').SyntheticAvatarAudioRange>
+    use: string
+    market: string
+    locale: string
+  }) => Promise<Readonly<{
+    blockId: string
+    scriptText: string
+    scriptHash: string
+    profileSnapshotId: string
+    expectedDurationMs: number
+    alignmentArtifactId: string | null
+    use: string
+    market: string
+    locale: string
+  }>>
+  resolveTtsCriticBinding?: (input: {
+    workspaceId: string
+    projectId: string
+    profileSnapshotId: string
+    planId: string
+    blockId: string
+    use: string
+    market: string
+    locale: string
+  }) => Promise<Readonly<{
+    planId: string
+    blockId: string
+    scriptText: string
+    scriptHash: string
+    profileSnapshotId: string
+    use: string
+    market: string
+    locale: string
+  }>>
 }) {
   return async function execute(request: {
     workspaceId: string
@@ -86,9 +126,24 @@ export function enqueueProviderJobService(dependencies: {
     adapterId: string
     adapterVersion: string
     providerInput: Readonly<Record<string, unknown>>
+    /** Trusted application binding; public provider-job payloads cannot set it. */
+    criticBinding?: Readonly<{
+      planId?: string
+      blockId: string
+      scriptText: string
+      scriptHash: string
+      profileSnapshotId: string
+      expectedDurationMs?: number
+      alignmentArtifactId?: string | null
+      use: string
+      market: string
+      locale: string
+    }>
     sourceArtifactIds: readonly string[]
     audioMasterId?: string
     audioRange?: Readonly<{ startWordIndex: number; endWordIndex: number }>
+    scriptPlanId?: string
+    scriptBlockId?: string
     use: string
     market: string
     locale: string
@@ -104,16 +159,19 @@ export function enqueueProviderJobService(dependencies: {
     const now = dependencies.clock()
     assertDomain(Number.isFinite(now.getTime()), 'INVALID_ARGUMENT', 'clock returned an invalid date')
     const requestFingerprint = calculateCanonicalHash({
-      schemaVersion: 'enqueue-provider-job-request/v2',
+      schemaVersion: 'enqueue-provider-job-request/v3',
       workspaceId, projectId, projectVersionId,
       profileSnapshotId: request.profileSnapshotId,
       operation: request.operation,
       adapterId: request.adapterId,
       adapterVersion: request.adapterVersion,
       providerInput: request.providerInput,
+      criticBinding: request.criticBinding,
       sourceArtifactIds: request.sourceArtifactIds,
       audioMasterId: request.audioMasterId,
       audioRange: request.audioRange,
+      scriptPlanId: request.scriptPlanId,
+      scriptBlockId: request.scriptBlockId,
       use: request.use, market: request.market, locale: request.locale,
       actorContextHash: audit.contextHash,
     })
@@ -148,6 +206,17 @@ export function enqueueProviderJobService(dependencies: {
       assertDomain(range.durationMs >= 1_000, 'INVALID_ARGUMENT', 'Audio-avatar range is shorter than the provider-safe minimum')
       assertDomain(request.sourceArtifactIds.length === 1 && request.sourceArtifactIds[0] === master.audio.artifactId, 'INVALID_ARGUMENT', 'Audio-avatar source must be the exact canonical audio master artifact')
       assertDomain(Object.keys(request.providerInput).every((key) => key === 'aspectRatio'), 'INVALID_ARGUMENT', 'Audio-avatar provider input may only select aspectRatio')
+      assertDomain(Boolean(dependencies.resolveAvatarCriticBinding), 'PRECONDITION_REQUIRED', 'Audio-avatar critic context resolver is unavailable')
+      const criticBinding = await dependencies.resolveAvatarCriticBinding!({
+        workspaceId,
+        projectId,
+        profileSnapshotId: profile.profileSnapshotId,
+        audioMaster: master,
+        audioRange: range,
+        use: request.use,
+        market: request.market,
+        locale: request.locale,
+      })
       providerInput = Object.freeze({
         audioArtifactId: master.audio.artifactId,
         durationMs: range.durationMs,
@@ -155,12 +224,42 @@ export function enqueueProviderJobService(dependencies: {
         audioMasterId: master.id,
         audioMasterHash: master.masterHash,
         audioRange: Object.freeze({ startMs: range.startMs, endMs: range.endMs, rangeHash: range.rangeHash }),
+        criticBinding,
         ...(request.providerInput.aspectRatio ? { aspectRatio: request.providerInput.aspectRatio } : {}),
       })
     } else {
       assertDomain(!request.audioMasterId && !request.audioRange, 'INVALID_ARGUMENT', 'TTS jobs cannot reference an existing audio master')
+      const criticBinding = request.criticBinding ?? (
+        request.scriptPlanId && request.scriptBlockId && dependencies.resolveTtsCriticBinding
+          ? await dependencies.resolveTtsCriticBinding({
+              workspaceId,
+              projectId,
+              profileSnapshotId: profile.profileSnapshotId,
+              planId: request.scriptPlanId,
+              blockId: request.scriptBlockId,
+              use: request.use,
+              market: request.market,
+              locale: request.locale,
+            })
+          : undefined
+      )
+      assertDomain(Boolean(criticBinding), 'PRECONDITION_REQUIRED', 'TTS jobs must reference a persisted synthetic script plan and block')
+      assertDomain(
+        criticBinding!.profileSnapshotId === profile.profileSnapshotId,
+        'PERSISTENCE_CONFLICT',
+        'TTS critic binding does not match the persisted profile',
+      )
+      providerInput = Object.freeze({
+        ...request.providerInput,
+        text: criticBinding!.scriptText,
+        scriptHash: criticBinding!.scriptHash,
+        locale: request.locale,
+        criticBinding,
+      })
     }
+    const head = await dependencies.profiles.readProfileHead({ workspaceId, profileId: profile.snapshot.id })
     const consent = profile.snapshot.consent
+    const currentConsent = head?.current.snapshot.consent
     assertDomain(
       profile.snapshot.status === 'active' && consent.granted && !consent.revokedAt &&
       Date.parse(consent.expiresAt) > now.getTime() &&
@@ -168,6 +267,14 @@ export function enqueueProviderJobService(dependencies: {
       consent.allowedLocales.includes(request.locale) && consent.allowedOperations.includes(request.operation),
       'ASSET_RIGHTS_BLOCKED',
       'Synthetic presenter consent does not authorize this provider operation',
+    )
+    assertDomain(
+      Boolean(head) && head!.current.snapshot.status === 'active' && currentConsent!.granted && !currentConsent!.revokedAt &&
+      Date.parse(currentConsent!.expiresAt) > now.getTime() &&
+      currentConsent!.allowedUses.includes(request.use) && currentConsent!.allowedMarkets.includes(request.market) &&
+      currentConsent!.allowedLocales.includes(request.locale) && currentConsent!.allowedOperations.includes(request.operation),
+      'ASSET_RIGHTS_BLOCKED',
+      'Current synthetic presenter consent does not authorize this provider operation',
     )
     assertDomain(new Set(request.sourceArtifactIds).size === request.sourceArtifactIds.length, 'INVALID_ARGUMENT', 'sourceArtifactIds contains duplicates')
     const artifacts = await Promise.all(request.sourceArtifactIds.map(async (artifactId) => {
@@ -344,6 +451,7 @@ export function runProviderJobWorkerOnce(dependencies: {
     let activeClaim = claimed
     let job = claimed.job
     let next
+    let advanceAt = now
     // Transport state is advanced in the same transaction as the transition, so
     // a job can never be recorded as retrying without its schedule moving, nor
     // parked on a wait whose transition never committed.
@@ -463,13 +571,40 @@ export function runProviderJobWorkerOnce(dependencies: {
           ...(observedCost ? { observedCost } : {}),
         })
       } else if (job.status === 'evaluating') {
-        const result = await dependencies.critic.evaluate({ job, artifact: job.resultArtifact!, signal })
-        next = transitionProviderJob(job, { status: result.approved ? 'approved' : 'rejected', occurredAt: now.toISOString(), criticResultHash: result.resultHash })
+        const evaluated = await runWithProviderJobLease({
+          jobs: dependencies.jobs,
+          claim: activeClaim,
+          clock: dependencies.clock,
+          leaseMs,
+          signal,
+        }, async ({ signal: criticSignal }) => {
+          try {
+            return Object.freeze({
+              ok: true as const,
+              value: await dependencies.critic.evaluate({ job, artifact: job.resultArtifact!, signal: criticSignal }),
+            })
+          } catch (error) {
+            return Object.freeze({ ok: false as const, error })
+          }
+        })
+        activeClaim = evaluated.claim
+        advanceAt = dependencies.clock()
+        if (!evaluated.value.ok) throw evaluated.value.error
+        next = transitionProviderJob(job, {
+          status: evaluated.value.value.approved ? 'approved' : 'rejected',
+          occurredAt: advanceAt.toISOString(),
+          criticResultHash: evaluated.value.value.resultHash,
+        })
       } else {
         throw new DomainError('VERSION_CONFLICT', `Provider job status ${job.status} is not executable`)
       }
     } catch (error) {
       if (signal?.aborted) throw error
+      if (error instanceof DomainError && error.code === 'VERSION_CONFLICT' && job.status === 'evaluating') throw error
+      // Evaluation may outlive the claim's original timestamp. Persist its
+      // terminal/retry decision at the time the renewed claim actually
+      // finished, never at the time the worker first entered this iteration.
+      if (job.status === 'evaluating') advanceAt = dependencies.clock()
       const failure = normalizedFailure(error)
       // A retryable transport failure is not the end of the job. It goes back
       // for another submission with the schedule advanced, and the provider's
@@ -479,30 +614,30 @@ export function runProviderJobWorkerOnce(dependencies: {
         failure.retryable &&
         Boolean(state) &&
         !providerJobAttemptsExhausted(state!) &&
-        !providerJobDeadlineExceeded(state!, now.toISOString()) &&
+        !providerJobDeadlineExceeded(state!, advanceAt.toISOString()) &&
         ALLOWED_RETRY_SOURCE_STATUSES.includes(job.status)
       if (retryable) {
         next = transitionProviderJob(job, {
           status: 'estimated',
-          occurredAt: now.toISOString(),
+          occurredAt: advanceAt.toISOString(),
           estimate: job.estimate ?? { currency: 'USD', costMinorUnits: 0, estimatedLatencyMs: 0 },
           normalizedError: failure,
         })
         transportState = scheduleProviderJobAttempt({
           state: state!,
           waitKind: 'retry',
-          occurredAt: now.toISOString(),
+          occurredAt: advanceAt.toISOString(),
           retryAfterMs: failure.retryAfterMs ?? null,
         })
       } else {
-        next = transitionProviderJob(job, { status: 'failed', occurredAt: now.toISOString(), normalizedError: failure })
+        next = transitionProviderJob(job, { status: 'failed', occurredAt: advanceAt.toISOString(), normalizedError: failure })
       }
     }
     return dependencies.jobs.advance({
       current: activeClaim,
       next,
       transitionId: identity(dependencies.createTransitionId(), 'createTransitionId()'),
-      occurredAt: now,
+      occurredAt: advanceAt,
       ...(transportState ? { transportState } : {}),
     })
   }

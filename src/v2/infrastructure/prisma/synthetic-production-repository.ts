@@ -56,7 +56,7 @@ function canonicalValue<T>(value: string, field: string): Readonly<T> {
   return deepFreeze(parsed as T)
 }
 
-function hydrateProfile(
+export function hydrateSyntheticPresenterProfile(
   row: V2SyntheticPresenterProfile,
 ): Readonly<PersistedSyntheticPresenterProfile> {
   hydrateExternalActorAudit(row, row.createdByClientId)
@@ -241,7 +241,7 @@ implements SyntheticProductionRepository {
         idempotencyKey: input.idempotencyKey,
       },
     })
-    return row ? hydrateProfile(row) : null
+    return row ? hydrateSyntheticPresenterProfile(row) : null
   }
 
   async createProfile(input: Parameters<SyntheticProductionRepository['createProfile']>[0]) {
@@ -336,7 +336,7 @@ implements SyntheticProductionRepository {
             throw new DomainError('VERSION_CONFLICT', 'Synthetic presenter head advanced concurrently')
           }
         }
-        return Object.freeze({ profile: hydrateProfile(row), replayed: false })
+        return Object.freeze({ profile: hydrateSyntheticPresenterProfile(row), replayed: false })
       })
     } catch (error) {
       if (!isPrismaCode(error, 'P2002')) throw error
@@ -364,7 +364,7 @@ implements SyntheticProductionRepository {
       },
       orderBy: { version: 'desc' },
     })
-    return row ? hydrateProfile(row) : null
+    return row ? hydrateSyntheticPresenterProfile(row) : null
   }
 
   private hydrateHead(row: {
@@ -385,7 +385,7 @@ implements SyntheticProductionRepository {
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
       }),
-      current: hydrateProfile(row.currentSnapshot),
+      current: hydrateSyntheticPresenterProfile(row.currentSnapshot),
     })
   }
 
@@ -411,7 +411,7 @@ implements SyntheticProductionRepository {
       where: { workspaceId: input.workspaceId, profileId: input.profileId },
       orderBy: { version: 'asc' },
     })
-    return Object.freeze(rows.map(hydrateProfile))
+    return Object.freeze(rows.map(hydrateSyntheticPresenterProfile))
   }
 
   async findRunReplay(input: {

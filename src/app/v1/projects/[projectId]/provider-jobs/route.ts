@@ -11,6 +11,8 @@ import {
   createProviderJobRepository,
   createSyntheticProductionRepository,
   createSyntheticAudioMasterRepository,
+  createAvatarCriticBindingResolver,
+  createTtsCriticBindingResolver,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
@@ -38,6 +40,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       clock: () => new Date(),
       createJobId: () => `provider-job-${randomUUID()}`,
       createTransitionId: () => `provider-transition-${randomUUID()}`,
+      resolveAvatarCriticBinding: createAvatarCriticBindingResolver(),
+      resolveTtsCriticBinding: createTtsCriticBindingResolver(),
     })({
       workspaceId: actor.workspaceId, projectId, ...body, actor,
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',

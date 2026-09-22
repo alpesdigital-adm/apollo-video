@@ -27,6 +27,7 @@ export interface SyntheticMasterAssetRepository {
     master: Readonly<SyntheticMasterAsset>
     profileSnapshotHash: string
     criticResultHash: string
+    authorityScope: Readonly<{ use: string; market: string; locale: string }>
     requestFingerprint: string
     idempotencyKey: string
     authenticationAudit: Readonly<ApiAccessAuditContext>

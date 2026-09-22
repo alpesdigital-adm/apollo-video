@@ -18,6 +18,7 @@ import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import type { ProviderJob } from '../domain/provider-job.ts'
 import { validateWebhookResolution } from '../domain/webhook-network.ts'
+import { validateSyntheticAlignment } from './media/synthetic-alignment-validation.ts'
 
 const DEFAULT_MAX_BYTES = 1024 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -184,12 +185,12 @@ export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
         sources: sources.map((source) => ({ artifactKey: source.artifactKey, sha256: source.sha256, role: 'provider-authorized-input', execution: { tool: { id: 'heygen', version: 'v3', digest: TOOL_DIGEST }, model: { provider: 'heygen', id: `job-${identityHash.slice(0, 32)}`, version: input.job.adapterVersion, config: { operation: input.job.operation, profileSnapshotHash: input.job.authorization.profileSnapshotHash } } } })),
         probe: { width: probe.width, height: probe.height, duration: probe.duration, fps: probe.fps },
       })
-      await this.dependencies.artifacts.persistOrReplay({
+      const persisted = await this.dependencies.artifacts.persistOrReplay({
         workspaceId: input.job.workspaceId, artifactId, manifestId,
         lineageIds: sources.map((source, index) => `lineage-${calculateCanonicalHash({ manifestId, artifactId: source.id, index })}`),
         manifest, createdAt: (this.dependencies.clock ?? (() => new Date()))().toISOString(),
       })
-      return Object.freeze({ artifactId, artifactSha256: stored.sha256, mediaType: 'video' as const, byteSize: stored.byteSize })
+      return Object.freeze({ artifactId: persisted.artifactId, artifactSha256: stored.sha256, mediaType: 'video' as const, byteSize: stored.byteSize })
     } finally {
       await this.dependencies.downloader.cleanup(input.job.id)
     }
@@ -226,7 +227,8 @@ function ttsProviderResult(value: unknown): Readonly<{
     'RENDER_OUTPUT_INVALID',
     'TTS provider result is invalid',
   )
-  return record as ReturnType<typeof ttsProviderResult>
+  const alignment = validateSyntheticAlignment(record.alignment)
+  return Object.freeze({ ...record, alignment }) as ReturnType<typeof ttsProviderResult>
 }
 
 /**
@@ -332,11 +334,11 @@ export class VerifiedTtsResultIngestor implements ProviderResultIngestor {
         recipe: { id: 'synthetic-tts-alignment', version: '1.0.0', parameters: { jobId: input.job.id, providerJobRef: result.requestId, adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion, adapterConfigHash: result.adapterConfigHash, scriptHash: result.scriptHash, audioSha256: result.audioSha256 } },
         sources: [{ artifactKey: storedAudio.key, sha256: storedAudio.sha256, role: 'tts-primary-audio', execution }],
       })
-      await this.dependencies.artifacts.persistOrReplay({
+      const persistedAudio = await this.dependencies.artifacts.persistOrReplay({
         workspaceId: input.job.workspaceId, artifactId: audioArtifactId, manifestId: `tts-audio-manifest-${identityHash.slice(0, 32)}`,
         lineageIds: [], manifest: audioManifest, createdAt: now,
       })
-      await this.dependencies.artifacts.persistOrReplay({
+      const persistedAlignment = await this.dependencies.artifacts.persistOrReplay({
         workspaceId: input.job.workspaceId, artifactId: alignmentArtifactId, manifestId: `tts-alignment-manifest-${identityHash.slice(0, 32)}`,
         lineageIds: [`lineage-${calculateCanonicalHash({ manifestId: `tts-alignment-manifest-${identityHash.slice(0, 32)}`, artifactId: audioArtifactId, index: 0 })}`],
         manifest: alignmentManifest, createdAt: now,
@@ -359,11 +361,11 @@ export class VerifiedTtsResultIngestor implements ProviderResultIngestor {
       }
       await this.dependencies.resultArtifacts.persistOrReplay({
         records: [
-          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-audio`, role: 'primary-audio', artifactId: audioArtifactId, artifactSha256: storedAudio.sha256, byteSize: storedAudio.byteSize, mediaType: 'audio', container: result.audioContainer },
-          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-alignment`, role: 'alignment-evidence', artifactId: alignmentArtifactId, artifactSha256: storedAlignment.sha256, byteSize: storedAlignment.byteSize, mediaType: 'data', container: 'json' },
+          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-audio`, role: 'primary-audio', artifactId: persistedAudio.artifactId, artifactSha256: storedAudio.sha256, byteSize: storedAudio.byteSize, mediaType: 'audio', container: result.audioContainer },
+          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-alignment`, role: 'alignment-evidence', artifactId: persistedAlignment.artifactId, artifactSha256: storedAlignment.sha256, byteSize: storedAlignment.byteSize, mediaType: 'data', container: 'json' },
         ],
       })
-      return Object.freeze({ artifactId: audioArtifactId, artifactSha256: storedAudio.sha256, mediaType: 'audio' as const, byteSize: storedAudio.byteSize })
+      return Object.freeze({ artifactId: persistedAudio.artifactId, artifactSha256: storedAudio.sha256, mediaType: 'audio' as const, byteSize: storedAudio.byteSize })
     } finally {
       await rm(directory, { recursive: true, force: true }).catch(() => undefined)
     }

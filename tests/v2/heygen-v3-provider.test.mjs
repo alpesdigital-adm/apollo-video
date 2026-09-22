@@ -184,13 +184,14 @@ test('T-FR-101 provider result is probed, promoted and persisted before its crit
   const ingestor = new VerifiedProviderResultIngestor({
     downloader: { async download() { return { path: 'C:/staged/provider.mp4', sha256: 'f'.repeat(64), byteSize: 1234 } }, async cleanup() { cleanupCalls += 1 } },
     storage: { async promoteDerived() { return { key: 'synthetic-provider-results/result.mp4', path: 'C:/stored/result.mp4', sha256: 'f'.repeat(64), byteSize: 1234 } } },
-    artifacts: { async persistOrReplay(bundle) { persistedBundle = bundle; return { artifactId: bundle.artifactId, manifestId: bundle.manifestId, replayed: false } } },
+    artifacts: { async persistOrReplay(bundle) { persistedBundle = bundle; return { artifactId: 'canonical-existing-video', manifestId: bundle.manifestId, replayed: true } } },
     artifactQuery,
     prober: { async probe() { return { width: 540, height: 960, fps: 25, duration: 2, codec: 'h264', audioCodec: 'aac', container: 'mov,mp4', color: {}, producer: {} } } },
     clock: () => new Date('2029-01-01T00:00:00.000Z'),
   })
   const artifact = await ingestor.ingest({ job, providerResult: { providerJobId: 'heygen-video-one', downloadUrl: 'https://files.heygen.ai/result.mp4?sig=short', mediaType: 'video' } })
   assert.equal(cleanupCalls, 1)
+  assert.equal(artifact.artifactId, 'canonical-existing-video')
   assert.equal(persistedBundle.manifest.artifact.sha256, artifact.artifactSha256)
   assert.equal(persistedBundle.manifest.sources[0].artifactKey, source.artifactKey)
   outputRecord = { id: artifact.artifactId, sha256: artifact.artifactSha256, byteSize: BigInt(artifact.byteSize), mediaType: 'video', manifests: [{ probe: { width: 540, height: 960, fps: 25, duration: 2 } }] }

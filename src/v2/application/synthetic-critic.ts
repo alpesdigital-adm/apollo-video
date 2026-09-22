@@ -1,7 +1,9 @@
 import { assertDomain } from '../domain/errors.ts'
+import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import {
   SYNTHETIC_CRITIC_DIMENSIONS,
   createSyntheticCriticReport,
+  isSyntheticCriticApproval,
   type SyntheticCriticDimension,
   type SyntheticCriticEvaluator,
   type SyntheticCriticMeasurement,
@@ -45,42 +47,63 @@ export interface EvaluateSyntheticCriticRequest {
   profileSnapshotId: string
   /** The hash of the approved script text the take was measured against. */
   scriptHash: string
+  signal?: AbortSignal
   actor: AuthenticatedExternalActor
 }
+
+export type EvaluateSyntheticCriticInternalRequest = Omit<EvaluateSyntheticCriticRequest, 'actor'>
 
 export interface SyntheticCriticEvaluationResult {
   report: Readonly<SyntheticCriticReport>
   replayed: boolean
 }
 
+/** Approval guard for runtime consumers. Historical reports remain readable,
+ * but only a report minted with the complete expectation and the policy now
+ * in force may authorize reuse, promotion or compilation. */
+export function isCurrentSyntheticCriticApproval(report: Readonly<SyntheticCriticReport>): boolean {
+  if (
+    !isSyntheticCriticApproval(report.decision) ||
+    !report.expectationHash ||
+    !report.evaluationContextHash
+  ) return false
+  try {
+    return report.thresholdsVersion === resolveSyntheticCriticThresholds({
+      capability: report.capability,
+      adapterId: report.adapterId,
+    }).version
+  } catch {
+    return false
+  }
+}
+
 /**
  * Orchestrates the critic: adapters measure, the versioned thresholds decide,
  * and the verdict is sealed as an immutable report.
  *
- * Idempotency is by take, not by clock. A second evaluation of the same block
- * and the same artifact under the same thresholds version returns the stored
- * report instead of running the adapters again and minting a second opinion
- * with a fresher timestamp. A new thresholds version is a genuinely new
- * question and does produce a new report.
+ * Idempotency is by the complete authoritative evaluation context, not by
+ * clock or media bytes alone. A different alignment, expectation, presenter,
+ * adapter provenance or policy is a genuinely new question and produces a new
+ * report even when the target bytes are identical.
  */
-export function evaluateSyntheticCriticService(dependencies: {
+export function evaluateSyntheticCriticCore(dependencies: {
   reports: SyntheticCriticReportRepository
   media: SyntheticCriticMediaEvaluator
   pronunciation: SyntheticCriticDimensionEvaluator
   controlled: SyntheticCriticDimensionEvaluator
   clock: () => Date
-  createId: (input: { workspaceId: string; blockId: string; artifactId: string }) => string
+  createId: (input: {
+    workspaceId: string
+    blockId: string
+    artifactId: string
+    thresholdsVersion: string
+    evaluationContextHash: string
+  }) => string
 }) {
   return async function evaluate(
-    request: EvaluateSyntheticCriticRequest,
+    request: EvaluateSyntheticCriticInternalRequest,
   ): Promise<Readonly<SyntheticCriticEvaluationResult>> {
     const subject = request.subject
-    requireScope(request.actor, 'projects:write')
-    assertDomain(
-      request.actor.workspaceId === subject.workspaceId,
-      'INVALID_WORKSPACE',
-      'Actor cannot evaluate a synthetic take in another workspace',
-    )
     const target = subject.video ?? subject.audio
     assertDomain(
       Boolean(target),
@@ -93,22 +116,70 @@ export function evaluateSyntheticCriticService(dependencies: {
       adapterId: subject.adapterId,
       modelRef: subject.modelRef,
     })
+    const expectationHash = calculateCanonicalHash(subject.expected)
+    const evaluationContextHash = calculateCanonicalHash({
+      schemaVersion: 'synthetic-critic-evaluation-context/v1',
+      workspaceId: subject.workspaceId,
+      projectId: subject.projectId,
+      blockId: subject.blockId,
+      capability: subject.capability,
+      adapterId: subject.adapterId,
+      adapterVersion: subject.adapterVersion,
+      modelRef: subject.modelRef,
+      target: {
+        artifactId: target!.artifactId,
+        sha256: target!.sha256,
+        byteSize: target!.byteSize,
+      },
+      audio: subject.audio ? {
+        artifactId: subject.audio.artifactId,
+        sha256: subject.audio.sha256,
+        byteSize: subject.audio.byteSize,
+      } : null,
+      alignmentArtifactId: subject.alignmentArtifactId,
+      scriptHash: request.scriptHash,
+      profileSnapshotId: request.profileSnapshotId,
+      expectedIdentityRef: subject.expected.identityRef,
+      expectationHash,
+      thresholdsVersion: thresholds.version,
+    })
 
     const stored = await dependencies.reports.readByBlock({
       workspaceId: subject.workspaceId,
       blockId: subject.blockId,
       artifactId: target!.artifactId,
       thresholdsVersion: thresholds.version,
+      evaluationContextHash,
       limit: 1,
     })
-    if (stored.length > 0) return Object.freeze({ report: stored[0]!, replayed: true })
+    if (stored.length > 0) {
+      const report = stored[0]!
+      assertDomain(
+        report.projectId === subject.projectId &&
+          report.capability === subject.capability &&
+          report.adapterId === subject.adapterId &&
+          report.adapterVersion === subject.adapterVersion &&
+          report.artifactSha256 === target!.sha256 &&
+          report.audioArtifactId === (subject.audio?.artifactId ?? null) &&
+          report.alignmentArtifactId === subject.alignmentArtifactId &&
+          report.scriptHash === request.scriptHash &&
+          report.profileSnapshotId === request.profileSnapshotId &&
+          report.expectedIdentityRef === subject.expected.identityRef &&
+          report.expectationHash === expectationHash &&
+          report.evaluationContextHash === evaluationContextHash,
+        'PERSISTENCE_CONFLICT',
+        'Stored synthetic critic report does not match the authoritative evaluation context',
+      )
+      return Object.freeze({ report, replayed: true })
+    }
 
     const mediaOutcome = await dependencies.media.evaluate(
-      Object.freeze({ subject, media: null }) as Readonly<SyntheticCriticEvaluationContext>,
+      Object.freeze({ subject, media: null, signal: request.signal }) as Readonly<SyntheticCriticEvaluationContext>,
     )
     const context: Readonly<SyntheticCriticEvaluationContext> = Object.freeze({
       subject,
       media: mediaOutcome.media,
+      signal: request.signal,
     })
     const [pronunciationOutcome, controlledOutcome] = await Promise.all([
       dependencies.pronunciation.evaluate(context),
@@ -183,6 +254,8 @@ export function evaluateSyntheticCriticService(dependencies: {
         workspaceId: subject.workspaceId,
         blockId: subject.blockId,
         artifactId: target!.artifactId,
+        thresholdsVersion: thresholds.version,
+        evaluationContextHash,
       }),
       workspaceId: subject.workspaceId,
       projectId: subject.projectId,
@@ -197,6 +270,8 @@ export function evaluateSyntheticCriticService(dependencies: {
       scriptHash: request.scriptHash,
       profileSnapshotId: request.profileSnapshotId,
       expectedIdentityRef: subject.expected.identityRef,
+      expectationHash,
+      evaluationContextHash,
       evaluators,
       measurements,
       issues: verdict.issues,
@@ -208,6 +283,22 @@ export function evaluateSyntheticCriticService(dependencies: {
 
     const recorded = await dependencies.reports.record({ report })
     return Object.freeze({ report: recorded.value, replayed: recorded.replayed })
+  }
+}
+
+export function evaluateSyntheticCriticService(dependencies: Parameters<typeof evaluateSyntheticCriticCore>[0]) {
+  const evaluateInternal = evaluateSyntheticCriticCore(dependencies)
+  return async function evaluate(
+    request: EvaluateSyntheticCriticRequest,
+  ): Promise<Readonly<SyntheticCriticEvaluationResult>> {
+    requireScope(request.actor, 'projects:write')
+    assertDomain(
+      request.actor.workspaceId === request.subject.workspaceId,
+      'INVALID_WORKSPACE',
+      'Actor cannot evaluate a synthetic take in another workspace',
+    )
+    const { actor: _actor, ...internal } = request
+    return evaluateInternal(internal)
   }
 }
 

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import type { PrismaClient } from '../../../generated/prisma-v2/index.js'
@@ -27,6 +27,8 @@ import { catalogApprovedOutputService } from '../application/catalog-approved-ou
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { enqueueProviderJobService, runProviderJobWorkerOnce } from '../application/provider-jobs.ts'
+import { evaluateSyntheticCriticCore } from '../application/synthetic-critic.ts'
+import { SpecializedSyntheticProviderResultCritic } from '../application/synthetic-provider-critic.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
@@ -211,7 +213,7 @@ import type {
   WebhookEndpointActivationStateRepository,
   WebhookReplayReceiptRepository,
 } from '../application/ports/webhook-security-repository.ts'
-import { DomainError } from '../domain/errors.ts'
+import { assertDomain, DomainError } from '../domain/errors.ts'
 import { compileSyntheticBlockAudioService } from '../application/synthetic-block-audio-compilation.ts'
 import {
   createSyntheticScriptPlanService,
@@ -403,6 +405,7 @@ import { FfmpegTransformationCriticEvaluator } from './transformation/ffmpeg-tra
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
 import { PrismaSyntheticCacheDecisionRepository } from './prisma/synthetic-cache-decision-repository.ts'
 import { PrismaSyntheticCriticReportRepository } from './prisma/synthetic-critic-report-repository.ts'
+import { PrismaSyntheticCriticRuntimeContextResolver } from './prisma/synthetic-critic-runtime-context.ts'
 import { PrismaSyntheticCacheSubmissionClaimRepository } from './prisma/synthetic-cache-submission-claim-repository.ts'
 import { PrismaSyntheticMasterAssetRepository } from './prisma/synthetic-master-asset-repository.ts'
 import { PrismaSyntheticSpeechSegmentRepository } from './prisma/synthetic-speech-segment-repository.ts'
@@ -513,6 +516,10 @@ import {
   S3VerifiedMediaStorage,
 } from './media/s3-artifact-storage.ts'
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
+import { StoredSyntheticMasterAlignmentReader } from './media/synthetic-master-alignment-reader.ts'
+import { FfprobeSyntheticCriticMediaEvaluator } from './media/synthetic-critic-media-integrity.ts'
+import { AlignmentSyntheticCriticPronunciationEvaluator } from './media/synthetic-critic-pronunciation.ts'
+import { DeterministicSyntheticCriticControlledEvaluator } from './media/synthetic-critic-controlled-probe.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
 import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
 import { FfmpegMediaSegmentExtractor } from './media/ffmpeg-media-segment-extractor.ts'
@@ -521,6 +528,7 @@ import { createConfiguredImageVisionProvider } from './image/composite-image-vis
 import { inspectUploadedMedia, probeAudioDurationSeconds, probeVideo } from './media/video-probe.ts'
 import {
   ArtifactContentSyntheticMasterByteVerifier,
+  FfmpegDecodedSyntheticAudioDurationReader,
   FfprobeSyntheticMasterDurationProber,
 } from './media/synthetic-master-media.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
@@ -906,6 +914,100 @@ export function createProviderJobRepository(): ProviderJobRepository {
   return new PrismaProviderJobRepository(resolveV2Client())
 }
 
+export function createAvatarCriticBindingResolver() {
+  const client = resolveV2Client()
+  const plans = createSyntheticScriptPlanRepository()
+  const concatenations = createSyntheticBlockConcatenationRepository()
+  const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
+  return async (input: {
+    workspaceId: string
+    projectId: string
+    profileSnapshotId: string
+    audioMaster: Readonly<import('../domain/synthetic-audio-master.ts').SyntheticAudioMaster>
+    audioRange: Readonly<import('../domain/synthetic-audio-master.ts').SyntheticAvatarAudioRange>
+    use: string
+    market: string
+    locale: string
+  }) => {
+    let block: Readonly<{ id: string; exactText: string }> | null = null
+    const source = input.audioMaster.source
+    if (source.kind === 'concatenated') {
+      const concatenation = await concatenations.read({
+        workspaceId: input.workspaceId,
+        planId: source.planId,
+        concatenationId: source.concatenationId,
+      })
+      assertDomain(
+        Boolean(concatenation) && concatenation!.audioMasterId === input.audioMaster.id &&
+          concatenation!.planVersionId === source.planVersionId,
+        'PERSISTENCE_CONFLICT',
+        'Audio-avatar master lost its block concatenation lineage',
+      )
+      const matches = concatenation!.entries.filter((entry) =>
+        entry.outputInMs <= input.audioRange.startMs && entry.outputOutMs >= input.audioRange.endMs)
+      assertDomain(matches.length === 1, 'PRECONDITION_REQUIRED', 'Audio-avatar range must resolve to exactly one approved script block')
+      const plan = await plans.readVersion({ workspaceId: input.workspaceId, planId: source.planId, versionId: source.planVersionId })
+      const persisted = plan?.blocks.find(({ id }) => id === matches[0]!.blockId)
+      if (persisted) block = persisted
+    } else if (source.kind === 'tts') {
+      const generation = await client.v2SyntheticBlockGeneration.findFirst({
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, providerJobId: source.providerJobId },
+        include: { block: true },
+      })
+      if (generation) block = generation.block
+    }
+    assertDomain(Boolean(block), 'PRECONDITION_REQUIRED', 'Audio-avatar requires durable lineage to one approved synthetic script block')
+    return Object.freeze({
+      blockId: block!.id,
+      scriptText: block!.exactText,
+      scriptHash: sha256(block!.exactText),
+      profileSnapshotId: input.profileSnapshotId,
+      expectedDurationMs: input.audioRange.durationMs,
+      // The existing master alignment spans the whole master. It is not passed
+      // off as block-local evidence; pronunciation remains unavailable and the
+      // required-dimension policy blocks until a range-specific artifact exists.
+      alignmentArtifactId: null,
+      use: input.use,
+      market: input.market,
+      locale: input.locale,
+    })
+  }
+}
+
+export function createTtsCriticBindingResolver() {
+  const plans = createSyntheticScriptPlanRepository()
+  const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
+  return async (input: {
+    workspaceId: string
+    projectId: string
+    profileSnapshotId: string
+    planId: string
+    blockId: string
+    use: string
+    market: string
+    locale: string
+  }) => {
+    const plan = await plans.readPlan({ workspaceId: input.workspaceId, projectId: input.projectId, planId: input.planId })
+    const block = plan?.blocks.find(({ id }) => id === input.blockId)
+    assertDomain(
+      Boolean(plan && block) && plan!.version.profileSnapshotId === input.profileSnapshotId &&
+        plan!.version.blockSequence.includes(input.blockId),
+      'PRECONDITION_REQUIRED',
+      'TTS critic binding must reference a current persisted script block for the authorized profile',
+    )
+    return Object.freeze({
+      planId: plan!.head.id,
+      blockId: block!.id,
+      scriptText: block!.exactText,
+      scriptHash: sha256(block!.exactText),
+      profileSnapshotId: input.profileSnapshotId,
+      use: input.use,
+      market: input.market,
+      locale: input.locale,
+    })
+  }
+}
+
 export function createSyntheticScriptPlanRepository(): SyntheticScriptPlanRepository {
   return new PrismaSyntheticScriptPlanRepository(resolveV2Client())
 }
@@ -979,6 +1081,7 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
       generations,
       providerJobs,
       resultArtifacts: createProviderResultArtifactRepository(),
+      criticReports: createSyntheticCriticReportRepository(),
       clock: () => new Date(),
     }),
   }
@@ -1092,6 +1195,8 @@ export function createSyntheticBlockAudioCompilationService(environment: NodeJS.
   return compileSyntheticBlockAudioService({
     plans,
     generations: createSyntheticBlockGenerationRepository(),
+    providerJobs: createProviderJobRepository(),
+    criticReports: createSyntheticCriticReportRepository(),
     profiles,
     artifacts,
     artifactPersistence: artifacts,
@@ -1110,6 +1215,8 @@ export function createSyntheticBlockAudioCompilationService(environment: NodeJS.
       providerJobs: createProviderJobRepository(),
       artifacts,
       rights: createAssetRightsRepository(),
+      criticReports: createSyntheticCriticReportRepository(),
+      ...createSyntheticAudioMasterEvidence(environment),
       clock: () => new Date(),
       createId: () => `synthetic-audio-master-${randomUUID()}`,
     }),
@@ -1365,6 +1472,20 @@ export function createArtifactSourceMaterializer(environment: NodeJS.ProcessEnv 
   return new S3ArtifactSourceMaterializer(workRoot, createArtifactS3ClientFromEnvironment(environment))
 }
 
+export function createSyntheticAudioMasterEvidence(environment: NodeJS.ProcessEnv = process.env) {
+  const artifacts = createMediaArtifactQueryRepository()
+  return Object.freeze({
+    alignment: new StoredSyntheticMasterAlignmentReader({
+      artifacts,
+      storage: createArtifactContentStorage(environment),
+    }),
+    audioDurations: new FfmpegDecodedSyntheticAudioDurationReader(
+      createArtifactSourceMaterializer(environment),
+      environment,
+    ),
+  })
+}
+
 function nonNegativeInteger(value: string | undefined, field: string): number {
   const parsed = Number(value)
   if (!Number.isSafeInteger(parsed) || parsed < 0) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${field} is invalid`)
@@ -1516,6 +1637,39 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
   })
   const videoCritic = new PersistedProviderResultCritic(artifactQuery)
   const ttsCritic = new PersistedTtsResultCritic(artifactQuery, resultArtifacts)
+  const alignment = new StoredSyntheticMasterAlignmentReader({
+    artifacts: artifactQuery,
+    storage: createArtifactContentStorage(environment),
+  })
+  const evaluateSynthetic = evaluateSyntheticCriticCore({
+    reports: createSyntheticCriticReportRepository(),
+    media: new FfprobeSyntheticCriticMediaEvaluator({
+      sources: createArtifactSourceMaterializer(environment),
+      environment,
+    }),
+    pronunciation: new AlignmentSyntheticCriticPronunciationEvaluator({ alignment }),
+    controlled: new DeterministicSyntheticCriticControlledEvaluator(),
+    clock: () => new Date(),
+    createId: ({ evaluationContextHash }) =>
+      `synthetic-critic-${evaluationContextHash.slice(0, 48)}`,
+  })
+  const criticContext = new PrismaSyntheticCriticRuntimeContextResolver({
+    client: resolveV2Client(),
+    artifacts: artifactQuery,
+    resultArtifacts,
+    generations: createSyntheticBlockGenerationRepository(),
+    plans: createSyntheticScriptPlanRepository(),
+    profiles: createSyntheticProductionRepository(),
+    rights: createAssetRightsRepository(),
+    alignment,
+    clock: () => new Date(),
+  })
+  const syntheticVideoCritic = new SpecializedSyntheticProviderResultCritic({
+    transport: videoCritic, context: criticContext, evaluate: evaluateSynthetic,
+  })
+  const syntheticTtsCritic = new SpecializedSyntheticProviderResultCritic({
+    transport: ttsCritic, context: criticContext, evaluate: evaluateSynthetic,
+  })
   const transformationCritic = new PersistedTransformationResultCritic({
     registry: createTransformationProviderRegistryRepository(),
     quality: createTransformationQualityRepository(),
@@ -1546,7 +1700,7 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
     critic: {
       evaluate(input) {
         if (isTransformation(input.job)) return transformationCritic.evaluate(input)
-        return (input.job.operation === 'tts' ? ttsCritic : videoCritic).evaluate(input)
+        return (input.job.operation === 'tts' ? syntheticTtsCritic : syntheticVideoCritic).evaluate(input)
       },
     },
     clock: () => new Date(),

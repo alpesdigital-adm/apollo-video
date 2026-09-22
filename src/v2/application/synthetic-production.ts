@@ -2,8 +2,11 @@ import {
   calculateCanonicalHash,
   stableSerialize,
 } from '../domain/canonical-hash.ts'
+import { createHash } from 'node:crypto'
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import type { SyntheticCriticReport } from '../domain/synthetic-critic-report.ts'
+import { isCurrentSyntheticCriticApproval } from './synthetic-critic.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import {
   createSyntheticPresenterEditPlan,
@@ -24,10 +27,12 @@ import type {
   MediaArtifactRecord,
 } from './ports/media-artifact-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from './ports/project-workspace-query-repository.ts'
+import type { PersistedProviderJob } from './ports/provider-job-repository.ts'
 import type { SyntheticProductionRepository } from './ports/synthetic-production-repository.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const KEY = /^[\x21-\x7E]{8,128}$/
+const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
 
 function identity(value: unknown, field: string): string {
   assertDomain(
@@ -159,6 +164,12 @@ export function createSyntheticProductionRunService(dependencies: {
   projects: ProjectWorkspaceQueryRepository
   artifacts: MediaArtifactQueryRepository
   rights: AssetRightsRepository
+  criticReports: Readonly<{
+    readByHash(input: { workspaceId: string; reportHash: string }): Promise<Readonly<SyntheticCriticReport> | null>
+  }>
+  providerJobs: Readonly<{
+    readById(input: { workspaceId: string; jobId: string }): Promise<Readonly<PersistedProviderJob> | null>
+  }>
   clock: () => Date
   createRunId: () => string
   createSnapshotId: () => string
@@ -233,6 +244,33 @@ export function createSyntheticProductionRunService(dependencies: {
     const audioRow = await availableArtifact(dependencies.artifacts, workspaceId, request.audio.artifactId, ['audio'])
     const blockRows = await Promise.all(request.blocks.map((entry) =>
       availableArtifact(dependencies.artifacts, workspaceId, entry.artifactId, ['video'])))
+    const blockReports = await Promise.all(request.blocks.map((entry) =>
+      dependencies.criticReports.readByHash({ workspaceId, reportHash: entry.critic.resultHash })))
+    const blockJobs = await Promise.all(request.blocks.map((entry) =>
+      dependencies.providerJobs.readById({ workspaceId, jobId: entry.providerJobId })))
+    for (const [index, entry] of request.blocks.entries()) {
+      const report = blockReports[index]
+      const job = blockJobs[index]?.job
+      const artifact = blockRows[index]!
+      const binding = job?.input.criticBinding as Record<string, unknown> | undefined
+      const audioRange = job?.input.audioRange as Record<string, unknown> | undefined
+      assertDomain(
+        Boolean(report) && report!.id === entry.critic.id && isCurrentSyntheticCriticApproval(report!) &&
+          entry.critic.status === 'approved' && report!.blockId === entry.id && report!.capability === 'audio-avatar' &&
+          report!.artifactId === artifact.id && report!.artifactSha256 === artifact.sha256 &&
+          report!.profileSnapshotId === request.profileSnapshotId && report!.scriptHash === sha256(entry.text) &&
+          job?.status === 'approved' && job.operation === 'audio-avatar' &&
+          job.authorization.profileSnapshotId === request.profileSnapshotId &&
+          job.criticResultHash === report!.reportHash && report!.projectId === job.projectId &&
+          job.resultArtifact?.artifactId === artifact.id && job.resultArtifact.artifactSha256 === artifact.sha256 &&
+          binding?.blockId === entry.id && binding.scriptText === entry.text && binding.scriptHash === report!.scriptHash &&
+          binding.profileSnapshotId === request.profileSnapshotId &&
+          job.input.audioArtifactId === audioRow.id &&
+          audioRange?.startMs === entry.rangeMs[0] && audioRange.endMs === entry.rangeMs[1],
+        'PRECONDITION_REQUIRED',
+        `Synthetic block ${entry.id} has no approved provider job and specialized critic report for its exact lineage`,
+      )
+    }
     const bRollRows = await Promise.all((request.bRoll ?? []).map((entry) =>
       availableArtifact(dependencies.artifacts, workspaceId, entry.artifactId, ['video', 'image'])))
     const overlayRows = await Promise.all((request.overlays ?? []).map((entry) =>

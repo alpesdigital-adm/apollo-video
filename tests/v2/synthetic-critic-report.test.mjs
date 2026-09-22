@@ -7,6 +7,7 @@ import {
   createSyntheticCriticReport,
   isSyntheticCriticApproval,
 } from '../../src/v2/domain/synthetic-critic-report.ts'
+import { isCurrentSyntheticCriticApproval } from '../../src/v2/application/synthetic-critic.ts'
 
 const digest = (character) => character.repeat(64)
 
@@ -73,6 +74,15 @@ test('T-FR-106 a report answers for every dimension and never hides what it coul
     assert.equal(entry.confidence, null)
     assert.ok(entry.note.length > 0)
   }
+})
+
+test('W24.1 runtime approval requires the current policy and an authoritative expectation hash', () => {
+  const historical = createSyntheticCriticReport({ ...base, adapterId: 'controlled-avatar', thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1' })
+  const stale = createSyntheticCriticReport({ ...base, id: 'critic-report-stale', adapterId: 'controlled-avatar', expectationHash: digest('c'), evaluationContextHash: digest('d'), thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v0' })
+  const current = createSyntheticCriticReport({ ...base, id: 'critic-report-current', adapterId: 'controlled-avatar', expectationHash: digest('c'), evaluationContextHash: digest('d'), thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1' })
+  assert.equal(isCurrentSyntheticCriticApproval(historical), false)
+  assert.equal(isCurrentSyntheticCriticApproval(stale), false)
+  assert.equal(isCurrentSyntheticCriticApproval(current), true)
 })
 
 test('T-FR-106 a dimension cannot carry a score it did not measure', () => {

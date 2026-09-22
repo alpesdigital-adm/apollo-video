@@ -132,6 +132,8 @@ export function presentSyntheticCriticReport(report: Readonly<SyntheticCriticRep
     scriptHash: report.scriptHash,
     profileSnapshotId: report.profileSnapshotId,
     expectedIdentityRef: report.expectedIdentityRef,
+    ...(report.expectationHash ? { expectationHash: report.expectationHash } : {}),
+    ...(report.evaluationContextHash ? { evaluationContextHash: report.evaluationContextHash } : {}),
     evaluators: report.evaluators.map(presentEvaluator),
     measurements: report.measurements.map(presentMeasurement),
     issues: report.issues.map(presentIssue),

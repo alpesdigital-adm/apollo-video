@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -33,6 +34,9 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId: id } })
+    await client.v2MediaArtifact.updateMany({ where: { workspaceId: id }, data: { currentRightsSnapshotId: null, rightsRevision: 0 } })
+    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId: id } })
+    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId: id } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: id } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId: id } })
@@ -56,6 +60,8 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { createSyntheticMasterAsset } = await import('../../src/v2/domain/synthetic-master-asset.ts')
     const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
+    const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../src/v2/domain/asset-rights.ts')
+    const { createAssetRightsChangeIntent } = await import('../../src/v2/domain/asset-rights-change.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
@@ -64,6 +70,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticMasterAssetRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-asset-repository.ts')
     const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
+    const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaSyntheticSpeechSegmentRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-speech-segment-repository.ts')
     const { catalogSyntheticSpeechSegmentsService } = await import('../../src/v2/application/synthetic-speech-segments.ts')
 
@@ -137,17 +144,34 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const profileSnapshotId = profile.profile.profileSnapshotId
     const profileSnapshotHash = profile.profile.profileHash
 
+    const rightsRepository = new PrismaAssetRightsRepository(client)
+    for (const [index, artifactId] of Object.values(artifactIds).entries()) {
+      const snapshot = createAssetRightsSnapshot({
+        id: `master-rights-${index + 1}`, workspaceId, artifactId, sequence: 1,
+        draft: {
+          status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+          allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
+          consent: { status: 'not-required', allowedUses: [] },
+        },
+        createdBy: { type: 'api-client', id: clientId }, createdAt: at(1),
+      })
+      await rightsRepository.setCurrent(snapshot, assetRightsRevision(artifactId, 0), createAssetRightsChangeIntent({
+        workspaceId, artifactId, snapshotHash: snapshot.snapshotHash, baseRevision: assetRightsRevision(artifactId, 0),
+        actor: { kind: 'internal', actorType: 'api-client', actorId: clientId }, changedAt: at(1),
+      }))
+    }
+
     // An approved provider job, sealed by its critic result hash: the fixture
     // the repository must keep verifying at commit time.
-    const criticResultHash = hash('f')
+    let criticResultHash = hash('f')
     const providerJobId = 'master-provider-job'
     await client.v2ProviderJob.create({
       data: {
         id: providerJobId, workspaceId, projectId, originProjectVersionId: projectVersionId,
         schemaVersion: 'provider-job/v1', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         providerJobId: 'heygen_job_master', inputJson: '{}', inputHash: hash('1'),
-        authorizationJson: '{}', authorizationHash: hash('2'), status: 'approved',
-        resultArtifactId: artifactIds['provider-original'], resultArtifactSha256: artifactShas['provider-original'],
+        authorizationJson: JSON.stringify({ profileSnapshotId }), authorizationHash: hash('2'), status: 'approved',
+        resultArtifactId: artifactIds['normalized-video'], resultArtifactSha256: artifactShas['normalized-video'],
         criticResultHash, jobJson: '{}', jobHash: hash('3'), requestFingerprint: hash('4'),
         idempotencyKey: 'master-job-key', createdByClientId: clientId, actorContextHash: auditContext.contextHash,
         createdAt: new Date(at(1)), updatedAt: new Date(at(2)), completedAt: new Date(at(2)),
@@ -196,9 +220,13 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const criticReport = createSyntheticCriticReport({
       id: 'master-critic-report-1', workspaceId, projectId, blockId: 'master-block',
       capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
-      artifactId: artifactIds['provider-original'], artifactSha256: artifactShas['provider-original'],
+      artifactId: artifactIds['normalized-video'], artifactSha256: artifactShas['normalized-video'],
       audioArtifactId: artifactIds['final-audio'], alignmentArtifactId: artifactIds.alignment,
-      scriptHash: hash('7'), profileSnapshotId, expectedIdentityRef: 'avatar_master',
+      scriptHash: createHash('sha256').update('Primeira ideia do roteiro. Segunda ideia bem forte.', 'utf8').digest('hex'), profileSnapshotId, expectedIdentityRef: 'avatar_master',
+      expectationHash: hash('8'),
+      evaluationContextHash: createHash('sha256')
+        .update(`master-asset-context:${providerJobId}:${artifactIds['normalized-video']}`)
+        .digest('hex'),
       evaluators: [
         { id: 'ffprobe-media-integrity', version: '1.0.0', kind: 'measured', scope: 'timeline and signal read from the artifact' },
         { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
@@ -226,6 +254,8 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       .record({ report: criticReport })
     assert.equal(recordedVerdict.replayed, false)
     assert.equal(recordedVerdict.value.decision, 'approved')
+    criticResultHash = recordedVerdict.value.reportHash
+    await client.v2ProviderJob.update({ where: { id: providerJobId }, data: { criticResultHash } })
 
     const repository = new PrismaSyntheticMasterAssetRepository(client)
     const masterInput = (overrides = {}) => createSyntheticMasterAsset({
@@ -257,6 +287,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     // 1. Transactional seal: master row and its four artifact rows commit together.
     const created = await repository.create({
       master: masterInput(), profileSnapshotHash, criticResultHash,
+      authorityScope: { use: 'ads', market: 'BRA', locale: 'pt-BR' },
       requestFingerprint: hash('9'), idempotencyKey: 'master-seal-1', authenticationAudit: auditContext,
     })
     assert.equal(created.replayed, false)
@@ -266,6 +297,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     // 2. Replay is idempotent and byte-equivalent, without a second row.
     const replay = await repository.create({
       master: masterInput(), profileSnapshotHash, criticResultHash,
+      authorityScope: { use: 'ads', market: 'BRA', locale: 'pt-BR' },
       requestFingerprint: hash('9'), idempotencyKey: 'master-seal-1', authenticationAudit: auditContext,
     })
     assert.equal(replay.replayed, true)
@@ -283,6 +315,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     // 4. The same performance is never sealed twice, even under a new idempotency key.
     const duplicate = await repository.create({
       master: masterInput(), profileSnapshotHash, criticResultHash,
+      authorityScope: { use: 'ads', market: 'BRA', locale: 'pt-BR' },
       requestFingerprint: hash('0'), idempotencyKey: 'master-seal-2', authenticationAudit: auditContext,
     })
     assert.equal(duplicate.replayed, true)
@@ -295,6 +328,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       repository.create({
         master: masterInput({ id: 'master-2', scriptText: 'Outro roteiro completamente diferente.' }),
         profileSnapshotHash: hash('c'), criticResultHash,
+        authorityScope: { use: 'ads', market: 'BRA', locale: 'pt-BR' },
         requestFingerprint: hash('9'), idempotencyKey: 'master-seal-3', authenticationAudit: auditContext,
       }),
       /snapshot changed before the master was sealed/,
@@ -303,6 +337,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       repository.create({
         master: masterInput({ id: 'master-3', scriptText: 'Mais um roteiro diferente ainda.' }),
         profileSnapshotHash, criticResultHash: hash('b'),
+        authorityScope: { use: 'ads', market: 'BRA', locale: 'pt-BR' },
         requestFingerprint: hash('9'), idempotencyKey: 'master-seal-4', authenticationAudit: auditContext,
       }),
       /no longer approved with the critic result/,

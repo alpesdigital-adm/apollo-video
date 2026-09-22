@@ -63,7 +63,15 @@ test('T-FR-101 TTS ingestor persists audio and alignment artifacts with provenan
           return { key, path, byteSize: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') }
         },
       },
-      artifacts: { async persistOrReplay(bundle) { persistedBundles.push(bundle); return { artifactId: bundle.artifactId, manifestId: bundle.manifestId, replayed: false } } },
+      artifacts: {
+        async persistOrReplay(bundle) {
+          persistedBundles.push(bundle)
+          const artifactId = bundle.manifest.artifact.mediaType === 'audio'
+            ? 'canonical-existing-audio'
+            : 'canonical-existing-alignment'
+          return { artifactId, manifestId: bundle.manifestId, replayed: true }
+        },
+      },
       artifactQuery: { async findById() { return null } },
       resultArtifacts: {
         async persistOrReplay(input) { ledgerCalls.push(input.records); return { records: input.records, replayed: false } },
@@ -74,6 +82,7 @@ test('T-FR-101 TTS ingestor persists audio and alignment artifacts with provenan
     })
     const artifact = await ingestor.ingest({ job: job(), providerResult })
     assert.equal(artifact.mediaType, 'audio')
+    assert.equal(artifact.artifactId, 'canonical-existing-audio')
     assert.equal(artifact.artifactSha256, audioSha256)
     assert.equal(persistedBundles.length, 2)
     const [audioBundle, alignmentBundle] = persistedBundles
@@ -86,6 +95,7 @@ test('T-FR-101 TTS ingestor persists audio and alignment artifacts with provenan
     assert.equal(ledgerCalls.length, 1)
     const [records] = ledgerCalls
     assert.deepEqual(records.map(({ role }) => role), ['primary-audio', 'alignment-evidence'])
+    assert.deepEqual(records.map(({ artifactId }) => artifactId), ['canonical-existing-audio', 'canonical-existing-alignment'])
     assert.equal(records[0].artifactSha256, audioSha256)
     assert.equal(records[0].providerJobRef, 'elevenlabs_request_123')
     assert.equal(records[0].adapterConfigHash, hash('4'))

@@ -11,6 +11,8 @@ import type {
 } from '../../application/ports/synthetic-master-asset-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { assertDomain, DomainError } from '../../domain/errors.ts'
+import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { assertSyntheticPresenterPolicy } from '../../domain/synthetic-presenter-policy-engine.ts'
 import {
   assertSyntheticMasterIntegrity,
   SYNTHETIC_MASTER_ARTIFACT_ROLES,
@@ -18,6 +20,8 @@ import {
 } from '../../domain/synthetic-master-asset.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { hydrateSyntheticPresenterProfile } from './synthetic-production-repository.ts'
 
 type MasterRow = V2SyntheticMasterAsset & { artifacts: V2SyntheticMasterArtifact[] }
 
@@ -133,27 +137,104 @@ export class PrismaSyntheticMasterAssetRepository implements SyntheticMasterAsse
             workspaceId: master.workspaceId,
             profileHash: input.profileSnapshotHash,
           },
-          select: { id: true },
         })
         assertDomain(
           Boolean(profile),
           'VERSION_CONFLICT',
           'Synthetic presenter snapshot changed before the master was sealed',
         )
+        const authorizedProfile = hydrateSyntheticPresenterProfile(profile!)
+        const head = await transaction.v2SyntheticPresenterProfileHead.findUnique({
+          where: {
+            workspaceId_profileId: {
+              workspaceId: master.workspaceId,
+              profileId: authorizedProfile.snapshot.id,
+            },
+          },
+          include: { currentSnapshot: true },
+        })
+        assertDomain(Boolean(head), 'ASSET_RIGHTS_BLOCKED', 'Synthetic presenter consent changed before the master was sealed')
+        const currentProfile = hydrateSyntheticPresenterProfile(head!.currentSnapshot)
+        const authorityAt = new Date()
+        assertSyntheticPresenterPolicy({
+          snapshot: authorizedProfile.snapshot,
+          snapshotWorkspaceId: master.workspaceId,
+          head: { currentVersion: head!.currentVersion, current: currentProfile.snapshot },
+          context: {
+            operation: 'audio-avatar',
+            use: input.authorityScope.use,
+            market: input.authorityScope.market,
+            locale: input.authorityScope.locale,
+            workspaceId: master.workspaceId,
+            now: authorityAt,
+          },
+        })
+        const target = master.artifacts.find(({ role }) => role === 'normalized-video') ??
+          master.artifacts.find(({ role }) => role === 'provider-original')
+        assertDomain(Boolean(target), 'PERSISTENCE_CONFLICT', 'Synthetic master has no promoted video target')
         const job = await transaction.v2ProviderJob.findFirst({
           where: {
             id: master.provenance.providerJobId,
             workspaceId: master.workspaceId,
             status: 'approved',
             criticResultHash: input.criticResultHash,
+            authorizationHash: master.authorizationHash,
+            resultArtifactId: target!.artifactId,
+            resultArtifactSha256: target!.sha256,
           },
-          select: { id: true },
+          select: { id: true, authorizationJson: true },
         })
         assertDomain(
           Boolean(job),
           'VERSION_CONFLICT',
           'Provider job is no longer approved with the critic result the master was validated against',
         )
+        let jobAuthorization: unknown
+        try {
+          jobAuthorization = JSON.parse(job!.authorizationJson)
+        } catch {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Stored provider job authorization JSON is invalid')
+        }
+        assertDomain(
+          typeof jobAuthorization === 'object' && jobAuthorization !== null &&
+            (jobAuthorization as { profileSnapshotId?: unknown }).profileSnapshotId === master.profileSnapshotId,
+          'PERSISTENCE_CONFLICT',
+          'Provider job authorization no longer matches the synthetic master profile',
+        )
+        const report = await transaction.v2SyntheticCriticReport.findFirst({
+          where: {
+            id: master.critic.reportId,
+            workspaceId: master.workspaceId,
+            reportHash: master.critic.reportHash,
+            artifactId: target!.artifactId,
+            artifactSha256: target!.sha256,
+            profileSnapshotId: master.profileSnapshotId,
+          },
+          select: { id: true },
+        })
+        assertDomain(Boolean(report), 'VERSION_CONFLICT', 'Specialized critic report changed before the master was sealed')
+        const artifacts = await transaction.v2MediaArtifact.findMany({
+          where: {
+            workspaceId: master.workspaceId,
+            id: { in: master.artifacts.map(({ artifactId }) => artifactId) },
+            status: 'available',
+          },
+          include: { currentRightsSnapshot: true },
+        })
+        const rightsByArtifact = new Map(artifacts.map((artifact) => [artifact.id, artifact.currentRightsSnapshot]))
+        const expectedArtifactCount = new Set(master.artifacts.map(({ artifactId }) => artifactId)).size
+        assertDomain(artifacts.length === expectedArtifactCount, 'ASSET_RIGHTS_BLOCKED', 'Synthetic master artifacts changed before sealing')
+        for (const artifact of master.artifacts) {
+          const currentRights = rightsByArtifact.get(artifact.artifactId)
+          const decision = evaluateAssetUse(currentRights ? hydrateAssetRights(currentRights) : null, {
+            workspaceId: master.workspaceId,
+            use: input.authorityScope.use,
+            market: input.authorityScope.market,
+            locale: input.authorityScope.locale,
+            syntheticOperations: ['audio-avatar'],
+          }, authorityAt)
+          assertDomain(decision.outcome === 'allow', 'ASSET_RIGHTS_BLOCKED', `Synthetic master ${artifact.role} rights changed before sealing`)
+        }
         return transaction.v2SyntheticMasterAsset.create({
           data: {
             id: master.id,

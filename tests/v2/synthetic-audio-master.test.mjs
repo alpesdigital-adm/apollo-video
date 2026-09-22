@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { createSyntheticAudioMasterService } from '../../src/v2/application/synthetic-audio-masters.ts'
+import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { assertSyntheticAudioMaster, createSyntheticAudioMaster, createSyntheticAvatarAudioRange } from '../../src/v2/domain/synthetic-audio-master.ts'
 
 const hash = (value) => value.repeat(64)
@@ -54,4 +56,79 @@ test('T-FR-100 fails closed on text/alignment mismatch, timing drift and stored 
   assert.throws(() => master({ words: [{ word: 'Olá', startMs: 0, endMs: 700, confidence: 1 }, { word: 'mundo', startMs: 600, endMs: 1_200, confidence: 1 }] }), /timing/)
   const value = master()
   assert.throws(() => assertSyntheticAudioMaster({ ...value, audio: { ...value.audio, durationMs: 2_000 } }), /hash/)
+})
+
+test('T-FR-100 service refuses caller word timing that differs from the approved stored alignment', async () => {
+  const workspaceId = 'workspace-audio-service'
+  const projectId = 'project-audio-service'
+  const profileSnapshotId = 'profile-audio-service:v1'
+  const audioArtifactId = 'artifact-audio-service'
+  const alignmentArtifactId = 'artifact-alignment-service'
+  const reportHash = hash('c')
+  let creates = 0
+  const rightsByArtifact = new Map([audioArtifactId, alignmentArtifactId].map((artifactId, index) => [
+    artifactId,
+    createAssetRightsSnapshot({
+      id: `rights-audio-service-${index}`, workspaceId, artifactId, sequence: 1,
+      draft: {
+        status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+        allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
+        consent: { status: 'not-required', allowedUses: [] },
+      },
+      createdBy: { type: 'api-client', id: 'audio-service-client' }, createdAt: '2029-01-01T00:00:00.000Z',
+    }),
+  ]))
+  const actor = Object.freeze({
+    clientId: 'audio-service-client', credentialId: 'audio-service-credential', workspaceId,
+    environment: 'production', actor: Object.freeze({ type: 'api-client', id: 'audio-service-client' }),
+    scopes: new Set(['projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active',
+    auditContext: Object.freeze({
+      clientId: 'audio-service-client', credentialId: 'audio-service-credential', workspaceId,
+      environment: 'production', actor: Object.freeze({ type: 'api-client', id: 'audio-service-client' }),
+    }),
+  })
+  const profile = {
+    id: 'profile-audio-service', version: 1, status: 'active', snapshotHash: hash('p'),
+    consent: {
+      granted: true, revokedAt: null, expiresAt: '2030-01-01T00:00:00.000Z',
+      allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+      allowedOperations: ['tts', 'audio-avatar'],
+    },
+  }
+  const execute = createSyntheticAudioMasterService({
+    repository: {
+      findReplay: async () => null,
+      create: async () => { creates += 1; throw new Error('must not persist') },
+    },
+    projects: { read: async () => ({ project: { currentVersionId: 'version-audio-service' }, version: { id: 'version-audio-service' } }) },
+    profiles: { readProfile: async () => ({ snapshot: profile, profileSnapshotId }) },
+    providerJobs: { read: async () => ({ job: {
+      status: 'approved', operation: 'tts', authorization: { profileSnapshotId, profileSnapshotHash: profile.snapshotHash },
+      resultArtifact: { artifactId: audioArtifactId, artifactSha256: hash('a') }, criticResultHash: reportHash,
+      input: { scriptHash: hash('s'), text: 'Olá mundo', locale: 'pt-BR' }, completedAt: '2029-01-01T00:00:01.000Z',
+    } }) },
+    artifacts: { findById: async (_workspaceId, artifactId) => artifactId === audioArtifactId
+      ? { id: artifactId, artifactKey: 'audio-service.mp3', sha256: hash('a'), byteSize: 32n, status: 'available', mediaType: 'audio' }
+      : { id: artifactId, artifactKey: 'audio-service-alignment.json', sha256: hash('b'), byteSize: 32n, status: 'available', mediaType: 'data' } },
+    rights: { findCurrentForArtifacts: async () => rightsByArtifact },
+    criticReports: { readByHash: async () => ({
+      decision: 'approved', expectationHash: hash('e'), evaluationContextHash: hash('c'), thresholdsVersion: 'synthetic-critic-thresholds/tts/v2',
+      capability: 'tts', adapterId: 'elevenlabs-tts', reportHash, projectId, artifactSha256: hash('a'),
+      profileSnapshotId, scriptHash: hash('s'), alignmentArtifactId,
+    }) },
+    alignment: { readWords: async () => [{ word: 'Olá', startMs: 0, endMs: 400 }, { word: 'mundo', startMs: 450, endMs: 1_000 }] },
+    audioDurations: { measure: async () => 1_000 },
+    clock: () => new Date('2029-01-01T00:00:02.000Z'), createId: () => 'audio-master-service',
+  })
+
+  await assert.rejects(execute({
+    workspaceId, projectId, projectVersionId: 'version-audio-service', profileSnapshotId,
+    source: { kind: 'tts', text: 'Olá mundo', providerJobId: 'provider-job-audio-service' },
+    audioArtifactId, alignmentEvidenceArtifactId: alignmentArtifactId, durationMs: 1_000, locale: 'pt-BR',
+    words: [{ word: 'Olá', startMs: 0, endMs: 500, confidence: 0.99 }, { word: 'mundo', startMs: 500, endMs: 1_000, confidence: 0.98 }],
+    approvedAt: '2029-01-01T00:00:01.000Z', approvalCriticHash: reportHash,
+    use: 'ads', market: 'BRA', actor, idempotencyKey: 'audio-service-key',
+  }), (error) => error.code === 'PERSISTENCE_CONFLICT' && /persisted alignment/.test(error.message))
+  assert.equal(creates, 0)
 })

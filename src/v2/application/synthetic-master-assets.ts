@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain } from '../domain/errors.ts'
@@ -9,10 +11,8 @@ import {
   type SyntheticMasterArtifactRole,
   type SyntheticMasterAsset,
 } from '../domain/synthetic-master-asset.ts'
-import {
-  isSyntheticCriticApproval,
-  type SyntheticCriticReport,
-} from '../domain/synthetic-critic-report.ts'
+import type { SyntheticCriticReport } from '../domain/synthetic-critic-report.ts'
+import { isCurrentSyntheticCriticApproval } from './synthetic-critic.ts'
 import { assertSyntheticPresenterPolicy } from '../domain/synthetic-presenter-policy-engine.ts'
 import type { AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import { materializeActorAuditContext, requireScope } from './authenticate-api-client.ts'
@@ -36,6 +36,8 @@ export interface PromotableProviderJob {
   providerJobId: string | null
   status: string
   criticResultHash: string | null
+  authorization: Readonly<{ profileSnapshotId: string }>
+  resultArtifact: Readonly<{ artifactId: string; artifactSha256: string }> | null
   authorizationHash: string
   submittedAt: string | null
   completedAt: string | null
@@ -50,19 +52,15 @@ export interface AssetRightsReader {
 }
 
 /**
- * The critic's durable verdicts on one set of bytes, newest first.
- *
- * Promotion reads them and nothing else: a verdict is only evidence when it was
- * written down. The full report repository satisfies this shape, so the port is
- * narrowed here to make plain that promotion never records a verdict, it only
- * consults one.
+ * The critic's durable verdict addressed by its immutable hash. Promotion must
+ * open the exact report sealed on the provider job; another legitimate opinion
+ * about the same bytes cannot supersede or substitute that job's evidence.
  */
 export interface PromotionCriticReportReader {
-  readByArtifact(input: {
+  readByHash(input: {
     workspaceId: string
-    artifactId: string
-    limit?: number
-  }): Promise<readonly Readonly<SyntheticCriticReport>[]>
+    reportHash: string
+  }): Promise<Readonly<SyntheticCriticReport> | null>
 }
 
 /**
@@ -180,6 +178,11 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       'PRECONDITION_REQUIRED',
       'Provider job has no provider reference',
     )
+    assertDomain(
+      job!.authorization.profileSnapshotId === request.profileSnapshotId,
+      'PERSISTENCE_CONFLICT',
+      'Provider job was approved for a different presenter snapshot',
+    )
 
     // A job already promoted returns its master instead of sealing a second one.
     const sealed = await dependencies.masters.findByProviderJob({
@@ -286,35 +289,37 @@ export function promoteSyntheticMasterAssetService(dependencies: {
 
     // 6. The critic must have approved these exact bytes, in writing.
     //
-    // The provider job's `criticResultHash` says a critic ran; it does not say
-    // what it decided about which artifact. The durable report does, so it is
-    // the approving evidence from here on. The job hash is deliberately kept —
-    // it is re-checked inside the sealing transaction below, which is the only
-    // thing that can catch the job changing between this validation and the
-    // commit. The two answer different questions and both must hold.
-    const verdicts = await dependencies.criticReports.readByArtifact({
+    // The provider job and durable specialized report must be the same approval
+    // seal for the exact result. A generic transport hash or a report for a
+    // different script, profile, alignment or set of bytes cannot authorize a
+    // reusable master.
+    const verdict = await dependencies.criticReports.readByHash({
       workspaceId: request.workspaceId,
-      artifactId: video.id,
-      limit: 1,
+      reportHash: job!.criticResultHash!,
     })
     // Absence of a verdict is not approval: an unjudged take is unjudged.
     assertDomain(
-      verdicts.length > 0,
+      Boolean(verdict),
       'PRECONDITION_REQUIRED',
       'No persisted critic report judges the artifact being promoted',
     )
-    // Newest first, so this is the verdict currently in force. An older
-    // approval never survives a newer rejection of the same bytes.
-    const verdict = verdicts[0]!
     assertDomain(
-      isSyntheticCriticApproval(verdict.decision),
+      isCurrentSyntheticCriticApproval(verdict!),
       'PRECONDITION_REQUIRED',
-      `The critic did not approve the artifact being promoted: its current verdict is ${verdict.decision}`,
+      `The critic did not approve the artifact being promoted: its job verdict is ${verdict!.decision}`,
     )
     assertDomain(
-      verdict.projectId === request.projectId && verdict.artifactSha256 === video.sha256,
+      verdict!.reportHash === job!.criticResultHash &&
+        verdict!.projectId === request.projectId &&
+        verdict!.artifactId === video.id &&
+        verdict!.artifactSha256 === video.sha256 &&
+        verdict!.profileSnapshotId === request.profileSnapshotId &&
+        verdict!.scriptHash === createHash('sha256').update(request.scriptText, 'utf8').digest('hex') &&
+        verdict!.alignmentArtifactId === byRole.get('alignment')!.artifactId &&
+        job!.resultArtifact?.artifactId === video.id &&
+        job!.resultArtifact.artifactSha256 === video.sha256,
       'PERSISTENCE_CONFLICT',
-      'The approving critic report does not describe the artifact being promoted',
+      'The provider job and approving critic report do not describe the exact master being promoted',
     )
 
     // 7. Audio and video must describe the same performance.
@@ -371,8 +376,8 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       critic: {
         // The approving evidence is the persisted report itself, so the master
         // points at a verdict a reader can open, re-hash and disagree with.
-        reportId: verdict.id,
-        reportHash: verdict.reportHash,
+        reportId: verdict!.id,
+        reportHash: verdict!.reportHash,
         // Narrowed by the approval gate above, not by assumption.
         decision: 'approved',
       },
@@ -384,6 +389,7 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       master,
       profileSnapshotHash: profile!.snapshot.snapshotHash,
       criticResultHash: job!.criticResultHash!,
+      authorityScope: { use: request.use, market: request.market, locale: request.locale },
       requestFingerprint: calculateCanonicalHash({
         schemaVersion: 'synthetic-master-promotion-request/v1',
         workspaceId: request.workspaceId,

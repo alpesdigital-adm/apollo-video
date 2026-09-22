@@ -75,8 +75,11 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       ensureSyntheticBlockGenerationsService,
       settleSyntheticBlockGenerationsService,
     } = await import('../../src/v2/application/synthetic-block-generations.ts')
+    const { evaluateSyntheticCriticCore } = await import('../../src/v2/application/synthetic-critic.ts')
+    const { SpecializedSyntheticProviderResultCritic } = await import('../../src/v2/application/synthetic-provider-critic.ts')
     const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../src/v2/domain/asset-rights.ts')
     const { createAssetRightsChangeIntent } = await import('../../src/v2/domain/asset-rights-change.ts')
+    const { calculateCanonicalHash, stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
     const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
@@ -95,7 +98,13 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
     const { PrismaSyntheticCacheSubmissionClaimRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-submission-claim-repository.ts')
     const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
+    const { PrismaSyntheticCriticRuntimeContextResolver } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-runtime-context.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
+    const { LocalArtifactContentStorage } = await import('../../src/v2/infrastructure/media/local-artifact-content-storage.ts')
+    const { StoredSyntheticMasterAlignmentReader } = await import('../../src/v2/infrastructure/media/synthetic-master-alignment-reader.ts')
+    const { FfprobeSyntheticCriticMediaEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-media-integrity.ts')
+    const { AlignmentSyntheticCriticPronunciationEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
+    const { DeterministicSyntheticCriticControlledEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
     const { AuthorizedProviderSubmissionInputMaterializer } = await import('../../src/v2/infrastructure/provider-submission-input-materializer.ts')
@@ -202,6 +211,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const projects = new PrismaProjectWorkspaceQueryRepository(client)
     const plans = new PrismaSyntheticScriptPlanRepository(client)
     const generations = new PrismaSyntheticBlockGenerationRepository(client)
+    const criticReports = new PrismaSyntheticCriticReportRepository(client)
     let providerTransition = 0
     let second = 0
     const tick = () => new Date(at((second += 1) + 4))
@@ -212,9 +222,10 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       createJobId: () => `blockgen-job-${++entity}`,
       createTransitionId: () => `blockgen-transition-${++providerTransition}`,
     })
+    const sourceMaterializer = new LocalArtifactSourceMaterializer(artifactRoot)
     const materializer = new AuthorizedProviderSubmissionInputMaterializer({
       profiles: syntheticRepository, artifacts: artifactRepository,
-      sources: new LocalArtifactSourceMaterializer(artifactRoot), clock: () => new Date(at(2)),
+      sources: sourceMaterializer, clock: () => new Date(at(2)),
     })
     const ttsIngestor = new VerifiedTtsResultIngestor({
       workRoot, storage, artifacts: artifactRepository, artifactQuery: artifactRepository,
@@ -222,7 +233,25 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       audioProber: { probeDurationSeconds: (path, options) => probeAudioDurationSeconds(path, options) },
       clock: () => new Date(at(3)),
     })
-    const ttsCritic = new PersistedTtsResultCritic(artifactRepository, resultArtifactRepository)
+    const alignment = new StoredSyntheticMasterAlignmentReader({
+      artifacts: artifactRepository, storage: new LocalArtifactContentStorage(artifactRoot),
+    })
+    const ttsCritic = new SpecializedSyntheticProviderResultCritic({
+      transport: new PersistedTtsResultCritic(artifactRepository, resultArtifactRepository),
+      context: new PrismaSyntheticCriticRuntimeContextResolver({
+        client, artifacts: artifactRepository, resultArtifacts: resultArtifactRepository,
+        generations, plans, profiles: syntheticRepository, rights: rightsRepository,
+        alignment, clock: () => new Date(at(8)),
+      }),
+      evaluate: evaluateSyntheticCriticCore({
+        reports: criticReports,
+        media: new FfprobeSyntheticCriticMediaEvaluator({ sources: sourceMaterializer, environment: { ...process.env, FFMPEG_PATH: ffmpegPath } }),
+        pronunciation: new AlignmentSyntheticCriticPronunciationEvaluator({ alignment }),
+        controlled: new DeterministicSyntheticCriticControlledEvaluator(),
+        clock: () => new Date(at(8)),
+        createId: ({ evaluationContextHash }) => `blockgen-critic-${evaluationContextHash.slice(0, 40)}`,
+      }),
+    })
     const drainWorkers = async () => {
       for (let quiet = 0; quiet < 2;) {
         const worked = await runProviderJobWorkerOnce({
@@ -248,7 +277,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
       rights: rightsRepository, cacheDecisions, providerJobs: providerRepository,
       resultArtifacts: resultArtifactRepository,
-      criticReports: new PrismaSyntheticCriticReportRepository(client),
+      criticReports,
       submissionClaims: new PrismaSyntheticCacheSubmissionClaimRepository(client),
       enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
     })
@@ -257,27 +286,30 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const mustRegenerate = (blockIds, reason) => ({ mustRegenerate: { blockIds, reason } })
     const settle = settleSyntheticBlockGenerationsService({
       generations, providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
+      criticReports,
       clock: () => new Date(at(9)),
     })
-    const grantRightsForApprovedAudio = async () => {
+    const grantRightsForApprovedArtifacts = async () => {
       const approved = await generations.listByPlan({ workspaceId, planId, statuses: ['approved'] })
       for (const generation of approved) {
-        const artifactId = generation.audioArtifactId
-        const revision = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId }, select: { rightsRevision: true } })
-        if (revision.rightsRevision > 0) continue
-        const snapshot = createAssetRightsSnapshot({
-          id: `blockgen-rights-${artifactId}`, workspaceId, artifactId, sequence: 1,
-          draft: {
-            status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
-            allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
-            consent: { status: 'not-required', allowedUses: [] },
-          },
-          createdBy: { type: 'api-client', id: clientId }, createdAt: at(8),
-        })
-        await rightsRepository.setCurrent(snapshot, assetRightsRevision(artifactId, 0), createAssetRightsChangeIntent({
-          workspaceId, artifactId, snapshotHash: snapshot.snapshotHash, baseRevision: assetRightsRevision(artifactId, 0),
-          actor: { kind: 'internal', actorType: 'api-client', actorId: clientId }, changedAt: at(8),
-        }))
+        for (const artifactId of [generation.audioArtifactId, generation.alignmentArtifactId]) {
+          assert.ok(artifactId, 'approved TTS generation must persist audio and alignment artifacts')
+          const revision = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId }, select: { rightsRevision: true } })
+          if (revision.rightsRevision > 0) continue
+          const snapshot = createAssetRightsSnapshot({
+            id: `blockgen-rights-${artifactId}`, workspaceId, artifactId, sequence: 1,
+            draft: {
+              status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+              allowedSyntheticOperations: ['tts'], expiresAt: '2030-01-01T00:00:00.000Z',
+              consent: { status: 'not-required', allowedUses: [] },
+            },
+            createdBy: { type: 'api-client', id: clientId }, createdAt: at(8),
+          })
+          await rightsRepository.setCurrent(snapshot, assetRightsRevision(artifactId, 0), createAssetRightsChangeIntent({
+            workspaceId, artifactId, snapshotHash: snapshot.snapshotHash, baseRevision: assetRightsRevision(artifactId, 0),
+            actor: { kind: 'internal', actorType: 'api-client', actorId: clientId }, changedAt: at(8),
+          }))
+        }
       }
     }
 
@@ -321,7 +353,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
 
     // 3. Inserting a sentence identical to an approved one reuses its audio
     //    only after rights and consent hold — zero new provider calls.
-    await grantRightsForApprovedAudio()
+    await grantRightsForApprovedArtifacts()
     head = (await mutatePlan({
       workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
       mutation: { kind: 'insert-block', position: 3, text: 'Primeira ideia do roteiro.' },
@@ -352,7 +384,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     await drainWorkers()
     await settle({ workspaceId, projectId, planId, actor })
     assert.equal(providerCalls.length, 7)
-    await grantRightsForApprovedAudio()
+    await grantRightsForApprovedArtifacts()
     const afterTwinSettled = await ensure(ensureArguments())
     assert.deepEqual(afterTwinSettled.map(({ action }) => action), ['up-to-date', 'up-to-date', 'up-to-date', 'reused'])
     assert.equal(providerCalls.length, 7)
@@ -476,53 +508,67 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       .filter(({ audioArtifactId }) => Boolean(audioArtifactId))
       .map(({ audioArtifactId }) => audioArtifactId))]
     assert.ok(rejectedArtifactIds.length > 0, 'the journey must have approved audio to reject')
-    const criticReports = new PrismaSyntheticCriticReportRepository(client)
+    const rejectedCriticReports = new PrismaSyntheticCriticReportRepository(client)
+    const changedOriginJobs = []
     let verdictOrdinal = 0
     for (const generation of approvedBeforeRejection) {
-      if (!generation.audioArtifactId) continue
+      // Reused rows carry sourceGenerationId only. The durable verdict belongs
+      // to the paying provider job at the root of that chain.
+      if (!generation.audioArtifactId || !generation.providerJobId) continue
       const artifactRow = await client.v2MediaArtifact.findUniqueOrThrow({
         where: { id: generation.audioArtifactId },
       })
-      await criticReports.record({
-        report: createSyntheticCriticReport({
-          id: `blockgen-critic-rejection-${++verdictOrdinal}`,
-          workspaceId, projectId, blockId: generation.blockId,
-          capability: 'tts', adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0',
-          artifactId: generation.audioArtifactId, artifactSha256: artifactRow.sha256,
-          audioArtifactId: generation.audioArtifactId,
-          alignmentArtifactId: generation.alignmentArtifactId ?? null,
-          scriptHash: generation.scriptHash,
-          profileSnapshotId: head.version.profileSnapshotId,
-          expectedIdentityRef: 'avatar_block',
-          evaluators: [
-            { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
-          ],
-          measurements: [
-            {
-              dimension: 'pronunciation', status: 'measured', evaluatorId: 'alignment-pronunciation',
-              value: 2, unit: 'word-deviations', threshold: 0, confidence: 1,
-              evidenceRefs: [`artifact://${generation.audioArtifactId}`], range: null, note: null,
-            },
-            ...[
-              'lip-sync', 'identity', 'visual-artifacts', 'framing', 'continuity',
-              'eyes', 'teeth', 'hands', 'temporal-integrity', 'audiovisual-integrity',
-            ].map((dimension) => ({
-              dimension, status: 'not-applicable', evaluatorId: null, value: null, unit: null,
-              threshold: null, confidence: null, evidenceRefs: [], range: null,
-              note: 'a speech-only take produces no such signal, so the dimension does not apply',
-            })),
-          ],
-          issues: [{
-            blockId: generation.blockId, dimension: 'pronunciation', severity: 'blocking',
-            range: null, evidence: 'two words of the approved script were not spoken in the aligned take',
-            action: 'retry',
-          }],
-          decision: 'rejected', recommendedAction: 'retry',
-          thresholdsVersion: 'synthetic-critic-thresholds/tts/elevenlabs-tts/v1',
-          decidedAt: at(40),
-        }),
+      const report = createSyntheticCriticReport({
+        id: `blockgen-critic-rejection-${++verdictOrdinal}`,
+        workspaceId, projectId, blockId: generation.blockId,
+        capability: 'tts', adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0',
+        artifactId: generation.audioArtifactId, artifactSha256: artifactRow.sha256,
+        audioArtifactId: generation.audioArtifactId,
+        alignmentArtifactId: generation.alignmentArtifactId ?? null,
+        scriptHash: generation.scriptHash,
+        profileSnapshotId: head.version.profileSnapshotId,
+        expectedIdentityRef: 'avatar_block',
+        expectationHash: createHash('sha256').update(`blockgen-rejected-expectation:${generation.id}`).digest('hex'),
+        evaluationContextHash: createHash('sha256').update(`blockgen-rejected-context:${generation.id}`).digest('hex'),
+        evaluators: [
+          { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
+        ],
+        measurements: [
+          {
+            dimension: 'pronunciation', status: 'measured', evaluatorId: 'alignment-pronunciation',
+            value: 2, unit: 'word-deviations', threshold: 0, confidence: 1,
+            evidenceRefs: [`artifact://${generation.audioArtifactId}`], range: null, note: null,
+          },
+          ...[
+            'lip-sync', 'identity', 'visual-artifacts', 'framing', 'continuity',
+            'eyes', 'teeth', 'hands', 'temporal-integrity', 'audiovisual-integrity',
+          ].map((dimension) => ({
+            dimension, status: 'not-applicable', evaluatorId: null, value: null, unit: null,
+            threshold: null, confidence: null, evidenceRefs: [], range: null,
+            note: 'a speech-only take produces no such signal, so the dimension does not apply',
+          })),
+        ],
+        issues: [{
+          blockId: generation.blockId, dimension: 'pronunciation', severity: 'blocking',
+          range: null, evidence: 'two words of the approved script were not spoken in the aligned take',
+          action: 'retry',
+        }],
+        decision: 'rejected', recommendedAction: 'retry',
+        thresholdsVersion: 'synthetic-critic-thresholds/tts/v2',
+        decidedAt: at(40),
+      })
+      await rejectedCriticReports.record({ report })
+      const originJobRow = await client.v2ProviderJob.findUniqueOrThrow({ where: { id: generation.providerJobId } })
+      const changedJob = { ...JSON.parse(originJobRow.jobJson), criticResultHash: report.reportHash }
+      const { jobHash: _originJobHash, ...changedJobBody } = changedJob
+      changedJob.jobHash = calculateCanonicalHash(changedJobBody)
+      changedOriginJobs.push(originJobRow)
+      await client.v2ProviderJob.update({
+        where: { id: originJobRow.id },
+        data: { criticResultHash: report.reportHash, jobJson: stableSerialize(changedJob), jobHash: changedJob.jobHash },
       })
     }
+    assert.ok(changedOriginJobs.length > 0, 'the negative needs at least one paying origin job to reject')
     const artifactsBeforeRejection = await client.v2MediaArtifact.count({ where: { workspaceId } })
     const callsBeforeRejection = providerCalls.length
     head = (await mutatePlan({
@@ -531,7 +577,21 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       actor, idempotencyKey: 'blockgen-insert-after-rejection',
     })).plan
     const rejectedBlockId = head.version.impact.createdBlockIds[0]
-    const afterRejection = await ensure(ensureArguments())
+    let afterRejection
+    try {
+      afterRejection = await ensure(ensureArguments())
+    } finally {
+      for (const originJobRow of changedOriginJobs) {
+        await client.v2ProviderJob.update({
+          where: { id: originJobRow.id },
+          data: {
+            criticResultHash: originJobRow.criticResultHash,
+            jobJson: originJobRow.jobJson,
+            jobHash: originJobRow.jobHash,
+          },
+        })
+      }
+    }
     assert.equal(
       afterRejection.find(({ blockId }) => blockId === rejectedBlockId)?.action,
       'enqueued',

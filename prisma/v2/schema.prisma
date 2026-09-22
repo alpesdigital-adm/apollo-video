@@ -8784,6 +8784,7 @@ model V2SyntheticCriticReport {
   scriptHash          String   @db.Char(64)
   profileSnapshotId   String   @db.VarChar(128)
   expectedIdentityRef String   @db.VarChar(256)
+  evaluationContextHash String? @db.Char(64)
   decision            String   @db.VarChar(24)
   recommendedAction   String   @db.VarChar(16)
   thresholdsVersion   String   @db.VarChar(128)
@@ -8807,7 +8808,7 @@ model V2SyntheticCriticReport {
   // ever being able to drift from the report's own block.
   @@unique([id, workspaceId, blockId], map: "synthetic_critic_reports_id_workspace_block_key")
   @@unique([workspaceId, reportHash], map: "synthetic_critic_reports_workspace_hash_key")
-  @@unique([workspaceId, blockId, artifactId, thresholdsVersion], map: "synthetic_critic_reports_workspace_take_key")
+  @@unique([workspaceId, evaluationContextHash], map: "synthetic_critic_reports_workspace_context_key")
   @@index([workspaceId, blockId], map: "synthetic_critic_reports_workspace_block_idx")
   @@index([workspaceId, artifactId], map: "synthetic_critic_reports_workspace_artifact_idx")
   @@index([workspaceId, decision], map: "synthetic_critic_reports_workspace_decision_idx")

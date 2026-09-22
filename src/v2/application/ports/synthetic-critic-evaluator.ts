@@ -23,6 +23,13 @@ export interface SyntheticCriticArtifactRef {
  */
 export interface SyntheticCriticExpectation {
   durationMs: number | null
+  /**
+   * `fixed` compares against a duration approved before generation (avatar
+   * slot/audio range). `alignment` compares free-form TTS bytes against the
+   * independently persisted provider alignment timeline. The latter is still
+   * untrusted evidence and must be hash-verified and validated before use.
+   */
+  durationMode?: 'fixed' | 'alignment'
   fps: number | null
   videoCodec: string | null
   audioCodec: string | null
@@ -85,6 +92,7 @@ export interface SyntheticCriticMediaFacts {
 
 export interface SyntheticCriticEvaluationContext {
   subject: Readonly<SyntheticCriticSubject>
+  signal?: AbortSignal
   /** What the probe could read. Null means the artifact did not decode. */
   media: Readonly<SyntheticCriticMediaFacts> | null
 }

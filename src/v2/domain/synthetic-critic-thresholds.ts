@@ -239,7 +239,11 @@ const AUDIO_AVATAR_HEYGEN_V3_V1: Readonly<SyntheticCriticThresholds> = Object.fr
 })
 
 const TTS_V1: Readonly<SyntheticCriticThresholds> = Object.freeze({
-  version: `${SYNTHETIC_CRITIC_THRESHOLD_FAMILY}/tts/v1`,
+  // v2 defines temporal integrity for duration-free speech as audio bytes
+  // versus the independently persisted alignment end. It keeps the existing
+  // tolerance; there is no live-provider calibration that would justify a
+  // wider budget or an assumed terminal-silence allowance.
+  version: `${SYNTHETIC_CRITIC_THRESHOLD_FAMILY}/tts/v2`,
   capability: 'tts',
   adapterId: null,
   modelRef: null,

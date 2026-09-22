@@ -7,8 +7,10 @@ import type {
   MasterDurationProber,
   MasterDurations,
 } from '../../application/synthetic-master-assets.ts'
+import type { SyntheticAudioDurationReader } from '../../application/synthetic-audio-masters.ts'
 import { assertDomain } from '../../domain/errors.ts'
 import { probeAudioDurationSeconds, probeVideo } from './video-probe.ts'
+import { decodedPcmDurationMs } from './synthetic-critic-media-integrity.ts'
 
 /**
  * Verifies a master artifact against the bytes storage actually holds.
@@ -107,6 +109,36 @@ export class FfprobeSyntheticMasterDurationProber implements MasterDurationProbe
       })
     } finally {
       await this.sources.cleanup(operationId).catch(() => undefined)
+    }
+  }
+}
+
+/** Measures free-form TTS from decoded samples, excluding container padding. */
+export class FfmpegDecodedSyntheticAudioDurationReader implements SyntheticAudioDurationReader {
+  private readonly sources: ArtifactSourceMaterializer
+  private readonly environment: NodeJS.ProcessEnv
+
+  constructor(sources: ArtifactSourceMaterializer, environment: NodeJS.ProcessEnv = process.env) {
+    this.sources = sources
+    this.environment = environment
+  }
+
+  async measure(input: Readonly<{
+    operationId: string
+    artifactKey: string
+    artifactSha256: string
+    byteSize: number
+  }>): Promise<number> {
+    try {
+      const materialized = await this.sources.materialize({
+        operationId: input.operationId,
+        artifactKey: input.artifactKey,
+        sha256: input.artifactSha256,
+        byteSize: input.byteSize,
+      })
+      return await decodedPcmDurationMs(materialized.path, this.environment)
+    } finally {
+      await this.sources.cleanup(input.operationId).catch(() => undefined)
     }
   }
 }

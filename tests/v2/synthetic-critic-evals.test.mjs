@@ -55,7 +55,7 @@ const AVATAR = 'heygen-v3'
 const GENERIC_AVATAR = 'synthesia-v2'
 const GENERIC_POLICY = 'synthetic-critic-thresholds/audio-avatar/v1'
 const ADAPTER_POLICY = 'synthetic-critic-thresholds/audio-avatar/heygen-v3/v1'
-const TTS_POLICY = 'synthetic-critic-thresholds/tts/v1'
+const TTS_POLICY = 'synthetic-critic-thresholds/tts/v2'
 
 /** Everything a take was approved to be, before it was generated. */
 const CLEAN_EXPECTATION = Object.freeze({
@@ -274,7 +274,7 @@ const UNDEPLOYED = ['visual-artifacts', 'framing', 'eyes', 'teeth', 'hands']
 
 function inMemoryReports() {
   const rows = new Map()
-  const takeKey = (report) => `${report.workspaceId}|${report.blockId}|${report.artifactId}|${report.thresholdsVersion}`
+  const takeKey = (report) => `${report.workspaceId}|${report.evaluationContextHash}`
   const sorted = (predicate, limit) => Object.freeze([...rows.values()]
     .filter(predicate)
     .sort((left, right) => right.decidedAt.localeCompare(left.decidedAt))
@@ -297,12 +297,13 @@ function inMemoryReports() {
     async readByHash({ workspaceId, reportHash }) {
       return [...rows.values()].find((row) => row.workspaceId === workspaceId && row.reportHash === reportHash) ?? null
     },
-    async readByBlock({ workspaceId, blockId, artifactId, thresholdsVersion, limit }) {
+    async readByBlock({ workspaceId, blockId, artifactId, thresholdsVersion, evaluationContextHash, limit }) {
       return sorted((row) =>
         row.workspaceId === workspaceId &&
         row.blockId === blockId &&
         (!artifactId || row.artifactId === artifactId) &&
-        (!thresholdsVersion || row.thresholdsVersion === thresholdsVersion), limit)
+        (!thresholdsVersion || row.thresholdsVersion === thresholdsVersion) &&
+        (!evaluationContextHash || row.evaluationContextHash === evaluationContextHash), limit)
     },
     async readByArtifact({ workspaceId, artifactId, limit }) {
       return sorted((row) => row.workspaceId === workspaceId && row.artifactId === artifactId, limit)
@@ -391,7 +392,8 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
       }),
       controlled: new DeterministicSyntheticCriticControlledEvaluator(),
       clock: () => new Date(Date.parse('2026-09-01T00:00:00.000Z') + (minted += 1) * 1_000),
-      createId: ({ blockId }) => `critic-report-${blockId}`,
+      createId: ({ evaluationContextHash }) =>
+        `critic-report-${evaluationContextHash.slice(0, 48)}`,
     })
 
     let currentWords = SPOKEN
@@ -492,9 +494,48 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
       })
     }
 
+    await t.test('the same block and bytes with a new alignment is a new opinion, while its exact replay converges', async () => {
+      currentWords = SPOKEN
+      const subject = {
+        workspaceId,
+        projectId: 'critic-eval-project',
+        blockId: 'block-alignment-context',
+        capability: 'audio-avatar',
+        adapterId: GENERIC_AVATAR,
+        adapterVersion: '1.0.0',
+        modelRef: null,
+        video: ref('clean.mp4'),
+        audio: null,
+        alignmentArtifactId: 'artifact-alignment-first',
+        scriptText: SCRIPT,
+        expected: CLEAN_EXPECTATION,
+      }
+      const request = {
+        profileSnapshotId: 'ana:v2',
+        scriptHash: createHash('sha256').update(SCRIPT, 'utf8').digest('hex'),
+        actor,
+      }
+      const first = await evaluate({ ...request, subject })
+      const second = await evaluate({
+        ...request,
+        subject: { ...subject, alignmentArtifactId: 'artifact-alignment-second' },
+      })
+      const replay = await evaluate({ ...request, subject })
+
+      assert.equal(first.replayed, false)
+      assert.equal(second.replayed, false)
+      assert.equal(replay.replayed, true)
+      assert.equal(replay.report.id, first.report.id)
+      assert.notEqual(first.report.evaluationContextHash, second.report.evaluationContextHash)
+      assert.notEqual(first.report.id, second.report.id)
+      assert.notEqual(first.report.reportHash, second.report.reportHash)
+      assert.equal(first.report.artifactId, second.report.artifactId)
+      assert.equal(first.report.thresholdsVersion, second.report.thresholdsVersion)
+    })
+
     await t.test('every declared case ran, and the reports stay queryable by block and by artifact', async () => {
       assert.equal(EVAL_SET.length, 14, 'the eval set is versioned: adding or removing a case is a deliberate edit')
-      assert.equal(reports.stored.size, EVAL_SET.length)
+      assert.equal(reports.stored.size, EVAL_SET.length + 2)
 
       const read = readSyntheticCriticReportsService({ reports })
       const byBlock = await read({ workspaceId, actor, blockId: 'block-muted-audio' })
@@ -506,7 +547,7 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
       assert.ok(byArtifact.length >= 6)
 
       const byProject = await read({ workspaceId, actor, projectId: 'critic-eval-project', limit: 100 })
-      assert.equal(byProject.length, EVAL_SET.length)
+      assert.equal(byProject.length, EVAL_SET.length + 2)
 
       const foreign = await read({ workspaceId, actor, blockId: 'block-that-never-existed' })
       assert.equal(foreign.length, 0)
@@ -535,6 +576,35 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
         }),
         /another workspace/,
       )
+    })
+
+    await t.test('the same take gets a distinct id under a new thresholds policy and converges within one policy', async () => {
+      currentWords = SPOKEN
+      const common = {
+        workspaceId,
+        projectId: 'critic-eval-project',
+        blockId: 'block-policy-versioning',
+        capability: 'audio-avatar',
+        adapterVersion: '1.0.0',
+        modelRef: null,
+        video: ref('clean.mp4'),
+        audio: null,
+        alignmentArtifactId: 'artifact-alignment',
+        scriptText: SCRIPT,
+        expected: CLEAN_EXPECTATION,
+      }
+      const request = {
+        profileSnapshotId: 'ana:v2',
+        scriptHash: createHash('sha256').update(SCRIPT, 'utf8').digest('hex'),
+        actor,
+      }
+      const generic = await evaluate({ ...request, subject: { ...common, adapterId: GENERIC_AVATAR } })
+      const specialized = await evaluate({ ...request, subject: { ...common, adapterId: AVATAR } })
+      const replay = await evaluate({ ...request, subject: { ...common, adapterId: GENERIC_AVATAR } })
+      assert.notEqual(generic.report.thresholdsVersion, specialized.report.thresholdsVersion)
+      assert.notEqual(generic.report.id, specialized.report.id)
+      assert.equal(replay.replayed, true)
+      assert.equal(replay.report.id, generic.report.id)
     })
 
     await t.test('a capability with no published thresholds is never judged against an improvised default', async () => {

@@ -25,6 +25,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     runProviderJobWorkerOnce,
   } = await import('../../src/v2/application/provider-jobs.ts')
   const { createSyntheticAudioMasterService } = await import('../../src/v2/application/synthetic-audio-masters.ts')
+  const { createSyntheticScriptPlanService } = await import('../../src/v2/application/synthetic-script-plans.ts')
   const {
     assetRightsRevision,
     createAssetRightsSnapshot,
@@ -34,6 +35,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   } = await import('../../src/v2/domain/asset-rights-change.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const { STORY_GOLDEN_FIXTURES } = await import('../../src/v2/domain/story-plan.ts')
+  const { createSyntheticCriticReport, SYNTHETIC_CRITIC_DIMENSIONS } = await import('../../src/v2/domain/synthetic-critic-report.ts')
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
   )
@@ -55,8 +57,14 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const { PrismaSyntheticProductionRepository } = await import(
     '../../src/v2/infrastructure/prisma/synthetic-production-repository.ts'
   )
+  const { PrismaSyntheticCriticReportRepository } = await import(
+    '../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts'
+  )
   const { PrismaSyntheticAudioMasterRepository } = await import(
     '../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts'
+  )
+  const { PrismaSyntheticScriptPlanRepository } = await import(
+    '../../src/v2/infrastructure/prisma/synthetic-script-plan-repository.ts'
   )
   const { PrismaStoryPlanRepository } = await import(
     '../../src/v2/infrastructure/prisma/story-plan-repository.ts'
@@ -76,6 +84,11 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const credentialId = 'synthetic-production-integration-credential'
 
   const cleanup = async () => {
+    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
@@ -310,11 +323,78 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       )
     }
 
+    let scriptBlockOrdinal = 0
+    const scriptPlan = await createSyntheticScriptPlanService({
+      plans: new PrismaSyntheticScriptPlanRepository(client),
+      projects: new PrismaProjectWorkspaceQueryRepository(client),
+      profiles: syntheticRepository,
+      clock: () => new Date(now),
+      createId: (kind) => kind === 'script-block'
+        ? `synthetic-block-${++scriptBlockOrdinal}`
+        : `${kind}-synthetic-production-integration`,
+    })({
+      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      profileSnapshotId: registered.profile.profileSnapshotId, locale: 'pt-BR',
+      scriptText: 'Olá. Mundo.', actor, idempotencyKey: 'synthetic-production-script-plan',
+    })
+    assert.equal(scriptPlan.plan.blocks.length, 2)
+    const criticReports = new PrismaSyntheticCriticReportRepository(client)
+    const blockInputs = scriptPlan.plan.blocks.map((block, index) => ({
+      id: block.id, text: block.exactText,
+      artifactId: index === 0 ? 'synthetic-avatar-block-one' : 'synthetic-avatar-block-two',
+      artifactSha256: index === 0 ? hash('c') : hash('d'),
+      reportId: index === 0 ? 'synthetic-critic-one' : 'synthetic-critic-two',
+      rangeMs: index === 0 ? [0, 1_000] : [1_000, 2_000],
+      jobId: index === 0 ? 'synthetic-provider-job-one' : 'synthetic-provider-job-two',
+    }))
+    const measured = new Set(['temporal-integrity', 'audiovisual-integrity'])
+    const persistedReports = []
+    for (const [index, block] of blockInputs.entries()) {
+      const scriptHash = (await import('node:crypto')).createHash('sha256').update(block.text, 'utf8').digest('hex')
+      const report = createSyntheticCriticReport({
+        id: block.reportId, workspaceId, projectId: project.project.id, blockId: block.id,
+        capability: 'audio-avatar', adapterId: 'controlled-avatar', adapterVersion: 'version-1',
+        artifactId: block.artifactId, artifactSha256: block.artifactSha256,
+        audioArtifactId: null, alignmentArtifactId: null, scriptHash,
+        profileSnapshotId: registered.profile.profileSnapshotId, expectedIdentityRef: 'identity-ref-integration', expectationHash: hash('9'),
+        evaluationContextHash: (await import('node:crypto')).createHash('sha256')
+          .update(`synthetic-production-context:${block.id}:${block.artifactId}:${block.artifactSha256}`)
+          .digest('hex'),
+        evaluators: [{ id: 'synthetic-production-controlled', version: '1.0.0', kind: 'controlled', scope: 'controlled PostgreSQL fixture only; no live provider claim' }],
+        measurements: SYNTHETIC_CRITIC_DIMENSIONS.map((dimension) => measured.has(dimension)
+          ? { dimension, status: 'measured', evaluatorId: 'synthetic-production-controlled', value: 0, unit: 'fixture-score', threshold: 0, confidence: 1, evidenceRefs: [`artifact://${block.artifactId}`], range: null, note: null }
+          : { dimension, status: 'not-applicable', evaluatorId: null, value: null, unit: null, threshold: null, confidence: null, evidenceRefs: [], range: null, note: 'controlled fixture does not claim an independent visual evaluator' }),
+        issues: [], decision: 'approved', recommendedAction: 'none',
+        thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1', decidedAt: now,
+      })
+      persistedReports.push((await criticReports.record({ report })).value)
+      block.scriptHash = scriptHash
+      block.reportHash = report.reportHash
+      block.index = index
+    }
+    const productionProviderJobs = {
+      async readById({ workspaceId: requestedWorkspaceId, jobId }) {
+        const block = blockInputs.find((entry) => entry.jobId === jobId)
+        if (requestedWorkspaceId !== workspaceId || !block) return null
+        return { job: {
+          id: jobId, workspaceId, projectId: project.project.id, status: 'approved', operation: 'audio-avatar',
+          criticResultHash: block.reportHash,
+          resultArtifact: { artifactId: block.artifactId, artifactSha256: block.artifactSha256 },
+          authorization: { profileSnapshotId: registered.profile.profileSnapshotId },
+          input: {
+            audioArtifactId: 'synthetic-audio-master', audioRange: { startMs: block.rangeMs[0], endMs: block.rangeMs[1] },
+            criticBinding: { blockId: block.id, scriptText: block.text, scriptHash: block.scriptHash, profileSnapshotId: registered.profile.profileSnapshotId },
+          },
+        } }
+      },
+    }
     const execute = createSyntheticProductionRunService({
       repository: syntheticRepository,
       projects: new PrismaProjectWorkspaceQueryRepository(client),
       artifacts: artifactRepository,
       rights: rightsRepository,
+      criticReports,
+      providerJobs: productionProviderJobs,
       clock: () => new Date(now),
       createRunId: () => 'synthetic-run-integration',
       createSnapshotId: () => 'synthetic-edit-plan-snapshot-integration',
@@ -323,7 +403,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       workspaceId,
       projectId: project.project.id,
       projectVersionId: project.version.id,
-      profileSnapshotId: registered.profile.snapshot.id,
+      profileSnapshotId: registered.profile.profileSnapshotId,
       audio: {
         artifactId: 'synthetic-audio-master',
         durationMs: 2_000,
@@ -335,8 +415,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
         ],
       },
       blocks: [
-        { id: 'synthetic-block-one', text: 'Olá', rangeMs: [0, 1_000], cacheKey: hash('f'), providerJobId: 'synthetic-provider-job-one', audioSha256: hash('b'), artifactId: 'synthetic-avatar-block-one', critic: { id: 'synthetic-critic-one', resultHash: hash('1'), status: 'approved' } },
-        { id: 'synthetic-block-two', text: 'mundo', rangeMs: [1_000, 2_000], cacheKey: hash('2'), providerJobId: 'synthetic-provider-job-two', audioSha256: hash('b'), artifactId: 'synthetic-avatar-block-two', critic: { id: 'synthetic-critic-two', resultHash: hash('3'), status: 'approved' } },
+        { id: blockInputs[0].id, text: blockInputs[0].text, rangeMs: [0, 1_000], cacheKey: hash('f'), providerJobId: 'synthetic-provider-job-one', audioSha256: hash('b'), artifactId: 'synthetic-avatar-block-one', critic: { id: 'synthetic-critic-one', resultHash: persistedReports[0].reportHash, status: 'approved' } },
+        { id: blockInputs[1].id, text: blockInputs[1].text, rangeMs: [1_000, 2_000], cacheKey: hash('2'), providerJobId: 'synthetic-provider-job-two', audioSha256: hash('b'), artifactId: 'synthetic-avatar-block-two', critic: { id: 'synthetic-critic-two', resultHash: persistedReports[1].reportHash, status: 'approved' } },
       ],
       captions: true,
       use: 'ads',
@@ -372,7 +452,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       workspaceId,
       projectId: project.project.id,
       projectVersionId: project.version.id,
-      profileSnapshotId: registered.profile.snapshot.id,
+      profileSnapshotId: registered.profile.profileSnapshotId,
       source: { kind: 'uploaded' },
       audioArtifactId: 'synthetic-audio-master',
       alignmentEvidenceArtifactId: 'synthetic-audio-alignment',
@@ -410,11 +490,17 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       clock: () => new Date(now),
       createJobId: () => 'synthetic-provider-job-integration',
       createTransitionId: () => `synthetic-provider-transition-${++providerTransition}`,
+      resolveAvatarCriticBinding: async ({ profileSnapshotId, audioRange, use, market, locale }) => ({
+        blockId: blockInputs[0].id, scriptText: blockInputs[0].text,
+        scriptHash: (await import('node:crypto')).createHash('sha256').update(blockInputs[0].text, 'utf8').digest('hex'),
+        profileSnapshotId, expectedDurationMs: audioRange.durationMs, alignmentArtifactId: null,
+        use, market, locale,
+      }),
     })({
       workspaceId,
       projectId: project.project.id,
       projectVersionId: project.version.id,
-      profileSnapshotId: registered.profile.snapshot.id,
+      profileSnapshotId: registered.profile.profileSnapshotId,
       operation: 'audio-avatar',
       adapterId: 'controlled-avatar',
       adapterVersion: 'version-1',
