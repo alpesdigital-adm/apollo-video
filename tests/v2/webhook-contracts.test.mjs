@@ -292,7 +292,7 @@ test('webhook endpoint creation rejects idempotency misuse before generating a s
   assert.equal(generated, 0)
 })
 
-test('webhook endpoint creation retries serialization conflicts before failing explicitly', async () => {
+test('webhook endpoint creation reconciles the committed winner after serialization retries', async (context) => {
   const cipher = createAesRecipeParameterCipher({
     keyId: 'webhook-retry-test-key',
     key: Buffer.alloc(32, 6),
@@ -322,21 +322,127 @@ test('webhook endpoint creation retries serialization conflicts before failing e
     actor: WEBHOOK_ADMINISTRATOR,
     idempotencyKey: 'endpoint-retry-request-1',
   })
-  let attempts = 0
-  const repository = new PrismaWebhookEndpointCreationRepository({
-    async $transaction() {
-      attempts += 1
-      const error = new Error('serialization conflict')
-      error.code = 'P2034'
-      throw error
-    },
+  const endpointRow = {
+    ...bundle.endpoint,
+    createdAt: new Date(bundle.endpoint.createdAt),
+    updatedAt: new Date(bundle.endpoint.updatedAt),
+    verifiedAt: null,
+    suspendedAt: null,
+    revokedAt: null,
+  }
+  const secretRow = {
+    ...bundle.secret,
+    createdAt: new Date(bundle.secret.createdAt),
+    retiredAt: null,
+    revokedAt: null,
+  }
+  const auditRow = webhookAdministrationCommandData(bundle.command)
+  const completedRecord = {
+    id: bundle.idempotency.id,
+    workspaceId: bundle.idempotency.workspaceId,
+    clientId: bundle.idempotency.clientId,
+    key: bundle.idempotency.key,
+    requestFingerprint: bundle.idempotency.requestFingerprint,
+    status: 'completed',
+    responseStatus: 201,
+    responseJson: JSON.stringify({
+      endpointId: bundle.endpoint.id,
+      secretId: bundle.secret.id,
+    }),
+    expiresAt: new Date(bundle.idempotency.expiresAt),
+    createdAt: new Date(bundle.idempotency.requestedAt),
+  }
+  const serializationFailure = () => {
+    const error = new Error('serialization conflict')
+    error.code = 'P2034'
+    return error
+  }
+  const clientFor = ({ record = completedRecord, storedSecret = secretRow } = {}) => {
+    let transactionAttempts = 0
+    const client = {
+      async $transaction() {
+        transactionAttempts += 1
+        throw serializationFailure()
+      },
+      v2IdempotencyRecord: { async findUnique() { return record } },
+      v2WebhookAdministrationCommand: { async findFirst() { return auditRow } },
+      v2WebhookEndpoint: { async findFirst() { return endpointRow } },
+      v2WebhookSigningSecret: { async findFirst() { return storedSecret } },
+    }
+    return { client, attempts: () => transactionAttempts }
+  }
+
+  await context.test('returns the validated original response for the same request', async () => {
+    const controlled = clientFor()
+    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client)
+    const replay = await repository.createOrReplay(bundle)
+    assert.equal(replay.replayed, true)
+    assert.equal(replay.endpoint.id, bundle.endpoint.id)
+    assert.equal(replay.secret.id, bundle.secret.id)
+    assert.equal(controlled.attempts(), 3)
   })
 
-  await assert.rejects(
-    () => repository.createOrReplay(bundle),
-    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
-  )
-  assert.equal(attempts, 3)
+  await context.test('reports a payload mismatch against the committed winner', async () => {
+    const controlled = clientFor({
+      record: { ...completedRecord, requestFingerprint: 'f'.repeat(64) },
+    })
+    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client)
+    await assert.rejects(
+      () => repository.createOrReplay(bundle),
+      (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    assert.equal(controlled.attempts(), 3)
+  })
+
+  await context.test('replays retired secret metadata after protected payload hygiene', async () => {
+    const controlled = clientFor({
+      storedSecret: {
+        ...secretRow,
+        status: 'retired',
+        retiredAt: new Date('2026-07-15T20:01:30.000Z'),
+      },
+    })
+    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client)
+    const replay = await repository.createOrReplay(bundle)
+    assert.equal(replay.replayed, true)
+    assert.equal(replay.secret.status, 'retired')
+    assert.equal(controlled.attempts(), 3)
+  })
+
+  await context.test('does not reconcile an expired winner record', async () => {
+    const controlled = clientFor({
+      record: {
+        ...completedRecord,
+        expiresAt: new Date(bundle.idempotency.requestedAt),
+      },
+    })
+    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client)
+    await assert.rejects(
+      () => repository.createOrReplay(bundle),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    assert.equal(controlled.attempts(), 3)
+  })
+
+  await context.test('keeps persistence conflict when no winner committed', async () => {
+    const controlled = clientFor({ record: null })
+    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client)
+    await assert.rejects(
+      () => repository.createOrReplay(bundle),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    assert.equal(controlled.attempts(), 3)
+  })
+
+  await context.test('fails closed when the winner secret metadata is missing', async () => {
+    const controlled = clientFor({ storedSecret: null })
+    const repository = new PrismaWebhookEndpointCreationRepository(controlled.client)
+    await assert.rejects(
+      () => repository.createOrReplay(bundle),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    assert.equal(controlled.attempts(), 3)
+  })
 })
 
 test('pending endpoint provisions a signing secret once and redacts idempotent replay', async () => {

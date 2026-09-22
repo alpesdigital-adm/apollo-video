@@ -96,6 +96,69 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
     this.client = client
   }
 
+  private async reconcileCommittedWinner(
+    bundle: Readonly<WebhookEndpointCreationBundle>,
+  ): Promise<Readonly<WebhookEndpointCreationResult> | null> {
+    const { command, endpoint: candidate, idempotency } = bundle
+    const existing = await this.client.v2IdempotencyRecord.findUnique({
+      where: {
+        workspaceId_clientId_key: {
+          workspaceId: idempotency.workspaceId,
+          clientId: idempotency.clientId,
+          key: idempotency.key,
+        },
+      },
+    })
+    if (
+      !existing ||
+      existing.expiresAt <= new Date(idempotency.requestedAt)
+    ) {
+      return null
+    }
+    if (existing.requestFingerprint !== idempotency.requestFingerprint) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Idempotency key was already used with a different request',
+      )
+    }
+    const stored = storedResponse(existing, idempotency.requestFingerprint)
+    const [auditCommand, endpointRow, secretRow] = await Promise.all([
+      this.client.v2WebhookAdministrationCommand.findFirst({
+        where: {
+          workspaceId: candidate.workspaceId,
+          targetType: 'webhook-endpoint',
+          targetId: stored.endpointId,
+          action: 'webhook-endpoint.create',
+          idempotencyKey: idempotency.key,
+          requestFingerprint: idempotency.requestFingerprint,
+        },
+      }),
+      this.client.v2WebhookEndpoint.findFirst({
+        where: {
+          id: stored.endpointId,
+          workspaceId: candidate.workspaceId,
+          createdByClientId: idempotency.clientId,
+          url: candidate.url,
+        },
+      }),
+      this.client.v2WebhookSigningSecret.findFirst({
+        where: {
+          id: stored.secretId,
+          workspaceId: candidate.workspaceId,
+          endpointId: stored.endpointId,
+        },
+      }),
+    ])
+    assertWebhookAdministrationReplay(auditCommand, command)
+    if (!endpointRow || !secretRow) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Idempotent endpoint creation result is incomplete',
+      )
+    }
+    return result(endpointRow, secretRow, true)
+  }
+
   async createOrReplay(
     bundle: Readonly<WebhookEndpointCreationBundle>,
     serializationAttempt = 1,
@@ -151,8 +214,15 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
           })
           assertWebhookAdministrationReplay(auditCommand, command)
           const [endpointRow, secretRow] = await Promise.all([
-            transaction.v2WebhookEndpoint.findFirst({ where: { id: stored.endpointId, workspaceId: candidate.workspaceId } }),
-            transaction.v2WebhookSigningSecret.findFirst({ where: { id: stored.secretId, workspaceId: candidate.workspaceId } }),
+            transaction.v2WebhookEndpoint.findFirst({
+              where: {
+                id: stored.endpointId,
+                workspaceId: candidate.workspaceId,
+                createdByClientId: idempotency.clientId,
+                url: candidate.url,
+              },
+            }),
+            transaction.v2WebhookSigningSecret.findFirst({ where: { id: stored.secretId, workspaceId: candidate.workspaceId, endpointId: stored.endpointId } }),
           ])
           if (!endpointRow || !secretRow) {
             throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent endpoint creation result is missing')
@@ -240,41 +310,13 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
         if (serializationAttempt < 3) {
           return this.createOrReplay(bundle, serializationAttempt + 1)
         }
+        const committedWinner = await this.reconcileCommittedWinner(bundle)
+        if (committedWinner) return committedWinner
         throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook endpoint creation must be retried')
       }
       if (prismaError(error, 'P2002')) {
-        const existing = await this.client.v2IdempotencyRecord.findUnique({
-          where: {
-            workspaceId_clientId_key: {
-              workspaceId: idempotency.workspaceId,
-              clientId: idempotency.clientId,
-              key: idempotency.key,
-            },
-          },
-        })
-        if (existing) {
-          if (existing.requestFingerprint !== idempotency.requestFingerprint) {
-            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
-          }
-          const stored = storedResponse(
-            existing,
-            idempotency.requestFingerprint,
-          )
-          const auditCommand = await this.client.v2WebhookAdministrationCommand.findFirst({
-            where: {
-              workspaceId: candidate.workspaceId,
-              targetType: 'webhook-endpoint',
-              targetId: stored.endpointId,
-              action: 'webhook-endpoint.create',
-            },
-          })
-          assertWebhookAdministrationReplay(auditCommand, command)
-          const [endpointRow, secretRow] = await Promise.all([
-            this.client.v2WebhookEndpoint.findFirst({ where: { id: stored.endpointId, workspaceId: candidate.workspaceId } }),
-            this.client.v2WebhookSigningSecret.findFirst({ where: { id: stored.secretId, workspaceId: candidate.workspaceId } }),
-          ])
-          if (endpointRow && secretRow) return result(endpointRow, secretRow, true)
-        }
+        const committedWinner = await this.reconcileCommittedWinner(bundle)
+        if (committedWinner) return committedWinner
         const duplicate = await this.client.v2WebhookEndpoint.findFirst({
           where: { workspaceId: candidate.workspaceId, url: candidate.url },
           select: { id: true },
