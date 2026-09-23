@@ -457,7 +457,6 @@ async function currentMasterAuthority(
       report.outputSpeechEvidence.sourceAudioArtifactId !== finalAudio.artifactId ||
       report.outputSpeechEvidence.sourceAudioRangeHash !== audioRange.rangeHash ||
       report.outputSpeechEvidence.sourceDurationMs !== master.master.durationMs ||
-      report.outputSpeechEvidence.outputDurationMs !== master.master.durationMs ||
       report.outputSpeechEvidence.speechEvidence.outputTranscriptHash !== master.master.scriptHash ||
       report.outputSpeechEvidence.speechEvidence.observedIdentityRef !== snapshot.snapshot.avatar.identityRef
     ) return null

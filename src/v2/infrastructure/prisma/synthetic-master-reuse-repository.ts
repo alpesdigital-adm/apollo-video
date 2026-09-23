@@ -168,7 +168,6 @@ export class PrismaSyntheticMasterReuseRepository implements SyntheticMasterReus
         outputSpeech.sourceAudioArtifactId !== finalAudio.artifactId ||
         outputSpeech.sourceAudioRangeHash !== audioRange.rangeHash ||
         outputSpeech.sourceDurationMs !== master.durationMs ||
-        outputSpeech.outputDurationMs !== master.durationMs ||
         outputSpeech.speechEvidence.outputTranscriptHash !== master.scriptHash ||
         outputSpeech.speechEvidence.observedIdentityRef !== profile.snapshot.avatar.identityRef ||
         !isCurrentSyntheticCriticApproval(report)

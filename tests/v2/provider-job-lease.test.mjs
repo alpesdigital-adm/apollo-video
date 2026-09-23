@@ -98,6 +98,7 @@ function approvalGuardRepository({ revoked = false, rightsDrift = false, headSwa
           leaseExpiresAt: new Date(at(20)),
         }
       },
+      async findFirst() { return { id: 'rejected-provider-job' } },
       async update(input) { writes.push(input); throw new Error('approval guard allowed a write') },
     },
     v2Project: { async findFirst() { return { id: current.projectId } } },
@@ -148,7 +149,7 @@ function approvalGuardRepository({ revoked = false, rightsDrift = false, headSwa
     async $transaction(callback) { return callback(transaction) },
   })
   return {
-    repository, writes,
+    repository, writes, transaction,
     input: {
       current: Object.freeze({
         job: current, requestFingerprint: hash('f'), transportState: null,
@@ -370,4 +371,59 @@ test('provider approval transaction keeps transformation jobs outside the synthe
   }
   await assert.rejects(repository.advance(input), /approval guard allowed a write/)
   assert.equal(writes.length, 1, 'transformation approval must pass the synthetic-only guard and reach its write')
+})
+
+function fallbackApprovalGuardRepository({ concurrentAttempt = false } = {}) {
+  const fixture = approvalGuardRepository()
+  fixture.input.next = {
+    ...fixture.input.next,
+    operation: 'generated-cutaway',
+    input: {},
+    transformation: {
+      briefId: 'brief-lease', briefHash: hash('1'), selectionId: 'selection-lease',
+      selectionHash: hash('2'), providerId: 'provider-lease', capabilityId: 'generated-cutaway',
+      fallback: {
+        ledgerId: 'fallback-origin', ledgerHash: hash('3'), rung: 'generated-cutaway',
+        rejectedJobId: 'rejected-provider-job', rejectedReportHash: hash('4'),
+        dispatchRequestHash: hash('5'),
+      },
+    },
+  }
+  fixture.transaction.v2TransformationFallbackLedger = {
+    async findFirst(input) {
+      if (input.where.id === 'fallback-origin') {
+        return {
+          id: 'fallback-origin', ledgerHash: hash('3'), currentRung: 'generated-cutaway',
+          reviewDecision: 'awaiting-review', _count: { attempts: 1 },
+        }
+      }
+      return {
+        id: 'fallback-successor', ledgerHash: hash('6'), briefHash: hash('1'),
+        currentRung: 'generated-cutaway', reviewDecision: 'awaiting-review',
+        _count: { attempts: concurrentAttempt ? 3 : 2 },
+        attempts: [{
+          sequence: 2, rung: 'generated-cutaway', providerId: 'provider-lease',
+          artifactId: fixture.input.next.resultArtifact.artifactId,
+          artifactSha256: fixture.input.next.resultArtifact.artifactSha256,
+          outcome: 'approved', criticReportHash: fixture.input.next.criticResultHash,
+        }],
+      }
+    },
+  }
+  fixture.transaction.v2TransformationFallbackDispatchClaim = {
+    async findFirst() { return { id: 'fallback-claim' } },
+  }
+  return fixture
+}
+
+test('provider approval accepts only the critic successor ledger produced by the same fallback job', async () => {
+  const { repository, writes, input } = fallbackApprovalGuardRepository()
+  await assert.rejects(repository.advance(input), /approval guard allowed a write/)
+  assert.equal(writes.length, 1, 'the exact job/report/artifact successor must reach the approved write')
+})
+
+test('provider approval refuses a concurrent fallback ledger revision after the critic successor', async () => {
+  const { repository, writes, input } = fallbackApprovalGuardRepository({ concurrentAttempt: true })
+  await assert.rejects(repository.advance(input), (error) => error?.code === 'ASSET_RIGHTS_BLOCKED')
+  assert.equal(writes.length, 0, 'a ledger containing an extra concurrent attempt must fail before approval')
 })

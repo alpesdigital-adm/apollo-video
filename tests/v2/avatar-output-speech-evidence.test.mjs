@@ -17,6 +17,8 @@ function speechSamples(durationMs = 2_000, gain = 1, offset = 0) {
 test('avatar PCM evidence accepts measured lossy-like transcode and non-grid encoder delay', () => {
   const comparison = compareAvatarAudioPcm({ source: speechSamples(), output: speechSamples(2_000, 0.98, 333) })
   assert.equal(comparison.passed, true)
+  assert.equal(comparison.sourceDurationMs, 2_000)
+  assert.equal(comparison.outputDurationMs, 2_021)
   assert.notEqual(comparison.sourcePcmSha256, comparison.outputPcmSha256)
   assert.ok(comparison.correlationBps >= 9_200)
   const evidence = createAvatarOutputSpeechEvidence({
@@ -25,6 +27,22 @@ test('avatar PCM evidence accepts measured lossy-like transcode and non-grid enc
     speechEvidence: { kind: 'controlled', evaluatorId: 'controlled-output-asr', evaluatorVersion: '1.0.0', outputTranscriptHash: 'c'.repeat(64), observedIdentityRef: 'avatar-identity-1' },
   })
   assert.match(evidence.evidenceHash, /^[a-f0-9]{64}$/)
+})
+
+test('avatar PCM evidence accepts the canonical codec-padding boundary and rejects one millisecond beyond it', () => {
+  const comparison = compareAvatarAudioPcm({ source: speechSamples(), output: speechSamples() })
+  const input = {
+    ...comparison,
+    jobId: 'avatar-job-padding', videoArtifactId: 'avatar-video-padding', videoArtifactSha256: 'a'.repeat(64),
+    sourceAudioArtifactId: 'audio-master-padding', sourceAudioRangeHash: 'b'.repeat(64),
+    speechEvidence: { kind: 'controlled', evaluatorId: 'controlled-output-asr', evaluatorVersion: '1.0.0', outputTranscriptHash: 'c'.repeat(64), observedIdentityRef: 'avatar-identity-padding' },
+  }
+  assert.equal(createAvatarOutputSpeechEvidence({ ...input, outputDurationMs: 2_080, passed: true }).passed, true)
+  assert.equal(createAvatarOutputSpeechEvidence({ ...input, outputDurationMs: 2_081, passed: false }).passed, false)
+  assert.throws(
+    () => createAvatarOutputSpeechEvidence({ ...input, outputDurationMs: 2_081, passed: true }),
+    /verdict does not match its persisted measurements/,
+  )
 })
 
 test('avatar PCM comparison waits for both decoder processes before surfacing a failure', async () => {

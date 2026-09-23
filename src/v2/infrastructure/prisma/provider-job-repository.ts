@@ -215,6 +215,67 @@ function projection(job: Readonly<ProviderJob>) {
   }
 }
 
+async function fallbackAuthorityIsCurrent(
+  transaction: Prisma.TransactionClient,
+  job: Readonly<ProviderJob>,
+): Promise<boolean> {
+  const fallback = job.transformation?.fallback
+  if (!job.transformation || !fallback) return true
+  const [origin, latest, claim] = await Promise.all([
+    transaction.v2TransformationFallbackLedger.findFirst({
+      where: {
+        id: fallback.ledgerId, workspaceId: job.workspaceId, projectId: job.projectId,
+        briefId: job.transformation.briefId, briefHash: job.transformation.briefHash,
+        ledgerHash: fallback.ledgerHash,
+      },
+      select: { id: true, ledgerHash: true, currentRung: true, reviewDecision: true, _count: { select: { attempts: true } } },
+    }),
+    transaction.v2TransformationFallbackLedger.findFirst({
+      where: { workspaceId: job.workspaceId, projectId: job.projectId, briefId: job.transformation.briefId },
+      select: {
+        id: true, ledgerHash: true, briefHash: true, currentRung: true, reviewDecision: true,
+        _count: { select: { attempts: true } },
+        attempts: {
+          where: { providerJobId: job.id }, orderBy: { sequence: 'desc' }, take: 1,
+          select: {
+            sequence: true, rung: true, providerId: true, artifactId: true, artifactSha256: true,
+            outcome: true, criticReportHash: true,
+          },
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+    }),
+    job.status === 'approved'
+      ? transaction.v2TransformationFallbackDispatchClaim.findFirst({
+          where: {
+            workspaceId: job.workspaceId, projectId: job.projectId, requestedLedgerId: fallback.ledgerId,
+            requestedLedgerHash: fallback.ledgerHash, rung: fallback.rung,
+            dispatchRequestHash: fallback.dispatchRequestHash, outcome: 'enqueued', providerJobId: job.id,
+          },
+          select: { id: true },
+        })
+      : Promise.resolve({ id: 'claim-not-yet-settled' }),
+  ])
+  if (!origin || !latest || !claim || origin.currentRung !== fallback.rung || origin.reviewDecision !== 'awaiting-review') {
+    return false
+  }
+  if (job.status !== 'approved') {
+    return latest.id === origin.id && latest.ledgerHash === origin.ledgerHash &&
+      latest.currentRung === fallback.rung && latest.reviewDecision === 'awaiting-review'
+  }
+  const attempt = latest.attempts[0]
+  return Boolean(
+    job.resultArtifact && job.criticResultHash && attempt &&
+    latest.id !== origin.id && latest.briefHash === job.transformation.briefHash &&
+    latest.currentRung === fallback.rung && latest.reviewDecision === 'awaiting-review' &&
+    latest._count.attempts === origin._count.attempts + 1 && attempt.sequence === origin._count.attempts + 1 &&
+    attempt.rung === fallback.rung && attempt.providerId === job.transformation.providerId &&
+    attempt.artifactId === job.resultArtifact.artifactId &&
+    attempt.artifactSha256 === job.resultArtifact.artifactSha256 &&
+    attempt.criticReportHash === job.criticResultHash && attempt.outcome === 'approved'
+  )
+}
+
 async function assertAuthority(
   transaction: Prisma.TransactionClient,
   job: Readonly<ProviderJob>,
@@ -247,17 +308,7 @@ async function assertAuthority(
           },
           select: { id: true },
         }),
-        job.transformation.fallback
-          ? transaction.v2TransformationFallbackLedger.findFirst({
-              where: {
-                workspaceId: job.workspaceId,
-                projectId: job.projectId,
-                briefId: job.transformation.briefId,
-              },
-              select: { id: true, ledgerHash: true, currentRung: true, reviewDecision: true },
-              orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-            })
-          : Promise.resolve({ id: 'normal-dispatch', ledgerHash: '', currentRung: '', reviewDecision: '' }),
+        fallbackAuthorityIsCurrent(transaction, job),
         job.transformation.fallback
           ? transaction.v2ProviderJob.findFirst({
               where: {
@@ -270,15 +321,8 @@ async function assertAuthority(
               select: { id: true },
             })
           : Promise.resolve({ id: 'normal-dispatch' }),
-      ]).then(([brief, selection, ledger, rejectedJob]) => Boolean(
-        brief && selection && ledger && rejectedJob && (
-          !job.transformation?.fallback || (
-            ledger.id === job.transformation.fallback.ledgerId &&
-            ledger.ledgerHash === job.transformation.fallback.ledgerHash &&
-            ledger.currentRung === job.transformation.fallback.rung &&
-            ledger.reviewDecision === 'awaiting-review'
-          )
-        ),
+      ]).then(([brief, selection, fallbackIsCurrent, rejectedJob]) => Boolean(
+        brief && selection && fallbackIsCurrent && rejectedJob,
       ))
     : transaction.v2SyntheticPresenterProfile.findFirst({
         where: {

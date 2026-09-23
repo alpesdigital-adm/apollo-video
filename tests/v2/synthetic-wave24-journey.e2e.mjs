@@ -834,6 +834,13 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     assert.equal(avatarReport?.outputSpeechEvidence?.speechEvidence.outputTranscriptHash, SCRIPT_HASH)
     assert.equal(avatarReport?.outputSpeechEvidence?.speechEvidence.observedIdentityRef, 'avatar_journey_123')
     assert.equal(avatarReport?.outputSpeechEvidence?.sourceAudioArtifactId, audioEntry.artifactId)
+    assert.equal(avatarReport?.outputSpeechEvidence?.sourceDurationMs, masterCreated.value.master.audio.durationMs)
+    assert.notEqual(
+      avatarReport?.outputSpeechEvidence?.outputDurationMs,
+      masterCreated.value.master.audio.durationMs,
+      'the controlled AAC fixture must exercise bounded codec padding rather than exact PCM duration',
+    )
+    assert.equal(avatarReport?.outputSpeechEvidence?.passed, true)
     assert.equal(await client.v2SyntheticMasterAsset.count({ where: { workspaceId } }), 0, 'approval alone is not promotion')
     assert.equal(downloaderCleanups, 1)
     assert.deepEqual(avatarAdapter.calls, [

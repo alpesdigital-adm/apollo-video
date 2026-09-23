@@ -80,6 +80,20 @@ export async function runControlledTransformationFallback(input) {
   assert.equal(dispatch.job?.operation, 'generated-cutaway')
   assert.equal(dispatch.job?.transformation?.fallback?.ledgerId, ledgerId)
   assert.equal(dispatch.job?.transformation?.fallback?.ledgerHash, ledgerHash)
+  if (input.expectedProviderId) {
+    assert.equal(
+      dispatch.job?.transformation?.providerId,
+      input.expectedProviderId,
+      'fallback routing escaped the controlled provider before worker execution',
+    )
+  }
+  if (input.expectedCapabilityId) {
+    assert.equal(
+      dispatch.job?.transformation?.capabilityId,
+      input.expectedCapabilityId,
+      'fallback routing selected an unexpected capability before worker execution',
+    )
+  }
   const jobId = boundedString(dispatch.job.id, 'dispatch.job.id')
 
   const dispatchReplay = await apiRequest({
@@ -267,6 +281,16 @@ export async function prepareControlledTransformationFallbackFixture(input) {
   })
   await registryApp.persistTransformationBriefService({ repository: registry, brief })
   const selection = await registryApp.routeTransformationBriefService({ repository: registry, workspaceId: input.workspaceId, projectId: input.projectId, briefId: brief.id, policy: { region: 'br', maximumCostMinorUnits: 100, minimumQualityScoreBps: 8_000, output: { width: sourceProbe.width, height: sourceProbe.height, includeAudio: true, fps: sourceProbe.fps } }, createdAt })
+  assert.equal(
+    selection.selection.selectedProviderId,
+    adapterId,
+    'initial routing escaped the controlled provider before enqueue',
+  )
+  assert.equal(
+    selection.selection.selectedCapabilityId,
+    `${adapterId}-video-to-video`,
+    'initial routing selected an unexpected capability before enqueue',
+  )
   const policy = createNoveltyBudgetPolicy({ ...DEFAULT_NOVELTY_BUDGET_POLICY, id: `controlled-fallback-policy-${suffix}` })
   await novelty.persistPolicy({ workspaceId: input.workspaceId, policy, createdAt })
   const noveltyDecision = createNoveltyBudgetDecision({ workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId, treatmentPlanId: `controlled-fallback-treatment-${suffix}`, storyPlanId: brief.storyPlanId, policy, candidates: [{ id: `controlled-fallback-candidate-${suffix}`, briefId: brief.id, mode: brief.mode, intensityBps: brief.intensityBps, startFrame: 0, endFrame: durationFrames, fps: sourceProbe.fps, servedFromCache: false }], evaluatedAt: createdAt })
@@ -301,6 +325,8 @@ export async function prepareControlledTransformationFallbackFixture(input) {
       return runControlledTransformationFallback({
         ...runInput, projectId: input.projectId, ledgerId: rejectedLedger.id, ledgerHash: rejectedLedger.ledgerHash,
         use: input.use, market: input.market, locale: input.locale,
+        expectedProviderId: adapterId,
+        expectedCapabilityId: `${adapterId}-generated-cutaway`,
         workerTick: async ({ jobId, iteration, signal }) => {
           await worker(`controlled-fallback-worker-${suffix}-dispatch-${iteration}`)
           const [ledger, receipt, claim] = await Promise.all([
