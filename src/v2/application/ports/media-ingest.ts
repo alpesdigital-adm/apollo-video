@@ -62,6 +62,7 @@ export interface ArtifactSourceMaterializer {
     artifactKey: string
     sha256: string
     byteSize: number
+    signal?: AbortSignal
   }): Promise<Readonly<{ path: string; sha256: string; byteSize: number }>>
   cleanup(operationId: string): Promise<void>
 }

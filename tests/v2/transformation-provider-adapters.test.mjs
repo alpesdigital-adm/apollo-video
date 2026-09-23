@@ -11,14 +11,17 @@ import { signProviderCallback } from '../../src/v2/domain/provider-job-callback.
 import { HttpTransformationProviderAdapter } from '../../src/v2/infrastructure/transformation/http-transformation-provider.ts'
 import { McpTransformationProviderAdapter } from '../../src/v2/infrastructure/transformation/mcp-transformation-provider.ts'
 
-const context = Object.freeze({ operationId: 'operation-transformation-adapter', idempotencyKey: 'transformation-adapter-key' })
+const context = Object.freeze({
+  workspaceId: 'workspace-transformation-adapter', projectVersionId: 'version-transformation-adapter',
+  operation: 'background-replace', operationId: 'operation-transformation-adapter', idempotencyKey: 'transformation-adapter-key',
+})
 const media = Buffer.from('controlled-transformation-video')
 const mediaSha256 = createHash('sha256').update(media).digest('hex')
 
 function httpAdapter(fetchImplementation, completion = 'polling', callbackSecret) {
   return new HttpTransformationProviderAdapter({
     id: 'controlled-http-transformation', adapterVersion: '1.0.0', baseUrl: 'http://127.0.0.1:4317',
-    apiKey: 'controlled-http-key', completion, callbackSecret, modes: ['background-replacement'],
+    apiKey: 'controlled-http-key', completion, callbackSecret, modes: ['background-replacement'], operations: ['background-replace'],
     supportsCancellation: true, timeoutMs: 1_000, fetchImplementation,
   })
 }
@@ -103,7 +106,7 @@ test('T-FR-113 MCP adapter uses the official wire and survives a fresh session f
     assert.equal(typeof address, 'object')
     const adapter = new McpTransformationProviderAdapter({
       id: 'controlled-mcp-transformation', adapterVersion: '1.0.0', endpoint: `http://127.0.0.1:${address.port}/mcp`,
-      apiKey: 'controlled-mcp-key', modes: ['background-replacement'], supportsCancellation: true,
+      apiKey: 'controlled-mcp-key', modes: ['background-replacement'], operations: ['background-replace'], supportsCancellation: true,
     })
     assert.equal((await adapter.getCapabilities()).completion, 'polling')
     assert.deepEqual(await adapter.submit({ durationFrames: 90, fps: 30 }, context), { kind: 'accepted', providerJobId: 'provider-job-mcp' })

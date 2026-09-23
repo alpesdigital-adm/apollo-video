@@ -119,7 +119,7 @@ test('latest PostgreSQL operation constraints cover every V2 operation type and 
   )
   assert.equal(
     latest('type')?.migration,
-    '20260803223000_project_director_operations',
+    '20260923143000_wave24_synthetic_render',
   )
   assert.equal(
     latest('phase')?.migration,

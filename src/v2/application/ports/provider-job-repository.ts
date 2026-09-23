@@ -47,6 +47,12 @@ export interface ProviderJobRepository {
     workspaceId: string
     jobId: string
   }): Promise<Readonly<PersistedProviderJob> | null>
+  findFallbackDispatch?(input: {
+    workspaceId: string
+    projectId: string
+    ledgerId: string
+    rung: 'generated-cutaway'
+  }): Promise<Readonly<PersistedProviderJob> | null>
   claimNext(input: {
     workerId: string
     leaseToken: string

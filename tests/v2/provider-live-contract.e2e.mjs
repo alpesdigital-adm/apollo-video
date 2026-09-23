@@ -1,197 +1,158 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
 import test from 'node:test'
 
-import { ElevenLabsTtsProviderAdapter } from '../../src/v2/infrastructure/elevenlabs-tts-provider.ts'
-import { HeyGenV3AsyncMediaProviderAdapter } from '../../src/v2/infrastructure/heygen-v3-provider.ts'
-
-const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
-const ffprobePath = require('ffprobe-static').path
-const enabled = process.env.APOLLO_V2_PROVIDER_LIVE_SMOKE === '1'
-const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
+import { createLiveAvatarEvidenceAvailability } from '../../src/v2/infrastructure/live-avatar-evidence-availability.ts'
 
 function required(name) {
   const value = process.env[name]?.trim()
-  assert.ok(value, `${name} is required for the live provider gate`)
+  assert.ok(value, `${name} is required for the canonical live harness`)
   return value
 }
 
-async function json(url, apiKey, header) {
-  const response = await fetch(url, { headers: { [header]: apiKey }, redirect: 'error', signal: AbortSignal.timeout(30_000) })
-  assert.equal(response.ok, true, `${new URL(url).pathname} returned ${response.status}`)
-  return response.json()
-}
-
-function probe(path) {
-  return JSON.parse(execFileSync(ffprobePath, [
-    '-v', 'error', '-show_entries', 'format=duration,format_name:stream=codec_type,codec_name,width,height', '-of', 'json', path,
-  ], { encoding: 'utf8', windowsHide: true }))
-}
-
-async function poll(adapter, providerJobId, deadline) {
-  const states = []
-  while (Date.now() < deadline) {
-    const status = await adapter.getStatus(providerJobId)
-    states.push(status)
-    if (status === 'completed') return states
-    assert.notEqual(status, 'failed', `HeyGen job ${providerJobId} failed`)
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10_000))
-  }
-  assert.fail(`HeyGen job ${providerJobId} did not complete before the owned deadline`)
-}
-
-async function renderAvatar({ adapter, avatarId, audioBytes, audioContainer, durationMs, label, runId, root }) {
-  const submitted = await adapter.submit({
-    avatarId,
-    audioBytes: new Uint8Array(audioBytes),
-    audioSha256: sha256(audioBytes),
-    audioByteSize: audioBytes.byteLength,
-    audioContainer,
-    durationMs,
-    aspectRatio: '9:16',
-  }, {
-    workspaceId: `live-gate-${runId}`,
-    projectVersionId: `live-version-${runId}`,
-    operationId: `live-${label}-${runId}`,
-    idempotencyKey: `live:${label}:${runId}`,
+async function api(baseUrl, token, path, init = {}) {
+  const response = await fetch(new URL(path, baseUrl), {
+    ...init,
+    headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...(init.body ? { 'content-type': 'application/json' } : {}), ...init.headers },
+    signal: AbortSignal.timeout(120_000),
   })
-  assert.equal(submitted.kind, 'accepted')
-  const states = await poll(adapter, submitted.providerJobId, Date.now() + 20 * 60_000)
-  const result = await adapter.retrieve(submitted.providerJobId)
-  const response = await fetch(result.downloadUrl, { redirect: 'error', signal: AbortSignal.timeout(120_000) })
-  assert.equal(response.ok, true, `HeyGen result download returned ${response.status}`)
-  const video = Buffer.from(await response.arrayBuffer())
-  const path = join(root, `${label}.mp4`)
-  await writeFile(path, video)
-  const mediaProbe = probe(path)
-  const videoStream = mediaProbe.streams.find((stream) => stream.codec_type === 'video')
-  const audioStream = mediaProbe.streams.find((stream) => stream.codec_type === 'audio')
-  assert.equal(videoStream?.codec_name, 'h264')
-  assert.equal(audioStream?.codec_name, 'aac')
-  assert.ok(Number(mediaProbe.format.duration) >= 1)
-  return {
-    label,
-    providerJobId: submitted.providerJobId,
-    states,
-    sha256: sha256(video),
-    byteSize: video.byteLength,
-    probe: mediaProbe,
-  }
+  const body = await response.json()
+  assert.ok(response.ok, `${init.method ?? 'GET'} ${path} failed ${response.status}/${body?.error?.code ?? 'UNKNOWN'}`)
+  return body.data
 }
 
-test('T-FR-101 live ElevenLabs alignment and HeyGen ready/generated audio contract', {
-  skip: !enabled && 'APOLLO_V2_PROVIDER_LIVE_SMOKE=1 is required',
-  timeout: 45 * 60_000,
-}, async () => {
-  const elevenLabsKey = required('APOLLO_V2_ELEVENLABS_API_KEY')
-  const heyGenKey = required('APOLLO_V2_HEYGEN_API_KEY')
-  const runId = required('APOLLO_V2_PROVIDER_LIVE_RUN_ID')
-  assert.match(runId, /^[A-Za-z0-9_-]{8,80}$/)
-  const evidenceRoot = resolve(required('APOLLO_V2_PROVIDER_LIVE_EVIDENCE_ROOT'))
-  const root = await mkdtemp(join(tmpdir(), `apollo-provider-live-${runId}-`))
-  await mkdir(evidenceRoot, { recursive: true })
-
+/**
+ * The live gate deliberately stops before TTS, avatar submission, credentials,
+ * budget reservation or catalog selection. A canonical API + provider-worker
+ * execution can only be enabled after the runtime has a measured live output
+ * speech/identity evaluator; transport marked `live` is not that evidence.
+ */
+test('T-FR-101 live provider preflight refuses before every paid call while output evaluation is unavailable', async () => {
+  const previousFetch = globalThis.fetch
+  let networkCalls = 0
+  globalThis.fetch = async () => {
+    networkCalls += 1
+    throw new Error('live preflight must not reach the network')
+  }
   try {
-    const voiceCatalog = await json('https://api.elevenlabs.io/v2/voices?page_size=20', elevenLabsKey, 'xi-api-key')
-    const voiceId = process.env.APOLLO_V2_PROVIDER_LIVE_VOICE_ID?.trim() || voiceCatalog.voices?.[0]?.voice_id
-    assert.match(voiceId, /^[A-Za-z0-9_-]{3,256}$/)
-    const lookCatalog = await json('https://api.heygen.com/v3/avatars/looks?ownership=public&limit=20', heyGenKey, 'x-api-key')
-    const publicLook = lookCatalog.data?.find((look) =>
-      look.status === 'completed' && Array.isArray(look.supported_api_engines) && look.supported_api_engines.includes('avatar_iv'))
-    const avatarId = process.env.APOLLO_V2_PROVIDER_LIVE_AVATAR_ID?.trim() || publicLook?.id
-    assert.match(avatarId, /^[A-Za-z0-9_-]{3,256}$/)
-
-    const script = 'Olá. Este é o teste real do Apollo.'
-    const tts = new ElevenLabsTtsProviderAdapter({
-      apiKey: elevenLabsKey,
-      costMinorUnitsPerThousandCharacters: 0,
-      requestTimeoutMs: 120_000,
+    const availability = createLiveAvatarEvidenceAvailability({
+      APOLLO_V2_PROVIDER_LIVE_SMOKE: '1',
+      APOLLO_V2_ELEVENLABS_API_KEY: 'must-not-be-read',
+      APOLLO_V2_HEYGEN_API_KEY: 'must-not-be-read',
     })
-    const ttsResult = await tts.submit({
-      text: script,
-      scriptHash: sha256(Buffer.from(script, 'utf8')),
-      voiceId,
-      modelId: 'eleven_multilingual_v2',
-      outputFormat: 'mp3',
-      seed: 19092026,
-    }, {
-      workspaceId: `live-gate-${runId}`,
-      projectVersionId: `live-version-${runId}`,
-      operationId: `live-tts-${runId}`,
-      idempotencyKey: `live:tts:${runId}`,
-    })
-    assert.equal(ttsResult.kind, 'completed')
-    assert.equal(ttsResult.bundle.result.alignment.characters.join(''), script)
-    assert.equal(ttsResult.bundle.result.alignment.characters.length, [...script].length)
-    const generatedAudio = Buffer.from(ttsResult.bundle.result.audioBytes)
-    const generatedAudioPath = join(root, 'generated.mp3')
-    await writeFile(generatedAudioPath, generatedAudio)
-    const generatedProbe = probe(generatedAudioPath)
-    const generatedDurationMs = Math.round(Number(generatedProbe.format.duration) * 1_000)
-    assert.ok(generatedDurationMs >= 1_000)
-
-    const readyAudioPath = join(root, 'ready.mp3')
-    execFileSync(ffmpegPath, [
-      '-v', 'error', '-y', '-i', resolve('tests/fixtures/source-deconstruction/reel-published-golden.mp4'),
-      '-t', '2.4', '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', readyAudioPath,
-    ], { windowsHide: true })
-    const readyAudio = await readFile(readyAudioPath)
-    const readyProbe = probe(readyAudioPath)
-    const readyDurationMs = Math.round(Number(readyProbe.format.duration) * 1_000)
-    assert.ok(readyDurationMs >= 1_000)
-
-    const heyGen = new HeyGenV3AsyncMediaProviderAdapter({
-      apiKey: heyGenKey,
-      costMinorUnitsPerMinute: 0,
-      requestTimeoutMs: 120_000,
-    })
-    assert.equal((await heyGen.getCapabilities()).supportsIdempotency, true)
-    const generatedAvatar = await renderAvatar({
-      adapter: heyGen, avatarId, audioBytes: generatedAudio, audioContainer: 'mp3',
-      durationMs: generatedDurationMs, label: 'generated-audio-avatar', runId, root,
-    })
-    const readyAvatar = await renderAvatar({
-      adapter: heyGen, avatarId, audioBytes: readyAudio, audioContainer: 'mp3',
-      durationMs: readyDurationMs, label: 'ready-audio-avatar', runId, root,
-    })
-
-    const evidence = {
-      schemaVersion: 'provider-live-contract-evidence/v1',
-      runId,
-      executedAt: new Date().toISOString(),
-      providers: {
-        elevenLabs: {
-          adapterId: tts.id,
-          adapterVersion: tts.adapterVersion,
-          requestId: ttsResult.bundle.providerJobRef,
-          voiceId,
-          scriptHash: ttsResult.bundle.result.scriptHash,
-          audioSha256: ttsResult.bundle.result.audioSha256,
-          audioByteSize: generatedAudio.byteLength,
-          characterCount: [...script].length,
-          alignmentCount: ttsResult.bundle.result.alignment.characters.length,
-          durationMs: generatedDurationMs,
-        },
-        heyGen: {
-          adapterId: heyGen.id,
-          adapterVersion: heyGen.adapterVersion,
-          avatarId,
-          generatedAvatar,
-          readyAvatar,
-        },
-      },
-    }
-    await writeFile(join(evidenceRoot, `provider-live-${runId}.json`), `${JSON.stringify(evidence, null, 2)}\n`)
-    await writeFile(join(evidenceRoot, `provider-live-${runId}-generated.mp3`), generatedAudio)
-    await writeFile(join(evidenceRoot, `provider-live-${runId}-generated.mp4`), await readFile(join(root, 'generated-audio-avatar.mp4')))
-    await writeFile(join(evidenceRoot, `provider-live-${runId}-ready.mp4`), await readFile(join(root, 'ready-audio-avatar.mp4')))
+    assert.equal(
+      await availability.isAvailable({ adapterId: 'heygen-v3', adapterVersion: '3.0.0', operation: 'audio-avatar' }),
+      false,
+    )
+    assert.equal(networkCalls, 0)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    globalThis.fetch = previousFetch
+  }
+})
+
+test('T-FR-101 paid live contract stays explicitly pending instead of using adapter-direct smoke as gate', {
+  skip: process.env.APOLLO_V2_PROVIDER_LIVE_SMOKE !== '1' && 'explicit live authorization is required',
+}, async () => {
+  const availability = createLiveAvatarEvidenceAvailability(process.env)
+  assert.equal(
+    await availability.isAvailable({ adapterId: 'heygen-v3', adapterVersion: '3.0.0', operation: 'audio-avatar' }),
+    true,
+    'live output speech and identity evaluator is unavailable; refusing before credentials, estimate, TTS or avatar spend',
+  )
+
+  // Every durable identity is supplied explicitly from an already approved,
+  // currently consented profile/audio master. No catalog-first selection and
+  // no fixture-created consent is allowed in a live run.
+  const baseUrl = required('APOLLO_V2_PROVIDER_LIVE_API_BASE_URL')
+  const token = required('APOLLO_V2_PROVIDER_LIVE_API_TOKEN')
+  const projectId = required('APOLLO_V2_PROVIDER_LIVE_PROJECT_ID')
+  const projectVersionId = required('APOLLO_V2_PROVIDER_LIVE_PROJECT_VERSION_ID')
+  const projectVersionHash = required('APOLLO_V2_PROVIDER_LIVE_PROJECT_VERSION_HASH')
+  const profileSnapshotId = required('APOLLO_V2_PROVIDER_LIVE_PROFILE_SNAPSHOT_ID')
+  const audioMasterId = required('APOLLO_V2_PROVIDER_LIVE_AUDIO_MASTER_ID')
+  const audioArtifactId = required('APOLLO_V2_PROVIDER_LIVE_AUDIO_ARTIFACT_ID')
+  const adapterId = required('APOLLO_V2_PROVIDER_LIVE_AVATAR_ADAPTER_ID')
+  const adapterVersion = required('APOLLO_V2_PROVIDER_LIVE_AVATAR_ADAPTER_VERSION')
+  const use = required('APOLLO_V2_PROVIDER_LIVE_USE')
+  const market = required('APOLLO_V2_PROVIDER_LIVE_MARKET')
+  const locale = required('APOLLO_V2_PROVIDER_LIVE_LOCALE')
+  const runId = required('APOLLO_V2_PROVIDER_LIVE_RUN_ID')
+  const maximumCostMinorUnits = Number(required('APOLLO_V2_PROVIDER_LIVE_MAXIMUM_COST_MINOR_UNITS'))
+  const endWordIndex = Number(required('APOLLO_V2_PROVIDER_LIVE_AUDIO_END_WORD_INDEX'))
+  const databaseUrl = new URL(required('V2_DATABASE_URL'))
+  const apiUrl = new URL(baseUrl)
+  assert.ok(Number.isSafeInteger(maximumCostMinorUnits) && maximumCostMinorUnits >= 0)
+  assert.ok(Number.isSafeInteger(endWordIndex) && endWordIndex > 0)
+  assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(databaseUrl.hostname), 'live harness database must be disposable and local')
+  assert.match(databaseUrl.pathname, /_e2e$/, 'live harness database must have an _e2e name')
+  assert.match(databaseUrl.searchParams.get('application_name') ?? '', /^apollo-video-e2e-[A-Za-z0-9_-]+$/)
+  for (const [name, maximum] of [['connection_limit', 5], ['pool_timeout', 10], ['connect_timeout', 10]]) {
+    const value = Number(databaseUrl.searchParams.get(name))
+    assert.ok(Number.isSafeInteger(value) && value >= 1 && value <= maximum, `${name} exceeds the disposable harness bound`)
+  }
+  assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(apiUrl.hostname), 'live harness API must be an isolated local process')
+  assert.match(runId, /^[A-Za-z0-9_-]{8,80}$/)
+
+  const [{ PrismaClient }, factory, postgres] = await Promise.all([
+    import('../../generated/prisma-v2/index.js'),
+    import('../../src/v2/infrastructure/repository-factory.ts'),
+    import('../../src/v2/infrastructure/prisma-postgres/client.ts'),
+  ])
+  const inspection = new PrismaClient({ datasourceUrl: databaseUrl.toString() })
+  let jobId = null
+  let observed = null
+  const terminal = new Set(['approved', 'rejected', 'failed', 'cancelled'])
+  try {
+    const foreignQueue = await inspection.v2ProviderJob.count({ where: { status: { notIn: [...terminal] } } })
+    assert.equal(foreignQueue, 0, 'isolated live harness database contains a foreign claimable provider job')
+    const idempotencyKey = `provider-live-avatar-${runId}`
+    const enqueued = await api(baseUrl, token, `/v1/projects/${encodeURIComponent(projectId)}/provider-jobs`, {
+      method: 'POST', headers: { 'idempotency-key': idempotencyKey }, body: JSON.stringify({
+        projectVersionId, profileSnapshotId, operation: 'audio-avatar', adapterId, adapterVersion,
+        providerInput: { aspectRatio: '9:16' }, sourceArtifactIds: [audioArtifactId], audioMasterId,
+        audioRange: { startWordIndex: 0, endWordIndex }, use, market, locale,
+      }),
+    })
+    jobId = enqueued.job.id
+    assert.equal(await inspection.v2ProviderJob.count({ where: { status: { notIn: [...terminal] } } }), 1)
+    const worker = factory.createProviderJobWorker(process.env)
+    const workerOwner = `provider-live-${runId}`
+
+    // One and only one job was claimable before this tick. Verify that the
+    // tick estimated this exact job and did not submit it before the cap check.
+    await worker(`${workerOwner}-estimate`)
+    observed = (await api(baseUrl, token, `/v1/projects/${encodeURIComponent(projectId)}/provider-jobs/${encodeURIComponent(jobId)}`)).job
+    assert.equal(observed.status, 'estimated', 'first live worker tick was not estimate-only for the owned job')
+    assert.ok(observed.estimate, 'live provider job did not persist its estimate before submission')
+    assert.equal(observed.estimate.currency, 'BRL')
+    assert.ok(observed.estimate.costMinorUnits <= maximumCostMinorUnits, 'live estimate exceeds the explicitly authorized cap')
+
+    const deadline = Date.now() + 20 * 60_000
+    for (let tick = 0; tick < 40 && Date.now() < deadline && !terminal.has(observed.status); tick += 1) {
+      await worker(`${workerOwner}-${tick}`)
+      observed = (await api(baseUrl, token, `/v1/projects/${encodeURIComponent(projectId)}/provider-jobs/${encodeURIComponent(jobId)}`)).job
+      if (!terminal.has(observed.status)) await new Promise((resolve) => setTimeout(resolve, 1_000))
+    }
+    assert.ok(terminal.has(observed.status), `live avatar job did not reach terminal state before deadline: ${observed.status}`)
+    assert.equal(observed.status, 'approved', `live avatar job ended ${observed.status}`)
+    assert.ok(observed.resultArtifact, 'live worker did not persist its canonical result artifact')
+
+    const gate = await api(baseUrl, token, `/v1/projects/${encodeURIComponent(projectId)}/synthetic-phase-gates`, {
+      method: 'POST', headers: { 'idempotency-key': `provider-live-gate-${runId}` },
+      body: JSON.stringify({ projectVersionId, projectVersionHash }),
+    })
+    assert.equal(gate.gate?.report?.approved, true, 'canonical collector did not approve the persisted live execution evidence')
+  } finally {
+    // No public generic cancellation contract exists. Stop admission by never
+    // ticking again; the isolated E2E owner tears down this database only after
+    // the persisted owned job is terminal or reported as the cleanup blocker.
+    let ownedCleanupBlocker = null
+    if (jobId) {
+      const stored = await inspection.v2ProviderJob.findFirst({ where: { id: jobId }, select: { status: true, leaseOwner: true } })
+      if (stored && !terminal.has(stored.status)) ownedCleanupBlocker = `owned live job requires isolated-run cleanup: ${stored.status}/${stored.leaseOwner ?? 'unclaimed'}`
+    }
+    const disconnected = await Promise.allSettled([inspection.$disconnect(), postgres.disconnectV2PostgresClient()])
+    const disconnectFailures = disconnected.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+    if (disconnectFailures.length > 0) throw new AggregateError(disconnectFailures, 'live harness database disconnect failed')
+    if (ownedCleanupBlocker) assert.fail(ownedCleanupBlocker)
   }
 })

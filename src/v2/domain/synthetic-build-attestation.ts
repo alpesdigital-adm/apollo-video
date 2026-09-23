@@ -43,6 +43,12 @@ export interface SyntheticBuildIdentity {
   renderBundleHash: string
 }
 
+export function calculateSyntheticBuildIdentityHash(
+  identity: Readonly<SyntheticBuildIdentity>,
+): string {
+  return calculateCanonicalHash(identity)
+}
+
 export interface SyntheticBuildAttestation {
   schemaVersion: typeof SYNTHETIC_BUILD_ATTESTATION_SCHEMA_VERSION
   id: string

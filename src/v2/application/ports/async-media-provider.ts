@@ -54,6 +54,7 @@ export interface ProviderCapabilities {
 export interface ProviderSubmitContext {
   workspaceId: string
   projectVersionId: string
+  operation: ProviderOperation
   operationId: string
   idempotencyKey: string
   signal?: AbortSignal
@@ -93,6 +94,8 @@ export interface AsyncMediaProviderAdapter<Input, Result> {
   readonly adapterVersion: string
   readonly modelRef?: string
   readonly configHash: string
+  /** Adapter-owned classification. Absence is treated as controlled. */
+  readonly runtimeClass?: 'controlled' | 'live'
   getCapabilities(signal?: AbortSignal): Promise<Readonly<ProviderCapabilities>>
   estimate(input: Readonly<Input>, signal?: AbortSignal): Promise<Readonly<ProviderEstimate>>
   submit(

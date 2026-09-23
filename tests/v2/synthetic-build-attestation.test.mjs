@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { createSyntheticBuildAttestationService } from '../../src/v2/application/create-synthetic-build-attestation.ts'
 import {
+  calculateSyntheticBuildIdentityHash,
   calculateSyntheticBuildAttestationHash,
   SYNTHETIC_BUILD_CHECKS,
 } from '../../src/v2/domain/synthetic-build-attestation.ts'
@@ -41,6 +42,13 @@ function repository(overrides = {}) {
     records,
     async findReplay() { return null },
     async readBinding() {
+      const runtimeIdentity = {
+        commitSha: 'a'.repeat(40),
+        treeHash: hash('b'),
+        contractGraphHash: hash('c'),
+        toolchainHash: hash('d'),
+        renderBundleHash: hash('8'),
+      }
       return {
         workspaceId: 'workspace-attestation',
         projectId: 'project-attestation',
@@ -53,8 +61,11 @@ function repository(overrides = {}) {
         renderManifestId: 'manifest-attestation',
         renderManifestHash: hash('1'),
         runtimeCommitSha: 'a'.repeat(40),
+        runtimeTreeHash: hash('b'),
         runtimeContractGraphHash: hash('c'),
+        runtimeToolchainHash: hash('d'),
         runtimeRenderBundleHash: hash('8'),
+        runtimeIdentityHash: calculateSyntheticBuildIdentityHash(runtimeIdentity),
       }
     },
     async create(input) {
@@ -113,6 +124,29 @@ test('T-F3-GATE build writer rejects runtime identity drift before persistence',
     (error) => error.code === 'VERSION_CONFLICT',
   )
   assert.equal(store.records.length, 0)
+})
+
+test('T-F3-GATE build writer rejects tree and toolchain drift independently', async () => {
+  for (const field of ['treeHash', 'toolchainHash']) {
+    const identity = {
+      commitSha: 'a'.repeat(40),
+      treeHash: hash('b'),
+      contractGraphHash: hash('c'),
+      toolchainHash: hash('d'),
+      renderBundleHash: hash('8'),
+      [field]: hash('9'),
+    }
+    const store = repository()
+    await assert.rejects(
+      createSyntheticBuildAttestationService({
+        repository: store,
+        runner: runner({ identity }),
+        createId: () => `build-attestation-${field}`,
+      })(request),
+      (error) => error.code === 'VERSION_CONFLICT',
+    )
+    assert.equal(store.records.length, 0)
+  }
 })
 
 test('T-F3-GATE build writer replays before executing checks and fences payload drift', async () => {

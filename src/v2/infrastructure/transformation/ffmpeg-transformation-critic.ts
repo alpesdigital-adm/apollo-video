@@ -6,6 +6,7 @@ import type {
   TransformationCriticEvaluation,
   TransformationCriticEvaluator,
 } from '../../application/ports/transformation-critic-evaluator.ts'
+import type { TransformationAudioPreservationEvaluator } from '../../application/ports/transformation-critic-evaluator.ts'
 import { assertDomain } from '../../domain/errors.ts'
 import {
   TRANSFORMATION_CRITIC_DIMENSIONS,
@@ -25,8 +26,25 @@ interface FrameEvidence {
   wholeDifferenceBps: number
   changeDifferenceBps: number | null
   protectedDifferenceBps: number | null
+  zoneDifferences: readonly Readonly<{ purpose: string; differenceBps: number }>[]
   sourceLumaBps: number
   resultLumaBps: number
+}
+
+async function waitForAll<T extends readonly unknown[]>(promises: { [K in keyof T]: Promise<T[K]> }): Promise<T> {
+  const settled = await Promise.allSettled(promises)
+  const failed = settled.find((entry): entry is PromiseRejectedResult => entry.status === 'rejected')
+  if (failed) throw failed.reason
+  return settled.map((entry) => (entry as PromiseFulfilledResult<unknown>).value) as unknown as T
+}
+
+function purposesForPreserve(item: string): readonly string[] {
+  if (item === 'identity' || item === 'lips' || item === 'expression') return ['face', 'subject']
+  if (item === 'body-motion' || item === 'wardrobe' || item === 'foreground') return ['subject']
+  if (item === 'objects') return ['protected-object']
+  if (item === 'text') return ['text']
+  if (item === 'brand') return ['brand']
+  return []
 }
 
 function clampBps(value: number): number {
@@ -88,6 +106,18 @@ function notApplicable(dimension: TransformationCriticDimension, reason: string)
   return Object.freeze({ dimension, status: 'not-applicable', scoreBps: null, thresholdBps: null, frameRange: null, region: null, note: reason })
 }
 
+export function combineTransformationPreservationScores(input: Readonly<{
+  audioRequired: boolean
+  visualPreservationRequired: boolean
+  visualScore: number | null
+  audioPassed: boolean | null
+}>): number | null {
+  if (input.audioRequired && input.audioPassed === null) return null
+  if (input.visualPreservationRequired && input.visualScore === null) return null
+  const audioScore = input.audioRequired ? (input.audioPassed ? 10_000 : 0) : 10_000
+  return input.visualScore === null ? audioScore : Math.min(input.visualScore, audioScore)
+}
+
 /**
  * Byte-level critic for F3.016. ffprobe establishes media integrity and three
  * decoded RGB samples compare the requested source range with the derivative.
@@ -98,6 +128,7 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
   private readonly dependencies: {
     sources: ArtifactSourceMaterializer
     prober: MediaSourceProber
+    audioComparison?: TransformationAudioPreservationEvaluator
   }
 
   constructor(dependencies: FfmpegTransformationCriticEvaluator['dependencies']) {
@@ -107,23 +138,26 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
   async evaluate(input: Parameters<TransformationCriticEvaluator['evaluate']>[0]): Promise<Readonly<TransformationCriticEvaluation>> {
     const sourceOperationId = `${input.operationId}-critic-source`
     const resultOperationId = `${input.operationId}-critic-result`
-    const source = await this.dependencies.sources.materialize({
-      operationId: sourceOperationId,
-      artifactKey: input.source.artifactKey,
-      sha256: input.source.sha256,
-      byteSize: Number(input.source.byteSize),
-    })
-    const result = await this.dependencies.sources.materialize({
-      operationId: resultOperationId,
-      artifactKey: input.result.artifactKey,
-      sha256: input.result.sha256,
-      byteSize: Number(input.result.byteSize),
-    })
+    let operationFailed = false
     try {
-      const [sourceProbe, resultProbe] = await Promise.all([
+      const [source, result] = await waitForAll([
+        this.dependencies.sources.materialize({ operationId: sourceOperationId, artifactKey: input.source.artifactKey, sha256: input.source.sha256, byteSize: Number(input.source.byteSize), signal: input.signal }),
+        this.dependencies.sources.materialize({ operationId: resultOperationId, artifactKey: input.result.artifactKey, sha256: input.result.sha256, byteSize: Number(input.result.byteSize), signal: input.signal }),
+      ] as const)
+      const [sourceProbe, resultProbe] = await waitForAll([
         this.dependencies.prober.probe(source.path, { signal: input.signal }),
         this.dependencies.prober.probe(result.path, { signal: input.signal }),
-      ])
+      ] as const)
+      const audioRequired = input.brief.preserve.includes('audio') || input.brief.preserve.includes('speech')
+      const audioComparison = audioRequired && this.dependencies.audioComparison
+        ? await this.dependencies.audioComparison.compare({
+            sourcePath: source.path,
+            resultPath: result.path,
+            sourceStartMs: Math.round(input.brief.sourceRange.startFrame / sourceProbe.fps * 1_000),
+            sourceDurationMs: Math.round(input.brief.durationFrames / sourceProbe.fps * 1_000),
+            signal: input.signal,
+          })
+        : null
       const resultFrames = Math.max(1, Math.round(resultProbe.duration * resultProbe.fps))
       const frameRange = Object.freeze({ startFrame: 0, endFrame: resultFrames })
       const protectedZones = input.brief.safeZones.filter((zone) =>
@@ -133,28 +167,29 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
         const sourceFrame = input.brief.sourceRange.startFrame + Math.floor((input.brief.durationFrames - 1) * ratio)
         const sourceSecond = sourceFrame / sourceProbe.fps
         const resultSecond = Math.min(resultProbe.duration * ratio, Math.max(resultProbe.duration - 1 / resultProbe.fps, 0))
-        const [sourceWhole, resultWhole] = await Promise.all([
+        const [sourceWhole, resultWhole] = await waitForAll([
           sampleFrame({ path: source.path, second: sourceSecond, signal: input.signal }),
           sampleFrame({ path: result.path, second: resultSecond, signal: input.signal }),
-        ])
+        ] as const)
         const changeDifference = input.changeRegion
-          ? await Promise.all([
+          ? await waitForAll([
               sampleFrame({ path: source.path, second: sourceSecond, region: input.changeRegion, signal: input.signal }),
               sampleFrame({ path: result.path, second: resultSecond, region: input.changeRegion, signal: input.signal }),
-            ]).then(([sourceChange, resultChange]) => pixelDifferenceBps(sourceChange, resultChange))
+            ] as const).then(([sourceChange, resultChange]) => pixelDifferenceBps(sourceChange, resultChange))
           : null
-        const zoneDifferences = await Promise.all(protectedZones.map(async (zone) => {
+        const zoneDifferences = await waitForAll(protectedZones.map(async (zone) => {
           const region = { x: zone.x, y: zone.y, width: zone.width, height: zone.height }
-          const [sourceZone, resultZone] = await Promise.all([
+          const [sourceZone, resultZone] = await waitForAll([
             sampleFrame({ path: source.path, second: sourceSecond, region, signal: input.signal }),
             sampleFrame({ path: result.path, second: resultSecond, region, signal: input.signal }),
-          ])
-          return pixelDifferenceBps(sourceZone, resultZone)
+          ] as const)
+          return Object.freeze({ purpose: zone.purpose, differenceBps: pixelDifferenceBps(sourceZone, resultZone) })
         }))
         evidence.push({
           wholeDifferenceBps: pixelDifferenceBps(sourceWhole, resultWhole),
           changeDifferenceBps: changeDifference,
-          protectedDifferenceBps: zoneDifferences.length > 0 ? Math.max(...zoneDifferences) : null,
+          protectedDifferenceBps: zoneDifferences.length > 0 ? Math.max(...zoneDifferences.map((entry) => entry.differenceBps)) : null,
+          zoneDifferences,
           sourceLumaBps: lumaBps(sourceWhole),
           resultLumaBps: lumaBps(resultWhole),
         })
@@ -167,7 +202,21 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
       const protectedDifference = protectedZones.length > 0
         ? Math.max(...evidence.map((entry) => entry.protectedDifferenceBps ?? 10_000))
         : null
-      const preserveScore = protectedDifference === null ? null : 10_000 - protectedDifference
+      const visualPreserves = input.brief.preserve.filter((preserve) => !['audio', 'speech', 'timing'].includes(preserve))
+      const visualScores = visualPreserves.map((preserve) => {
+        const purposes = purposesForPreserve(preserve)
+        if (purposes.length === 0 || !protectedZones.some((zone) => purposes.includes(zone.purpose))) return null
+        const differences = evidence.flatMap((entry) => entry.zoneDifferences.filter((zone) => purposes.includes(zone.purpose)).map((zone) => zone.differenceBps))
+        return differences.length > 0 ? 10_000 - Math.max(...differences) : null
+      })
+      const preserveScore = visualScores.length === 0 ? null : visualScores.every((score) => score !== null) ? Math.min(...visualScores as number[]) : null
+      const visualPreservationRequired = visualPreserves.length > 0
+      const combinedPreserveScore = combineTransformationPreservationScores({
+        audioRequired,
+        visualPreservationRequired,
+        visualScore: preserveScore,
+        audioPassed: audioComparison?.passed ?? null,
+      })
       const durationDelta = Math.abs(resultProbe.duration - input.brief.durationFrames / sourceProbe.fps)
       const durationScore = 10_000 - durationDelta / Math.max(resultProbe.duration, 0.001) * 10_000
       const fpsScore = 10_000 - Math.abs(resultProbe.fps - sourceProbe.fps) / Math.max(sourceProbe.fps, 1) * 10_000
@@ -195,16 +244,21 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
         input.changeRegion ?? null,
         `mean decoded ${input.changeRegion ? 'reviewed-change-region' : 'whole-frame'} difference ${Math.round(intentDifference)} bps`,
       ))
-      measurements.set('preserve-list', preserveScore === null
-        ? Object.freeze({ dimension: 'preserve-list', status: 'unavailable', scoreBps: null, thresholdBps: null, frameRange: null, region: null, note: 'The brief declares no protected region that a pixel evaluator can compare safely.' })
-        : measured('preserve-list', pixelEvaluator, preserveScore, 9_200, frameRange, region, `maximum protected-region difference ${protectedDifference} bps`))
+      measurements.set('preserve-list', combinedPreserveScore === null
+        ? Object.freeze({ dimension: 'preserve-list', status: 'unavailable', scoreBps: null, thresholdBps: null, frameRange: null, region: null, note: audioRequired && !audioComparison ? 'No decoded output-audio comparison evaluator is configured.' : 'The brief requires visual preservation but declares no protected region that a pixel evaluator can compare safely.' })
+        : measured('preserve-list', audioRequired ? 'ffmpeg-pcm-preservation/v1' : pixelEvaluator, combinedPreserveScore, 9_200, frameRange, region, audioComparison ? `decoded PCM correlation ${audioComparison.correlationBps} bps; worst window ${audioComparison.worstWindowCorrelationBps} bps; failed windows ${audioComparison.failedWindowCount}/${audioComparison.comparedWindowCount}` : `maximum protected-region difference ${protectedDifference} bps`))
+      const identityPurposes = purposesForPreserve('identity')
+      const identityDifferences = evidence.flatMap((entry) => entry.zoneDifferences.filter((zone) => identityPurposes.includes(zone.purpose)).map((zone) => zone.differenceBps))
+      const identityScore = identityDifferences.length > 0 ? 10_000 - Math.max(...identityDifferences) : null
       measurements.set('identity', input.brief.preserve.includes('identity')
-        ? (preserveScore === null
-            ? notApplicable('identity', 'Identity is preserved by contract but the brief contains no face or subject region for measurement.')
-            : measured('identity', pixelEvaluator, preserveScore, 9_400, frameRange, region))
+        ? (identityScore === null
+            ? Object.freeze({ dimension: 'identity', status: 'unavailable' as const, scoreBps: null, thresholdBps: null, frameRange: null, region: null, note: 'Identity is required but the brief contains no face or subject region that can be measured.' })
+            : measured('identity', pixelEvaluator, identityScore, 9_400, frameRange, region))
         : notApplicable('identity', 'The immutable brief does not require identity preservation for this transformation.'))
       measurements.set('lip-sync', input.brief.preserve.includes('lips')
-        ? measured('lip-sync', controlledEvaluator, preserveScore ?? 0, 9_200, frameRange, region, 'controlled proxy uses protected facial pixels; no phoneme model is deployed')
+        ? (identityScore === null
+            ? Object.freeze({ dimension: 'lip-sync', status: 'unavailable' as const, scoreBps: null, thresholdBps: null, frameRange: null, region: null, note: 'Lip preservation requires a face or subject region; no input alignment is treated as output evidence.' })
+            : measured('lip-sync', controlledEvaluator, identityScore, 9_200, frameRange, region, 'controlled proxy uses protected facial pixels; no phoneme model is deployed'))
         : notApplicable('lip-sync', 'The immutable brief does not require lip preservation for this transformation.'))
       measurements.set('temporal-coherence', measured('temporal-coherence', pixelEvaluator, flickerScore, 7_000, frameRange))
       measurements.set('flicker', measured('flicker', pixelEvaluator, flickerScore, 7_000, frameRange))
@@ -217,7 +271,7 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
       measurements.set('transitions', measured('transitions', controlledEvaluator, flickerScore, 7_000, frameRange, null, 'controlled proxy uses temporal sample continuity'))
       measurements.set('format-safe-areas', measured('format-safe-areas', probeEvaluator, 10_000, 10_000, frameRange, null, `${resultProbe.width}x${resultProbe.height} decoded geometry`))
       measurements.set('media-integrity', measured('media-integrity', probeEvaluator, mediaScore, 9_000, frameRange, null, `${resultProbe.codec}/${resultProbe.container} at ${resultProbe.fps.toFixed(3)} fps`))
-      const riskScore = Math.min(preserveScore ?? 0, mediaScore)
+      const riskScore = Math.min(combinedPreserveScore ?? 0, mediaScore)
       measurements.set('risk', measured('risk', controlledEvaluator, riskScore, 8_500, frameRange, region, 'risk is the minimum of measured preserve and media-integrity evidence'))
 
       const issues: TransformationCriticIssue[] = []
@@ -226,7 +280,11 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
         issues.push(Object.freeze({ dimension: 'preserve-list', severity: 'blocking', frameRange, region, violatedPreserve: input.brief.preserve[0], description: 'Decoded pixels changed materially inside a region the transformation brief explicitly protects.' }))
         hardGates.push('preserve-list')
       }
-      if (input.brief.preserve.includes('identity') && preserveScore !== null && preserveScore < 9_400) {
+      if (audioRequired && audioComparison && !audioComparison.passed) {
+        issues.push(Object.freeze({ dimension: 'preserve-list', severity: 'blocking', frameRange, region: null, violatedPreserve: input.brief.preserve.includes('speech') ? 'speech' : 'audio', description: 'Decoded output PCM does not preserve the complete authorized source range.' }))
+        hardGates.push('preserve-list')
+      }
+      if (input.brief.preserve.includes('identity') && identityScore !== null && identityScore < 9_400) {
         issues.push(Object.freeze({ dimension: 'identity', severity: 'blocking', frameRange, region, violatedPreserve: 'identity', description: 'The protected face or subject region changed beyond the identity-preservation threshold.' }))
         hardGates.push('identity')
       }
@@ -241,6 +299,7 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
         evaluators: Object.freeze([
           Object.freeze({ id: pixelEvaluator, kind: 'measured' as const, version: '1.1.0', scope: 'Decodes three RGB samples and compares the reviewed change region, whole frame and protected normalized regions.' }),
           Object.freeze({ id: probeEvaluator, kind: 'measured' as const, version: '1.0.0', scope: 'Reads codec, geometry, duration and frame rate from the source and derivative bytes.' }),
+          ...(audioComparison ? [Object.freeze({ id: 'ffmpeg-pcm-preservation/v1', kind: 'measured' as const, version: audioComparison.policyVersion, scope: 'Decodes the complete source range and output audio to mono PCM and compares global and short-window signal preservation.' })] : []),
           Object.freeze({ id: controlledEvaluator, kind: 'controlled' as const, version: '1.0.0', scope: 'Conservative deterministic proxy only; it is not a deployed semantic or pose model.' }),
         ]),
         measurements: ordered,
@@ -251,11 +310,18 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
         confidenceBps: mandatoryUnavailable ? 3_000 : 8_500,
         intentScoreBps: intentScore,
       })
+    } catch (error) {
+      operationFailed = true
+      throw error
     } finally {
-      await Promise.allSettled([
+      const cleanup = await Promise.allSettled([
         this.dependencies.sources.cleanup(sourceOperationId),
         this.dependencies.sources.cleanup(resultOperationId),
       ])
+      if (!operationFailed) {
+        const failedCleanup = cleanup.find((entry): entry is PromiseRejectedResult => entry.status === 'rejected')
+        if (failedCleanup) throw failedCleanup.reason
+      }
     }
   }
 }

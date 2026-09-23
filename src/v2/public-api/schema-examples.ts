@@ -826,6 +826,26 @@ const queuedProductionBatchItemOperationVisibleExample = {
     terminal: false,
   },
 }
+const queuedSyntheticProductionRenderOperationVisibleExample = {
+  ...queuedProjectProxyRenderOperationExample,
+  id: 'operation-synthetic-production-render-example-1',
+  projectId,
+  type: 'synthetic-production-render',
+  progress: { completed: 0, total: 4, unit: 'render' },
+  target: {
+    type: 'project-version',
+    id: 'project-version-example-1',
+  },
+  visibleState: {
+    schemaVersion: 'visible-state/v1',
+    label: 'queued',
+    tone: 'neutral',
+    progress: { mode: 'not-started', percent: 0 },
+    primaryAction: 'view-progress',
+    availableActions: ['view-progress', 'cancel'],
+    terminal: false,
+  },
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -5984,6 +6004,63 @@ const transformationJobExample = {
   updatedAt: '2029-03-01T10:00:14.000Z',
 }
 
+const transformationFallbackDispatchLedgerExample = {
+  schemaVersion: 'transformation-fallback-ledger/v1',
+  id: 'transformation-fallback-dispatch-example',
+  projectId: 'project-medieval-01',
+  projectVersionId: 'project-version-medieval-01',
+  briefId: transformationBriefExample.id,
+  briefHash: transformationBriefExample.briefHash,
+  ladder: ['video-to-video', 'generated-cutaway', 'source-unchanged'],
+  attempts: [{
+    sequence: 0,
+    rung: 'video-to-video',
+    providerJobId: transformationJobExample.id,
+    providerId: 'atelier-v2v',
+    artifactId: 'artifact-rejected-v2v-example',
+    artifactSha256: '6'.repeat(64),
+    outcome: 'rejected',
+    intentScoreBps: 5_900,
+    criticReportHash: '7'.repeat(64),
+    violatesProtectedContent: false,
+    estimatedCostMinorUnits: 900,
+    observedCostMinorUnits: 900,
+    costCurrency: 'USD',
+    reason: 'critic rejected the generated result',
+  }],
+  currentRung: 'generated-cutaway',
+  bestArtifactId: null,
+  bestArtifactSha256: null,
+  bestIntentScoreBps: null,
+  incurredCostMinorUnits: 900,
+  costCurrency: 'USD',
+  reviewDecision: 'awaiting-review',
+  sourceArtifactId: 'artifact-specialist-take-01',
+  sourceArtifactSha256: 'c'.repeat(64),
+  createdAt: '2029-03-01T10:00:00.000Z',
+  updatedAt: '2029-03-01T10:04:20.000Z',
+  ledgerHash: '8'.repeat(64),
+}
+
+const transformationFallbackJobExample = {
+  ...transformationJobExample,
+  id: 'provider-job-generated-cutaway-example',
+  operation: 'generated-cutaway',
+  transformation: {
+    ...transformationJobExample.transformation,
+    selectionId: 'transformation-provider-selection-generated-cutaway-example',
+    selectionHash: '9'.repeat(64),
+    capabilityId: 'atelier-generated-cutaway-hd',
+    fallback: {
+      ledgerId: transformationFallbackDispatchLedgerExample.id,
+      ledgerHash: transformationFallbackDispatchLedgerExample.ledgerHash,
+      rung: 'generated-cutaway',
+      rejectedJobId: transformationJobExample.id,
+      rejectedReportHash: '7'.repeat(64),
+    },
+  },
+}
+
 const transformationCallbackAcceptedExample = {
   eventId: 'atelier-event-88213',
   providerId: 'atelier-v2v',
@@ -7482,6 +7559,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/transformation-fallback-dispatch-request/v1': [{
+      expectedLedgerHash: transformationFallbackDispatchLedgerExample.ledgerHash,
+      use: 'ads', market: 'BRA', locale: 'pt-BR',
+    }],
+    'apollo://schemas/transformation-fallback-dispatch-result/v1': [{
+      data: {
+        outcome: 'enqueued',
+        ledger: transformationFallbackDispatchLedgerExample,
+        job: transformationFallbackJobExample,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/provider-callback-notification/v1': [{
       providerJobId: 'medieval-v2v-7741',
       status: 'completed',
@@ -7718,6 +7807,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     }],
     'apollo://schemas/synthetic-production-run-read/v1': [{
       data: { run: { id: syntheticPlanExample.id, status: 'compiled', editPlanSnapshotId: 'snapshot-synthetic-example-1', plan: syntheticPlanExample } }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-production-render-operation-request/v1': [{
+      output: { kind: 'final', aspectRatio: '9:16' },
+    }],
+    'apollo://schemas/synthetic-production-render-operation-created/v1': [{
+      data: {
+        operation: queuedSyntheticProductionRenderOperationVisibleExample,
+        render: {
+          runId: syntheticPlanExample.id,
+          projectVersionId: syntheticPlanExample.projectVersionId,
+          editPlanSnapshotId: 'snapshot-synthetic-example-1',
+          renderInputHash: '3'.repeat(64),
+          outputArtifactId: 'artifact-synthetic-production-render-example-1',
+          outputManifestId: 'manifest-synthetic-production-render-example-1',
+        },
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
     }],
     'apollo://schemas/enqueue-provider-job-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'audio-avatar',
@@ -8633,6 +8740,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v11': [
       { data: { operation: queuedProductionBatchItemOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v12': [
+      { data: { operation: queuedSyntheticProductionRenderOperationVisibleExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -8677,6 +8787,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v10': [
       { data: { operations: [queuedLongFormIndexCostOperationExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v11': [
+      { data: { operations: [queuedSyntheticProductionRenderOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/enqueue-project-director-run-request/v1': [
       {

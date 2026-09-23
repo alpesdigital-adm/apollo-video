@@ -2,6 +2,7 @@ import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import { TRANSFORMATION_MODE_CONTRACTS } from './transformation-mode-registry.ts'
 import { assertTransformationBrief, type TransformationBrief, type TransformationMode } from './transformation-brief.ts'
+import type { ProviderOperation } from './provider-contract.ts'
 
 export const TRANSFORMATION_PROVIDER_DEFINITION_SCHEMA_VERSION = 'transformation-provider-definition/v1' as const
 export const TRANSFORMATION_PROVIDER_SELECTION_SCHEMA_VERSION = 'transformation-provider-selection/v1' as const
@@ -88,6 +89,8 @@ export interface TransformationProviderSelection {
   briefHash: string
   selectedProviderId?: string
   selectedCapabilityId?: string
+  /** Present when routing a fallback operation that differs from brief.mode. */
+  requestedOperation?: ProviderOperation
   candidates: readonly Readonly<TransformationProviderCandidateDecision>[]
   policy: Readonly<TransformationRoutingPolicy>
   selectedReason: string
@@ -119,7 +122,10 @@ function instant(value: string, field: string): string {
 
 function capability(input: Omit<TransformationProviderCapability, 'capabilityHash'> & { capabilityHash?: string }): Readonly<TransformationProviderCapability> {
   assertDomain(input.modes.length > 0 && new Set(input.modes).size === input.modes.length, 'INVALID_ARGUMENT', 'Provider capability modes are invalid')
-  assertDomain(input.modes.every((mode) => TRANSFORMATION_MODE_CONTRACTS[mode].providerCapability === input.operation), 'INVALID_ARGUMENT', 'Provider operation does not satisfy the declared modes')
+  assertDomain(input.modes.every((mode) =>
+    TRANSFORMATION_MODE_CONTRACTS[mode].providerCapability === input.operation ||
+    (input.operation === 'generated-cutaway' && TRANSFORMATION_MODE_CONTRACTS[mode].defaultFallbackLadder.includes('generated-cutaway')),
+  ), 'INVALID_ARGUMENT', 'Provider operation does not satisfy the declared modes or their fallback ladder')
   assertDomain(input.regions.length > 0 && input.regions.every((region) => LOCALE.test(region)), 'INVALID_ARGUMENT', 'Provider capability regions are invalid')
   assertDomain(Number.isSafeInteger(input.maximumDurationFrames) && input.maximumDurationFrames > 0, 'INVALID_ARGUMENT', 'Provider duration limit is invalid')
   assertDomain(Number.isSafeInteger(input.maximumWidth) && input.maximumWidth > 0 && Number.isSafeInteger(input.maximumHeight) && input.maximumHeight > 0, 'INVALID_ARGUMENT', 'Provider dimension limit is invalid')
@@ -222,6 +228,7 @@ export function routeTransformationProvider(input: {
   health: readonly Readonly<TransformationProviderHealth>[]
   policy: Readonly<TransformationRoutingPolicy>
   createdAt: string
+  requestedOperation?: ProviderOperation
 }): Readonly<TransformationProviderSelection> {
   const brief = assertTransformationBrief(input.brief)
   assertDomain(Number.isSafeInteger(input.policy.maximumCostMinorUnits) && input.policy.maximumCostMinorUnits >= 0, 'INVALID_ARGUMENT', 'maximumCostMinorUnits is invalid')
@@ -232,7 +239,8 @@ export function routeTransformationProvider(input: {
   const decisions = input.providers.map((provider): TransformationProviderCandidateDecision => {
     const reasons: TransformationProviderDiscardReason[] = []
     if (provider.workspaceId !== brief.workspaceId || !provider.enabled) reasons.push('provider-disabled')
-    const matching = provider.capabilities.filter((item) => item.modes.includes(brief.mode))
+    const operation = input.requestedOperation ?? TRANSFORMATION_MODE_CONTRACTS[brief.mode].providerCapability
+    const matching = provider.capabilities.filter((item) => item.modes.includes(brief.mode) && item.operation === operation)
     if (matching.length === 0) {
       const missingReasons: TransformationProviderDiscardReason[] = [...reasons, 'capability-missing']
       return Object.freeze({ providerId: provider.id, eligible: false, reasons: Object.freeze(missingReasons) })
@@ -261,6 +269,7 @@ export function routeTransformationProvider(input: {
     briefId: brief.id,
     briefHash: brief.briefHash,
     ...(selected ? { selectedProviderId: selected.providerId, selectedCapabilityId: selected.capabilityId } : {}),
+    ...(input.requestedOperation ? { requestedOperation: input.requestedOperation } : {}),
     candidates: ordered,
     policy: Object.freeze({ ...input.policy, output: Object.freeze({ ...input.policy.output }) }),
     selectedReason: selected ? `eligible:${selected.providerId}:${selected.capabilityId}` : 'no-eligible-provider',

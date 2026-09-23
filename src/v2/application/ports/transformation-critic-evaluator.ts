@@ -1,5 +1,6 @@
 import type { MediaArtifactRecord } from './media-artifact-query-repository.ts'
 import type { TransformationBrief } from '../../domain/transformation-brief.ts'
+import type { AvatarAudioComparison } from '../../domain/avatar-output-speech-evidence.ts'
 import type {
   TransformationCriticAction,
   TransformationCriticDecision,
@@ -31,4 +32,14 @@ export interface TransformationCriticEvaluator {
     operationId: string
     signal?: AbortSignal
   }): Promise<Readonly<TransformationCriticEvaluation>>
+}
+
+export interface TransformationAudioPreservationEvaluator {
+  compare(input: {
+    sourcePath: string
+    resultPath: string
+    sourceStartMs: number
+    sourceDurationMs: number
+    signal?: AbortSignal
+  }): Promise<Readonly<AvatarAudioComparison>>
 }

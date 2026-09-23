@@ -28,6 +28,12 @@ import { SUBTITLE_SEGMENT_OVERRIDE_ANCHORS } from '../domain/subtitle-segment-ov
 import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
 import { PROVIDER_CALLBACK_REJECTIONS } from '../domain/provider-job-callback.ts'
 import { PROVIDER_JOB_TRANSPORTS } from '../domain/provider-job-transport.ts'
+import { PROVIDER_OPERATIONS } from '../domain/provider-contract.ts'
+import {
+  FALLBACK_ATTEMPT_OUTCOMES,
+  FALLBACK_DESCENT_REASONS,
+  FALLBACK_REVIEW_DECISIONS,
+} from '../domain/transformation-fallback.ts'
 import {
   SYNTHETIC_PHASE_GATE_CRITERIA,
   SYNTHETIC_PHASE_GATE_EVIDENCE_TYPES,
@@ -8883,6 +8889,19 @@ const publicOperationSchemaV11 = {
   },
 }
 
+const publicOperationSchemaV12 = {
+  ...publicOperationSchemaV11,
+  properties: {
+    ...publicOperationSchemaV11.properties,
+    type: {
+      enum: [
+        ...publicOperationSchemaV11.properties.type.enum,
+        'synthetic-production-render',
+      ],
+    },
+  },
+}
+
 const longFormStageNames = [
   'probe',
   'transcript',
@@ -14535,6 +14554,7 @@ const transformationSelectionPublicSchema: JsonSchema = {
   properties: {
     id: idSchema, briefId: idSchema, briefHash: sha256Schema,
     selectedProviderId: idSchema, selectedCapabilityId: idSchema,
+    requestedOperation: { enum: [...PROVIDER_OPERATIONS] },
     selectedReason: { type: 'string', maxLength: 300 },
     candidates: {
       type: 'array', maxItems: 100,
@@ -14550,6 +14570,56 @@ const transformationSelectionPublicSchema: JsonSchema = {
     },
     policy: { type: 'object', maxProperties: 20, additionalProperties: true },
     createdAt: dateTimeSchema, selectionHash: sha256Schema,
+  },
+}
+
+const transformationFallbackLedgerPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'projectId', 'projectVersionId', 'briefId', 'briefHash',
+    'ladder', 'attempts', 'currentRung', 'bestArtifactId', 'bestArtifactSha256',
+    'bestIntentScoreBps', 'incurredCostMinorUnits', 'costCurrency', 'reviewDecision',
+    'sourceArtifactId', 'sourceArtifactSha256', 'createdAt', 'updatedAt', 'ledgerHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'transformation-fallback-ledger/v1' },
+    id: idSchema, projectId: idSchema, projectVersionId: idSchema,
+    briefId: idSchema, briefHash: sha256Schema,
+    ladder: { type: 'array', minItems: 1, maxItems: 5, uniqueItems: true, items: { enum: [...TRANSFORMATION_FALLBACKS] } },
+    attempts: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: [
+          'sequence', 'rung', 'outcome', 'intentScoreBps', 'violatesProtectedContent',
+          'estimatedCostMinorUnits', 'observedCostMinorUnits', 'costCurrency', 'reason',
+        ],
+        properties: {
+          sequence: { type: 'integer', minimum: 0 },
+          rung: { enum: [...TRANSFORMATION_FALLBACKS] },
+          providerJobId: idSchema, providerId: idSchema,
+          artifactId: idSchema, artifactSha256: sha256Schema,
+          outcome: { enum: [...FALLBACK_ATTEMPT_OUTCOMES] },
+          intentScoreBps: { oneOf: [{ type: 'integer', minimum: 0, maximum: 10000 }, { type: 'null' }] },
+          criticReportHash: sha256Schema,
+          violatesProtectedContent: { type: 'boolean' },
+          estimatedCostMinorUnits: { type: 'integer', minimum: 0 },
+          observedCostMinorUnits: { type: 'integer', minimum: 0 },
+          costCurrency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          reason: { type: 'string', minLength: 1, maxLength: 500 },
+          descendedBecause: { enum: [...FALLBACK_DESCENT_REASONS] },
+        },
+      },
+    },
+    currentRung: { enum: [...TRANSFORMATION_FALLBACKS] },
+    bestArtifactId: { oneOf: [idSchema, { type: 'null' }] },
+    bestArtifactSha256: { oneOf: [sha256Schema, { type: 'null' }] },
+    bestIntentScoreBps: { oneOf: [{ type: 'integer', minimum: 0, maximum: 10000 }, { type: 'null' }] },
+    incurredCostMinorUnits: { type: 'integer', minimum: 0 },
+    costCurrency: { type: 'string', pattern: '^[A-Z]{3}$' },
+    reviewDecision: { enum: [...FALLBACK_REVIEW_DECISIONS] },
+    sourceArtifactId: idSchema, sourceArtifactSha256: sha256Schema,
+    createdAt: dateTimeSchema, updatedAt: dateTimeSchema, ledgerHash: sha256Schema,
   },
 }
 
@@ -14591,6 +14661,14 @@ const transformationJobPublicSchema: JsonSchema = {
       properties: {
         briefId: idSchema, briefHash: sha256Schema, selectionId: idSchema, selectionHash: sha256Schema,
         providerId: idSchema, capabilityId: idSchema,
+        fallback: {
+          type: 'object', additionalProperties: false,
+          required: ['ledgerId', 'ledgerHash', 'rung', 'rejectedJobId', 'rejectedReportHash'],
+          properties: {
+            ledgerId: idSchema, ledgerHash: sha256Schema, rung: { const: 'generated-cutaway' },
+            rejectedJobId: idSchema, rejectedReportHash: sha256Schema,
+          },
+        },
       },
     },
     transport: transformationTransportPublicSchema,
@@ -17927,6 +18005,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV11 },
     }),
   ),
+  defineSchema('public-operation-detail', 12, 'Public operation detail including synthetic production renders',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV12 },
+    }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -18453,6 +18539,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['operations'],
       properties: {
         operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV10 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    }),
+  ),
+  defineSchema('public-operation-list', 11, 'Public operation list including synthetic production renders',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV12 },
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
       },
     }),
@@ -25688,6 +25785,35 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('synthetic-production-run-read', 1, 'Read one immutable synthetic production run',
     successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: { type: 'object', additionalProperties: false, required: ['id', 'status', 'editPlanSnapshotId', 'plan'], properties: { id: idSchema, status: { enum: ['compiled', 'rendering', 'completed', 'failed', 'canceled'] }, editPlanSnapshotId: idSchema, plan: syntheticProductionPlanSchema } } } }),
   ),
+  defineSchema('synthetic-production-render-operation-request', 1, 'Queue one proxy or final MP4 render from a persisted synthetic production run', {
+    type: 'object', additionalProperties: false, required: ['output'],
+    properties: {
+      output: {
+        type: 'object', additionalProperties: false, required: ['kind', 'aspectRatio'],
+        properties: {
+          kind: { enum: ['proxy', 'final'] },
+          aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+        },
+      },
+    },
+  }),
+  defineSchema('synthetic-production-render-operation-created', 1, 'Queued or replayed synthetic production render identity',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['operation', 'render', 'replayed'],
+      properties: {
+        operation: publicOperationSchemaV12,
+        render: {
+          type: 'object', additionalProperties: false,
+          required: ['runId', 'projectVersionId', 'editPlanSnapshotId', 'renderInputHash', 'outputArtifactId', 'outputManifestId'],
+          properties: {
+            runId: idSchema, projectVersionId: idSchema, editPlanSnapshotId: idSchema,
+            renderInputHash: sha256Schema, outputArtifactId: idSchema, outputManifestId: idSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('create-synthetic-audio-master-request', 1, 'Approve immutable aligned audio before synthetic video generation', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'profileSnapshotId', 'source', 'audioArtifactId', 'alignmentEvidenceArtifactId', 'durationMs', 'locale', 'words', 'approvedAt', 'approvalCriticHash', 'use', 'market'],
@@ -26235,6 +26361,28 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         ledger: { type: 'object', additionalProperties: true },
         actions: { type: 'array', uniqueItems: true, items: { enum: ['accept','retry','descend','keep-source'] } },
         replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('transformation-fallback-dispatch-request', 1, 'Dispatch the server-selected generated-cutaway rung of one exact fallback ledger', {
+    type: 'object', additionalProperties: false,
+    required: ['expectedLedgerHash', 'use', 'market', 'locale'],
+    properties: {
+      expectedLedgerHash: sha256Schema,
+      use: { type: 'string', minLength: 1, maxLength: 128 },
+      market: { type: 'string', minLength: 1, maxLength: 64 },
+      locale: { type: 'string', minLength: 1, maxLength: 35 },
+    },
+  }),
+  defineSchema('transformation-fallback-dispatch-result', 1, 'The persisted fallback decision and optional durable generated-cutaway job',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['outcome', 'ledger'],
+      properties: {
+        outcome: { enum: ['enqueued', 'replayed', 'skipped'] },
+        ledger: transformationFallbackLedgerPublicSchema,
+        job: transformationJobPublicSchema,
+        reason: { const: 'capability-unavailable' },
       },
     }),
   ),

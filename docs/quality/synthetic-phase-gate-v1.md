@@ -4,10 +4,15 @@
 
 Domain evaluator, immutable PostgreSQL persistence, the authoritative W24.2
 collector for provider execution and master catalogues, and the authenticated
-public run/list API are implemented locally. Provider-live execution, the
-render-bound reuse/fallback/swap projections, editor integration, production
-deployment and acceptance are still open. All W24.2 local gates listed below
-passed under Astra supervision; the W24.2 CI run is still pending. This
+public run/list API are implemented locally. W24.3 adds the canonical synthetic
+render operation, protected compiler input, Remotion worker, MP4 inspection,
+technical quality report, build attestation persistence and cross-project
+master-consumption lineage. Those W24.3 paths are implemented in the working
+tree and remain under local PostgreSQL/render validation. Provider-live
+execution, production deployment and acceptance are still open. All W24.2
+local gates listed below passed under Astra supervision, and CI run
+`35859804992` passed both jobs at `46cae59d81916f597f47b50a077682e5413261a4`.
+This
 document is not an approval record or a production acceptance record.
 
 ## Purpose
@@ -59,10 +64,15 @@ digests and verifies a clean Git tree, commit, contract graph, toolchain and the
 materialized Remotion bundle before and after execution. Abort and timeout stop
 the owned process tree before the runner returns.
 
-The domain, service, runner and port are ready locally. Persistence is withheld
-until W24.3 supplies the canonical synthetic render operation and manifest
-binding. Consequently no build attestation is collected for `F3-GATE-004` in
-W24.2, and commit metadata alone cannot make that check covered.
+W24.3 persists the attestation only against the exact render operation,
+checkpoint, manifest, plan snapshot and runtime identity. The render worker
+does not execute build checks: a separate local/CI service runs them while the
+operation waits without a lease, and the next worker claim revalidates current
+authority before completing the operation and production run atomically.
+Production hosts therefore cannot run validation builds through the render
+worker. Until the controlled W24.3 render journey passes with a clean checkout,
+these bindings remain implemented locally rather than accepted evidence for
+`F3-GATE-004`.
 
 ## Public API
 
@@ -116,18 +126,19 @@ These results prove the local W24.2 implementation and controlled PostgreSQL
 integration. The catalogue proof is intentionally partial: it covers the
 approved master and speech-segment catalogue path, while the consuming render
 lineage needed for cross-project reuse, fallback and provider swap belongs to
-W24.3. The W24.2 CI run has not yet completed, and no live provider execution,
-W24.3 render journey, editor UI, reviewed final MP4, merge, deployment, product
+W24.3. W24.2 CI run `35859804992` passed both jobs. No live provider execution,
+completed W24.3 render journey, reviewed final MP4, merge, deployment, product
 acceptance or TODO closure is claimed.
 
 ## Remaining integration
 
-W24.3 must bind cross-project reuse, transformation rejection/fallback and the
-provider swap to the exact consuming synthetic render operation, assets,
-materialized props, manifest and attested bundle. Until those joins exist, the
-corresponding checks stay missing even when historical cache or fallback rows
-exist. It must also expose gate history in the editor and exercise the same
-collector through the integrated production journey.
+The W24.3 working tree now models those joins. Acceptance still requires the
+supervised PostgreSQL journey to prove the canonical master consumption,
+fallback chain, provider swap, render operation, materialized props, manifest,
+technical report and attested bundle together. Checks stay missing when any
+authority is absent, controlled evidence is presented as live, or the terminal
+render binding is incomplete. The editor history must exercise the same
+collector in that integrated journey.
 
 A separately authorized live run must traverse the production provider
 services. Adapter names, controlled transport receipts and controlled

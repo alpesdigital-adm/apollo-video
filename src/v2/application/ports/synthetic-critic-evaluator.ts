@@ -4,6 +4,7 @@ import type {
   SyntheticCriticMeasurement,
 } from '../../domain/synthetic-critic-report.ts'
 import type { SyntheticCriticFinding } from '../../domain/synthetic-critic-thresholds.ts'
+import type { AvatarOutputSpeechEvidence } from '../../domain/avatar-output-speech-evidence.ts'
 
 /**
  * The bytes an evaluator is allowed to judge, named by their content address so
@@ -56,6 +57,8 @@ export interface SyntheticCriticExpectation {
 }
 
 export interface SyntheticCriticSubject {
+  /** Durable origin job. Required for output-side avatar evidence. */
+  providerJobId?: string
   workspaceId: string
   projectId: string
   blockId: string
@@ -67,6 +70,10 @@ export interface SyntheticCriticSubject {
   video: Readonly<SyntheticCriticArtifactRef> | null
   audio: Readonly<SyntheticCriticArtifactRef> | null
   alignmentArtifactId: string | null
+  /** Output-side evidence. Input TTS alignment never satisfies this field. */
+  outputSpeechEvidence?: Readonly<AvatarOutputSpeechEvidence> | null
+  outputSpeechEvidenceArtifactId?: string | null
+  scriptHash?: string
   /** The approved text, exactly as approved. */
   scriptText: string
   expected: Readonly<SyntheticCriticExpectation>

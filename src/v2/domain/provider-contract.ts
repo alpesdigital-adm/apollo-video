@@ -5,6 +5,7 @@ export const PROVIDER_OPERATIONS = [
   'lip-sync',
   'image-to-video',
   'video-to-video',
+  'generated-cutaway',
   'background-replace',
   'camera-motion',
 ] as const

@@ -147,7 +147,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
   private readonly clock: () => Date
   private readonly costMinorUnitsPerMinute: number
   private readonly requestTimeoutMs: number
-  private readonly runtimeClass: 'controlled' | 'live'
+  readonly runtimeClass: 'controlled' | 'live'
 
   constructor(input: {
     apiKey: string

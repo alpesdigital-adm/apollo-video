@@ -3,6 +3,17 @@ import type {
   PersistedSyntheticPresenterProfile,
   PersistedSyntheticProductionRun,
 } from '../application/ports/synthetic-production-repository.ts'
+import type { PublicOperation } from '../domain/public-operation.ts'
+import type {
+  SyntheticProductionRenderAspectRatio,
+  SyntheticProductionRenderKind,
+} from '../domain/synthetic-production-render.ts'
+import { presentPublicOperationV2 } from './presenters.ts'
+
+export const SYNTHETIC_PRODUCTION_RENDER_KINDS = ['proxy', 'final'] as const
+export const SYNTHETIC_PRODUCTION_RENDER_ASPECT_RATIOS = [
+  '9:16', '16:9', '4:5', '1:1', '21:9',
+] as const
 
 function record(value: unknown, field: string): Record<string, unknown> {
   assertDomain(
@@ -186,6 +197,53 @@ export function parseCreateSyntheticProductionRunBody(raw: unknown) {
     captions: body.captions,
     use: string(body.use, 'body.use'),
     market: string(body.market, 'body.market'),
+  })
+}
+
+export function parseCreateSyntheticProductionRenderOperationBody(raw: unknown): Readonly<{
+  output: Readonly<{
+    kind: SyntheticProductionRenderKind
+    aspectRatio: SyntheticProductionRenderAspectRatio
+  }>
+}> {
+  const body = record(raw, 'body')
+  exact(body, ['output'], 'body')
+  const output = record(body.output, 'body.output')
+  exact(output, ['kind', 'aspectRatio'], 'body.output')
+  assertDomain(
+    SYNTHETIC_PRODUCTION_RENDER_KINDS.includes(output.kind as SyntheticProductionRenderKind),
+    'INVALID_ARGUMENT',
+    'body.output.kind is unsupported',
+  )
+  assertDomain(
+    SYNTHETIC_PRODUCTION_RENDER_ASPECT_RATIOS.includes(output.aspectRatio as SyntheticProductionRenderAspectRatio),
+    'INVALID_ARGUMENT',
+    'body.output.aspectRatio is unsupported',
+  )
+  return Object.freeze({
+    output: Object.freeze({
+      kind: output.kind as SyntheticProductionRenderKind,
+      aspectRatio: output.aspectRatio as SyntheticProductionRenderAspectRatio,
+    }),
+  })
+}
+
+export function presentSyntheticProductionRenderOperation(result: Readonly<{
+  operation: Readonly<PublicOperation>
+  render: Readonly<{
+    runId: string
+    projectVersionId: string
+    editPlanSnapshotId: string
+    renderInputHash: string
+    outputArtifactId: string
+    outputManifestId: string
+  }>
+  replayed: boolean
+}>) {
+  return Object.freeze({
+    operation: presentPublicOperationV2(result.operation, { includeProjectId: true }),
+    render: Object.freeze({ ...result.render }),
+    replayed: result.replayed,
   })
 }
 

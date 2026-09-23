@@ -62,6 +62,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { createSyntheticMasterAsset } = await import('../../src/v2/domain/synthetic-master-asset.ts')
     const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
+    const { createAvatarOutputSpeechEvidence } = await import('../../src/v2/domain/avatar-output-speech-evidence.ts')
     const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../src/v2/domain/asset-rights.ts')
     const { createAssetRightsChangeIntent } = await import('../../src/v2/domain/asset-rights-change.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
@@ -126,6 +127,12 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
         byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
       },
     })
+    await client.v2MediaArtifact.create({
+      data: {
+        id: 'master-output-speech-evidence', workspaceId, artifactKey: 'master/output-speech.json', sha256: hash('9'),
+        byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
+      },
+    })
 
     const profile = await registerSyntheticPresenterProfileService({
       repository: new PrismaSyntheticProductionRepository(client),
@@ -171,7 +178,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       data: {
         id: providerJobId, workspaceId, projectId, originProjectVersionId: projectVersionId,
         schemaVersion: 'provider-job/v1', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
-        providerJobId: 'heygen_job_master', inputJson: '{}', inputHash: hash('1'),
+        providerJobId: 'heygen_job_master', inputJson: JSON.stringify({ audioRange: { startMs: 0, endMs: 4_000, rangeHash: hash('7') } }), inputHash: hash('1'),
         authorizationJson: JSON.stringify({ profileSnapshotId }), authorizationHash: hash('2'), status: 'approved',
         resultArtifactId: artifactIds['normalized-video'], resultArtifactSha256: artifactShas['normalized-video'],
         criticResultHash, jobJson: '{}', jobHash: hash('3'), requestFingerprint: hash('4'),
@@ -219,12 +226,28 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       dimension, status: 'unavailable', evaluatorId: null, value: null, unit: null,
       threshold: null, confidence: null, evidenceRefs: [], range: null, note,
     })
+    const reportScriptHash = createHash('sha256').update('Primeira ideia do roteiro. Segunda ideia bem forte.', 'utf8').digest('hex')
+    const outputSpeechEvidence = createAvatarOutputSpeechEvidence({
+      jobId: providerJobId,
+      videoArtifactId: artifactIds['normalized-video'], videoArtifactSha256: artifactShas['normalized-video'],
+      sourceAudioArtifactId: artifactIds['final-audio'], sourceAudioRangeHash: hash('7'),
+      sourcePcmSha256: hash('8'), outputPcmSha256: hash('9'),
+      sourceDurationMs: 4_000, outputDurationMs: 4_000,
+      policyVersion: 'avatar-audio-pcm-comparison/1.1.0', sampleRateHz: 16_000,
+      alignedLagSamples: 0, correlationBps: 10_000, normalizedErrorBps: 0,
+      comparedSampleCount: 64_000, sourceCoverageBps: 10_000, outputCoverageBps: 10_000,
+      worstWindowCorrelationBps: 10_000, worstWindowNormalizedErrorBps: 0,
+      failedWindowCount: 0, comparedWindowCount: 16, sourceRmsBps: 5_000, outputRmsBps: 5_000, passed: true,
+      speechEvidence: { kind: 'controlled', evaluatorId: 'controlled-output-speech', evaluatorVersion: '1.0.0', outputTranscriptHash: reportScriptHash, observedIdentityRef: 'avatar_master' },
+    })
     const criticReport = createSyntheticCriticReport({
       id: 'master-critic-report-1', workspaceId, projectId, blockId: 'master-block',
+      providerJobId,
       capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
       artifactId: artifactIds['normalized-video'], artifactSha256: artifactShas['normalized-video'],
-      audioArtifactId: artifactIds['final-audio'], alignmentArtifactId: artifactIds.alignment,
-      scriptHash: createHash('sha256').update('Primeira ideia do roteiro. Segunda ideia bem forte.', 'utf8').digest('hex'), profileSnapshotId, expectedIdentityRef: 'avatar_master',
+      audioArtifactId: null, alignmentArtifactId: artifactIds.alignment,
+      outputSpeechEvidence, outputSpeechEvidenceArtifactId: 'master-output-speech-evidence',
+      scriptHash: reportScriptHash, profileSnapshotId, expectedIdentityRef: 'avatar_master',
       expectationHash: hash('8'),
       evaluationContextHash: createHash('sha256')
         .update(`master-asset-context:${providerJobId}:${artifactIds['normalized-video']}`)

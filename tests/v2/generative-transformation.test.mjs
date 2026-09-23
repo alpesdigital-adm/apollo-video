@@ -1,5 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { combineTransformationPreservationScores, FfmpegTransformationCriticEvaluator } from '../../src/v2/infrastructure/transformation/ffmpeg-transformation-critic.ts'
+import { dispatchGeneratedCutawayFallbackService } from '../../src/v2/application/transformation-jobs.ts'
+import { materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
+import { runControlledTransformationFallback } from './helpers/run-controlled-transformation-fallback.mjs'
 
 import {
   classifyProviderCallbackReplay,
@@ -83,6 +88,29 @@ test('T-FR-112 routing records discarded reasons without mutating the brief', ()
   assert.ok(routed.candidates.find((item) => item.providerId === unavailable.id).reasons.includes('health-unavailable'))
   assert.equal(JSON.stringify(brief), before)
   assert.match(routed.selectionHash, /^[a-f0-9]{64}$/)
+})
+
+test('T-FR-112 routes a generated cutaway fallback without rewriting a stylization brief', () => {
+  const brief = createTransformationBrief({
+    ...TRANSFORMATION_GOLDENS.medieval,
+    id: 'brief-stylization-fallback',
+    mode: 'stylization',
+    preserve: ['timing', 'speech', 'audio'],
+    allowedChanges: ['environment'],
+    fallbackLadder: ['video-to-video', 'generated-cutaway', 'source-unchanged'],
+    briefHash: undefined,
+  })
+  const primary = provider({ id: 'provider-v2v', adapterId: 'adapter-v2v', capabilityId: 'capability-v2v', operation: 'video-to-video', modes: ['stylization'] })
+  const fallback = provider({ id: 'provider-cutaway', adapterId: 'adapter-cutaway', capabilityId: 'capability-cutaway', operation: 'generated-cutaway', modes: ['stylization'] })
+  const before = brief.briefHash
+  const policy = { region: 'br', maximumCostMinorUnits: 200, minimumQualityScoreBps: 8_000, output: { width: 1080, height: 1920, includeAudio: true, fps: 30 } }
+  const normal = routeTransformationProvider({ brief, providers: [primary, fallback], health: [health(primary.id), health(fallback.id)], policy, createdAt: '2026-08-30T12:02:00.000Z' })
+  const routedFallback = routeTransformationProvider({ brief, providers: [primary, fallback], health: [health(primary.id), health(fallback.id)], policy, createdAt: '2026-08-30T12:02:01.000Z', requestedOperation: 'generated-cutaway' })
+  assert.equal(normal.selectedProviderId, primary.id)
+  assert.equal(routedFallback.selectedProviderId, fallback.id)
+  assert.equal(routedFallback.requestedOperation, 'generated-cutaway')
+  assert.equal(brief.briefHash, before)
+  assert.equal(brief.mode, 'stylization')
 })
 
 test('T-FR-112 circuit breaker opens deterministically without deleting provider state', () => {
@@ -172,10 +200,214 @@ test('T-FR-114 through T-FR-116 preserve novelty fallback and protected-change b
   assert.equal(critic.issue.code, 'protected-content-changed')
 })
 
+test('passing output audio cannot satisfy an unavailable visual preservation requirement', () => {
+  assert.equal(combineTransformationPreservationScores({
+    audioRequired: true,
+    visualPreservationRequired: true,
+    visualScore: null,
+    audioPassed: true,
+  }), null)
+  assert.equal(combineTransformationPreservationScores({
+    audioRequired: true,
+    visualPreservationRequired: false,
+    visualScore: null,
+    audioPassed: true,
+  }), 10_000)
+})
+
+test('transformation critic waits for sibling acquisition and probe work before cleanup', async () => {
+  let slowMaterializationFinished = false
+  const acquisitionCleanups = []
+  const acquisition = new FfmpegTransformationCriticEvaluator({
+    sources: {
+      async materialize({ operationId }) {
+        if (operationId.endsWith('result')) throw new Error('result materialization failed')
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        slowMaterializationFinished = true
+        return { path: 'source.mp4', sha256: 'a'.repeat(64), byteSize: 1 }
+      },
+      async cleanup(operationId) {
+        assert.equal(slowMaterializationFinished, true, 'cleanup cannot race a sibling materialization')
+        acquisitionCleanups.push(operationId)
+      },
+    },
+    prober: { async probe() { throw new Error('unreachable') } },
+  })
+  const minimal = {
+    operationId: 'transformation-acquisition-failure', signal: undefined,
+    source: { artifactKey: 'source', sha256: 'a'.repeat(64), byteSize: 1n },
+    result: { artifactKey: 'result', sha256: 'b'.repeat(64), byteSize: 1n },
+  }
+  await assert.rejects(acquisition.evaluate(minimal), /materialization failed/)
+  assert.equal(acquisitionCleanups.length, 2)
+
+  let slowProbeFinished = false
+  const probeCleanups = []
+  let probes = 0
+  const probing = new FfmpegTransformationCriticEvaluator({
+    sources: {
+      async materialize({ artifactKey, sha256, byteSize }) { return { path: `${artifactKey}.mp4`, sha256, byteSize } },
+      async cleanup(operationId) {
+        assert.equal(slowProbeFinished, true, 'cleanup cannot race a sibling probe')
+        probeCleanups.push(operationId)
+      },
+    },
+    prober: {
+      async probe() {
+        probes += 1
+        if (probes === 1) throw new Error('source probe failed')
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        slowProbeFinished = true
+        return {}
+      },
+    },
+  })
+  await assert.rejects(probing.evaluate({ ...minimal, operationId: 'transformation-probe-failure' }), /source probe failed/)
+  assert.equal(probeCleanups.length, 2)
+})
+
+test('fallback dispatch public idempotency replays the durable claim and rejects key reuse before effects', async () => {
+  const actor = Object.freeze({
+    clientId: 'fallback-client', credentialId: 'fallback-credential', workspaceId: 'workspace-golden',
+    environment: 'production', actor: Object.freeze({ type: 'api-client', id: 'fallback-client' }),
+    scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active',
+    auditContext: Object.freeze({ clientId: 'fallback-client', credentialId: 'fallback-credential', workspaceId: 'workspace-golden', environment: 'production', actor: Object.freeze({ type: 'api-client', id: 'fallback-client' }) }),
+  })
+  const audit = materializeActorAuditContext(actor)
+  const ledger = Object.freeze({ id: 'fallback-ledger-1', ledgerHash: 'a'.repeat(64), briefId: 'fallback-brief-1' })
+  const baseRequest = {
+    workspaceId: 'workspace-golden', projectId: 'project-golden', ledgerId: ledger.id,
+    expectedLedgerHash: ledger.ledgerHash, use: 'ads', market: 'BRA', locale: 'pt-BR',
+    actor, idempotencyKey: 'fallback-public-key-1',
+  }
+  const fingerprint = calculateCanonicalHash({
+    schemaVersion: 'generated-cutaway-dispatch-request/v1', workspaceId: baseRequest.workspaceId,
+    projectId: baseRequest.projectId, ledgerId: baseRequest.ledgerId,
+    expectedLedgerHash: baseRequest.expectedLedgerHash, use: baseRequest.use,
+    market: baseRequest.market, locale: baseRequest.locale, actorContextHash: audit.contextHash,
+  })
+  let ledgerReads = 0
+  let enqueues = 0
+  const fallbackOrigin = Object.freeze({ ledgerId: ledger.id, ledgerHash: ledger.ledgerHash, rung: 'generated-cutaway', dispatchRequestHash: fingerprint })
+  const persistedJob = Object.freeze({ job: Object.freeze({ id: 'fallback-job-1', transformation: Object.freeze({ fallback: fallbackOrigin }) }) })
+  const execute = dispatchGeneratedCutawayFallbackService({
+    quality: {
+      async readFallbackDispatchRequest() {
+        return { requestFingerprint: fingerprint, authenticationAudit: audit, claim: {
+          id: 'fallback-claim-1', workspaceId: baseRequest.workspaceId, projectId: baseRequest.projectId,
+          requestedLedgerId: ledger.id, requestedLedgerHash: ledger.ledgerHash, briefId: ledger.briefId,
+          dispatchRequestHash: fingerprint, authenticationAudit: audit,
+          rung: 'generated-cutaway', outcome: 'enqueued', providerJobId: 'fallback-job-1',
+          resultLedgerId: null, resultLedgerHash: null, reason: null,
+        } }
+      },
+      async readFallbackLedger() { ledgerReads += 1; return ledger },
+    },
+    jobs: { async read() { return persistedJob } },
+    registry: {},
+    async enqueue() { enqueues += 1; throw new Error('must not enqueue a settled claim') },
+    clock: () => new Date('2029-03-01T10:00:00.000Z'),
+  })
+  const replay = await execute(baseRequest)
+  assert.equal(replay.outcome, 'replayed')
+  assert.equal(replay.job, persistedJob)
+  assert.equal(enqueues, 0)
+
+  await assert.rejects(
+    execute({ ...baseRequest, ledgerId: 'fallback-ledger-other', expectedLedgerHash: 'b'.repeat(64) }),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+  assert.equal(ledgerReads, 1, 'a mismatched public key is refused before reading or mutating another ledger')
+  await assert.rejects(execute({ ...baseRequest, idempotencyKey: '' }), /Idempotency-Key is invalid/)
+
+  let claimCalls = 0
+  const aliasDispatch = dispatchGeneratedCutawayFallbackService({
+    quality: {
+      async readFallbackDispatchRequest() { return null },
+      async readFallbackLedger() { return ledger },
+      async claimFallbackDispatch() {
+        claimCalls += 1
+        return { requestReplayed: false, claim: {
+          id: 'fallback-claim-1', workspaceId: baseRequest.workspaceId, projectId: baseRequest.projectId,
+          requestedLedgerId: ledger.id, requestedLedgerHash: ledger.ledgerHash, briefId: ledger.briefId,
+          dispatchRequestHash: fingerprint, authenticationAudit: audit,
+          rung: 'generated-cutaway', outcome: 'enqueued', providerJobId: 'fallback-job-1',
+          resultLedgerId: null, resultLedgerHash: null, reason: null,
+        } }
+      },
+    },
+    jobs: { async read() { return persistedJob } }, registry: {},
+    async enqueue() { enqueues += 1; throw new Error('must not enqueue an aliased claim') },
+    clock: () => new Date('2029-03-01T10:00:00.000Z'),
+  })
+  const [aliasA, aliasB] = await Promise.all([
+    aliasDispatch({ ...baseRequest, idempotencyKey: 'fallback-public-key-a' }),
+    aliasDispatch({ ...baseRequest, idempotencyKey: 'fallback-public-key-b' }),
+  ])
+  assert.equal(aliasA.job.job.id, aliasB.job.job.id)
+  assert.equal(claimCalls, 2, 'each public key is durably aliased to the single internal rung claim')
+  assert.equal(enqueues, 0)
+})
+
 test('T-FR-123 and T-FR-218 keep cleanup derivatives immutable and mask review explicit', () => {
   const mask = annotationToMask({ pixels: { x: 100, y: 50, width: 200, height: 100 }, canvas: { width: 1000, height: 500 }, rangeMs: [0, 2000], confidence: .9, format: '9:16' })
   assert.deepEqual(mask.normalized, { x: .1, y: .1, width: .2, height: .2 })
   const plan = planAdvancedCleanup({ mask, sourceId: 'source', operation: 'inpaint', qualityThreshold: .8, estimated: { quality: .9, cost: 4 }, alternatives: [{ method: 'crop', quality: .85, cost: 1 }] })
   assert.equal(plan.immutableSource, true)
   assert.equal(plan.chosen.cost, 1)
+})
+
+test('controlled fallback helper uses public replay, one worker effect and canonical human review', async () => {
+  const previousFetch = globalThis.fetch
+  const calls = []
+  const job = (status) => ({
+    id: 'fallback-job-helper', projectId: 'project-helper', operation: 'generated-cutaway', status,
+    transformation: { fallback: { ledgerId: 'ledger-helper', ledgerHash: 'a'.repeat(64), rung: 'generated-cutaway' } },
+    ...(status === 'approved' ? { resultArtifact: { artifactId: 'artifact-helper', artifactSha256: 'b'.repeat(64), mediaType: 'video', byteSize: 10 } } : {}),
+  })
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method ?? 'GET', key: init?.headers?.['idempotency-key'] })
+    if ((init?.method ?? 'GET') === 'POST') {
+      const ordinal = calls.filter((call) => call.method === 'POST').length
+      return new Response(JSON.stringify({ data: { outcome: ordinal === 1 ? 'enqueued' : 'replayed', job: job('planned') } }), {
+        status: ordinal === 1 ? 201 : 200, headers: { 'content-type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify({ data: { job: job('approved'), callbacks: [] } }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    let ticks = 0
+    let approvals = 0
+    const result = await runControlledTransformationFallback({
+      baseUrl: 'http://127.0.0.1:3999', bearerToken: 'test-token', projectId: 'project-helper',
+      ledgerId: 'ledger-helper', ledgerHash: 'a'.repeat(64), idempotencyKey: 'fallback-helper-key',
+      use: 'editorial-reuse', market: 'BRA', locale: 'pt-BR', signal: new AbortController().signal,
+      async workerTick() {
+        ticks += 1
+        return {
+          ledger: { id: 'ledger-result', reviewDecision: 'awaiting-review' },
+          receipt: { id: 'receipt-helper', receiptHash: 'c'.repeat(64) },
+          claim: { id: 'claim-helper', outcome: 'enqueued', providerJobId: 'fallback-job-helper' },
+        }
+      },
+      async approveReview({ ledger, action }) {
+        approvals += 1
+        assert.equal(ledger.id, 'ledger-result')
+        assert.equal(action, 'accept')
+        return { ledger: { ...ledger, reviewDecision: 'accepted' } }
+      },
+    })
+    assert.equal(result.fallbackResult.artifactId, 'artifact-helper')
+    assert.equal(result.dispatchReplay.job.id, result.dispatch.job.id)
+    assert.equal(ticks, 1)
+    assert.equal(approvals, 1)
+    assert.deepEqual(calls.map(({ method }) => method), ['POST', 'POST', 'GET'])
+    assert.ok(calls.slice(0, 2).every(({ key }) => key === 'fallback-helper-key'))
+  } finally {
+    globalThis.fetch = previousFetch
+  }
 })

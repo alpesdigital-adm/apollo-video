@@ -157,6 +157,7 @@ export function presentTransformationSelection(selection: Readonly<Transformatio
     briefHash: selection.briefHash,
     ...(selection.selectedProviderId ? { selectedProviderId: selection.selectedProviderId } : {}),
     ...(selection.selectedCapabilityId ? { selectedCapabilityId: selection.selectedCapabilityId } : {}),
+    ...(selection.requestedOperation ? { requestedOperation: selection.requestedOperation } : {}),
     selectedReason: selection.selectedReason,
     // Every discarded candidate and its reasons. A routing decision without its
     // rejections is unexplainable the moment anything changes.

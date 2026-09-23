@@ -86,7 +86,7 @@ const EVAL_SET = Object.freeze([
   },
   {
     id: 'muted-audio',
-    why: 'a take with no measurable audio is rejected, and the fix is to ask the provider again',
+    why: 'a take with no measurable audio also fails canonical audio preservation and must be retried',
     capability: 'audio-avatar',
     adapterId: GENERIC_AVATAR,
     video: 'silent.mp4',
@@ -95,7 +95,7 @@ const EVAL_SET = Object.freeze([
     thresholdsVersion: GENERIC_POLICY,
     decision: 'rejected',
     action: 'retry',
-    causes: ['audio-silent'],
+    causes: ['audio-preservation-mismatch', 'audio-silent'],
   },
   {
     id: 'frozen-video',
@@ -120,8 +120,8 @@ const EVAL_SET = Object.freeze([
     expected: CLEAN_EXPECTATION,
     thresholdsVersion: GENERIC_POLICY,
     decision: 'rejected',
-    action: 'retry',
-    causes: ['duration-drift'],
+    action: 'fallback',
+    causes: ['audio-preservation-mismatch', 'duration-drift'],
   },
   {
     id: 'omitted-word',
@@ -134,7 +134,7 @@ const EVAL_SET = Object.freeze([
     thresholdsVersion: GENERIC_POLICY,
     decision: 'rejected',
     action: 'retry',
-    causes: ['word-omitted'],
+    causes: ['output-speech-mismatch'],
   },
   {
     id: 'added-word',
@@ -145,9 +145,9 @@ const EVAL_SET = Object.freeze([
     words: SPOKEN_EXTRA_WORD,
     expected: CLEAN_EXPECTATION,
     thresholdsVersion: GENERIC_POLICY,
-    decision: 'needs-review',
-    action: 'manual-review',
-    causes: ['word-added'],
+    decision: 'rejected',
+    action: 'retry',
+    causes: ['output-speech-mismatch'],
   },
   {
     id: 'empty-alignment',
@@ -161,6 +161,7 @@ const EVAL_SET = Object.freeze([
     decision: 'evidence-unavailable',
     action: 'manual-review',
     causes: ['required-evidence-missing'],
+    omitOutputEvidence: true,
   },
   {
     id: 'corrupt-blob',
@@ -174,6 +175,7 @@ const EVAL_SET = Object.freeze([
     decision: 'rejected',
     action: 'retry',
     causes: ['blob-undecodable', 'required-evidence-missing'],
+    omitOutputEvidence: true,
   },
   {
     id: 'identity-mismatch',
@@ -213,9 +215,9 @@ const EVAL_SET = Object.freeze([
     words: SPOKEN,
     expected: CLEAN_EXPECTATION,
     thresholdsVersion: GENERIC_POLICY,
-    decision: 'needs-review',
-    action: 'manual-review',
-    causes: ['audio-silence-window'],
+    decision: 'rejected',
+    action: 'fallback',
+    causes: ['audio-preservation-mismatch', 'audio-silence-window'],
   },
   {
     id: 'continuity-break',
@@ -253,7 +255,7 @@ const EVAL_SET = Object.freeze([
     thresholdsVersion: ADAPTER_POLICY,
     decision: 'rejected',
     action: 'fallback',
-    causes: ['lip-sync-below-threshold'],
+    causes: ['audio-preservation-mismatch', 'lip-sync-below-threshold'],
   },
   {
     id: 'speech-only-clean',
@@ -331,6 +333,10 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
     await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
   const { DeterministicSyntheticCriticControlledEvaluator } =
     await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
+  const { FfmpegAvatarAudioComparison } =
+    await import('../../src/v2/infrastructure/media/ffmpeg-avatar-audio-comparison.ts')
+  const { createAvatarOutputSpeechEvidence } =
+    await import('../../src/v2/domain/avatar-output-speech-evidence.ts')
 
   const workspaceId = 'critic-eval-workspace'
   const audit = createExternalAuditContext({
@@ -411,7 +417,36 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
       await t.test(`${evaluation.id} — ${evaluation.why}`, async () => {
         currentWords = evaluation.words
         const blockId = `block-${evaluation.id}`
+        const scriptHash = createHash('sha256').update(SCRIPT, 'utf8').digest('hex')
+        let outputSpeechEvidence
+        if (evaluation.video && !evaluation.omitOutputEvidence) {
+          const intentionallyChangedAudio = ['muted-audio', 'duration-drift', 'silence-window', 'audio-video-offset'].includes(evaluation.id)
+          const sourceAudio = identities.get(intentionallyChangedAudio ? (evaluation.audio ?? 'speech.m4a') : evaluation.video)
+          const outputVideo = identities.get(evaluation.video)
+          const comparison = await new FfmpegAvatarAudioComparison(process.env).compare({
+            sourcePath: sourceAudio.path,
+            resultPath: outputVideo.path,
+            sourceStartMs: 0,
+            // AAC containers carry a short encoder tail. When the same file is
+            // the canonical source, include that tail so the PCM comparison is
+            // about content rather than container padding.
+            sourceDurationMs: intentionallyChangedAudio
+              ? (evaluation.id === 'audio-video-offset' ? 3_500 : 3_000)
+              : 3_008,
+          })
+          const spokenHash = createHash('sha256').update(evaluation.words.map(({ word }) => word).join(' '), 'utf8').digest('hex')
+          outputSpeechEvidence = createAvatarOutputSpeechEvidence({
+            ...comparison,
+            jobId: `provider-job-${evaluation.id}`,
+            videoArtifactId: ref(evaluation.video).artifactId,
+            videoArtifactSha256: outputVideo.sha256,
+            sourceAudioArtifactId: `artifact-${(intentionallyChangedAudio ? (evaluation.audio ?? 'speech.m4a') : evaluation.video).replace(/[^A-Za-z0-9]/g, '-')}`,
+            sourceAudioRangeHash: createHash('sha256').update(`range:${evaluation.id}`).digest('hex'),
+            speechEvidence: { kind: 'controlled', evaluatorId: 'controlled-output-sidecar', evaluatorVersion: '1.0.0', outputTranscriptHash: evaluation.words === SPOKEN ? scriptHash : spokenHash, observedIdentityRef: evaluation.expected.declaredIdentityRef },
+          })
+        }
         const subject = {
+          providerJobId: evaluation.video ? `provider-job-${evaluation.id}` : undefined,
           workspaceId,
           projectId: 'critic-eval-project',
           blockId,
@@ -422,13 +457,15 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
           video: evaluation.video ? ref(evaluation.video) : null,
           audio: evaluation.audio ? ref(evaluation.audio) : null,
           alignmentArtifactId: evaluation.words.length === 0 ? null : 'artifact-alignment',
+          ...(outputSpeechEvidence ? { outputSpeechEvidence, outputSpeechEvidenceArtifactId: `artifact-output-speech-${evaluation.id}` } : {}),
+          scriptHash,
           scriptText: SCRIPT,
           expected: evaluation.expected,
         }
         const result = await evaluate({
           subject,
           profileSnapshotId: 'ana:v2',
-          scriptHash: createHash('sha256').update(SCRIPT, 'utf8').digest('hex'),
+          scriptHash,
           actor,
         })
         const report = result.report

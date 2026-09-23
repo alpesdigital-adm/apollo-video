@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -15,6 +16,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const {
     createExternalAuditContext,
+    materializeActorAuditContext,
   } = await import('../../src/v2/application/authenticate-api-client.ts')
   const {
     createSyntheticProductionRunService,
@@ -36,6 +38,11 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const { STORY_GOLDEN_FIXTURES } = await import('../../src/v2/domain/story-plan.ts')
   const { createSyntheticCriticReport, SYNTHETIC_CRITIC_DIMENSIONS } = await import('../../src/v2/domain/synthetic-critic-report.ts')
+  const { createAvatarOutputSpeechEvidence, AVATAR_AUDIO_COMPARISON_POLICY_VERSION } = await import(
+    '../../src/v2/domain/avatar-output-speech-evidence.ts'
+  )
+  const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+  const { createProviderJob, transitionProviderJob } = await import('../../src/v2/domain/provider-job.ts')
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
   )
@@ -85,6 +92,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const client = new PrismaClient()
   const clientId = 'synthetic-production-integration-client'
   const credentialId = 'synthetic-production-integration-credential'
+  let primaryError
 
   const cleanup = async () => {
     await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
@@ -96,10 +104,12 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticMasterConsumption.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionAsset.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionRun.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.updateMany({
@@ -225,6 +235,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       ['synthetic-audio-alignment', 'data', 'json', '6'],
       ['synthetic-avatar-block-one', 'video', 'mp4', 'c'],
       ['synthetic-avatar-block-two', 'video', 'mp4', 'd'],
+      ['synthetic-speech-evidence-one', 'data', 'json', '7'],
+      ['synthetic-speech-evidence-two', 'data', 'json', '8'],
     ]
     for (const [id, mediaType, container, digest] of artifacts) {
       await client.v2MediaArtifact.create({
@@ -290,6 +302,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     )
 
     const rightsRepository = new PrismaAssetRightsRepository(client)
+    const currentRights = new Map()
     for (const [index, artifactId] of [
       'synthetic-audio-master',
       'synthetic-audio-alignment',
@@ -326,6 +339,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
           changedAt: now,
         }),
       )
+      currentRights.set(artifactId, snapshot)
     }
 
     let scriptBlockOrdinal = 0
@@ -344,25 +358,171 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     })
     assert.equal(scriptPlan.plan.blocks.length, 2)
     const criticReports = new PrismaSyntheticCriticReportRepository(client)
+    const providerRepository = new PrismaProviderJobRepository(client)
+    const provenanceRepository = new PrismaProviderExecutionProvenanceRepository(client)
+    const audioMasterRepository = new PrismaSyntheticAudioMasterRepository(client)
+    let providerTransition = 0
     const blockInputs = scriptPlan.plan.blocks.map((block, index) => ({
       id: block.id, text: block.exactText,
       artifactId: index === 0 ? 'synthetic-avatar-block-one' : 'synthetic-avatar-block-two',
       artifactSha256: index === 0 ? hash('c') : hash('d'),
+      speechEvidenceArtifactId: index === 0 ? 'synthetic-speech-evidence-one' : 'synthetic-speech-evidence-two',
       reportId: index === 0 ? 'synthetic-critic-one' : 'synthetic-critic-two',
       rangeMs: index === 0 ? [0, 1_000] : [1_000, 2_000],
       jobId: index === 0 ? 'synthetic-provider-job-one' : 'synthetic-provider-job-two',
     }))
+    const canonicalWords = blockInputs.map((block) => ({
+      word: block.text,
+      startMs: block.rangeMs[0],
+      endMs: block.rangeMs[1],
+      confidence: null,
+    }))
+    const canonicalAudioScriptHash = createHash('sha256')
+      .update(canonicalWords.map(({ word }) => word).join(' '), 'utf8')
+      .digest('hex')
+    const audioMasterResult = await createSyntheticAudioMasterService({
+      repository: audioMasterRepository,
+      projects: new PrismaProjectWorkspaceQueryRepository(client),
+      profiles: syntheticRepository,
+      providerJobs: providerRepository,
+      artifacts: artifactRepository,
+      rights: rightsRepository,
+      criticReports,
+      clock: () => new Date(now),
+      createId: () => 'synthetic-approved-audio-master-integration',
+    })({
+      workspaceId,
+      projectId: project.project.id,
+      projectVersionId: project.version.id,
+      profileSnapshotId: registered.profile.profileSnapshotId,
+      source: { kind: 'uploaded' },
+      audioArtifactId: 'synthetic-audio-master',
+      alignmentEvidenceArtifactId: 'synthetic-audio-alignment',
+      durationMs: 2_000,
+      locale: 'pt-BR',
+      words: canonicalWords,
+      approvedAt: now,
+      approvalCriticHash: hash('7'),
+      use: 'ads',
+      market: 'BRA',
+      actor,
+      idempotencyKey: 'synthetic-audio-master-integration-key',
+    })
+    assert.equal(audioMasterResult.replayed, false)
+    assert.equal(audioMasterResult.value.master.audio.durationMs, 2_000)
+    assert.equal(audioMasterResult.value.master.profileSnapshotId, registered.profile.profileSnapshotId)
+    const persistedMasterRow = await client.v2SyntheticAudioMaster.findUniqueOrThrow({
+      where: { id: audioMasterResult.value.master.id },
+    })
+    assert.equal(persistedMasterRow.profileSnapshotId, 'synthetic-presenter-integration:v1')
+    assert.equal(await client.v2SyntheticAudioMaster.count({ where: { workspaceId } }), 1)
+    assert.equal(
+      (await audioMasterRepository.read({
+        workspaceId,
+        projectId: project.project.id,
+        audioMasterId: audioMasterResult.value.master.id,
+      }))?.master.masterHash,
+      audioMasterResult.value.master.masterHash,
+    )
+
     const measured = new Set(['temporal-integrity', 'audiovisual-integrity'])
     const persistedReports = []
     for (const [index, block] of blockInputs.entries()) {
-      const scriptHash = (await import('node:crypto')).createHash('sha256').update(block.text, 'utf8').digest('hex')
+      const scriptHash = createHash('sha256').update(block.text, 'utf8').digest('hex')
+      const audioRights = currentRights.get('synthetic-audio-master')
+      assert.ok(audioRights)
+      const authorizationBody = {
+        id: `synthetic-provider-authorization-${index + 1}`,
+        profileSnapshotId: registered.profile.profileSnapshotId,
+        profileSnapshotHash: registered.profile.snapshot.snapshotHash,
+        artifactDecisions: [{
+          artifactId: 'synthetic-audio-master',
+          rightsSnapshotId: audioRights.id,
+          rightsSnapshotHash: audioRights.snapshotHash,
+          validUntil: audioRights.expiresAt,
+        }],
+        evaluatedAt: now,
+        expiresAt: '2030-01-01T00:00:00.000Z',
+      }
+      const authorization = Object.freeze({
+        ...authorizationBody,
+        authorizationHash: calculateCanonicalHash(authorizationBody),
+      })
+      const planned = createProviderJob({
+        id: block.jobId,
+        workspaceId,
+        projectId: project.project.id,
+        originProjectVersionId: project.version.id,
+        operation: 'audio-avatar',
+        adapterId: 'controlled-avatar',
+        adapterVersion: 'version-1',
+        providerInput: {
+          audioMasterId: audioMasterResult.value.master.id,
+          audioArtifactId: 'synthetic-audio-master',
+          audioRange: { startMs: block.rangeMs[0], endMs: block.rangeMs[1] },
+          criticBinding: {
+            blockId: block.id,
+            scriptText: block.text,
+            scriptHash,
+            profileSnapshotId: registered.profile.profileSnapshotId,
+            expectedDurationMs: block.rangeMs[1] - block.rangeMs[0],
+            alignmentArtifactId: null,
+            use: 'ads',
+            market: 'BRA',
+            locale: 'pt-BR',
+          },
+        },
+        idempotencyKey: `synthetic-provider-job-seed-${index + 1}`,
+        authorization,
+        createdAt: now,
+      })
+      await providerRepository.create({
+        job: planned,
+        requestFingerprint: calculateCanonicalHash({ jobId: block.jobId, controlledFixture: true }),
+        authenticationAudit: materializeActorAuditContext(actor),
+        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+      })
+      const outputSpeechEvidence = createAvatarOutputSpeechEvidence({
+        jobId: block.jobId,
+        videoArtifactId: block.artifactId,
+        videoArtifactSha256: block.artifactSha256,
+        sourceAudioArtifactId: 'synthetic-audio-master',
+        sourceAudioRangeHash: calculateCanonicalHash({ startMs: block.rangeMs[0], endMs: block.rangeMs[1] }),
+        policyVersion: AVATAR_AUDIO_COMPARISON_POLICY_VERSION,
+        sourcePcmSha256: hash('4'),
+        outputPcmSha256: hash('5'),
+        sampleRateHz: 16_000,
+        sourceDurationMs: 1_000,
+        outputDurationMs: 1_000,
+        alignedLagSamples: 0,
+        comparedSampleCount: 16_000,
+        sourceCoverageBps: 10_000,
+        outputCoverageBps: 10_000,
+        correlationBps: 10_000,
+        normalizedErrorBps: 0,
+        worstWindowCorrelationBps: 10_000,
+        worstWindowNormalizedErrorBps: 0,
+        failedWindowCount: 0,
+        comparedWindowCount: 4,
+        sourceRmsBps: 1_000,
+        outputRmsBps: 1_000,
+        passed: true,
+        speechEvidence: {
+          kind: 'controlled',
+          evaluatorId: 'synthetic-production-controlled-speech',
+          evaluatorVersion: '1.0.0',
+          outputTranscriptHash: scriptHash,
+          observedIdentityRef: 'identity-ref-integration',
+        },
+      })
       const report = createSyntheticCriticReport({
-        id: block.reportId, workspaceId, projectId: project.project.id, blockId: block.id,
+        id: block.reportId, workspaceId, projectId: project.project.id, providerJobId: block.jobId, blockId: block.id,
         capability: 'audio-avatar', adapterId: 'controlled-avatar', adapterVersion: 'version-1',
         artifactId: block.artifactId, artifactSha256: block.artifactSha256,
         audioArtifactId: null, alignmentArtifactId: null, scriptHash,
+        outputSpeechEvidence, outputSpeechEvidenceArtifactId: block.speechEvidenceArtifactId,
         profileSnapshotId: registered.profile.profileSnapshotId, expectedIdentityRef: 'identity-ref-integration', expectationHash: hash('9'),
-        evaluationContextHash: (await import('node:crypto')).createHash('sha256')
+        evaluationContextHash: createHash('sha256')
           .update(`synthetic-production-context:${block.id}:${block.artifactId}:${block.artifactSha256}`)
           .digest('hex'),
         evaluators: [{ id: 'synthetic-production-controlled', version: '1.0.0', kind: 'controlled', scope: 'controlled PostgreSQL fixture only; no live provider claim' }],
@@ -376,22 +536,80 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       block.scriptHash = scriptHash
       block.reportHash = report.reportHash
       block.index = index
-    }
-    const productionProviderJobs = {
-      async readById({ workspaceId: requestedWorkspaceId, jobId }) {
-        const block = blockInputs.find((entry) => entry.jobId === jobId)
-        if (requestedWorkspaceId !== workspaceId || !block) return null
-        return { job: {
-          id: jobId, workspaceId, projectId: project.project.id, status: 'approved', operation: 'audio-avatar',
-          criticResultHash: block.reportHash,
-          resultArtifact: { artifactId: block.artifactId, artifactSha256: block.artifactSha256 },
-          authorization: { profileSnapshotId: registered.profile.profileSnapshotId },
-          input: {
-            audioArtifactId: 'synthetic-audio-master', audioRange: { startMs: block.rangeMs[0], endMs: block.rangeMs[1] },
-            criticBinding: { blockId: block.id, scriptText: block.text, scriptHash: block.scriptHash, profileSnapshotId: registered.profile.profileSnapshotId },
+
+      const claim = async (suffix) => {
+        const value = await providerRepository.claimNext({
+          workerId: `synthetic-provider-seed-worker-${index + 1}`,
+          leaseToken: `synthetic-provider-seed-lease-${index + 1}-${suffix}`,
+          now: new Date(now),
+          leaseExpiresAt: new Date('2029-01-01T00:01:00.000Z'),
+        })
+        assert.equal(value?.job.id, block.jobId)
+        return value
+      }
+      const plannedClaim = await claim('planned')
+      await providerRepository.advance({
+        current: plannedClaim,
+        next: transitionProviderJob(plannedClaim.job, {
+          status: 'estimated',
+          occurredAt: now,
+          estimate: { currency: 'USD', costMinorUnits: 0, estimatedLatencyMs: 1 },
+        }),
+        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        occurredAt: new Date(now),
+      })
+      const estimatedClaim = await claim('estimated')
+      const submittingClaim = await providerRepository.beginSubmission({
+        current: estimatedClaim,
+        next: transitionProviderJob(estimatedClaim.job, { status: 'submitting', occurredAt: now }),
+        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        occurredAt: new Date(now),
+      })
+      await providerRepository.advance({
+        current: submittingClaim,
+        next: transitionProviderJob(submittingClaim.job, {
+          status: 'submitted',
+          occurredAt: now,
+          providerJobId: `controlled-avatar-ref-${index + 1}`,
+          providerStatus: 'completed',
+        }),
+        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        occurredAt: new Date(now),
+      })
+      const submittedClaim = await claim('submitted')
+      await providerRepository.advance({
+        current: submittedClaim,
+        next: transitionProviderJob(submittedClaim.job, { status: 'retrieving', occurredAt: now }),
+        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        occurredAt: new Date(now),
+      })
+      const retrievingClaim = await claim('retrieving')
+      await providerRepository.advance({
+        current: retrievingClaim,
+        next: transitionProviderJob(retrievingClaim.job, {
+          status: 'evaluating',
+          occurredAt: now,
+          resultArtifact: {
+            artifactId: block.artifactId,
+            artifactSha256: block.artifactSha256,
+            mediaType: 'video',
+            byteSize: 4_096,
           },
-        } }
-      },
+        }),
+        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        occurredAt: new Date(now),
+      })
+      const evaluatingClaim = await claim('evaluating')
+      await providerRepository.advance({
+        current: evaluatingClaim,
+        next: transitionProviderJob(evaluatingClaim.job, {
+          status: 'approved',
+          occurredAt: now,
+          criticResultHash: report.reportHash,
+        }),
+        transitionId: `synthetic-provider-seed-${++providerTransition}`,
+        occurredAt: new Date(now),
+      })
     }
     const execute = createSyntheticProductionRunService({
       repository: syntheticRepository,
@@ -399,7 +617,10 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       artifacts: artifactRepository,
       rights: rightsRepository,
       criticReports,
-      providerJobs: productionProviderJobs,
+      providerJobs: providerRepository,
+      audioMasters: audioMasterRepository,
+      scriptPlans: new PrismaSyntheticScriptPlanRepository(client),
+      prepareCanonicalReuse: async () => null,
       clock: () => new Date(now),
       createRunId: () => 'synthetic-run-integration',
       createSnapshotId: () => 'synthetic-edit-plan-snapshot-integration',
@@ -413,11 +634,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
         artifactId: 'synthetic-audio-master',
         durationMs: 2_000,
         locale: 'pt-BR',
-        scriptHash: hash('e'),
-        alignment: [
-          { text: 'Olá', startMs: 0, endMs: 1_000 },
-          { text: 'mundo', startMs: 1_000, endMs: 2_000 },
-        ],
+        scriptHash: canonicalAudioScriptHash,
+        alignment: canonicalWords.map(({ word, startMs, endMs }) => ({ text: word, startMs, endMs })),
       },
       blocks: [
         { id: blockInputs[0].id, text: blockInputs[0].text, rangeMs: [0, 1_000], cacheKey: hash('f'), providerJobId: 'synthetic-provider-job-one', audioSha256: hash('b'), artifactId: 'synthetic-avatar-block-one', critic: { id: 'synthetic-critic-one', resultHash: persistedReports[0].reportHash, status: 'approved' } },
@@ -442,49 +660,6 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       where: { workspaceId, kind: 'edit-plan', id: 'synthetic-edit-plan-snapshot-integration' },
     }), 1)
 
-    const providerRepository = new PrismaProviderJobRepository(client)
-    const provenanceRepository = new PrismaProviderExecutionProvenanceRepository(client)
-    const audioMasterRepository = new PrismaSyntheticAudioMasterRepository(client)
-    const audioMasterResult = await createSyntheticAudioMasterService({
-      repository: audioMasterRepository,
-      projects: new PrismaProjectWorkspaceQueryRepository(client),
-      profiles: syntheticRepository,
-      providerJobs: providerRepository,
-      artifacts: artifactRepository,
-      rights: rightsRepository,
-      clock: () => new Date(now),
-      createId: () => 'synthetic-approved-audio-master-integration',
-    })({
-      workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
-      profileSnapshotId: registered.profile.profileSnapshotId,
-      source: { kind: 'uploaded' },
-      audioArtifactId: 'synthetic-audio-master',
-      alignmentEvidenceArtifactId: 'synthetic-audio-alignment',
-      durationMs: 2_000,
-      locale: 'pt-BR',
-      words: [
-        { word: 'Olá', startMs: 0, endMs: 1_000, confidence: 0.99 },
-        { word: 'mundo', startMs: 1_000, endMs: 2_000, confidence: 0.98 },
-      ],
-      approvedAt: now,
-      approvalCriticHash: hash('7'),
-      use: 'ads',
-      market: 'BRA',
-      actor,
-      idempotencyKey: 'synthetic-audio-master-integration-key',
-    })
-    assert.equal(audioMasterResult.replayed, false)
-    assert.equal(audioMasterResult.value.master.audio.durationMs, 2_000)
-    assert.equal(audioMasterResult.value.master.profileSnapshotId, registered.profile.profileSnapshotId)
-    const persistedMasterRow = await client.v2SyntheticAudioMaster.findUniqueOrThrow({
-      where: { id: audioMasterResult.value.master.id },
-    })
-    assert.equal(persistedMasterRow.profileSnapshotId, 'synthetic-presenter-integration:v1')
-    assert.equal(await client.v2SyntheticAudioMaster.count({ where: { workspaceId } }), 1)
-    assert.equal((await audioMasterRepository.read({ workspaceId, projectId: project.project.id, audioMasterId: audioMasterResult.value.master.id }))?.master.masterHash, audioMasterResult.value.master.masterHash)
-    let providerTransition = 0
     const enqueued = await enqueueProviderJobService({
       jobs: providerRepository,
       adapters: { get: ({ adapterId, adapterVersion }) => adapterId === 'controlled-avatar' && adapterVersion === 'version-1' ? {} : null },
@@ -498,7 +673,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       createTransitionId: () => `synthetic-provider-transition-${++providerTransition}`,
       resolveAvatarCriticBinding: async ({ profileSnapshotId, audioRange, use, market, locale }) => ({
         blockId: blockInputs[0].id, scriptText: blockInputs[0].text,
-        scriptHash: (await import('node:crypto')).createHash('sha256').update(blockInputs[0].text, 'utf8').digest('hex'),
+        scriptHash: createHash('sha256').update(blockInputs[0].text, 'utf8').digest('hex'),
         profileSnapshotId, expectedDurationMs: audioRange.durationMs, alignmentArtifactId: null,
         use, market, locale,
       }),
@@ -592,7 +767,9 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       `provider job failed: ${JSON.stringify(completedProvider?.job.normalizedError ?? null)}`,
     )
     assert.equal(completedProvider?.job.resultArtifact?.artifactId, 'synthetic-provider-output')
-    assert.equal(await client.v2ProviderJobTransition.count({ where: { workspaceId } }), 10)
+    assert.equal(await client.v2ProviderJobTransition.count({
+      where: { workspaceId, jobId: enqueued.persisted.job.id },
+    }), 10)
     assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve', 'capabilities'])
 
     assert.ok(ledgerFirst)
@@ -633,8 +810,21 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       where: { id: created.run.plan.id },
       data: { planHash: original.planHash },
     })
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
-    await cleanup()
-    await client.$disconnect()
+    let cleanupError
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupError = error
+    }
+    try {
+      await client.$disconnect()
+    } catch (error) {
+      cleanupError ??= error
+    }
+    if (!primaryError && cleanupError) throw cleanupError
   }
 })

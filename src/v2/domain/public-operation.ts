@@ -14,6 +14,7 @@ export type PublicOperationStatus = (typeof PUBLIC_OPERATION_STATUSES)[number]
 
 export const PUBLIC_OPERATION_TYPES = [
   'artifact-render',
+  'synthetic-production-render',
   'media-ingest',
   'project-proxy-render',
   'project-final-export',
@@ -33,6 +34,7 @@ export function requiresArtifactRenderCheckpoint(type: PublicOperationType): boo
 
 function isRenderOperation(type: PublicOperationType): boolean {
   return type === 'artifact-render' ||
+    type === 'synthetic-production-render' ||
     type === 'project-proxy-render' ||
     type === 'project-final-export' ||
     type === 'source-cleanup'
@@ -423,7 +425,8 @@ export function assertPublicOperation(operation: PublicOperation): void {
   )
   validateTarget(operation.target, 'operation.target')
   assertDomain(
-    operation.type === 'project-director-run'
+    operation.type === 'project-director-run' ||
+      operation.type === 'synthetic-production-render'
       ? operation.target.type === 'project-version'
       : operation.type === 'production-batch-item'
         ? operation.target.type === 'production-batch-item'

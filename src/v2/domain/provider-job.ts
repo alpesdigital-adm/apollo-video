@@ -84,6 +84,14 @@ export interface ProviderJobTransformationOrigin {
   selectionHash: string
   providerId: string
   capabilityId: string
+  fallback?: Readonly<{
+    ledgerId: string
+    ledgerHash: string
+    rung: 'generated-cutaway'
+    rejectedJobId: string
+    rejectedReportHash: string
+    dispatchRequestHash: string
+  }>
 }
 
 export interface ProviderJob {
@@ -244,6 +252,17 @@ export function createProviderJob(input: {
     })) id(value, `transformation.${field}`)
     assertDomain(HASH.test(input.transformation.briefHash), 'INVALID_ARGUMENT', 'transformation.briefHash is invalid')
     assertDomain(HASH.test(input.transformation.selectionHash), 'INVALID_ARGUMENT', 'transformation.selectionHash is invalid')
+    if (input.transformation.fallback) {
+      for (const [field, value] of Object.entries({
+        ledgerId: input.transformation.fallback.ledgerId,
+        rejectedJobId: input.transformation.fallback.rejectedJobId,
+      })) id(value, `transformation.fallback.${field}`)
+      assertDomain(HASH.test(input.transformation.fallback.ledgerHash), 'INVALID_ARGUMENT', 'transformation.fallback.ledgerHash is invalid')
+      assertDomain(HASH.test(input.transformation.fallback.rejectedReportHash), 'INVALID_ARGUMENT', 'transformation.fallback.rejectedReportHash is invalid')
+      assertDomain(HASH.test(input.transformation.fallback.dispatchRequestHash), 'INVALID_ARGUMENT', 'transformation fallback dispatch request hash is invalid')
+      assertDomain(input.transformation.fallback.rung === 'generated-cutaway', 'INVALID_ARGUMENT', 'transformation fallback rung is invalid')
+      assertDomain(input.operation === 'generated-cutaway', 'INVALID_ARGUMENT', 'A generated-cutaway fallback must use its dedicated provider operation')
+    }
   }
   const providerInput = JSON.parse(stableSerialize(input.providerInput)) as Record<string, unknown>
   return seal({

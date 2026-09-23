@@ -66,6 +66,12 @@ function parseJob(row: V2ProviderJob): Readonly<PersistedProviderJob> {
     job.transformation?.selectionHash !== (row.transformationSelectionHash ?? undefined) ||
     job.transformation?.providerId !== (row.transformationProviderId ?? undefined) ||
     job.transformation?.capabilityId !== (row.transformationCapabilityId ?? undefined) ||
+    job.transformation?.fallback?.ledgerId !== (row.fallbackLedgerId ?? undefined) ||
+    job.transformation?.fallback?.ledgerHash !== (row.fallbackLedgerHash ?? undefined) ||
+    job.transformation?.fallback?.rung !== (row.fallbackRung ?? undefined) ||
+    job.transformation?.fallback?.rejectedJobId !== (row.fallbackRejectedJobId ?? undefined) ||
+    job.transformation?.fallback?.rejectedReportHash !== (row.fallbackRejectedReportHash ?? undefined) ||
+    job.transformation?.fallback?.dispatchRequestHash !== (row.fallbackDispatchRequestHash ?? undefined) ||
     job.observedCost?.currency !== (row.observedCostCurrency ?? undefined) ||
     job.observedCost?.costMinorUnits !== (row.observedCostMinorUnits ?? undefined)
   ) {
@@ -194,6 +200,12 @@ function projection(job: Readonly<ProviderJob>) {
     transformationSelectionHash: job.transformation?.selectionHash ?? null,
     transformationProviderId: job.transformation?.providerId ?? null,
     transformationCapabilityId: job.transformation?.capabilityId ?? null,
+    fallbackLedgerId: job.transformation?.fallback?.ledgerId ?? null,
+    fallbackLedgerHash: job.transformation?.fallback?.ledgerHash ?? null,
+    fallbackRung: job.transformation?.fallback?.rung ?? null,
+    fallbackRejectedJobId: job.transformation?.fallback?.rejectedJobId ?? null,
+    fallbackRejectedReportHash: job.transformation?.fallback?.rejectedReportHash ?? null,
+    fallbackDispatchRequestHash: job.transformation?.fallback?.dispatchRequestHash ?? null,
     observedCostCurrency: job.observedCost?.currency ?? null,
     observedCostMinorUnits: job.observedCost?.costMinorUnits ?? null,
     submittedAt: job.submittedAt ? new Date(job.submittedAt) : null,
@@ -231,10 +243,43 @@ async function assertAuthority(
             selectionHash: job.transformation.selectionHash,
             selectedProviderId: job.transformation.providerId,
             selectedCapabilityId: job.transformation.capabilityId,
+            requestedOperation: job.transformation.fallback ? job.operation : null,
           },
           select: { id: true },
         }),
-      ]).then(([brief, selection]) => Boolean(brief && selection))
+        job.transformation.fallback
+          ? transaction.v2TransformationFallbackLedger.findFirst({
+              where: {
+                workspaceId: job.workspaceId,
+                projectId: job.projectId,
+                briefId: job.transformation.briefId,
+              },
+              select: { id: true, ledgerHash: true, currentRung: true, reviewDecision: true },
+              orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+            })
+          : Promise.resolve({ id: 'normal-dispatch', ledgerHash: '', currentRung: '', reviewDecision: '' }),
+        job.transformation.fallback
+          ? transaction.v2ProviderJob.findFirst({
+              where: {
+                id: job.transformation.fallback.rejectedJobId,
+                workspaceId: job.workspaceId,
+                projectId: job.projectId,
+                status: 'rejected',
+                criticResultHash: job.transformation.fallback.rejectedReportHash,
+              },
+              select: { id: true },
+            })
+          : Promise.resolve({ id: 'normal-dispatch' }),
+      ]).then(([brief, selection, ledger, rejectedJob]) => Boolean(
+        brief && selection && ledger && rejectedJob && (
+          !job.transformation?.fallback || (
+            ledger.id === job.transformation.fallback.ledgerId &&
+            ledger.ledgerHash === job.transformation.fallback.ledgerHash &&
+            ledger.currentRung === job.transformation.fallback.rung &&
+            ledger.reviewDecision === 'awaiting-review'
+          )
+        ),
+      ))
     : transaction.v2SyntheticPresenterProfile.findFirst({
         where: {
           workspaceId: job.workspaceId,
@@ -340,6 +385,21 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
     return row ? parseJob(row) : null
   }
 
+  async findFallbackDispatch(input: Parameters<NonNullable<ProviderJobRepository['findFallbackDispatch']>>[0]) {
+    const row = await this.prisma.v2ProviderJob.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        fallbackLedgerId: input.ledgerId,
+        fallbackRung: input.rung,
+      },
+      include: { transportState: true },
+    })
+    if (!row) return null
+    const { transportState, ...jobRow } = row
+    return Object.freeze({ ...parseJob(jobRow), transportState: transportState ? parseTransportState(transportState) : null })
+  }
+
   async create(input: Parameters<ProviderJobRepository['create']>[0]) {
     for (let attempt = 1; ; attempt += 1) {
     try {
@@ -411,6 +471,24 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
       // are transient: retry the create instead of surfacing them.
       if (isPrismaCode(error, 'P2034') && attempt < 4) continue
       if (!isPrismaCode(error, 'P2002')) throw error
+      const fallback = input.job.transformation?.fallback
+      if (fallback) {
+        const replay = await this.findFallbackDispatch({
+          workspaceId: input.job.workspaceId,
+          projectId: input.job.projectId,
+          ledgerId: fallback.ledgerId,
+          rung: fallback.rung,
+        })
+        const existing = replay?.job.transformation?.fallback
+        if (
+          replay && existing &&
+          existing.dispatchRequestHash === fallback.dispatchRequestHash &&
+          existing.ledgerHash === fallback.ledgerHash &&
+          existing.rejectedJobId === fallback.rejectedJobId &&
+          existing.rejectedReportHash === fallback.rejectedReportHash
+        ) return Object.freeze({ persisted: replay, replayed: true })
+        throw new DomainError('VERSION_CONFLICT', 'Fallback rung was already dispatched with different authority or intent')
+      }
       const replay = await this.findReplay({
         workspaceId: input.job.workspaceId,
         actorClientId: input.authenticationAudit.clientId,

@@ -332,7 +332,7 @@ test('the build attestation non-media spawn is fenced to Git, Node and taskkill 
   assert.deepEqual(spawnExpressions(source), ["'taskkill'", 'executable'])
   assert.deepEqual(
     [...source.matchAll(/this\.executor\.execute\(([^,\n]+)/g)].map((match) => match[1].trim()),
-    ["'git'", 'command[0]'],
+    ['command[0]', "'git'"],
   )
   assert.match(source, /const CHECK_COMMANDS = Object\.freeze\(\{[\s\S]*?architecture:\s*Object\.freeze\(\[process\.execPath,/)
   assert.match(source, /'domain-language':\s*Object\.freeze\(\[process\.execPath,/)

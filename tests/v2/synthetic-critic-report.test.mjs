@@ -79,10 +79,12 @@ test('T-FR-106 a report answers for every dimension and never hides what it coul
 test('W24.1 runtime approval requires the current policy and an authoritative expectation hash', () => {
   const historical = createSyntheticCriticReport({ ...base, adapterId: 'controlled-avatar', thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1' })
   const stale = createSyntheticCriticReport({ ...base, id: 'critic-report-stale', adapterId: 'controlled-avatar', expectationHash: digest('c'), evaluationContextHash: digest('d'), thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v0' })
-  const current = createSyntheticCriticReport({ ...base, id: 'critic-report-current', adapterId: 'controlled-avatar', expectationHash: digest('c'), evaluationContextHash: digest('d'), thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1' })
+  const currentWithoutOutputEvidence = createSyntheticCriticReport({ ...base, id: 'critic-report-current', adapterId: 'controlled-avatar', expectationHash: digest('c'), evaluationContextHash: digest('d'), thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1' })
+  const currentTts = createSyntheticCriticReport({ ...base, id: 'critic-report-current-tts', capability: 'tts', adapterId: 'controlled-tts', expectationHash: digest('c'), evaluationContextHash: digest('d'), thresholdsVersion: 'synthetic-critic-thresholds/tts/v2' })
   assert.equal(isCurrentSyntheticCriticApproval(historical), false)
   assert.equal(isCurrentSyntheticCriticApproval(stale), false)
-  assert.equal(isCurrentSyntheticCriticApproval(current), true)
+  assert.equal(isCurrentSyntheticCriticApproval(currentWithoutOutputEvidence), false)
+  assert.equal(isCurrentSyntheticCriticApproval(currentTts), true)
 })
 
 test('T-FR-106 a dimension cannot carry a score it did not measure', () => {

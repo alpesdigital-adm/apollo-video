@@ -146,7 +146,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, ElevenLa
   private readonly requestTimeoutMs: number
   private readonly maxAudioBytes: number
   private readonly maxCharacters: number
-  private readonly runtimeClass: 'controlled' | 'live'
+  readonly runtimeClass: 'controlled' | 'live'
 
   constructor(input: {
     apiKey: string

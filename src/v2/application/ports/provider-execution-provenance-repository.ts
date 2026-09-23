@@ -46,7 +46,7 @@ export interface ProviderTransportEvidence extends Omit<ProviderTransportObserva
 export interface ProviderExecutionReceiptResult {
   resultRecordId: string
   resultRecordHash: string
-  role: 'primary-audio' | 'primary-video' | 'alignment-evidence'
+  role: 'primary-audio' | 'primary-video' | 'alignment-evidence' | 'output-speech-evidence'
   artifactId: string
   artifactSha256: string
   byteSize: number

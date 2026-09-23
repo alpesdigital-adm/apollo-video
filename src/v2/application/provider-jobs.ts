@@ -119,6 +119,9 @@ export function enqueueProviderJobService(dependencies: {
     market: string
     locale: string
   }>>
+  liveAvatarEvidence?: Readonly<{
+    isAvailable(input: { adapterId: string; adapterVersion: string; operation: 'audio-avatar' }): Promise<boolean>
+  }>
 }) {
   return async function execute(request: {
     workspaceId: string
@@ -188,8 +191,13 @@ export function enqueueProviderJobService(dependencies: {
       if (replay.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different provider job')
       return Object.freeze({ persisted: replay, replayed: true })
     }
-    if (!dependencies.adapters.get({ adapterId: request.adapterId, adapterVersion: request.adapterVersion })) {
+    const adapter = dependencies.adapters.get({ adapterId: request.adapterId, adapterVersion: request.adapterVersion })
+    if (!adapter) {
       throw new DomainError('PRECONDITION_REQUIRED', 'Configured provider adapter is unavailable')
+    }
+    if (request.operation === 'audio-avatar' && adapter.runtimeClass === 'live') {
+      const evidenceAvailable = await dependencies.liveAvatarEvidence?.isAvailable({ adapterId: adapter.id, adapterVersion: adapter.adapterVersion, operation: 'audio-avatar' })
+      assertDomain(evidenceAvailable === true, 'PRECONDITION_REQUIRED', 'Live avatar output evidence is unavailable; submission was not started')
     }
     const [project, profile, persistedAudioMaster] = await Promise.all([
       dependencies.projects.read({ workspaceId, projectId }),
@@ -528,6 +536,7 @@ export function runProviderJobWorkerOnce(dependencies: {
           async ({ signal: submitSignal }) => {
             const submission = await adapter.submit(submissionInput, {
               workspaceId: job.workspaceId, projectVersionId: job.originProjectVersionId,
+              operation: job.operation,
               operationId: job.id, idempotencyKey: job.idempotencyKey,
               signal: submitSignal, observeTransport,
             })

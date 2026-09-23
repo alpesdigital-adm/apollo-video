@@ -485,6 +485,53 @@ test('W24.2 retrieve retry keeps one paid effect and receipt replay survives a n
   assert.equal(canonicalReceipt.leaseToken, receiptLeaseTokens[0])
 })
 
+test('W24.3 report-only crash repair reuses the persisted critic result without another provider effect', async () => {
+  let job = planned('polling')
+  job = transitionProviderJob(job, { status: 'estimated', occurredAt: at(1), estimate: { currency: 'USD', costMinorUnits: 9, estimatedLatencyMs: 800 } })
+  job = transitionProviderJob(job, { status: 'submitting', occurredAt: at(2) })
+  job = transitionProviderJob(job, { status: 'submitted', occurredAt: at(3), providerJobId: 'controlled-avatar:provider-job-key' })
+  job = transitionProviderJob(job, { status: 'retrieving', occurredAt: at(4), providerStatus: 'completed' })
+  job = transitionProviderJob(job, { status: 'evaluating', occurredAt: at(5), resultArtifact: { artifactId: 'avatar-report-only', artifactSha256: hash('c'), mediaType: 'video', byteSize: 12_345 } })
+  let stored = { job, requestFingerprint: hash('e') }
+  let crash = true
+  let tick = 5
+  let criticCalls = 0
+  const jobs = {
+    async claimNext(input) { return { ...stored, lease: { owner: input.workerId, token: input.leaseToken, expiresAt: input.leaseExpiresAt.toISOString() } } },
+    async renewLease({ current, leaseExpiresAt }) { return { ...current, lease: { ...current.lease, expiresAt: leaseExpiresAt.toISOString() } } },
+    async advance(input) {
+      if (crash && input.next.status === 'approved') { crash = false; throw new Error('simulated crash after critic report commit') }
+      stored = { ...stored, job: input.next }
+      return stored
+    },
+  }
+  const adapter = {
+    id: job.adapterId, adapterVersion: job.adapterVersion, configHash: hash('1'), runtimeClass: 'controlled',
+    async getCapabilities() { return { completion: 'polling' } },
+  }
+  const runOnce = runProviderJobWorkerOnce({
+    ...runtimeEvidence(), jobs, adapters: { get: () => adapter },
+    materializer: { async materialize() { throw new Error('unreachable') } },
+    ingestor: { async ingest() { throw new Error('unreachable') } },
+    critic: {
+      async evaluate() {
+        criticCalls += 1
+        // The first call persists this report before the job transition. The
+        // second is the critic repository's exact replay of the same report.
+        return { approved: true, resultHash: hash('d') }
+      },
+    },
+    clock: () => new Date(at(++tick)), createLeaseToken: () => `report-repair-lease-${tick}`,
+    createTransitionId: () => `report-repair-transition-${tick}`,
+  })
+  await assert.rejects(runOnce('provider-worker-report-crash'), /critic report commit/)
+  assert.equal(stored.job.status, 'evaluating')
+  await runOnce('provider-worker-report-repair')
+  assert.equal(stored.job.status, 'approved')
+  assert.equal(stored.job.criticResultHash, hash('d'))
+  assert.equal(criticCalls, 2)
+})
+
 test('T-FR-101 supervised provider loop stays idle, isolates iteration failure and stops on abort', async () => {
   const controller = new AbortController()
   const calls = []

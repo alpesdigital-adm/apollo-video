@@ -51,6 +51,23 @@ export async function routeTransformationBriefService(input: {
   return input.repository.persistSelection({ selection })
 }
 
+export async function routeTransformationFallbackService(input: {
+  repository: TransformationProviderRegistryRepository
+  workspaceId: string
+  projectId: string
+  briefId: string
+  policy: Readonly<TransformationRoutingPolicy>
+  createdAt: string
+}) {
+  const brief = await input.repository.readBrief({ workspaceId: input.workspaceId, projectId: input.projectId, briefId: input.briefId })
+  assertDomain(brief, 'INVALID_ARGUMENT', 'TransformationBrief was not found')
+  assertDomain(brief.fallbackLadder.includes('generated-cutaway'), 'PRECONDITION_REQUIRED', 'TransformationBrief has no generated-cutaway fallback')
+  const providers = await input.repository.listProviders({ workspaceId: input.workspaceId })
+  const health = await input.repository.readLatestHealth({ workspaceId: input.workspaceId, providerIds: providers.map((provider) => provider.id) })
+  const selection = routeTransformationProvider({ brief, providers, health, policy: input.policy, createdAt: input.createdAt, requestedOperation: 'generated-cutaway' })
+  return input.repository.persistSelection({ selection })
+}
+
 export async function listTransformationProvidersService(input: {
   repository: TransformationProviderRegistryRepository
   workspaceId: string

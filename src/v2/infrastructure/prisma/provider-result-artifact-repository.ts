@@ -67,7 +67,7 @@ function assertRecord(record: Readonly<ProviderResultArtifactRecord>): void {
   assertDomain(HASH.test(record.artifactSha256) && HASH.test(record.adapterConfigHash) && HASH.test(record.inputHash) && HASH.test(record.authorizationHash), 'INVALID_ARGUMENT', 'Provider result artifact hashes are invalid')
   if (record.scriptHash !== undefined) assertDomain(HASH.test(record.scriptHash), 'INVALID_ARGUMENT', 'Provider result artifact scriptHash is invalid')
   assertDomain(Number.isSafeInteger(record.byteSize) && record.byteSize > 0, 'INVALID_ARGUMENT', 'Provider result artifact byteSize is invalid')
-  const mediaByRole: Record<ProviderResultArtifactRole, string> = { 'primary-audio': 'audio', 'primary-video': 'video', 'alignment-evidence': 'data' }
+  const mediaByRole: Record<ProviderResultArtifactRole, string> = { 'primary-audio': 'audio', 'primary-video': 'video', 'alignment-evidence': 'data', 'output-speech-evidence': 'data' }
   assertDomain(record.mediaType === mediaByRole[record.role], 'INVALID_ARGUMENT', 'Provider result artifact media type does not match its role')
   if (record.observedCost) {
     assertDomain(/^[A-Z]{3}$/.test(record.observedCost.currency) && Number.isSafeInteger(record.observedCost.costMinorUnits) && record.observedCost.costMinorUnits >= 0, 'INVALID_ARGUMENT', 'Provider result artifact observed cost is invalid')

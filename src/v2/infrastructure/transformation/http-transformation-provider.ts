@@ -6,6 +6,7 @@ import type {
   ProviderSubmitContext,
   ProviderWebhookEvent,
   ProviderRetrieveContext,
+  ProviderOperation,
 } from '../../application/ports/async-media-provider.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { assertDomain } from '../../domain/errors.ts'
@@ -107,6 +108,7 @@ export interface HttpTransformationProviderConfig {
   apiKey: string
   completion: ProviderCompletionMode
   modes: readonly string[]
+  operations: readonly ProviderOperation[]
   callbackSecret?: Uint8Array
   modelRef?: string
   timeoutMs?: number
@@ -129,6 +131,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
   private readonly apiKey: string
   private readonly completion: ProviderCompletionMode
   private readonly modes: readonly string[]
+  private readonly operations: readonly ProviderOperation[]
   private readonly callbackSecret?: Uint8Array
   private readonly timeoutMs: number
   private readonly maxResultBytes: number
@@ -137,7 +140,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
   private readonly pricePerSecondMinorUnits: number
   private readonly currency: string
   private readonly fetchImplementation: FetchLike
-  private readonly runtimeClass: 'controlled' | 'live'
+  readonly runtimeClass: 'controlled' | 'live'
 
   constructor(config: HttpTransformationProviderConfig) {
     const baseUrl = new URL(config.baseUrl)
@@ -150,6 +153,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     )
     assertDomain(config.apiKey.trim().length >= 8, 'PERSISTENCE_NOT_CONFIGURED', 'Transformation provider credential is invalid')
     assertDomain(config.modes.length > 0, 'PERSISTENCE_NOT_CONFIGURED', 'Transformation provider declares no modes')
+    assertDomain(config.operations.length > 0, 'PERSISTENCE_NOT_CONFIGURED', 'Transformation provider declares no operations')
     if (config.completion === 'webhook' || config.completion === 'both') {
       assertDomain(
         Boolean(config.callbackSecret && config.callbackSecret.byteLength >= 32),
@@ -164,6 +168,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     this.apiKey = config.apiKey.trim()
     this.completion = config.completion
     this.modes = Object.freeze([...config.modes])
+    this.operations = Object.freeze([...new Set(config.operations)])
     this.callbackSecret = config.callbackSecret
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.maxResultBytes = config.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES
@@ -190,6 +195,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
       baseUrl: this.baseUrl,
       completion: this.completion,
       modes: this.modes,
+      operations: this.operations,
       modelRef: this.modelRef ?? null,
       timeoutMs: this.timeoutMs,
       maxResultBytes: this.maxResultBytes,
@@ -226,7 +232,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     const payload = (await response.json()) as Record<string, unknown>
     const now = Date.now()
     return Object.freeze({
-      operations: Object.freeze(['video-to-video', 'background-replace', 'camera-motion'] as const),
+      operations: this.operations,
       inputFormats: Object.freeze(['mp4']),
       outputFormats: Object.freeze(['mp4']),
       duration: Object.freeze({
@@ -263,7 +269,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
       // The provider's own idempotency key, when it honours one. Apollo's
       // replay protection is independent and always applies.
       headers: { 'idempotency-key': context.idempotencyKey },
-      body: JSON.stringify({ input, operationId: context.operationId }),
+      body: JSON.stringify({ input, operation: context.operation, operationId: context.operationId }),
     }, context.signal)
     if (!response.ok) throw adapterError(response)
     const payload = (await response.json()) as Record<string, unknown>
@@ -274,7 +280,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
       await context.observeTransport?.(createProviderTransportObservation({
         phase: 'submit', runtimeClass: this.runtimeClass, adapterId: this.id, adapterVersion: this.adapterVersion,
         adapterConfigHash: this.configHash, endpointClass: 'transformation-http-submit', method: 'POST',
-        requestHash: calculateCanonicalHash({ input, operationId: context.operationId, idempotencyKeyHash: calculateCanonicalHash(context.idempotencyKey) }),
+        requestHash: calculateCanonicalHash({ input, operation: context.operation, operationId: context.operationId, idempotencyKeyHash: calculateCanonicalHash(context.idempotencyKey) }),
         responseHash: calculateCanonicalHash({ providerJobId: payload.providerJobId }), responseStatus: response.status,
         providerJobRef: payload.providerJobId, observedAt: new Date().toISOString(),
       }))
@@ -284,7 +290,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     await context.observeTransport?.(createProviderTransportObservation({
       phase: 'submit', runtimeClass: this.runtimeClass, adapterId: this.id, adapterVersion: this.adapterVersion,
       adapterConfigHash: this.configHash, endpointClass: 'transformation-http-submit', method: 'POST',
-      requestHash: calculateCanonicalHash({ input, operationId: context.operationId, idempotencyKeyHash: calculateCanonicalHash(context.idempotencyKey) }),
+      requestHash: calculateCanonicalHash({ input, operation: context.operation, operationId: context.operationId, idempotencyKeyHash: calculateCanonicalHash(context.idempotencyKey) }),
       responseHash: calculateCanonicalHash({ providerJobId: result.providerJobId, mediaSha256: result.mediaSha256, mediaByteSize: result.mediaByteSize, observedCost: result.observedCost }),
       responseStatus: response.status, providerJobRef: result.providerJobId, observedAt: new Date().toISOString(),
     }))

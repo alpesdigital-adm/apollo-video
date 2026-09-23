@@ -465,6 +465,9 @@ const coverage = Object.freeze({
   'apollo.projects.synthetic-production-runs.create': {
     mode: 'durable-covered', evidence: 'serializable current ProjectVersion, active profile, exact artifact digest and current rights snapshot rechecks plus actor-bound idempotency and immutable EditPlan snapshot',
   },
+  'apollo.projects.synthetic-production-runs.render-operations.create': {
+    mode: 'durable-covered', evidence: 'actor-bound idempotency fingerprints the exact persisted production run plus output kind and aspect ratio; operation, immutable render context and reserved artifact identities commit together, so concurrent retries converge on one durable render operation',
+  },
   'apollo.projects.synthetic-phase-gates.run': {
     mode: 'durable-covered', evidence: 'actor- and tenant-bound idempotency fingerprints the exact ProjectVersion identity; Serializable persistence rechecks the current version, active API client and complete server-owned evidence before atomically writing the immutable gate and its references',
   },
@@ -491,6 +494,9 @@ const coverage = Object.freeze({
   },
   'apollo.projects.transformation-fallbacks.act': {
     mode: 'durable-covered', evidence: 'the action is appended to the immutable fallback ledger through a brief-scoped advisory lock and exact previous-ledger-hash compare-and-swap; same-decision retries converge naturally and stale concurrent reviewers receive VERSION_CONFLICT',
+  },
+  'apollo.projects.transformation-fallbacks.dispatch': {
+    mode: 'durable-covered', evidence: 'the exact ledger hash, server-selected generated-cutaway rung and actor context form the dispatch claim; a prior job or skipped attempt for the same ledger and rung is replayed, while a divergent context is refused and a stale ledger loses its compare-and-set before another provider attempt can be created',
   },
   'apollo.projects.provider-jobs.enqueue': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent creation, immutable authorization, serializable project/profile/rights rechecks, leased stage claims and job-hash compare-and-swap transition history',
@@ -588,7 +594,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    176,
+    178,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

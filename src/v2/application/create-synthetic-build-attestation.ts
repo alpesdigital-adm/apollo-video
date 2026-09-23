@@ -6,6 +6,7 @@ import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
   assertSyntheticBuildAttestation,
+  calculateSyntheticBuildIdentityHash,
   calculateSyntheticBuildAttestationHash,
   SYNTHETIC_BUILD_ATTESTATION_SCHEMA_VERSION,
 } from '../domain/synthetic-build-attestation.ts'
@@ -78,12 +79,23 @@ export function createSyntheticBuildAttestationService(dependencies: {
       )
     }
     const result = await dependencies.runner.run({ signal: request.signal })
+    const resultIdentityHash = calculateSyntheticBuildIdentityHash(result.identity)
     assertDomain(
       result.identity.commitSha === binding.runtimeCommitSha &&
+        result.identity.treeHash === binding.runtimeTreeHash &&
         result.identity.contractGraphHash === binding.runtimeContractGraphHash &&
-        result.identity.renderBundleHash === binding.runtimeRenderBundleHash,
+        result.identity.toolchainHash === binding.runtimeToolchainHash &&
+        result.identity.renderBundleHash === binding.runtimeRenderBundleHash &&
+        resultIdentityHash === binding.runtimeIdentityHash,
       'VERSION_CONFLICT',
       'Build identity differs from the runtime that produced the render binding',
+    )
+    const currentBinding = await dependencies.repository.readBinding(normalized)
+    assertDomain(
+      currentBinding !== null &&
+        calculateCanonicalHash(currentBinding) === calculateCanonicalHash(binding),
+      'VERSION_CONFLICT',
+      'Synthetic render binding changed while build checks were running',
     )
     const content = Object.freeze({
       schemaVersion: SYNTHETIC_BUILD_ATTESTATION_SCHEMA_VERSION,

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import LogoutButton from '@/components/LogoutButton'
+import SyntheticPhaseGatePanel from '@/components/SyntheticPhaseGatePanel'
 import TransformationReviewPanel from '@/components/TransformationReviewPanel'
 import type { VisibleState } from '@/v2/domain/visible-state'
 import { createEditorReads, createLatestReadFence, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
@@ -3451,6 +3452,12 @@ export default function ProjectWorkspacePage() {
             {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || reviewLoading || reviewFailure !== null || proxyReviewFailure !== null || proxyReviewLoading || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || operationActive} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : reviewLoading || reviewFailure || proxyReviewFailure || proxyReviewLoading ? 'Laudo indisponível' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
             {finalOutput ? <a className="mt-2 block w-full rounded-lg border border-white/[0.08] px-3 py-2.5 text-center text-xs text-[#aaa49a] transition hover:border-white/[0.16] hover:text-white" download={finalOutput.originalFileName} href={`/v1/artifacts/${encodeURIComponent(finalOutput.artifactId)}/content`}>Baixar MP4 final</a> : null}
           </div>
+          {workspace.version ? <SyntheticPhaseGatePanel
+            projectId={projectId}
+            projectVersionHash={workspace.version.baseHash}
+            projectVersionId={workspace.version.id}
+            reads={reads}
+          /> : null}
           <div className="mt-5 overflow-hidden rounded-xl border border-white/[0.07] bg-[#0d0d0d]" data-testid="proxy-review-gate">
             <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
               <div>

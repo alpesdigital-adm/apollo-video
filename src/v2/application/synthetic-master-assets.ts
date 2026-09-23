@@ -37,6 +37,15 @@ export interface PromotableProviderJob {
   status: string
   criticResultHash: string | null
   authorization: Readonly<{ profileSnapshotId: string }>
+  audioRange: Readonly<{ startMs: number; endMs: number; rangeHash: string }> | null
+  audioMaster: Readonly<{
+    id: string
+    masterHash: string
+    profileSnapshotId: string
+    sourceProviderJobId: string | null
+    audio: Readonly<{ artifactId: string; artifactSha256: string; durationMs: number; locale: string }>
+    alignmentEvidence: Readonly<{ artifactId: string; artifactSha256: string }>
+  }> | null
   resultArtifact: Readonly<{ artifactId: string; artifactSha256: string }> | null
   authorizationHash: string
   submittedAt: string | null
@@ -148,6 +157,20 @@ export function promoteSyntheticMasterAssetService(dependencies: {
     const audit = materializeActorAuditContext(request.actor)
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(idempotencyKey.length >= 8, 'INVALID_ARGUMENT', 'Idempotency key is required')
+    const scriptHash = createHash('sha256').update(request.scriptText, 'utf8').digest('hex')
+    const requestFingerprint = calculateCanonicalHash({
+      schemaVersion: 'synthetic-master-promotion-request/v1',
+      workspaceId: request.workspaceId,
+      projectId: request.projectId,
+      providerJobId: request.providerJobId,
+      profileSnapshotId: request.profileSnapshotId,
+      scriptHash,
+      locale: request.locale,
+      use: request.use,
+      market: request.market,
+      lineage: [...request.lineage],
+      cost: { currency: request.cost.currency, minorUnits: request.cost.minorUnits },
+    })
 
     const replay = await dependencies.masters.findReplay({
       workspaceId: request.workspaceId,
@@ -156,7 +179,14 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       actorContextHash: audit.contextHash,
       idempotencyKey,
     })
-    if (replay) return Object.freeze({ master: replay.master, replayed: true })
+    if (replay) {
+      assertDomain(
+        replay.requestFingerprint === requestFingerprint,
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Synthetic master promotion idempotency key was already used for a different request',
+      )
+      return Object.freeze({ master: replay.master, replayed: true })
+    }
 
     // 1. The job must be terminal, approved and ours.
     const job = await dependencies.jobs.read({ workspaceId: request.workspaceId, jobId: request.providerJobId })
@@ -197,11 +227,54 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       projectId: request.projectId,
       jobId: request.providerJobId,
     })
-    const byRole = new Map<SyntheticMasterArtifactRole, (typeof results)[number]>()
+    type PromotionArtifact = (typeof results)[number] | Readonly<{
+      artifactId: string
+      artifactSha256: string
+      byteSize?: number
+      modelRef?: string
+      adapterConfigHash?: string
+    }>
+    const byRole = new Map<SyntheticMasterArtifactRole, PromotionArtifact>()
     for (const result of results) {
       const role = ROLE_BY_PROVIDER_ROLE[result.role]
       if (!role || byRole.has(role)) continue
       byRole.set(role, result)
+    }
+    const audioMaster = job!.audioMaster
+    assertDomain(Boolean(audioMaster), 'PERSISTENCE_CONFLICT', 'Audio-avatar job has no canonical audio master')
+    assertDomain(
+      audioMaster!.profileSnapshotId === request.profileSnapshotId &&
+        job!.audioRange?.startMs === 0 &&
+        job!.audioRange?.endMs === audioMaster!.audio.durationMs,
+      'PERSISTENCE_CONFLICT',
+      'Audio-avatar job does not bind the full canonical audio master',
+    )
+    byRole.set('final-audio', Object.freeze({
+      artifactId: audioMaster!.audio.artifactId,
+      artifactSha256: audioMaster!.audio.artifactSha256,
+    }))
+    byRole.set('alignment', Object.freeze({
+      artifactId: audioMaster!.alignmentEvidence.artifactId,
+      artifactSha256: audioMaster!.alignmentEvidence.artifactSha256,
+    }))
+    if (audioMaster!.sourceProviderJobId) {
+      const upstream = await dependencies.resultArtifacts.listByJob({
+        workspaceId: request.workspaceId,
+        projectId: request.projectId,
+        jobId: audioMaster!.sourceProviderJobId,
+      })
+      const upstreamAudio = upstream.find((result) => result.role === 'primary-audio')
+      const upstreamAlignment = upstream.find((result) => result.role === 'alignment-evidence')
+      assertDomain(
+        upstreamAudio?.artifactId === audioMaster!.audio.artifactId &&
+          upstreamAudio.artifactSha256 === audioMaster!.audio.artifactSha256 &&
+          upstreamAlignment?.artifactId === audioMaster!.alignmentEvidence.artifactId &&
+          upstreamAlignment.artifactSha256 === audioMaster!.alignmentEvidence.artifactSha256,
+        'PERSISTENCE_CONFLICT',
+        'TTS provider result ledger does not match the canonical audio master',
+      )
+      byRole.set('final-audio', upstreamAudio)
+      byRole.set('alignment', upstreamAlignment)
     }
     for (const role of SYNTHETIC_MASTER_REQUIRED_ARTIFACT_ROLES) {
       assertDomain(byRole.has(role), 'PRECONDITION_REQUIRED', `Provider job has no ${role} artifact to promote`)
@@ -226,7 +299,8 @@ export function promoteSyntheticMasterAssetService(dependencies: {
         `Master ${role} artifact is not available`,
       )
       assertDomain(
-        artifact!.sha256 === result.artifactSha256 && artifact!.byteSize === BigInt(result.byteSize),
+        artifact!.sha256 === result.artifactSha256 &&
+          (result.byteSize === undefined || artifact!.byteSize === BigInt(result.byteSize)),
         'PERSISTENCE_CONFLICT',
         `Master ${role} artifact drifted from the provider result ledger`,
       )
@@ -283,6 +357,12 @@ export function promoteSyntheticMasterAssetService(dependencies: {
     }
 
     const audio = catalogued.get('final-audio')!
+    const providerOriginal = byRole.get('provider-original')!
+    assertDomain(
+      typeof providerOriginal.adapterConfigHash === 'string' && providerOriginal.adapterConfigHash.length === 64,
+      'PERSISTENCE_CONFLICT',
+      'Avatar provider result has no adapter configuration identity',
+    )
     // The normalized track when a normalization stage produced one; otherwise
     // the provider's own video, which is what the master actually holds.
     const video = catalogued.get('normalized-video') ?? catalogued.get('provider-original')!
@@ -314,8 +394,15 @@ export function promoteSyntheticMasterAssetService(dependencies: {
         verdict!.artifactId === video.id &&
         verdict!.artifactSha256 === video.sha256 &&
         verdict!.profileSnapshotId === request.profileSnapshotId &&
-        verdict!.scriptHash === createHash('sha256').update(request.scriptText, 'utf8').digest('hex') &&
+        verdict!.scriptHash === scriptHash &&
         verdict!.alignmentArtifactId === byRole.get('alignment')!.artifactId &&
+        verdict!.audioArtifactId === null &&
+        verdict!.providerJobId === job!.id &&
+        verdict!.outputSpeechEvidence?.passed === true &&
+        verdict!.outputSpeechEvidence.sourceAudioArtifactId === audio.id &&
+        verdict!.outputSpeechEvidence.sourceAudioRangeHash === job!.audioRange?.rangeHash &&
+        verdict!.outputSpeechEvidence.speechEvidence.outputTranscriptHash === verdict!.scriptHash &&
+        job!.audioRange?.startMs === 0 &&
         job!.resultArtifact?.artifactId === video.id &&
         job!.resultArtifact.artifactSha256 === video.sha256,
       'PERSISTENCE_CONFLICT',
@@ -327,6 +414,12 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       audio: { artifactId: audio.id, artifactKey: audio.artifactKey },
       video: { artifactId: video.id, artifactKey: video.artifactKey },
     })
+    assertDomain(
+      job!.audioRange?.endMs === measured.audioDurationMs &&
+        verdict!.outputSpeechEvidence?.sourceDurationMs === measured.audioDurationMs,
+      'PERSISTENCE_CONFLICT',
+      'The approving avatar evidence does not cover the full promoted audio master',
+    )
 
     const master = createSyntheticMasterAsset({
       id: dependencies.createId(),
@@ -360,8 +453,8 @@ export function promoteSyntheticMasterAssetService(dependencies: {
         adapterId: job!.adapterId,
         adapterVersion: job!.adapterVersion,
         capability: job!.operation,
-        modelRef: byRole.get('provider-original')!.modelRef ?? null,
-        adapterConfigHash: byRole.get('provider-original')!.adapterConfigHash,
+        modelRef: providerOriginal.modelRef ?? null,
+        adapterConfigHash: providerOriginal.adapterConfigHash,
         providerJobId: job!.id,
         providerJobRef: job!.providerJobId!,
       },
@@ -390,19 +483,7 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       profileSnapshotHash: profile!.snapshot.snapshotHash,
       criticResultHash: job!.criticResultHash!,
       authorityScope: { use: request.use, market: request.market, locale: request.locale },
-      requestFingerprint: calculateCanonicalHash({
-        schemaVersion: 'synthetic-master-promotion-request/v1',
-        workspaceId: request.workspaceId,
-        projectId: request.projectId,
-        providerJobId: request.providerJobId,
-        profileSnapshotId: request.profileSnapshotId,
-        scriptHash: master.scriptHash,
-        locale: request.locale,
-        use: request.use,
-        market: request.market,
-        lineage: [...request.lineage],
-        cost: { currency: request.cost.currency, minorUnits: request.cost.minorUnits },
-      }),
+      requestFingerprint,
       idempotencyKey,
       authenticationAudit: audit,
     })

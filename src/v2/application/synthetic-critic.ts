@@ -2,6 +2,7 @@ import { assertDomain } from '../domain/errors.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import {
   SYNTHETIC_CRITIC_DIMENSIONS,
+  assertSyntheticCriticReportIntegrity,
   createSyntheticCriticReport,
   isSyntheticCriticApproval,
   type SyntheticCriticDimension,
@@ -67,6 +68,18 @@ export function isCurrentSyntheticCriticApproval(report: Readonly<SyntheticCriti
     !report.expectationHash ||
     !report.evaluationContextHash
   ) return false
+  if (report.capability === 'audio-avatar') {
+    if (!report.providerJobId || !report.outputSpeechEvidence) return false
+    if (
+      !report.outputSpeechEvidence.passed ||
+      report.outputSpeechEvidence.speechEvidence.outputTranscriptHash !== report.scriptHash
+    ) return false
+    try {
+      assertSyntheticCriticReportIntegrity(report)
+    } catch {
+      return false
+    }
+  }
   try {
     return report.thresholdsVersion === resolveSyntheticCriticThresholds({
       capability: report.capability,
@@ -121,6 +134,7 @@ export function evaluateSyntheticCriticCore(dependencies: {
       schemaVersion: 'synthetic-critic-evaluation-context/v1',
       workspaceId: subject.workspaceId,
       projectId: subject.projectId,
+      providerJobId: subject.providerJobId ?? null,
       blockId: subject.blockId,
       capability: subject.capability,
       adapterId: subject.adapterId,
@@ -137,6 +151,8 @@ export function evaluateSyntheticCriticCore(dependencies: {
         byteSize: subject.audio.byteSize,
       } : null,
       alignmentArtifactId: subject.alignmentArtifactId,
+      ...(subject.outputSpeechEvidence ? { outputSpeechEvidence: subject.outputSpeechEvidence } : {}),
+      outputSpeechEvidenceArtifactId: subject.outputSpeechEvidenceArtifactId ?? null,
       scriptHash: request.scriptHash,
       profileSnapshotId: request.profileSnapshotId,
       expectedIdentityRef: subject.expected.identityRef,
@@ -156,6 +172,7 @@ export function evaluateSyntheticCriticCore(dependencies: {
       const report = stored[0]!
       assertDomain(
         report.projectId === subject.projectId &&
+          report.providerJobId === subject.providerJobId &&
           report.capability === subject.capability &&
           report.adapterId === subject.adapterId &&
           report.adapterVersion === subject.adapterVersion &&
@@ -166,7 +183,9 @@ export function evaluateSyntheticCriticCore(dependencies: {
           report.profileSnapshotId === request.profileSnapshotId &&
           report.expectedIdentityRef === subject.expected.identityRef &&
           report.expectationHash === expectationHash &&
-          report.evaluationContextHash === evaluationContextHash,
+          report.evaluationContextHash === evaluationContextHash &&
+          report.outputSpeechEvidence?.evidenceHash === subject.outputSpeechEvidence?.evidenceHash &&
+          report.outputSpeechEvidenceArtifactId === subject.outputSpeechEvidenceArtifactId,
         'PERSISTENCE_CONFLICT',
         'Stored synthetic critic report does not match the authoritative evaluation context',
       )
@@ -259,6 +278,7 @@ export function evaluateSyntheticCriticCore(dependencies: {
       }),
       workspaceId: subject.workspaceId,
       projectId: subject.projectId,
+      ...(subject.providerJobId ? { providerJobId: subject.providerJobId } : {}),
       blockId: subject.blockId,
       capability: subject.capability,
       adapterId: subject.adapterId,
@@ -272,6 +292,8 @@ export function evaluateSyntheticCriticCore(dependencies: {
       expectedIdentityRef: subject.expected.identityRef,
       expectationHash,
       evaluationContextHash,
+      ...(subject.outputSpeechEvidence ? { outputSpeechEvidence: subject.outputSpeechEvidence } : {}),
+      ...(subject.outputSpeechEvidenceArtifactId ? { outputSpeechEvidenceArtifactId: subject.outputSpeechEvidenceArtifactId } : {}),
       evaluators,
       measurements,
       issues: verdict.issues,

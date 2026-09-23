@@ -4,6 +4,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 
 import type { SyntheticBuildAttestationRunner } from '../application/ports/synthetic-build-attestation-repository.ts'
+import type { SyntheticRuntimeIdentityReader } from '../application/ports/synthetic-runtime-identity-reader.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError } from '../domain/errors.ts'
 import { SYNTHETIC_BUILD_CHECKS } from '../domain/synthetic-build-attestation.ts'
@@ -138,17 +139,77 @@ const CHECK_COMMANDS = Object.freeze({
 export class NodeSyntheticBuildAttestationRunner
 implements SyntheticBuildAttestationRunner {
   private readonly executor: CommandExecutor
+  private readonly identityReader: SyntheticRuntimeIdentityReader
   private readonly clock: () => Date
-  private readonly cwd: string
 
   constructor(input: {
     cwd: string
     executor?: CommandExecutor
+    identityReader?: SyntheticRuntimeIdentityReader
     clock?: () => Date
   }) {
+    this.executor = input.executor ?? new ProcessCommandExecutor(input.cwd)
+    this.identityReader = input.identityReader ?? new NodeSyntheticRuntimeIdentityReader({
+      cwd: input.cwd,
+      executor: this.executor,
+    })
+    this.clock = input.clock ?? (() => new Date())
+  }
+
+  async run(input: { signal?: AbortSignal } = {}) {
+    const startedAt = this.clock().toISOString()
+    const before = await this.identityReader.read(input)
+    const checks = []
+    for (const definition of SYNTHETIC_BUILD_CHECKS) {
+      const command = CHECK_COMMANDS[definition.code]
+      const checkStartedAt = this.clock().toISOString()
+      const result = await this.executor.execute(command[0], command[1], { signal: input.signal })
+      const checkCompletedAt = this.clock().toISOString()
+      checks.push(Object.freeze({
+        code: definition.code,
+        command: definition.command,
+        exitCode: result.exitCode,
+        logHash: digestLog(result),
+        startedAt: checkStartedAt,
+        completedAt: checkCompletedAt,
+      }))
+      if (result.exitCode !== 0) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          `Build attestation check ${definition.code} failed`,
+        )
+      }
+    }
+    const after = await this.identityReader.read(input)
+    if (
+      before.commitSha !== after.commitSha ||
+      before.treeHash !== after.treeHash ||
+      before.contractGraphHash !== after.contractGraphHash ||
+      before.toolchainHash !== after.toolchainHash ||
+      before.renderBundleHash !== after.renderBundleHash
+    ) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Build identity changed while attestation checks were running',
+      )
+    }
+    return Object.freeze({
+      identity: before,
+      checks: Object.freeze(checks),
+      startedAt,
+      completedAt: this.clock().toISOString(),
+    })
+  }
+}
+
+export class NodeSyntheticRuntimeIdentityReader
+implements SyntheticRuntimeIdentityReader {
+  private readonly executor: CommandExecutor
+  private readonly cwd: string
+
+  constructor(input: { cwd: string; executor?: CommandExecutor }) {
     this.cwd = input.cwd
     this.executor = input.executor ?? new ProcessCommandExecutor(input.cwd)
-    this.clock = input.clock ?? (() => new Date())
   }
 
   private async renderBundleHash() {
@@ -201,7 +262,8 @@ implements SyntheticBuildAttestationRunner {
     return result.stdout.trim()
   }
 
-  private async inspectIdentity(signal?: AbortSignal) {
+  async read(input: { signal?: AbortSignal } = {}) {
+    const signal = input.signal
     const tasks = await Promise.allSettled([
       this.git(['rev-parse', 'HEAD'], signal),
       this.git(['status', '--porcelain=v1', '--untracked-files=all'], signal),
@@ -220,12 +282,26 @@ implements SyntheticBuildAttestationRunner {
       this.renderBundleHash(),
       readFile(join(this.cwd, 'package.json')),
       readFile(join(this.cwd, 'package-lock.json')),
+      readFile(join(this.cwd, 'remotion', 'package.json')),
+      readFile(join(this.cwd, 'remotion', 'package-lock.json')),
+      readFile(join(this.cwd, 'remotion', 'node_modules', '@remotion', 'renderer', 'package.json')),
     ])
     const failure = tasks.find((result) => result.status === 'rejected')
     if (failure?.status === 'rejected') throw failure.reason
-    const [commitSha, status, trackedGraph, wholeTree, renderBundleHash, packageJson, packageLock] =
+    const [
+      commitSha,
+      status,
+      trackedGraph,
+      wholeTree,
+      renderBundleHash,
+      packageJson,
+      packageLock,
+      remotionPackageJson,
+      remotionPackageLock,
+      installedRendererPackageJson,
+    ] =
       tasks.map((result) => (result as PromiseFulfilledResult<unknown>).value) as
-        [string, string, string, string, string, Buffer, Buffer]
+        [string, string, string, string, string, Buffer, Buffer, Buffer, Buffer, Buffer]
     if (status.length > 0) {
       throw new DomainError(
         'VERSION_CONFLICT',
@@ -241,53 +317,12 @@ implements SyntheticBuildAttestationRunner {
         versions: process.versions,
         packageJsonHash: createHash('sha256').update(packageJson).digest('hex'),
         packageLockHash: createHash('sha256').update(packageLock).digest('hex'),
+        remotionPackageJsonHash: createHash('sha256').update(remotionPackageJson).digest('hex'),
+        remotionPackageLockHash: createHash('sha256').update(remotionPackageLock).digest('hex'),
+        installedRendererPackageJsonHash: createHash('sha256').update(installedRendererPackageJson).digest('hex'),
       }),
       renderBundleHash,
     })
   }
 
-  async run(input: { signal?: AbortSignal } = {}) {
-    const startedAt = this.clock().toISOString()
-    const before = await this.inspectIdentity(input.signal)
-    const checks = []
-    for (const definition of SYNTHETIC_BUILD_CHECKS) {
-      const command = CHECK_COMMANDS[definition.code]
-      const checkStartedAt = this.clock().toISOString()
-      const result = await this.executor.execute(command[0], command[1], { signal: input.signal })
-      const checkCompletedAt = this.clock().toISOString()
-      checks.push(Object.freeze({
-        code: definition.code,
-        command: definition.command,
-        exitCode: result.exitCode,
-        logHash: digestLog(result),
-        startedAt: checkStartedAt,
-        completedAt: checkCompletedAt,
-      }))
-      if (result.exitCode !== 0) {
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          `Build attestation check ${definition.code} failed`,
-        )
-      }
-    }
-    const after = await this.inspectIdentity(input.signal)
-    if (
-      before.commitSha !== after.commitSha ||
-      before.treeHash !== after.treeHash ||
-      before.contractGraphHash !== after.contractGraphHash ||
-      before.toolchainHash !== after.toolchainHash ||
-      before.renderBundleHash !== after.renderBundleHash
-    ) {
-      throw new DomainError(
-        'VERSION_CONFLICT',
-        'Build identity changed while attestation checks were running',
-      )
-    }
-    return Object.freeze({
-      identity: before,
-      checks: Object.freeze(checks),
-      startedAt,
-      completedAt: this.clock().toISOString(),
-    })
-  }
 }

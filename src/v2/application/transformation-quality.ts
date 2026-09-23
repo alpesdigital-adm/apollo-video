@@ -69,14 +69,18 @@ function criticChangeRegion(job: Readonly<ProviderJob>) {
 }
 
 export class PersistedTransformationResultCritic {
-  constructor(private readonly dependencies: {
+  private readonly dependencies: {
     registry: TransformationProviderRegistryRepository
     quality: TransformationQualityRepository
     artifacts: MediaArtifactQueryRepository
     novelty: NoveltyBudgetRepository
     evaluator: TransformationCriticEvaluator
     clock?: () => Date
-  }) {}
+  }
+
+  constructor(dependencies: PersistedTransformationResultCritic['dependencies']) {
+    this.dependencies = dependencies
+  }
 
   async evaluate(input: {
     job: Readonly<ProviderJob>

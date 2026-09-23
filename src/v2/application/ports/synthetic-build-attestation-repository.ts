@@ -12,8 +12,11 @@ export interface SyntheticBuildAttestationBinding {
   renderManifestId: string
   renderManifestHash: string
   runtimeCommitSha: string
+  runtimeTreeHash: string
   runtimeContractGraphHash: string
+  runtimeToolchainHash: string
   runtimeRenderBundleHash: string
+  runtimeIdentityHash: string
 }
 
 export interface PersistedSyntheticBuildAttestation {

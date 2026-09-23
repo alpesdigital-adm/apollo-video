@@ -1,10 +1,12 @@
 import {
   Prisma,
   type PrismaClient,
+  type V2SyntheticAudioMaster,
   type V2SyntheticPresenterProfile,
   type V2SyntheticProductionAsset,
   type V2SyntheticProductionRun,
 } from '../../../../generated/prisma-v2/index.js'
+import { createHash } from 'node:crypto'
 
 import type {
   PersistedSyntheticPresenterProfile,
@@ -12,7 +14,15 @@ import type {
   SyntheticProductionRepository,
 } from '../../application/ports/synthetic-production-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
-import { DomainError } from '../../domain/errors.ts'
+import { assertDomain, DomainError } from '../../domain/errors.ts'
+import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import {
+  assertSyntheticCacheDecisionIntegrity,
+  assertSyntheticCacheDecisionPrivacy,
+  type SyntheticCacheDecision,
+} from '../../domain/synthetic-cache-decision.ts'
+import { assertSyntheticMasterConsumptionIntegrity } from '../../domain/synthetic-master-consumption.ts'
+import { assertSyntheticPresenterPolicy } from '../../domain/synthetic-presenter-policy-engine.ts'
 import {
   assertSyntheticPresenterEditPlan,
   createSyntheticPresenterProfileSnapshot,
@@ -24,9 +34,18 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { PrismaProviderJobRepository } from './provider-job-repository.ts'
+import { PrismaSyntheticAudioMasterRepository } from './synthetic-audio-master-repository.ts'
+import { PrismaSyntheticCriticReportRepository } from './synthetic-critic-report-repository.ts'
+import { PrismaSyntheticMasterAssetRepository } from './synthetic-master-asset-repository.ts'
+import { isCurrentSyntheticCriticApproval } from '../../application/synthetic-critic.ts'
+
+const sha256Text = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
 
 type RunWithAssets = V2SyntheticProductionRun & {
   assets: V2SyntheticProductionAsset[]
+  audioMaster: V2SyntheticAudioMaster | null
 }
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -165,6 +184,31 @@ function expectedAssets(plan: Readonly<SyntheticPresenterEditPlan>) {
   ]
 }
 
+function cacheDecisionData(decision: Readonly<SyntheticCacheDecision>) {
+  return {
+    id: decision.id,
+    workspaceId: decision.workspaceId,
+    projectId: decision.projectId,
+    schemaVersion: decision.schemaVersion,
+    operation: decision.operation,
+    cacheKey: decision.cacheKey,
+    cacheKeyVersion: decision.cacheKeyVersion,
+    outcome: decision.outcome,
+    reasonCode: decision.reasonCode,
+    reason: decision.reason,
+    candidateGenerationId: decision.candidateGenerationId,
+    candidateMasterId: decision.candidateMasterId,
+    policyVersion: decision.policyVersion,
+    criticReportHash: decision.criticReportHash,
+    estimatedSavingMinorUnits: decision.estimatedSavingMinorUnits,
+    avoidedCostMinorUnits: decision.avoidedCostMinorUnits,
+    currency: decision.currency,
+    subjectHash: decision.subjectHash,
+    decisionHash: decision.decisionHash,
+    decidedAt: new Date(decision.decidedAt),
+  }
+}
+
 function hydrateRun(
   row: RunWithAssets,
 ): Readonly<PersistedSyntheticProductionRun> {
@@ -192,6 +236,10 @@ function hydrateRun(
     plan.authorization.authorizationHash !== row.authorizationHash ||
     plan.planHash !== row.planHash ||
     stableSerialize(plan) !== row.planJson ||
+    ((row.audioMasterId === null || row.audioMasterHash === null || row.audioOriginProjectId === null)
+      ? !(row.audioMasterId === null && row.audioMasterHash === null && row.audioOriginProjectId === null && row.audioMaster === null)
+      : (!row.audioMaster || row.audioMaster.id !== row.audioMasterId ||
+        row.audioMaster.masterHash !== row.audioMasterHash || row.audioMaster.projectId !== row.audioOriginProjectId)) ||
     expected.length !== stored.length ||
     expected.some((entry, index) => {
       const asset = stored[index]!
@@ -213,6 +261,9 @@ function hydrateRun(
   return Object.freeze({
     plan,
     editPlanSnapshotId: row.editPlanSnapshotId,
+    audioMaster: row.audioMasterId && row.audioMasterHash && row.audioOriginProjectId
+      ? Object.freeze({ id: row.audioMasterId, masterHash: row.audioMasterHash, originProjectId: row.audioOriginProjectId })
+      : null,
     status: row.status as PersistedSyntheticProductionRun['status'],
     requestFingerprint: row.requestFingerprint,
     idempotencyKey: row.idempotencyKey,
@@ -225,6 +276,260 @@ implements SyntheticProductionRepository {
 
   constructor(prisma: PrismaClient = getV2PostgresClient()) {
     this.prisma = prisma
+  }
+
+  private async validateCanonicalAudioAndReuse(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<SyntheticProductionRepository['createRun']>[0],
+    profile: Readonly<PersistedSyntheticPresenterProfile>,
+  ) {
+    const { plan } = input
+    const prisma = transaction as unknown as PrismaClient
+    const jobs = new PrismaProviderJobRepository(prisma)
+    const critics = new PrismaSyntheticCriticReportRepository(prisma)
+    const audioMasters = new PrismaSyntheticAudioMasterRepository(prisma)
+    const sourceJobs = await Promise.all(plan.blocks.map(({ providerJobId }) =>
+      jobs.readById({ workspaceId: plan.workspaceId, jobId: providerJobId })))
+    assertDomain(
+      sourceJobs.length > 0 && sourceJobs.every((persisted) =>
+        persisted?.job.status === 'approved' &&
+        persisted.job.operation === 'audio-avatar' &&
+        persisted.job.input.audioMasterId === input.audioMaster.id),
+      'VERSION_CONFLICT',
+      'Synthetic production provider jobs no longer bind one approved canonical audio master',
+    )
+    const reports = await Promise.all(plan.blocks.map(({ critic }) =>
+      critics.readByHash({ workspaceId: plan.workspaceId, reportHash: critic.resultHash })))
+    for (const [index, block] of plan.blocks.entries()) {
+      const job = sourceJobs[index]!.job
+      const report = reports[index]
+      const range = typeof job.input.audioRange === 'object' && job.input.audioRange !== null
+        ? job.input.audioRange as Record<string, unknown>
+        : null
+      assertDomain(
+        Boolean(report) && report!.id === block.critic.id && isCurrentSyntheticCriticApproval(report!) &&
+          report!.providerJobId === job.id && report!.projectId === job.projectId &&
+          report!.profileSnapshotId === profile.profileSnapshotId &&
+          report!.artifactId === block.artifact.artifactId && report!.artifactSha256 === block.artifact.sha256 &&
+          report!.scriptHash === sha256Text(block.text) && report!.capability === 'audio-avatar' &&
+          report!.outputSpeechEvidence?.passed === true &&
+          report!.outputSpeechEvidence.sourceAudioArtifactId === plan.audio.artifactId &&
+          job.criticResultHash === report!.reportHash &&
+          job.authorization.profileSnapshotId === profile.profileSnapshotId &&
+          job.resultArtifact?.artifactId === block.artifact.artifactId &&
+          job.resultArtifact.artifactSha256 === block.artifact.sha256 &&
+          job.input.audioArtifactId === plan.audio.artifactId &&
+          range?.startMs === block.rangeMs[0] && range.endMs === block.rangeMs[1],
+        'VERSION_CONFLICT',
+        `Synthetic block ${block.id} lost its exact worker approval before commit`,
+      )
+    }
+    const sourceJob = sourceJobs[0]!.job
+    const persistedAudioMaster = await audioMasters.read({
+      workspaceId: plan.workspaceId,
+      projectId: input.audioMaster.originProjectId,
+      audioMasterId: input.audioMaster.id,
+    })
+    assertDomain(Boolean(persistedAudioMaster), 'VERSION_CONFLICT', 'Canonical audio master changed before commit')
+    const audioMaster = persistedAudioMaster!.master
+    const canonicalAlignment = audioMaster.words.map(({ word, startMs, endMs }) => ({ text: word, startMs, endMs }))
+    let canonicalScriptHash: string
+    if (audioMaster.source.kind === 'tts') {
+      canonicalScriptHash = sha256Text(audioMaster.source.text)
+    } else if (audioMaster.source.kind === 'uploaded') {
+      canonicalScriptHash = sha256Text(audioMaster.words.map(({ word }) => word).join(' '))
+    } else {
+      const sourcePlan = await transaction.v2SyntheticScriptPlanVersion.findFirst({
+        where: {
+          id: audioMaster.source.planVersionId,
+          workspaceId: plan.workspaceId,
+          planId: audioMaster.source.planId,
+        },
+        select: { scriptHash: true },
+      })
+      assertDomain(Boolean(sourcePlan), 'PERSISTENCE_CONFLICT', 'Canonical concatenated audio lost its script plan')
+      canonicalScriptHash = sourcePlan!.scriptHash
+    }
+    assertDomain(
+      audioMaster.masterHash === input.audioMaster.masterHash &&
+        audioMaster.projectId === input.audioMaster.originProjectId &&
+        audioMaster.profileSnapshotId === profile.profileSnapshotId &&
+        audioMaster.audio.artifactId === plan.audio.artifactId &&
+        audioMaster.audio.artifactSha256 === plan.audio.sha256 &&
+        audioMaster.audio.durationMs === plan.audio.durationMs &&
+        audioMaster.audio.locale === plan.audio.locale &&
+        audioMaster.words[0]?.startMs === 0 &&
+        audioMaster.words.at(-1)?.endMs === audioMaster.audio.durationMs &&
+        canonicalScriptHash === plan.audio.scriptHash &&
+        stableSerialize(canonicalAlignment) === stableSerialize(plan.audio.alignment),
+      'VERSION_CONFLICT',
+      'Canonical audio master bytes, profile, script, alignment or timing changed before commit',
+    )
+    const evidenceRows = await transaction.v2MediaArtifact.findMany({
+      where: {
+        workspaceId: plan.workspaceId,
+        id: { in: [audioMaster.audio.artifactId, audioMaster.alignmentEvidence.artifactId] },
+        status: 'available',
+      },
+      include: { currentRightsSnapshot: true },
+    })
+    const evidenceById = new Map(evidenceRows.map((row) => [row.id, row]))
+    assertDomain(
+      [
+        { id: audioMaster.audio.artifactId, sha256: audioMaster.audio.artifactSha256 },
+        { id: audioMaster.alignmentEvidence.artifactId, sha256: audioMaster.alignmentEvidence.artifactSha256 },
+      ].every((reference) => {
+        const row = evidenceById.get(reference.id)
+        if (!row || row.sha256 !== reference.sha256) return false
+        const rights = row.currentRightsSnapshot ? hydrateAssetRights(row.currentRightsSnapshot) : null
+        return evaluateAssetUse(rights, {
+          workspaceId: plan.workspaceId,
+          use: plan.use,
+          market: plan.market,
+          locale: plan.locale,
+          syntheticOperations: ['audio-avatar'],
+        }, new Date()).outcome === 'allow'
+      }),
+      'ASSET_RIGHTS_BLOCKED',
+      'Canonical audio or alignment evidence lost current authority before commit',
+    )
+
+    const canonicalReuse = input.canonicalReuse
+    if (!canonicalReuse) return null
+    const decision = assertSyntheticCacheDecisionIntegrity(canonicalReuse.decision)
+    assertSyntheticCacheDecisionPrivacy(decision)
+    const consumption = assertSyntheticMasterConsumptionIntegrity(canonicalReuse.consumption)
+    assertDomain(
+      decision.workspaceId === plan.workspaceId &&
+        decision.projectId === plan.projectId &&
+        decision.operation === 'audio-avatar' &&
+        decision.outcome === 'hit' &&
+        decision.reasonCode === 'CACHE_HIT_ELIGIBLE' &&
+        decision.candidateGenerationId === null &&
+        decision.candidateMasterId === consumption.sourceMasterId &&
+        decision.decisionHash === consumption.cacheDecisionHash &&
+        decision.id === consumption.cacheDecisionId &&
+        decision.criticReportHash !== null &&
+        consumption.workspaceId === plan.workspaceId &&
+        consumption.consumerProjectId === plan.projectId &&
+        consumption.consumerProjectVersionId === plan.projectVersionId &&
+        consumption.productionRunId === plan.id &&
+        consumption.productionPlanHash === plan.planHash &&
+        consumption.createdAt === decision.decidedAt,
+      'PERSISTENCE_CONFLICT',
+      'Canonical master reuse proposal does not match the production run and cache decision',
+    )
+    const project = await transaction.v2Project.findFirst({
+      where: { id: plan.projectId, workspaceId: plan.workspaceId },
+      select: { createdAt: true },
+    })
+    assertDomain(
+      Boolean(project) && consumption.observationOpenedAt === project!.createdAt.toISOString(),
+      'VERSION_CONFLICT',
+      'Canonical reuse observation must cover the complete lifetime of the consuming project',
+    )
+
+    const masters = new PrismaSyntheticMasterAssetRepository(prisma)
+    const persistedMaster = await masters.findByProviderJob({
+      workspaceId: plan.workspaceId,
+      providerJobId: consumption.sourceProviderJobId,
+    })
+    assertDomain(Boolean(persistedMaster), 'VERSION_CONFLICT', 'Canonical reused master changed before commit')
+    const master = persistedMaster!.master
+    const providerOriginal = master.artifacts.find(({ role }) => role === 'provider-original')
+    const finalAudio = master.artifacts.find(({ role }) => role === 'final-audio')
+    const alignment = master.artifacts.find(({ role }) => role === 'alignment')
+    const sourceBlock = plan.blocks[0]
+    assertDomain(
+      plan.blocks.length === 1 && Boolean(sourceBlock) &&
+        sourceBlock!.rangeMs[0] === 0 && sourceBlock!.rangeMs[1] === plan.durationMs &&
+        master.id === consumption.sourceMasterId &&
+        master.masterHash === consumption.sourceMasterHash &&
+        master.projectId === consumption.sourceProjectId &&
+        master.projectVersionId === consumption.sourceProjectVersionId &&
+        master.projectId !== plan.projectId &&
+        master.profileSnapshotId === profile.profileSnapshotId &&
+        master.profileId === plan.profile.id && master.profileVersion === plan.profile.version &&
+        master.consentSnapshotHash === plan.profile.consent.snapshotHash &&
+        master.scriptHash === plan.audio.scriptHash && master.scriptText === sourceBlock!.text &&
+        master.durationMs === plan.durationMs && master.locale === plan.locale &&
+        Boolean(providerOriginal) && Boolean(finalAudio) && Boolean(alignment) &&
+        providerOriginal!.artifactId === consumption.sourceArtifactId &&
+        providerOriginal!.sha256 === consumption.sourceArtifactSha256 &&
+        providerOriginal!.artifactId === sourceBlock!.artifact.artifactId &&
+        providerOriginal!.sha256 === sourceBlock!.artifact.sha256 &&
+        finalAudio!.artifactId === plan.audio.artifactId && finalAudio!.sha256 === plan.audio.sha256 &&
+        alignment!.sha256 === master.alignmentHash &&
+        decision.candidateMasterId === master.id &&
+        decision.criticReportHash === master.critic.reportHash &&
+        sourceBlock!.critic.id === master.critic.reportId &&
+        sourceBlock!.critic.resultHash === master.critic.reportHash,
+      'VERSION_CONFLICT',
+      'Canonical reused master, plan, artifacts or critic changed before commit',
+    )
+
+    const [persistedSourceJob, report, head, artifactRows] = await Promise.all([
+      jobs.readById({ workspaceId: plan.workspaceId, jobId: consumption.sourceProviderJobId }),
+      critics.readByHash({ workspaceId: plan.workspaceId, reportHash: master.critic.reportHash }),
+      transaction.v2SyntheticPresenterProfileHead.findUnique({
+        where: { workspaceId_profileId: { workspaceId: plan.workspaceId, profileId: master.profileId } },
+        include: { currentSnapshot: true },
+      }),
+      transaction.v2MediaArtifact.findMany({
+        where: {
+          workspaceId: plan.workspaceId,
+          id: { in: master.artifacts.map(({ artifactId }) => artifactId) },
+          status: 'available',
+        },
+        include: { currentRightsSnapshot: true },
+      }),
+    ])
+    assertDomain(Boolean(persistedSourceJob) && Boolean(report) && Boolean(head), 'VERSION_CONFLICT', 'Canonical reuse lineage changed before commit')
+    const source = persistedSourceJob!.job
+    const currentProfile = hydrateSyntheticPresenterProfile(head!.currentSnapshot)
+    assertSyntheticPresenterPolicy({
+      snapshot: profile.snapshot,
+      snapshotWorkspaceId: plan.workspaceId,
+      head: { currentVersion: head!.currentVersion, current: currentProfile.snapshot },
+      context: {
+        operation: 'audio-avatar',
+        use: plan.use,
+        market: plan.market,
+        locale: plan.locale,
+        workspaceId: plan.workspaceId,
+        now: new Date(),
+      },
+    })
+    const artifactsById = new Map(artifactRows.map((artifact) => [artifact.id, artifact]))
+    assertDomain(
+      artifactRows.length === new Set(master.artifacts.map(({ artifactId }) => artifactId)).size &&
+        master.artifacts.every((artifact) => {
+          const row = artifactsById.get(artifact.artifactId)
+          if (!row || row.sha256 !== artifact.sha256 || Number(row.byteSize) !== artifact.byteSize ||
+            row.mediaType !== artifact.mediaType || row.container !== artifact.container) return false
+          const rights = row.currentRightsSnapshot ? hydrateAssetRights(row.currentRightsSnapshot) : null
+          return evaluateAssetUse(rights, {
+            workspaceId: plan.workspaceId,
+            use: plan.use,
+            market: plan.market,
+            locale: plan.locale,
+            syntheticOperations: ['audio-avatar'],
+          }, new Date()).outcome === 'allow'
+        }) &&
+        source.id === master.provenance.providerJobId && source.status === 'approved' &&
+        source.projectId === master.projectId && source.originProjectVersionId === master.projectVersionId &&
+        source.criticResultHash === master.critic.reportHash &&
+        source.resultArtifact?.artifactId === providerOriginal!.artifactId &&
+        source.resultArtifact.artifactSha256 === providerOriginal!.sha256 &&
+        source.authorization.profileSnapshotId === master.profileSnapshotId &&
+        report!.id === master.critic.reportId && report!.providerJobId === source.id &&
+        report!.projectId === master.projectId && report!.profileSnapshotId === master.profileSnapshotId &&
+        report!.artifactId === providerOriginal!.artifactId && report!.artifactSha256 === providerOriginal!.sha256 &&
+        report!.scriptHash === master.scriptHash && isCurrentSyntheticCriticApproval(report!),
+      'ASSET_RIGHTS_BLOCKED',
+      'Canonical reused master lost current authority or exact worker approval before commit',
+    )
+    return Object.freeze({ decision, consumption })
   }
 
   async findProfileReplay(input: {
@@ -429,7 +734,7 @@ implements SyntheticProductionRepository {
         actorContextHash: input.actorContextHash,
         idempotencyKey: input.idempotencyKey,
       },
-      include: { assets: { orderBy: { ordinal: 'asc' } } },
+      include: { assets: { orderBy: { ordinal: 'asc' } }, audioMaster: true },
     })
     return row ? hydrateRun(row) : null
   }
@@ -456,7 +761,6 @@ implements SyntheticProductionRepository {
               consentSnapshotHash: plan.profile.consent.snapshotHash,
               status: 'active',
             },
-            select: { id: true },
           }),
           transaction.v2ApiClient.findFirst({
             where: {
@@ -473,6 +777,11 @@ implements SyntheticProductionRepository {
             'Synthetic project version, presenter profile or actor changed before commit',
           )
         }
+        const canonical = await this.validateCanonicalAudioAndReuse(
+          transaction,
+          input,
+          hydrateSyntheticPresenterProfile(profile),
+        )
         const assets = expectedAssets(plan)
         const persistedAssets = await transaction.v2MediaArtifact.findMany({
           where: {
@@ -521,6 +830,9 @@ implements SyntheticProductionRepository {
             projectVersionId: plan.projectVersionId,
             profileSnapshotId: profile.id,
             editPlanSnapshotId: input.editPlanSnapshot.id,
+            audioMasterId: input.audioMaster.id,
+            audioMasterHash: input.audioMaster.masterHash,
+            audioOriginProjectId: input.audioMaster.originProjectId,
             schemaVersion: plan.schemaVersion,
             policyVersion: plan.policyVersion,
             status: 'compiled',
@@ -552,9 +864,38 @@ implements SyntheticProductionRepository {
             ordinal,
           })),
         })
+        if (canonical) {
+          await transaction.v2SyntheticCacheDecision.create({
+            data: cacheDecisionData(canonical.decision),
+          })
+          const consumption = canonical.consumption
+          await transaction.v2SyntheticMasterConsumption.create({
+            data: {
+              id: consumption.id,
+              workspaceId: consumption.workspaceId,
+              consumerProjectId: consumption.consumerProjectId,
+              consumerProjectVersionId: consumption.consumerProjectVersionId,
+              productionRunId: consumption.productionRunId,
+              sourceMasterId: consumption.sourceMasterId,
+              sourceMasterHash: consumption.sourceMasterHash,
+              sourceProjectId: consumption.sourceProjectId,
+              sourceProjectVersionId: consumption.sourceProjectVersionId,
+              sourceProviderJobId: consumption.sourceProviderJobId,
+              sourceArtifactId: consumption.sourceArtifactId,
+              sourceArtifactSha256: consumption.sourceArtifactSha256,
+              cacheDecisionId: consumption.cacheDecisionId,
+              cacheDecisionHash: consumption.cacheDecisionHash,
+              productionPlanHash: consumption.productionPlanHash,
+              observationOpenedAt: new Date(consumption.observationOpenedAt),
+              schemaVersion: consumption.schemaVersion,
+              consumptionHash: consumption.consumptionHash,
+              createdAt: new Date(consumption.createdAt),
+            },
+          })
+        }
         const row = await transaction.v2SyntheticProductionRun.findUniqueOrThrow({
           where: { id: plan.id },
-          include: { assets: { orderBy: { ordinal: 'asc' } } },
+          include: { assets: { orderBy: { ordinal: 'asc' } }, audioMaster: true },
         })
         return Object.freeze({ run: hydrateRun(row), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
@@ -584,7 +925,7 @@ implements SyntheticProductionRepository {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
       },
-      include: { assets: { orderBy: { ordinal: 'asc' } } },
+      include: { assets: { orderBy: { ordinal: 'asc' } }, audioMaster: true },
     })
     return row ? hydrateRun(row) : null
   }

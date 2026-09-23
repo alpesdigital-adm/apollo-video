@@ -1099,8 +1099,46 @@ jobs:
       - name: Install locked renderer dependencies for the production build
         run: npm ci --prefix remotion
 
+      - name: Bundle Remotion renderer for the synthetic W24 journey
+        run: npm run remotion:build
+
       - name: Build production application for the browser journey
         run: npm run build
+
+      - name: Run controlled synthetic W24 provider, reuse, render and gate journey
+        run: npm run test:e2e:synthetic-wave24-journey
+        env:
+          APOLLO_SYNTHETIC_WAVE24_JOURNEY_E2E: "1"
+          APOLLO_WAVE24_RUN_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_WAVE24_EVIDENCE_ROOT: ${{ runner.temp }}/synthetic-wave24-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: synthetic-wave24-ci
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-synthetic-wave24-ci-${{ github.run_id }}-${{ github.run_attempt }}&connection_limit=1&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan synthetic W24 journey backends
+        if: always()
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          app_name="apollo-video-e2e-synthetic-wave24-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = '$app_name'")"
+            if test "$backends" = 0; then break; fi
+            sleep 1
+          done
+          echo "$app_name backends: $backends"
+          test "$backends" = 0
+
+      - name: Publish synthetic W24 MP4, frames, screenshots and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-wave24-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/synthetic-wave24-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Run synthetic master cross-project reuse E2E against /v1 and PostgreSQL
         run: npm run test:e2e:synthetic-master-reuse

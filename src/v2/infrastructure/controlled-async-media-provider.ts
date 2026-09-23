@@ -38,6 +38,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, Result> 
   readonly adapterVersion: string
   readonly modelRef = 'controlled-model'
   readonly configHash: string
+  readonly runtimeClass = 'controlled' as const
   private readonly scenario: Readonly<ControlledProviderScenario<Result>>
   private readonly jobs = new Map<string, { cursor: number; result: Readonly<Result> }>()
   readonly calls: string[] = []

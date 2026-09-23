@@ -391,6 +391,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Compiles already ingested, critic-approved and rights-authorized synthetic media into one immutable EditPlan without submitting provider work or starting a render.',
     },
+    'apollo.projects.synthetic-production-runs.render-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues one local renderer operation from the exact persisted synthetic plan and server-owned assets; the caller chooses only proxy or final output and one supported aspect ratio.',
+    },
     'apollo.projects.provider-jobs.enqueue': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Authorizes a durable worker to estimate and submit one paid TTS or avatar provider job after exact project, consent and source-rights checks.',
@@ -406,6 +410,10 @@ export function createFoundationAgentToolSafety(
     'apollo.projects.transformation-jobs.request': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Authorizes a durable worker to submit one paid generative transformation. The payload is projected from the persisted brief and never accepted from the caller, and the rights snapshot must still match the one the brief was authorized under.',
+    },
+    'apollo.projects.transformation-fallbacks.dispatch': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Authorizes one paid generated-cutaway attempt only after the server replays the rejected result, critic report, routing policy and exact fallback-ledger revision; the caller cannot choose the provider, capability or payload.',
     },
     'apollo.projects.transformation-fallbacks.act': {
       impact: 'bounded', confirmation: 'human-approval',

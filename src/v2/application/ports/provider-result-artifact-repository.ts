@@ -4,6 +4,7 @@ export const PROVIDER_RESULT_ARTIFACT_ROLES = [
   'primary-audio',
   'primary-video',
   'alignment-evidence',
+  'output-speech-evidence',
 ] as const
 
 export type ProviderResultArtifactRole = (typeof PROVIDER_RESULT_ARTIFACT_ROLES)[number]

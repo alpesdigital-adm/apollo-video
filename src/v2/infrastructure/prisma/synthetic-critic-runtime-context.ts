@@ -7,9 +7,17 @@ import type { ProviderResultArtifactRepository } from '../../application/ports/p
 import type { SyntheticBlockGenerationRepository } from '../../application/ports/synthetic-block-generation-repository.ts'
 import type { SyntheticProductionRepository } from '../../application/ports/synthetic-production-repository.ts'
 import type { SyntheticScriptPlanRepository } from '../../application/ports/synthetic-script-plan-repository.ts'
+import type { SyntheticAudioMasterRepository } from '../../application/ports/synthetic-audio-master-repository.ts'
 import type { MasterAlignmentReader } from '../../application/synthetic-speech-segments.ts'
+import type { ArtifactSourceMaterializer } from '../../application/ports/media-ingest.ts'
+import type { TransformationAudioPreservationEvaluator } from '../../application/ports/transformation-critic-evaluator.ts'
 import type { SyntheticCriticRuntimeContextResolver } from '../../application/synthetic-provider-critic.ts'
 import { assertDomain, DomainError } from '../../domain/errors.ts'
+import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { createAvatarOutputSpeechEvidence } from '../../domain/avatar-output-speech-evidence.ts'
+import { createSyntheticAvatarAudioRange } from '../../domain/synthetic-audio-master.ts'
+import { parseControlledOutputSpeechSidecar } from '../provider-result-ingestion.ts'
+import { readFile } from 'node:fs/promises'
 
 type AvatarBinding = Readonly<{
   blockId: string
@@ -73,6 +81,9 @@ export class PrismaSyntheticCriticRuntimeContextResolver implements SyntheticCri
     profiles: SyntheticProductionRepository
     rights: AssetRightsRepository
     alignment: MasterAlignmentReader
+    audioMasters: SyntheticAudioMasterRepository
+    sources: ArtifactSourceMaterializer
+    audioComparison: TransformationAudioPreservationEvaluator
     clock: () => Date
   }
 
@@ -169,6 +180,7 @@ export class PrismaSyntheticCriticRuntimeContextResolver implements SyntheticCri
       assertDomain(Number.isSafeInteger(alignmentEndMs) && alignmentEndMs! > 0, 'PERSISTENCE_CONFLICT', 'TTS alignment has no valid terminal timestamp')
       return Object.freeze({
         subject: Object.freeze({
+          providerJobId: job.id,
           workspaceId: job.workspaceId, projectId: job.projectId, blockId: binding.blockId,
           capability: 'tts', adapterId: job.adapterId, adapterVersion: job.adapterVersion,
           modelRef: audio!.modelRef ?? null,
@@ -192,21 +204,104 @@ export class PrismaSyntheticCriticRuntimeContextResolver implements SyntheticCri
     }
 
     const binding = avatarBinding(job.input.criticBinding)
-    const block = await this.dependencies.client.v2SyntheticScriptBlock.findFirst({
-      where: { id: binding.blockId, workspaceId: job.workspaceId, projectId: job.projectId },
-    })
+    const audioMasterId = String(job.input.audioMasterId ?? '')
+    const persistedMaster = await this.dependencies.audioMasters.read({ workspaceId: job.workspaceId, projectId: job.projectId, audioMasterId })
+    const master = persistedMaster?.master
+    const storedRange = job.input.audioRange as Record<string, unknown> | undefined
+    const startWordIndex = master && storedRange ? master.words.findIndex((word) => word.startMs === storedRange.startMs) : -1
+    const endWordPosition = master && storedRange ? master.words.findIndex((word) => word.endMs === storedRange.endMs) : -1
+    const canonicalRange = master && startWordIndex >= 0 && endWordPosition >= startWordIndex
+      ? createSyntheticAvatarAudioRange({ master, startWordIndex, endWordIndex: endWordPosition + 1 })
+      : null
     assertDomain(
-      Boolean(block) && block!.exactText === binding.scriptText &&
+      Boolean(master && canonicalRange) &&
+        master!.masterHash === job.input.audioMasterHash &&
+        master!.projectVersionId === job.originProjectVersionId &&
+        master!.profileSnapshotId === job.authorization.profileSnapshotId &&
+        canonicalRange!.rangeHash === storedRange?.rangeHash &&
+        canonicalRange!.text === binding.scriptText &&
         binding.scriptHash === sha256(binding.scriptText) &&
-        binding.profileSnapshotId === job.authorization.profileSnapshotId,
+        binding.profileSnapshotId === job.authorization.profileSnapshotId &&
+        binding.expectedDurationMs === canonicalRange!.durationMs &&
+        binding.alignmentArtifactId === master!.alignmentEvidence.artifactId,
       'PERSISTENCE_CONFLICT',
-      'Audio-avatar critic binding diverged from the persisted script or profile',
+      'Audio-avatar critic binding diverged from the canonical audio master range',
     )
     const audioArtifactId = String(job.input.audioArtifactId ?? '')
     const audio = await this.dependencies.artifacts.findById(job.workspaceId, audioArtifactId)
-    assertDomain(audio?.status === 'available' && audio.mediaType === 'audio', 'PERSISTENCE_CONFLICT', 'Audio-avatar driving audio is unavailable')
+    assertDomain(audio?.status === 'available' && audio.mediaType === 'audio' && audio.id === master!.audio.artifactId && audio.sha256 === master!.audio.artifactSha256, 'PERSISTENCE_CONFLICT', 'Audio-avatar driving audio diverged from its canonical master')
+    const audioRange = storedRange
+    assertDomain(audioRange && Number.isSafeInteger(audioRange.startMs) && Number.isSafeInteger(audioRange.endMs) && Number(audioRange.endMs) > Number(audioRange.startMs) && typeof audioRange.rangeHash === 'string' && /^[a-f0-9]{64}$/.test(audioRange.rangeHash), 'PERSISTENCE_CONFLICT', 'Audio-avatar canonical audio range is invalid')
+    const ledger = await this.dependencies.resultArtifacts.listByJob({ workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id })
+    const sidecars = ledger.filter((entry) => entry.role === 'output-speech-evidence')
+    assertDomain(sidecars.length === 1, 'PRECONDITION_REQUIRED', 'Audio-avatar output speech evidence is unavailable')
+    assertDomain(
+      sidecars[0]!.providerJobRef === job.providerJobId && sidecars[0]!.adapterId === job.adapterId &&
+        sidecars[0]!.adapterVersion === job.adapterVersion && sidecars[0]!.inputHash === job.inputHash &&
+        sidecars[0]!.authorizationHash === job.authorization.authorizationHash && sidecars[0]!.scriptHash === binding.scriptHash,
+      'PERSISTENCE_CONFLICT',
+      'Audio-avatar output speech evidence ledger diverged from its provider job',
+    )
+    const sidecarArtifact = await this.dependencies.artifacts.findById(job.workspaceId, sidecars[0]!.artifactId)
+    assertDomain(sidecarArtifact?.status === 'available' && sidecarArtifact.mediaType === 'data' && sidecarArtifact.sha256 === sidecars[0]!.artifactSha256, 'PERSISTENCE_CONFLICT', 'Audio-avatar output speech sidecar diverged from its ledger record')
+    const operationPrefix = `avatar-output-evidence-${calculateCanonicalHash({ jobId: job.id, artifactId: artifact.artifactId }).slice(0, 24)}`
+    let outputSpeechEvidence
+    let operationFailed = false
+    try {
+      const materialized = await Promise.allSettled([
+        this.dependencies.sources.materialize({ operationId: `${operationPrefix}-audio`, artifactKey: audio!.artifactKey, sha256: audio!.sha256, byteSize: Number(audio!.byteSize), signal: input.signal }),
+        this.dependencies.sources.materialize({ operationId: `${operationPrefix}-video`, artifactKey: target!.artifactKey, sha256: target!.sha256, byteSize: Number(target!.byteSize), signal: input.signal }),
+        this.dependencies.sources.materialize({ operationId: `${operationPrefix}-sidecar`, artifactKey: sidecarArtifact!.artifactKey, sha256: sidecarArtifact!.sha256, byteSize: Number(sidecarArtifact!.byteSize), signal: input.signal }),
+      ])
+      const failed = materialized.find((entry): entry is PromiseRejectedResult => entry.status === 'rejected')
+      if (failed) throw failed.reason
+      const [sourceResult, videoResult, sidecarResult] = materialized
+      assertDomain(sourceResult?.status === 'fulfilled' && videoResult?.status === 'fulfilled' && sidecarResult?.status === 'fulfilled', 'PERSISTENCE_CONFLICT', 'Avatar evidence materialization did not complete')
+      const sourceMaterialized = sourceResult.value
+      const videoMaterialized = videoResult.value
+      const sidecarMaterialized = sidecarResult.value
+      let sidecar: ReturnType<typeof parseControlledOutputSpeechSidecar>
+      try {
+        sidecar = parseControlledOutputSpeechSidecar(JSON.parse(await readFile(sidecarMaterialized.path, 'utf8')))
+      } catch {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Persisted avatar output speech sidecar is invalid')
+      }
+      const comparison = await this.dependencies.audioComparison.compare({
+        sourcePath: sourceMaterialized.path,
+        resultPath: videoMaterialized.path,
+        sourceStartMs: Number(audioRange.startMs),
+        sourceDurationMs: Number(audioRange.endMs) - Number(audioRange.startMs),
+        signal: input.signal,
+      })
+      outputSpeechEvidence = createAvatarOutputSpeechEvidence({
+        ...comparison,
+        jobId: job.id,
+        videoArtifactId: target!.id,
+        videoArtifactSha256: target!.sha256,
+        sourceAudioArtifactId: audio!.id,
+        sourceAudioRangeHash: String(audioRange.rangeHash),
+        speechEvidence: {
+          kind: 'controlled', evaluatorId: sidecar.evaluatorId, evaluatorVersion: sidecar.evaluatorVersion,
+          outputTranscriptHash: sidecar.outputTranscriptHash, observedIdentityRef: sidecar.observedIdentityRef,
+        },
+      })
+    } catch (error) {
+      operationFailed = true
+      throw error
+    } finally {
+      const cleanup = await Promise.allSettled([
+        this.dependencies.sources.cleanup(`${operationPrefix}-audio`),
+        this.dependencies.sources.cleanup(`${operationPrefix}-video`),
+        this.dependencies.sources.cleanup(`${operationPrefix}-sidecar`),
+      ])
+      if (!operationFailed) {
+        const failedCleanup = cleanup.find((entry): entry is PromiseRejectedResult => entry.status === 'rejected')
+        if (failedCleanup) throw failedCleanup.reason
+      }
+    }
     return Object.freeze({
       subject: Object.freeze({
+        providerJobId: job.id,
         workspaceId: job.workspaceId, projectId: job.projectId, blockId: binding.blockId,
         capability: 'audio-avatar', adapterId: job.adapterId, adapterVersion: job.adapterVersion, modelRef: null,
         video: Object.freeze({ artifactId: target!.id, artifactKey: target!.artifactKey, sha256: target!.sha256, byteSize: Number(target!.byteSize) }),
@@ -216,6 +311,9 @@ export class PrismaSyntheticCriticRuntimeContextResolver implements SyntheticCri
         // range-alignment artifact is still required for pronunciation.
         audio: null,
         alignmentArtifactId: binding.alignmentArtifactId,
+        outputSpeechEvidence,
+        outputSpeechEvidenceArtifactId: sidecarArtifact!.id,
+        scriptHash: binding.scriptHash,
         scriptText: binding.scriptText,
         expected: Object.freeze({
           durationMs: binding.expectedDurationMs, durationMode: 'fixed' as const,

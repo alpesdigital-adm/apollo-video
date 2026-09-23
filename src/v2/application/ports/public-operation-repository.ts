@@ -8,11 +8,37 @@ import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { StrategicObjectiveId } from '../../domain/strategic-objective.ts'
 import type { DesiredAction } from '../../domain/desired-action.ts'
 import type { RenderColorPipelineBinding } from '../resolve-render-color-pipelines.ts'
+import type {
+  SyntheticProductionRenderAspectRatio,
+  SyntheticProductionRenderKind,
+} from '../../domain/synthetic-production-render.ts'
+import type { RenderInputSpecV1 } from '../../domain/render-input.ts'
 
 export interface ArtifactRenderOperationContext {
   kind: 'artifact-render'
   authorizationId: string
   inputHash: string
+}
+
+export interface SyntheticProductionRenderOperationContext {
+  kind: 'synthetic-production-render'
+  projectId: string
+  projectVersionId: string
+  projectVersionHash: string
+  productionRunId: string
+  editPlanSnapshotId: string
+  editPlanSnapshotHash: string
+  planHash: string
+  outputKind: SyntheticProductionRenderKind
+  aspectRatio: SyntheticProductionRenderAspectRatio
+  renderInputRef: string
+  renderInputHash: string
+  propsHash: string
+  outputArtifactId: string
+  outputManifestId: string
+  contextHash: string
+  /** Present only while atomically creating the protected payload and operation. */
+  renderInput?: Readonly<RenderInputSpecV1>
 }
 
 export interface MediaIngestOperationContext {
@@ -140,6 +166,7 @@ export interface ProjectDirectorRunOperationContext {
 
 export type PublicOperationContext =
   | ArtifactRenderOperationContext
+  | SyntheticProductionRenderOperationContext
   | MediaIngestOperationContext
   | ProjectProxyRenderOperationContext
   | ProjectProxyReuseOperationContext

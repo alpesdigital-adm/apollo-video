@@ -8,6 +8,7 @@ import type {
   SyntheticCatalogueEvidence,
   SyntheticCrossProjectReuseEvidence,
   SyntheticPhaseGateEvidenceReader,
+  SyntheticPhaseGateEvidenceReference,
   SyntheticPhaseGateEvidenceSources,
   SyntheticProviderExecutionEvidence,
   SyntheticProviderSwapEvidence,
@@ -18,17 +19,31 @@ import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  assertSyntheticCacheDecisionIntegrity,
+  SYNTHETIC_CACHE_DECISION_SCHEMA_VERSION,
+  type SyntheticCacheDecision,
+} from '../../domain/synthetic-cache-decision.ts'
+import {
+  assertSyntheticMasterConsumptionIntegrity,
+  SYNTHETIC_MASTER_CONSUMPTION_SCHEMA_VERSION,
+  type SyntheticMasterConsumption,
+} from '../../domain/synthetic-master-consumption.ts'
 import { resolveSyntheticCriticThresholds } from '../../domain/synthetic-critic-thresholds.ts'
 import { assertSyntheticPresenterPolicy } from '../../domain/synthetic-presenter-policy-engine.ts'
 import { PrismaProviderExecutionProvenanceRepository } from './provider-execution-provenance-repository.ts'
 import { PrismaProviderJobRepository } from './provider-job-repository.ts'
 import { PrismaProviderResultArtifactRepository } from './provider-result-artifact-repository.ts'
+import { PrismaProtectedRenderInputStore } from './protected-render-input-store.ts'
 import { PrismaSyntheticAudioMasterRepository } from './synthetic-audio-master-repository.ts'
 import { PrismaSyntheticCriticReportRepository } from './synthetic-critic-report-repository.ts'
 import { PrismaSyntheticMasterAssetRepository } from './synthetic-master-asset-repository.ts'
 import { PrismaSyntheticProductionRepository } from './synthetic-production-repository.ts'
+import { PrismaSyntheticProductionRenderRepository } from './synthetic-production-render-repository.ts'
 import { PrismaSyntheticSpeechSegmentRepository } from './synthetic-speech-segment-repository.ts'
+import { PrismaTransformationQualityRepository } from './transformation-quality-repository.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { createProtectedPayloadCipherFromEnvironment } from '../security/recipe-parameter-cipher.ts'
 
 type ReaderClient = PrismaClient | Prisma.TransactionClient
 
@@ -339,7 +354,12 @@ async function readExecution(
       adapterVersion: job.adapterVersion,
       projectVersionId: job.originProjectVersionId,
       profileSnapshotId: job.authorization.profileSnapshotId,
-      runtimeClass: receipt.runtimeClass,
+      runtimeClass: receipt.runtimeClass === 'live' && (
+        job.operation === 'tts' || (
+          report.outputSpeechEvidence?.speechEvidence.kind === 'measured' &&
+          report.evaluators.every((evaluator) => evaluator.kind === 'measured')
+        )
+      ) ? 'live' : 'controlled',
       passed: job.status === 'approved' && isCurrentSyntheticCriticApproval({
         ...report,
         capability: job.operation,
@@ -385,6 +405,7 @@ async function currentMasterAuthority(
     ) return null
     if (!isCurrentSyntheticCriticApproval({ ...report, capability: job.job.operation })) return false
     const criticBinding = record(record(job.job.input)?.criticBinding)
+    const audioRange = record(record(job.job.input)?.audioRange)
     const use = string(criticBinding?.use)
     const market = string(criticBinding?.market)
     const locale = string(criticBinding?.locale)
@@ -429,8 +450,16 @@ async function currentMasterAuthority(
       job.job.resultArtifact.artifactSha256 !== providerOriginal.sha256 ||
       report.artifactId !== providerOriginal.artifactId ||
       report.artifactSha256 !== providerOriginal.sha256 ||
-      report.audioArtifactId !== finalAudio.artifactId ||
-      report.alignmentArtifactId !== alignment.artifactId
+      report.audioArtifactId !== null ||
+      report.alignmentArtifactId !== alignment.artifactId ||
+      !audioRange || audioRange.startMs !== 0 || audioRange.endMs !== master.master.durationMs ||
+      !report.outputSpeechEvidence?.passed ||
+      report.outputSpeechEvidence.sourceAudioArtifactId !== finalAudio.artifactId ||
+      report.outputSpeechEvidence.sourceAudioRangeHash !== audioRange.rangeHash ||
+      report.outputSpeechEvidence.sourceDurationMs !== master.master.durationMs ||
+      report.outputSpeechEvidence.outputDurationMs !== master.master.durationMs ||
+      report.outputSpeechEvidence.speechEvidence.outputTranscriptHash !== master.master.scriptHash ||
+      report.outputSpeechEvidence.speechEvidence.observedIdentityRef !== snapshot.snapshot.avatar.identityRef
     ) return null
     if (
       artifacts.length !== new Set(master.master.artifacts.map(({ artifactId }) => artifactId)).size ||
@@ -459,6 +488,163 @@ async function currentMasterAuthority(
     if (error instanceof DomainError) return false
     throw error
   }
+}
+
+function hydrateConsumption(row: Readonly<{
+  id: string
+  workspaceId: string
+  consumerProjectId: string
+  consumerProjectVersionId: string
+  productionRunId: string
+  sourceMasterId: string
+  sourceMasterHash: string
+  sourceProjectId: string
+  sourceProjectVersionId: string
+  sourceProviderJobId: string
+  sourceArtifactId: string
+  sourceArtifactSha256: string
+  cacheDecisionId: string
+  cacheDecisionHash: string
+  productionPlanHash: string
+  observationOpenedAt: Date
+  schemaVersion: string
+  consumptionHash: string
+  createdAt: Date
+}>): Readonly<SyntheticMasterConsumption> {
+  if (row.schemaVersion !== SYNTHETIC_MASTER_CONSUMPTION_SCHEMA_VERSION) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored synthetic master consumption has an unknown schema version')
+  }
+  return assertSyntheticMasterConsumptionIntegrity(Object.freeze({
+    schemaVersion: SYNTHETIC_MASTER_CONSUMPTION_SCHEMA_VERSION,
+    id: row.id,
+    workspaceId: row.workspaceId,
+    consumerProjectId: row.consumerProjectId,
+    consumerProjectVersionId: row.consumerProjectVersionId,
+    productionRunId: row.productionRunId,
+    sourceMasterId: row.sourceMasterId,
+    sourceMasterHash: row.sourceMasterHash,
+    sourceProjectId: row.sourceProjectId,
+    sourceProjectVersionId: row.sourceProjectVersionId,
+    sourceProviderJobId: row.sourceProviderJobId,
+    sourceArtifactId: row.sourceArtifactId,
+    sourceArtifactSha256: row.sourceArtifactSha256,
+    cacheDecisionId: row.cacheDecisionId,
+    cacheDecisionHash: row.cacheDecisionHash,
+    productionPlanHash: row.productionPlanHash,
+    observationOpenedAt: row.observationOpenedAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    consumptionHash: row.consumptionHash,
+  }))
+}
+
+function hydrateCacheDecision(row: Readonly<{
+  id: string
+  workspaceId: string
+  projectId: string
+  schemaVersion: string
+  operation: string
+  cacheKey: string
+  cacheKeyVersion: string
+  outcome: string
+  reasonCode: string
+  reason: string
+  candidateGenerationId: string | null
+  candidateMasterId: string | null
+  policyVersion: string
+  criticReportHash: string | null
+  estimatedSavingMinorUnits: number
+  avoidedCostMinorUnits: number
+  currency: string
+  subjectHash: string
+  decidedAt: Date
+  decisionHash: string
+}>): Readonly<SyntheticCacheDecision> {
+  if (row.schemaVersion !== SYNTHETIC_CACHE_DECISION_SCHEMA_VERSION) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored synthetic cache decision has an unknown schema version')
+  }
+  return assertSyntheticCacheDecisionIntegrity(Object.freeze({
+    schemaVersion: SYNTHETIC_CACHE_DECISION_SCHEMA_VERSION,
+    id: row.id,
+    workspaceId: row.workspaceId,
+    projectId: row.projectId,
+    operation: row.operation as SyntheticCacheDecision['operation'],
+    cacheKey: row.cacheKey,
+    cacheKeyVersion: row.cacheKeyVersion,
+    outcome: row.outcome as SyntheticCacheDecision['outcome'],
+    reasonCode: row.reasonCode as SyntheticCacheDecision['reasonCode'],
+    reason: row.reason,
+    candidateGenerationId: row.candidateGenerationId,
+    candidateMasterId: row.candidateMasterId,
+    policyVersion: row.policyVersion,
+    criticReportHash: row.criticReportHash,
+    estimatedSavingMinorUnits: row.estimatedSavingMinorUnits,
+    avoidedCostMinorUnits: row.avoidedCostMinorUnits,
+    currency: row.currency,
+    subjectHash: row.subjectHash,
+    decidedAt: row.decidedAt.toISOString(),
+    decisionHash: row.decisionHash,
+  }))
+}
+
+interface VerifiedReuseRender {
+  completedAt: Date
+  editPlan: SyntheticPhaseGateEvidenceReference
+  renderManifest: SyntheticPhaseGateEvidenceReference
+  buildAttestation: SyntheticPhaseGateEvidenceReference
+  runtimeIdentityMatches: boolean
+  assetsMatch: boolean
+  propsHashMatches: boolean
+  providerNeutral: boolean
+}
+
+async function readVerifiedReuseRender(
+  client: ReaderClient,
+  consumption: Readonly<SyntheticMasterConsumption>,
+): Promise<Readonly<VerifiedReuseRender> | null> {
+  const prisma = asPrismaClient(client)
+  const protectedInputs = new PrismaProtectedRenderInputStore(
+    prisma,
+    createProtectedPayloadCipherFromEnvironment(),
+  )
+  const render = await new PrismaSyntheticProductionRenderRepository(
+    prisma,
+    protectedInputs,
+  ).readLatestByRun({
+    workspaceId: consumption.workspaceId,
+    projectId: consumption.consumerProjectId,
+    runId: consumption.productionRunId,
+  })
+  if (!render || render.context.outputKind !== 'final' ||
+    render.operation.status !== 'succeeded' || render.operation.phase !== 'completed' ||
+    !render.operation.completedAt || !render.checkpoint || !render.qualityReport || !render.attestation ||
+    !render.qualityReport.passed ||
+    render.context.projectVersionId !== consumption.consumerProjectVersionId ||
+    render.context.planHash !== consumption.productionPlanHash ||
+    Date.parse(consumption.createdAt) > Date.parse(render.operation.completedAt)) return null
+  return Object.freeze({
+    completedAt: new Date(render.operation.completedAt),
+    editPlan: Object.freeze({
+      type: 'edit-plan' as const,
+      id: render.context.editPlanSnapshotId,
+      hash: render.context.editPlanSnapshotHash,
+    }),
+    renderManifest: Object.freeze({
+      type: 'render-manifest' as const,
+      id: render.context.outputManifestId,
+      hash: render.attestation.renderManifestHash,
+    }),
+    buildAttestation: Object.freeze({
+      type: 'build-attestation' as const,
+      id: render.attestation.id,
+      hash: render.attestation.attestationHash,
+    }),
+    runtimeIdentityMatches: true,
+    assetsMatch: true,
+    propsHashMatches: true,
+    providerNeutral: render.attestation.checks.some(
+      (check) => check.code === 'provider-swap' && check.exitCode === 0,
+    ),
+  })
 }
 
 export class PrismaSyntheticPhaseGateEvidenceReader
@@ -678,16 +864,207 @@ implements SyntheticPhaseGateEvidenceReader {
       }))
     }
 
-    // The current cache and transformation ledgers do not bind an actual
-    // consuming synthetic render. W24.3 adds that lineage; until then these
-    // checks remain missing rather than being inferred from time windows.
     const reuses: SyntheticCrossProjectReuseEvidence[] = []
-    const transformations: SyntheticTransformationEvidence[] = []
-
-    // W24.3 will persist a synthetic render subtype and its manifest/runtime
-    // binding. Until that server-owned chain exists, no build attestation can
-    // be joined to a render and F3-GATE-004 must remain missing.
     const swaps: SyntheticProviderSwapEvidence[] = []
+    const consumptionRows = await client.v2SyntheticMasterConsumption.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        sourceProjectId: input.projectId,
+        sourceProjectVersionId: projectVersion.id,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 100,
+    })
+    for (const row of consumptionRows) {
+      const consumption = await omitCorruptSource(async () => hydrateConsumption(row))
+      if (!consumption) continue
+      const [storedMaster, decisionRow, consumerProject, consumerVersion, render] = await Promise.all([
+        omitCorruptSource(() => masterRepository.read({
+          workspaceId: input.workspaceId,
+          masterId: consumption.sourceMasterId,
+        })),
+        client.v2SyntheticCacheDecision.findFirst({
+          where: {
+            id: consumption.cacheDecisionId,
+            workspaceId: input.workspaceId,
+            projectId: consumption.consumerProjectId,
+          },
+        }),
+        client.v2Project.findFirst({
+          where: { id: consumption.consumerProjectId, workspaceId: input.workspaceId },
+        }),
+        client.v2ProjectVersion.findFirst({
+          where: {
+            id: consumption.consumerProjectVersionId,
+            projectId: consumption.consumerProjectId,
+            workspaceId: input.workspaceId,
+          },
+        }),
+        omitCorruptSource(() => readVerifiedReuseRender(client, consumption)),
+      ])
+      if (!storedMaster || !decisionRow || !consumerProject || !consumerVersion || !render) continue
+      const decision = await omitCorruptSource(async () => hydrateCacheDecision(decisionRow))
+      if (!decision ||
+        storedMaster.master.id !== consumption.sourceMasterId ||
+        storedMaster.master.masterHash !== consumption.sourceMasterHash ||
+        storedMaster.master.projectId !== input.projectId ||
+        storedMaster.master.projectVersionId !== projectVersion.id ||
+        storedMaster.master.provenance.providerJobId !== consumption.sourceProviderJobId ||
+        !storedMaster.master.artifacts.some(({ role, artifactId, sha256 }) =>
+          role === 'provider-original' && artifactId === consumption.sourceArtifactId &&
+          sha256 === consumption.sourceArtifactSha256) ||
+        decision.id !== consumption.cacheDecisionId ||
+        decision.decisionHash !== consumption.cacheDecisionHash ||
+        decision.projectId !== consumption.consumerProjectId ||
+        decision.outcome !== 'hit' ||
+        decision.reasonCode !== 'CACHE_HIT_ELIGIBLE' ||
+        decision.candidateMasterId !== consumption.sourceMasterId ||
+        decision.criticReportHash !== storedMaster.master.critic.reportHash ||
+        consumerProject.createdAt.toISOString() !== consumption.observationOpenedAt ||
+        Date.parse(consumption.createdAt) < consumerProject.createdAt.getTime()) continue
+      const authority = await currentMasterAuthority(client, storedMaster, now)
+      if (authority !== true) continue
+      const closedAt = render.completedAt
+      const [providerJobs, reservations, submits] = await Promise.all([
+        client.v2ProviderJob.count({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: consumption.consumerProjectId,
+            createdAt: { lte: closedAt },
+          },
+        }),
+        client.v2DirectorBudgetReservation.count({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: consumption.consumerProjectId,
+            createdAt: { lte: closedAt },
+          },
+        }),
+        client.v2ProviderTransportEvidence.count({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: consumption.consumerProjectId,
+            phase: 'submit',
+            observedAt: { lte: closedAt },
+          },
+        }),
+      ])
+      const providerWorkCount = providerJobs + reservations + submits
+      reuses.push(Object.freeze({
+        decision: Object.freeze({
+          type: 'cache-decision' as const,
+          id: decision.id,
+          hash: decision.decisionHash,
+        }),
+        master: Object.freeze({
+          type: 'synthetic-master' as const,
+          id: storedMaster.master.id,
+          hash: storedMaster.master.masterHash,
+        }),
+        consumerProject: Object.freeze({
+          type: 'project' as const,
+          id: consumption.consumerProjectId,
+          hash: consumerVersion.baseHash,
+        }),
+        sourceProjectId: input.projectId,
+        consumerProjectId: consumption.consumerProjectId,
+        providerWorkCount,
+        consumedByProduction: true,
+      }))
+      swaps.push(Object.freeze({
+        editPlan: render.editPlan,
+        renderManifest: render.renderManifest,
+        buildAttestation: render.buildAttestation,
+        runtimeIdentityMatches: render.runtimeIdentityMatches,
+        assetsMatch: render.assetsMatch,
+        propsHashMatches: render.propsHashMatches,
+        providerNeutral: render.providerNeutral,
+      }))
+    }
+
+    const transformations: SyntheticTransformationEvidence[] = []
+    const transformationQuality = new PrismaTransformationQualityRepository(prisma)
+    const ledgers = await transformationQuality.listFallbackLedgers({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      limit: 100,
+    })
+    for (const ledger of ledgers) {
+      if (ledger.projectVersionId !== projectVersion.id) continue
+      const rejected = ledger.attempts.find((attempt) =>
+        attempt.rung === 'video-to-video' && attempt.outcome === 'rejected' &&
+        attempt.providerJobId && attempt.criticReportHash)
+      const approved = ledger.attempts.find((attempt) =>
+        attempt.rung === 'generated-cutaway' && attempt.outcome === 'approved' &&
+        attempt.providerJobId && attempt.artifactId && attempt.artifactSha256)
+      if (!rejected?.providerJobId || !rejected.criticReportHash ||
+        !approved?.providerJobId || !approved.artifactId || !approved.artifactSha256) continue
+      const [rejectedReport, fallbackJob, fallbackResults, dispatchClaim] = await Promise.all([
+        omitCorruptSource(() => transformationQuality.readCriticReportByJob({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          providerJobId: rejected.providerJobId!,
+        })),
+        omitCorruptSource(() => new PrismaProviderJobRepository(prisma).readById({
+          workspaceId: input.workspaceId,
+          jobId: approved.providerJobId!,
+        })),
+        omitCorruptSource(() => resultRepository.listByJob({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          jobId: approved.providerJobId!,
+        })),
+        client.v2TransformationFallbackDispatchClaim.findFirst({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            providerJobId: approved.providerJobId,
+            outcome: 'enqueued',
+            settledAt: { not: null },
+          },
+        }),
+      ])
+      const fallbackResult = fallbackResults?.find((result) =>
+        result.artifactId === approved.artifactId &&
+        result.artifactSha256 === approved.artifactSha256 &&
+        result.mediaType === 'video' && result.recordHash)
+      const fallback = fallbackJob?.job.transformation?.fallback
+      const rejectedBeforeFallback = Boolean(
+        rejectedReport && rejectedReport.reportHash === rejected.criticReportHash &&
+        rejectedReport.providerJobId === rejected.providerJobId &&
+        rejectedReport.decision === 'rejected' &&
+        Date.parse(rejectedReport.evaluatedAt) <= Date.parse(ledger.updatedAt),
+      )
+      const fallbackApproved = Boolean(
+        fallbackJob?.job.status === 'approved' && fallbackResult && dispatchClaim &&
+        fallback?.rung === 'generated-cutaway' &&
+        fallback.ledgerId === dispatchClaim.requestedLedgerId &&
+        fallback.ledgerHash === dispatchClaim.requestedLedgerHash &&
+        fallback.rejectedJobId === rejected.providerJobId &&
+        fallback.rejectedReportHash === rejected.criticReportHash &&
+        ledger.bestArtifactId === approved.artifactId &&
+        ledger.bestArtifactSha256 === approved.artifactSha256,
+      )
+      transformations.push(Object.freeze({
+        ledger: Object.freeze({
+          type: 'transformation-fallback-ledger' as const,
+          id: ledger.id,
+          hash: ledger.ledgerHash,
+        }),
+        ...(rejectedReport ? { rejectedReport: Object.freeze({
+          type: 'transformation-critic-report' as const,
+          id: rejectedReport.id,
+          hash: rejectedReport.reportHash,
+        }) } : {}),
+        ...(fallbackResult?.recordHash ? { approvedResult: Object.freeze({
+          type: 'provider-result-artifact' as const,
+          id: fallbackResult.id,
+          hash: fallbackResult.recordHash,
+        }) } : {}),
+        rejectedBeforeFallback,
+        fallbackApproved,
+      }))
+    }
 
     return Object.freeze({
       projectVersionId: projectVersion.id,

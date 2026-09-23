@@ -29,9 +29,11 @@ export const SYNTHETIC_CRITIC_THRESHOLD_FAMILY = 'synthetic-critic-thresholds' a
 export const SYNTHETIC_CRITIC_HARD_GATES = Object.freeze([
   'identity-mismatch',
   'critical-word-omitted',
+  'output-speech-mismatch',
   'corrupt-blob',
   'lip-sync-below-threshold',
   'frame-or-duration-mismatch',
+  'audio-preservation-mismatch',
   'required-evidence-missing',
   'change-outside-rights',
 ] as const)
@@ -47,6 +49,7 @@ export const SYNTHETIC_CRITIC_CAUSES = Object.freeze([
   'blob-undecodable',
   'audio-track-missing',
   'audio-silent',
+  'audio-preservation-mismatch',
   'audio-silence-window',
   'video-frozen',
   'video-freeze-window',
@@ -57,6 +60,7 @@ export const SYNTHETIC_CRITIC_CAUSES = Object.freeze([
   'codec-mismatch',
   'word-omitted',
   'word-added',
+  'output-speech-mismatch',
   'lip-sync-below-threshold',
   'identity-mismatch',
   'continuity-break',
@@ -139,6 +143,7 @@ const SHARED_CAUSES: readonly Readonly<SyntheticCriticCausePolicy>[] = Object.fr
   { cause: 'blob-undecodable', severity: 'blocking', action: 'retry', hardGate: 'corrupt-blob' },
   { cause: 'audio-track-missing', severity: 'blocking', action: 'retry', hardGate: null },
   { cause: 'audio-silent', severity: 'blocking', action: 'retry', hardGate: null },
+  { cause: 'audio-preservation-mismatch', severity: 'blocking', action: 'fallback', hardGate: 'audio-preservation-mismatch' },
   // A pause inside a sentence is normal speech; it is reported, not gated.
   { cause: 'audio-silence-window', severity: 'minor', action: 'manual-review', hardGate: null },
   // A take frozen end to end is a dead render; a still window is a judgement call.
@@ -153,6 +158,7 @@ const SHARED_CAUSES: readonly Readonly<SyntheticCriticCausePolicy>[] = Object.fr
   // The bytes do not say what was approved. That is the whole point of the gate.
   { cause: 'word-omitted', severity: 'blocking', action: 'retry', hardGate: 'critical-word-omitted' },
   { cause: 'word-added', severity: 'major', action: 'manual-review', hardGate: null },
+  { cause: 'output-speech-mismatch', severity: 'blocking', action: 'retry', hardGate: 'output-speech-mismatch' },
   { cause: 'lip-sync-below-threshold', severity: 'blocking', action: 'fallback', hardGate: 'lip-sync-below-threshold' },
   { cause: 'identity-mismatch', severity: 'blocking', action: 'fallback', hardGate: 'identity-mismatch' },
   { cause: 'continuity-break', severity: 'major', action: 'manual-review', hardGate: null },

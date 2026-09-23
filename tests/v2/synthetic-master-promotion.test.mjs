@@ -5,6 +5,7 @@ import test from 'node:test'
 import { promoteSyntheticMasterAssetService } from '../../src/v2/application/synthetic-master-assets.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
+import { createAvatarOutputSpeechEvidence } from '../../src/v2/domain/avatar-output-speech-evidence.ts'
 import { createSyntheticCriticReport } from '../../src/v2/domain/synthetic-critic-report.ts'
 import { createSyntheticPresenterProfileSnapshot } from '../../src/v2/domain/synthetic-production.ts'
 
@@ -15,6 +16,7 @@ const providerJobId = 'promotion-job'
 const now = new Date('2029-05-01T00:00:00.000Z')
 const scriptText = 'Primeira ideia do roteiro. Segunda ideia bem forte.'
 const scriptHash = createHash('sha256').update(scriptText, 'utf8').digest('hex')
+const audioRangeHash = digest('6')
 
 const snapshot = createSyntheticPresenterProfileSnapshot({
   id: 'promotion-presenter',
@@ -86,18 +88,40 @@ const criticExpectation = Object.freeze({
 })
 
 function criticReport(overrides = {}) {
+  const reportArtifactId = overrides.artifactId ?? 'artifact-original'
+  const reportArtifactSha256 = overrides.artifactSha256 ?? digest('a')
+  const outputSpeechEvidence = overrides.outputSpeechEvidence ?? createAvatarOutputSpeechEvidence({
+    jobId: overrides.providerJobId ?? providerJobId,
+    videoArtifactId: reportArtifactId, videoArtifactSha256: reportArtifactSha256,
+    sourceAudioArtifactId: 'artifact-audio', sourceAudioRangeHash: audioRangeHash,
+    sourcePcmSha256: digest('4'), outputPcmSha256: digest('5'),
+    sourceDurationMs: 8_000, outputDurationMs: 8_000,
+    policyVersion: 'avatar-audio-pcm-comparison/1.1.0', sampleRateHz: 16_000,
+    alignedLagSamples: 0, correlationBps: 10_000, normalizedErrorBps: 0,
+    comparedSampleCount: 128_000, sourceCoverageBps: 10_000, outputCoverageBps: 10_000,
+    worstWindowCorrelationBps: 10_000, worstWindowNormalizedErrorBps: 0,
+    failedWindowCount: 0, comparedWindowCount: 32,
+    sourceRmsBps: 5_000, outputRmsBps: 5_000, passed: true,
+    speechEvidence: {
+      kind: 'controlled', evaluatorId: 'controlled-output-speech', evaluatorVersion: '1.0.0',
+      outputTranscriptHash: scriptHash, observedIdentityRef: 'avatar_promotion',
+    },
+  })
   return createSyntheticCriticReport({
     id: 'promotion-critic-report-1',
     workspaceId,
     projectId,
     blockId: 'promotion-block-1',
+    providerJobId,
     capability: 'audio-avatar',
     adapterId: 'heygen-v3',
     adapterVersion: '3.0.0',
-    artifactId: 'artifact-original',
-    artifactSha256: digest('a'),
-    audioArtifactId: 'artifact-audio',
+    artifactId: reportArtifactId,
+    artifactSha256: reportArtifactSha256,
+    audioArtifactId: null,
     alignmentArtifactId: 'artifact-alignment',
+    outputSpeechEvidence,
+    outputSpeechEvidenceArtifactId: 'artifact-output-speech-evidence',
     scriptHash,
     profileSnapshotId: 'promotion-presenter:v3',
     expectedIdentityRef: 'avatar_promotion',
@@ -186,6 +210,13 @@ function harness(overrides = {}) {
         providerJobId: 'heygen_job_promotion', status: 'approved',
         criticResultHash: overrides.criticReports?.[0]?.reportHash ?? criticReport().reportHash,
         authorization: { profileSnapshotId: 'promotion-presenter:v3' },
+        audioRange: { startMs: 0, endMs: 8_000, rangeHash: audioRangeHash },
+        audioMaster: {
+          id: 'promotion-audio-master', masterHash: digest('6'), profileSnapshotId: 'promotion-presenter:v3',
+          sourceProviderJobId: 'promotion-tts-job',
+          audio: { artifactId: 'artifact-audio', artifactSha256: digest('c'), durationMs: 8_000, locale: 'pt-BR' },
+          alignmentEvidence: { artifactId: 'artifact-alignment', artifactSha256: digest('d') },
+        },
         resultArtifact: { artifactId: 'artifact-original', artifactSha256: digest('a') },
         authorizationHash: digest('2'), submittedAt: '2029-05-01T00:00:00.000Z', completedAt: '2029-05-01T00:00:08.000Z',
         ...overrides.job,
@@ -193,10 +224,14 @@ function harness(overrides = {}) {
     },
     resultArtifacts: {
       persistOrReplay: async () => { throw new Error('unused') },
-      listByJob: async () => overrides.results ?? Object.entries(ROLES).map(([, entry]) => ({
-        role: entry.providerRole, artifactId: entry.artifactId, artifactSha256: entry.sha256,
-        byteSize: 4_096, modelRef: 'avatar-model-1', adapterConfigHash: digest('7'),
-      })),
+      listByJob: async ({ jobId }) => overrides.results ?? Object.entries(ROLES)
+        .filter(([, entry]) => jobId === providerJobId
+          ? ['primary-video', 'output-speech-evidence'].includes(entry.providerRole)
+          : ['primary-audio', 'alignment-evidence'].includes(entry.providerRole))
+        .map(([, entry]) => ({
+          role: entry.providerRole, artifactId: entry.artifactId, artifactSha256: entry.sha256,
+          byteSize: 4_096, modelRef: 'avatar-model-1', adapterConfigHash: digest('7'),
+        })),
     },
     artifacts: {
       findById: async (_workspaceId, artifactId) => {
@@ -314,7 +349,7 @@ test('T-FR-104 promotion refuses missing, unavailable, drifted or tampered bytes
     .filter(([role]) => role !== 'final-audio')
     .map(([, entry]) => ({ role: entry.providerRole, artifactId: entry.artifactId, artifactSha256: entry.sha256, byteSize: 4_096, modelRef: null, adapterConfigHash: digest('7') }))
   const missing = harness({ results: withoutAudio })
-  await assert.rejects(missing.promote(request), /no final-audio artifact to promote/)
+  await assert.rejects(missing.promote(request), /TTS provider result ledger does not match/)
   assert.equal(missing.calls.sealed.length, 0)
 
   const unavailable = harness({ artifactStatus: 'quarantined' })
@@ -327,11 +362,35 @@ test('T-FR-104 promotion refuses missing, unavailable, drifted or tampered bytes
       byteSize: 4_096, modelRef: null, adapterConfigHash: digest('7'),
     })),
   })
-  await assert.rejects(drifted.promote(request), /drifted from the provider result ledger/)
+  await assert.rejects(drifted.promote(request), /TTS provider result ledger does not match/)
 
   const tampered = harness({ byteFailure: 'stored artifact checksum mismatch' })
   await assert.rejects(tampered.promote(request), /checksum mismatch/)
   assert.equal(tampered.calls.sealed.length, 0)
+})
+
+test('T-FR-104 uploaded and concatenated audio masters use their canonical artifacts without inventing a TTS job', async () => {
+  for (const source of ['uploaded', 'concatenated']) {
+    const controlled = harness({
+      job: {
+        audioMaster: {
+          id: `promotion-audio-master-${source}`, masterHash: digest('6'), profileSnapshotId: 'promotion-presenter:v3',
+          sourceProviderJobId: null,
+          audio: { artifactId: 'artifact-audio', artifactSha256: digest('c'), durationMs: 8_000, locale: 'pt-BR' },
+          alignmentEvidence: { artifactId: 'artifact-alignment', artifactSha256: digest('d') },
+        },
+      },
+      results: Object.values(ROLES)
+        .filter((entry) => ['primary-video', 'output-speech-evidence'].includes(entry.providerRole))
+        .map((entry) => ({
+          role: entry.providerRole, artifactId: entry.artifactId, artifactSha256: entry.sha256,
+          byteSize: 4_096, modelRef: 'avatar-model-1', adapterConfigHash: digest('7'),
+        })),
+    })
+    const promoted = await controlled.promote({ ...request, idempotencyKey: `promotion-${source}-key` })
+    assert.equal(promoted.master.artifacts.find(({ role }) => role === 'final-audio').artifactId, 'artifact-audio')
+    assert.equal(promoted.master.artifacts.find(({ role }) => role === 'alignment').artifactId, 'artifact-alignment')
+  }
 })
 
 test('T-FR-104 promotion refuses revoked consent, blocked rights and incoherent durations', async () => {
@@ -435,13 +494,25 @@ test('T-FR-106 the specialized report hash stays as the seal transaction guard',
 
 test('T-FR-104 promotion is idempotent and never seals a job twice', async () => {
   const master = { id: 'existing-master', workspaceId, masterHash: digest('e') }
+  const fingerprintSource = harness()
+  await fingerprintSource.promote(request)
+  const requestFingerprint = fingerprintSource.calls.sealed[0].requestFingerprint
   const byReplay = harness({
-    masters: { findReplay: async () => ({ master, requestFingerprint: digest('1'), idempotencyKey: 'promotion-key-1' }) },
+    masters: { findReplay: async () => ({ master, requestFingerprint, idempotencyKey: 'promotion-key-1' }) },
   })
   const replayed = await byReplay.promote(request)
   assert.equal(replayed.replayed, true)
   assert.equal(replayed.master.id, 'existing-master')
   assert.equal(byReplay.calls.sealed.length, 0)
+
+  const mismatchedReplay = harness({
+    masters: { findReplay: async () => ({ master, requestFingerprint, idempotencyKey: 'promotion-key-1' }) },
+  })
+  await assert.rejects(
+    mismatchedReplay.promote({ ...request, scriptText: `${request.scriptText} diferente` }),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+  assert.equal(mismatchedReplay.calls.sealed.length, 0)
 
   const byJob = harness({
     masters: { findByProviderJob: async () => ({ master, requestFingerprint: digest('1'), idempotencyKey: 'other-key' }) },

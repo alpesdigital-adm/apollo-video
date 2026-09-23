@@ -3,6 +3,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import type { PrismaClient } from '../../../generated/prisma-v2/index.js'
+import { PROVIDER_OPERATIONS, type ProviderOperation } from '../domain/provider-contract.ts'
+import { createLiveAvatarEvidenceAvailability } from './live-avatar-evidence-availability.ts'
+export { createLiveAvatarEvidenceAvailability } from './live-avatar-evidence-availability.ts'
 
 import { activateWebhookEndpointConvergentlyService } from '../application/secure-webhook.ts'
 import { materializeNextWebhookEventService } from '../application/materialize-webhook-deliveries.ts'
@@ -27,6 +30,15 @@ import { catalogApprovedOutputService } from '../application/catalog-approved-ou
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { enqueueProviderJobService, runProviderJobWorkerOnce } from '../application/provider-jobs.ts'
+import {
+  dispatchGeneratedCutawayFallbackService,
+  requestTransformationJobService,
+} from '../application/transformation-jobs.ts'
+import { enqueueSyntheticProductionRenderService } from '../application/synthetic-production-render.ts'
+import { prepareCanonicalSyntheticMasterReuseService } from '../application/prepare-synthetic-master-reuse.ts'
+import { runNextSyntheticProductionRenderService } from '../application/run-synthetic-production-render-worker.ts'
+import { materializeRenderInputService } from '../application/materialize-render-input.ts'
+import { createSyntheticBuildAttestationService } from '../application/create-synthetic-build-attestation.ts'
 import { evaluateSyntheticCriticCore } from '../application/synthetic-critic.ts'
 import {
   listSyntheticPhaseGatesService,
@@ -396,6 +408,7 @@ import { PrismaMontageAlternativeRepository } from './prisma/montage-alternative
 import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-repository.ts'
 import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
 import { PrismaSyntheticProductionRepository } from './prisma/synthetic-production-repository.ts'
+import { PrismaSyntheticProductionRenderRepository } from './prisma/synthetic-production-render-repository.ts'
 import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-master-repository.ts'
 import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-plan-repository.ts'
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
@@ -510,6 +523,11 @@ import {
   type S3RenderInputObjectClient,
 } from './s3-render-input-object-client.ts'
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
+import { NodeSyntheticBuildAttestationRunner, NodeSyntheticRuntimeIdentityReader } from './synthetic-build-attestation-runner.ts'
+import { PrismaSyntheticBuildAttestationRepository } from './prisma/synthetic-build-attestation-repository.ts'
+import { PrismaSyntheticMasterReuseRepository } from './prisma/synthetic-master-reuse-repository.ts'
+import { FfmpegSyntheticRenderOutputInspector } from './media/ffmpeg-synthetic-render-output-inspector.ts'
+import { VerifiedSyntheticRenderOutputPromoter } from './media/synthetic-render-output-promoter.ts'
 import {
   createLocalMediaUploadStorageFromEnvironment,
   LocalArtifactSourceMaterializer,
@@ -523,6 +541,7 @@ import {
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
 import { StoredSyntheticMasterAlignmentReader } from './media/synthetic-master-alignment-reader.ts'
 import { FfprobeSyntheticCriticMediaEvaluator } from './media/synthetic-critic-media-integrity.ts'
+import { FfmpegAvatarAudioComparison } from './media/ffmpeg-avatar-audio-comparison.ts'
 import { AlignmentSyntheticCriticPronunciationEvaluator } from './media/synthetic-critic-pronunciation.ts'
 import { DeterministicSyntheticCriticControlledEvaluator } from './media/synthetic-critic-controlled-probe.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
@@ -907,6 +926,132 @@ export function createSyntheticProductionRepository(): SyntheticProductionReposi
   return new PrismaSyntheticProductionRepository(resolveV2Client())
 }
 
+export function createSyntheticProductionRenderRepository() {
+  return new PrismaSyntheticProductionRenderRepository(resolveV2Client(), createProtectedRenderInputStore())
+}
+
+export function createSyntheticProductionRenderRuntime(
+  clock: () => Date = () => new Date(),
+) {
+  const production = createSyntheticProductionRepository()
+  const operations = createPublicOperationRepository()
+  const runtimeIdentity = new NodeSyntheticRuntimeIdentityReader({ cwd: process.cwd() })
+  return Object.freeze({
+    enqueue: enqueueSyntheticProductionRenderService({
+      production,
+      projects: createProjectWorkspaceQueryRepository(),
+      operations,
+      runtimeIdentity,
+      clock,
+      createId: (kind) => `synthetic-render-${kind}-${randomUUID()}`,
+    }),
+  })
+}
+
+export function createSyntheticBuildAttestationRepository() {
+  return new PrismaSyntheticBuildAttestationRepository(resolveV2Client())
+}
+
+/** Explicit local/CI runtime. Render workers only verify persisted attestations. */
+export function createSyntheticBuildAttestationRuntime(
+  clock: () => Date = () => new Date(),
+) {
+  const repository = createSyntheticBuildAttestationRepository()
+  return Object.freeze({
+    repository,
+    create: createSyntheticBuildAttestationService({
+      repository,
+      runner: new NodeSyntheticBuildAttestationRunner({ cwd: process.cwd(), clock }),
+      createId: () => `synthetic-build-attestation-${randomUUID()}`,
+    }),
+  })
+}
+
+export function createSyntheticProductionRenderWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const outputRoot = environment.APOLLO_V2_RENDER_OUTPUT_ROOT?.trim()
+  if (!outputRoot) {
+    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Synthetic render output root is required')
+  }
+  const configuredTimeout = Number(environment.APOLLO_V2_RENDER_TIMEOUT_MS)
+  const configuredLease = Number(environment.APOLLO_V2_WORKER_LEASE_MS)
+  const configuredHeartbeat = Number(environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
+  const configuredRetry = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
+  const operations = createPublicOperationRepository()
+  const materialize = async (
+    workspaceId: string,
+    validUntil: string,
+    spec: Parameters<ReturnType<typeof materializeRenderInputService>>[0],
+    signal?: AbortSignal,
+  ) => {
+    if (signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic render materialization was cancelled')
+    const execute = materializeRenderInputService({
+      resolver: createRenderInputAssetResolver(workspaceId, environment, { validUntil }),
+    })
+    const result = await execute(spec)
+    if (signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic render materialization was cancelled')
+    return result
+  }
+  return runNextSyntheticProductionRenderService({
+    operations,
+    renders: createSyntheticProductionRenderRepository(),
+    protectedInputs: createProtectedRenderInputStore(),
+    materialize,
+    renderer: new RemotionRenderInputRenderer({
+      projectRoot: process.cwd(),
+      outputRoot,
+      ...(Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0 ? { timeoutMs: configuredTimeout } : {}),
+      clock,
+    }),
+    inspector: new FfmpegSyntheticRenderOutputInspector({ outputRoot, environment }),
+    promoter: new VerifiedSyntheticRenderOutputPromoter({
+      outputRoot,
+      storage: createVerifiedMediaStorage(environment),
+    }),
+    artifacts: createMediaArtifactPersistenceRepository(environment),
+    runtimeIdentity: new NodeSyntheticRuntimeIdentityReader({ cwd: process.cwd() }),
+    clock,
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
+    ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
+    ...(Number.isSafeInteger(configuredRetry) && configuredRetry > 0 ? { retryDelayMs: configuredRetry } : {}),
+  })
+}
+
+export function createTransformationFallbackDispatchRuntime(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const jobs = createProviderJobRepository()
+  const registry = createTransformationProviderRegistryRepository()
+  const requestJob = requestTransformationJobService({
+    jobs,
+    registry,
+    adapters: createProviderAdapterRegistry(environment),
+    projects: createProjectWorkspaceQueryRepository(),
+    artifacts: createMediaArtifactQueryRepository(),
+    rights: createAssetRightsRepository(),
+    novelty: createNoveltyBudgetRepository(),
+    masks: createReviewCleanupMaskRepository(),
+    clock,
+    createJobId: () => `provider-job-${randomUUID()}`,
+    createTransitionId: () => `provider-transition-${randomUUID()}`,
+  })
+  return Object.freeze({
+    dispatch: dispatchGeneratedCutawayFallbackService({
+      quality: createTransformationQualityRepository(),
+      registry,
+      jobs,
+      enqueue: ({ selection, fallback, ...request }) => requestJob.enqueueGeneratedCutawayFallback({
+        ...request,
+        selectionId: selection.id,
+      }, fallback),
+      clock,
+    }),
+  })
+}
+
 export function createSyntheticPhaseGateRepository(): SyntheticPhaseGateRepository {
   return new PrismaSyntheticPhaseGateRepository(resolveV2Client())
 }
@@ -928,6 +1073,29 @@ export function createSyntheticPhaseGateRuntime(
 
 export function createSyntheticAudioMasterRepository(): SyntheticAudioMasterRepository {
   return new PrismaSyntheticAudioMasterRepository(resolveV2Client())
+}
+
+export function createSyntheticMasterReuseRepository(environment: NodeJS.ProcessEnv = process.env) {
+  const artifacts = createMediaArtifactQueryRepository()
+  return new PrismaSyntheticMasterReuseRepository({
+    client: resolveV2Client(),
+    alignment: new StoredSyntheticMasterAlignmentReader({
+      artifacts,
+      storage: createArtifactContentStorage(environment),
+    }),
+  })
+}
+
+export function createCanonicalSyntheticMasterReusePreparer(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  return prepareCanonicalSyntheticMasterReuseService({
+    repository: createSyntheticMasterReuseRepository(environment),
+    clock,
+    createDecisionId: () => `synthetic-cache-decision-${randomUUID()}`,
+    createConsumptionId: () => `synthetic-master-consumption-${randomUUID()}`,
+  })
 }
 
 export function createProviderJobRepository(): ProviderJobRepository {
@@ -1090,6 +1258,7 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
       enqueueProviderJob: enqueueProviderJobService({
         jobs: providerJobs,
         adapters: createProviderAdapterRegistry(environment),
+        liveAvatarEvidence: createLiveAvatarEvidenceAvailability(environment),
         profiles,
         audioMasters: createSyntheticAudioMasterRepository(),
         projects,
@@ -1565,6 +1734,7 @@ export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = p
             endpoint: httpTransformation.baseUrl,
             apiKey: httpTransformation.apiKey,
             modes: httpTransformation.modes,
+            operations: httpTransformation.operations,
           })
         }
         return new HttpTransformationProviderAdapter({
@@ -1574,6 +1744,7 @@ export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = p
           apiKey: httpTransformation.apiKey,
           completion: httpTransformation.completion,
           modes: httpTransformation.modes,
+          operations: httpTransformation.operations,
           ...(httpTransformation.callbackSecret ? { callbackSecret: httpTransformation.callbackSecret } : {}),
         })
       }
@@ -1591,6 +1762,7 @@ export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = p
  *   APOLLO_V2_TRANSFORMATION_<ID>_API_KEY
  *   APOLLO_V2_TRANSFORMATION_<ID>_COMPLETION      synchronous|polling|webhook|both|mcp
  *   APOLLO_V2_TRANSFORMATION_<ID>_MODES           comma separated
+ *   APOLLO_V2_TRANSFORMATION_<ID>_OPERATIONS      comma separated, server owned
  *   APOLLO_V2_TRANSFORMATION_<ID>_CALLBACK_SECRET hex, >= 32 bytes
  *   APOLLO_V2_TRANSFORMATION_<ID>_ADAPTER_VERSION
  */
@@ -1603,6 +1775,14 @@ export function transformationAdapterEnvironment(environment: NodeJS.ProcessEnv,
   const transport = declared === 'mcp' ? 'mcp' : 'http'
   const completion = (declared === 'mcp' ? 'polling' : declared) as 'synchronous' | 'polling' | 'webhook' | 'both'
   const secretHex = environment[`${prefix}_CALLBACK_SECRET`]?.trim()
+  const operations = (environment[`${prefix}_OPERATIONS`]?.trim() || 'video-to-video')
+    .split(',')
+    .map((operation) => operation.trim())
+    .filter((operation): operation is ProviderOperation =>
+      (PROVIDER_OPERATIONS as readonly string[]).includes(operation))
+  if (operations.length === 0) {
+    throw new DomainError('INVALID_ARGUMENT', 'Transformation adapter must declare at least one supported operation')
+  }
   return Object.freeze({
     adapterVersion: environment[`${prefix}_ADAPTER_VERSION`]?.trim() || '1.0.0',
     baseUrl,
@@ -1610,6 +1790,7 @@ export function transformationAdapterEnvironment(environment: NodeJS.ProcessEnv,
     transport,
     completion,
     modes: Object.freeze((environment[`${prefix}_MODES`]?.trim() || 'video-to-video').split(',').map((mode) => mode.trim()).filter(Boolean)),
+    operations: Object.freeze(operations),
     ...(secretHex ? { callbackSecret: Buffer.from(secretHex, 'hex') } : {}),
   })
 }
@@ -1666,6 +1847,7 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
     artifacts: artifactQuery,
     storage: createArtifactContentStorage(environment),
   })
+  const audioComparison = new FfmpegAvatarAudioComparison(environment)
   const evaluateSynthetic = evaluateSyntheticCriticCore({
     reports: createSyntheticCriticReportRepository(),
     media: new FfprobeSyntheticCriticMediaEvaluator({
@@ -1687,6 +1869,9 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
     profiles: createSyntheticProductionRepository(),
     rights: createAssetRightsRepository(),
     alignment,
+    audioMasters: new PrismaSyntheticAudioMasterRepository(resolveV2Client()),
+    sources: createArtifactSourceMaterializer(environment),
+    audioComparison,
     clock: () => new Date(),
   })
   const syntheticVideoCritic = new SpecializedSyntheticProviderResultCritic({
@@ -1702,6 +1887,7 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
     novelty: createNoveltyBudgetRepository(),
     evaluator: new FfmpegTransformationCriticEvaluator({
       sources: createArtifactSourceMaterializer(environment),
+      audioComparison,
       prober: {
         probe(sourcePath, options) {
           return probeVideo(sourcePath, { ...options, environment, requireAudio: false })
@@ -1775,7 +1961,11 @@ export function createPublicOperationRepository(
   telemetry: OperationTelemetrySink = createConfiguredOperationTelemetry(),
 ): PublicOperationRepository {
   return new TelemetryPublicOperationRepository(
-    new PrismaPublicOperationRepository(resolveV2Client()),
+    new PrismaPublicOperationRepository(
+      resolveV2Client(),
+      randomUUID,
+      createProtectedPayloadCipherFromEnvironment(),
+    ),
     telemetry,
   )
 }

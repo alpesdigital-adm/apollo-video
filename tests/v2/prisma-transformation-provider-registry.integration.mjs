@@ -15,6 +15,10 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
 }, async () => {
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
   const cleanup = async () => {
+    await client.v2TransformationFallbackDispatchRequest.deleteMany({ where: { workspaceId } })
+    await client.v2TransformationFallbackDispatchClaim.deleteMany({ where: { workspaceId } })
+    await client.v2TransformationFallbackAttempt.deleteMany({ where: { workspaceId } })
+    await client.v2TransformationFallbackLedger.deleteMany({ where: { workspaceId } })
     await client.v2TransformationProviderSelection.deleteMany({ where: { workspaceId } })
     await client.v2TransformationBrief.deleteMany({ where: { workspaceId } })
     await client.v2TransformationProviderHealth.deleteMany({ where: { workspaceId } })
@@ -32,7 +36,7 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
-    const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+    const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
     const { persistTransformationBriefService, recordTransformationProviderHealthService, registerTransformationProviderService, routeTransformationBriefService } = await import('../../src/v2/application/transformation-provider-registry.ts')
     const { createTransformationBrief } = await import('../../src/v2/domain/transformation-brief.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
@@ -41,11 +45,13 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
     const { PrismaTransformationProviderRegistryRepository } = await import('../../src/v2/infrastructure/prisma/transformation-provider-registry-repository.ts')
+    const { PrismaTransformationQualityRepository } = await import('../../src/v2/infrastructure/prisma/transformation-quality-repository.ts')
 
     await new PrismaWorkspaceRepository(client).create(createWorkspace({ id: workspaceId, slug: workspaceId, name: 'Transformation registry integration', status: 'active', createdAt: at(0) }))
     const issued = await createApiClientService({ repository: new PrismaApiClientRepository(client), credentialCrypto: nodeApiCredentialCrypto, clock: () => new Date(at(0)) })({ id: clientId, credentialId, workspaceId, name: 'Transformation registry client', environment: 'production', scopes: ['projects:read', 'projects:write'] })
     const auditContext = createExternalAuditContext({ clientId, credentialId: issued.credential.id, workspaceId, environment: 'production' })
     const actor = Object.freeze({ ...auditContext, scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext })
+    const durableAudit = materializeActorAuditContext(actor)
     let entity = 0, event = 0
     const created = await createProjectService({ repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)), createId: (kind) => `${kind}-transformation-${++entity}`, createEventId: () => `00000000-0000-4000-8000-${String(800_000 + ++event).padStart(12, '0')}` })({ workspaceId, name: 'Transformation project', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'transformation-project' } })
     const repository = new PrismaTransformationProviderRegistryRepository(client)
@@ -74,12 +80,68 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     assert.equal((await routeTransformationBriefService({ repository, workspaceId, projectId: created.project.id, briefId: brief.id, policy: { region: 'br', maximumCostMinorUnits: 100, minimumQualityScoreBps: 8_000, output: { width: 1080, height: 1920, includeAudio: true, fps: 30 } }, createdAt: at(4) })).replayed, true)
     assert.equal(await client.v2TransformationProviderSelection.count({ where: { workspaceId } }), 1)
 
+    // Public keys are aliases for one server-owned ledger/rung claim. Two
+    // callers racing with different keys converge before any provider job is
+    // created, and each key remains permanently bound to its own fingerprint.
+    const fallbackLedgerId = 'transformation-fallback-ledger-1'
+    await client.v2TransformationFallbackLedger.create({ data: {
+      id: fallbackLedgerId, workspaceId, projectId: created.project.id, projectVersionId: created.version.id,
+      schemaVersion: 'transformation-fallback-ledger/v1', briefId: brief.id, briefHash: brief.briefHash,
+      ladderJson: '["video-to-video","generated-cutaway","source-unchanged"]', currentRung: 'generated-cutaway',
+      incurredCostMinorUnits: 10, costCurrency: 'BRL', reviewDecision: 'awaiting-review',
+      sourceArtifactId: brief.sourceArtifactId, sourceArtifactSha256: brief.sourceArtifactHash,
+      ledgerHash: hash('8'), createdAt: new Date(at(5)), updatedAt: new Date(at(5)),
+    } })
+    const quality = new PrismaTransformationQualityRepository(client)
+    const claimInput = (key, fingerprint, suffix) => ({
+      claimId: 'transformation-fallback-claim-1', requestId: `transformation-fallback-request-${suffix}`,
+      workspaceId, projectId: created.project.id, ledgerId: fallbackLedgerId, ledgerHash: hash('8'), briefId: brief.id,
+      rung: 'generated-cutaway', idempotencyKey: key, requestFingerprint: fingerprint,
+      authenticationAudit: durableAudit, createdAt: at(6),
+    })
+    const [aliasA, aliasB] = await Promise.all([
+      quality.claimFallbackDispatch(claimInput('fallback-public-key-a', hash('a'), 'a')),
+      quality.claimFallbackDispatch(claimInput('fallback-public-key-b', hash('a'), 'b')),
+    ])
+    assert.equal(aliasA.claim.id, aliasB.claim.id)
+    assert.equal(await client.v2TransformationFallbackDispatchClaim.count({ where: { workspaceId } }), 1)
+    assert.equal(await client.v2TransformationFallbackDispatchRequest.count({ where: { workspaceId } }), 2)
+    await assert.rejects(
+      quality.claimFallbackDispatch(claimInput('fallback-public-key-a', hash('b'), 'mismatch')),
+      (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    await client.v2TransformationFallbackAttempt.create({ data: {
+      id: 'transformation-fallback-skip-attempt', workspaceId, ledgerId: fallbackLedgerId, sequence: 1,
+      rung: 'generated-cutaway', outcome: 'skipped', intentScoreBps: null, violatesProtectedContent: false,
+      estimatedCostMinorUnits: 0, observedCostMinorUnits: 0, costCurrency: 'BRL',
+      reason: 'capability-unavailable', descendedBecause: 'capability-unavailable',
+      dispatchRequestHash: hash('a'), actorClientId: durableAudit.clientId,
+      actorCredentialId: durableAudit.credentialId, actorEnvironment: durableAudit.environment,
+      actorAuthenticationKind: durableAudit.authenticationKind, actorContextHash: durableAudit.contextHash,
+      delegatedUserId: durableAudit.delegatedUserId ?? null, delegatedIdentityId: durableAudit.delegatedIdentityId ?? null,
+      workspaceRole: durableAudit.workspaceRole ?? null,
+    } })
+    const settleInput = {
+      workspaceId, projectId: created.project.id, claimId: aliasA.claim.id, expectedLedgerId: fallbackLedgerId,
+      outcome: 'skipped', resultLedgerId: fallbackLedgerId, resultLedgerHash: hash('8'),
+      reason: 'capability-unavailable', settledAt: at(7),
+    }
+    const [settledA, settledB] = await Promise.all([
+      quality.settleFallbackDispatch(settleInput),
+      quality.settleFallbackDispatch(settleInput),
+    ])
+    assert.equal(settledA.outcome, 'skipped')
+    assert.equal(settledB.outcome, 'skipped')
+    const replay = await quality.claimFallbackDispatch(claimInput('fallback-public-key-a', hash('a'), 'replay'))
+    assert.equal(replay.requestReplayed, true)
+    assert.equal(replay.claim.outcome, 'skipped')
+
     const invisible = await repository.readBrief({ workspaceId: 'another-workspace', projectId: created.project.id, briefId: brief.id })
     assert.equal(invisible, null)
     await client.v2TransformationBrief.update({ where: { id: brief.id }, data: { briefJson: JSON.stringify({ ...brief, prompt: 'tampered' }) } })
     await assert.rejects(repository.readBrief({ workspaceId, projectId: created.project.id, briefId: brief.id }), (error) => error.code === 'PERSISTENCE_CONFLICT')
   } finally {
-    await cleanup().catch(() => undefined)
+    await cleanup()
     await client.$disconnect()
   }
 })
