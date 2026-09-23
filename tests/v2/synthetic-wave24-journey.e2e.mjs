@@ -854,7 +854,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         draft: {
           status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
           allowedSyntheticOperations: result.role === 'primary-video'
-            ? ['audio-avatar', 'video-to-video', 'generated-cutaway']
+            ? ['tts', 'audio-avatar', 'video-to-video', 'generated-cutaway']
             : ['audio-avatar'],
           expiresAt: '2030-01-01T00:00:00.000Z',
           consent: { status: 'not-required', allowedUses: [] },
@@ -1424,6 +1424,21 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
   } catch (error) {
     primaryError = error
     t.diagnostic(`journey failure before cleanup: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+    const details = error && typeof error === 'object' && 'details' in error ? error.details : null
+    if (details && typeof details === 'object' && 'decisions' in details && Array.isArray(details.decisions)) {
+      t.diagnostic(`journey safe domain details: ${JSON.stringify({
+        code: 'code' in error && typeof error.code === 'string' ? error.code : null,
+        decisions: details.decisions.map((decision) => decision && typeof decision === 'object'
+          ? {
+              artifactId: 'artifactId' in decision && typeof decision.artifactId === 'string' ? decision.artifactId : null,
+              outcome: 'outcome' in decision && typeof decision.outcome === 'string' ? decision.outcome : null,
+              reasonCodes: 'reasonCodes' in decision && Array.isArray(decision.reasonCodes)
+                ? decision.reasonCodes.filter((reason) => typeof reason === 'string')
+                : [],
+            }
+          : null),
+      })}`)
+    }
     throw error
   } finally {
     const cleanupErrors = []
