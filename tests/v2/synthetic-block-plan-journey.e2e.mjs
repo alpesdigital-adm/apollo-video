@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import http from 'node:http'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -63,6 +64,12 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
 
   const cleanup = async () => {
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockConcatenation.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
@@ -93,11 +100,14 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+    const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
     const { registerSyntheticPresenterProfileService } = await import('../../src/v2/application/synthetic-production.ts')
+    const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
+    const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
     const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
@@ -179,6 +189,13 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
       ...auditContext, scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer',
       clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
       clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+    })
+    const rightsRepository = new PrismaAssetRightsRepository(client)
+    let rightsOrdinal = 0
+    const setRights = setAssetRightsService({
+      repository: rightsRepository,
+      clock: () => new Date(at(40)),
+      createId: () => `block-journey-rights-${++rightsOrdinal}`,
     })
     let entity = 0
     let event = 0
@@ -317,6 +334,44 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
       }
       return byBlock
     }
+    const grantRightsForEffectiveGenerations = async (data) => {
+      const artifactIds = new Set()
+      const effective = effectiveByBlock(data)
+      for (const blockId of data.plan.version.blockSequence) {
+        const generation = effective.get(blockId)
+        assert.ok(generation, `active block ${blockId} must carry an effective generation`)
+        assert.ok(generation.audioArtifactId, `generation ${generation.id} must carry audio`)
+        assert.ok(generation.alignmentArtifactId, `generation ${generation.id} must carry alignment`)
+        artifactIds.add(generation.audioArtifactId)
+        artifactIds.add(generation.alignmentArtifactId)
+      }
+      let granted = 0
+      for (const artifactId of artifactIds) {
+        const artifact = await client.v2MediaArtifact.findUniqueOrThrow({
+          where: { id: artifactId },
+          select: { rightsRevision: true },
+        })
+        if (artifact.rightsRevision > 0) continue
+        await setRights({
+          workspaceId,
+          artifactId,
+          baseRevision: assetRightsRevision(artifactId, artifact.rightsRevision),
+          draft: {
+            status: 'approved',
+            allowedUses: ['ads'],
+            prohibitedUses: [],
+            allowedMarkets: ['BRA'],
+            allowedLocales: ['pt-BR'],
+            allowedSyntheticOperations: ['tts'],
+            expiresAt: '2030-01-01T00:00:00.000Z',
+            consent: { status: 'not-required', allowedUses: [] },
+          },
+          actor: { type: 'api-client', id: issued.client.id },
+        })
+        granted += 1
+      }
+      return granted
+    }
     const allApproved = (data) => data.plan.version.blockSequence.every((blockId) => effectiveByBlock(data).get(blockId)?.status === 'approved')
     const context = (data) => ({
       projectVersionId,
@@ -426,29 +481,48 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
     assert.deepEqual(avatarChanged.payload.data.generations.map(({ action }) => action), ['up-to-date', 'up-to-date', 'up-to-date', 'up-to-date', 'up-to-date'])
     assert.equal(providerCalls.length, 15)
     state = await getPlan(planId)
+    assert.equal(
+      await grantRightsForEffectiveGenerations(state),
+      10,
+      'every current audio and alignment artifact must be authorized before integrity is tested',
+    )
 
     // 9. A corrupted stored artifact never poisons the plan: the compile fails
     //    closed and only the affected block regenerates.
     const corruptTargetBlock = state.plan.version.blockSequence[0]
     const corruptGeneration = effectiveByBlock(state).get(corruptTargetBlock)
     const corruptRow = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: corruptGeneration.audioArtifactId } })
+    const corruptedBytes = Buffer.from('corrupted-bytes')
     if (objectStore) {
       await objectStore.client.send(new objectStore.aws.PutObjectCommand({
-        Bucket: objectStore.bucket, Key: corruptRow.artifactKey, Body: Buffer.from('corrupted-bytes'),
+        Bucket: objectStore.bucket, Key: corruptRow.artifactKey, Body: corruptedBytes,
       }))
+      const corruptedObject = await objectStore.client.send(new objectStore.aws.GetObjectCommand({
+        Bucket: objectStore.bucket, Key: corruptRow.artifactKey,
+      }))
+      const storedBytes = Buffer.from(await corruptedObject.Body.transformToByteArray())
+      assert.notEqual(createHash('sha256').update(storedBytes).digest('hex'), corruptRow.sha256)
     } else {
-      await writeFile(join(artifactRoot, ...corruptRow.artifactKey.split('/')), Buffer.from('corrupted-bytes'))
+      const corruptPath = join(artifactRoot, ...corruptRow.artifactKey.split('/'))
+      await writeFile(corruptPath, corruptedBytes)
+      assert.notEqual(await calculateFileSha256(corruptPath), corruptRow.sha256)
     }
     const failedCompile = await api('POST', planPath(`/${planId}/audio-compilations`), 'bj-compile-corrupt', {
       ...context(state), settings: { gapMs: 200, outputFormat: 'mp3' },
     })
-    assert.ok(failedCompile.status >= 400, JSON.stringify(failedCompile.payload))
+    assert.equal(failedCompile.status, 409, JSON.stringify(failedCompile.payload))
+    assert.equal(failedCompile.payload.error.code, 'PERSISTENCE_CONFLICT')
     assert.equal(providerCalls.length, 15, 'a corrupted artifact must not silently trigger paid work')
     state = await getPlan(planId)
     const regenerateCorrupt = await api('POST', planPath(`/${planId}/blocks/${corruptTargetBlock}/regenerations`), 'bj-regen-corrupt', { ...context(state) })
     assert.equal(regenerateCorrupt.status, 201, JSON.stringify(regenerateCorrupt.payload))
     state = await waitForGenerations(planId, allApproved, 'regenerated corrupted block')
     assert.equal(providerCalls.length, 16)
+    assert.equal(
+      await grantRightsForEffectiveGenerations(state),
+      2,
+      'the regenerated block must authorize its new audio and alignment artifacts',
+    )
 
     // 10. Compile: deterministic concatenation plus one consolidated master.
     const compiled = await api('POST', planPath(`/${planId}/audio-compilations`), 'bj-compile', {
