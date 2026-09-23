@@ -76,6 +76,8 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
     await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })

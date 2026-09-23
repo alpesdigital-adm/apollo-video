@@ -28,6 +28,10 @@ import { runNextSourceCleanupOperationService } from '../application/run-source-
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { enqueueProviderJobService, runProviderJobWorkerOnce } from '../application/provider-jobs.ts'
 import { evaluateSyntheticCriticCore } from '../application/synthetic-critic.ts'
+import {
+  listSyntheticPhaseGatesService,
+  runSyntheticPhaseGateService,
+} from '../application/run-synthetic-phase-gate.ts'
 import { SpecializedSyntheticProviderResultCritic } from '../application/synthetic-provider-critic.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
@@ -419,6 +423,7 @@ import { AuthorizedProviderSubmissionInputMaterializer } from './provider-submis
 import { ElevenLabsTtsProviderAdapter } from './elevenlabs-tts-provider.ts'
 import { HeyGenV3AsyncMediaProviderAdapter } from './heygen-v3-provider.ts'
 import { PrismaProviderResultArtifactRepository } from './prisma/provider-result-artifact-repository.ts'
+import { PrismaProviderExecutionProvenanceRepository } from './prisma/provider-execution-provenance-repository.ts'
 import {
   PersistedProviderResultCritic,
   PersistedTtsResultCritic,
@@ -906,6 +911,21 @@ export function createSyntheticPhaseGateRepository(): SyntheticPhaseGateReposito
   return new PrismaSyntheticPhaseGateRepository(resolveV2Client())
 }
 
+export function createSyntheticPhaseGateRuntime(
+  clock: () => Date = () => new Date(),
+) {
+  const repository = createSyntheticPhaseGateRepository()
+  return Object.freeze({
+    repository,
+    run: runSyntheticPhaseGateService({
+      repository,
+      clock,
+      createId: () => `spg-${randomUUID()}`,
+    }),
+    list: listSyntheticPhaseGatesService({ repository }),
+  })
+}
+
 export function createSyntheticAudioMasterRepository(): SyntheticAudioMasterRepository {
   return new PrismaSyntheticAudioMasterRepository(resolveV2Client())
 }
@@ -1034,6 +1054,10 @@ export function createSyntheticBlockConcatenationRepository(): SyntheticBlockCon
 
 export function createProviderResultArtifactRepository() {
   return new PrismaProviderResultArtifactRepository(resolveV2Client())
+}
+
+export function createProviderExecutionProvenanceRepository() {
+  return new PrismaProviderExecutionProvenanceRepository(resolveV2Client())
 }
 
 /** One wiring for every synthetic-script-plan route: plan commands plus the
@@ -1605,6 +1629,7 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
     storage: createVerifiedMediaStorage(environment),
     artifacts: createMediaArtifactPersistenceRepository(environment),
     artifactQuery,
+    resultArtifacts,
     prober: {
       probe(sourcePath, options) {
         return probeVideo(sourcePath, { ...options, environment, requireAudio: true })
@@ -1689,6 +1714,8 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
   const isTransformation = (job: { transformation?: unknown }) => job.transformation !== undefined
   return runProviderJobWorkerOnce({
     jobs: createProviderJobRepository(),
+    provenance: createProviderExecutionProvenanceRepository(),
+    resultArtifacts,
     adapters: createProviderAdapterRegistry(environment),
     materializer: createProviderSubmissionInputMaterializer(environment),
     ingestor: {

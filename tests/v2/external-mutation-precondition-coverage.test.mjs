@@ -469,6 +469,9 @@ const coverage = Object.freeze({
   'apollo.projects.synthetic-production-runs.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, profile snapshot, critic results, artifact digests and authorization; serializable persistence rechecks current state before commit',
   },
+  'apollo.projects.synthetic-phase-gates.run': {
+    mode: 'identity-bound-action', fields: ['projectVersionId', 'projectVersionHash'], evidence: 'request requires the exact immutable ProjectVersion identity and actor-tenant-bound idempotency; Serializable persistence rechecks the current version, active API client and server-owned evidence before commit',
+  },
   'apollo.projects.synthetic-masters.promote': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the approved provider job, presenter snapshot, exact script hash, locale, use, market, lineage and cost; the sealing transaction rechecks the job critic hash and profile snapshot hash, and a job already promoted returns its master instead of sealing a second one',
   },
@@ -799,7 +802,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
     'idempotent-create': 70,
-    'identity-bound-action': 9,
+    'identity-bound-action': 10,
     'natural-idempotent-create': 11,
     'state-machine-action': 18,
     'single-flight-action': 4,

@@ -37,6 +37,10 @@ export interface ProviderResultArtifactRecord {
   observedCost?: Readonly<{ currency: string; costMinorUnits: number }>
   completedAt: string
   createdAt: string
+  /** Canonical semantic body. Historical rows may not have one. */
+  recordJson?: string
+  /** Hash of recordJson. Historical rows remain readable but unattested. */
+  recordHash?: string
 }
 
 export interface ProviderResultArtifactRepository {

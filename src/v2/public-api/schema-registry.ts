@@ -29,6 +29,10 @@ import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/su
 import { PROVIDER_CALLBACK_REJECTIONS } from '../domain/provider-job-callback.ts'
 import { PROVIDER_JOB_TRANSPORTS } from '../domain/provider-job-transport.ts'
 import {
+  SYNTHETIC_PHASE_GATE_CRITERIA,
+  SYNTHETIC_PHASE_GATE_EVIDENCE_TYPES,
+} from '../domain/synthetic-phase-gate.ts'
+import {
   TRANSFORMATION_FALLBACKS,
   TRANSFORMATION_INTENTS,
   TRANSFORMATION_MODES,
@@ -84,6 +88,7 @@ import { COVERAGE_AVAILABILITIES } from '../domain/track-coverage.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../application/multicam-direction.ts'
 import { STRATEGIC_OBJECTIVES } from '../domain/strategic-objective.ts'
 import { MULTICAM_LONGFORM_CHECK_CODES } from './multicam-longform-gate-contract.ts'
+import { SYNTHETIC_PHASE_GATE_CHECK_CODES } from './synthetic-phase-gate-contract.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -14314,6 +14319,110 @@ const syntheticCacheDecisionSummarySchema: JsonSchema = {
     },
   },
 }
+const syntheticPhaseGateCriterionSchema: JsonSchema = {
+  type: 'string', enum: [...SYNTHETIC_PHASE_GATE_CRITERIA],
+}
+const syntheticPhaseGateCheckCodeSchema: JsonSchema = {
+  type: 'string', enum: [...SYNTHETIC_PHASE_GATE_CHECK_CODES],
+}
+const syntheticPhaseGateEvidenceTypeSchema: JsonSchema = {
+  type: 'string', enum: [...SYNTHETIC_PHASE_GATE_EVIDENCE_TYPES],
+}
+const syntheticPhaseGateEvidenceIdSchema: JsonSchema = {
+  type: 'string', minLength: 3, maxLength: 192,
+  pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{2,191}$',
+}
+const syntheticPhaseGateReferenceSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['type', 'id', 'hash'],
+  properties: {
+    type: syntheticPhaseGateEvidenceTypeSchema,
+    id: syntheticPhaseGateEvidenceIdSchema,
+    hash: sha256Schema,
+  },
+}
+const syntheticPhaseGateCheckSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['code', 'passed', 'missingEvidenceTypes', 'references'],
+  properties: {
+    code: syntheticPhaseGateCheckCodeSchema,
+    passed: { type: 'boolean' },
+    missingEvidenceTypes: {
+      type: 'array', maxItems: SYNTHETIC_PHASE_GATE_EVIDENCE_TYPES.length,
+      uniqueItems: true, items: syntheticPhaseGateEvidenceTypeSchema,
+    },
+    references: { type: 'array', maxItems: 16, items: syntheticPhaseGateReferenceSchema },
+  },
+}
+const syntheticPhaseGateCriterionEvidenceSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['criterion', 'source', 'automatic', 'passed', 'missingChecks', 'checks'],
+  properties: {
+    criterion: syntheticPhaseGateCriterionSchema,
+    source: { const: 'server' },
+    automatic: { const: true },
+    passed: { type: 'boolean' },
+    missingChecks: {
+      type: 'array', maxItems: SYNTHETIC_PHASE_GATE_CHECK_CODES.length,
+      uniqueItems: true, items: syntheticPhaseGateCheckCodeSchema,
+    },
+    checks: { type: 'array', minItems: 1, maxItems: 3, items: syntheticPhaseGateCheckSchema },
+  },
+}
+const syntheticPhaseGateReportSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'gate', 'workspaceId', 'projectId', 'projectVersionId',
+    'projectVersionHash', 'approved', 'covered', 'passed', 'total', 'missing',
+    'failed', 'serverEvidenceOnly', 'evidence', 'evaluatedAt', 'fingerprint',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-phase-gate-report/v1' },
+    gate: { const: 'synthetic-phase/v1' },
+    workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema,
+    projectVersionHash: sha256Schema,
+    approved: { type: 'boolean' },
+    covered: { type: 'integer', minimum: 0, maximum: SYNTHETIC_PHASE_GATE_CRITERIA.length },
+    passed: { type: 'integer', minimum: 0, maximum: SYNTHETIC_PHASE_GATE_CRITERIA.length },
+    total: { const: SYNTHETIC_PHASE_GATE_CRITERIA.length },
+    missing: {
+      type: 'array', maxItems: SYNTHETIC_PHASE_GATE_CRITERIA.length,
+      uniqueItems: true, items: syntheticPhaseGateCriterionSchema,
+    },
+    failed: {
+      type: 'array', maxItems: SYNTHETIC_PHASE_GATE_CRITERIA.length,
+      uniqueItems: true, items: syntheticPhaseGateCriterionSchema,
+    },
+    serverEvidenceOnly: { const: true },
+    evidence: {
+      type: 'array', maxItems: SYNTHETIC_PHASE_GATE_CRITERIA.length,
+      items: syntheticPhaseGateCriterionEvidenceSchema,
+    },
+    evaluatedAt: dateTimeSchema,
+    fingerprint: sha256Schema,
+  },
+}
+const syntheticPhaseGateRecordSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'projectVersionId',
+    'projectVersionHash', 'report', 'reportFingerprint', 'createdBy', 'createdAt',
+    'recordHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-phase-gate/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema,
+    projectVersionId: idSchema, projectVersionHash: sha256Schema,
+    report: syntheticPhaseGateReportSchema,
+    reportFingerprint: sha256Schema,
+    createdBy: {
+      type: 'object', additionalProperties: false, required: ['type', 'id'],
+      properties: { type: { const: 'api-client' }, id: idSchema },
+    },
+    createdAt: dateTimeSchema,
+    recordHash: sha256Schema,
+  },
+}
 const syntheticPresenterProfileSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: [
@@ -25531,6 +25640,23 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       profileVersion: { type: 'integer', minimum: 1 },
     },
   })),
+  defineSchema('run-synthetic-phase-gate-request', 1, 'Run the synthetic phase gate for one immutable project version', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'projectVersionHash'],
+    properties: { projectVersionId: idSchema, projectVersionHash: sha256Schema },
+  }),
+  defineSchema('synthetic-phase-gate-run', 1, 'Persisted or replayed synthetic phase-gate evaluation',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['gate', 'replayed'],
+      properties: { gate: syntheticPhaseGateRecordSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('synthetic-phase-gate-list', 1, 'Synthetic phase-gate history for one project, newest first',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['gates'],
+      properties: { gates: { type: 'array', maxItems: 100, items: syntheticPhaseGateRecordSchema } },
+    }),
+  ),
   defineSchema('create-synthetic-production-run-request', 1, 'Compile approved synthetic media into one immutable EditPlan', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'profileSnapshotId', 'audio', 'blocks', 'captions', 'use', 'market'],

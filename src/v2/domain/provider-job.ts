@@ -274,16 +274,14 @@ const ALLOWED_TRANSITIONS: Readonly<Record<ProviderJobStatus, readonly ProviderJ
   planned: ['estimated', 'failed', 'canceled', 'expired', 'superseded'],
   estimated: ['submitting', 'failed', 'canceled', 'expired', 'superseded'],
   submitting: ['submitted', 'failed', 'canceled', 'expired', 'superseded'],
-  // `estimated` reappears as a target from every in-flight status: that is a
-  // retryable transport failure sending the same job back for another
-  // submission. It is the same job — same brief, same authorization, same
-  // idempotency key — so it keeps its identity and only `attempt` moves. A
-  // fresh creative attempt is a different job entirely and is not this edge.
-  submitted: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
+  // Same-state edges park a known provider effect behind durable backoff.
+  // Returning a job with providerJobId to `estimated` would submit and bill it
+  // again; only failures before a provider reference exists may take that edge.
+  submitted: ['submitted', 'queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   queued: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   processing: ['processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   'suspected-stalled': ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
-  retrieving: ['evaluating', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
+  retrieving: ['retrieving', 'evaluating', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   evaluating: ['approved', 'rejected', 'failed', 'canceled', 'expired', 'superseded'],
   approved: [], rejected: [], failed: [], canceled: [], expired: [], superseded: [],
 })

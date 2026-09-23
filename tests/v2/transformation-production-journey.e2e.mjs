@@ -71,6 +71,8 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     await client.v2TransformationCriticReport.deleteMany({ where: { workspaceId } })
     await client.v2TransformationFallbackAttempt.deleteMany({ where: { workspaceId } })
     await client.v2TransformationFallbackLedger.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
@@ -134,6 +136,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
+    const { PrismaProviderExecutionProvenanceRepository } = await import('../../src/v2/infrastructure/prisma/provider-execution-provenance-repository.ts')
     const { PrismaReviewAnnotationRepository } = await import('../../src/v2/infrastructure/prisma/review-annotation-repository.ts')
     const { PrismaReviewCleanupMaskRepository } = await import('../../src/v2/infrastructure/prisma/review-cleanup-mask-repository.ts')
     const { PrismaTransformationProviderRegistryRepository } = await import('../../src/v2/infrastructure/prisma/transformation-provider-registry-repository.ts')
@@ -264,16 +267,17 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const sourceMaterializer = new LocalArtifactSourceMaterializer(artifactRoot)
     const materializer = new AuthorizedProviderSubmissionInputMaterializer({ profiles: { readProfile: async () => null }, artifacts, sources: sourceMaterializer })
     const resultArtifacts = new PrismaProviderResultArtifactRepository(client)
+    const provenance = new PrismaProviderExecutionProvenanceRepository(client, () => at(clockSecond))
     const ingestor = new VerifiedTransformationResultIngestor({ workRoot, storage, artifacts, artifactQuery: artifacts, resultArtifacts, prober: { probe: (path, options) => probeVideo(path, { ...options, requireAudio: false }) }, clock: () => at(clockSecond) })
     const quality = new PrismaTransformationQualityRepository(client)
     const critic = new PersistedTransformationResultCritic({ registry, quality, artifacts, novelty, evaluator: new FfmpegTransformationCriticEvaluator({ sources: sourceMaterializer, prober: { probe: (path, options) => probeVideo(path, { ...options, requireAudio: false }) } }), clock: () => at(clockSecond) })
     const runFreshWorker = async () => {
       clockSecond += 1
-      return runProviderJobWorkerOnce({ jobs, adapters, materializer, ingestor, critic, clock: () => at(clockSecond), createLeaseToken: () => `transformation-production-lease-${clockSecond}`, createTransitionId: () => `transformation-production-transition-${++transitionSequence}` })(`transformation-production-worker-${clockSecond}`)
+      return runProviderJobWorkerOnce({ jobs, provenance, resultArtifacts, adapters, materializer, ingestor, critic, clock: () => at(clockSecond), createLeaseToken: () => `transformation-production-lease-${clockSecond}`, createTransitionId: () => `transformation-production-transition-${++transitionSequence}` })(`transformation-production-worker-${clockSecond}`)
     }
     const executeToTerminal = async (idempotencyKey) => {
       const requested = await requestJob({ workspaceId, projectId, briefId: brief.id, selectionId: routed.selection.id, use: 'ads', market: 'BRA', locale: 'pt-BR', maskId: refinedMask.persisted.mask.id, outputSpecId: 'output-horizontal', actor, idempotencyKey })
-      for (let stage = 0; stage < 6; stage += 1) await runFreshWorker()
+      for (let stage = 0; stage < 7; stage += 1) await runFreshWorker()
       return jobs.read({ workspaceId, projectId, jobId: requested.persisted.job.id })
     }
 

@@ -18,6 +18,8 @@ test('T-FR-105 synthetic cache decisions persist idempotently, summarize by outc
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId: id }, data: { currentVersionId: null } })
     await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })

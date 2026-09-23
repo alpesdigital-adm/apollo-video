@@ -58,6 +58,8 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
@@ -102,6 +104,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
+    const { PrismaProviderExecutionProvenanceRepository } = await import('../../src/v2/infrastructure/prisma/provider-execution-provenance-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticAudioMasterRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts')
     const { PrismaSyntheticScriptPlanRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-script-plan-repository.ts')
@@ -253,6 +256,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     }
     const providerRepository = new PrismaProviderJobRepository(client)
     const resultArtifactRepository = new PrismaProviderResultArtifactRepository(client)
+    const provenanceRepository = new PrismaProviderExecutionProvenanceRepository(client)
     const rightsRepository = new PrismaAssetRightsRepository(client)
     const projectsQuery = new PrismaProjectWorkspaceQueryRepository(client)
     const audioMasterRepository = new PrismaSyntheticAudioMasterRepository(client)
@@ -393,14 +397,16 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const runFreshTtsWorkerOnce = () => {
       tick += 1
       return runProviderJobWorkerOnce({
-        jobs: providerRepository, adapters: registry, materializer,
+        jobs: providerRepository, provenance: provenanceRepository,
+        resultArtifacts: resultArtifactRepository,
+        adapters: registry, materializer,
         ingestor: ttsIngestor, critic: ttsCritic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-tts-lease-${tick}`,
         createTransitionId: () => `journey-transition-${++providerTransition}`,
       })(`journey-tts-worker-${tick}`)
     }
-    for (let stage = 0; stage < 5; stage += 1) await runFreshTtsWorkerOnce()
+    for (let stage = 0; stage < 6; stage += 1) await runFreshTtsWorkerOnce()
     const ttsDone = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: ttsJobId })
     const ttsReport = ttsDone.job.criticResultHash
       ? await criticReports.readByHash({ workspaceId, reportHash: ttsDone.job.criticResultHash })
@@ -532,6 +538,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
         },
       },
       storage, artifacts: artifactRepository, artifactQuery: artifactRepository,
+      resultArtifacts: resultArtifactRepository,
       prober: { probe: (path, options) => probeVideo(path, { ...options, requireAudio: true }) },
       clock: () => new Date(at(12)),
     })
@@ -543,18 +550,30 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const runFreshAvatarWorkerOnce = () => {
       tick += 1
       return runProviderJobWorkerOnce({
-        jobs: providerRepository, adapters: registry, materializer,
+        jobs: providerRepository, provenance: provenanceRepository,
+        resultArtifacts: resultArtifactRepository,
+        adapters: registry, materializer,
         ingestor: avatarIngestor, critic: avatarCritic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-avatar-lease-${tick}`,
         createTransitionId: () => `journey-transition-${++providerTransition}`,
       })(`journey-avatar-worker-${tick}`)
     }
-    for (let stage = 0; stage < 7; stage += 1) await runFreshAvatarWorkerOnce()
+    for (let stage = 0; stage < 8; stage += 1) await runFreshAvatarWorkerOnce()
     const avatarDone = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
     assert.ok(['rejected', 'failed'].includes(avatarDone.job.status), `frozen color fixture must fail closed, got ${avatarDone.job.status}`)
     assert.equal(avatarDone.job.providerJobId, 'journey_video_1')
     assert.ok(avatarDone.job.resultArtifact, 'provider result must remain ingested for diagnosis')
+    const avatarEvidence = await provenanceRepository.listEvidenceByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
+    const avatarSubmitEvidence = avatarEvidence.filter((evidence) => evidence.phase === 'submit')
+    const avatarRetrieveEvidence = avatarEvidence.filter((evidence) => evidence.phase === 'retrieve')
+    const avatarReceipt = await provenanceRepository.readReceiptByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
+    assert.equal(avatarSubmitEvidence.length, 1)
+    assert.equal(avatarRetrieveEvidence.length, 1)
+    assert.ok(avatarReceipt, 'avatar execution receipt must exist before critic terminal state')
+    assert.equal(avatarReceipt.submitEvidenceId, avatarSubmitEvidence[0].id)
+    assert.equal(avatarReceipt.retrieveEvidenceId, avatarRetrieveEvidence[0].id)
+    assert.equal(new Set([avatarSubmitEvidence[0].leaseToken, avatarRetrieveEvidence[0].leaseToken, avatarReceipt.leaseToken]).size, 3, 'submit, retrieve and receipt must retain their distinct legitimate worker leases')
     const avatarReport = avatarDone.job.criticResultHash
       ? await criticReports.readByHash({ workspaceId, reportHash: avatarDone.job.criticResultHash })
       : null
@@ -624,7 +643,9 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const runRacedWorker = (critic) => {
       tick += 1
       return runProviderJobWorkerOnce({
-        jobs: diagnosticJobs, adapters: registry, materializer, ingestor: diagnosticIngestor, critic,
+        jobs: diagnosticJobs, provenance: provenanceRepository,
+        resultArtifacts: resultArtifactRepository,
+        adapters: registry, materializer, ingestor: diagnosticIngestor, critic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-race-lease-${tick}`,
         createTransitionId: () => `journey-transition-${++providerTransition}`,

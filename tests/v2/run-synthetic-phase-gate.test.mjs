@@ -188,6 +188,7 @@ test('T-F3-GATE list is bounded and delegates only normalized identities', async
   assert.deepEqual(await list({
     workspaceId: ' workspace-synthetic-gate ',
     projectId: ' project-synthetic-gate ',
+    actor,
     limit: 25,
   }), [])
   assert.deepEqual(calls, [{
@@ -196,7 +197,28 @@ test('T-F3-GATE list is bounded and delegates only normalized identities', async
     limit: 25,
   }])
   await assert.rejects(
-    () => list({ workspaceId: actor.workspaceId, projectId: request.projectId, limit: 101 }),
+    () => list({
+      workspaceId: actor.workspaceId,
+      projectId: request.projectId,
+      actor,
+      limit: 101,
+    }),
     /between 1 and 100/,
+  )
+  await assert.rejects(
+    () => list({
+      workspaceId: actor.workspaceId,
+      projectId: request.projectId,
+      actor: { ...actor, scopes: new Set(['projects:write']) },
+    }),
+    (error) => error.code === 'AUTH_SCOPE_REQUIRED',
+  )
+  await assert.rejects(
+    () => list({
+      workspaceId: 'workspace-foreign',
+      projectId: request.projectId,
+      actor,
+    }),
+    (error) => error.code === 'AUTH_INVALID',
   )
 })

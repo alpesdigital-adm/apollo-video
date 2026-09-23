@@ -114,7 +114,7 @@ export function runSyntheticPhaseGateService(dependencies: {
       projectId,
       projectVersionId,
       projectVersionHash,
-      actorId,
+      authenticationAudit,
     })
     if (!context) {
       throw new DomainError(
@@ -181,10 +181,18 @@ export function listSyntheticPhaseGatesService(dependencies: {
   return async function list(request: {
     workspaceId: string
     projectId: string
+    actor: Readonly<AuthenticatedExternalActor>
     limit?: number
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
+    requireScope(request.actor, 'projects:read')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Synthetic phase gate actor does not belong to the workspace',
+    )
     const limit = request.limit ?? 20
     assertDomain(
       Number.isSafeInteger(limit) && limit >= 1 && limit <= 100,

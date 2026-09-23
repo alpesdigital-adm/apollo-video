@@ -22,6 +22,7 @@ function json(body, status = 200, headers = {}) {
 test('T-FR-101 HeyGen v3 adapter normalizes submit, polling and retrieval without leaking its credential', async () => {
   const audio = Buffer.from('verified-wave-audio')
   const requests = []
+  const observations = []
   const statuses = ['pending', 'processing', 'completed', 'completed']
   const adapter = new HeyGenV3AsyncMediaProviderAdapter({
     apiKey: 'heygen-test-secret', costMinorUnitsPerMinute: 150,
@@ -43,13 +44,16 @@ test('T-FR-101 HeyGen v3 adapter normalizes submit, polling and retrieval withou
   assert.equal(typeof adapter.verifyWebhook, 'undefined')
   assert.deepEqual(await adapter.estimate({ durationMs: 61_000 }), { currency: 'USD', costMinorUnits: 300, estimatedLatencyMs: 152_500 })
   const submitted = await adapter.submit({ avatarId: 'avatar_123', audioBytes: new Uint8Array(audio), audioSha256: createHash('sha256').update(audio).digest('hex'), audioByteSize: audio.length, audioContainer: 'wav', durationMs: 61_000, aspectRatio: '9:16' }, {
-    workspaceId: 'workspace-one', projectVersionId: 'version-one', operationId: 'operation-one', idempotencyKey: 'apollo-idempotency-one',
+    workspaceId: 'workspace-one', projectVersionId: 'version-one', operationId: 'operation-one', idempotencyKey: 'apollo-idempotency-one', async observeTransport(value) { observations.push(value) },
   })
   assert.equal(submitted.providerJobId, 'video_job_123')
   assert.equal(await adapter.getStatus(submitted.providerJobId), 'queued')
   assert.equal(await adapter.getStatus(submitted.providerJobId), 'processing')
   assert.equal(await adapter.getStatus(submitted.providerJobId), 'completed')
-  assert.deepEqual(await adapter.retrieve(submitted.providerJobId), { providerJobId: 'video_job_123', downloadUrl: 'https://files.heygen.ai/video/result.mp4?Expires=123', mediaType: 'video' })
+  assert.deepEqual(await adapter.retrieve(submitted.providerJobId, undefined, { async observeTransport(value) { observations.push(value) } }), { providerJobId: 'video_job_123', downloadUrl: 'https://files.heygen.ai/video/result.mp4?Expires=123', mediaType: 'video', adapterConfigHash: adapter.configHash })
+  assert.deepEqual(observations.map(({ phase, runtimeClass }) => ({ phase, runtimeClass })), [{ phase: 'submit', runtimeClass: 'controlled' }, { phase: 'retrieve', runtimeClass: 'controlled' }])
+  assert.equal(JSON.stringify(observations).includes('heygen-test-secret'), false)
+  assert.equal(JSON.stringify(observations).includes('https://'), false)
   assert.match(requests[0].headers.get('idempotency-key'), /^apollo:[a-f0-9]{64}$/)
   assert.equal(requests[1].headers.get('idempotency-key'), requests[0].headers.get('idempotency-key'))
   assert.notEqual(requests[0].headers.get('idempotency-key'), 'apollo-idempotency-one')
@@ -173,11 +177,12 @@ test('T-FR-101 provider result is probed, promoted and persisted before its crit
   let persistedBundle
   let outputRecord
   let cleanupCalls = 0
+  let ledgerRecords
   const artifactQuery = {
     async findById(_workspaceId, artifactId) { return artifactId === 'audio-one' ? source : outputRecord },
   }
   const job = {
-    id: 'provider-job-one', workspaceId: 'workspace-one', providerJobId: 'heygen-video-one', operation: 'audio-avatar',
+    id: 'provider-job-one', workspaceId: 'workspace-one', projectId: 'project-one', providerJobId: 'heygen-video-one', operation: 'audio-avatar',
     adapterId: 'heygen-v3', adapterVersion: '3.1.0', input: { durationMs: 2_000, aspectRatio: '9:16' }, inputHash: 'c'.repeat(64),
     authorization: { authorizationHash: 'd'.repeat(64), profileSnapshotHash: 'e'.repeat(64), artifactDecisions: [{ artifactId: 'audio-one' }] },
   }
@@ -186,14 +191,17 @@ test('T-FR-101 provider result is probed, promoted and persisted before its crit
     storage: { async promoteDerived() { return { key: 'synthetic-provider-results/result.mp4', path: 'C:/stored/result.mp4', sha256: 'f'.repeat(64), byteSize: 1234 } } },
     artifacts: { async persistOrReplay(bundle) { persistedBundle = bundle; return { artifactId: 'canonical-existing-video', manifestId: bundle.manifestId, replayed: true } } },
     artifactQuery,
+    resultArtifacts: { async persistOrReplay({ records }) { ledgerRecords = records; return { records, replayed: false } } },
     prober: { async probe() { return { width: 540, height: 960, fps: 25, duration: 2, codec: 'h264', audioCodec: 'aac', container: 'mov,mp4', color: {}, producer: {} } } },
     clock: () => new Date('2029-01-01T00:00:00.000Z'),
   })
-  const artifact = await ingestor.ingest({ job, providerResult: { providerJobId: 'heygen-video-one', downloadUrl: 'https://files.heygen.ai/result.mp4?sig=short', mediaType: 'video' } })
+  const artifact = await ingestor.ingest({ job, providerResult: { providerJobId: 'heygen-video-one', downloadUrl: 'https://files.heygen.ai/result.mp4?sig=short', mediaType: 'video', adapterConfigHash: 'a'.repeat(64) } })
   assert.equal(cleanupCalls, 1)
   assert.equal(artifact.artifactId, 'canonical-existing-video')
   assert.equal(persistedBundle.manifest.artifact.sha256, artifact.artifactSha256)
   assert.equal(persistedBundle.manifest.sources[0].artifactKey, source.artifactKey)
+  assert.equal(ledgerRecords[0].role, 'primary-video')
+  assert.equal(ledgerRecords[0].artifactId, 'canonical-existing-video')
   outputRecord = { id: artifact.artifactId, sha256: artifact.artifactSha256, byteSize: BigInt(artifact.byteSize), mediaType: 'video', manifests: [{ probe: { width: 540, height: 960, fps: 25, duration: 2 } }] }
   const critic = await new PersistedProviderResultCritic(artifactQuery).evaluate({ job, artifact })
   assert.equal(critic.approved, true)

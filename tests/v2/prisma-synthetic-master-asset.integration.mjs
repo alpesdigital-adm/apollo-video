@@ -29,6 +29,8 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     await client.v2SyntheticSpeechSegment.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })

@@ -35,6 +35,9 @@ import type {
 import { runWithProviderJobLease } from './with-provider-job-lease.ts'
 import type { SyntheticProductionRepository } from './ports/synthetic-production-repository.ts'
 import type { SyntheticAudioMasterRepository } from './ports/synthetic-audio-master-repository.ts'
+import type { ProviderExecutionProvenanceRepository } from './ports/provider-execution-provenance-repository.ts'
+import type { ProviderResultArtifactRepository } from './ports/provider-result-artifact-repository.ts'
+import { bindProviderTransportEvidence, createProviderExecutionReceipt } from './provider-transport-observation.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 
@@ -429,6 +432,8 @@ export async function runProviderJobWorkerLoop(input: {
 
 export function runProviderJobWorkerOnce(dependencies: {
   jobs: ProviderJobRepository
+  provenance: ProviderExecutionProvenanceRepository
+  resultArtifacts: ProviderResultArtifactRepository
   adapters: ProviderAdapterRegistry
   materializer: ProviderSubmissionInputMaterializer
   ingestor: ProviderResultIngestor
@@ -456,6 +461,7 @@ export function runProviderJobWorkerOnce(dependencies: {
     // a job can never be recorded as retrying without its schedule moving, nor
     // parked on a wait whose transition never committed.
     let transportState: Readonly<ProviderJobTransportState> | undefined
+    let evidencePersistenceFailed = false
     const state = claimed.transportState ?? null
     try {
       const adapter = dependencies.adapters.get({ adapterId: job.adapterId, adapterVersion: job.adapterVersion })
@@ -505,35 +511,72 @@ export function runProviderJobWorkerOnce(dependencies: {
           occurredAt: now,
         })
         job = activeClaim.job
-        const submission = await adapter.submit(submissionInput, {
-          workspaceId: job.workspaceId,
-          projectVersionId: job.originProjectVersionId,
-          operationId: job.id,
-          idempotencyKey: job.idempotencyKey,
-          signal,
-        })
+        const observeTransport = async (observation: Readonly<import('./ports/provider-execution-provenance-repository.ts').ProviderTransportObservation>) => {
+          try {
+            await dependencies.provenance.recordEvidence({ evidence: bindProviderTransportEvidence({
+              observation, workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id,
+              attempt: job.attempt, inputHash: job.inputHash, authorizationHash: job.authorization.authorizationHash,
+              jobHash: job.jobHash,
+              leaseOwner: activeClaim.lease.owner, leaseToken: activeClaim.lease.token,
+            }) })
+          } catch (error) {
+            evidencePersistenceFailed = true
+            throw error
+          }
+        }
+        const submitted = await runWithProviderJobLease({ jobs: dependencies.jobs, claim: activeClaim, clock: dependencies.clock, leaseMs, signal },
+          async ({ signal: submitSignal }) => {
+            const submission = await adapter.submit(submissionInput, {
+              workspaceId: job.workspaceId, projectVersionId: job.originProjectVersionId,
+              operationId: job.id, idempotencyKey: job.idempotencyKey,
+              signal: submitSignal, observeTransport,
+            })
+            if (submission.kind !== 'completed') return Object.freeze({ submission })
+            assertDomain(Number.isFinite(Date.parse(submission.bundle.completedAt)), 'INVALID_ARGUMENT', 'Provider result bundle completedAt is invalid')
+            return Object.freeze({ submission, artifact: await dependencies.ingestor.ingest({ job, providerResult: submission.bundle.result, signal: submitSignal }) })
+          })
+        activeClaim = submitted.claim
+        advanceAt = dependencies.clock()
+        const submission = submitted.value.submission
         if (submission.kind === 'completed') {
-          assertDomain(Number.isFinite(Date.parse(submission.bundle.completedAt)), 'INVALID_ARGUMENT', 'Provider result bundle completedAt is invalid')
-          const artifact = await dependencies.ingestor.ingest({ job, providerResult: submission.bundle.result, signal })
+          assertDomain('artifact' in submitted.value, 'PERSISTENCE_CONFLICT', 'Synchronous provider result was not ingested')
+          const artifact = submitted.value.artifact
           next = transitionProviderJob(job, {
-            status: 'submitted', occurredAt: now.toISOString(),
+            status: 'submitted', occurredAt: advanceAt.toISOString(),
             providerJobId: submission.bundle.providerJobRef, providerStatus: 'completed', resultArtifact: artifact,
             // The cost the provider actually reported, never the estimate.
             ...(submission.bundle.observedCost ? { observedCost: submission.bundle.observedCost } : {}),
           })
         } else {
-          next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submission.providerJobId })
+          next = transitionProviderJob(job, { status: 'submitted', occurredAt: advanceAt.toISOString(), providerJobId: submission.providerJobId })
         }
       } else if (job.status === 'submitting') {
-        next = transitionProviderJob(job, {
-          status: 'failed',
-          occurredAt: now.toISOString(),
-          normalizedError: {
-            code: 'PROVIDER_SUBMISSION_OUTCOME_UNKNOWN',
-            message: 'Provider submission outcome requires reconciliation',
-            retryable: false,
-          },
-        })
+        const submitCandidates = (await dependencies.provenance.listEvidenceByJob({ workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id }))
+          .filter((evidence) => evidence.attempt === job.attempt && evidence.phase === 'submit' && evidence.adapterId === job.adapterId && evidence.adapterVersion === job.adapterVersion && evidence.inputHash === job.inputHash && evidence.authorizationHash === job.authorization.authorizationHash && evidence.jobHash === job.jobHash)
+        assertDomain(submitCandidates.length <= 1, 'PERSISTENCE_CONFLICT', 'Provider submission has ambiguous transport evidence')
+        const submitEvidence = submitCandidates[0]
+        const completion = (await adapter.getCapabilities(signal)).completion
+        if (submitEvidence?.providerJobRef && completion !== 'synchronous') {
+          next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submitEvidence.providerJobRef })
+        } else if (submitEvidence?.providerJobRef && completion === 'synchronous') {
+          const records = await dependencies.resultArtifacts.listByJob({ workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id })
+          const primary = records.find((record) => record.role === 'primary-audio' || record.role === 'primary-video')
+          const complete = Boolean(primary?.recordHash) && records.every((record) => record.recordHash !== undefined && record.providerJobRef === submitEvidence.providerJobRef && record.adapterId === job.adapterId && record.adapterVersion === job.adapterVersion && record.adapterConfigHash === submitEvidence.adapterConfigHash && record.inputHash === job.inputHash && record.authorizationHash === job.authorization.authorizationHash)
+          if (complete && primary) {
+            next = transitionProviderJob(job, {
+              status: 'submitted', occurredAt: now.toISOString(), providerJobId: submitEvidence.providerJobRef,
+              providerStatus: 'completed', resultArtifact: { artifactId: primary.artifactId, artifactSha256: primary.artifactSha256, mediaType: primary.mediaType === 'audio' ? 'audio' : 'video', byteSize: primary.byteSize },
+              ...(primary.observedCost ? { observedCost: primary.observedCost } : {}),
+            })
+          } else {
+            next = transitionProviderJob(job, { status: 'failed', occurredAt: now.toISOString(), normalizedError: { code: 'PROVIDER_SUBMISSION_OUTCOME_UNKNOWN', message: 'Provider submission outcome requires reconciliation', retryable: false } })
+          }
+        } else {
+          next = transitionProviderJob(job, {
+            status: 'failed', occurredAt: now.toISOString(),
+            normalizedError: { code: 'PROVIDER_SUBMISSION_OUTCOME_UNKNOWN', message: 'Provider submission outcome requires reconciliation', retryable: false },
+          })
+        }
       } else if (['submitted', 'queued', 'processing', 'suspected-stalled'].includes(job.status)) {
         if (job.providerStatus === 'completed') {
           assertDomain(Boolean(job.resultArtifact), 'PERSISTENCE_CONFLICT', 'Synchronously completed provider job lost its ingested result artifact')
@@ -560,16 +603,63 @@ export function runProviderJobWorkerOnce(dependencies: {
         let observedCost: Readonly<ProviderObservedCost> | undefined
         if (!artifact) {
           assertDomain(typeof adapter.retrieve === 'function', 'PRECONDITION_REQUIRED', 'Provider adapter has no retrieval path')
-          const providerResult = await adapter.retrieve(job.providerJobId!, signal)
-          observedCost = observedCostFromProviderResult(providerResult)
-          artifact = await dependencies.ingestor.ingest({ job, providerResult, signal })
+          const retrieved = await runWithProviderJobLease({ jobs: dependencies.jobs, claim: activeClaim, clock: dependencies.clock, leaseMs, signal },
+            async ({ signal: retrieveSignal }) => {
+              const providerResult = await adapter.retrieve!(job.providerJobId!, retrieveSignal, {
+                signal: retrieveSignal,
+                observeTransport: async (observation) => {
+                  try {
+                    await dependencies.provenance.recordEvidence({ evidence: bindProviderTransportEvidence({
+                      observation, workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id,
+                      attempt: job.attempt, inputHash: job.inputHash, authorizationHash: job.authorization.authorizationHash,
+                      jobHash: job.jobHash,
+                      leaseOwner: activeClaim.lease.owner, leaseToken: activeClaim.lease.token,
+                    }) })
+                  } catch (error) {
+                    evidencePersistenceFailed = true
+                    throw error
+                  }
+                },
+              })
+              const ingested = await dependencies.ingestor.ingest({ job, providerResult, signal: retrieveSignal })
+              return Object.freeze({ providerResult, artifact: ingested })
+            })
+          activeClaim = retrieved.claim
+          advanceAt = dependencies.clock()
+          observedCost = observedCostFromProviderResult(retrieved.value.providerResult)
+          artifact = retrieved.value.artifact
         }
-        next = transitionProviderJob(job, {
-          status: 'evaluating',
-          occurredAt: now.toISOString(),
-          resultArtifact: artifact,
-          ...(observedCost ? { observedCost } : {}),
-        })
+        if (!job.resultArtifact) {
+          // Persist the canonical result on the job first. A later leased tick
+          // builds the receipt against this state and only then enters critic.
+          next = transitionProviderJob(job, { status: 'retrieving', occurredAt: advanceAt.toISOString(), resultArtifact: artifact, ...(observedCost ? { observedCost } : {}) })
+        } else {
+          const capabilities = await adapter.getCapabilities(signal)
+          const allEvidence = (await dependencies.provenance.listEvidenceByJob({ workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id }))
+            .filter((evidence) => evidence.attempt === job.attempt)
+          const submit = allEvidence.filter((evidence) => evidence.phase === 'submit')
+          const retrieveCandidates = allEvidence.filter((evidence) => evidence.phase === 'retrieve')
+          assertDomain(submit.length === 1 && (capabilities.completion === 'synchronous' ? retrieveCandidates.length === 0 : retrieveCandidates.length >= 1), 'PERSISTENCE_CONFLICT', 'Provider execution transport evidence is incomplete or ambiguous')
+          assertDomain(retrieveCandidates.every((evidence) => evidence.adapterId === job.adapterId && evidence.adapterVersion === job.adapterVersion && evidence.adapterConfigHash === submit[0]!.adapterConfigHash && evidence.inputHash === job.inputHash && evidence.authorizationHash === job.authorization.authorizationHash && evidence.providerJobRef === job.providerJobId), 'PERSISTENCE_CONFLICT', 'Provider retrieve evidence diverges from the durable effect')
+          const retrieve = retrieveCandidates.toSorted((left, right) => left.observedAt.localeCompare(right.observedAt) || left.id.localeCompare(right.id)).at(-1)
+          const records = await dependencies.resultArtifacts.listByJob({ workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id })
+          assertDomain(records.length > 0 && records.every((record) => record.recordHash !== undefined), 'PERSISTENCE_CONFLICT', 'Provider execution result ledger is unattested')
+          const receipt = createProviderExecutionReceipt({
+            schemaVersion: 'provider-execution-receipt/v1', id: `provider-receipt-${calculateCanonicalHash({ workspaceId: job.workspaceId, jobId: job.id }).slice(0, 48)}`,
+            workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id, attempt: job.attempt,
+            runtimeClass: [...submit, ...retrieveCandidates].every((evidence) => evidence.runtimeClass === 'live') ? 'live' : 'controlled',
+            adapterId: job.adapterId, adapterVersion: job.adapterVersion, adapterConfigHash: submit[0]!.adapterConfigHash,
+            inputHash: job.inputHash, authorizationHash: job.authorization.authorizationHash, providerJobRef: job.providerJobId!,
+            leaseOwner: activeClaim.lease.owner, leaseToken: activeClaim.lease.token,
+            submitEvidenceId: submit[0]!.id, submitEvidenceHash: submit[0]!.evidenceHash,
+            ...(retrieve ? { retrieveEvidenceId: retrieve.id, retrieveEvidenceHash: retrieve.evidenceHash } : {}),
+            results: records.map((record) => Object.freeze({ resultRecordId: record.id, resultRecordHash: record.recordHash!, role: record.role, artifactId: record.artifactId, artifactSha256: record.artifactSha256, byteSize: record.byteSize })),
+            createdAt: dependencies.clock().toISOString(),
+          })
+          await dependencies.provenance.createReceipt({ receipt })
+          advanceAt = dependencies.clock()
+          next = transitionProviderJob(job, { status: 'evaluating', occurredAt: advanceAt.toISOString(), resultArtifact: artifact })
+        }
       } else if (job.status === 'evaluating') {
         const evaluated = await runWithProviderJobLease({
           jobs: dependencies.jobs,
@@ -600,6 +690,10 @@ export function runProviderJobWorkerOnce(dependencies: {
       }
     } catch (error) {
       if (signal?.aborted) throw error
+      // The external effect completed but its server-owned proof did not
+      // persist. Keep `submitting`/`retrieving` intact for reconciliation;
+      // turning this into a retry would risk a second paid submission.
+      if (evidencePersistenceFailed) throw error
       if (error instanceof DomainError && error.code === 'VERSION_CONFLICT' && job.status === 'evaluating') throw error
       // Evaluation may outlive the claim's original timestamp. Persist its
       // terminal/retry decision at the time the renewed claim actually
@@ -617,8 +711,9 @@ export function runProviderJobWorkerOnce(dependencies: {
         !providerJobDeadlineExceeded(state!, advanceAt.toISOString()) &&
         ALLOWED_RETRY_SOURCE_STATUSES.includes(job.status)
       if (retryable) {
+        const resumeKnownProviderEffect = Boolean(job.providerJobId) && ['submitted', 'queued', 'processing', 'suspected-stalled', 'retrieving'].includes(job.status)
         next = transitionProviderJob(job, {
-          status: 'estimated',
+          status: resumeKnownProviderEffect ? job.status : 'estimated',
           occurredAt: advanceAt.toISOString(),
           estimate: job.estimate ?? { currency: 'USD', costMinorUnits: 0, estimatedLatencyMs: 0 },
           normalizedError: failure,

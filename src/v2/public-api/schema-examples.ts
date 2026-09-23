@@ -50,6 +50,7 @@ import {
   calculateMulticamLongformGateRecordHash,
   listMulticamLongformGateCriteria,
 } from '../application/multicam-longform-gate.ts'
+import { calculateSyntheticPhaseGateRecordHash } from '../application/run-synthetic-phase-gate.ts'
 import {
   buildLegacyRuntimeCriterion,
   calculateLegacyRuntimeAuditHash,
@@ -59,6 +60,7 @@ import {
   type MulticamLongformCriterion,
   type MulticamLongformEvidenceResourceType,
 } from '../domain/multicam-longform-gate.ts'
+import { evaluateSyntheticPhaseGate } from '../domain/synthetic-phase-gate.ts'
 import {
   presentMulticamLongformGateArtifacts,
   presentMulticamLongformGateCriteria,
@@ -67,6 +69,10 @@ import {
   presentMulticamLongformGateOutstanding,
   presentMulticamLongformGateRead,
 } from './multicam-longform-gate-contract.ts'
+import {
+  presentSyntheticPhaseGateList,
+  presentSyntheticPhaseGateRun,
+} from './synthetic-phase-gate-contract.ts'
 import { directionVersionRef, toAngleCandidateWindow } from '../application/multicam-direction.ts'
 import { matchPlanVersionRef } from '../application/multicam-color-match.ts'
 import { captureSessionDerivationRef } from '../domain/capture-session.ts'
@@ -7287,6 +7293,49 @@ const w20GateOutstandingExample = {
   ...explainMulticamLongformGate(w20GateExample.report),
 }
 
+/**
+ * The public synthetic gate example stays deliberately incomplete: the
+ * server supplied one real check with partial evidence and derived every
+ * missing criterion, check and evidence type itself.
+ */
+const syntheticPhaseGateReportExample = evaluateSyntheticPhaseGate({
+  workspaceId,
+  projectId,
+  projectVersionId: 'project-version-example-1',
+  projectVersionHash: 'd'.repeat(64),
+  evidence: [{
+    criterion: 'F3-GATE-001',
+    checks: [{
+      code: 'elevenlabs-audio-alignment-live',
+      passed: true,
+      references: [{
+        type: 'provider-job',
+        id: 'provider-job-example-1',
+        hash: '1'.repeat(64),
+      }],
+    }],
+  }],
+  evaluatedAt: createdAt,
+})
+const syntheticPhaseGateRecordContent = {
+  schemaVersion: 'synthetic-phase-gate/v1' as const,
+  id: 'synthetic-phase-gate-example-1',
+  workspaceId,
+  projectId,
+  projectVersionId: syntheticPhaseGateReportExample.projectVersionId,
+  projectVersionHash: syntheticPhaseGateReportExample.projectVersionHash,
+  report: syntheticPhaseGateReportExample,
+  reportFingerprint: syntheticPhaseGateReportExample.fingerprint,
+  idempotencyKey: 'synthetic-phase-gate-example-key',
+  requestFingerprint: 'e'.repeat(64),
+  createdBy: { type: 'api-client' as const, id: clientId },
+  createdAt,
+}
+const syntheticPhaseGateExample = {
+  ...syntheticPhaseGateRecordContent,
+  recordHash: calculateSyntheticPhaseGateRecordHash(syntheticPhaseGateRecordContent),
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/localization-canonical-list/v1': [{ data: { versions: [{ id: 'canonical-1', projectVersionId: 'version-1', sourceLocale: 'pt-BR', revision: 1, blocks: [], approvedAt: '2026-09-08T12:00:00.000Z', contentHash: 'a'.repeat(64) }] }, meta: { apiVersion: 'v1' } }],
@@ -7443,6 +7492,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       { data: { outcome: 'duplicate' }, meta: { apiVersion: 'v1' } },
       { data: { outcome: 'rejected', rejectedBecause: 'signature-invalid' }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/run-synthetic-phase-gate-request/v1': [{
+      projectVersionId: syntheticPhaseGateExample.projectVersionId,
+      projectVersionHash: syntheticPhaseGateExample.projectVersionHash,
+    }],
+    'apollo://schemas/synthetic-phase-gate-run/v1': [{
+      data: presentSyntheticPhaseGateRun({ gate: syntheticPhaseGateExample, replayed: false }),
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-phase-gate-list/v1': [{
+      data: presentSyntheticPhaseGateList([syntheticPhaseGateExample]),
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/synthetic-critic-report-list/v1': [{
       data: { reports: [syntheticCriticReportExample, syntheticCriticRejectedReportExample] },
       meta: { apiVersion: 'v1' },

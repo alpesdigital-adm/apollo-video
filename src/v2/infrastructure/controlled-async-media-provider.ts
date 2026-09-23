@@ -5,7 +5,9 @@ import type {
   ProviderStatus,
   ProviderSubmitContext,
   ProviderSubmissionResult,
+  ProviderRetrieveContext,
 } from '../application/ports/async-media-provider.ts'
+import { createProviderTransportObservation } from '../application/provider-transport-observation.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { ProviderAdapterError } from '../domain/provider-contract.ts'
 
@@ -72,6 +74,13 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, Result> 
       throw new ControlledProviderError(this.scenario.submitFailure.code, this.scenario.submitFailure.retryable, this.scenario.submitFailure.retryAfterMs)
     }
     const providerJobId = `${this.id}:${context.idempotencyKey}`
+    await context.observeTransport?.(createProviderTransportObservation({
+      phase: 'submit', runtimeClass: 'controlled', adapterId: this.id, adapterVersion: this.adapterVersion,
+      adapterConfigHash: this.configHash, endpointClass: 'controlled-adapter', method: 'CALL',
+      requestHash: calculateCanonicalHash(_input), responseHash: calculateCanonicalHash({ providerJobId, result: this.scenario.result }),
+      responseStatus: 200, providerJobRef: providerJobId,
+      observedAt: this.scenario.completedAt ?? '1970-01-01T00:00:00.000Z',
+    }))
     if (this.scenario.capabilities.completion === 'synchronous') {
       return Object.freeze({
         kind: 'completed' as const,
@@ -96,10 +105,17 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, Result> 
     return status
   }
 
-  async retrieve(providerJobId: string) {
+  async retrieve(providerJobId: string, _signal?: AbortSignal, context?: Readonly<ProviderRetrieveContext>) {
     this.calls.push('retrieve')
     const job = this.jobs.get(providerJobId)
     if (!job) throw new ControlledProviderError('JOB_NOT_FOUND', false)
+    await context?.observeTransport?.(createProviderTransportObservation({
+      phase: 'retrieve', runtimeClass: 'controlled', adapterId: this.id, adapterVersion: this.adapterVersion,
+      adapterConfigHash: this.configHash, endpointClass: 'controlled-adapter', method: 'CALL',
+      requestHash: calculateCanonicalHash({ providerJobId }), responseHash: calculateCanonicalHash(job.result),
+      responseStatus: 200, providerJobRef: providerJobId,
+      observedAt: this.scenario.completedAt ?? '1970-01-01T00:00:00.000Z',
+    }))
     return job.result
   }
 

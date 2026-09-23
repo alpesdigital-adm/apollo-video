@@ -41,6 +41,8 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
@@ -91,6 +93,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
+    const { PrismaProviderExecutionProvenanceRepository } = await import('../../src/v2/infrastructure/prisma/provider-execution-provenance-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticAudioMasterRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts')
     const { PrismaSyntheticScriptPlanRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-script-plan-repository.ts')
@@ -207,6 +210,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const storage = new LocalMediaUploadStorage(artifactRoot)
     const providerRepository = new PrismaProviderJobRepository(client)
     const resultArtifactRepository = new PrismaProviderResultArtifactRepository(client)
+    const provenanceRepository = new PrismaProviderExecutionProvenanceRepository(client)
     const rightsRepository = new PrismaAssetRightsRepository(client)
     const projects = new PrismaProjectWorkspaceQueryRepository(client)
     const plans = new PrismaSyntheticScriptPlanRepository(client)
@@ -255,7 +259,9 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const drainWorkers = async () => {
       for (let quiet = 0; quiet < 2;) {
         const worked = await runProviderJobWorkerOnce({
-          jobs: providerRepository, adapters: registry, materializer,
+          jobs: providerRepository, provenance: provenanceRepository,
+          resultArtifacts: resultArtifactRepository,
+          adapters: registry, materializer,
           ingestor: ttsIngestor, critic: ttsCritic,
           clock: tick,
           createLeaseToken: () => `blockgen-lease-${second}`,

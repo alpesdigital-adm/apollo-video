@@ -706,6 +706,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Persists one immutable fail-closed phase-gate record derived only from server-read PostgreSQL rows and a module-graph scan; it accepts no evidence, changes no media or aggregate, and starts no provider or render work.',
     },
+    'apollo.projects.synthetic-phase-gates.run': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one immutable fail-closed synthetic phase-gate record derived only from server-owned evidence and trusted build attestations; it accepts no verdict, changes no media or aggregate, and starts no provider or render work.',
+    },
     'apollo.localization-profiles.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates an immutable locale policy snapshot and starts no provider, render or media operation.',

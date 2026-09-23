@@ -5,6 +5,7 @@ import type {
   ProviderStatus,
   ProviderSubmissionResult,
 } from '../../domain/provider-contract.ts'
+import type { ProviderTransportObservation } from './provider-execution-provenance-repository.ts'
 
 export {
   PROVIDER_COMPLETION_MODES,
@@ -56,6 +57,12 @@ export interface ProviderSubmitContext {
   operationId: string
   idempotencyKey: string
   signal?: AbortSignal
+  observeTransport?: (observation: Readonly<ProviderTransportObservation>) => Promise<void>
+}
+
+export interface ProviderRetrieveContext {
+  signal?: AbortSignal
+  observeTransport?: (observation: Readonly<ProviderTransportObservation>) => Promise<void>
 }
 
 export interface ProviderWebhookEvent {
@@ -93,7 +100,7 @@ export interface AsyncMediaProviderAdapter<Input, Result> {
     context: Readonly<ProviderSubmitContext>,
   ): Promise<Readonly<ProviderSubmissionResult<Result>>>
   getStatus?(providerJobId: string, signal?: AbortSignal): Promise<ProviderStatus>
-  retrieve?(providerJobId: string, signal?: AbortSignal): Promise<Readonly<Result>>
+  retrieve?(providerJobId: string, signal?: AbortSignal, context?: Readonly<ProviderRetrieveContext>): Promise<Readonly<Result>>
   cancel?(providerJobId: string, signal?: AbortSignal): Promise<void>
   verifyWebhook?(request: unknown): Promise<Readonly<ProviderWebhookEvent>>
 }

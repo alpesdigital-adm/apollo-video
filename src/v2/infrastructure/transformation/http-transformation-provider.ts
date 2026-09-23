@@ -5,9 +5,11 @@ import type {
   ProviderCapabilities,
   ProviderSubmitContext,
   ProviderWebhookEvent,
+  ProviderRetrieveContext,
 } from '../../application/ports/async-media-provider.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { assertDomain } from '../../domain/errors.ts'
+import { createProviderTransportObservation } from '../../application/provider-transport-observation.ts'
 import {
   ProviderAdapterError,
   PROVIDER_STATUS_VALUES,
@@ -61,6 +63,7 @@ export interface HttpTransformationResult {
   mediaByteSize: number
   container: 'mp4'
   mediaType: 'video'
+  adapterConfigHash: string
   observedCost?: Readonly<{ currency: string; costMinorUnits: number }>
 }
 
@@ -134,6 +137,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
   private readonly pricePerSecondMinorUnits: number
   private readonly currency: string
   private readonly fetchImplementation: FetchLike
+  private readonly runtimeClass: 'controlled' | 'live'
 
   constructor(config: HttpTransformationProviderConfig) {
     const baseUrl = new URL(config.baseUrl)
@@ -168,6 +172,10 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     this.pricePerSecondMinorUnits = config.pricePerSecondMinorUnits ?? 100
     this.currency = config.currency ?? 'USD'
     this.fetchImplementation = config.fetchImplementation ?? ((url, init) => fetch(url, init))
+    // This generic adapter has no provider identity with a code-owned official
+    // origin. HTTPS and operator configuration are security inputs, not proof
+    // of a live named-provider call.
+    this.runtimeClass = 'controlled'
     assertDomain(
       Number.isSafeInteger(this.timeoutMs) && this.timeoutMs >= 1_000 && this.timeoutMs <= 600_000,
       'PERSISTENCE_NOT_CONFIGURED',
@@ -263,9 +271,23 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
       throw new ProviderAdapterError('PROVIDER_MALFORMED_RESPONSE', false, undefined, 'Provider did not return a job identifier')
     }
     if (this.completion !== 'synchronous') {
+      await context.observeTransport?.(createProviderTransportObservation({
+        phase: 'submit', runtimeClass: this.runtimeClass, adapterId: this.id, adapterVersion: this.adapterVersion,
+        adapterConfigHash: this.configHash, endpointClass: 'transformation-http-submit', method: 'POST',
+        requestHash: calculateCanonicalHash({ input, operationId: context.operationId, idempotencyKeyHash: calculateCanonicalHash(context.idempotencyKey) }),
+        responseHash: calculateCanonicalHash({ providerJobId: payload.providerJobId }), responseStatus: response.status,
+        providerJobRef: payload.providerJobId, observedAt: new Date().toISOString(),
+      }))
       return Object.freeze({ kind: 'accepted' as const, providerJobId: payload.providerJobId })
     }
     const result = await this.readResult(payload.providerJobId, payload)
+    await context.observeTransport?.(createProviderTransportObservation({
+      phase: 'submit', runtimeClass: this.runtimeClass, adapterId: this.id, adapterVersion: this.adapterVersion,
+      adapterConfigHash: this.configHash, endpointClass: 'transformation-http-submit', method: 'POST',
+      requestHash: calculateCanonicalHash({ input, operationId: context.operationId, idempotencyKeyHash: calculateCanonicalHash(context.idempotencyKey) }),
+      responseHash: calculateCanonicalHash({ providerJobId: result.providerJobId, mediaSha256: result.mediaSha256, mediaByteSize: result.mediaByteSize, observedCost: result.observedCost }),
+      responseStatus: response.status, providerJobRef: result.providerJobId, observedAt: new Date().toISOString(),
+    }))
     return Object.freeze({
       kind: 'completed' as const,
       bundle: Object.freeze({
@@ -287,10 +309,17 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     return payload.status as ProviderStatus
   }
 
-  async retrieve(providerJobId: string, signal?: AbortSignal): Promise<Readonly<HttpTransformationResult>> {
+  async retrieve(providerJobId: string, signal?: AbortSignal, context?: Readonly<ProviderRetrieveContext>): Promise<Readonly<HttpTransformationResult>> {
     const response = await this.call(`/transformations/${encodeURIComponent(providerJobId)}/result`, { method: 'GET' }, signal)
     if (!response.ok) throw adapterError(response)
-    return this.readResult(providerJobId, (await response.json()) as Record<string, unknown>)
+    const result = await this.readResult(providerJobId, (await response.json()) as Record<string, unknown>)
+    await context?.observeTransport?.(createProviderTransportObservation({
+      phase: 'retrieve', runtimeClass: this.runtimeClass, adapterId: this.id, adapterVersion: this.adapterVersion,
+      adapterConfigHash: this.configHash, endpointClass: 'transformation-http-result', method: 'GET',
+      requestHash: calculateCanonicalHash({ providerJobId }), responseHash: calculateCanonicalHash({ providerJobId, mediaSha256: result.mediaSha256, mediaByteSize: result.mediaByteSize, observedCost: result.observedCost }),
+      responseStatus: response.status, providerJobRef: providerJobId, observedAt: new Date().toISOString(),
+    }))
+    return result
   }
 
   async cancel(providerJobId: string, signal?: AbortSignal): Promise<void> {
@@ -366,6 +395,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
       mediaByteSize: mediaBytes.byteLength,
       container: 'mp4' as const,
       mediaType: 'video' as const,
+      adapterConfigHash: this.configHash,
       ...(cost && typeof cost.currency === 'string' && Number.isSafeInteger(cost.costMinorUnits)
         ? { observedCost: Object.freeze({ currency: cost.currency, costMinorUnits: cost.costMinorUnits as number }) }
         : {}),

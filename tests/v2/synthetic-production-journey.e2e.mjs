@@ -142,6 +142,8 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })

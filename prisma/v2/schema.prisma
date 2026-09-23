@@ -203,6 +203,9 @@ model V2Workspace {
   providerJobs                           V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
   providerResultArtifacts                V2ProviderResultArtifact[]
+  providerTransportEvidence              V2ProviderTransportEvidence[]
+  providerExecutionReceipts              V2ProviderExecutionReceipt[]
+  providerExecutionReceiptResults        V2ProviderExecutionReceiptResult[]
   syntheticScriptPlans                   V2SyntheticScriptPlan[]
   syntheticScriptPlanVersions            V2SyntheticScriptPlanVersion[]
   syntheticScriptBlocks                  V2SyntheticScriptBlock[]
@@ -772,6 +775,9 @@ model V2Project {
   providerJobs                           V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
   providerResultArtifacts                V2ProviderResultArtifact[]
+  providerTransportEvidence              V2ProviderTransportEvidence[]
+  providerExecutionReceipts              V2ProviderExecutionReceipt[]
+  providerExecutionReceiptResults        V2ProviderExecutionReceiptResult[]
   syntheticScriptPlans                   V2SyntheticScriptPlan[]
   syntheticScriptPlanVersions            V2SyntheticScriptPlanVersion[]
   syntheticScriptBlocks                  V2SyntheticScriptBlock[]
@@ -4340,6 +4346,8 @@ model V2ProviderJob {
   blockGenerations     V2SyntheticBlockGeneration[] @relation("BlockGenerationProviderJob")
   syntheticMasters     V2SyntheticMasterAsset[]     @relation("SyntheticMasterProviderJob")
   resultArtifacts      V2ProviderResultArtifact[]
+  transportEvidence    V2ProviderTransportEvidence[]
+  executionReceipt     V2ProviderExecutionReceipt?
   transportState       V2ProviderJobTransportState?
   callbackEvents       V2ProviderCallbackEvent[]
 
@@ -4712,18 +4720,124 @@ model V2ProviderResultArtifact {
   observedCostMinorUnits Int?
   completedAt            DateTime @db.Timestamptz(3)
   createdAt              DateTime @db.Timestamptz(3)
+  recordJson             String?  @db.Text
+  recordHash             String?  @db.Char(64)
 
   workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project   V2Project       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   job       V2ProviderJob   @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
   artifact  V2MediaArtifact @relation("ProviderResultArtifactMedia", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  receiptResults V2ProviderExecutionReceiptResult[]
 
   @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId, jobId], map: "provider_result_artifacts_id_workspace_project_job_key")
   @@unique([jobId, role])
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, artifactId])
   @@index([workspaceId, adapterId, providerJobRef])
   @@map("provider_result_artifacts")
+}
+
+model V2ProviderTransportEvidence {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  jobId                 String   @db.VarChar(128)
+  schemaVersion         String   @db.VarChar(64)
+  attempt               Int
+  phase                 String   @db.VarChar(16)
+  runtimeClass          String   @db.VarChar(16)
+  adapterId             String   @db.VarChar(128)
+  adapterVersion        String   @db.VarChar(128)
+  adapterConfigHash     String   @db.Char(64)
+  endpointClass         String   @db.VarChar(128)
+  method                String   @db.VarChar(16)
+  requestHash           String   @db.Char(64)
+  responseHash          String   @db.Char(64)
+  responseStatus        Int
+  providerJobRef        String?  @db.VarChar(256)
+  observedAt            DateTime @db.Timestamptz(3)
+  observationHash       String   @db.Char(64)
+  inputHash             String   @db.Char(64)
+  authorizationHash     String   @db.Char(64)
+  jobHash               String   @db.Char(64)
+  leaseOwner            String   @db.VarChar(128)
+  leaseToken            String   @db.VarChar(128)
+  evidenceHash          String   @db.Char(64)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "provider_transport_evidence_workspace_fkey")
+  project   V2Project     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "provider_transport_evidence_project_fkey")
+  job       V2ProviderJob @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "provider_transport_evidence_job_fkey")
+  submitReceipts   V2ProviderExecutionReceipt[] @relation("ProviderReceiptSubmitEvidence")
+  retrieveReceipts V2ProviderExecutionReceipt[] @relation("ProviderReceiptRetrieveEvidence")
+
+  @@unique([id, workspaceId], map: "provider_transport_evidence_id_workspace_key")
+  @@unique([workspaceId, jobId, attempt, phase, observationHash], map: "provider_transport_evidence_attempt_phase_key")
+  @@index([workspaceId, projectId, jobId, phase, observedAt], map: "provider_transport_evidence_job_phase_idx")
+  @@map("provider_transport_evidence")
+}
+
+model V2ProviderExecutionReceipt {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  jobId                String   @db.VarChar(128)
+  attempt              Int
+  schemaVersion        String   @db.VarChar(64)
+  runtimeClass         String   @db.VarChar(16)
+  adapterId            String   @db.VarChar(128)
+  adapterVersion       String   @db.VarChar(128)
+  adapterConfigHash    String   @db.Char(64)
+  inputHash            String   @db.Char(64)
+  authorizationHash    String   @db.Char(64)
+  providerJobRef       String   @db.VarChar(256)
+  leaseOwner           String   @db.VarChar(128)
+  leaseToken           String   @db.VarChar(128)
+  submitEvidenceId     String   @db.VarChar(128)
+  submitEvidenceHash   String   @db.Char(64)
+  retrieveEvidenceId   String?  @db.VarChar(128)
+  retrieveEvidenceHash String?  @db.Char(64)
+  receiptJson          String   @db.Text
+  receiptHash          String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "provider_execution_receipts_workspace_fkey")
+  project   V2Project     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "provider_execution_receipts_project_fkey")
+  job       V2ProviderJob @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "provider_execution_receipts_job_fkey")
+  submitEvidence   V2ProviderTransportEvidence  @relation("ProviderReceiptSubmitEvidence", fields: [submitEvidenceId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "provider_execution_receipts_submit_fkey")
+  retrieveEvidence V2ProviderTransportEvidence? @relation("ProviderReceiptRetrieveEvidence", fields: [retrieveEvidenceId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "provider_execution_receipts_retrieve_fkey")
+  results V2ProviderExecutionReceiptResult[]
+
+  @@unique([id, workspaceId], map: "provider_execution_receipts_id_workspace_key")
+  @@unique([id, workspaceId, projectId], map: "provider_execution_receipts_id_workspace_project_key")
+  @@unique([id, workspaceId, projectId, jobId], map: "provider_execution_receipts_id_workspace_project_job_key")
+  @@unique([jobId, workspaceId, projectId], map: "provider_execution_receipts_job_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "provider_execution_receipts_project_created_idx")
+  @@map("provider_execution_receipts")
+}
+
+model V2ProviderExecutionReceiptResult {
+  receiptId       String @db.VarChar(128)
+  workspaceId     String @db.VarChar(128)
+  projectId       String @db.VarChar(128)
+  jobId           String @db.VarChar(128)
+  resultRecordId  String @db.VarChar(128)
+  resultRecordHash String @db.Char(64)
+  role            String @db.VarChar(32)
+  artifactId      String @db.VarChar(128)
+  artifactSha256  String @db.Char(64)
+  byteSize        BigInt
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "provider_execution_receipt_results_workspace_fkey")
+  project   V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "provider_execution_receipt_results_project_fkey")
+  receipt   V2ProviderExecutionReceipt @relation(fields: [receiptId, workspaceId, projectId, jobId], references: [id, workspaceId, projectId, jobId], onDelete: Cascade, map: "provider_execution_receipt_results_receipt_fkey")
+  result    V2ProviderResultArtifact   @relation(fields: [resultRecordId, workspaceId, projectId, jobId], references: [id, workspaceId, projectId, jobId], onDelete: Restrict, map: "provider_execution_receipt_results_result_fkey")
+
+  @@id([receiptId, resultRecordId])
+  @@unique([receiptId, role], map: "provider_execution_receipt_results_role_key")
+  @@index([workspaceId, projectId, artifactId], map: "provider_execution_receipt_results_artifact_idx")
+  @@map("provider_execution_receipt_results")
 }
 
 model V2TransformationBrief {

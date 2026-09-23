@@ -142,11 +142,11 @@ export class SafeProviderResultDownloader implements ProviderResultDownloader {
   }
 }
 
-function providerResult(value: unknown): Readonly<{ providerJobId: string; downloadUrl: string; mediaType: 'video' }> {
+function providerResult(value: unknown): Readonly<{ providerJobId: string; downloadUrl: string; mediaType: 'video'; adapterConfigHash: string }> {
   assertDomain(typeof value === 'object' && value !== null && !Array.isArray(value), 'RENDER_OUTPUT_INVALID', 'Provider result is invalid')
   const record = value as Record<string, unknown>
-  assertDomain(Object.keys(record).toSorted().join(',') === 'downloadUrl,mediaType,providerJobId' && typeof record.providerJobId === 'string' && typeof record.downloadUrl === 'string' && record.mediaType === 'video', 'RENDER_OUTPUT_INVALID', 'Provider result is invalid')
-  return record as { providerJobId: string; downloadUrl: string; mediaType: 'video' }
+  assertDomain(Object.keys(record).toSorted().join(',') === 'adapterConfigHash,downloadUrl,mediaType,providerJobId' && typeof record.providerJobId === 'string' && typeof record.downloadUrl === 'string' && record.mediaType === 'video' && typeof record.adapterConfigHash === 'string' && /^[a-f0-9]{64}$/.test(record.adapterConfigHash), 'RENDER_OUTPUT_INVALID', 'Provider result is invalid')
+  return record as { providerJobId: string; downloadUrl: string; mediaType: 'video'; adapterConfigHash: string }
 }
 
 export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
@@ -155,6 +155,7 @@ export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
     storage: VerifiedMediaStorage
     artifacts: MediaArtifactPersistenceRepository
     artifactQuery: MediaArtifactQueryRepository
+    resultArtifacts: ProviderResultArtifactRepository
     prober: MediaSourceProber
     clock?: () => Date
   }
@@ -190,6 +191,16 @@ export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
         lineageIds: sources.map((source, index) => `lineage-${calculateCanonicalHash({ manifestId, artifactId: source.id, index })}`),
         manifest, createdAt: (this.dependencies.clock ?? (() => new Date()))().toISOString(),
       })
+      const now = (this.dependencies.clock ?? (() => new Date()))().toISOString()
+      await this.dependencies.resultArtifacts.persistOrReplay({ records: [{
+        id: `provider-result-artifact-${identityHash.slice(0, 24)}-video`, workspaceId: input.job.workspaceId,
+        projectId: input.job.projectId, jobId: input.job.id, schemaVersion: PROVIDER_RESULT_ARTIFACT_SCHEMA_VERSION,
+        role: 'primary-video', providerJobRef: result.providerJobId, artifactId: persisted.artifactId,
+        artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
+        adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion,
+        adapterConfigHash: result.adapterConfigHash, inputHash: input.job.inputHash,
+        authorizationHash: input.job.authorization.authorizationHash, completedAt: now, createdAt: now,
+      }] })
       return Object.freeze({ artifactId: persisted.artifactId, artifactSha256: stored.sha256, mediaType: 'video' as const, byteSize: stored.byteSize })
     } finally {
       await this.dependencies.downloader.cleanup(input.job.id)

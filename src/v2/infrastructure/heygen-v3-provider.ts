@@ -7,10 +7,12 @@ import type {
   ProviderStatus,
   ProviderSubmitContext,
   ProviderSubmissionResult,
+  ProviderRetrieveContext,
 } from '../application/ports/async-media-provider.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain } from '../domain/errors.ts'
 import { ProviderAdapterError } from '../domain/provider-contract.ts'
+import { createProviderTransportObservation } from '../application/provider-transport-observation.ts'
 
 /*
  * HeyGen v3 adapter. Facts verified against the official documentation on
@@ -41,11 +43,13 @@ const HASH = /^[a-f0-9]{64}$/
 const MAX_ASSET_BYTES = 32 * 1024 * 1024
 
 type Fetch = typeof fetch
+const NATIVE_FETCH = globalThis.fetch
 
 export interface HeyGenV3ProviderResult {
   providerJobId: string
   downloadUrl: string
   mediaType: 'video'
+  adapterConfigHash: string
 }
 
 export class HeyGenProviderError extends ProviderAdapterError {
@@ -143,6 +147,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
   private readonly clock: () => Date
   private readonly costMinorUnitsPerMinute: number
   private readonly requestTimeoutMs: number
+  private readonly runtimeClass: 'controlled' | 'live'
 
   constructor(input: {
     apiKey: string
@@ -161,6 +166,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     this.apiKey = input.apiKey.trim()
     this.baseUrl = baseUrl.toString().replace(/\/$/, '')
     this.fetch = input.fetch ?? globalThis.fetch
+    this.runtimeClass = input.fetch === undefined && this.fetch === NATIVE_FETCH && baseUrl.origin === 'https://api.heygen.com' ? 'live' : 'controlled'
     this.clock = input.clock ?? (() => new Date())
     this.costMinorUnitsPerMinute = input.costMinorUnitsPerMinute
     this.requestTimeoutMs = requestTimeoutMs
@@ -221,7 +227,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
       headers: { 'idempotency-key': providerIdempotencyKey(context.idempotencyKey) },
       body: form,
     }, context.signal)
-    const assetId = identifier(object(uploaded.data, 'data').asset_id, 'asset_id')
+    const assetId = identifier(object(uploaded.body.data, 'data').asset_id, 'asset_id')
     const response = await this.request('/v3/videos', {
       method: 'POST',
       headers: {
@@ -233,19 +239,28 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
         aspect_ratio: value.aspectRatio, fit: 'cover', output_format: 'mp4',
       }),
     }, context.signal)
-    const data = object(response.data, 'data')
-    return Object.freeze({ kind: 'accepted' as const, providerJobId: identifier(data.video_id, 'video_id') })
+    const data = object(response.body.data, 'data')
+    const providerJobId = identifier(data.video_id, 'video_id')
+    await context.observeTransport?.(createProviderTransportObservation({
+      phase: 'submit', runtimeClass: this.runtimeClass, adapterId: this.id,
+      adapterVersion: this.adapterVersion, adapterConfigHash: this.configHash,
+      endpointClass: 'heygen-v3-assets-and-video', method: 'POST',
+      requestHash: calculateCanonicalHash({ audioSha256: value.audioSha256, avatarId: value.avatarId, durationMs: value.durationMs, aspectRatio: value.aspectRatio, idempotencyKeyHash: calculateCanonicalHash(context.idempotencyKey) }),
+      responseHash: calculateCanonicalHash({ assetId, providerJobId }), responseStatus: response.status,
+      providerJobRef: providerJobId, observedAt: this.clock().toISOString(),
+    }))
+    return Object.freeze({ kind: 'accepted' as const, providerJobId })
   }
 
   async getStatus(providerJobId: string, signal?: AbortSignal): Promise<ProviderStatus> {
     const response = await this.request(`/v3/videos/${encodeURIComponent(identifier(providerJobId, 'provider_job_id'))}`, { method: 'GET' }, signal)
-    return statusFromProvider(object(response.data, 'data').status)
+    return statusFromProvider(object(response.body.data, 'data').status)
   }
 
-  async retrieve(providerJobId: string, signal?: AbortSignal): Promise<Readonly<HeyGenV3ProviderResult>> {
+  async retrieve(providerJobId: string, signal?: AbortSignal, context?: Readonly<ProviderRetrieveContext>): Promise<Readonly<HeyGenV3ProviderResult>> {
     const id = identifier(providerJobId, 'provider_job_id')
     const response = await this.request(`/v3/videos/${encodeURIComponent(id)}`, { method: 'GET' }, signal)
-    const data = object(response.data, 'data')
+    const data = object(response.body.data, 'data')
     if (statusFromProvider(data.status) !== 'completed' || typeof data.video_url !== 'string') {
       throw new HeyGenProviderError('PROVIDER_RESULT_UNAVAILABLE', true)
     }
@@ -258,10 +273,18 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     if (downloadUrl.protocol !== 'https:' || downloadUrl.username || downloadUrl.password || downloadUrl.hash) {
       throw new HeyGenProviderError('PROVIDER_RESULT_INVALID', false)
     }
-    return Object.freeze({ providerJobId: id, downloadUrl: downloadUrl.toString(), mediaType: 'video' as const })
+    const result = Object.freeze({ providerJobId: id, downloadUrl: downloadUrl.toString(), mediaType: 'video' as const, adapterConfigHash: this.configHash })
+    await context?.observeTransport?.(createProviderTransportObservation({
+      phase: 'retrieve', runtimeClass: this.runtimeClass, adapterId: this.id,
+      adapterVersion: this.adapterVersion, adapterConfigHash: this.configHash,
+      endpointClass: 'heygen-v3-video-status', method: 'GET', requestHash: calculateCanonicalHash({ providerJobId: id }),
+      responseHash: calculateCanonicalHash({ providerJobId: id, status: data.status, downloadUrlHash: calculateCanonicalHash(downloadUrl.toString()) }),
+      responseStatus: response.status, providerJobRef: id, observedAt: this.clock().toISOString(),
+    }))
+    return result
   }
 
-  private async request(path: string, init: RequestInit, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  private async request(path: string, init: RequestInit, signal?: AbortSignal): Promise<Readonly<{ body: Record<string, unknown>; status: number }>> {
     const timeout = AbortSignal.timeout(this.requestTimeoutMs)
     const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
     let response: Response
@@ -276,6 +299,6 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
       if (error instanceof HeyGenProviderError) throw error
       throw new HeyGenProviderError(requestSignal.aborted ? 'PROVIDER_TIMEOUT' : 'PROVIDER_NETWORK_FAILURE', true)
     }
-    return responseBody(response)
+    return Object.freeze({ body: await responseBody(response), status: response.status })
   }
 }
