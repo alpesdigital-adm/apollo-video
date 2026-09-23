@@ -239,9 +239,23 @@ export async function assertSyntheticPhaseGateBrowser(input) {
     const evaluatedEnvelope = await evaluatedResponse.json()
     assertGate(evaluatedEnvelope.data?.gate, input)
     await bounded(page.getByText('Executar nova avaliação', { exact: true }).waitFor({ state: 'visible' }), input.signal, 'phase gate terminal state')
-    assert.equal(await page.getByRole('alert').count(), 0)
-
-    await bounded(page.screenshot({ path: screenshotPath, fullPage: true }), input.signal, 'phase gate screenshot')
+    await bounded(panel.screenshot({ path: screenshotPath }), input.signal, 'phase gate panel screenshot')
+    const globalAlerts = page.getByRole('alert')
+    const [globalAlertCount, globalAlertDescriptors, panelAlertCount] = await bounded(Promise.all([
+      globalAlerts.count(),
+      globalAlerts.evaluateAll((nodes) => nodes.map((node) => ({
+        id: node.id || null,
+        tag: node.tagName.toLowerCase(),
+        text: (node.textContent ?? '').trim().slice(0, 300),
+      }))),
+      panel.getByRole('alert').count(),
+    ]), input.signal, 'phase gate alert diagnostics')
+    const boundedGlobalAlertDiagnostic = JSON.stringify(globalAlertDescriptors).slice(0, 1_000)
+    assert.equal(
+      panelAlertCount,
+      0,
+      `phase gate panel retained an alert; globalAlerts=${globalAlertCount} descriptors=${boundedGlobalAlertDiagnostic}`,
+    )
     result = Object.freeze({ gateText: await panel.innerText(), screenshotPath })
   } catch (error) {
     const details = await diagnostic(input.readServerLogs, page)

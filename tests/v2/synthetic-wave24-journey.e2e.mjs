@@ -1471,7 +1471,15 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         '-nostdin', '-v', 'error', '-ss', '0.75', '-i', retainedPath,
         '-frames:v', '1', '-y', framePath,
       ], { windowsHide: true, timeout: 120_000 })
-      return Object.freeze({ created, terminal, retainedPath, framePath })
+      const captionFrames = ['0.25', '1.25'].map((timestamp) => {
+        const name = `${evidenceName}-caption-${timestamp}s.png`
+        execFileSync(ffmpegPath, [
+          '-nostdin', '-v', 'error', '-ss', timestamp, '-i', retainedPath,
+          '-frames:v', '1', '-y', join(evidenceRoot, name),
+        ], { windowsHide: true, timeout: 120_000 })
+        return name
+      })
+      return Object.freeze({ created, terminal, retainedPath, framePath, captionFrames: Object.freeze(captionFrames) })
     }
 
     const sourceRender = await renderOne({
@@ -1573,12 +1581,14 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       sourceRender: {
         operationId: sourceRender.created.operation.id,
         outputSha256: sourceRender.terminal.checkpoint.outputSha256,
+        captionFrames: sourceRender.captionFrames,
       },
       consumerRender: {
         operationId: consumerRender.created.operation.id,
         outputSha256: consumerRender.terminal.checkpoint.outputSha256,
         bRollFrame: 'project-b-final-frame.png',
         overlayFrame: 'project-b-overlay-frame.png',
+        captionFrames: consumerRender.captionFrames,
       },
       fallbackJobId: fallback.fallbackJob.id,
       phaseGateId: gate.id,
