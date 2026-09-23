@@ -328,8 +328,8 @@ test('T-FR-105 synthetic cache decisions persist idempotently, summarize by outc
         data: {
           id: 'scd-invalid-1', workspaceId, projectId, schemaVersion: 'synthetic-cache-decision/v1',
           operation: 'tts', cacheKey, cacheKeyVersion: 'synthetic-block-cache-key/v1',
-          outcome: 'hit', reasonCode: 'CACHE_HIT_ELIGIBLE', reason: 'a hit that avoided nothing',
-          candidateGenerationId: candidateId, policyVersion: 'synthetic-presenter-eligibility-policy/v1',
+          outcome: 'hit', reasonCode: 'CACHE_HIT_ELIGIBLE', reason: 'a hit that named no candidate',
+          candidateGenerationId: null, policyVersion: 'synthetic-presenter-eligibility-policy/v1',
           estimatedSavingMinorUnits: 0, avoidedCostMinorUnits: 0, currency: 'USD',
           subjectHash: hash('9'), decisionHash: hash('a'), decidedAt: new Date(at(20)),
         },

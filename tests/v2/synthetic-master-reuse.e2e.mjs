@@ -165,12 +165,9 @@ async function closeHttpServer(server) {
  * artifacts, exactly like the F3.007 persistence integration test. What is
  * under test is the master and its reuse, not how the bytes were produced.
  *
- * The fixture carries the three ledger roles the pipeline actually writes —
- * primary-video, primary-audio and alignment-evidence, the only three
- * `provider_result_artifacts_media_check` admits. `normalized-video` is an
- * optional master role reserved for a real normalization stage, so a master
- * promoted straight off a provider job holds three artifacts and its video
- * duration is measured on the provider's own track.
+ * The avatar fixture carries only its primary video and controlled output
+ * speech evidence. Final audio and alignment stay on the canonical upstream
+ * audio master, matching the production boundary used by W24.3.
  */
 test('T-FR-104 a sealed synthetic master is reused across projects through /v1 with zero new provider work', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
@@ -205,6 +202,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId: id } })
     await client.v2MediaArtifact.updateMany({
@@ -244,6 +242,8 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const { calculateCanonicalHash, stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
     const { createProviderJob, transitionProviderJob } = await import('../../src/v2/domain/provider-job.ts')
     const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
+    const { createSyntheticAudioMaster, createSyntheticAvatarAudioRange } = await import('../../src/v2/domain/synthetic-audio-master.ts')
+    const { createAvatarOutputSpeechEvidence } = await import('../../src/v2/domain/avatar-output-speech-evidence.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
@@ -254,6 +254,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticMasterAssetRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-asset-repository.ts')
     const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
+    const { PrismaSyntheticAudioMasterRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts')
     const { PrismaSyntheticSpeechSegmentRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-speech-segment-repository.ts')
     const { PrismaSyntheticPhaseGateEvidenceReader } = await import('../../src/v2/infrastructure/prisma/synthetic-phase-gate-evidence-reader.ts')
     const { PrismaSyntheticPhaseGateRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-phase-gate-repository.ts')
@@ -269,11 +270,13 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       'provider-original': { key: `workspaces/${workspaceId}/masters/provider-original.mp4`, mediaType: 'video', container: 'mp4' },
       'final-audio': { key: `workspaces/${workspaceId}/masters/final-audio.wav`, mediaType: 'audio', container: 'wav' },
       alignment: { key: `workspaces/${workspaceId}/masters/alignment.json`, mediaType: 'data', container: 'json' },
+      'output-speech-evidence': { key: `workspaces/${workspaceId}/masters/output-speech-evidence.json`, mediaType: 'data', container: 'json' },
     }
     const artifactIds = {
       'provider-original': 'master-reuse-original',
       'final-audio': 'master-reuse-audio',
       alignment: 'master-reuse-alignment',
+      'output-speech-evidence': 'master-reuse-output-speech-evidence',
     }
     const scriptText = 'Primeira ideia do roteiro. Segunda ideia bem forte.'
     const alignmentWords = [
@@ -284,7 +287,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       { word: 'Segunda', startMs: 2_300, endMs: 2_900 },
       { word: 'ideia', startMs: 2_900, endMs: 3_300 },
       { word: 'bem', startMs: 3_300, endMs: 3_500 },
-      { word: 'forte.', startMs: 3_500, endMs: 3_900 },
+      { word: 'forte.', startMs: 3_500, endMs: 4_000 },
     ]
     const absolute = (key) => join(artifactRoot, ...key.split('/'))
     for (const key of Object.values(roleFiles).map((file) => file.key)) {
@@ -330,6 +333,13 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       absolute(roleFiles.alignment.key),
       JSON.stringify({ schemaVersion: 'tts-alignment/v1', characters, startTimesSeconds, endTimesSeconds }),
     )
+    await writeFile(absolute(roleFiles['output-speech-evidence'].key), JSON.stringify({
+      schemaVersion: 'controlled-avatar-output-speech/v1',
+      evaluatorId: 'controlled-output-speech',
+      evaluatorVersion: '1.0.0',
+      outputTranscriptHash: sha256(Buffer.from(scriptText, 'utf8')),
+      observedIdentityRef: 'avatar_reuse',
+    }))
     const bytes = {}
     for (const [role, file] of Object.entries(roleFiles)) {
       const content = await readFile(absolute(file.key))
@@ -432,6 +442,24 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       actor, idempotencyKey: 'master-reuse-profile-v1',
     })
     const profileSnapshotId = profile.profile.profileSnapshotId
+    const audioMaster = createSyntheticAudioMaster({
+      id: 'master-reuse-audio-master', workspaceId, projectId, projectVersionId, profileSnapshotId,
+      source: { kind: 'uploaded' },
+      audio: { artifactId: artifactIds['final-audio'], artifactSha256: bytes['final-audio'].sha256, durationMs: 4_000, locale: 'pt-BR' },
+      alignmentEvidence: { artifactId: artifactIds.alignment, artifactSha256: bytes.alignment.sha256 },
+      words: alignmentWords.map((word) => ({ ...word, confidence: null })),
+      approvedAt: at(0), approvalCriticHash: hash('d'), createdAt: at(1),
+    })
+    await new PrismaSyntheticAudioMasterRepository(client).create({
+      master: audioMaster,
+      profileSnapshotHash: profile.profile.snapshot.snapshotHash,
+      requestFingerprint: hash('c'),
+      idempotencyKey: 'master-reuse-audio-master-key',
+      authenticationAudit: auditContext,
+    })
+    const audioRange = createSyntheticAvatarAudioRange({
+      master: audioMaster, startWordIndex: 0, endWordIndex: audioMaster.words.length,
+    })
     const authorization = {
       id: 'master-reuse-authorization', profileSnapshotId,
       profileSnapshotHash: profile.profile.snapshot.snapshotHash,
@@ -455,13 +483,11 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
         submittedAt: new Date(at(2)), completedAt: new Date(at(6)),
       },
     })
-    // The ledger roles the promotion maps onto the four master roles.
-    // The three roles the ledger admits, mapped onto the three required master
-    // roles. There is deliberately no normalization row: no stage writes one.
+    // The avatar ledger owns only its video and controlled output-side evidence.
+    // Audio and alignment remain authoritative on the upstream audio master.
     const resultRoles = {
       'primary-video': 'provider-original',
-      'primary-audio': 'final-audio',
-      'alignment-evidence': 'alignment',
+      'output-speech-evidence': 'output-speech-evidence',
     }
     for (const [resultRole, masterRole] of Object.entries(resultRoles)) {
       await client.v2ProviderResultArtifact.create({
@@ -473,6 +499,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
           mediaType: roleFiles[masterRole].mediaType, container: roleFiles[masterRole].container,
           adapterId: 'heygen-v3', adapterVersion: '3.0.0', modelRef: 'avatar-model-1',
           adapterConfigHash: hash('7'), inputHash: hash('1'), authorizationHash: hash('2'),
+          ...(resultRole === 'output-speech-evidence' ? { scriptHash: sha256(Buffer.from(scriptText, 'utf8')) } : {}),
           completedAt: new Date(at(6)), createdAt: new Date(at(6)),
         },
       })
@@ -517,13 +544,32 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       dimension, status: 'unavailable', evaluatorId: null, value: null, unit: null,
       threshold: null, confidence: null, evidenceRefs: [], range: null, note,
     })
+    const scriptHash = createHash('sha256').update(scriptText, 'utf8').digest('hex')
+    const outputSpeechEvidence = createAvatarOutputSpeechEvidence({
+      jobId: providerJobId,
+      videoArtifactId: artifactIds['provider-original'], videoArtifactSha256: bytes['provider-original'].sha256,
+      sourceAudioArtifactId: artifactIds['final-audio'], sourceAudioRangeHash: audioRange.rangeHash,
+      sourcePcmSha256: hash('8'), outputPcmSha256: hash('9'),
+      sourceDurationMs: 4_000, outputDurationMs: 4_000,
+      policyVersion: 'avatar-audio-pcm-comparison/1.1.0', sampleRateHz: 16_000,
+      alignedLagSamples: 0, correlationBps: 10_000, normalizedErrorBps: 0,
+      comparedSampleCount: 64_000, sourceCoverageBps: 10_000, outputCoverageBps: 10_000,
+      worstWindowCorrelationBps: 10_000, worstWindowNormalizedErrorBps: 0,
+      failedWindowCount: 0, comparedWindowCount: 16, sourceRmsBps: 5_000, outputRmsBps: 5_000, passed: true,
+      speechEvidence: {
+        kind: 'controlled', evaluatorId: 'controlled-output-speech', evaluatorVersion: '1.0.0',
+        outputTranscriptHash: scriptHash, observedIdentityRef: 'avatar_reuse',
+      },
+    })
     const criticVerdict = await new PrismaSyntheticCriticReportRepository(client).record({
       report: createSyntheticCriticReport({
         id: 'master-reuse-critic-report', workspaceId, projectId, blockId: 'master-reuse-block',
+        providerJobId,
         capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         artifactId: artifactIds['provider-original'], artifactSha256: bytes['provider-original'].sha256,
-        audioArtifactId: artifactIds['final-audio'], alignmentArtifactId: artifactIds.alignment,
-        scriptHash: createHash('sha256').update(scriptText, 'utf8').digest('hex'), profileSnapshotId, expectedIdentityRef: 'avatar_reuse',
+        audioArtifactId: null, alignmentArtifactId: artifactIds.alignment,
+        outputSpeechEvidence, outputSpeechEvidenceArtifactId: artifactIds['output-speech-evidence'],
+        scriptHash, profileSnapshotId, expectedIdentityRef: 'avatar_reuse',
         expectationHash: calculateCanonicalHash({
           durationMs: 4_000, durationMode: 'fixed', fps: null,
           videoCodec: null, audioCodec: null, audioSampleRateHz: null,
@@ -572,7 +618,12 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       adapterVersion: '3.0.0',
       providerInput: {
         audioArtifactId: artifactIds['final-audio'],
+        audioMasterId: audioMaster.id,
+        audioMasterHash: audioMaster.masterHash,
+        audioRange,
         criticBinding: {
+          blockId: 'master-reuse-block', scriptText, scriptHash, profileSnapshotId,
+          expectedDurationMs: 4_000, alignmentArtifactId: artifactIds.alignment,
           use: 'ads', market: 'BRA', locale: 'pt-BR',
         },
       },
@@ -786,7 +837,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     assert.equal(listed.status, 200, JSON.stringify(listed.payload))
     const segments = listed.payload.data.segments
     assert.equal(segments.length, 2)
-    assert.deepEqual(segments.map(({ startMs, endMs }) => [startMs, endMs]), [[0, 1_900], [2_300, 3_900]])
+    assert.deepEqual(segments.map(({ startMs, endMs }) => [startMs, endMs]), [[0, 1_900], [2_300, 4_000]])
     for (const [index, segment] of segments.entries()) {
       assert.ok(segment.endMs > segment.startMs, 'a segment range must be non-empty')
       assert.ok(segment.endMs <= master.audioDurationMs, 'a segment must stay inside the master timeline')
