@@ -195,7 +195,6 @@ export function runNextSyntheticProductionRenderService(dependencies: {
       )
       if (!spec || spec.inputHash !== binding.context.renderInputHash ||
         spec.composition.propsHash !== binding.context.propsHash ||
-        spec.plan.hash !== binding.context.planHash ||
         spec.plan.versionId !== binding.context.projectVersionId) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Protected synthetic RenderInput does not match its operation')
       }

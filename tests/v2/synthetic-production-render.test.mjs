@@ -4,6 +4,7 @@ import test from 'node:test'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import {
   assertSyntheticProductionRenderQualityReport,
+  calculateSyntheticProductionRenderContextHash,
   calculateSyntheticProductionRenderQualityHash,
   assertSyntheticProductionRenderCheckpoint,
   syntheticProductionRenderOutputKey,
@@ -15,6 +16,10 @@ import {
   createSyntheticPresenterProfileSnapshot,
 } from '../../src/v2/domain/synthetic-production.ts'
 import { compileSyntheticPresenterRenderInputs } from '../../src/v2/application/compile-synthetic-presenter-render.ts'
+import { enqueueSyntheticProductionRenderService } from '../../src/v2/application/synthetic-production-render.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import { readConfiguredRenderTargetIdentity } from '../../src/v2/infrastructure/render-target-registry.ts'
+import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
 
 const hash = (character) => character.repeat(64)
 
@@ -296,15 +301,17 @@ function renderWorkerFixture() {
     renderer: { id: 'remotion', version: '4.0.489', digest: runtimeIdentity.toolchainHash },
     aspectRatio: '16:9',
   }).final
-  const context = {
-    kind: 'synthetic-production-render',
+  const contextBody = {
+    schemaVersion: 'synthetic-production-render-context/v1',
+    operationId: 'operation-render-worker',
+    workspaceId: plan.workspaceId,
     projectId: plan.projectId,
     projectVersionId: plan.projectVersionId,
     projectVersionHash: hash('6'),
     productionRunId: 'run-render-worker',
     editPlanSnapshotId: 'snapshot-render-worker',
-    editPlanSnapshotHash: hash('7'),
-    planHash: spec.plan.hash,
+    editPlanSnapshotHash: plan.planHash,
+    planHash: plan.planHash,
     outputKind: 'final',
     aspectRatio: '16:9',
     renderInputRef: 'protected/render-worker.json',
@@ -313,15 +320,197 @@ function renderWorkerFixture() {
     outputArtifactId: 'artifact-output-render-worker',
     outputManifestId: 'manifest-output-render-worker',
   }
-  context.contextHash = calculateCanonicalHash(context)
+  const context = {
+    ...contextBody,
+    contextHash: calculateSyntheticProductionRenderContextHash(contextBody),
+  }
   const claimed = {
     operation: { id: 'operation-render-worker', workspaceId: plan.workspaceId },
-    context,
+    context: {
+      kind: 'synthetic-production-render',
+      ...context,
+    },
     authenticationAudit: {},
     lease: { owner: 'worker-render', attempt: 2, heartbeatAt: '2029-01-01T00:00:00.000Z', expiresAt: '2029-01-01T00:01:00.000Z' },
   }
   return { plan, spec, context, claimed, runtimeIdentity }
 }
+
+test('synthetic render enqueue uses the configured renderer and the worker recompiles the sealed render plan', async () => {
+  const { plan, runtimeIdentity } = renderWorkerFixture()
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-render-enqueue',
+    credentialId: 'credential-render-enqueue',
+    workspaceId: plan.workspaceId,
+    environment: 'production',
+  })
+  const actor = Object.freeze({
+    ...auditContext,
+    scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active',
+    auditContext,
+  })
+  let persisted
+  const renderer = readConfiguredRenderTargetIdentity({})
+  const enqueue = enqueueSyntheticProductionRenderService({
+    production: {
+      async readRun() {
+        return { status: 'compiled', plan, editPlanSnapshotId: 'snapshot-render-enqueue' }
+      },
+    },
+    projects: {
+      async read() {
+        return {
+          project: { currentVersionId: plan.projectVersionId },
+          version: { id: plan.projectVersionId, baseHash: hash('6') },
+        }
+      },
+    },
+    operations: {
+      async findReplay() { return null },
+      async createOrReplay(input) {
+        persisted = input
+        return { operation: input.operation, context: input.context, replayed: false }
+      },
+    },
+    runtimeIdentity: { async read() { return runtimeIdentity } },
+    renderer,
+    clock: () => new Date('2029-01-01T00:02:00.000Z'),
+    createId: (kind) => `render-${kind}-enqueue`,
+  })
+  const enqueued = await enqueue({
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    runId: plan.id,
+    output: { kind: 'final', aspectRatio: '9:16' },
+    actor,
+    idempotencyKey: 'render-enqueue-key',
+  })
+  assert.equal(enqueued.replayed, false)
+  assert.equal(persisted.context.renderInput.renderer.id, renderer.id)
+  assert.equal(persisted.context.renderInput.renderer.version, renderer.version)
+  assert.equal(persisted.context.planHash, plan.planHash)
+  assert.notEqual(persisted.context.renderInput.plan.hash, plan.planHash)
+
+  const { kind, renderInput, ...context } = persisted.context
+  let materialized = false
+  const worker = runNextSyntheticProductionRenderService({
+    operations: {
+      async claimNext() {
+        return {
+          operation: persisted.operation,
+          context: { kind, ...context },
+          authenticationAudit: persisted.authenticationAudit,
+          lease: {
+            owner: 'worker-render-enqueue', attempt: 1,
+            heartbeatAt: '2029-01-01T00:02:00.000Z', expiresAt: '2029-01-01T00:03:00.000Z',
+          },
+        }
+      },
+      async advancePhase() { return true },
+      async heartbeat() { return false },
+    },
+    renders: {
+      async findReadyToFinalize() { return null },
+      async readBinding() { return { context, plan } },
+    },
+    protectedInputs: { async read() { return renderInput } },
+    runtimeIdentity: { async read() { return runtimeIdentity } },
+    async materialize(_workspaceId, _validUntil, spec) {
+      assert.equal(spec, renderInput)
+      materialized = true
+      return {}
+    },
+    renderer: {}, inspector: {}, promoter: {}, artifacts: {},
+    clock: () => new Date('2029-01-01T00:02:00.000Z'),
+  })
+  assert.deepEqual(await worker('worker-render-enqueue'), {
+    operationId: persisted.operation.id,
+    status: 'lease-lost',
+  })
+  assert.equal(materialized, true)
+})
+
+test('synthetic render worker rejects a coherently rehashed RenderInput from another render plan', async () => {
+  const fixture = renderWorkerFixture()
+  const tamperedSpec = createRenderInputSpec({
+    schemaVersion: fixture.spec.schemaVersion,
+    renderer: fixture.spec.renderer,
+    composition: {
+      id: fixture.spec.composition.id,
+      version: fixture.spec.composition.version,
+      propsSchemaRef: fixture.spec.composition.propsSchemaRef,
+    },
+    plan: {
+      id: 'synthetic-other-render-plan-final',
+      versionId: fixture.spec.plan.versionId,
+      hash: hash('9'),
+    },
+    output: {
+      id: fixture.spec.output.id,
+      locale: fixture.spec.output.locale,
+      aspectRatio: fixture.spec.output.aspectRatio,
+      width: fixture.spec.output.width,
+      height: fixture.spec.output.height,
+      fps: fixture.spec.output.fps,
+      safeArea: fixture.spec.output.safeArea,
+      ...(fixture.spec.output.deliveryProfileId
+        ? { deliveryProfileId: fixture.spec.output.deliveryProfileId }
+        : {}),
+      durationInFrames: fixture.spec.output.durationInFrames,
+    },
+    assets: fixture.spec.assets,
+    props: { ...fixture.spec.props, stylePreset: 'editorial-clean' },
+  })
+  const contextBody = {
+    ...fixture.context,
+    renderInputHash: tamperedSpec.inputHash,
+    propsHash: tamperedSpec.composition.propsHash,
+  }
+  delete contextBody.contextHash
+  const tamperedContext = {
+    ...contextBody,
+    contextHash: calculateSyntheticProductionRenderContextHash(contextBody),
+  }
+  let failure
+  let materializeCalls = 0
+  const worker = runNextSyntheticProductionRenderService({
+    operations: {
+      async claimNext() {
+        return {
+          ...fixture.claimed,
+          context: { kind: 'synthetic-production-render', ...tamperedContext },
+        }
+      },
+      async advancePhase() { return true },
+      async failOrRetry(command) {
+        failure = command.error
+        return { operation: { status: 'failed' } }
+      },
+    },
+    renders: {
+      async findReadyToFinalize() { return null },
+      async readBinding() { return { context: tamperedContext, plan: fixture.plan } },
+    },
+    protectedInputs: { async read() { return tamperedSpec } },
+    runtimeIdentity: { async read() { throw new Error('runtime identity must not be read') } },
+    async materialize() { materializeCalls += 1; throw new Error('must not materialize') },
+    renderer: {}, inspector: {}, promoter: {}, artifacts: {},
+    clock: () => new Date('2029-01-01T00:02:00.000Z'),
+  })
+  assert.deepEqual(await worker('worker-render-tamper'), {
+    operationId: fixture.claimed.operation.id,
+    status: 'failed',
+  })
+  assert.equal(materializeCalls, 0)
+  assert.equal(failure.code, 'persistence_conflict')
+  assert.equal(failure.message, 'Synthetic production render could not be completed')
+  assert.equal(failure.retryable, false)
+})
 
 function renderWorkerDependencies(overrides = {}) {
   const fixture = renderWorkerFixture()

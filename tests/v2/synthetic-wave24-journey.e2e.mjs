@@ -151,6 +151,21 @@ async function readJsonResponse(response, label) {
   return payload
 }
 
+async function readExpectedPublicResponse(response, label, expectedStatus, t) {
+  const payload = await response.json()
+  const error = payload && typeof payload === 'object' && payload.error && typeof payload.error === 'object'
+    ? payload.error
+    : null
+  const diagnostic = Object.freeze({
+    status: response.status,
+    code: error && typeof error.code === 'string' ? error.code : null,
+    message: error && typeof error.message === 'string' ? error.message : null,
+  })
+  if (response.status !== expectedStatus) t.diagnostic(`${label} public response: ${JSON.stringify(diagnostic)}`)
+  assert.equal(response.status, expectedStatus, `${label} returned ${JSON.stringify(diagnostic)}`)
+  return payload
+}
+
 test('W24.3 controlled provider to canonical cross-project render and phase-gate browser journey', {
   skip: SKIP,
   timeout: 1_500_000,
@@ -341,6 +356,10 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     const bRollPath = join(root, 'consumer-b-broll.png')
     execFileSync(ffmpegPath, [
       '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x2347D9:s=540x960', '-frames:v', '1', bRollPath,
+    ], { windowsHide: true })
+    const overlayPath = join(root, 'consumer-b-overlay.png')
+    execFileSync(ffmpegPath, [
+      '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0xF2C94C:s=540x960', '-frames:v', '1', overlayPath,
     ], { windowsHide: true })
 
     await new PrismaWorkspaceRepository(client).create(createWorkspace({
@@ -928,6 +947,51 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       actor: { kind: 'internal', actorType: 'api-client', actorId: clientId }, changedAt: at(14),
     }))
 
+    const overlayBytes = await readFile(overlayPath)
+    const overlaySha256 = createHash('sha256').update(overlayBytes).digest('hex')
+    const storedOverlay = await storage.promoteDerived({
+      workspaceId,
+      sourcePath: overlayPath,
+      sha256: overlaySha256,
+      extension: 'png',
+      prefix: 'synthetic-wave24-overlay',
+    })
+    const overlayManifest = createMediaArtifactManifestV2({
+      artifactKey: storedOverlay.key,
+      artifactSha256: storedOverlay.sha256,
+      byteSize: storedOverlay.byteSize,
+      mediaType: 'image',
+      container: 'png',
+      recipe: {
+        id: 'synthetic-wave24-controlled-overlay', version: '1.0.0',
+        parameters: { project: 'consumer-b', colour: '0xF2C94C' },
+      },
+      sources: [],
+    })
+    await artifactRepository.persistOrReplay({
+      workspaceId,
+      artifactId: 'journey-consumer-b-overlay',
+      manifestId: 'journey-consumer-b-overlay-manifest',
+      lineageIds: [],
+      manifest: overlayManifest,
+      createdAt: at(14),
+    })
+    const overlayRights = createAssetRightsSnapshot({
+      id: 'journey-consumer-b-overlay-rights', workspaceId,
+      artifactId: 'journey-consumer-b-overlay', sequence: 1,
+      draft: {
+        status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+        allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
+        consent: { status: 'not-required', allowedUses: [] },
+      },
+      createdBy: { type: 'api-client', id: clientId }, createdAt: at(14),
+    })
+    await rightsRepository.setCurrent(overlayRights, assetRightsRevision('journey-consumer-b-overlay', 0), createAssetRightsChangeIntent({
+      workspaceId, artifactId: 'journey-consumer-b-overlay', snapshotHash: overlayRights.snapshotHash,
+      baseRevision: assetRightsRevision('journey-consumer-b-overlay', 0),
+      actor: { kind: 'internal', actorType: 'api-client', actorId: clientId }, changedAt: at(14),
+    }))
+
     const masterRepository = new PrismaSyntheticMasterAssetRepository(client)
     const promoted = await promoteSyntheticMasterAssetService({
       masters: masterRepository,
@@ -1085,12 +1149,30 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         artifactId: 'journey-consumer-b-broll',
         role: 'b-roll',
       }],
-      captions: false,
+      overlays: [{
+        id: 'journey-consumer-b-overlay-insert',
+        rangeMs: [1_500, 2_000],
+        artifactId: 'journey-consumer-b-overlay',
+        role: 'overlay',
+      }],
+      captions: true,
       idempotencyKey: 'journey-production-consumer-b',
     })
     assert.equal(consumerRun.replayed, false)
     assert.notEqual(consumerRun.run.plan.planHash, sourceRun.run.plan.planHash)
     assert.equal(consumerRun.run.plan.bRoll.length, 1)
+    assert.equal(consumerRun.run.plan.overlays.length, 1)
+    assert.deepEqual([
+      consumerRun.run.plan.audio.artifactId,
+      ...consumerRun.run.plan.blocks.map(({ artifact }) => artifact.artifactId),
+      ...consumerRun.run.plan.bRoll.map(({ artifact }) => artifact.artifactId),
+      ...consumerRun.run.plan.overlays.map(({ artifact }) => artifact.artifactId),
+    ], [
+      audioEntry.artifactId,
+      avatarRow.id,
+      'journey-consumer-b-broll',
+      'journey-consumer-b-overlay',
+    ])
     const consumption = await reuseRepository.readByRun({
       workspaceId,
       consumerProjectId: consumerProject.project.id,
@@ -1221,6 +1303,55 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       'content-type': 'application/json',
     }
     const renderOne = async ({ projectId, projectVersionId, runId, idempotencyKey, evidenceName }) => {
+      const diagnoseUnexpectedWorkerState = async (label, workerResult, expectedStatus) => {
+        if (workerResult?.status === expectedStatus) return
+        let latest = null
+        let repositoryError = null
+        try {
+          latest = await renderRepository.readLatestByRun({ workspaceId, projectId, runId })
+        } catch (error) {
+          const domainCode = error instanceof Error && error.name === 'DomainError' &&
+            'code' in error && typeof error.code === 'string' && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.code)
+            ? error.code
+            : null
+          repositoryError = domainCode
+            ? { code: domainCode, message: error.message.slice(0, 240) }
+            : { code: null, message: 'Render repository diagnostic failed' }
+        }
+        t.diagnostic(`${label} render worker state: ${JSON.stringify({
+          worker: {
+            operationId: workerResult?.operationId ?? null,
+            status: workerResult?.status ?? null,
+          },
+          operation: latest
+            ? {
+                id: latest.operation.id,
+                status: latest.operation.status,
+                phase: latest.operation.phase,
+                error: latest.operation.error
+                  ? { code: latest.operation.error.code, message: latest.operation.error.message }
+                  : null,
+              }
+            : null,
+          binding: latest
+            ? {
+                projectId: latest.context.projectId,
+                projectVersionId: latest.context.projectVersionId,
+                productionRunId: latest.context.productionRunId,
+                editPlanSnapshotId: latest.context.editPlanSnapshotId,
+                planHash: latest.context.planHash,
+                renderInputHash: latest.context.renderInputHash,
+                contextHash: latest.context.contextHash,
+                outputArtifactId: latest.context.outputArtifactId,
+                outputManifestId: latest.context.outputManifestId,
+                checkpointPresent: Boolean(latest.checkpoint),
+                checkpointOutputSha256: latest.checkpoint?.outputSha256 ?? null,
+                qualityPassed: latest.qualityReport?.passed ?? null,
+              }
+            : null,
+          repositoryError,
+        })}`)
+      }
       const endpoint = `${baseUrl}/v1/projects/${encodeURIComponent(projectId)}/synthetic-production-runs/${encodeURIComponent(runId)}/render-operations`
       const request = async () => boundedFetch(endpoint, {
         method: 'POST',
@@ -1228,13 +1359,18 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         body: JSON.stringify({ output: { kind: 'final', aspectRatio: '9:16' } }),
       }, t.signal)
       const createdResponse = await request()
-      assert.equal(createdResponse.status, 202)
-      const created = (await readJsonResponse(createdResponse, `${evidenceName} render enqueue`)).data
+      const created = (await readExpectedPublicResponse(
+        createdResponse,
+        `${evidenceName} render enqueue`,
+        202,
+        t,
+      )).data
       assert.equal(created.replayed, false)
       assert.equal(created.render.runId, runId)
 
       const firstWorker = createSyntheticProductionRenderWorker(runtimeEnv)
       const rendered = await firstWorker(`synthetic-wave24-render-${evidenceName}-1`, t.signal)
+      await diagnoseUnexpectedWorkerState(`${evidenceName} initial`, rendered, 'waiting-attestation')
       assert.equal(rendered?.operationId, created.operation.id)
       assert.equal(rendered?.status, 'waiting-attestation')
       const waiting = await renderRepository.readLatestByRun({ workspaceId, projectId, runId })
@@ -1289,6 +1425,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         `synthetic-wave24-render-${evidenceName}-2`,
         t.signal,
       )
+      await diagnoseUnexpectedWorkerState(`${evidenceName} finalize`, finalized, 'succeeded')
       assert.deepEqual(finalized, { operationId: created.operation.id, status: 'succeeded' })
       const terminal = await renderRepository.readLatestByRun({ workspaceId, projectId, runId })
       assert.equal(terminal.operation.status, 'succeeded')
@@ -1300,8 +1437,12 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       assert.equal(terminal.checkpoint.outputKey, waiting.checkpoint.outputKey)
 
       const replayResponse = await request()
-      assert.equal(replayResponse.status, 200)
-      const replay = (await readJsonResponse(replayResponse, `${evidenceName} render replay`)).data
+      const replay = (await readExpectedPublicResponse(
+        replayResponse,
+        `${evidenceName} render replay`,
+        200,
+        t,
+      )).data
       assert.equal(replay.replayed, true)
       assert.equal(replay.operation.id, created.operation.id)
 
@@ -1328,6 +1469,11 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       idempotencyKey: 'synthetic-wave24-render-consumer-b',
       evidenceName: 'project-b-final',
     })
+    const consumerOverlayFrame = join(evidenceRoot, 'project-b-overlay-frame.png')
+    execFileSync(ffmpegPath, [
+      '-nostdin', '-v', 'error', '-ss', '1.75', '-i', consumerRender.retainedPath,
+      '-frames:v', '1', '-y', consumerOverlayFrame,
+    ], { windowsHide: true, timeout: 120_000 })
     assert.notEqual(
       sourceRender.terminal.checkpoint.outputSha256,
       consumerRender.terminal.checkpoint.outputSha256,
@@ -1346,8 +1492,12 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         projectVersionHash: project.version.baseHash,
       }),
     }, t.signal)
-    assert.equal(gateResponse.status, 201)
-    const gate = (await readJsonResponse(gateResponse, 'synthetic phase gate run')).data.gate
+    const gate = (await readExpectedPublicResponse(
+      gateResponse,
+      'synthetic phase gate run',
+      201,
+      t,
+    )).data.gate
     const expectedMissingLiveChecks = [
       'elevenlabs-audio-alignment-live',
       'heygen-generated-audio-avatar-live',
@@ -1365,7 +1515,12 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     const listedResponse = await boundedFetch(`${gateEndpoint}?limit=100`, {
       headers: { authorization: `Bearer ${issued.token}`, accept: 'application/json' },
     }, t.signal)
-    const listed = (await readJsonResponse(listedResponse, 'synthetic phase gate list')).data.gates
+    const listed = (await readExpectedPublicResponse(
+      listedResponse,
+      'synthetic phase gate list',
+      200,
+      t,
+    )).data.gates
     assert.equal(listed[0].recordHash, gate.recordHash)
 
     const { assertSyntheticPhaseGateBrowser } = await import('./helpers/assert-synthetic-phase-gate-browser.mjs')
@@ -1399,6 +1554,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       consumerRender: {
         operationId: consumerRender.created.operation.id,
         outputSha256: consumerRender.terminal.checkpoint.outputSha256,
+        bRollFrame: 'project-b-final-frame.png',
+        overlayFrame: 'project-b-overlay-frame.png',
       },
       fallbackJobId: fallback.fallbackJob.id,
       phaseGateId: gate.id,

@@ -69,6 +69,7 @@ export function enqueueSyntheticProductionRenderService(dependencies: {
   projects: ProjectWorkspaceQueryRepository
   operations: PublicOperationRepository
   runtimeIdentity: SyntheticRuntimeIdentityReader
+  renderer: Readonly<{ id: string; version: string }>
   clock?: () => Date
   createId?: (kind: 'operation' | 'artifact' | 'manifest') => string
 }) {
@@ -135,8 +136,8 @@ export function enqueueSyntheticProductionRenderService(dependencies: {
     const compiled = compileSyntheticPresenterRenderInputs({
       plan: run.plan,
       renderer: {
-        id: 'remotion',
-        version: 'apollo-video/v1',
+        id: dependencies.renderer.id,
+        version: dependencies.renderer.version,
         digest: runtimeIdentity.toolchainHash,
       },
       aspectRatio: request.output.aspectRatio,

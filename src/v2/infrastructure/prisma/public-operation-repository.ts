@@ -1511,7 +1511,6 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             payload.inputHash !== syntheticRenderContext.renderInputHash ||
             syntheticRenderContext.renderInput!.composition.propsHash !== syntheticRenderContext.propsHash ||
             syntheticRenderContext.renderInput!.plan.versionId !== syntheticRenderContext.projectVersionId ||
-            syntheticRenderContext.renderInput!.plan.hash !== syntheticRenderContext.planHash ||
             syntheticRenderContext.renderInput!.output.aspectRatio !== syntheticRenderContext.aspectRatio
           ) {
             throw new DomainError('INVALID_PUBLIC_OPERATION', 'Synthetic RenderInput does not match its operation binding')

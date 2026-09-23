@@ -563,7 +563,7 @@ import {
   createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment,
 } from './media/ffmpeg-speaker-diarization-audio-preparer.ts'
 import { EnvironmentProviderRuntimeRouter } from './provider-runtime-router.ts'
-import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
+import { createConfiguredRenderTargetRegistry, readConfiguredRenderTargetIdentity } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
 import { createWebhookSigningSecretProtector } from './security/webhook-signing-secret-protector.ts'
 export { createMediaUploadSessionSignerFromEnvironment } from './security/media-upload-session-signer.ts'
@@ -942,6 +942,7 @@ export function createSyntheticProductionRenderRuntime(
       projects: createProjectWorkspaceQueryRepository(),
       operations,
       runtimeIdentity,
+      renderer: readConfiguredRenderTargetIdentity(process.env),
       clock,
       createId: (kind) => `synthetic-render-${kind}-${randomUUID()}`,
     }),
