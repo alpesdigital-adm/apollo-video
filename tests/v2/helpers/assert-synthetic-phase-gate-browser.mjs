@@ -239,6 +239,11 @@ export async function assertSyntheticPhaseGateBrowser(input) {
     const evaluatedEnvelope = await evaluatedResponse.json()
     assertGate(evaluatedEnvelope.data?.gate, input)
     await bounded(page.getByText('Executar nova avaliação', { exact: true }).waitFor({ state: 'visible' }), input.signal, 'phase gate terminal state')
+    await bounded(panel.evaluate((node) => node.scrollIntoView({
+      block: 'center',
+      inline: 'nearest',
+      behavior: 'instant',
+    })), input.signal, 'phase gate panel scroll')
     await bounded(panel.screenshot({ path: screenshotPath }), input.signal, 'phase gate panel screenshot')
     const globalAlerts = page.getByRole('alert')
     const [globalAlertCount, globalAlertDescriptors, panelAlertCount] = await bounded(Promise.all([

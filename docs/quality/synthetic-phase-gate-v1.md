@@ -7,9 +7,10 @@ collector for provider execution and master catalogues, and the authenticated
 public run/list API are implemented locally. W24.3 adds the canonical synthetic
 render operation, protected compiler input, Remotion worker, MP4 inspection,
 technical quality report, build attestation persistence and cross-project
-master-consumption lineage. Those W24.3 paths are implemented in the working
-tree and remain under local PostgreSQL/render validation. Provider-live
-execution, production deployment and acceptance are still open. All W24.2
+master-consumption lineage. The controlled W24.3 PostgreSQL/render/browser
+journey passed locally with the honest partial gate described below.
+Provider-live execution, production deployment and acceptance are still open;
+CI for the current W24.3 commit is reported by the PR checks. All W24.2
 local gates listed below passed under Astra supervision, and CI run
 `35859804992` passed both jobs at `46cae59d81916f597f47b50a077682e5413261a4`.
 This
@@ -70,9 +71,9 @@ does not execute build checks: a separate local/CI service runs them while the
 operation waits without a lease, and the next worker claim revalidates current
 authority before completing the operation and production run atomically.
 Production hosts therefore cannot run validation builds through the render
-worker. Until the controlled W24.3 render journey passes with a clean checkout,
-these bindings remain implemented locally rather than accepted evidence for
-`F3-GATE-004`.
+worker. The controlled W24.3 journey proved these bindings against a clean
+attested checkout and supplied the server-owned evidence for `F3-GATE-004`;
+that controlled attestation is not provider-live or production acceptance.
 
 ## Public API
 
@@ -128,19 +129,38 @@ approved master and speech-segment catalogue path, while the consuming render
 lineage needed for cross-project reuse, fallback and provider swap belongs to
 W24.3. W24.2 CI run `35859804992` passed both jobs. No live provider execution,
 completed W24.3 render journey, reviewed final MP4, merge, deployment, product
-acceptance or TODO closure is claimed.
+acceptance or TODO closure is claimed by W24.2.
+
+## Local W24.3 verification checkpoint
+
+The supervised run `w24-3-full-journey-c2645167-551e8a1f` passed 1/1 in 183 s
+at `c26451670c6a1c9cec36aa97d085b70edbc07359`. It exercised PostgreSQL, public
+API, workers, artifact storage with the local driver, the canonical compiler, Remotion and the real
+editor panel. Render A ended at
+`ebdb51f115709248f421038ba32983d2da33ac994b672ad3f567d9adb882e03e`; render B
+ended at `93c99df84c89813914e5fd97a6297b4d58f74881b4ca83e408d5db3e078d39cb`.
+Both passed full decode and ffprobe measured 1080×1920 H.264, 60 frames over
+2 s, with AAC lasting 2.048 s. The retained frames show `Olá` at 0.25 s,
+`mundo` at 1.25 s and the disclosure at the top; B separately shows B-roll at
+0.75 s and the overlay at 1.75 s. This is frame inspection and full technical
+decoding, not a claim that a person watched the two complete MP4s.
+
+B consumed the exact approved full master from A with a different composition
+and zero provider jobs, budget reservations or transport submits in the
+consumer project. The fallback chain persisted the rejected result, the
+server-owned reroute, the approved result and the human decision. The API and
+browser read the same immutable report: 3/4 criteria and 5/8 checks, with
+`approved=false` and all three live-provider checks missing. The supervisor
+observed 68 owned process identities and ended with zero alive, zero database
+backends, the cluster stopped, port 55571 free, scratch removed and no cleanup
+errors. The complete unit suite at the preceding checkpoint passed 2,519/2,519;
+the static gates and application/Remotion builds also passed locally.
 
 ## Remaining integration
 
-The W24.3 working tree now models those joins. Acceptance still requires the
-supervised PostgreSQL journey to prove the canonical master consumption,
-fallback chain, provider swap, render operation, materialized props, manifest,
-technical report and attested bundle together. Checks stay missing when any
-authority is absent, controlled evidence is presented as live, or the terminal
-render binding is incomplete. The editor history must exercise the same
-collector in that integrated journey.
-
-A separately authorized live run must traverse the production provider
-services. Adapter names, controlled transport receipts and controlled
-PostgreSQL evidence do not prove provider-live acceptance. No deploy or F3.019
-acceptance is claimed here.
+The local checkpoint did not include W24.3 CI; consult the PR checks for the
+current commit. A separately authorized live run must traverse the production
+provider services before the three `F3-GATE-001` checks can pass.
+Adapter names, controlled receipts and controlled PostgreSQL evidence do not
+prove provider-live acceptance. Merge, deployment, owner acceptance and TODO
+closure also remain open; no F3.019 acceptance is claimed here.

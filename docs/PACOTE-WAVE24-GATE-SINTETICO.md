@@ -224,6 +224,29 @@ autorização de gasto e ambiente adequado.
   `npm run test:e2e:synthetic-master-reuse`, testes de render e browser focados
   passam com cleanup completo.
 
+### Resultado controlado W24.3
+
+O run `w24-3-full-journey-c2645167-551e8a1f`, no SHA
+`c26451670c6a1c9cec36aa97d085b70edbc07359`, passou 1/1 em 183 s. A jornada
+atravessou PostgreSQL, API, workers, storage, compiler, Remotion e UI e reteve
+os MP4s A/B, relatórios terminais, gate e frames. A terminou no SHA-256
+`ebdb51f115709248f421038ba32983d2da33ac994b672ad3f567d9adb882e03e` e B em
+`93c99df84c89813914e5fd97a6297b4d58f74881b4ca83e408d5db3e078d39cb`.
+Decode integral e ffprobe passaram; os frames revisados mostram `Olá` em 0,25 s,
+`mundo` em 1,25 s, disclosure no topo, B-roll em 0,75 s e overlay em 1,75 s.
+Isso prova decodificação e frames definidos, não visualização humana completa
+dos dois MP4s.
+
+O projeto B consumiu o master completo aprovado de A com composição distinta e
+zero jobs, reservas ou submits de provider em B. Fallback, decisão humana,
+checkpoint, quality report, manifest e attestation ficaram ligados à cadeia
+persistida. API e browser apresentaram o mesmo gate: 3/4 critérios, 5/8 checks,
+`approved=false` e três checks live ausentes. O supervisor observou 68 processos
+do run, terminou com zero vivos e zero backends, parou o cluster, liberou a
+porta 55571, removeu o scratch e registrou zero erro de cleanup. O checkpoint
+local não incluiu CI W24.3; consultar os checks do PR para o commit atual.
+Provider live, merge, deploy, aceite e fechamento do TODO permanecem abertos.
+
 ## Evidência e encerramento do pacote
 
 | Nível | O que comprova | Limite |

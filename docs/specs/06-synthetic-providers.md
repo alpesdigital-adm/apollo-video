@@ -349,6 +349,8 @@ Cache hit só é utilizável se:
 
 > **Nota de implementação (F3.008).** A fórmula acima continua sendo a autoridade de FORMA. A identidade é calculada por um único módulo (`synthetic-cache-identity.ts`, ADR-146) que cobre TTS e avatar: a chave de TTS é byte-idêntica à `synthetic-block-cache-key/v1` já persistida (congelada por sentinela), e a de avatar acrescenta checksum do áudio condutor, referência de identidade do avatar, versão do presenter, model, formato, hash de config de render, direção e background. Uma sentinela de forma proíbe que projeto, posição, bloco, plano, consent, custo, moeda, timeout, retry, tentativa, deadline, timestamps, workspace, actor ou idempotency key entrem no endereço — consent é elegibilidade, não identidade, senão renovar consent fabricaria regeneração paga e revogar deixaria endereço reutilizável. A elegibilidade é revalidada a cada consulta na ordem vinculante: request/workspace → snapshot → head (vontade atual) → rights/consent → identidade → candidato → critic → blob/checksum → output constraints → `mustRegenerate` → hit; custo só é reservado depois que um miss sobrevive a essa ordem. Toda decisão vira linha durável em `synthetic_cache_decisions` (hit/miss/forced-regenerate/blocked + reason code + candidato + política + critic + economia estimada + custo evitado + hash da decisão), com o assunto guardado apenas como hash domain-separated — nunca o texto, a evidência de consent ou segredo de provider. O custo evitado vem da estimativa persistida do provider job que pagou pelo candidato; sem essa evidência o reuso falha fechado em vez de alegar economia. Invalidação nunca apaga master ou histórico.
 
+> **Complemento W24.3.** Reuso entre projetos aceita somente o master completo aprovado. A preparação resolve uma única origem canônica; o commit reabre job, master, artifacts, critic, profile, consentimento e rights e grava decisão, consumo, run e assets atomicamente. A observação começa na criação server-owned do projeto consumidor e conta TODOS os jobs, reservas e submits desse projeto até o render terminal; atividade sem correlação também impede o check positivo. Custo legítimo zero permanece zero e não fabrica economia.
+
 ## 15. TransformationBrief
 
 ```ts
@@ -443,6 +445,8 @@ Valores serão calibrados por dataset e não devem ser hardcoded fora de policy 
 - Regerar somente block/range falho.
 - Após duas falhas sem melhora, descer risk ladder.
 - Budget excedido: cache/library/simple composition.
+
+> **Complemento W24.3.** O dispatch público de fallback recebe somente ledger esperado e contexto de uso; rung, operação, provider, capability e selection são server-owned. Claim e request idempotente impedem duplicação mesmo sob outra chave pública. A jornada controlada persistiu a rejeição inicial, o reroute `generated-cutaway`, o resultado aprovado e a decisão humana canônica, sem transformar transporte controlado em prova live.
 
 ## 21. Erros normalizados
 
