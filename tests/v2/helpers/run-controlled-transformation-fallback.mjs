@@ -10,7 +10,27 @@ const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 
-const TERMINAL_JOB_STATUSES = new Set(['approved', 'rejected', 'failed', 'cancelled'])
+const TERMINAL_JOB_STATUSES = new Set(['approved', 'rejected', 'failed', 'canceled'])
+
+async function waitUntilProviderDue(persisted, signal) {
+  if (signal.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError')
+  const nextAttemptAt = persisted.transportState?.nextAttemptAt
+  if (!nextAttemptAt) return
+  const delayMs = Math.max(0, Date.parse(nextAttemptAt) - Date.now())
+  assert.ok(Number.isFinite(delayMs) && delayMs <= 10_000, `controlled provider scheduled an invalid or unexpectedly long ${delayMs}ms wait`)
+  if (delayMs === 0) return
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(finish, delayMs)
+    const abort = () => finish(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+    function finish(error) {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      if (error) reject(error)
+      else resolve()
+    }
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
 
 function boundedString(value, field, maximum = 256) {
   assert.equal(typeof value, 'string', `${field} must be a string`)
@@ -162,6 +182,7 @@ export async function prepareControlledTransformationFallbackFixture(input) {
   execFileSync(ffmpegPath, ['-v', 'error', '-i', input.sourcePath, '-vf', 'hue=s=0.65', '-af', 'atrim=duration=0.8', '-c:v', 'libx264', '-c:a', 'aac', '-y', rejectedPath], { windowsHide: true, timeout: 120_000 })
   execFileSync(ffmpegPath, ['-v', 'error', '-i', input.sourcePath, '-vf', 'hue=s=0.65', '-c:v', 'libx264', '-c:a', 'aac', '-y', approvedPath], { windowsHide: true, timeout: 120_000 })
   const outputs = [await readFile(rejectedPath), await readFile(approvedPath)]
+  let observedCostMinorUnits = 0
   const submissions = new Map()
   const sockets = new Set()
   const server = createServer(async (request, response) => {
@@ -184,7 +205,7 @@ export async function prepareControlledTransformationFallbackFixture(input) {
       response.setHeader('content-type', 'application/json')
       if (request.url.endsWith('/result')) return void response.end(JSON.stringify({
         mediaBase64: stored.bytes.toString('base64'), mediaSha256: sha256(stored.bytes),
-        observedCost: { currency: 'BRL', costMinorUnits: 1 },
+        observedCost: { currency: 'USD', costMinorUnits: observedCostMinorUnits },
       }))
       stored.polls += 1
       return void response.end(JSON.stringify({ status: stored.polls === 1 ? 'processing' : 'completed' }))
@@ -231,7 +252,7 @@ export async function prepareControlledTransformationFallbackFixture(input) {
   assert.ok(address && typeof address === 'object')
   const providerBaseUrl = `http://127.0.0.1:${address.port}`
 
-  const [{ createTransformationBrief }, { createNoveltyBudgetPolicy, createNoveltyBudgetDecision, DEFAULT_NOVELTY_BUDGET_POLICY }, registryApp, jobsApp, workerApp, qualityApp, registryModule, qualityModule, jobsModule, provenanceModule, resultsModule, artifactsModule, projectsModule, noveltyModule, rightsModule, materializerModule, adapterModule, criticModule, ingestionModule, audioModule, probeModule] = await Promise.all([
+  const [{ createTransformationBrief }, { createNoveltyBudgetPolicy, createNoveltyBudgetDecision, DEFAULT_NOVELTY_BUDGET_POLICY }, registryApp, jobsApp, workerApp, qualityApp, registryModule, qualityModule, jobsModule, provenanceModule, resultsModule, artifactsModule, projectsModule, noveltyModule, rightsModule, materializerModule, factoryModule, criticModule, ingestionModule, audioModule, probeModule] = await Promise.all([
     import('../../../src/v2/domain/transformation-brief.ts'),
     import('../../../src/v2/domain/novelty-budget.ts'),
     import('../../../src/v2/application/transformation-provider-registry.ts'),
@@ -248,7 +269,7 @@ export async function prepareControlledTransformationFallbackFixture(input) {
     import('../../../src/v2/infrastructure/prisma/novelty-budget-repository.ts'),
     import('../../../src/v2/infrastructure/prisma/asset-rights-repository.ts'),
     import('../../../src/v2/infrastructure/provider-submission-input-materializer.ts'),
-    import('../../../src/v2/infrastructure/transformation/http-transformation-provider.ts'),
+    import('../../../src/v2/infrastructure/repository-factory.ts'),
     import('../../../src/v2/infrastructure/transformation/ffmpeg-transformation-critic.ts'),
     import('../../../src/v2/infrastructure/transformation/transformation-result-ingestion.ts'),
     import('../../../src/v2/infrastructure/media/ffmpeg-avatar-audio-comparison.ts'),
@@ -261,16 +282,17 @@ export async function prepareControlledTransformationFallbackFixture(input) {
   const novelty = new noveltyModule.PrismaNoveltyBudgetRepository(input.client)
   const rights = new rightsModule.PrismaAssetRightsRepository(input.client)
   const createdAt = new Date().toISOString()
-  const capability = (operation) => ({ id: `${adapterId}-${operation}`, operation, capabilityVersion: '1.0.0', modes: ['stylization'], regions: ['br'], maximumDurationFrames: 18_000, maximumWidth: 3840, maximumHeight: 2160, supportsAudio: true, price: { currency: 'BRL', fixedMinorUnits: 1, perSecondMinorUnits: 0 }, qualityScoreBps: 9_000, dataRetention: 'transient' })
+  const capability = (operation) => ({ id: `${adapterId}-${operation}`, operation, capabilityVersion: '1.0.0', modes: ['stylization'], regions: ['br'], maximumDurationFrames: 18_000, maximumWidth: 3840, maximumHeight: 2160, supportsAudio: true, price: { currency: 'USD', fixedMinorUnits: 0, perSecondMinorUnits: 100 }, qualityScoreBps: 9_000, dataRetention: 'transient' })
   await registryApp.registerTransformationProviderService({ repository: registry, provider: { id: adapterId, workspaceId: input.workspaceId, displayName: 'Controlled generated cutaway', adapterId, adapterVersion: '1.0.0', transport: 'api', credentialRef: `controlled/${adapterId}`, enabled: true, capabilities: [capability('video-to-video'), capability('generated-cutaway')], createdAt, updatedAt: createdAt } })
   await registryApp.recordTransformationProviderHealthService({ repository: registry, health: { providerId: adapterId, workspaceId: input.workspaceId, status: 'healthy', circuitState: 'closed', consecutiveFailures: 0, observedLatencyMs: 1, observedAt: createdAt } })
   const sourceProbe = await probeModule.probeVideo(input.sourcePath, { requireAudio: true })
   const durationFrames = Math.max(1, Math.round(sourceProbe.duration * sourceProbe.fps))
+  observedCostMinorUnits = Math.ceil(durationFrames / sourceProbe.fps) * 100
   const brief = createTransformationBrief({
     workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId,
     storyPlanId: `controlled-fallback-story-${suffix}`, storyPlanHash: sha256(`story:${suffix}`),
     sourceArtifactId: input.sourceArtifact.id, sourceArtifactHash: input.sourceArtifact.sha256,
-    sourceRange: { startFrame: 0, endFrame: durationFrames }, intent: 'stylized-cutaway',
+    sourceRange: { startFrame: 0, endFrame: durationFrames }, intent: 'dramatic-emphasis',
     editorialIntent: 'Create a stylized cutaway while preserving the complete approved speech and timing.',
     mode: 'stylization', prompt: 'Measured controlled stylization.', negativeConstraints: ['do not replace or truncate speech'],
     preserve: ['audio', 'speech', 'timing'], allowedChanges: ['visual style'], target: { style: 'controlled-muted' },
@@ -280,7 +302,7 @@ export async function prepareControlledTransformationFallbackFixture(input) {
     identitySnapshotId: `controlled-fallback-identity-${suffix}`, identitySnapshotHash: sha256(`identity:${suffix}`), createdAt,
   })
   await registryApp.persistTransformationBriefService({ repository: registry, brief })
-  const selection = await registryApp.routeTransformationBriefService({ repository: registry, workspaceId: input.workspaceId, projectId: input.projectId, briefId: brief.id, policy: { region: 'br', maximumCostMinorUnits: 100, minimumQualityScoreBps: 8_000, output: { width: sourceProbe.width, height: sourceProbe.height, includeAudio: true, fps: sourceProbe.fps } }, createdAt })
+  const selection = await registryApp.routeTransformationBriefService({ repository: registry, workspaceId: input.workspaceId, projectId: input.projectId, briefId: brief.id, policy: { region: 'br', maximumCostMinorUnits: observedCostMinorUnits, minimumQualityScoreBps: 8_000, output: { width: sourceProbe.width, height: sourceProbe.height, includeAudio: true, fps: sourceProbe.fps } }, createdAt })
   assert.equal(
     selection.selection.selectedProviderId,
     adapterId,
@@ -295,11 +317,12 @@ export async function prepareControlledTransformationFallbackFixture(input) {
   await novelty.persistPolicy({ workspaceId: input.workspaceId, policy, createdAt })
   const noveltyDecision = createNoveltyBudgetDecision({ workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId, treatmentPlanId: `controlled-fallback-treatment-${suffix}`, storyPlanId: brief.storyPlanId, policy, candidates: [{ id: `controlled-fallback-candidate-${suffix}`, briefId: brief.id, mode: brief.mode, intensityBps: brief.intensityBps, startFrame: 0, endFrame: durationFrames, fps: sourceProbe.fps, servedFromCache: false }], evaluatedAt: createdAt })
   await novelty.persistDecision({ decision: noveltyDecision, createdAt })
-  const adapter = new adapterModule.HttpTransformationProviderAdapter({ id: adapterId, adapterVersion: '1.0.0', baseUrl: providerBaseUrl, apiKey: `controlled-key-${suffix}`, completion: 'polling', modes: ['stylization'], operations: ['video-to-video', 'generated-cutaway'], supportsCancellation: false, priceFixedMinorUnits: 1, currency: 'BRL' })
-  const adapters = { get: ({ adapterId: requestedId, adapterVersion }) => requestedId === adapter.id && adapterVersion === adapter.adapterVersion ? adapter : null }
+  const envPrefix = `APOLLO_V2_TRANSFORMATION_${adapterId.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}`
+  const environment = Object.freeze({ [`${envPrefix}_BASE_URL`]: providerBaseUrl, [`${envPrefix}_API_KEY`]: `controlled-key-${suffix}`, [`${envPrefix}_COMPLETION`]: 'polling', [`${envPrefix}_MODES`]: 'stylization', [`${envPrefix}_OPERATIONS`]: 'video-to-video,generated-cutaway', [`${envPrefix}_ADAPTER_VERSION`]: '1.0.0' })
+  const factoryExports = factoryModule.default ?? factoryModule
+  const adapters = factoryExports.createProviderAdapterRegistry(environment)
   let sequence = 0
-  let clockMs = Date.now()
-  const clock = () => new Date(clockMs += 1_000)
+  const clock = () => new Date()
   const requestJob = jobsApp.requestTransformationJobService({ jobs, registry, adapters, projects: new projectsModule.PrismaProjectWorkspaceQueryRepository(input.client), artifacts, rights, novelty, clock, createJobId: () => `controlled-fallback-job-${suffix}-${++sequence}`, createTransitionId: () => `controlled-fallback-transition-${suffix}-${++sequence}` })
   const materializer = new materializerModule.AuthorizedProviderSubmissionInputMaterializer({ profiles: { readProfile: async () => null }, artifacts, sources: input.sourceMaterializer })
   const resultArtifacts = new resultsModule.PrismaProviderResultArtifactRepository(input.client)
@@ -311,15 +334,15 @@ export async function prepareControlledTransformationFallbackFixture(input) {
   for (let tick = 0; tick < 12; tick += 1) {
     const persisted = await jobs.read({ workspaceId: input.workspaceId, projectId: input.projectId, jobId: initial.persisted.job.id })
     if (TERMINAL_JOB_STATUSES.has(persisted.job.status)) break
-    await worker(`controlled-fallback-worker-${suffix}-${tick}`)
+    await waitUntilProviderDue(persisted, input.signal)
+    await worker(`controlled-fallback-worker-${suffix}-${tick}`, input.signal)
   }
   const rejected = await jobs.read({ workspaceId: input.workspaceId, projectId: input.projectId, jobId: initial.persisted.job.id })
   assert.equal(rejected.job.status, 'rejected', 'controlled first rung must be rejected by measured truncated audio')
   const rejectedLedger = await quality.readLatestFallbackLedger({ workspaceId: input.workspaceId, projectId: input.projectId, briefId: brief.id })
   assert.equal(rejectedLedger.currentRung, 'generated-cutaway')
-  const envPrefix = `APOLLO_V2_TRANSFORMATION_${adapterId.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}`
   return Object.freeze({
-    environment: Object.freeze({ [`${envPrefix}_BASE_URL`]: providerBaseUrl, [`${envPrefix}_API_KEY`]: `controlled-key-${suffix}`, [`${envPrefix}_COMPLETION`]: 'polling', [`${envPrefix}_MODES`]: 'stylization', [`${envPrefix}_OPERATIONS`]: 'video-to-video,generated-cutaway', [`${envPrefix}_ADAPTER_VERSION`]: '1.0.0' }),
+    environment,
     rejectedJob: rejected.job, rejectedLedger,
     async run(runInput) {
       return runControlledTransformationFallback({
@@ -328,7 +351,9 @@ export async function prepareControlledTransformationFallbackFixture(input) {
         expectedProviderId: adapterId,
         expectedCapabilityId: `${adapterId}-generated-cutaway`,
         workerTick: async ({ jobId, iteration, signal }) => {
-          await worker(`controlled-fallback-worker-${suffix}-dispatch-${iteration}`)
+          const current = await jobs.read({ workspaceId: input.workspaceId, projectId: input.projectId, jobId })
+          await waitUntilProviderDue(current, signal)
+          await worker(`controlled-fallback-worker-${suffix}-dispatch-${iteration}`, signal)
           const [ledger, receipt, claim] = await Promise.all([
             quality.readLatestFallbackLedger({ workspaceId: input.workspaceId, projectId: input.projectId, briefId: brief.id }),
             input.client.v2ProviderExecutionReceipt.findFirst({ where: { workspaceId: input.workspaceId, jobId } }),
