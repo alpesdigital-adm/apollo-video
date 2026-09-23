@@ -105,6 +105,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
     const { LocalArtifactContentStorage } = await import('../../src/v2/infrastructure/media/local-artifact-content-storage.ts')
     const { StoredSyntheticMasterAlignmentReader } = await import('../../src/v2/infrastructure/media/synthetic-master-alignment-reader.ts')
+    const { FfmpegAvatarAudioComparison } = await import('../../src/v2/infrastructure/media/ffmpeg-avatar-audio-comparison.ts')
     const { FfprobeSyntheticCriticMediaEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-media-integrity.ts')
     const { AlignmentSyntheticCriticPronunciationEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
     const { DeterministicSyntheticCriticControlledEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
@@ -235,7 +236,11 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
       context: new PrismaSyntheticCriticRuntimeContextResolver({
         client, artifacts: artifactRepository, resultArtifacts: resultArtifactRepository,
         generations, plans, profiles: syntheticRepository, rights: rightsRepository,
-        alignment, clock: () => new Date(at(8)),
+        alignment, audioMasters: audioMasterRepository, sources: sourceMaterializer,
+        audioComparison: new FfmpegAvatarAudioComparison({
+          ...process.env, FFMPEG_PATH: ffmpegPath, FFPROBE_PATH: ffprobePath,
+        }),
+        clock: () => new Date(at(8)),
       }),
       evaluate: evaluateSyntheticCriticCore({
         reports: criticReports,

@@ -1965,7 +1965,7 @@ export function createPublicOperationRepository(
     new PrismaPublicOperationRepository(
       resolveV2Client(),
       randomUUID,
-      createProtectedPayloadCipherFromEnvironment(),
+      () => createProtectedPayloadCipherFromEnvironment(),
     ),
     telemetry,
   )

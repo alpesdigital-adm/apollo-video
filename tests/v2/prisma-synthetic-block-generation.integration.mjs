@@ -105,6 +105,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
     const { LocalArtifactContentStorage } = await import('../../src/v2/infrastructure/media/local-artifact-content-storage.ts')
     const { StoredSyntheticMasterAlignmentReader } = await import('../../src/v2/infrastructure/media/synthetic-master-alignment-reader.ts')
+    const { FfmpegAvatarAudioComparison } = await import('../../src/v2/infrastructure/media/ffmpeg-avatar-audio-comparison.ts')
     const { FfprobeSyntheticCriticMediaEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-media-integrity.ts')
     const { AlignmentSyntheticCriticPronunciationEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
     const { DeterministicSyntheticCriticControlledEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
@@ -216,12 +217,13 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const plans = new PrismaSyntheticScriptPlanRepository(client)
     const generations = new PrismaSyntheticBlockGenerationRepository(client)
     const criticReports = new PrismaSyntheticCriticReportRepository(client)
+    const audioMasterRepository = new PrismaSyntheticAudioMasterRepository(client)
     let providerTransition = 0
     let second = 0
     const tick = () => new Date(at((second += 1) + 4))
     const enqueue = enqueueProviderJobService({
       jobs: providerRepository, adapters: registry, profiles: syntheticRepository,
-      audioMasters: new PrismaSyntheticAudioMasterRepository(client), projects, artifacts: artifactRepository,
+      audioMasters: audioMasterRepository, projects, artifacts: artifactRepository,
       rights: rightsRepository, clock: () => new Date(at(2)),
       createJobId: () => `blockgen-job-${++entity}`,
       createTransitionId: () => `blockgen-transition-${++providerTransition}`,
@@ -245,7 +247,9 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       context: new PrismaSyntheticCriticRuntimeContextResolver({
         client, artifacts: artifactRepository, resultArtifacts: resultArtifactRepository,
         generations, plans, profiles: syntheticRepository, rights: rightsRepository,
-        alignment, clock: () => new Date(at(8)),
+        alignment, audioMasters: audioMasterRepository, sources: sourceMaterializer,
+        audioComparison: new FfmpegAvatarAudioComparison({ ...process.env, FFMPEG_PATH: ffmpegPath }),
+        clock: () => new Date(at(8)),
       }),
       evaluate: evaluateSyntheticCriticCore({
         reports: criticReports,

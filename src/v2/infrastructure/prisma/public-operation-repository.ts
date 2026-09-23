@@ -997,16 +997,28 @@ export async function persistManyOperationStatusEvents(
 export class PrismaPublicOperationRepository implements PublicOperationRepository {
   private readonly client: PrismaClient
   private readonly createEventId: () => string
-  private readonly protectedPayloadCipher: RecipeParameterCipher | undefined
+  private readonly protectedPayloadCipherSource:
+    | RecipeParameterCipher
+    | (() => RecipeParameterCipher)
+    | undefined
 
   constructor(
     client: PrismaClient,
     createEventId: () => string = randomUUID,
-    protectedPayloadCipher?: RecipeParameterCipher,
+    protectedPayloadCipher?: RecipeParameterCipher | (() => RecipeParameterCipher),
   ) {
     this.client = client
     this.createEventId = createEventId
-    this.protectedPayloadCipher = protectedPayloadCipher
+    this.protectedPayloadCipherSource = protectedPayloadCipher
+  }
+
+  private resolveProtectedPayloadCipher(): RecipeParameterCipher {
+    if (!this.protectedPayloadCipherSource) {
+      throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Protected RenderInput persistence is not configured')
+    }
+    return typeof this.protectedPayloadCipherSource === 'function'
+      ? this.protectedPayloadCipherSource()
+      : this.protectedPayloadCipherSource
   }
 
   async cancel(input: {
@@ -1481,9 +1493,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         let ingestUploadKind: 'video' | 'audio' | 'image' | undefined
         let persistedSyntheticRenderContext: SyntheticProductionRenderContext | undefined
         if (syntheticRenderContext) {
-          if (!this.protectedPayloadCipher) {
-            throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Protected RenderInput persistence is not configured')
-          }
+          const protectedPayloadCipher = this.resolveProtectedPayloadCipher()
           const payload = createRenderInputPayload(syntheticRenderContext.renderInput!)
           const contextBody = {
             schemaVersion: 'synthetic-production-render-context/v1' as const,
@@ -1555,7 +1565,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             where: { workspaceId_ref: { workspaceId: input.operation.workspaceId, ref: payload.ref } },
           })
           if (storedPayload) {
-            const opened = await this.protectedPayloadCipher.open({
+            const opened = await protectedPayloadCipher.open({
               algorithm: storedPayload.algorithm as 'aes-256-gcm',
               keyId: storedPayload.keyId,
               nonce: storedPayload.nonce,
@@ -1568,7 +1578,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               opened !== payload.canonicalJson
             ) throw new DomainError('PERSISTENCE_CONFLICT', 'Protected synthetic RenderInput collided with different content')
           } else {
-            const sealed = await this.protectedPayloadCipher.seal(
+            const sealed = await protectedPayloadCipher.seal(
               payload.canonicalJson,
               renderInputCipherContext(input.operation.workspaceId, payload.ref),
             )

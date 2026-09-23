@@ -117,6 +117,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const { LocalArtifactContentStorage } = await import('../../src/v2/infrastructure/media/local-artifact-content-storage.ts')
     const { StoredSyntheticMasterAlignmentReader } = await import('../../src/v2/infrastructure/media/synthetic-master-alignment-reader.ts')
     const { FfmpegDecodedSyntheticAudioDurationReader } = await import('../../src/v2/infrastructure/media/synthetic-master-media.ts')
+    const { FfmpegAvatarAudioComparison } = await import('../../src/v2/infrastructure/media/ffmpeg-avatar-audio-comparison.ts')
     const { FfprobeSyntheticCriticMediaEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-media-integrity.ts')
     const { AlignmentSyntheticCriticPronunciationEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
     const { DeterministicSyntheticCriticControlledEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
@@ -382,7 +383,11 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const criticContext = new PrismaSyntheticCriticRuntimeContextResolver({
       client, artifacts: artifactRepository, resultArtifacts: resultArtifactRepository,
       generations, plans, profiles: syntheticRepository, rights: rightsRepository,
-      alignment, clock: () => new Date(at(7)),
+      alignment, audioMasters: audioMasterRepository, sources: sourceMaterializer,
+      audioComparison: new FfmpegAvatarAudioComparison({
+        ...process.env, FFMPEG_PATH: ffmpegPath, FFPROBE_PATH: ffprobePath,
+      }),
+      clock: () => new Date(at(7)),
     })
     const ttsCritic = new SpecializedSyntheticProviderResultCritic({
       transport: new PersistedTtsResultCritic(artifactRepository, resultArtifactRepository),
@@ -561,7 +566,8 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     }
     for (let stage = 0; stage < 8; stage += 1) await runFreshAvatarWorkerOnce()
     const avatarDone = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
-    assert.ok(['rejected', 'failed'].includes(avatarDone.job.status), `frozen color fixture must fail closed, got ${avatarDone.job.status}`)
+    assert.equal(avatarDone.job.status, 'failed', 'HeyGen without output speech evidence must fail closed before criticism')
+    assert.equal(avatarDone.job.normalizedError?.code, 'PRECONDITION_REQUIRED')
     assert.equal(avatarDone.job.providerJobId, 'journey_video_1')
     assert.ok(avatarDone.job.resultArtifact, 'provider result must remain ingested for diagnosis')
     const avatarEvidence = await provenanceRepository.listEvidenceByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
@@ -574,10 +580,19 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     assert.equal(avatarReceipt.submitEvidenceId, avatarSubmitEvidence[0].id)
     assert.equal(avatarReceipt.retrieveEvidenceId, avatarRetrieveEvidence[0].id)
     assert.equal(new Set([avatarSubmitEvidence[0].leaseToken, avatarRetrieveEvidence[0].leaseToken, avatarReceipt.leaseToken]).size, 3, 'submit, retrieve and receipt must retain their distinct legitimate worker leases')
-    const avatarReport = avatarDone.job.criticResultHash
-      ? await criticReports.readByHash({ workspaceId, reportHash: avatarDone.job.criticResultHash })
-      : null
-    assert.ok(avatarReport && avatarReport.decision !== 'approved', JSON.stringify(avatarReport))
+    assert.equal(avatarDone.job.criticResultHash, undefined, 'missing output speech evidence cannot produce a critic result')
+    assert.deepEqual(
+      (await resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId }))
+        .map(({ role }) => role),
+      ['primary-video'],
+      'transport evidence cannot be promoted into output speech evidence',
+    )
+    await assert.rejects(
+      criticContext.resolve({ job: avatarDone.job, artifact: avatarDone.job.resultArtifact }),
+      (error) => error?.code === 'PRECONDITION_REQUIRED' &&
+        error.message === 'Audio-avatar output speech evidence is unavailable',
+      'the authoritative critic context must identify the missing output evidence precisely',
+    )
     assert.equal(await client.v2SyntheticMasterAsset.count({ where: { workspaceId } }), 0, 'non-approved avatar cannot be promoted')
     assert.equal(downloaderCleanups, 1)
     assert.deepEqual(heygenRequests.map(({ method }) => method), ['POST', 'POST', 'GET', 'GET', 'GET', 'GET'])

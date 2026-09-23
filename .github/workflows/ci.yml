@@ -1134,7 +1134,7 @@ jobs:
           database="apollo_synthetic_wave24_e2e"
           app_name="apollo-video-e2e-synthetic-wave24-ci-${{ github.run_id }}-${{ github.run_attempt }}"
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$database" -Atc "select count(*) from pg_stat_activity where datname = '$database' and application_name = '$app_name'")"
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where datname = '$database' and application_name = '$app_name'")"
             if test "$backends" = 0; then break; fi
             sleep 1
           done

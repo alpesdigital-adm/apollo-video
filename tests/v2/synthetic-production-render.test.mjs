@@ -23,6 +23,9 @@ import { createExternalAuditContext } from '../../src/v2/application/authenticat
 import { readConfiguredRenderTargetIdentity } from '../../src/v2/infrastructure/render-target-registry.ts'
 import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
 import { assertCurrentSyntheticRenderAuthority } from '../../src/v2/infrastructure/prisma/synthetic-production-render-repository.ts'
+import { createQueuedPublicOperation } from '../../src/v2/domain/public-operation.ts'
+import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+import { createProtectedPayloadCipherFromEnvironment } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 
 const hash = (character) => character.repeat(64)
 
@@ -338,6 +341,94 @@ function renderWorkerFixture() {
   }
   return { plan, spec, context, claimed, runtimeIdentity }
 }
+
+test('public operation persistence resolves the protected payload cipher only for synthetic renders', async () => {
+  let cipherResolutionCount = 0
+  const missingCipher = () => {
+    cipherResolutionCount += 1
+    return createProtectedPayloadCipherFromEnvironment({})
+  }
+  const nonSyntheticOperation = createQueuedPublicOperation({
+    id: 'operation-lazy-cipher-artifact',
+    workspaceId: 'workspace-lazy-cipher',
+    clientId: 'client-lazy-cipher',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-lazy-cipher',
+      manifestId: 'manifest-lazy-cipher',
+    },
+    createdAt: '2029-01-01T00:00:00.000Z',
+  })
+  const audit = createApiAccessAuditContext({
+    clientId: nonSyntheticOperation.clientId,
+    credentialId: 'credential-lazy-cipher',
+    workspaceId: nonSyntheticOperation.workspaceId,
+    environment: 'production',
+    authenticationKind: 'bearer',
+  })
+  let transactionAttempts = 0
+  const nonSyntheticRepository = new PrismaPublicOperationRepository({
+    async $transaction() {
+      transactionAttempts += 1
+      const conflict = new Error('controlled serialization conflict')
+      conflict.code = 'P2034'
+      throw conflict
+    },
+  }, () => 'event-lazy-cipher', missingCipher)
+  await assert.rejects(
+    nonSyntheticRepository.createOrReplay({
+      operation: nonSyntheticOperation,
+      authenticationAudit: audit,
+      context: {
+        kind: 'artifact-render',
+        authorizationId: 'authorization-lazy-cipher',
+        inputHash: hash('9'),
+      },
+      idempotencyKey: 'operation-lazy-cipher-key',
+      requestFingerprint: hash('8'),
+    }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(transactionAttempts, 3)
+  assert.equal(cipherResolutionCount, 0)
+
+  const { plan, spec, context } = renderWorkerFixture()
+  const syntheticOperation = createQueuedPublicOperation({
+    id: context.operationId,
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    clientId: 'client-lazy-cipher',
+    type: 'synthetic-production-render',
+    target: { type: 'project-version', id: plan.projectVersionId },
+    createdAt: '2029-01-01T00:02:00.000Z',
+  })
+  const syntheticAudit = createApiAccessAuditContext({
+    clientId: syntheticOperation.clientId,
+    credentialId: 'credential-lazy-cipher',
+    workspaceId: syntheticOperation.workspaceId,
+    environment: 'production',
+    authenticationKind: 'bearer',
+  })
+  const syntheticRepository = new PrismaPublicOperationRepository({
+    async $transaction(callback) {
+      return callback({
+        v2PublicOperation: { async findUnique() { return null } },
+      })
+    },
+  }, () => 'event-lazy-cipher', missingCipher)
+  await assert.rejects(
+    syntheticRepository.createOrReplay({
+      operation: syntheticOperation,
+      authenticationAudit: syntheticAudit,
+      context: { kind: 'synthetic-production-render', ...context, renderInput: spec },
+      idempotencyKey: 'synthetic-lazy-cipher-key',
+      requestFingerprint: hash('7'),
+    }),
+    (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED',
+  )
+  assert.equal(cipherResolutionCount, 1)
+})
 
 function rightsRow(snapshot) {
   return {
