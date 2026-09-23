@@ -39,6 +39,47 @@ function boundedString(value, field, maximum = 256) {
   return normalized
 }
 
+function safeJobDiagnostic(job, transitions, receipt) {
+  const error = job.normalizedError
+  return JSON.stringify({
+    status: job.status,
+    providerStatus: job.providerStatus ?? null,
+    normalizedError: error ? {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      retryAfterMs: error.retryAfterMs ?? null,
+    } : null,
+    criticResultHash: job.criticResultHash ?? null,
+    transitions: transitions.map((transition) => ({
+      sequence: transition.sequence,
+      fromStatus: transition.fromStatus,
+      toStatus: transition.toStatus,
+    })),
+    receipt: receipt ? {
+      id: receipt.id,
+      receiptHash: receipt.receiptHash,
+      runtimeClass: receipt.runtimeClass,
+      attempt: receipt.attempt,
+    } : null,
+  })
+}
+
+async function readJobDiagnostic(client, job) {
+  const [transitions, receipt] = await Promise.all([
+    client.v2ProviderJobTransition.findMany({
+      where: { workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id },
+      select: { sequence: true, fromStatus: true, toStatus: true },
+      orderBy: { sequence: 'asc' },
+    }),
+    client.v2ProviderExecutionReceipt.findFirst({
+      where: { workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id },
+      select: { id: true, receiptHash: true, runtimeClass: true, attempt: true },
+    }),
+  ])
+  return safeJobDiagnostic(job, transitions, receipt)
+}
+
 async function responseJson(response, label) {
   let body
   try { body = await response.json() } catch { assert.fail(`${label} returned non-JSON status ${response.status}`) }
@@ -139,7 +180,13 @@ export async function runControlledTransformationFallback(input) {
     })
     fallbackJob = read.job
   }
-  assert.equal(fallbackJob.status, 'approved', `controlled fallback ended ${fallbackJob.status}`)
+  assert.equal(
+    fallbackJob.status,
+    'approved',
+    `controlled fallback did not approve: ${typeof input.readJobDiagnostic === 'function'
+      ? await input.readJobDiagnostic(fallbackJob)
+      : safeJobDiagnostic(fallbackJob, [], receipt)}`,
+  )
   assert.ok(fallbackJob.resultArtifact, 'approved fallback has no canonical result artifact')
   assert.ok(fallbackLedger, 'worker did not expose the durable fallback result ledger')
   assert.ok(receipt, 'worker did not expose the canonical provider execution receipt')
@@ -338,7 +385,11 @@ export async function prepareControlledTransformationFallbackFixture(input) {
     await worker(`controlled-fallback-worker-${suffix}-${tick}`, input.signal)
   }
   const rejected = await jobs.read({ workspaceId: input.workspaceId, projectId: input.projectId, jobId: initial.persisted.job.id })
-  assert.equal(rejected.job.status, 'rejected', 'controlled first rung must be rejected by measured truncated audio')
+  assert.equal(
+    rejected.job.status,
+    'rejected',
+    `controlled first rung must be rejected by measured truncated audio: ${await readJobDiagnostic(input.client, rejected.job)}`,
+  )
   const rejectedLedger = await quality.readLatestFallbackLedger({ workspaceId: input.workspaceId, projectId: input.projectId, briefId: brief.id })
   assert.equal(rejectedLedger.currentRung, 'generated-cutaway')
   return Object.freeze({
@@ -350,6 +401,7 @@ export async function prepareControlledTransformationFallbackFixture(input) {
         use: input.use, market: input.market, locale: input.locale,
         expectedProviderId: adapterId,
         expectedCapabilityId: `${adapterId}-generated-cutaway`,
+        readJobDiagnostic: (job) => readJobDiagnostic(input.client, job),
         workerTick: async ({ jobId, iteration, signal }) => {
           const current = await jobs.read({ workspaceId: input.workspaceId, projectId: input.projectId, jobId })
           await waitUntilProviderDue(current, signal)
