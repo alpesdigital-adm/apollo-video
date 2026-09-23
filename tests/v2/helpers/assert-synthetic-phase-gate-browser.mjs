@@ -4,6 +4,66 @@ import { mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
 const SHA256 = /^[a-f0-9]{64}$/
+const CRITERION_CHECKS = Object.freeze({
+  'F3-GATE-001': Object.freeze([
+    'elevenlabs-audio-alignment-live',
+    'heygen-generated-audio-avatar-live',
+    'heygen-ready-audio-avatar-live',
+  ]),
+  'F3-GATE-002': Object.freeze([
+    'approved-blocks-catalogued',
+    'cross-project-reuse-with-zero-provider-work',
+  ]),
+  'F3-GATE-003': Object.freeze([
+    'transformation-rejected-before-fallback',
+    'fallback-result-approved',
+  ]),
+  'F3-GATE-004': Object.freeze([
+    'provider-swap-keeps-plan-and-renderer-contracts',
+  ]),
+})
+
+export function summarizeSyntheticPhaseGateCoverage(report) {
+  const evidenceByCriterion = new Map(report.evidence.map((criterion) => [criterion.criterion, criterion]))
+  assert.equal(evidenceByCriterion.size, report.evidence.length, 'gate criteria must be unique')
+  const missingCriteria = new Set(report.missing)
+  assert.equal(missingCriteria.size, report.missing.length, 'missing gate criteria must be unique')
+  assert.deepEqual(
+    [...new Set([...evidenceByCriterion.keys(), ...missingCriteria])].sort(),
+    Object.keys(CRITERION_CHECKS).sort(),
+    'present and missing criteria must cover the fixed gate contract exactly',
+  )
+
+  const missingCodes = []
+  let covered = 0
+  let total = 0
+  for (const [criterionCode, requiredCodes] of Object.entries(CRITERION_CHECKS)) {
+    const criterion = evidenceByCriterion.get(criterionCode)
+    if (!criterion) {
+      assert.ok(missingCriteria.has(criterionCode), `${criterionCode} must be declared missing`)
+      missingCodes.push(...requiredCodes)
+      total += requiredCodes.length
+      continue
+    }
+    assert.equal(missingCriteria.has(criterionCode), false, `${criterionCode} cannot be present and missing`)
+    const checksByCode = new Map(criterion.checks.map((check) => [check.code, check]))
+    assert.equal(checksByCode.size, criterion.checks.length, `${criterionCode} checks must be unique`)
+    const missingChecks = new Set(criterion.missingChecks)
+    assert.equal(missingChecks.size, criterion.missingChecks.length, `${criterionCode} missing checks must be unique`)
+    assert.ok(
+      [...checksByCode.keys(), ...missingChecks].every((code) => requiredCodes.includes(code)),
+      `${criterionCode} contains a check outside the fixed gate contract`,
+    )
+    for (const code of requiredCodes) {
+      total += 1
+      const check = checksByCode.get(code)
+      const missing = !check || missingChecks.has(code) || check.missingEvidenceTypes.length > 0
+      if (missing) missingCodes.push(code)
+      else covered += 1
+    }
+  }
+  return Object.freeze({ covered, total, missingCodes: Object.freeze(missingCodes.sort()) })
+}
 
 function browserExecutable() {
   return [
@@ -40,15 +100,10 @@ function assertGate(gate, input) {
   assert.ok(Number.isFinite(Date.parse(gate.report.evaluatedAt)), 'gate must expose a valid evaluatedAt')
   assert.ok(Number.isFinite(Date.parse(gate.createdAt)), 'gate must expose a valid createdAt')
 
-  const checks = gate.report.evidence.flatMap((criterion) => criterion.checks)
-  assert.equal(checks.length, input.expected.checksTotal)
-  const covered = checks.filter((check) => check.missingEvidenceTypes.length === 0)
-  assert.equal(covered.length, input.expected.checksPassed)
-  const missingCodes = checks
-    .filter((check) => check.missingEvidenceTypes.length > 0)
-    .map((check) => check.code)
-    .sort()
-  assert.deepEqual(missingCodes, [...input.expected.missingLiveChecks].sort())
+  const coverage = summarizeSyntheticPhaseGateCoverage(gate.report)
+  assert.equal(coverage.total, input.expected.checksTotal)
+  assert.equal(coverage.covered, input.expected.checksPassed)
+  assert.deepEqual(coverage.missingCodes, [...input.expected.missingLiveChecks].sort())
 }
 
 async function diagnostic(readServerLogs, page) {

@@ -255,6 +255,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
+    await client.v2RecipeParameterPayload.deleteMany({ where: { workspaceId } })
     await client.v2RenderInputPayload.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
@@ -1436,6 +1437,23 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       assert.equal(terminal.attestation.attestationHash, attested.record.attestation.attestationHash)
       assert.equal(terminal.context.outputArtifactId, waiting.context.outputArtifactId)
       assert.equal(terminal.checkpoint.outputKey, waiting.checkpoint.outputKey)
+      await writeFile(join(evidenceRoot, `${evidenceName}-render-terminal.json`), `${JSON.stringify({
+        operation: {
+          id: terminal.operation.id,
+          status: terminal.operation.status,
+          phase: terminal.operation.phase,
+        },
+        checkpoint: {
+          outputSha256: terminal.checkpoint.outputSha256,
+          attempt: terminal.checkpoint.attempt,
+        },
+        qualityReport: terminal.qualityReport,
+        attestation: {
+          attestationHash: terminal.attestation.attestationHash,
+          identity: terminal.attestation.identity,
+          identityHash: terminal.checkpoint.runtimeIdentityHash,
+        },
+      }, null, 2)}\n`, 'utf8')
 
       const replayResponse = await request()
       const replay = (await readExpectedPublicResponse(
@@ -1506,12 +1524,17 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     ]
     assert.equal(gate.report.approved, false)
     assert.deepEqual([gate.report.passed, gate.report.total], [3, 4])
-    const gateChecks = gate.report.evidence.flatMap((criterion) => criterion.checks)
-    assert.equal(gateChecks.length, 8)
-    assert.equal(gateChecks.filter((check) => check.missingEvidenceTypes.length === 0).length, 5)
-    assert.deepEqual(
-      gateChecks.filter((check) => check.missingEvidenceTypes.length > 0).map(({ code }) => code).sort(),
-      [...expectedMissingLiveChecks].sort(),
+    const {
+      assertSyntheticPhaseGateBrowser,
+      summarizeSyntheticPhaseGateCoverage,
+    } = await import('./helpers/assert-synthetic-phase-gate-browser.mjs')
+    const gateCoverage = summarizeSyntheticPhaseGateCoverage(gate.report)
+    assert.deepEqual([gateCoverage.covered, gateCoverage.total], [5, 8])
+    assert.deepEqual(gateCoverage.missingCodes, [...expectedMissingLiveChecks].sort())
+    await writeFile(
+      join(evidenceRoot, 'phase-gate-report.json'),
+      `${JSON.stringify(gate, null, 2)}\n`,
+      'utf8',
     )
     const listedResponse = await boundedFetch(`${gateEndpoint}?limit=100`, {
       headers: { authorization: `Bearer ${issued.token}`, accept: 'application/json' },
@@ -1524,7 +1547,6 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     )).data.gates
     assert.equal(listed[0].recordHash, gate.recordHash)
 
-    const { assertSyntheticPhaseGateBrowser } = await import('./helpers/assert-synthetic-phase-gate-browser.mjs')
     const browserEvidence = await assertSyntheticPhaseGateBrowser({
       baseUrl,
       projectId: project.project.id,
