@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain, DomainError } from './errors.ts'
+import { normalizePortableKey } from './render-input.ts'
 
 export const SYNTHETIC_EDIT_PLAN_SCHEMA_VERSION =
   'synthetic-edit-plan/v1' as const
@@ -392,7 +393,7 @@ function artifact(
   return Object.freeze({
     id: canonicalId(value.id, `${field}.id`),
     artifactId: canonicalId(value.artifactId, `${field}.artifactId`),
-    artifactKey: canonicalId(value.artifactKey, `${field}.artifactKey`),
+    artifactKey: normalizePortableKey(value.artifactKey, `${field}.artifactKey`),
     kind: value.kind,
     sha256: canonicalHash(value.sha256, `${field}.sha256`),
     byteSize: value.byteSize,

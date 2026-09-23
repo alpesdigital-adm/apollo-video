@@ -5,6 +5,7 @@ import { ElevenLabsTtsProviderAdapter } from '../../src/v2/infrastructure/eleven
 import { HeyGenV3AsyncMediaProviderAdapter } from '../../src/v2/infrastructure/heygen-v3-provider.ts';
 import { validateProviderCapabilities } from '../../src/v2/application/provider-capabilities.ts';
 import { compileSyntheticPresenterRenderInputs } from '../../src/v2/application/compile-synthetic-presenter-render.ts';
+import { contentAddressedArtifactKey } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts';
 
 const profile = { id: 'ana', version: 2, actor: 'Ana', providerIdentities: { heygen: 'ana-h' }, voiceProfiles: { 'pt-BR': 'ana-v' }, languages: ['pt-BR'], consent: { granted: true, expiresAt: '2030-01-01', allowedLocales: ['pt-BR'], allowedUses: ['ads'], evidenceId: 'consent-1' }, restrictions: [], active: true, disclosure: 'Personagem gerado por IA' };
 const audio = prepareAudio({ text: 'Uma frase completa. Outra reflexão.', locale: 'pt-BR' });
@@ -169,6 +170,51 @@ test('T-FR-092 creates immutable person-free EditPlan and portable RenderInputs'
   assert.equal(compiled.proxy.props.subtitles[0].text, 'Conteúdo gerado com IA')
   assert.equal(compiled.proxy.composition.propsHash, compiled.final.composition.propsHash)
   assert.equal(compiled.proxy.plan.hash, compiled.final.plan.hash)
+})
+
+test('T-FR-092 accepts canonical content-addressed artifact keys and rejects unsafe storage identities', () => {
+  const portableKey = contentAddressedArtifactKey({
+    workspaceId: 'workspace-with-a-real-canonical-storage-namespace',
+    prefix: 'provider-original',
+    sha256: digest('9'),
+    extension: 'mp4',
+  })
+  assert.ok(portableKey.length > 128)
+  const fixture = durableFixture({
+    blocks: durableFixture().blocks.map((entry, index) => index === 0
+      ? { ...entry, artifact: { ...entry.artifact, artifactKey: portableKey } }
+      : entry),
+  })
+  const plan = createSyntheticPresenterEditPlan(fixture)
+  assert.equal(plan.blocks[0].artifact.artifactKey, portableKey)
+  assert.equal(
+    compileSyntheticPresenterRenderInputs({
+      plan,
+      renderer: { id: 'remotion', version: 'version-1', digest: digest('7') },
+    }).final.assets.some((entry) => entry.artifactKey === portableKey),
+    true,
+  )
+
+  for (const artifactKey of [
+    '../provider-original.mp4',
+    'synthetic/../provider-original.mp4',
+    'synthetic//provider-original.mp4',
+    '/synthetic/provider-original.mp4',
+    'C:/synthetic/provider-original.mp4',
+    'synthetic\\provider-original.mp4',
+    'https://storage.example/provider-original.mp4',
+  ]) {
+    assert.throws(
+      () => createSyntheticPresenterEditPlan({
+        ...fixture,
+        blocks: fixture.blocks.map((entry, index) => index === 0
+          ? { ...entry, artifact: { ...entry.artifact, artifactKey } }
+          : entry),
+      }),
+      /portable relative key/,
+      artifactKey,
+    )
+  }
 })
 
 test('T-FR-092 fails closed before render on consent, rights, critic or timeline drift', () => {

@@ -131,7 +131,7 @@ function normalizeSha256(value: unknown, field: string): string {
   return normalized
 }
 
-function normalizePortableKey(value: unknown, field: string): string {
+export function normalizePortableKey(value: unknown, field: string): string {
   assertDomain(typeof value === 'string', 'INVALID_RENDER_INPUT', `${field} must be a string`)
   const normalized = value.trim()
   const segments = normalized.split('/')
