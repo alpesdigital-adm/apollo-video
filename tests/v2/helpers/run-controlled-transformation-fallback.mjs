@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -197,6 +197,21 @@ export async function prepareControlledTransformationFallbackFixture(input) {
   }
   const abortListener = () => { void closeServer() }
   input.signal.addEventListener('abort', abortListener, { once: true })
+  const closeFixture = async () => {
+    // The generated media belongs to this fixture, but it cannot be removed
+    // while the loopback provider may still be serving it to a worker.
+    await closeServer()
+    const removals = await Promise.allSettled([
+      rm(rejectedPath, { force: true }),
+      rm(approvedPath, { force: true }),
+    ])
+    const failures = removals
+      .filter((removal) => removal.status === 'rejected')
+      .map((removal) => removal.reason)
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'Controlled fallback fixture media cleanup failed')
+    }
+  }
   try {
   const address = server.address()
   assert.ok(address && typeof address === 'object')
@@ -298,10 +313,14 @@ export async function prepareControlledTransformationFallbackFixture(input) {
         },
       })
     },
-    async close() { await closeServer() },
+    async close() { await closeFixture() },
   })
   } catch (error) {
-    await closeServer()
+    try {
+      await closeFixture()
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'Controlled fallback setup and cleanup both failed')
+    }
     throw error
   }
 }

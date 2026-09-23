@@ -473,7 +473,9 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     }
     const providerRepository = new PrismaProviderJobRepository(client)
     const resultArtifactRepository = new PrismaProviderResultArtifactRepository(client)
-    const provenanceRepository = new PrismaProviderExecutionProvenanceRepository(client)
+    let tick = 0
+    const controlledWorkerClock = () => new Date(at(tick + 2))
+    const provenanceRepository = new PrismaProviderExecutionProvenanceRepository(client, controlledWorkerClock)
     const rightsRepository = new PrismaAssetRightsRepository(client)
     const projectsQuery = new PrismaProjectWorkspaceQueryRepository(client)
     const audioMasterRepository = new PrismaSyntheticAudioMasterRepository(client)
@@ -637,7 +639,6 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     // Each tick constructs a brand-new worker instance with a new identity:
     // exactly what a process restart between steps looks like. All state that
     // carries the journey forward lives in PostgreSQL.
-    let tick = 0
     const runFreshTtsWorkerOnce = () => {
       tick += 1
       return runProviderJobWorkerOnce({
@@ -645,7 +646,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         resultArtifacts: resultArtifactRepository,
         adapters: registry, materializer,
         ingestor: ttsIngestor, critic: ttsCritic,
-        clock: () => new Date(at(tick + 2)),
+        clock: controlledWorkerClock,
         createLeaseToken: () => `journey-tts-lease-${tick}`,
         createTransitionId: () => `journey-transition-${++providerTransition}`,
       })(`journey-tts-worker-${tick}`)
@@ -796,7 +797,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         resultArtifacts: resultArtifactRepository,
         adapters: registry, materializer,
         ingestor: avatarIngestor, critic: avatarCritic,
-        clock: () => new Date(at(tick + 2)),
+        clock: controlledWorkerClock,
         createLeaseToken: () => `journey-avatar-lease-${tick}`,
         createTransitionId: () => `journey-transition-${++providerTransition}`,
       })(`journey-avatar-worker-${tick}`)
@@ -1179,7 +1180,13 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
           `${baseUrl}/v1/projects/${encodeURIComponent(project.project.id)}/transformation-fallbacks/${encodeURIComponent(ledger.id)}/actions`,
           {
             method: 'POST',
-            headers: { cookie: uiCookie, accept: 'application/json', 'content-type': 'application/json' },
+            headers: {
+              cookie: uiCookie,
+              accept: 'application/json',
+              'content-type': 'application/json',
+              origin: baseUrl,
+              'sec-fetch-site': 'same-origin',
+            },
             body: JSON.stringify({ action }),
           },
           signal,
@@ -1229,6 +1236,26 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       assert.equal(waiting?.attestation, undefined)
       const checkpointHash = waiting.checkpoint.outputSha256
       const checkpointAttempt = waiting.checkpoint.attempt
+      const waitingArtifact = await artifactRepository.findById(workspaceId, waiting.context.outputArtifactId)
+      assert.ok(waitingArtifact, 'waiting render output artifact must be durable before attestation')
+      const waitingSourcePath = await storedArtifactPath(waitingArtifact.artifactKey)
+      assert.equal(await calculateFileSha256(waitingSourcePath), checkpointHash)
+      const retainedPath = join(evidenceRoot, `${evidenceName}.mp4`)
+      await copyFile(waitingSourcePath, retainedPath)
+      await writeFile(join(evidenceRoot, `${evidenceName}-render-identity.json`), `${JSON.stringify({
+        workspaceId,
+        projectId,
+        projectVersionId,
+        productionRunId: runId,
+        publicOperationId: created.operation.id,
+        outputArtifactId: waiting.context.outputArtifactId,
+        outputManifestId: created.render.outputManifestId,
+        outputKey: waiting.checkpoint.outputKey,
+        outputSha256: checkpointHash,
+        attempt: checkpointAttempt,
+        status: waiting.operation.status,
+      }, null, 2)}\n`, 'utf8')
+      expectedRenderOutputKeys.push(waiting.checkpoint.outputKey)
 
       const recoveryBeforeAttestation = await createSyntheticProductionRenderWorker(runtimeEnv)(
         `synthetic-wave24-render-${evidenceName}-recovery`,
@@ -1261,7 +1288,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       assert.equal(terminal.checkpoint.outputSha256, checkpointHash)
       assert.equal(terminal.checkpoint.attempt, checkpointAttempt)
       assert.equal(terminal.attestation.attestationHash, attested.record.attestation.attestationHash)
-      expectedRenderOutputKeys.push(terminal.checkpoint.outputKey)
+      assert.equal(terminal.context.outputArtifactId, waiting.context.outputArtifactId)
+      assert.equal(terminal.checkpoint.outputKey, waiting.checkpoint.outputKey)
 
       const replayResponse = await request()
       assert.equal(replayResponse.status, 200)
@@ -1269,12 +1297,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       assert.equal(replay.replayed, true)
       assert.equal(replay.operation.id, created.operation.id)
 
-      const artifact = await artifactRepository.findById(workspaceId, terminal.context.outputArtifactId)
-      assert.ok(artifact)
-      const sourcePath = await storedArtifactPath(artifact.artifactKey)
-      assert.equal(await calculateFileSha256(sourcePath), terminal.checkpoint.outputSha256)
-      const retainedPath = join(evidenceRoot, `${evidenceName}.mp4`)
-      await copyFile(sourcePath, retainedPath)
+      assert.equal(await calculateFileSha256(retainedPath), terminal.checkpoint.outputSha256)
       const framePath = join(evidenceRoot, `${evidenceName}-frame.png`)
       execFileSync(ffmpegPath, [
         '-nostdin', '-v', 'error', '-ss', '0.75', '-i', retainedPath,
@@ -1434,9 +1457,10 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     await cleanupStep('render scratch cleanup failed', async () => {
       const renderRoot = join(workRoot, 'render-output')
       const renderEntries = await readdir(renderRoot, { recursive: true }).catch(() => [])
-      assert.equal(renderEntries.some((entry) => String(entry).includes('.partial.')), false, 'render scratch retains a partial output')
+      const normalizedRenderEntries = renderEntries.map((entry) => String(entry).replaceAll('\\', '/'))
+      assert.equal(normalizedRenderEntries.some((entry) => entry.includes('.partial.')), false, 'render scratch retains a partial output')
       assert.deepEqual(
-        renderEntries.filter((entry) => String(entry).endsWith('.mp4')).map(String).sort(),
+        normalizedRenderEntries.filter((entry) => entry.endsWith('.mp4')).sort(),
         [...expectedRenderOutputKeys].sort(),
         'render scratch contains an unexpected or missing committed output',
       )

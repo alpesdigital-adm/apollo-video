@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createLiveAvatarEvidenceAvailability } from '../../src/v2/infrastructure/live-avatar-evidence-availability.ts'
+const availabilityNamespace = await import('../../src/v2/infrastructure/live-avatar-evidence-availability.ts')
+const availabilityExports = availabilityNamespace.default ?? availabilityNamespace
+const { createLiveAvatarEvidenceAvailability } = availabilityExports
+assert.equal(typeof createLiveAvatarEvidenceAvailability, 'function')
 
 function required(name) {
   const value = process.env[name]?.trim()
