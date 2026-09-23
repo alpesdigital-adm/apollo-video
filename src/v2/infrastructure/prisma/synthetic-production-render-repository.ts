@@ -655,6 +655,22 @@ export class PrismaSyntheticProductionRenderRepository implements SyntheticProdu
     if (Number.isNaN(now.getTime()) || now.toISOString() !== input.now) {
       throw new DomainError('INVALID_ARGUMENT', 'Synthetic render finalization clock is invalid')
     }
+    const source = await this.client.v2SyntheticProductionRenderOperation.findUnique({
+      where: { operationId: input.operationId },
+      select: { workspaceId: true, renderInputRef: true, renderInputHash: true },
+    })
+    if (!source) return false
+    // The protected store owns its Prisma client and decrypts the payload. Read
+    // it before opening the serializable transaction so a connection_limit=1
+    // runtime cannot deadlock waiting for a second pool checkout. The
+    // transaction below rechecks the immutable ref/hash and payload row before
+    // it commits the operation and run atomically.
+    const spec = await this.protectedInputs.read(
+      source.workspaceId,
+      source.renderInputRef,
+      source.renderInputHash,
+    )
+    if (!spec) throw new DomainError('PERSISTENCE_CONFLICT', 'Protected RenderInput is missing before synthetic render completion')
     return this.client.$transaction(async (transaction) => {
       const row = await transaction.v2SyntheticProductionRenderOperation.findFirst({
         where: { operationId: input.operationId },
@@ -668,6 +684,17 @@ export class PrismaSyntheticProductionRenderRepository implements SyntheticProdu
       if (!operationRow || operationRow.status !== 'running' || operationRow.phase !== 'persisting' ||
         operationRow.leaseOwner !== input.leaseOwner || operationRow.attempt !== input.attempt ||
         operationRow.leaseExpiresAt === null || operationRow.leaseExpiresAt.getTime() <= now.getTime()) return false
+      if (row.workspaceId !== source.workspaceId || row.renderInputRef !== source.renderInputRef ||
+        row.renderInputHash !== source.renderInputHash) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Synthetic render protected input changed before completion')
+      }
+      const protectedPayload = await transaction.v2RenderInputPayload.findUnique({
+        where: { workspaceId_ref: { workspaceId: row.workspaceId, ref: row.renderInputRef } },
+        select: { inputHash: true },
+      })
+      if (!protectedPayload || protectedPayload.inputHash !== row.renderInputHash) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Synthetic render protected input is no longer current')
+      }
       const plan = await assertCurrentSyntheticRenderAuthority(transaction, row, now)
       const storedCheckpoint = checkpoint(row)
       if (!storedCheckpoint || !row.qualityReport?.passed || !row.buildAttestation) {
@@ -677,8 +704,6 @@ export class PrismaSyntheticProductionRenderRepository implements SyntheticProdu
         parseRecord(row.qualityReport.reportJson, 'synthetic render quality report') as unknown as SyntheticProductionRenderQualityReport,
       )
       const attestation = hydrateAttestation(row.buildAttestation)
-      const spec = await this.protectedInputs.read(row.workspaceId, row.renderInputRef, row.renderInputHash)
-      if (!spec) throw new DomainError('PERSISTENCE_CONFLICT', 'Protected RenderInput is missing before synthetic render completion')
       assertQualityBinding(row, row.qualityReport, quality, storedCheckpoint, spec)
       const manifest = await transaction.v2MediaArtifactManifest.findFirst({
         where: {
