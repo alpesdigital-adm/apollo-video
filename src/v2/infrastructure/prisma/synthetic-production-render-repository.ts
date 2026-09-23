@@ -116,10 +116,10 @@ export async function assertCurrentSyntheticRenderAuthority(
   })
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]))
   const planArtifactIds = [
-    plan.audio.id,
-    ...plan.blocks.map((block) => block.artifact.id),
-    ...plan.bRoll.map((insert) => insert.artifact.id),
-    ...plan.overlays.map((insert) => insert.artifact.id),
+    plan.audio.artifactId,
+    ...plan.blocks.map((block) => block.artifact.artifactId),
+    ...plan.bRoll.map((insert) => insert.artifact.artifactId),
+    ...plan.overlays.map((insert) => insert.artifact.artifactId),
   ].toSorted()
   const authorizedArtifactIds = [...plan.authorization.artifactIds].toSorted()
   const persistedArtifactIds = run.assets.map((asset) => asset.artifactId).toSorted()
@@ -128,6 +128,9 @@ export async function assertCurrentSyntheticRenderAuthority(
     stableSerialize(planArtifactIds) !== stableSerialize(persistedArtifactIds) ||
     plan.authorization.decisions.length !== planArtifactIds.length) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Synthetic render plan, assets and authorization set differ')
+  }
+  if (Date.parse(plan.authorization.expiresAt) <= now.getTime()) {
+    throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Synthetic render authorization has expired')
   }
   for (const asset of run.assets) {
     const artifact = byId.get(asset.artifactId)
@@ -146,7 +149,7 @@ export async function assertCurrentSyntheticRenderAuthority(
       locale: run.locale,
       syntheticOperations: ['audio-avatar'],
     }, now)
-    if (decision.outcome !== 'allow' || decision.validUntil !== authorized.validUntil) {
+    if (decision.outcome !== 'allow' || Date.parse(authorized.validUntil) <= now.getTime()) {
       throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Synthetic render asset rights are no longer valid')
     }
   }
@@ -182,7 +185,7 @@ export async function assertCurrentSyntheticRenderAuthority(
     return [stored.reportHash, report] as const
   }))
   for (const block of plan.blocks) {
-    const asset = run.assets.find((candidate) => candidate.artifactId === block.artifact.id)
+    const asset = run.assets.find((candidate) => candidate.artifactId === block.artifact.artifactId)
     const job = jobs.get(block.providerJobId)
     const report = reports.get(block.critic.resultHash)
     const binding = job?.input.criticBinding as Readonly<Record<string, unknown>> | undefined
@@ -190,14 +193,14 @@ export async function assertCurrentSyntheticRenderAuthority(
     if (!asset || asset.providerJobId !== block.providerJobId || asset.criticHash !== block.critic.resultHash ||
       !job || !report || !isCurrentSyntheticCriticApproval(report) ||
       job.status !== 'approved' || job.operation !== 'audio-avatar' || job.criticResultHash !== report.reportHash ||
-      job.resultArtifact?.artifactId !== block.artifact.id || job.resultArtifact.artifactSha256 !== block.artifact.sha256 ||
-      job.authorization.profileSnapshotId !== run.profileSnapshotId || job.input.audioArtifactId !== plan.audio.id ||
+      job.resultArtifact?.artifactId !== block.artifact.artifactId || job.resultArtifact.artifactSha256 !== block.artifact.sha256 ||
+      job.authorization.profileSnapshotId !== run.profileSnapshotId || job.input.audioArtifactId !== plan.audio.artifactId ||
       audioRange?.startMs !== block.rangeMs[0] || audioRange.endMs !== block.rangeMs[1] ||
       report.providerJobId !== job.id || report.projectId !== job.projectId || report.blockId !== block.id ||
-      report.capability !== 'audio-avatar' || report.artifactId !== block.artifact.id ||
+      report.capability !== 'audio-avatar' || report.artifactId !== block.artifact.artifactId ||
       report.artifactSha256 !== block.artifact.sha256 || report.profileSnapshotId !== run.profileSnapshotId ||
       report.scriptHash !== binding?.scriptHash || binding.blockId !== block.id || binding.scriptText !== block.text ||
-      report.outputSpeechEvidence?.sourceAudioArtifactId !== plan.audio.id ||
+      report.outputSpeechEvidence?.sourceAudioArtifactId !== plan.audio.artifactId ||
       report.outputSpeechEvidence.sourceAudioRangeHash !== audioRange.rangeHash) {
       throw new DomainError('PRECONDITION_REQUIRED', 'Synthetic render block no longer has its exact current critic approval')
     }

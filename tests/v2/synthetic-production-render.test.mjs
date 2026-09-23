@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-control.ts'
 import {
   assertSyntheticProductionRenderQualityReport,
   calculateSyntheticProductionRenderContextHash,
@@ -20,6 +22,7 @@ import { enqueueSyntheticProductionRenderService } from '../../src/v2/applicatio
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { readConfiguredRenderTargetIdentity } from '../../src/v2/infrastructure/render-target-registry.ts'
 import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
+import { assertCurrentSyntheticRenderAuthority } from '../../src/v2/infrastructure/prisma/synthetic-production-render-repository.ts'
 
 const hash = (character) => character.repeat(64)
 
@@ -335,6 +338,247 @@ function renderWorkerFixture() {
   }
   return { plan, spec, context, claimed, runtimeIdentity }
 }
+
+function rightsRow(snapshot) {
+  return {
+    id: snapshot.id,
+    workspaceId: snapshot.workspaceId,
+    artifactId: snapshot.artifactId,
+    sequence: snapshot.sequence,
+    schemaVersion: snapshot.schemaVersion,
+    snapshotHash: snapshot.snapshotHash,
+    owner: snapshot.owner ?? null,
+    license: snapshot.license ?? null,
+    status: snapshot.status,
+    allowedUsesJson: stableSerialize(snapshot.allowedUses),
+    prohibitedUsesJson: stableSerialize(snapshot.prohibitedUses),
+    allowedWorkspaceIdsJson: stableSerialize(snapshot.allowedWorkspaceIds),
+    allowedMarketsJson: snapshot.allowedMarkets ? stableSerialize(snapshot.allowedMarkets) : null,
+    allowedLocalesJson: snapshot.allowedLocales ? stableSerialize(snapshot.allowedLocales) : null,
+    allowedSyntheticOperationsJson: snapshot.allowedSyntheticOperations
+      ? stableSerialize(snapshot.allowedSyntheticOperations)
+      : null,
+    expiresAt: snapshot.expiresAt ? new Date(snapshot.expiresAt) : null,
+    consentStatus: snapshot.consent.status,
+    consentAllowedUsesJson: stableSerialize(snapshot.consent.allowedUses),
+    consentAllowedMarketsJson: snapshot.consent.allowedMarkets
+      ? stableSerialize(snapshot.consent.allowedMarkets)
+      : null,
+    consentAllowedLocalesJson: snapshot.consent.allowedLocales
+      ? stableSerialize(snapshot.consent.allowedLocales)
+      : null,
+    consentSyntheticOperationsJson: snapshot.consent.allowedSyntheticOperations
+      ? stableSerialize(snapshot.consent.allowedSyntheticOperations)
+      : null,
+    consentExpiresAt: snapshot.consent.expiresAt ? new Date(snapshot.consent.expiresAt) : null,
+    consentDocumentArtifactId: snapshot.consent.documentArtifactId ?? null,
+    sourceNote: snapshot.sourceNote ?? null,
+    createdByType: snapshot.createdBy.type,
+    createdById: snapshot.createdBy.id,
+    createdAt: new Date(snapshot.createdAt),
+  }
+}
+
+function syntheticRenderAuthorityFixture({ revoked = false } = {}) {
+  const base = renderWorkerFixture().plan
+  const profileSnapshotId = `${base.profile.id}:v${base.profile.version}`
+  const artifactRefs = [base.audio, base.blocks[0].artifact]
+  const rights = artifactRefs.map((artifact, index) => createAssetRightsSnapshot({
+    id: `rights-render-authority-${index}`,
+    workspaceId: base.workspaceId,
+    artifactId: artifact.artifactId,
+    sequence: 1,
+    draft: {
+      status: 'approved',
+      allowedUses: ['ads'],
+      prohibitedUses: [],
+      allowedMarkets: ['BRA'],
+      allowedLocales: ['pt-BR'],
+      allowedSyntheticOperations: ['audio-avatar'],
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      consent: {
+        status: 'approved',
+        allowedUses: ['ads'],
+        allowedMarkets: ['BRA'],
+        allowedLocales: ['pt-BR'],
+        allowedSyntheticOperations: ['audio-avatar'],
+        expiresAt: '2030-01-01T00:00:00.000Z',
+      },
+    },
+    createdBy: { type: 'system', id: 'synthetic-render-authority' },
+    createdAt: '2028-12-31T23:59:00.000Z',
+  }))
+  const planAuthorization = {
+    id: 'authorization-render-authority-plan',
+    authorizationHash: hash('c'),
+    outcome: 'allowed',
+    use: base.use,
+    market: base.market,
+    locale: base.locale,
+    syntheticOperations: ['tts', 'audio-avatar'],
+    artifactIds: artifactRefs.map((artifact) => artifact.artifactId),
+    decisions: artifactRefs.map((artifact, index) => ({
+      artifactId: artifact.artifactId,
+      rightsSnapshotId: rights[index].id,
+      rightsSnapshotHash: rights[index].snapshotHash,
+      validUntil: '2029-01-01T00:15:00.000Z',
+    })),
+    evaluatedAt: '2029-01-01T00:00:00.000Z',
+    expiresAt: '2029-01-01T00:15:00.000Z',
+  }
+  const plan = createSyntheticPresenterEditPlan({
+    id: base.id,
+    workspaceId: base.workspaceId,
+    projectId: base.projectId,
+    projectVersionId: base.projectVersionId,
+    profile: base.profile,
+    audio: base.audio,
+    blocks: base.blocks,
+    bRoll: [],
+    overlays: [],
+    captions: true,
+    use: base.use,
+    market: base.market,
+    authorization: planAuthorization,
+    createdAt: base.createdAt,
+  })
+  const profileAudit = createApiAccessAuditContext({
+    clientId: 'client-render-authority',
+    credentialId: 'credential-render-authority',
+    workspaceId: plan.workspaceId,
+    environment: 'production',
+    authenticationKind: 'bearer',
+  })
+  const profileRow = {
+    id: profileSnapshotId,
+    workspaceId: plan.workspaceId,
+    profileId: plan.profile.id,
+    version: plan.profile.version,
+    schemaVersion: 'synthetic-presenter-profile/v1',
+    status: plan.profile.status,
+    actorIdentityId: plan.profile.actorIdentityId,
+    defaultLocale: plan.profile.defaultLocale,
+    disclosure: plan.profile.disclosure,
+    consentSnapshotHash: plan.profile.consent.snapshotHash,
+    profileJson: stableSerialize(plan.profile),
+    profileHash: plan.profile.snapshotHash,
+    requestFingerprint: hash('d'),
+    idempotencyKey: 'render-authority-profile-key',
+    createdByClientId: profileAudit.clientId,
+    actorCredentialId: profileAudit.credentialId,
+    actorEnvironment: profileAudit.environment,
+    actorAuthenticationKind: profileAudit.authenticationKind,
+    actorContextHash: profileAudit.contextHash,
+    delegatedUserId: null,
+    delegatedIdentityId: null,
+    workspaceRole: null,
+    createdAt: new Date('2028-12-31T23:58:00.000Z'),
+  }
+  const currentRights = revoked
+    ? rights.map((snapshot, index) => createAssetRightsSnapshot({
+        id: `rights-render-revoked-${index}`,
+        workspaceId: snapshot.workspaceId,
+        artifactId: snapshot.artifactId,
+        sequence: 2,
+        draft: {
+          status: 'revoked', allowedUses: [], prohibitedUses: [],
+          consent: { status: 'revoked', allowedUses: [] },
+        },
+        createdBy: { type: 'system', id: 'synthetic-render-revocation' },
+        createdAt: '2029-01-01T00:04:00.000Z',
+      }))
+    : rights
+  const run = {
+    id: plan.id,
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    projectVersionId: plan.projectVersionId,
+    editPlanSnapshotId: 'snapshot-render-authority',
+    planHash: plan.planHash,
+    planJson: stableSerialize(plan),
+    status: 'rendering',
+    profileSnapshotId,
+    profileSnapshot: profileRow,
+    use: plan.use,
+    market: plan.market,
+    locale: plan.locale,
+    assets: [
+      { artifactId: plan.audio.artifactId, artifactSha256: plan.audio.sha256, providerJobId: null, criticHash: null },
+      { artifactId: plan.blocks[0].artifact.artifactId, artifactSha256: plan.blocks[0].artifact.sha256, providerJobId: plan.blocks[0].providerJobId, criticHash: plan.blocks[0].critic.resultHash },
+    ],
+  }
+  const mediaArtifacts = artifactRefs.map((artifact, index) => ({
+    id: artifact.artifactId,
+    sha256: artifact.sha256,
+    currentRightsSnapshotId: currentRights[index].id,
+    currentRightsSnapshot: rightsRow(currentRights[index]),
+  }))
+  const client = {
+    v2SyntheticProductionRun: { async findFirst() { return run } },
+    v2SyntheticPresenterProfileHead: {
+      async findUnique() {
+        return { currentVersion: plan.profile.version, currentSnapshot: profileRow }
+      },
+    },
+    v2MediaArtifact: { async findMany() { return mediaArtifacts } },
+    v2ProviderJob: {
+      async findMany() { return [] },
+    },
+    v2SyntheticCriticReport: {
+      async findMany() { return [] },
+    },
+  }
+  const row = {
+    productionRunId: run.id,
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    projectVersionId: plan.projectVersionId,
+    projectVersionHash: hash('f'),
+    editPlanSnapshotId: run.editPlanSnapshotId,
+    editPlanSnapshotHash: plan.planHash,
+    planHash: plan.planHash,
+  }
+  return { client, row, plan }
+}
+
+test('current render authority passes MediaArtifact rights after TTL reevaluation, then rejects an absent critic', async () => {
+  const fixture = syntheticRenderAuthorityFixture()
+  assert.notEqual(fixture.plan.audio.id, fixture.plan.audio.artifactId)
+  assert.notEqual(fixture.plan.blocks[0].artifact.id, fixture.plan.blocks[0].artifact.artifactId)
+  // Empty job/report readers deliberately stop this focused fixture after the
+  // artifact-id set and current-rights checks. The PostgreSQL journey supplies
+  // the real approved job and critic chain.
+  await assert.rejects(
+    assertCurrentSyntheticRenderAuthority(
+      fixture.client,
+      fixture.row,
+      new Date('2029-01-01T00:05:00.000Z'),
+    ),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && /exact current critic approval/.test(error.message),
+  )
+})
+
+test('current synthetic render authority rejects expired authorization and revoked current rights', async () => {
+  const expired = syntheticRenderAuthorityFixture()
+  await assert.rejects(
+    assertCurrentSyntheticRenderAuthority(
+      expired.client,
+      expired.row,
+      new Date('2029-01-01T00:15:00.000Z'),
+    ),
+    (error) => error.code === 'ASSET_RIGHTS_BLOCKED' && /authorization has expired/.test(error.message),
+  )
+
+  const revoked = syntheticRenderAuthorityFixture({ revoked: true })
+  await assert.rejects(
+    assertCurrentSyntheticRenderAuthority(
+      revoked.client,
+      revoked.row,
+      new Date('2029-01-01T00:05:00.000Z'),
+    ),
+    (error) => error.code === 'ASSET_RIGHTS_BLOCKED',
+  )
+})
 
 test('synthetic render enqueue uses the configured renderer and the worker recompiles the sealed render plan', async () => {
   const { plan, runtimeIdentity } = renderWorkerFixture()

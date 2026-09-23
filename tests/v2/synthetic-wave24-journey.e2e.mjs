@@ -1064,6 +1064,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       idempotency: { clientId, key: 'journey-consumer-project-b' },
     })
     const reuseRepository = new PrismaSyntheticMasterReuseRepository({ client, alignment })
+    const currentAuthorizationClock = () => new Date()
     const canonicalSource = await reuseRepository.resolveCanonicalSource({
       workspaceId,
       sourceProviderJobId: avatarJobId,
@@ -1072,7 +1073,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       use: 'ads',
       market: 'BRA',
       locale: 'pt-BR',
-      at: new Date(at(16)),
+      at: currentAuthorizationClock(),
     })
     assert.ok(canonicalSource)
     assert.equal(canonicalSource.master.id, promoted.master.id)
@@ -1081,7 +1082,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     let reuseIdentity = 0
     const prepareCanonicalReuse = prepareCanonicalSyntheticMasterReuseService({
       repository: reuseRepository,
-      clock: () => new Date(at(16)),
+      clock: currentAuthorizationClock,
       createDecisionId: () => `journey-master-reuse-decision-${++reuseIdentity}`,
       createConsumptionId: () => `journey-master-consumption-${++reuseIdentity}`,
     })
@@ -1096,7 +1097,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       audioMasters: audioMasterRepository,
       scriptPlans: plans,
       prepareCanonicalReuse,
-      clock: () => new Date(at(16)),
+      clock: currentAuthorizationClock,
       createRunId: () => `journey-production-run-${++runIdentity}`,
       createSnapshotId: () => `journey-edit-plan-snapshot-${runIdentity}`,
     })
