@@ -1083,6 +1083,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         id: 'journey-consumer-b-broll-insert',
         rangeMs: [500, 1_500],
         artifactId: 'journey-consumer-b-broll',
+        role: 'b-roll',
       }],
       captions: false,
       idempotencyKey: 'journey-production-consumer-b',
