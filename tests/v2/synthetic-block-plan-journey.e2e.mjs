@@ -45,6 +45,23 @@ async function waitForServer(baseUrl, server) {
   throw new Error('Timed out waiting for Next server')
 }
 
+function safeServerFailureDiagnostic(logs) {
+  const bounded = logs.slice(0, 12_000)
+  const unique = (values) => [...new Set(values)].slice(0, 12)
+  const codes = unique([...bounded.matchAll(/\bcode:\s*['"]([A-Za-z0-9_]+)['"]/g)].map((match) => match[1]))
+  const syscalls = unique([...bounded.matchAll(/\bsyscall:\s*['"]([A-Za-z0-9_]+)['"]/g)].map((match) => match[1]))
+  const allowedNames = new Set([
+    'Error', 'S3ServiceException', 'NoSuchKey', 'NotFound', 'InternalError',
+    'TimeoutError', 'ChecksumMismatchError', 'InvalidRequestException',
+  ])
+  const errorNames = unique(
+    [...bounded.matchAll(/\b([A-Za-z][A-Za-z0-9]*(?:Error|Exception))\b/g)]
+      .map((match) => match[1])
+      .filter((name) => allowedNames.has(name)),
+  )
+  return { codes, syscalls, errorNames }
+}
+
 test('T-FR-102 block plan journey runs end to end through /v1, durable workers and real storage', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
   timeout: 900_000,
@@ -509,10 +526,19 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
       await writeFile(corruptPath, corruptedBytes)
       assert.notEqual(await calculateFileSha256(corruptPath), corruptRow.sha256)
     }
+    const corruptCompileLogOffset = serverLogs.length
     const failedCompile = await api('POST', planPath(`/${planId}/audio-compilations`), 'bj-compile-corrupt', {
       ...context(state), settings: { gapMs: 200, outputFormat: 'mp3' },
     })
-    assert.equal(failedCompile.status, 409, JSON.stringify(failedCompile.payload))
+    const failedCompileDiagnostic = JSON.stringify({
+      storage: objectStore ? 's3' : 'local',
+      status: failedCompile.status,
+      code: failedCompile.payload?.error?.code,
+      category: failedCompile.payload?.error?.category,
+      requestId: failedCompile.payload?.error?.requestId,
+      server: safeServerFailureDiagnostic(serverLogs.slice(corruptCompileLogOffset)),
+    })
+    assert.equal(failedCompile.status, 409, failedCompileDiagnostic)
     assert.equal(failedCompile.payload.error.code, 'PERSISTENCE_CONFLICT')
     assert.equal(providerCalls.length, 15, 'a corrupted artifact must not silently trigger paid work')
     state = await getPlan(planId)

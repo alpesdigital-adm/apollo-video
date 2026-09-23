@@ -97,6 +97,38 @@ export interface CompileBlockAudioSettings {
   outputFormat: 'mp3' | 'wav'
 }
 
+type BlockAudioSourceInput = Readonly<{
+  blockId: string
+  generationId: string
+  audio: Readonly<{ artifactKey: string; sha256: string; byteSize: number }>
+}>
+
+/**
+ * Waits for every concurrent materialization to reach a terminal state before
+ * exposing a failure. The caller may therefore clean the shared operation
+ * directory without racing sibling downloads that are still writing to it.
+ */
+export async function materializeBlockAudioSources(input: {
+  sources: ArtifactSourceMaterializer
+  operationId: string
+  blocks: readonly BlockAudioSourceInput[]
+}): Promise<ReadonlyArray<Readonly<AudioConcatenationBlockInput>>> {
+  const outcomes = await Promise.allSettled(input.blocks.map(async (block) => ({
+    blockId: block.blockId,
+    generationId: block.generationId,
+    sha256: block.audio.sha256,
+    path: (await input.sources.materialize({
+      operationId: input.operationId,
+      artifactKey: block.audio.artifactKey,
+      sha256: block.audio.sha256,
+      byteSize: block.audio.byteSize,
+    })).path,
+  })))
+  const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+  if (failure) throw failure.reason
+  return outcomes.map((outcome) => (outcome as PromiseFulfilledResult<Readonly<AudioConcatenationBlockInput>>).value)
+}
+
 export function compileSyntheticBlockAudioService(dependencies: {
   plans: SyntheticScriptPlanRepository
   generations: SyntheticBlockGenerationRepository
@@ -314,12 +346,7 @@ export function compileSyntheticBlockAudioService(dependencies: {
     const operationId = `compile-${planVersionId}`
     const workDirectory = join(dependencies.workRoot, `concat-${sha256(operationId).slice(0, 24)}`)
     try {
-      const materialized = await Promise.all(inputs.map(async (input) => ({
-        blockId: input.blockId,
-        generationId: input.generationId,
-        sha256: input.audio.sha256,
-        path: (await dependencies.sources.materialize({ operationId, artifactKey: input.audio.artifactKey, sha256: input.audio.sha256, byteSize: input.audio.byteSize })).path,
-      })))
+      const materialized = await materializeBlockAudioSources({ sources: dependencies.sources, operationId, blocks: inputs })
       const result = await dependencies.concatenate({ blocks: materialized, gapMs: settings.gapMs, workDirectory })
 
       // Consolidated words: provider characters per block, shifted by the

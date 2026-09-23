@@ -237,9 +237,15 @@ export class S3ArtifactSourceMaterializer implements ArtifactSourceMaterializer 
     if (!input.operationId.trim() || !/^[a-f0-9]{64}$/.test(input.sha256) || !Number.isSafeInteger(input.byteSize) || input.byteSize <= 0) {
       throw new DomainError('INVALID_ARGUMENT', 'Artifact materialization identity is invalid')
     }
-    const head = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: input.artifactKey, ChecksumMode: 'ENABLED' }))
-    if (!head.VersionId || head.VersionId === 'null') throw new DomainError('PERSISTENCE_CONFLICT', 'S3 artifact is not version-bound')
-    await verifyHead({ client: this.client, bucket: this.bucket, key: input.artifactKey, versionId: head.VersionId, sha256: input.sha256, byteSize: input.byteSize })
+    let head
+    try {
+      head = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: input.artifactKey, ChecksumMode: 'ENABLED' }))
+      if (!head.VersionId || head.VersionId === 'null') throw new DomainError('PERSISTENCE_CONFLICT', 'S3 artifact is not version-bound')
+      await verifyHead({ client: this.client, bucket: this.bucket, key: input.artifactKey, versionId: head.VersionId, sha256: input.sha256, byteSize: input.byteSize })
+    } catch (error) {
+      if (error instanceof DomainError) throw error
+      throw new DomainError('PERSISTENCE_CONFLICT', 'S3 artifact identity could not be read')
+    }
     const operationNamespace = createHash('sha256').update(input.operationId).digest('hex').slice(0, 32)
     const directory = join(this.workRoot, operationNamespace)
     const target = join(directory, `${input.sha256}-${basename(input.artifactKey)}`)
