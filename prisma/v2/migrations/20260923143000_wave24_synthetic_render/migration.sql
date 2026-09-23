@@ -186,7 +186,7 @@ CREATE TABLE "transformation_fallback_dispatch_claims" (
   CONSTRAINT "transformation_fallback_claims_outcome_check" CHECK (
     ("outcome" = 'pending' AND "providerJobId" IS NULL AND "resultLedgerId" IS NULL AND "resultLedgerHash" IS NULL AND "reason" IS NULL AND "settledAt" IS NULL)
     OR
-    ("outcome" = 'enqueued' AND "providerJobId" IS NOT NULL AND "resultLedgerId" IS NOT NULL AND "resultLedgerHash" IS NOT NULL AND "reason" IS NULL AND "settledAt" IS NOT NULL)
+    ("outcome" = 'enqueued' AND "providerJobId" IS NOT NULL AND "resultLedgerId" IS NULL AND "resultLedgerHash" IS NULL AND "reason" IS NULL AND "settledAt" IS NOT NULL)
     OR
     ("outcome" = 'skipped' AND "providerJobId" IS NULL AND "resultLedgerId" IS NOT NULL AND "resultLedgerHash" IS NOT NULL AND "reason" IS NOT NULL AND "settledAt" IS NOT NULL)
   )
