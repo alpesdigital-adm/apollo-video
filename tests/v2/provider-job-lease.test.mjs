@@ -7,6 +7,12 @@ import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/can
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProviderJob, transitionProviderJob } from '../../src/v2/domain/provider-job.ts'
 import { createSyntheticPresenterProfileSnapshot } from '../../src/v2/domain/synthetic-production.ts'
+import { createTransformationBrief } from '../../src/v2/domain/transformation-brief.ts'
+import {
+  createTransformationFallbackLedger,
+  descendFallbackLadder,
+  recordFallbackAttempt,
+} from '../../src/v2/domain/transformation-fallback.ts'
 import { PrismaProviderJobRepository } from '../../src/v2/infrastructure/prisma/provider-job-repository.ts'
 
 function deferred() {
@@ -389,23 +395,80 @@ function fallbackApprovalGuardRepository({ concurrentAttempt = false } = {}) {
       },
     },
   }
+  const brief = createTransformationBrief({
+    id: 'brief-lease', workspaceId: fixture.input.next.workspaceId,
+    projectId: fixture.input.next.projectId, projectVersionId: fixture.input.next.originProjectVersionId,
+    storyPlanId: 'story-lease', storyPlanHash: hash('0'),
+    sourceArtifactId: 'audio-lease', sourceArtifactHash: hash('b'),
+    sourceRange: { startFrame: 0, endFrame: 60 }, intent: 'dramatic-emphasis',
+    editorialIntent: 'Preserve the measured speech while transforming the image.',
+    mode: 'stylization', prompt: 'Controlled fallback.', negativeConstraints: ['do not truncate speech'],
+    preserve: ['speech', 'timing'], allowedChanges: ['visual style'], target: { style: 'controlled' },
+    outputSpecIds: ['output-lease'], intensityBps: 1_000, noveltyBps: 1_000,
+    safety: ['speech-locked'], safeZones: [],
+    fallbackLadder: ['video-to-video', 'generated-cutaway', 'source-unchanged'],
+    rightsSnapshotId: 'rights-audio-lease', rightsSnapshotHash: hash('b'), createdAt: at(0),
+  })
+  const first = recordFallbackAttempt({
+    ledger: createTransformationFallbackLedger({
+      workspaceId: fixture.input.next.workspaceId, projectId: fixture.input.next.projectId,
+      projectVersionId: fixture.input.next.originProjectVersionId, brief,
+      sourceArtifactId: 'audio-lease', sourceArtifactSha256: hash('b'),
+      costCurrency: 'USD', createdAt: at(0),
+    }),
+    attempt: {
+      rung: 'video-to-video', providerJobId: 'rejected-provider-job', providerId: 'provider-lease',
+      artifactId: 'rejected-artifact', artifactSha256: hash('7'), outcome: 'rejected',
+      intentScoreBps: 1_000, criticReportHash: hash('4'), violatesProtectedContent: false,
+      estimatedCostMinorUnits: 1, observedCostMinorUnits: 1, costCurrency: 'USD', reason: 'measured rejection',
+    },
+    occurredAt: at(1),
+  })
+  const origin = descendFallbackLadder({ ledger: first, because: 'critic-rejected-quality', occurredAt: at(2) })
+  const successor = recordFallbackAttempt({
+    ledger: origin,
+    attempt: {
+      rung: 'generated-cutaway', providerJobId: fixture.input.next.id, providerId: 'provider-lease',
+      artifactId: fixture.input.next.resultArtifact.artifactId,
+      artifactSha256: fixture.input.next.resultArtifact.artifactSha256, outcome: 'approved',
+      intentScoreBps: 9_000, criticReportHash: fixture.input.next.criticResultHash,
+      violatesProtectedContent: false, estimatedCostMinorUnits: 1, observedCostMinorUnits: 1,
+      costCurrency: 'USD', reason: 'measured approval',
+    },
+    occurredAt: at(3),
+  })
+  const latest = concurrentAttempt ? recordFallbackAttempt({
+    ledger: successor,
+    attempt: {
+      rung: 'generated-cutaway', providerJobId: 'concurrent-provider-job', providerId: 'provider-lease',
+      artifactId: 'concurrent-artifact', artifactSha256: hash('8'), outcome: 'failed',
+      intentScoreBps: null, violatesProtectedContent: false,
+      estimatedCostMinorUnits: 1, observedCostMinorUnits: 1, costCurrency: 'USD', reason: 'concurrent attempt',
+    },
+    occurredAt: at(4),
+  }) : successor
+  fixture.input.next.transformation = {
+    ...fixture.input.next.transformation,
+    briefHash: brief.briefHash,
+    fallback: { ...fixture.input.next.transformation.fallback, ledgerHash: origin.ledgerHash },
+  }
   fixture.transaction.v2TransformationFallbackLedger = {
     async findFirst(input) {
       if (input.where.id === 'fallback-origin') {
         return {
-          id: 'fallback-origin', ledgerHash: hash('3'), currentRung: 'generated-cutaway',
-          reviewDecision: 'awaiting-review', _count: { attempts: 1 },
+          id: 'fallback-origin', ledgerHash: origin.ledgerHash, currentRung: origin.currentRung,
+          reviewDecision: origin.reviewDecision, _count: { attempts: origin.attempts.length },
         }
       }
+      const currentAttempt = latest.attempts.find((attempt) => attempt.providerJobId === fixture.input.next.id)
       return {
-        id: 'fallback-successor', ledgerHash: hash('6'), briefHash: hash('1'),
-        currentRung: 'generated-cutaway', reviewDecision: 'awaiting-review',
-        _count: { attempts: concurrentAttempt ? 3 : 2 },
+        id: 'fallback-successor', ledgerHash: latest.ledgerHash, briefHash: brief.briefHash,
+        currentRung: latest.currentRung, reviewDecision: latest.reviewDecision,
+        _count: { attempts: latest.attempts.length },
         attempts: [{
-          sequence: 2, rung: 'generated-cutaway', providerId: 'provider-lease',
-          artifactId: fixture.input.next.resultArtifact.artifactId,
-          artifactSha256: fixture.input.next.resultArtifact.artifactSha256,
-          outcome: 'approved', criticReportHash: fixture.input.next.criticResultHash,
+          sequence: currentAttempt.sequence, rung: currentAttempt.rung, providerId: currentAttempt.providerId,
+          artifactId: currentAttempt.artifactId, artifactSha256: currentAttempt.artifactSha256,
+          outcome: currentAttempt.outcome, criticReportHash: currentAttempt.criticReportHash,
         }],
       }
     },

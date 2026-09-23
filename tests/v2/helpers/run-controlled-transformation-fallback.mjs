@@ -39,7 +39,7 @@ function boundedString(value, field, maximum = 256) {
   return normalized
 }
 
-function safeJobDiagnostic(job, transitions, receipt) {
+function safeJobDiagnostic(job, transitions, receipt, fallbackAuthority = null) {
   const error = job.normalizedError
   return JSON.stringify({
     status: job.status,
@@ -62,11 +62,13 @@ function safeJobDiagnostic(job, transitions, receipt) {
       runtimeClass: receipt.runtimeClass,
       attempt: receipt.attempt,
     } : null,
+    fallbackAuthority,
   })
 }
 
 async function readJobDiagnostic(client, job) {
-  const [transitions, receipt] = await Promise.all([
+  const fallback = job.transformation?.fallback
+  const [transitions, receipt, fallbackAuthority] = await Promise.all([
     client.v2ProviderJobTransition.findMany({
       where: { workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id },
       select: { sequence: true, fromStatus: true, toStatus: true },
@@ -76,8 +78,41 @@ async function readJobDiagnostic(client, job) {
       where: { workspaceId: job.workspaceId, projectId: job.projectId, jobId: job.id },
       select: { id: true, receiptHash: true, runtimeClass: true, attempt: true },
     }),
+    fallback ? Promise.all([
+      client.v2TransformationFallbackLedger.findFirst({
+        where: { id: fallback.ledgerId, workspaceId: job.workspaceId, projectId: job.projectId },
+        select: {
+          id: true, ledgerHash: true, briefId: true, briefHash: true,
+          currentRung: true, reviewDecision: true,
+          attempts: { select: { sequence: true, rung: true, providerJobId: true, providerId: true, artifactId: true, artifactSha256: true, outcome: true, criticReportHash: true }, orderBy: { sequence: 'asc' } },
+        },
+      }),
+      client.v2TransformationFallbackLedger.findFirst({
+        where: { workspaceId: job.workspaceId, projectId: job.projectId, briefId: job.transformation.briefId },
+        select: {
+          id: true, ledgerHash: true, briefId: true, briefHash: true,
+          currentRung: true, reviewDecision: true,
+          attempts: { select: { sequence: true, rung: true, providerJobId: true, providerId: true, artifactId: true, artifactSha256: true, outcome: true, criticReportHash: true }, orderBy: { sequence: 'asc' } },
+        },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      }),
+      client.v2TransformationFallbackDispatchClaim.findFirst({
+        where: { workspaceId: job.workspaceId, projectId: job.projectId, requestedLedgerId: fallback.ledgerId, rung: fallback.rung },
+        select: { id: true, dispatchRequestHash: true, requestedLedgerId: true, requestedLedgerHash: true, rung: true, outcome: true, providerJobId: true, resultLedgerId: true, resultLedgerHash: true },
+      }),
+    ]).then(([origin, latest, claim]) => ({
+      jobBinding: {
+        briefId: job.transformation.briefId, briefHash: job.transformation.briefHash,
+        providerId: job.transformation.providerId, capabilityId: job.transformation.capabilityId,
+        ledgerId: fallback.ledgerId, ledgerHash: fallback.ledgerHash, rung: fallback.rung,
+        dispatchRequestHash: fallback.dispatchRequestHash,
+      },
+      origin,
+      latest,
+      claim,
+    })) : Promise.resolve(null),
   ])
-  return safeJobDiagnostic(job, transitions, receipt)
+  return safeJobDiagnostic(job, transitions, receipt, fallbackAuthority)
 }
 
 async function responseJson(response, label) {

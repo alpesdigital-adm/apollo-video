@@ -268,7 +268,7 @@ async function fallbackAuthorityIsCurrent(
     job.resultArtifact && job.criticResultHash && attempt &&
     latest.id !== origin.id && latest.briefHash === job.transformation.briefHash &&
     latest.currentRung === fallback.rung && latest.reviewDecision === 'awaiting-review' &&
-    latest._count.attempts === origin._count.attempts + 1 && attempt.sequence === origin._count.attempts + 1 &&
+    latest._count.attempts === origin._count.attempts + 1 && attempt.sequence === origin._count.attempts &&
     attempt.rung === fallback.rung && attempt.providerId === job.transformation.providerId &&
     attempt.artifactId === job.resultArtifact.artifactId &&
     attempt.artifactSha256 === job.resultArtifact.artifactSha256 &&
