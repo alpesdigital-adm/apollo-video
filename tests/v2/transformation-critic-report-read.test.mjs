@@ -5,6 +5,7 @@ import addFormats from 'ajv-formats'
 
 import { readTransformationCriticReportService } from '../../src/v2/application/transformation-quality.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import { PUBLIC_ERROR_CATALOG } from '../../src/v2/public-api/public-error-catalog.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import { presentSuccess } from '../../src/v2/public-api/presenters.ts'
 import { presentTransformationCriticReport } from '../../src/v2/public-api/transformation-quality-contract.ts'
@@ -67,4 +68,10 @@ test('critic report GET publishes the exact read capability and a closed respons
   assert.equal(validate(response), true, JSON.stringify(validate.errors))
   assert.equal(validate({ ...response, data: { report: {} } }), false)
   assert.equal(validate({ ...response, data: { report: { ...response.data.report, internalSecret: 'hidden' } } }), false)
+})
+
+test('critic report access errors retain the published HTTP classification', () => {
+  assert.equal(PUBLIC_ERROR_CATALOG.ASSET_NOT_FOUND.status, 422)
+  assert.equal(PUBLIC_ERROR_CATALOG.INVALID_ARGUMENT.status, 422)
+  assert.equal(PUBLIC_ERROR_CATALOG.AUTH_INVALID.status, 401)
 })

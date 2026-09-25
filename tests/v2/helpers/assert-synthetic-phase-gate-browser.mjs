@@ -240,16 +240,26 @@ export async function assertSyntheticPhaseGateBrowser(input) {
       context.request.get(`${origin.origin}${reportPath}?unexpected=1`),
       fetch(`${origin.origin}${reportPath}`, { signal: input.signal }),
     ]), input.signal, 'rejected report access boundaries')
-    assert.equal(otherProjectResponse.status(), 404, 'a report cannot be read through a different project')
-    assert.equal(unsupportedQueryResponse.status(), 400, 'unsupported query parameters must be rejected')
+    const otherProjectError = await otherProjectResponse.json()
+    const unsupportedQueryError = await unsupportedQueryResponse.json()
+    assert.equal(otherProjectResponse.status(), 422, 'a report cannot be read through a different project')
+    assert.equal(otherProjectError.error?.code, 'ASSET_NOT_FOUND')
+    assert.equal(unsupportedQueryResponse.status(), 422, 'unsupported query parameters must be rejected')
+    assert.equal(unsupportedQueryError.error?.code, 'INVALID_ARGUMENT')
     assert.equal(anonymousResponse.status, 401, 'a report must require authentication')
-    await anonymousResponse.arrayBuffer()
+    const anonymousError = await anonymousResponse.json()
+    assert.equal(anonymousError.error?.code, 'AUTH_INVALID')
     await writeFile(resolve(dirname(screenshotPath), 'transformation-critic-read.json'), `${JSON.stringify({
       gateId: latest.id,
       reference: rejectedReportReference,
       href: reportPath,
       report: openedReport,
-      http: { authenticated: 200, otherProject: 404, unsupportedQuery: 400, anonymous: 401 },
+      http: {
+        authenticated: { status: openedReportResponse.status() },
+        otherProject: { status: otherProjectResponse.status(), code: otherProjectError.error.code },
+        unsupportedQuery: { status: unsupportedQueryResponse.status(), code: unsupportedQueryError.error.code },
+        anonymous: { status: anonymousResponse.status, code: anonymousError.error.code },
+      },
     }, null, 2)}\n`, 'utf8')
     await bounded(page.goBack(), input.signal, 'return to persisted gate')
     await bounded(panel.waitFor({ state: 'visible' }), input.signal, 'phase gate after report navigation')
@@ -308,7 +318,8 @@ export async function assertSyntheticPhaseGateBrowser(input) {
     result = Object.freeze({ gateText: await panel.innerText(), screenshotPath })
   } catch (error) {
     const details = await diagnostic(input.readServerLogs, page)
-    primaryError = new AggregateError([error], `Synthetic phase gate browser assertion failed${details}`)
+    const cause = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error)
+    primaryError = new AggregateError([error], `Synthetic phase gate browser assertion failed: ${cause.slice(0, 2_000)}${details}`)
   } finally {
     releaseHeldPost?.()
     const cleanupErrors = []
