@@ -607,12 +607,19 @@ export async function assertSyntheticPhaseGateBrowser(input) {
       // A native <select> popup is not part of a headless page screenshot, so
       // the options are rendered in place (size attribute) for this capture
       // only and restored before anything else is asserted.
-      await bounded(historySelect.evaluate((node, size) => { node.setAttribute('size', String(size)) },
-        state.options.length + 1), input.signal, 'options capture layout')
+      // Focus keeps the selected row painted with the active highlight; an
+      // unfocused listbox paints it with a colour the panel text can vanish into.
+      await bounded(historySelect.evaluate((node, size) => {
+        node.setAttribute('size', String(size))
+        node.focus({ preventScroll: true })
+      }, state.options.length + 1), input.signal, 'options capture layout')
       try {
         await capturePanel(join(evidenceRoot, 'synthetic-phase-gate-history-options.png'), 'real: history options expanded for capture')
       } finally {
-        await bounded(historySelect.evaluate((node) => { node.removeAttribute('size') }), input.signal, 'options capture restore')
+        await bounded(historySelect.evaluate((node) => {
+          node.removeAttribute('size')
+          node.blur()
+        }), input.signal, 'options capture restore')
       }
     })
 
