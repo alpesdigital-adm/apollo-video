@@ -1482,6 +1482,64 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       return Object.freeze({ created, terminal, retainedPath, framePath, captionFrames: Object.freeze(captionFrames) })
     }
 
+    // W25 history proof: the first of three real evaluations of the same
+    // project version goes through the same public POST before any render.
+    // The evidence reader derives both the cross-project reuse check and the
+    // provider-swap check from the consumer's verified, attested render, so
+    // both are still absent here and present after the renders below.
+    const {
+      assertSyntheticPhaseGateBrowser,
+      summarizeSyntheticPhaseGateCoverage,
+    } = await import('./helpers/assert-synthetic-phase-gate-browser.mjs')
+    const gateEndpoint = `${baseUrl}/v1/projects/${encodeURIComponent(project.project.id)}/synthetic-phase-gates`
+    const expectedMissingLiveChecks = [
+      'elevenlabs-audio-alignment-live',
+      'heygen-generated-audio-avatar-live',
+      'heygen-ready-audio-avatar-live',
+    ]
+    const renderSwapCheck = 'provider-swap-keeps-plan-and-renderer-contracts'
+    const renderReuseCheck = 'cross-project-reuse-with-zero-provider-work'
+    const gateCheck = (candidate, code) => candidate.report.evidence
+      .flatMap((criterion) => criterion.checks)
+      .find((check) => check.code === code) ?? null
+    const runPhaseGateAsJourneyActor = async (idempotencyKey, label) => (await readExpectedPublicResponse(
+      await boundedFetch(gateEndpoint, {
+        method: 'POST',
+        headers: { ...bearerHeaders, 'idempotency-key': idempotencyKey },
+        body: JSON.stringify({
+          projectVersionId: project.version.id,
+          projectVersionHash: project.version.baseHash,
+        }),
+      }, t.signal),
+      label,
+      201,
+      t,
+    )).data.gate
+    const preRenderGate = await runPhaseGateAsJourneyActor(
+      'synthetic-wave25-phase-gate-before-render',
+      'synthetic phase gate before render',
+    )
+    await writeFile(
+      join(evidenceRoot, 'phase-gate-report-before-render.json'),
+      `${JSON.stringify(preRenderGate, null, 2)}\n`,
+      'utf8',
+    )
+    assert.equal(preRenderGate.projectVersionId, project.version.id)
+    assert.equal(preRenderGate.projectVersionHash, project.version.baseHash)
+    assert.equal(preRenderGate.report.approved, false)
+    assert.deepEqual([preRenderGate.report.passed, preRenderGate.report.total], [1, 4])
+    assert.deepEqual([...preRenderGate.report.missing].sort(), ['F3-GATE-001', 'F3-GATE-004'])
+    const preRenderCoverage = summarizeSyntheticPhaseGateCoverage(preRenderGate.report)
+    assert.deepEqual([preRenderCoverage.covered, preRenderCoverage.total], [3, 8])
+    assert.deepEqual(
+      preRenderCoverage.missingCodes,
+      [...expectedMissingLiveChecks, renderReuseCheck, renderSwapCheck].sort(),
+    )
+    assert.equal(gateCheck(preRenderGate, renderSwapCheck), null, 'the pre-render gate must not carry render evidence')
+    assert.equal(gateCheck(preRenderGate, renderReuseCheck)?.passed, false)
+    assert.ok(gateCheck(preRenderGate, renderReuseCheck)?.missingEvidenceTypes.length > 0,
+      'the pre-render gate must declare the reuse evidence it does not have')
+
     const sourceRender = await renderOne({
       projectId: project.project.id,
       projectVersionId: project.version.id,
@@ -1510,7 +1568,6 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     assert.equal(await client.v2DirectorBudgetReservation.count({ where: { workspaceId, projectId: consumerProject.project.id } }), 0)
     assert.equal(await client.v2ProviderTransportEvidence.count({ where: { workspaceId, projectId: consumerProject.project.id, phase: 'submit' } }), 0)
 
-    const gateEndpoint = `${baseUrl}/v1/projects/${encodeURIComponent(project.project.id)}/synthetic-phase-gates`
     const gateResponse = await boundedFetch(gateEndpoint, {
       method: 'POST',
       headers: { ...bearerHeaders, 'idempotency-key': 'synthetic-wave24-phase-gate' },
@@ -1525,17 +1582,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       201,
       t,
     )).data.gate
-    const expectedMissingLiveChecks = [
-      'elevenlabs-audio-alignment-live',
-      'heygen-generated-audio-avatar-live',
-      'heygen-ready-audio-avatar-live',
-    ]
     assert.equal(gate.report.approved, false)
     assert.deepEqual([gate.report.passed, gate.report.total], [3, 4])
-    const {
-      assertSyntheticPhaseGateBrowser,
-      summarizeSyntheticPhaseGateCoverage,
-    } = await import('./helpers/assert-synthetic-phase-gate-browser.mjs')
     const gateCoverage = summarizeSyntheticPhaseGateCoverage(gate.report)
     assert.deepEqual([gateCoverage.covered, gateCoverage.total], [5, 8])
     assert.deepEqual(gateCoverage.missingCodes, [...expectedMissingLiveChecks].sort())
@@ -1555,11 +1603,84 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     )).data.gates
     assert.equal(listed[0].recordHash, gate.recordHash)
 
+    // The render and attestation are the observable difference between the
+    // first two evaluations of the same version.
+    assert.equal(gate.projectVersionId, preRenderGate.projectVersionId)
+    assert.equal(gate.projectVersionHash, preRenderGate.projectVersionHash)
+    for (const code of [renderReuseCheck, renderSwapCheck]) {
+      assert.equal(gateCheck(gate, code)?.passed, true, `${code} must pass after the attested renders`)
+      assert.deepEqual(gateCheck(gate, code)?.missingEvidenceTypes, [])
+    }
+    assert.deepEqual([gateCoverage.covered, preRenderCoverage.covered], [5, 3], 'render evidence must add two covered checks')
+    assert.notEqual(gate.reportFingerprint, preRenderGate.reportFingerprint)
+    assert.ok(Date.parse(gate.createdAt) > Date.parse(preRenderGate.createdAt))
+
+    // The third real evaluation repeats the same version after the evidence:
+    // same coverage, but a new immutable record.
+    const repeatedGate = await runPhaseGateAsJourneyActor(
+      'synthetic-wave25-phase-gate-repeat',
+      'synthetic phase gate repeat',
+    )
+    assert.equal(repeatedGate.projectVersionId, gate.projectVersionId)
+    assert.equal(repeatedGate.projectVersionHash, gate.projectVersionHash)
+    assert.equal(repeatedGate.report.approved, false)
+    assert.deepEqual([repeatedGate.report.passed, repeatedGate.report.total], [3, 4])
+    assert.deepEqual(summarizeSyntheticPhaseGateCoverage(repeatedGate.report), gateCoverage)
+    assert.notEqual(repeatedGate.id, gate.id)
+    assert.notEqual(repeatedGate.recordHash, gate.recordHash)
+    assert.ok(Date.parse(repeatedGate.createdAt) > Date.parse(gate.createdAt))
+
+    const readCanonicalGateHistory = async () => (await readExpectedPublicResponse(
+      await boundedFetch(`${gateEndpoint}?limit=20`, {
+        headers: { authorization: `Bearer ${issued.token}`, accept: 'application/json' },
+      }, t.signal),
+      'synthetic phase gate canonical history',
+      200,
+      t,
+    )).data.gates
+    const historyGates = await readCanonicalGateHistory()
+    assert.deepEqual(historyGates.map(({ id }) => id), [repeatedGate.id, gate.id, preRenderGate.id])
+    assert.deepEqual(historyGates.map(({ recordHash }) => recordHash), [
+      repeatedGate.recordHash,
+      gate.recordHash,
+      preRenderGate.recordHash,
+    ])
+    for (const historyGate of historyGates) {
+      assert.equal(historyGate.projectVersionId, project.version.id)
+      assert.equal(historyGate.projectVersionHash, project.version.baseHash)
+    }
+    await writeFile(join(evidenceRoot, 'phase-gate-history-api.json'), `${JSON.stringify({
+      mode: 'real',
+      endpoint: 'GET /v1/projects/{projectId}/synthetic-phase-gates?limit=20',
+      actor: 'journey API client (bearer)',
+      projectId: project.project.id,
+      projectVersionId: project.version.id,
+      projectVersionHash: project.version.baseHash,
+      gates: historyGates.map((historyGate) => ({
+        id: historyGate.id,
+        createdAt: historyGate.createdAt,
+        evaluatedAt: historyGate.report.evaluatedAt,
+        reportFingerprint: historyGate.reportFingerprint,
+        recordHash: historyGate.recordHash,
+        criteria: `${historyGate.report.passed}/${historyGate.report.total}`,
+        checksCovered: summarizeSyntheticPhaseGateCoverage(historyGate.report).covered,
+        renderDerivedChecks: Object.fromEntries([renderReuseCheck, renderSwapCheck].map((code) => [
+          code,
+          gateCheck(historyGate, code)?.missingEvidenceTypes.length === 0 ? 'covered' : 'absent',
+        ])),
+      })),
+    }, null, 2)}\n`, 'utf8')
+
+    assert.equal(typeof project.project.name, 'string')
+    assert.equal(typeof consumerProject.project.name, 'string')
     const browserEvidence = await assertSyntheticPhaseGateBrowser({
       baseUrl,
       projectId: project.project.id,
       login: { username: uiUsername, password: uiPassword },
-      evidence: { screenshotPath: join(evidenceRoot, 'synthetic-phase-gate.png') },
+      evidence: {
+        screenshotPath: join(evidenceRoot, 'synthetic-phase-gate.png'),
+        root: evidenceRoot,
+      },
       expected: {
         criteriaPassed: 3,
         criteriaTotal: 4,
@@ -1568,10 +1689,43 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         approved: false,
         missingLiveChecks: expectedMissingLiveChecks,
       },
+      history: {
+        canonicalGates: historyGates,
+        readCanonicalGates: readCanonicalGateHistory,
+        currentVersion: { id: project.version.id, hash: project.version.baseHash },
+        olderGateId: preRenderGate.id,
+        projectName: project.project.name,
+        secondProject: {
+          id: consumerProject.project.id,
+          name: consumerProject.project.name,
+          versionId: consumerProject.version.id,
+          versionHash: consumerProject.version.baseHash,
+        },
+      },
+      step: async (name, action) => {
+        let failure = null
+        await t.test(name, async () => {
+          try {
+            await action()
+          } catch (error) {
+            failure = error
+            throw error
+          }
+        })
+        if (failure) throw failure
+      },
       signal: t.signal,
       readServerLogs: () => serverLogs,
     })
     assert.ok(browserEvidence.gateText.includes('5/8 checks com evidência'))
+    // The editor's own re-evaluation is the fourth real record; every
+    // controlled transport answer stayed in the browser and never persisted.
+    const historyAfterBrowser = await readCanonicalGateHistory()
+    assert.equal(historyAfterBrowser.length, historyGates.length + 1)
+    assert.equal(historyAfterBrowser[0].id, browserEvidence.history.editorEvaluationId)
+    assert.deepEqual(historyAfterBrowser.slice(1).map(({ id }) => id), historyGates.map(({ id }) => id))
+    assert.equal(historyAfterBrowser.some(({ id }) => id.startsWith('controlled-')), false)
+    assert.equal(await client.v2SyntheticPhaseGate.count({ where: { workspaceId } }), historyGates.length + 1)
     await writeFile(join(evidenceRoot, 'result.json'), `${JSON.stringify({
       runId: process.env.APOLLO_WAVE24_RUN_ID,
       sourceProjectId: project.project.id,
@@ -1595,6 +1749,19 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       phaseGateRecordHash: gate.recordHash,
       criteria: { passed: gate.report.passed, total: gate.report.total },
       checks: { covered: 5, total: 8 },
+      phaseGateHistory: {
+        mode: 'real',
+        projectVersionId: project.version.id,
+        evaluations: historyAfterBrowser.map((historyGate) => ({
+          id: historyGate.id,
+          createdAt: historyGate.createdAt,
+          recordHash: historyGate.recordHash,
+          checksCovered: summarizeSyntheticPhaseGateCoverage(historyGate.report).covered,
+        })),
+        preRenderGateId: preRenderGate.id,
+        editorEvaluationId: browserEvidence.history.editorEvaluationId,
+        browserEvidence: browserEvidence.history.evidencePath,
+      },
     }, null, 2)}\n`, 'utf8')
 
     if (objectStore) {
