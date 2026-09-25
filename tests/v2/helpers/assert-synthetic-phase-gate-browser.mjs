@@ -608,7 +608,7 @@ export async function assertSyntheticPhaseGateBrowser(input) {
       // the options are rendered in place (size attribute) for this capture
       // only and restored before anything else is asserted.
       await bounded(historySelect.evaluate((node, size) => { node.setAttribute('size', String(size)) },
-        state.options.length), input.signal, 'options capture layout')
+        state.options.length + 1), input.signal, 'options capture layout')
       try {
         await capturePanel(join(evidenceRoot, 'synthetic-phase-gate-history-options.png'), 'real: history options expanded for capture')
       } finally {
