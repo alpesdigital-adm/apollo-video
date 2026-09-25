@@ -5,6 +5,15 @@ import { useRouter } from 'next/navigation'
 
 import { createLatestReadFence, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
 import { addressSyntheticPhaseGateReference } from '@/v2/ui/synthetic-phase-gate-addresses'
+import {
+  capSyntheticPhaseGateHistory,
+  classifySyntheticPhaseGateSnapshot,
+  insertSyntheticPhaseGateFirst,
+  NO_SYNTHETIC_PHASE_GATE_SELECTION,
+  reconcileSyntheticPhaseGateSelection,
+  SYNTHETIC_PHASE_GATE_HISTORY_LIMIT,
+  type SyntheticPhaseGateSelection,
+} from '@/v2/ui/synthetic-phase-gate-history'
 
 const CRITERIA = Object.freeze([
   Object.freeze({
@@ -87,6 +96,27 @@ interface PublicEnvelope<T> {
 }
 
 type PanelState = 'loading' | 'ready' | 'empty' | 'error'
+type GateVerdict = 'approved' | 'failed' | 'incomplete'
+
+interface GateHistory extends SyntheticPhaseGateSelection {
+  /** Project, version and hash of the props the list was read or evaluated for. */
+  gatesIdentity: string
+  /** Server order (`createdAt desc, id desc`), at most the history limit. */
+  gates: readonly SyntheticPhaseGateView[]
+}
+
+const NO_GATES: readonly SyntheticPhaseGateView[] = Object.freeze([])
+const EMPTY_HISTORY: Readonly<GateHistory> = Object.freeze({
+  ...NO_SYNTHETIC_PHASE_GATE_SELECTION,
+  gatesIdentity: '',
+  gates: NO_GATES,
+})
+
+const VERDICT_LABELS: Readonly<Record<GateVerdict, string>> = Object.freeze({
+  approved: 'Aprovado',
+  failed: 'Reprovado',
+  incomplete: 'Incompleto',
+})
 
 function visibleFailure(failure: ReadFailure): string {
   if (failure.kind === 'auth') return 'A sessão expirou. Entre novamente para consultar o gate.'
@@ -103,6 +133,19 @@ function shortHash(value: string): string {
   return `${value.slice(0, 10)}…${value.slice(-6)}`
 }
 
+function panelIdentity(projectId: string, versionId: string, versionHash: string): string {
+  return `${projectId}\u0000${versionId}\u0000${versionHash}`
+}
+
+function gateVerdict(gate: SyntheticPhaseGateView): GateVerdict {
+  if (gate.report.approved) return 'approved'
+  const incomplete = gate.report.missing.length > 0 ||
+    gate.report.evidence.some((criterion) =>
+      criterion.missingChecks.length > 0 ||
+      criterion.checks.some((check) => check.missingEvidenceTypes.length > 0))
+  return incomplete ? 'incomplete' : 'failed'
+}
+
 export default function SyntheticPhaseGatePanel(props: Readonly<{
   projectId: string
   projectVersionId: string
@@ -111,8 +154,7 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
 }>) {
   const router = useRouter()
   const [state, setState] = useState<PanelState>('loading')
-  const [gate, setGate] = useState<SyntheticPhaseGateView | null>(null)
-  const [gateProjectId, setGateProjectId] = useState<string | null>(null)
+  const [history, setHistory] = useState<Readonly<GateHistory>>(EMPTY_HISTORY)
   const [failure, setFailure] = useState<string | null>(null)
   const [publishedCapabilityIds, setPublishedCapabilityIds] = useState<ReadonlySet<string>>(new Set())
   const [running, setRunning] = useState(false)
@@ -131,9 +173,10 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
     if (mutationPendingRef.current) return
     const ticket = readFenceRef.current.begin()
     const mutationGeneration = mutationGenerationRef.current
+    const loadIdentity = panelIdentity(props.projectId, props.projectVersionId, props.projectVersionHash)
     setState('loading')
     setFailure(null)
-    const query = 'limit=100'
+    const query = 'limit=20'
     let gateResult
     let capabilityResult
     try {
@@ -155,8 +198,7 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
         !readFenceRef.current.isCurrent(ticket) ||
         mutationGenerationRef.current !== mutationGeneration
       ) return
-      setGate(null)
-      setGateProjectId(null)
+      setHistory({ ...EMPTY_HISTORY, gatesIdentity: loadIdentity })
       setFailure(error instanceof Error ? error.message : 'Não foi possível consultar o gate sintético.')
       setState('error')
       return
@@ -178,20 +220,29 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
         router.replace('/login')
         return
       }
-      setGate(null)
-      setGateProjectId(null)
+      setHistory({ ...EMPTY_HISTORY, gatesIdentity: loadIdentity })
       setFailure(visibleFailure(gateResult.failure))
       setState('error')
       return
     }
-    const latest = [...gateResult.data.gates]
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null
-    setGate(latest)
-    setGateProjectId(latest ? props.projectId : null)
-    setState(latest ? 'ready' : 'empty')
-  }, [props.projectId, props.projectVersionId, props.reads, router])
+    // The server order is the history order; the list is only cut, never sorted.
+    const gates = capSyntheticPhaseGateHistory(gateResult.data.gates)
+    setHistory((current) => {
+      const selection = reconcileSyntheticPhaseGateSelection(
+        gates,
+        current.gatesIdentity === loadIdentity ? current : NO_SYNTHETIC_PHASE_GATE_SELECTION,
+      )
+      return {
+        gatesIdentity: loadIdentity,
+        gates,
+        selectedGateId: selection.selectedGateId,
+        selectionPinned: selection.selectionPinned,
+      }
+    })
+    setState(gates.length > 0 ? 'ready' : 'empty')
+  }, [props.projectId, props.projectVersionHash, props.projectVersionId, props.reads, router])
 
-  const identity = `${props.projectId}\u0000${props.projectVersionId}\u0000${props.projectVersionHash}`
+  const identity = panelIdentity(props.projectId, props.projectVersionId, props.projectVersionHash)
   useEffect(() => {
     const readFence = readFenceRef.current
     if (identityRef.current !== identity) {
@@ -199,13 +250,17 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
       mutationGenerationRef.current += 1
       mutationPendingRef.current = false
       setRunning(false)
+      // Nothing read or evaluated for the previous identity may render, and no
+      // pin survives it: the new identity starts from its own first gate.
+      setHistory(EMPTY_HISTORY)
+      setFailure(null)
     }
     void load()
     return () => readFence.invalidate()
   }, [identity, load])
 
   const run = useCallback(async () => {
-    const requestIdentity = `${props.projectId}\u0000${props.projectVersionId}\u0000${props.projectVersionHash}`
+    const requestIdentity = panelIdentity(props.projectId, props.projectVersionId, props.projectVersionHash)
     const mutationGeneration = mutationGenerationRef.current + 1
     mutationGenerationRef.current = mutationGeneration
     mutationPendingRef.current = true
@@ -224,7 +279,9 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
     }
     setRunning(true)
     setFailure(null)
+    let evaluated = false
     try {
+      // Always the editor's current version, never the selected gate's.
       const response = await fetch(
         `/v1/projects/${encodeURIComponent(props.projectId)}/synthetic-phase-gates`,
         {
@@ -253,11 +310,20 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
       if (!response.ok || !payload.data?.gate) {
         throw new Error(payload.error?.message ?? `A avaliação foi recusada (HTTP ${response.status}).`)
       }
+      const evaluatedGate = payload.data.gate
       idempotencyRef.current = null
       props.reads.invalidate('synthetic-phase-gates')
-      setGate(payload.data.gate)
-      setGateProjectId(props.projectId)
+      setHistory((current) => ({
+        gatesIdentity: requestIdentity,
+        gates: insertSyntheticPhaseGateFirst(
+          current.gatesIdentity === requestIdentity ? current.gates : NO_GATES,
+          evaluatedGate,
+        ),
+        selectedGateId: evaluatedGate.id,
+        selectionPinned: 'mutation',
+      }))
       setState('ready')
+      evaluated = true
     } catch (error) {
       if (
         mutationGenerationRef.current !== mutationGeneration ||
@@ -266,7 +332,7 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
       setFailure(error instanceof Error && error.name === 'TimeoutError'
         ? 'A resposta da avaliação não chegou a tempo. Tente novamente para consultar a mesma intenção.'
         : error instanceof Error ? error.message : 'Não foi possível avaliar o gate sintético.')
-      setState(gateProjectId === props.projectId && gate ? 'ready' : 'error')
+      setState(history.gatesIdentity === requestIdentity && history.gates.length > 0 ? 'ready' : 'error')
     } finally {
       if (
         mutationGenerationRef.current === mutationGeneration &&
@@ -274,14 +340,23 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
       ) {
         mutationPendingRef.current = false
         setRunning(false)
+        // The canonical list replaces the optimistic one; the pin keeps the
+        // evaluated gate selected while that list still contains it.
+        if (evaluated) void load()
       }
     }
-  }, [gate, gateProjectId, props.projectId, props.projectVersionHash, props.projectVersionId, props.reads, router])
+  }, [history.gates.length, history.gatesIdentity, load, props.projectId, props.projectVersionHash, props.projectVersionId, props.reads, router])
 
   // State can survive a route transition for one render. Bind the displayed
-  // report to the project that produced it so references from project A are
-  // never addressed with project B's URL while the new read is in flight.
-  const visibleGate = gateProjectId === props.projectId ? gate : null
+  // history to the identity that produced it so gates read for project A are
+  // never shown, nor their references addressed with project B's URL, while
+  // the new read is in flight.
+  const gates = history.gatesIdentity === identity ? history.gates : NO_GATES
+  const visibleGate = useMemo(
+    () => gates.find((gate) => gate.id === history.selectedGateId) ?? null,
+    [gates, history.selectedGateId],
+  )
+  const selectedGateId = visibleGate?.id ?? null
 
   const checksByCode = useMemo(() => new Map(
     visibleGate?.report.evidence.flatMap((criterion) => criterion.checks).map((check) => [check.code, check]) ?? [],
@@ -299,22 +374,18 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
     }
     return Object.freeze({ covered, passed, total: TOTAL_CHECKS })
   }, [checksByCode])
-  const stale = Boolean(visibleGate && (
-    visibleGate.projectVersionId !== props.projectVersionId ||
-    visibleGate.projectVersionHash !== props.projectVersionHash
-  ))
-  const incomplete = Boolean(visibleGate && (
-    visibleGate.report.missing.length > 0 ||
-    visibleGate.report.evidence.some((criterion) =>
-      criterion.missingChecks.length > 0 ||
-      criterion.checks.some((check) => check.missingEvidenceTypes.length > 0))
-  ))
-  const verdict = visibleGate?.report.approved
-    ? 'approved'
-    : visibleGate && !incomplete ? 'failed' : 'incomplete'
+  const snapshot = visibleGate
+    ? classifySyntheticPhaseGateSnapshot({
+      gate: visibleGate,
+      gates,
+      projectVersionId: props.projectVersionId,
+      projectVersionHash: props.projectVersionHash,
+    })
+    : null
+  const verdict: GateVerdict = visibleGate ? gateVerdict(visibleGate) : 'incomplete'
 
   return (
-    <section className="mt-5 overflow-hidden rounded-xl border border-[#6962de]/20 bg-[#6962de]/[0.04]" data-testid="synthetic-phase-gate-panel">
+    <section className="mt-5 overflow-hidden rounded-xl border border-[#6962de]/20 bg-[#6962de]/[0.04]" data-gates-count={gates.length} data-selected-gate-id={selectedGateId ?? ''} data-testid="synthetic-phase-gate-panel">
       <header className="border-b border-white/[0.07] px-4 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -324,17 +395,43 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
             </p>
           </div>
           <span className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${verdict === 'approved' ? 'border-[#62b47d]/35 text-[#86cf9d]' : verdict === 'failed' ? 'border-[#ba6262]/35 text-[#d99a94]' : 'border-[#d2a647]/30 text-[#d9b765]'}`} data-gate-verdict={verdict}>
-            {verdict === 'approved' ? 'Aprovado' : verdict === 'failed' ? 'Reprovado' : 'Incompleto'}
+            {VERDICT_LABELS[verdict]}
           </span>
         </div>
+        <p className="mt-2 text-[9px] leading-4 text-[#77728a]" data-testid="synthetic-phase-gate-snapshot-note">Estado do retrato selecionado. Nenhuma avaliação histórica equivale a aprovação da versão atual.</p>
+        {gates.length > 0 ? (
+          <div className="mt-3">
+            <select
+              aria-label="Histórico de avaliações"
+              className="w-full rounded-lg border border-white/[0.08] bg-[#111018] px-2.5 py-2 font-mono text-[9px] text-[#c2bdcf] outline-none transition focus:border-[#8f86e8]/45 disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="synthetic-phase-gate-history"
+              disabled={state === 'loading' || running}
+              onChange={(event) => {
+                const gateId = event.target.value
+                setHistory((current) => ({ ...current, selectedGateId: gateId, selectionPinned: 'user' }))
+              }}
+              value={selectedGateId ?? ''}
+            >
+              {gates.map((gate) => {
+                const gateState = gateVerdict(gate)
+                return <option className="bg-[#111]" data-gate-id={gate.id} data-gate-state={gateState} data-gate-version={gate.projectVersionId} data-testid="synthetic-phase-gate-history-option" key={gate.id} value={gate.id}>{`${new Date(gate.createdAt).toLocaleString('pt-BR')} · versão ${gate.projectVersionId} · ${VERDICT_LABELS[gateState]}`}</option>
+              })}
+            </select>
+            <p className="mt-1 text-[8px] text-[#656071]" data-testid="synthetic-phase-gate-history-count">{`${gates.length} avaliação(ões) · últimas ${SYNTHETIC_PHASE_GATE_HISTORY_LIMIT} do projeto`}</p>
+          </div>
+        ) : null}
         {state === 'loading' ? <p className="mt-3 animate-pulse text-[10px] text-[#77728a]" role="status">Lendo avaliação persistida…</p> : null}
-        {state === 'empty' ? <p className="mt-3 text-[10px] leading-4 text-[#817c91]" data-testid="synthetic-phase-gate-empty">Esta versão ainda não foi avaliada. Os oito checks permanecem visíveis como ausentes.</p> : null}
+        {state === 'empty' ? <p className="mt-3 text-[10px] leading-4 text-[#817c91]" data-testid="synthetic-phase-gate-empty">Este projeto ainda não tem avaliações persistidas. Os oito checks permanecem visíveis como ausentes.</p> : null}
         {failure ? <div className="mt-3 rounded-lg border border-[#ba6262]/25 bg-[#ba6262]/10 p-3 text-[10px] leading-4 text-[#d99a94]" role="alert"><p>{failure}</p><button className="mt-2 underline underline-offset-2 disabled:opacity-50" disabled={running} onClick={() => { void load(true) }} type="button">Tentar leitura novamente</button></div> : null}
         {visibleGate ? (
           <div className="mt-3 space-y-1 font-mono text-[8px] leading-4 text-[#6f6a7c]" data-testid="synthetic-phase-gate-identity">
             <p>Avaliado em {new Date(visibleGate.report.evaluatedAt).toLocaleString('pt-BR')} · versão {visibleGate.projectVersionId}</p>
             <p title={visibleGate.reportFingerprint}>report {shortHash(visibleGate.reportFingerprint)} · record {shortHash(visibleGate.recordHash)}</p>
-            {stale ? <p className="font-sans text-[10px] text-[#d5a958]" data-testid="synthetic-phase-gate-stale">Avaliação histórica: o editor está em outra versão. Execute novamente para avaliar o estado atual.</p> : <p className="font-sans text-[10px] text-[#79738a]">Retrato imutável da versão e das evidências existentes no instante acima.</p>}
+            {snapshot === 'divergent'
+              ? <p className="font-sans text-[10px] text-[#d5a958]" data-testid="synthetic-phase-gate-stale">{`Avaliação de outra versão ou hash: o editor está na versão ${props.projectVersionId}. Use "Avaliar versão atual" para o estado atual.`}</p>
+              : snapshot === 'historical'
+                ? <p className="font-sans text-[10px] text-[#aba2dc]" data-testid="synthetic-phase-gate-historical">Avaliação histórica desta versão: existe uma avaliação mais recente na lista.</p>
+                : <p className="font-sans text-[10px] text-[#79738a]">Retrato imutável da versão e das evidências existentes no instante acima.</p>}
           </div>
         ) : null}
       </header>
@@ -362,7 +459,10 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
             </ul>
           </article>
         ))}
-        <button className="w-full rounded-lg border border-[#8f86e8]/30 bg-[#8f86e8]/10 px-3 py-2.5 text-xs font-semibold text-[#b5aef4] transition hover:bg-[#8f86e8]/15 disabled:cursor-not-allowed disabled:opacity-45" data-testid="synthetic-phase-gate-run" disabled={running || state === 'loading'} onClick={() => { void run() }} type="button">{running ? 'Avaliando evidências…' : stale || !visibleGate ? 'Avaliar esta versão' : 'Executar nova avaliação'}</button>
+        <div>
+          <button className="w-full rounded-lg border border-[#8f86e8]/30 bg-[#8f86e8]/10 px-3 py-2.5 text-xs font-semibold text-[#b5aef4] transition hover:bg-[#8f86e8]/15 disabled:cursor-not-allowed disabled:opacity-45" data-testid="synthetic-phase-gate-run" disabled={running || state === 'loading'} onClick={() => { void run() }} type="button">{running ? 'Avaliando evidências…' : 'Avaliar versão atual'}</button>
+          <p className="mt-2 text-[9px] leading-4 text-[#77728a]" data-testid="synthetic-phase-gate-run-note">{`Avalia a versão atual do editor (${props.projectVersionId}), independentemente da avaliação selecionada.`}</p>
+        </div>
       </div>
     </section>
   )
