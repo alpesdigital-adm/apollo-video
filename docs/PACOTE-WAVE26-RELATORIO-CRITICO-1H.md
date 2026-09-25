@@ -23,4 +23,8 @@ Comandos de verificação: `node --test tests/v2/transformation-critic-report-re
 
 ## Limite e estado
 
-Janela de uma hora: 25/09/2026 19:52–20:52 UTC. Reservar a parte final para revisão, CI do commit exato e cleanup. Se fila ou infraestrutura externa consumir o prazo, parar com checkpoint verificável e pendências abertas; tempo decorrido não equivale a aprovação. No momento de escrita, a implementação local e os testes unitários focados estão presentes; CI, jornada browser, merge, deploy e aceite ainda não foram comprovados neste pacote. Não marcar TODO como concluído por este recorte.
+Janela de uma hora: 25/09/2026 19:52–20:52 UTC. O CI individual da Wave 26 (`36187322963`) terminou com sucesso. O artefato `synthetic-wave24-590030c6ef27ec28aa0ea65522854f3902ef014f-1/transformation-critic-read.json` registra leitura autenticada 200, `reportHash` igual ao hash da referência (`d24051a4b34d82c200be3f53dedeaf79302069c65fd674724ad52e3a9d48f032`), outro projeto 422/`ASSET_NOT_FOUND`, query desconhecida 422/`INVALID_ARGUMENT` e acesso anônimo 401/`AUTH_INVALID`.
+
+A integração local com a Wave 25 preserva a prova real do histórico e os casos de transporte controlado. O CI do conjunto integrado ainda está pendente; sucesso dos CIs individuais não o substitui. Merge, deploy e aceite do produto não foram comprovados neste pacote. Não marcar TODO como concluído por este recorte.
+
+Em esclarecimento posterior em 25/09/2026, o proprietário solicitou integração, commit e merge das Waves 24–26 e E2E isolado. Produção só será considerada após a prontidão; qualquer ambiente extra de validação será descartável, com cleanup verificado. Permanecem aplicáveis os gates do `AGENTS.md`.

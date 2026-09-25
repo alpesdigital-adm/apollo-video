@@ -18,6 +18,14 @@ const dockerfileSource = readFileSync(
   new URL('../../Dockerfile', import.meta.url),
   'utf8',
 )
+const syntheticPhaseGatePanelSource = readFileSync(
+  new URL('../../src/components/SyntheticPhaseGatePanel.tsx', import.meta.url),
+  'utf8',
+)
+const syntheticPhaseGateHistorySource = readFileSync(
+  new URL('../../src/v2/ui/synthetic-phase-gate-history.ts', import.meta.url),
+  'utf8',
+)
 
 test('T-FR-012 project editor shows persisted owner trust, summary and assumptions', () => {
   assert.match(projectEditorSource, /parseProductionBrief\(workspace\?\.brief\?\.productionBrief\)/)
@@ -614,4 +622,60 @@ test('W22 the editor reads go through the coordinator and the review failure sta
   assert.match(projectEditorSource, /reviewLoading \|\|\s+reviewFailure !== null \|\|\s+proxyReviewFailure !== null \|\|\s+proxyReviewLoading/, 'review loading and failures block final export')
   assert.match(projectEditorSource, /reads\.invalidate\('workspace', 'policy-overrides', 'annotations', 'proxy-reviews'\)/, 'post-mutation refreshes invalidate pre-mutation GETs')
   assert.doesNotMatch(projectEditorSource, /registro sem auditoria de credencial/, 'a generic persistence conflict does not invent an audit cause')
+})
+
+test('W25 synthetic phase gate panel shows the server-ordered history of the last 20 evaluations', () => {
+  // Structural guards over the panel. The list, pin and classification rules
+  // are proved by tests/v2/synthetic-phase-gate-history.test.mjs; the
+  // behaviour in a real browser belongs to the Wave 25 browser proof.
+  const source = syntheticPhaseGatePanelSource
+  assert.match(source, /const query = 'limit=20'/, 'the history asks the server for the last 20 gates')
+  assert.match(source, /\/synthetic-phase-gates\?\$\{query\}`/, 'the read URL carries the same explicit limit')
+  assert.doesNotMatch(source, /limit=100/, 'the panel no longer reads 100 gates to keep one')
+  assert.doesNotMatch(source, /\.sort\(/, 'the server order (createdAt desc, id desc) is never re-sorted')
+  assert.doesNotMatch(source, /createdAt\.localeCompare/, 'recency is never inferred locally')
+  assert.doesNotMatch(syntheticPhaseGateHistorySource, /\.sort\(/, 'the history rules never re-sort either')
+  assert.match(source, /capSyntheticPhaseGateHistory\(gateResult\.data\.gates\)/, 'the received list is only cut')
+  for (const testId of [
+    'synthetic-phase-gate-panel',
+    'synthetic-phase-gate-summary',
+    'synthetic-phase-gate-empty',
+    'synthetic-phase-gate-identity',
+    'synthetic-phase-gate-stale',
+    'synthetic-phase-gate-run',
+    'synthetic-phase-gate-history',
+    'synthetic-phase-gate-history-option',
+    'synthetic-phase-gate-history-count',
+    'synthetic-phase-gate-historical',
+    'synthetic-phase-gate-snapshot-note',
+    'synthetic-phase-gate-run-note',
+  ]) {
+    assert.ok(source.includes(`data-testid="${testId}"`), `${testId} is rendered`)
+  }
+  for (const attribute of [
+    'data-gate-verdict=',
+    'data-criterion=',
+    'data-check-code=',
+    'data-check-status=',
+    'data-selected-gate-id=',
+    'data-gates-count=',
+    'data-gate-id=',
+    'data-gate-version=',
+    'data-gate-state=',
+  ]) {
+    assert.ok(source.includes(attribute), `${attribute} is rendered`)
+  }
+  assert.match(source, /aria-label="Histórico de avaliações"/)
+  assert.match(
+    source,
+    /body: JSON\.stringify\(\{\s*projectVersionId: props\.projectVersionId,\s*projectVersionHash: props\.projectVersionHash,\s*\}\)/,
+    'the evaluation targets the editor version, never the selected gate',
+  )
+  assert.match(source, /'Avaliar versão atual'/, 'the button names what it evaluates')
+  assert.doesNotMatch(source, /Executar nova avaliação|Avaliar esta versão/, 'the previous labels are gone')
+  const onChange = source.match(/onChange=\{\(event\) => \{([\s\S]*?)\n\s*\}\}/)
+  assert.ok(onChange, 'the history selector has a change handler')
+  assert.match(onChange[1], /selectionPinned: 'user'/, 'a choice made by the operator is pinned')
+  assert.doesNotMatch(onChange[1], /fetch\(|load\(|run\(|invalidate\(|\.read\(/, 'choosing a gate issues no request')
+  assert.doesNotMatch(source, /createdBy/, 'the author is not in the public gate contract and is never fabricated')
 })

@@ -267,3 +267,7 @@ Gate final da branch: `npm test`, `npm run typecheck`, `npm run lint`,
 `npm run api:parity:validate` e `npm run build`, além dos dois jobs do CI.
 Pós-merge só existe se o merge for autorizado; então confirmar o novo `main` e
 seu CI, sem inferir deploy ou aceite.
+
+## Nota histórica de autorização
+
+Os limites de autorização acima registram o escopo original deste plano. Em 25/09/2026, o proprietário solicitou integrar, comitar e fazer merge das Waves 24, 25 e 26, além de validar o E2E em ambiente isolado. Em esclarecimento posterior, determinou que produção só será considerada após a prontidão; qualquer ambiente extra de validação será descartável, com cleanup verificado. A execução continua sujeita aos gates e às regras operacionais do `AGENTS.md`; este plano, por si, não comprova merge, deploy ou aceite.
