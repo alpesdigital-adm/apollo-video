@@ -44,6 +44,14 @@ import {
   TRANSFORMATION_MODES,
   TRANSFORMATION_PRESERVES,
 } from '../domain/transformation-brief.ts'
+import {
+  TRANSFORMATION_CRITIC_ACTIONS,
+  TRANSFORMATION_CRITIC_DECISIONS,
+  TRANSFORMATION_CRITIC_DIMENSIONS,
+  TRANSFORMATION_CRITIC_REPORT_VERSION,
+  TRANSFORMATION_CRITIC_STATUSES,
+  TRANSFORMATION_EVALUATOR_KINDS,
+} from '../domain/transformation-critic-report.ts'
 // Wave 20. Every enum below is spread from the domain constant that defines it,
 // never retyped: an enum written from memory is a contract that says one thing
 // and a system that does another, and in Wave 19 each one written by hand was
@@ -26345,6 +26353,58 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         reports: { type: 'array', maxItems: 50, items: { type: 'object', additionalProperties: true } },
         novelty: { type: 'array', maxItems: 20, items: { type: 'object', additionalProperties: true } },
       },
+    }),
+  ),
+  defineSchema('transformation-critic-report-read', 1, 'One persisted transformation critic report',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['report'],
+      properties: { report: {
+        type: 'object', additionalProperties: false,
+        required: [
+          'schemaVersion', 'id', 'workspaceId', 'projectId', 'briefId', 'briefHash', 'providerJobId',
+          'policyId', 'policyHash', 'sourceArtifactId', 'sourceArtifactSha256', 'resultArtifactId',
+          'resultArtifactSha256', 'evaluators', 'measurements', 'issues', 'hardGates', 'decision',
+          'action', 'confidenceBps', 'intentScoreBps', 'evaluatedAt', 'reportHash',
+        ],
+        properties: {
+          schemaVersion: { const: TRANSFORMATION_CRITIC_REPORT_VERSION },
+          id: idSchema, workspaceId: idSchema, projectId: idSchema, briefId: idSchema,
+          briefHash: sha256Schema, providerJobId: idSchema, policyId: idSchema, policyHash: sha256Schema,
+          sourceArtifactId: idSchema, sourceArtifactSha256: sha256Schema,
+          resultArtifactId: idSchema, resultArtifactSha256: sha256Schema,
+          evaluators: { type: 'array', items: {
+            type: 'object', additionalProperties: false, required: ['id', 'kind', 'version', 'scope'],
+            properties: { id: idSchema, kind: { enum: [...TRANSFORMATION_EVALUATOR_KINDS] }, version: { type: 'string' }, scope: { type: 'string' } },
+          } },
+          measurements: { type: 'array', items: {
+            type: 'object', additionalProperties: false,
+            required: ['dimension', 'status', 'scoreBps', 'thresholdBps', 'frameRange', 'region'],
+            properties: {
+              dimension: { enum: [...TRANSFORMATION_CRITIC_DIMENSIONS] }, status: { enum: [...TRANSFORMATION_CRITIC_STATUSES] },
+              evaluatorId: idSchema, scoreBps: { type: ['integer', 'null'], minimum: 0, maximum: 10000 },
+              thresholdBps: { type: ['integer', 'null'], minimum: 0, maximum: 10000 },
+              frameRange: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'], properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 0 } } }] },
+              region: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' } } }] },
+              note: { type: 'string' },
+            },
+          } },
+          issues: { type: 'array', items: {
+            type: 'object', additionalProperties: false,
+            required: ['dimension', 'severity', 'frameRange', 'region', 'description'],
+            properties: {
+              dimension: { enum: [...TRANSFORMATION_CRITIC_DIMENSIONS] }, severity: { enum: ['blocking', 'major', 'minor'] },
+              frameRange: { type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'], properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 0 } } },
+              region: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' } } }] },
+              violatedPreserve: { enum: [...TRANSFORMATION_PRESERVES] }, description: { type: 'string' },
+            },
+          } },
+          hardGates: { type: 'array', uniqueItems: true, items: { enum: [...TRANSFORMATION_CRITIC_DIMENSIONS] } },
+          decision: { enum: [...TRANSFORMATION_CRITIC_DECISIONS] }, action: { enum: [...TRANSFORMATION_CRITIC_ACTIONS] },
+          confidenceBps: { type: ['integer', 'null'], minimum: 0, maximum: 10000 },
+          intentScoreBps: { type: ['integer', 'null'], minimum: 0, maximum: 10000 },
+          evaluatedAt: dateTimeSchema, reportHash: sha256Schema,
+        },
+      } },
     }),
   ),
   defineSchema('transformation-fallback-action-request', 1, 'A human decision on the current fallback ledger revision', {

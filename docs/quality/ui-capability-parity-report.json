@@ -4,9 +4,9 @@
     "uiActions": 168,
     "capabilities": 150,
     "endpoints": 150,
-    "registeredCapabilities": 373,
-    "operableCapabilities": 373,
-    "publicContractCapabilities": 373,
+    "registeredCapabilities": 374,
+    "operableCapabilities": 374,
+    "publicContractCapabilities": 374,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -6955,6 +6955,17 @@
       "endpoint": "GET /v1/projects/{projectId}/transformation-quality",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/transformation-quality-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-critic-reports.get",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/transformation-critic-reports/{reportId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/transformation-critic-report-read/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

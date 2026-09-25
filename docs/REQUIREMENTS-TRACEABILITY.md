@@ -419,6 +419,8 @@ Complemento local Wave 15 — `transformation-brief/v1` substitui o tipo solto a
 | FR-123 | Limpeza avançada | S3,S6 | D1,D4 | máscara revisada produz derivative inpaint imutável; separation provider-bound e comparação crop/cover/reject estão implementadas localmente, ainda sem merge/deploy/aceite | visual eval real de legenda/logo/fundo + golden FFmpeg de voz/música + smoke ElevenLabs vivo — parcial 3/5 entregue, 2/5 em gate |
 | FR-218 | Mask future | S6,S7 | D3,D4,D6 | annotation region/refinements imutáveis viram mask input sem dados internos do revisor | PostgreSQL + provider boundary + MP4 + browser E2E |
 
+Wave 26 (leitura pública por ID, ainda sem aceite de produto): `GET /v1/projects/{projectId}/transformation-critic-reports/{reportId}` expõe um relatório crítico já persistido sob `projects:read`, com `apollo.projects.transformation-critic-reports.get` e isolamento por workspace/projeto/ID. O gate só endereça essa evidência quando a capability exata está publicada ao ator. Este recorte não altera avaliação, provider, persistência ou os critérios de aprovação de FR-116.
+
 Aceite de produção 2026-09-02 — a jornada T-FR-113/114/115/116/123/218 percorreu
 PostgreSQL, API pública, workers reiniciados, materialização dos bytes reais, critic e
 fallback persistidos, FFmpeg/ffprobe e Chrome contra `next start`. O painel do editor

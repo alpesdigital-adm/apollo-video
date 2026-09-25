@@ -28,6 +28,11 @@ export function addressSyntheticPhaseGateReference(input: {
           capabilityId: 'apollo.projects.provider-jobs.read',
           href: `/v1/projects/${projectId}/provider-jobs/${referenceId}`,
         }
+      case 'transformation-critic-report':
+        return {
+          capabilityId: 'apollo.projects.transformation-critic-reports.get',
+          href: `/v1/projects/${projectId}/transformation-critic-reports/${referenceId}`,
+        }
       case 'synthetic-audio-master':
         return {
           capabilityId: 'apollo.projects.synthetic-audio-masters.read',

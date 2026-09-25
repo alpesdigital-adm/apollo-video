@@ -4,6 +4,7 @@ import {
   type TransformationFallbackLedger,
 } from '../domain/transformation-fallback.ts'
 import type { PersistedProviderJob } from '../application/ports/provider-job-repository.ts'
+import type { TransformationCriticReport } from '../domain/transformation-critic-report.ts'
 import { presentTransformationJob } from './transformation-job-contract.ts'
 
 function record(value: unknown, field: string): Record<string, unknown> {
@@ -101,4 +102,42 @@ export function presentTransformationQuality(value: Readonly<{
   novelty: readonly unknown[]
 }>) {
   return Object.freeze({ ledgers: value.ledgers, reports: value.reports, novelty: value.novelty })
+}
+
+export function presentTransformationCriticReport(report: Readonly<TransformationCriticReport>) {
+  return Object.freeze({ report: Object.freeze({
+    schemaVersion: report.schemaVersion,
+    id: report.id,
+    workspaceId: report.workspaceId,
+    projectId: report.projectId,
+    briefId: report.briefId,
+    briefHash: report.briefHash,
+    providerJobId: report.providerJobId,
+    policyId: report.policyId,
+    policyHash: report.policyHash,
+    sourceArtifactId: report.sourceArtifactId,
+    sourceArtifactSha256: report.sourceArtifactSha256,
+    resultArtifactId: report.resultArtifactId,
+    resultArtifactSha256: report.resultArtifactSha256,
+    evaluators: report.evaluators.map(({ id, kind, version, scope }) => Object.freeze({ id, kind, version, scope })),
+    measurements: report.measurements.map(({ dimension, status, evaluatorId, scoreBps, thresholdBps, frameRange, region, note }) => Object.freeze({
+      dimension, status, ...(evaluatorId === undefined ? {} : { evaluatorId }), scoreBps, thresholdBps,
+      frameRange: frameRange ? Object.freeze({ startFrame: frameRange.startFrame, endFrame: frameRange.endFrame }) : null,
+      region: region ? Object.freeze({ x: region.x, y: region.y, width: region.width, height: region.height }) : null,
+      ...(note === undefined ? {} : { note }),
+    })),
+    issues: report.issues.map(({ dimension, severity, frameRange, region, violatedPreserve, description }) => Object.freeze({
+      dimension, severity,
+      frameRange: Object.freeze({ startFrame: frameRange.startFrame, endFrame: frameRange.endFrame }),
+      region: region ? Object.freeze({ x: region.x, y: region.y, width: region.width, height: region.height }) : null,
+      ...(violatedPreserve === undefined ? {} : { violatedPreserve }), description,
+    })),
+    hardGates: [...report.hardGates],
+    decision: report.decision,
+    action: report.action,
+    confidenceBps: report.confidenceBps,
+    intentScoreBps: report.intentScoreBps,
+    evaluatedAt: report.evaluatedAt,
+    reportHash: report.reportHash,
+  }) })
 }

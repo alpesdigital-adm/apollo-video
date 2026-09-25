@@ -6996,6 +6996,15 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.projects.transformation-critic-reports.get', version: '1.0.0', title: 'Read one transformation critic report',
+    description: 'Reads one persisted transformation critic report by ID within its workspace and project.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/transformation-critic-report-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/transformation-critic-reports/{reportId}' },
+    toolName: 'apollo.projects.transformation-critic-reports.get', supportsDryRun: false, costClass: 'free',
+    confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.projects.transformation-fallbacks.dispatch', version: '1.0.0', title: 'Dispatch the current transformation fallback',
     description: 'Dispatches the generated-cutaway rung selected by the server for one exact fallback-ledger revision. The caller supplies execution scope but cannot choose a rung, provider, capability, selection, policy or provider payload.',
     exposure: 'public', operationKind: 'job', authMode: 'required', requiredScopes: ['projects:write'],

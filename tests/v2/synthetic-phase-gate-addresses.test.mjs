@@ -8,9 +8,16 @@ const reference = (type, id = 'reference-1') => ({ type, id, hash: 'a'.repeat(64
 test('phase-gate evidence links only exact addressable capabilities published to the actor', () => {
   const published = new Set([
     'apollo.projects.provider-jobs.read',
+    'apollo.projects.transformation-critic-reports.get',
     'apollo.projects.synthetic-masters.get',
     'apollo.projects.workspace.read',
   ])
+  assert.deepEqual(addressSyntheticPhaseGateReference({
+    gateProjectId: 'project-a', reference: reference('transformation-critic-report', 'critic-a'), publishedCapabilityIds: published,
+  }), {
+    capabilityId: 'apollo.projects.transformation-critic-reports.get',
+    href: '/v1/projects/project-a/transformation-critic-reports/critic-a',
+  })
   assert.deepEqual(addressSyntheticPhaseGateReference({
     gateProjectId: 'project-a', reference: reference('provider-job', 'job-a'), publishedCapabilityIds: published,
   }), {
@@ -26,6 +33,10 @@ test('phase-gate evidence links only exact addressable capabilities published to
   assert.equal(addressSyntheticPhaseGateReference({
     gateProjectId: 'project-a', reference: reference('alignment-artifact'), publishedCapabilityIds: published,
   }), null, 'the artifact is not linked when artifacts.read is absent from the filtered registry')
+  assert.equal(addressSyntheticPhaseGateReference({
+    gateProjectId: 'project-a', reference: reference('transformation-critic-report'),
+    publishedCapabilityIds: new Set(['apollo.projects.transformation-quality.read']),
+  }), null, 'the list capability does not authorize a report-by-ID link')
 })
 
 test('phase-gate ledgers and non-addressable evidence never receive fabricated links', () => {

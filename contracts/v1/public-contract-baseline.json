@@ -9598,6 +9598,29 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.transformation-critic-reports.get": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/transformation-critic-report-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/transformation-critic-reports/{reportId}"
+      },
+      "toolName": "apollo.projects.transformation-critic-reports.get",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.transformation-fallbacks.act": {
       "version": "1.0.0",
       "exposure": "public",
@@ -226569,6 +226592,453 @@
                     "type": "string",
                     "pattern": "^[a-f0-9]{64}$"
                   }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/transformation-critic-report-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "report"
+          ],
+          "properties": {
+            "report": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "briefId",
+                "briefHash",
+                "providerJobId",
+                "policyId",
+                "policyHash",
+                "sourceArtifactId",
+                "sourceArtifactSha256",
+                "resultArtifactId",
+                "resultArtifactSha256",
+                "evaluators",
+                "measurements",
+                "issues",
+                "hardGates",
+                "decision",
+                "action",
+                "confidenceBps",
+                "intentScoreBps",
+                "evaluatedAt",
+                "reportHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "transformation-critic-report/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "briefId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "briefHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "providerJobId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "policyId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "policyHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "resultArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "resultArtifactSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "evaluators": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "kind",
+                      "version",
+                      "scope"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "kind": {
+                        "enum": [
+                          "measured",
+                          "controlled"
+                        ]
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "scope": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "measurements": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "dimension",
+                      "status",
+                      "scoreBps",
+                      "thresholdBps",
+                      "frameRange",
+                      "region"
+                    ],
+                    "properties": {
+                      "dimension": {
+                        "enum": [
+                          "intent-adherence",
+                          "preserve-list",
+                          "identity",
+                          "lip-sync",
+                          "temporal-coherence",
+                          "flicker",
+                          "warping",
+                          "anatomy",
+                          "composite-edges",
+                          "composite-light",
+                          "transitions",
+                          "format-safe-areas",
+                          "risk",
+                          "media-integrity"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "measured",
+                          "not-applicable",
+                          "unavailable"
+                        ]
+                      },
+                      "evaluatorId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "scoreBps": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0,
+                        "maximum": 10000
+                      },
+                      "thresholdBps": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0,
+                        "maximum": 10000
+                      },
+                      "frameRange": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "startFrame",
+                              "endFrame"
+                            ],
+                            "properties": {
+                              "startFrame": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "endFrame": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "region": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "x",
+                              "y",
+                              "width",
+                              "height"
+                            ],
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              },
+                              "width": {
+                                "type": "number"
+                              },
+                              "height": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "note": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "issues": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "dimension",
+                      "severity",
+                      "frameRange",
+                      "region",
+                      "description"
+                    ],
+                    "properties": {
+                      "dimension": {
+                        "enum": [
+                          "intent-adherence",
+                          "preserve-list",
+                          "identity",
+                          "lip-sync",
+                          "temporal-coherence",
+                          "flicker",
+                          "warping",
+                          "anatomy",
+                          "composite-edges",
+                          "composite-light",
+                          "transitions",
+                          "format-safe-areas",
+                          "risk",
+                          "media-integrity"
+                        ]
+                      },
+                      "severity": {
+                        "enum": [
+                          "blocking",
+                          "major",
+                          "minor"
+                        ]
+                      },
+                      "frameRange": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "startFrame",
+                          "endFrame"
+                        ],
+                        "properties": {
+                          "startFrame": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "endFrame": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      },
+                      "region": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "x",
+                              "y",
+                              "width",
+                              "height"
+                            ],
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              },
+                              "width": {
+                                "type": "number"
+                              },
+                              "height": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "violatedPreserve": {
+                        "enum": [
+                          "identity",
+                          "lips",
+                          "expression",
+                          "body-motion",
+                          "wardrobe",
+                          "speech",
+                          "timing",
+                          "foreground",
+                          "background",
+                          "objects",
+                          "text",
+                          "brand",
+                          "audio"
+                        ]
+                      },
+                      "description": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "hardGates": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "intent-adherence",
+                      "preserve-list",
+                      "identity",
+                      "lip-sync",
+                      "temporal-coherence",
+                      "flicker",
+                      "warping",
+                      "anatomy",
+                      "composite-edges",
+                      "composite-light",
+                      "transitions",
+                      "format-safe-areas",
+                      "risk",
+                      "media-integrity"
+                    ]
+                  }
+                },
+                "decision": {
+                  "enum": [
+                    "approved",
+                    "rejected",
+                    "needs-review",
+                    "evidence-unavailable"
+                  ]
+                },
+                "action": {
+                  "enum": [
+                    "approve",
+                    "retry",
+                    "fallback",
+                    "review"
+                  ]
+                },
+                "confidenceBps": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 10000
+                },
+                "intentScoreBps": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 10000
+                },
+                "evaluatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "reportHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
                 }
               }
             }

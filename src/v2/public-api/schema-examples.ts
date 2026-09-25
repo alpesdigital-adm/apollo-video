@@ -7545,6 +7545,26 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/transformation-critic-report-read/v1': [{
+      data: {
+        report: {
+          schemaVersion: 'transformation-critic-report/v1',
+          id: 'transformation-critic-example', workspaceId: 'workspace-medieval-01', projectId: transformationBriefExample.projectId,
+          briefId: transformationBriefExample.id, briefHash: transformationBriefExample.briefHash,
+          providerJobId: transformationJobExample.id,
+          policyId: 'transformation-policy-example', policyHash: '1'.repeat(64),
+          sourceArtifactId: transformationBriefExample.sourceArtifactId, sourceArtifactSha256: '2'.repeat(64),
+          resultArtifactId: 'artifact-transformed-example', resultArtifactSha256: '3'.repeat(64),
+          evaluators: [{ id: 'ffprobe-evaluator', kind: 'measured', version: '1.0.0', scope: 'Media integrity' }],
+          measurements: [{ dimension: 'media-integrity', status: 'measured', evaluatorId: 'ffprobe-evaluator',
+            scoreBps: 9000, thresholdBps: 8000, frameRange: null, region: null }],
+          issues: [], hardGates: [], decision: 'approved', action: 'approve',
+          confidenceBps: 9000, intentScoreBps: 9000,
+          evaluatedAt: '2029-03-01T10:04:12.000Z', reportHash: '9'.repeat(64),
+        },
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/transformation-fallback-action-request/v1': [{
       action: 'descend', because: 'critic-rejected-quality',
     }],

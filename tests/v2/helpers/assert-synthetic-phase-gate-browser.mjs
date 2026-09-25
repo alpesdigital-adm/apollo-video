@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
 const SHA256 = /^[a-f0-9]{64}$/
@@ -209,6 +209,50 @@ export async function assertSyntheticPhaseGateBrowser(input) {
       const href = await link.getAttribute('href')
       assert.ok(href?.startsWith('/v1/'), `gate reference must use a published local API address: ${href}`)
     }
+
+    const rejectedReportReference = latest.report.evidence
+      .flatMap((criterion) => criterion.checks)
+      .flatMap((check) => check.references)
+      .find((reference) => reference.type === 'transformation-critic-report')
+    assert.ok(rejectedReportReference, 'the persisted gate must identify its rejected transformation report')
+    const reportPath = `/v1/projects/${encodeURIComponent(input.projectId)}/transformation-critic-reports/${encodeURIComponent(rejectedReportReference.id)}`
+    const reportLink = panel.locator(`a[href="${reportPath}"]`)
+    assert.equal(await reportLink.count(), 1, 'the rejected report must have one exact public read link')
+    const reportResponse = trackWait(page.waitForResponse((response) =>
+      response.request().method() === 'GET' && new URL(response.url()).pathname === reportPath))
+    await bounded(reportLink.click(), input.signal, 'open rejected transformation report')
+    const openedReportResponse = await bounded(reportResponse, input.signal, 'rejected report response')
+    assert.equal(openedReportResponse.status(), 200)
+    const openedReport = (await openedReportResponse.json()).data.report
+    assert.equal(openedReport.id, rejectedReportReference.id)
+    assert.equal(openedReport.reportHash, rejectedReportReference.hash)
+    assert.equal(openedReport.projectId, input.projectId)
+    assert.equal(openedReport.decision, 'rejected')
+
+    const consumerReference = latest.report.evidence
+      .flatMap((criterion) => criterion.checks)
+      .flatMap((check) => check.references)
+      .find((reference) => reference.type === 'project' && reference.id !== input.projectId)
+    assert.ok(consumerReference, 'the reuse gate must identify a different existing project')
+    const otherProjectPath = `/v1/projects/${encodeURIComponent(consumerReference.id)}/transformation-critic-reports/${encodeURIComponent(rejectedReportReference.id)}`
+    const [otherProjectResponse, unsupportedQueryResponse, anonymousResponse] = await bounded(Promise.all([
+      context.request.get(`${origin.origin}${otherProjectPath}`),
+      context.request.get(`${origin.origin}${reportPath}?unexpected=1`),
+      fetch(`${origin.origin}${reportPath}`, { signal: input.signal }),
+    ]), input.signal, 'rejected report access boundaries')
+    assert.equal(otherProjectResponse.status(), 404, 'a report cannot be read through a different project')
+    assert.equal(unsupportedQueryResponse.status(), 400, 'unsupported query parameters must be rejected')
+    assert.equal(anonymousResponse.status, 401, 'a report must require authentication')
+    await anonymousResponse.arrayBuffer()
+    await writeFile(resolve(dirname(screenshotPath), 'transformation-critic-read.json'), `${JSON.stringify({
+      gateId: latest.id,
+      reference: rejectedReportReference,
+      href: reportPath,
+      report: openedReport,
+      http: { authenticated: 200, otherProject: 404, unsupportedQuery: 400, anonymous: 401 },
+    }, null, 2)}\n`, 'utf8')
+    await bounded(page.goBack(), input.signal, 'return to persisted gate')
+    await bounded(panel.waitFor({ state: 'visible' }), input.signal, 'phase gate after report navigation')
 
     let markPostHeld
     const postHeld = new Promise((resolveHeld) => { markPostHeld = resolveHeld })
