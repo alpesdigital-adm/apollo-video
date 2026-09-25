@@ -622,6 +622,96 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       storedReportAudit.actorCredentialId,
       expectedAuthenticationAudit.credentialId,
     )
+    const { PrismaContaminationReportRepository } = await import(
+      '../../src/v2/infrastructure/prisma/contamination-report-repository.ts'
+    )
+    const { presentContaminationReport } = await import(
+      '../../src/v2/public-api/contamination-report-contract.ts'
+    )
+    const persistedDomainReport =
+      await new PrismaContaminationReportRepository(client).read({
+        workspaceId,
+        projectId,
+        reportId: report.id,
+      })
+    assert.ok(persistedDomainReport)
+    const persistedRecord = {
+      report: persistedDomainReport,
+      requestFingerprint: storedReportAudit.requestFingerprint,
+      idempotencyKey,
+      authenticationAudit: expectedAuthenticationAudit,
+    }
+    function conflictRepository(code) {
+      let attempts = 0
+      const repository = new PrismaContaminationReportRepository({
+        v2ContaminationReport: client.v2ContaminationReport,
+        async $transaction() {
+          attempts += 1
+          throw Object.assign(new Error('injected transaction conflict'), {
+            code,
+          })
+        },
+      })
+      return { repository, attempts: () => attempts }
+    }
+    const serializableWinner = conflictRepository('P2034')
+    const reconciled = await serializableWinner.repository.create(
+      persistedRecord,
+    )
+    assert.equal(serializableWinner.attempts(), 3)
+    assert.equal(reconciled.replayed, true)
+    assert.equal(reconciled.report.id, report.id)
+    assert.equal(reconciled.report.reportHash, report.reportHash)
+    assert.deepEqual(presentContaminationReport(reconciled.report), report)
+
+    const uniqueWinner = conflictRepository('P2002')
+    assert.equal(
+      (await uniqueWinner.repository.create(persistedRecord)).replayed,
+      true,
+    )
+    assert.equal(uniqueWinner.attempts(), 1)
+
+    await assert.rejects(
+      conflictRepository('P2034').repository.create({
+        ...persistedRecord,
+        requestFingerprint: 'different-request',
+      }),
+      { code: 'IDEMPOTENCY_PAYLOAD_MISMATCH' },
+    )
+    await assert.rejects(
+      conflictRepository('P2034').repository.create({
+        ...persistedRecord,
+        authenticationAudit: {
+          ...expectedAuthenticationAudit,
+          contextHash: 'f'.repeat(64),
+        },
+      }),
+      { code: 'IDEMPOTENCY_PAYLOAD_MISMATCH' },
+    )
+    await assert.rejects(
+      conflictRepository('P2034').repository.create({
+        ...persistedRecord,
+        idempotencyKey: `contamination-missing-${suffix}`,
+      }),
+      { code: 'PERSISTENCE_CONFLICT' },
+    )
+    const corruptReportHash = 'f'.repeat(64)
+    assert.notEqual(corruptReportHash, storedReportAudit.reportHash)
+    try {
+      await client.v2ContaminationReport.update({
+        where: { id: report.id },
+        data: { reportHash: corruptReportHash },
+      })
+      await assert.rejects(
+        conflictRepository('P2034').repository.create(persistedRecord),
+        { code: 'PERSISTENCE_CONFLICT' },
+      )
+    } finally {
+      await client.v2ContaminationReport.update({
+        where: { id: report.id },
+        data: { reportHash: storedReportAudit.reportHash },
+      })
+    }
     assert.deepEqual(
       report.findings.map((finding) => finding.kind).sort(),
       fixture.kinds.toSorted(),
@@ -888,15 +978,27 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       APOLLO_PROTECTED_PAYLOAD_KEY:
         Buffer.alloc(32, 17).toString('base64url'),
     })
+    const cleanupWorkerResult = await runCleanupWorker(
+      `source-cleanup-e2e-worker-${suffix}`,
+    )
+    const cleanupOperationState =
+      await client.v2PublicOperation.findUniqueOrThrow({
+        where: { id: cleanupPayload.data.cleanup.operation.id },
+        select: {
+          status: true,
+          phase: true,
+          attempt: true,
+          errorCode: true,
+        },
+      })
     assert.deepEqual(
-      await runCleanupWorker(
-        `source-cleanup-e2e-worker-${suffix}`,
-      ),
+      cleanupWorkerResult,
       {
         operationId:
           cleanupPayload.data.cleanup.operation.id,
         status: 'succeeded',
       },
+      JSON.stringify(cleanupOperationState),
     )
     assert.equal(
       createHash('sha256')

@@ -691,7 +691,9 @@ implements ContaminationReportRepository {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
         return this.create(record, attempt + 1)
       }
-      if (isPrismaCode(error, 'P2002')) {
+      // Another transaction may commit the same key while all serializable
+      // attempts fail with P2034. Check the committed winner before failing.
+      if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {
         const replay = await this.findCreateReplay({
           workspaceId: record.report.workspaceId,
           projectId: record.report.projectId,
