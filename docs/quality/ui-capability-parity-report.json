@@ -2584,7 +2584,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPhaseGatePanel.tsx:228",
+      "uiAction": "src/components/SyntheticPhaseGatePanel.tsx:285",
       "capabilityId": "apollo.projects.synthetic-phase-gates.run",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/synthetic-phase-gates",
