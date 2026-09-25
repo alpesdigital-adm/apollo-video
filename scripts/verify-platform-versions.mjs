@@ -70,6 +70,13 @@ for (const [component, release] of [['minio', versions.storage.minioRelease], ['
 }
 if ((storageDockerfile.match(/CGO_ENABLED=0 GOTOOLCHAIN=local go build -mod=readonly -tags kqueue -trimpath/g) ?? []).length !== 2) failures.push('MinIO and mc must use upstream-compatible static build flags and read-only modules')
 if ((storageDockerfile.match(/GOTOOLCHAIN=local go mod verify/g) ?? []).length !== 2) failures.push('MinIO and mc must verify downloaded Go modules')
+if (!storageDockerfile.includes('org.opencontainers.image.licenses="AGPL-3.0-or-later"')) failures.push('MinIO source image must declare the upstream AGPL license')
+for (const component of ['minio', 'mc']) {
+  const builder = component === 'minio' ? 'minio-build' : 'mc-build'
+  for (const notice of ['LICENSE', 'CREDITS']) {
+    if (!storageDockerfile.includes(`COPY --from=${builder} /src/${component}/${notice} /licenses/${component}/${notice}`)) failures.push(`${component} ${notice} notice must be included in the runtime image`)
+  }
+}
 if (!storageDockerfile.includes('COPY --from=minio-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt')) failures.push('MinIO runtime must include the builder CA bundle')
 for (const token of [versions.storage.minioSourceCommit, versions.storage.mcSourceCommit, versions.storage.minioArchiveSha256, versions.storage.mcArchiveSha256, versions.storage.builderImage, versions.storage.runtimeImage]) if (!adr003.includes(token)) failures.push(`ADR-003 does not declare ${token}`)
 for (const [label, document, expected] of [['ADR-001', adr001, [versions.web.next, versions.web.react, `Node ${versions.node.containerMajor}`]], ['ADR-002', adr002, [versions.database.image, `Prisma ${versions.database.prisma}`]], ['ADR-008', adr008, [`FFmpeg ${versions.render.ffmpegTarget}`, `ffprobe ${versions.render.ffprobeTarget}`, `Remotion ${versions.render.remotion}`]]]) for (const token of expected) if (!document.includes(token)) failures.push(`${label} does not declare ${token}`)

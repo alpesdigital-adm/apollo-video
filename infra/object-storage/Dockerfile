@@ -26,7 +26,9 @@ LABEL org.opencontainers.image.source="https://github.com/minio/minio/tree/0d740
 COPY --from=minio-build /out/minio /usr/bin/minio
 COPY --from=mc-build /out/mc /usr/bin/mc
 COPY --from=minio-build /src/minio/LICENSE /licenses/minio/LICENSE
+COPY --from=minio-build /src/minio/CREDITS /licenses/minio/CREDITS
 COPY --from=mc-build /src/mc/LICENSE /licenses/mc/LICENSE
+COPY --from=mc-build /src/mc/CREDITS /licenses/mc/CREDITS
 COPY --from=minio-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 VOLUME ["/data"]
 EXPOSE 9000 9001
