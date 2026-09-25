@@ -1,10 +1,13 @@
 import { type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
+import { DomainError } from '../../domain/errors.ts'
 import type {
   PromotableProviderJob,
   PromotableProviderJobReader,
 } from '../../application/synthetic-master-assets.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { PrismaProviderJobRepository } from './provider-job-repository.ts'
+import { PrismaSyntheticAudioMasterRepository } from './synthetic-audio-master-repository.ts'
 
 /**
  * Reads the durable provider run a promotion is allowed to trust.
@@ -22,25 +25,27 @@ export class PrismaPromotableProviderJobReader implements PromotableProviderJobR
   }
 
   async read(input: { workspaceId: string; jobId: string }): Promise<Readonly<PromotableProviderJob> | null> {
-    const row = await this.client.v2ProviderJob.findFirst({
-      where: { id: input.jobId, workspaceId: input.workspaceId },
-      select: {
-        id: true,
-        workspaceId: true,
-        projectId: true,
-        originProjectVersionId: true,
-        operation: true,
-        adapterId: true,
-        adapterVersion: true,
-        providerJobId: true,
-        status: true,
-        criticResultHash: true,
-        authorizationHash: true,
-        submittedAt: true,
-        completedAt: true,
-      },
+    const persisted = await new PrismaProviderJobRepository(this.client).readById(input)
+    if (!persisted) return null
+    const row = persisted.job
+    const audioRange = row.input.audioRange
+    if (
+      audioRange !== undefined &&
+      (typeof audioRange !== 'object' || audioRange === null ||
+        !Number.isSafeInteger((audioRange as { startMs?: unknown }).startMs) ||
+        !Number.isSafeInteger((audioRange as { endMs?: unknown }).endMs) ||
+        typeof (audioRange as { rangeHash?: unknown }).rangeHash !== 'string')
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored provider job audio range is invalid')
+    if (
+      typeof row.input.audioMasterId !== 'string' || row.input.audioMasterId.length === 0
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored audio-avatar job has no canonical audio master')
+    const storedMaster = await new PrismaSyntheticAudioMasterRepository(this.client).read({
+      workspaceId: row.workspaceId,
+      projectId: row.projectId,
+      audioMasterId: row.input.audioMasterId,
     })
-    if (!row) return null
+    if (!storedMaster) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored audio-avatar job references a missing audio master')
+    const master = storedMaster.master
     return Object.freeze({
       id: row.id,
       workspaceId: row.workspaceId,
@@ -49,12 +54,33 @@ export class PrismaPromotableProviderJobReader implements PromotableProviderJobR
       operation: row.operation,
       adapterId: row.adapterId,
       adapterVersion: row.adapterVersion,
-      providerJobId: row.providerJobId,
+      providerJobId: row.providerJobId ?? null,
       status: row.status,
-      criticResultHash: row.criticResultHash,
-      authorizationHash: row.authorizationHash,
-      submittedAt: row.submittedAt ? row.submittedAt.toISOString() : null,
-      completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+      criticResultHash: row.criticResultHash ?? null,
+      authorization: Object.freeze({
+        profileSnapshotId: row.authorization.profileSnapshotId,
+      }),
+      audioRange: audioRange
+        ? Object.freeze({
+          startMs: (audioRange as { startMs: number }).startMs,
+          endMs: (audioRange as { endMs: number }).endMs,
+          rangeHash: (audioRange as { rangeHash: string }).rangeHash,
+        })
+        : null,
+      audioMaster: Object.freeze({
+        id: master.id,
+        masterHash: master.masterHash,
+        profileSnapshotId: master.profileSnapshotId,
+        sourceProviderJobId: master.source.kind === 'tts' ? master.source.providerJobId : null,
+        audio: Object.freeze({ ...master.audio }),
+        alignmentEvidence: Object.freeze({ ...master.alignmentEvidence }),
+      }),
+      resultArtifact: row.resultArtifact
+        ? Object.freeze({ artifactId: row.resultArtifact.artifactId, artifactSha256: row.resultArtifact.artifactSha256 })
+        : null,
+      authorizationHash: row.authorization.authorizationHash,
+      submittedAt: row.submittedAt ?? null,
+      completedAt: row.completedAt ?? null,
     })
   }
 }

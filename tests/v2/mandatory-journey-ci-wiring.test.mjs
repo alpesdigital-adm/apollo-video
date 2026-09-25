@@ -436,7 +436,11 @@ const KNOWN_UNRUN_SUITES = [
     citedBy: ['docs/quality/take-library-v1.md'],
   },
   { file: 'tests/v2/prisma-validated-segment-catalog.integration.mjs', reason: PHASE_1_3 },
-  { file: 'tests/v2/provider-live-contract.e2e.mjs', reason: PAID_PROVIDERS },
+  {
+    file: 'tests/v2/provider-live-contract.e2e.mjs',
+    reason: PAID_PROVIDERS,
+    citedBy: ['docs/PACOTE-WAVE24-GATE-SINTETICO.md'],
+  },
   { file: 'tests/v2/reframe-plan-render.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/render-geometry-render.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/responsive-placement-visual.integration.mjs', reason: PHASE_1_3 },

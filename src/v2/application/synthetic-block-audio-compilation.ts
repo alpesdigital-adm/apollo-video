@@ -2,12 +2,14 @@ import { createHash } from 'node:crypto'
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { assetRightsRevision, createAssetRightsSnapshot, type AssetRightsSnapshot } from '../domain/asset-rights.ts'
+import { assetRightsRevision, createAssetRightsSnapshot, evaluateAssetUse, type AssetRightsSnapshot } from '../domain/asset-rights.ts'
 import { createAssetRightsChangeIntent } from '../domain/asset-rights-change.ts'
 import { calculateCanonicalHash, stableSerialize } from '../domain/canonical-hash.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { calculateSyntheticBlockCacheKey } from '../domain/synthetic-block-generation.ts'
+import type { SyntheticCriticReport } from '../domain/synthetic-critic-report.ts'
+import { isCurrentSyntheticCriticApproval } from './synthetic-critic.ts'
 import type { SyntheticAudioWord } from '../domain/synthetic-audio-master.ts'
 import {
   assertBlockGenerationConsent,
@@ -21,6 +23,7 @@ import {
 } from './authenticate-api-client.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
+import type { ProviderJobRepository } from './ports/provider-job-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { MediaArtifactQueryRepository } from './ports/media-artifact-query-repository.ts'
 import type { SyntheticBlockConcatenationRepository } from './ports/synthetic-block-concatenation-repository.ts'
@@ -94,9 +97,45 @@ export interface CompileBlockAudioSettings {
   outputFormat: 'mp3' | 'wav'
 }
 
+type BlockAudioSourceInput = Readonly<{
+  blockId: string
+  generationId: string
+  audio: Readonly<{ artifactKey: string; sha256: string; byteSize: number }>
+}>
+
+/**
+ * Waits for every concurrent materialization to reach a terminal state before
+ * exposing a failure. The caller may therefore clean the shared operation
+ * directory without racing sibling downloads that are still writing to it.
+ */
+export async function materializeBlockAudioSources(input: {
+  sources: ArtifactSourceMaterializer
+  operationId: string
+  blocks: readonly BlockAudioSourceInput[]
+}): Promise<ReadonlyArray<Readonly<AudioConcatenationBlockInput>>> {
+  const outcomes = await Promise.allSettled(input.blocks.map(async (block) => ({
+    blockId: block.blockId,
+    generationId: block.generationId,
+    sha256: block.audio.sha256,
+    path: (await input.sources.materialize({
+      operationId: input.operationId,
+      artifactKey: block.audio.artifactKey,
+      sha256: block.audio.sha256,
+      byteSize: block.audio.byteSize,
+    })).path,
+  })))
+  const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+  if (failure) throw failure.reason
+  return outcomes.map((outcome) => (outcome as PromiseFulfilledResult<Readonly<AudioConcatenationBlockInput>>).value)
+}
+
 export function compileSyntheticBlockAudioService(dependencies: {
   plans: SyntheticScriptPlanRepository
   generations: SyntheticBlockGenerationRepository
+  providerJobs: ProviderJobRepository
+  criticReports: Readonly<{
+    readByHash(input: { workspaceId: string; reportHash: string }): Promise<Readonly<SyntheticCriticReport> | null>
+  }>
   profiles: SyntheticProductionRepository
   artifacts: MediaArtifactQueryRepository
   artifactPersistence: MediaArtifactPersistenceRepository
@@ -204,8 +243,81 @@ export function compileSyntheticBlockAudioService(dependencies: {
         missing.push(block.id)
         continue
       }
+      let origin = effective
+      if (effective.sourceGenerationId) {
+        const candidates = await dependencies.generations.findByCacheKey({
+          workspaceId: request.workspaceId,
+          cacheKey: effective.cacheKey,
+          statuses: ['approved'],
+        })
+        const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]))
+        const visited = new Set([effective.id])
+        while (origin.sourceGenerationId) {
+          assertDomain(!visited.has(origin.sourceGenerationId), 'PERSISTENCE_CONFLICT', `Block ${block.id} reuse lineage contains a cycle`)
+          const source = byId.get(origin.sourceGenerationId)
+          assertDomain(Boolean(source), 'PERSISTENCE_CONFLICT', `Block ${block.id} reuse origin is missing`)
+          visited.add(source!.id)
+          origin = source!
+        }
+      }
+      const originProfile = await dependencies.profiles.readProfile({
+        workspaceId: request.workspaceId,
+        snapshotId: origin.profileSnapshotId,
+      })
+      assertDomain(Boolean(originProfile), 'ASSET_RIGHTS_BLOCKED', `Block ${block.id} origin presenter snapshot is unavailable`)
+      await assertBlockGenerationConsent(dependencies.profiles, originProfile!.snapshot, {
+        workspaceId: request.workspaceId,
+        operation: 'tts',
+        use: request.use,
+        market: request.market,
+        locale: plan.version.locale,
+        now,
+      })
       const audioRow = await dependencies.artifacts.findById(request.workspaceId, effective.audioArtifactId)
       assertDomain(audioRow?.status === 'available', 'ASSET_NOT_USABLE', 'Approved block audio artifact is unavailable')
+      const currentRights = await dependencies.rights.findCurrentForArtifacts(
+        request.workspaceId,
+        [effective.audioArtifactId, effective.alignmentArtifactId],
+      )
+      for (const artifactId of [effective.audioArtifactId, effective.alignmentArtifactId]) {
+        const decision = evaluateAssetUse(currentRights.get(artifactId) ?? null, {
+          workspaceId: request.workspaceId,
+          use: request.use,
+          market: request.market,
+          locale: plan.version.locale,
+          syntheticOperations: ['tts'],
+        }, now)
+        assertDomain(decision.outcome === 'allow', 'ASSET_RIGHTS_BLOCKED', `Block ${block.id} origin artifact ${artifactId} is no longer authorized`)
+      }
+      assertDomain(Boolean(origin.providerJobId), 'PERSISTENCE_CONFLICT', `Block ${block.id} reuse origin has no provider job`)
+      const persistedJob = await dependencies.providerJobs.read({
+        workspaceId: request.workspaceId,
+        projectId: origin.projectId,
+        jobId: origin.providerJobId!,
+      })
+      assertDomain(Boolean(persistedJob?.job.criticResultHash), 'PERSISTENCE_CONFLICT', `Block ${block.id} provider job carries no specialized critic result hash`)
+      const verdict = await dependencies.criticReports.readByHash({
+        workspaceId: request.workspaceId,
+        reportHash: persistedJob!.job.criticResultHash!,
+      })
+      assertDomain(
+        Boolean(verdict) && isCurrentSyntheticCriticApproval(verdict!) &&
+          verdict!.projectId === origin.projectId && verdict!.blockId === origin.blockId &&
+          verdict!.artifactId === effective.audioArtifactId && verdict!.artifactSha256 === audioRow!.sha256 &&
+          verdict!.scriptHash === origin.scriptHash &&
+          verdict!.profileSnapshotId === origin.profileSnapshotId &&
+          verdict!.alignmentArtifactId === effective.alignmentArtifactId,
+        'PRECONDITION_REQUIRED',
+        `Block ${block.id} has no approved specialized critic report for its exact audio and alignment`,
+      )
+      assertDomain(
+        persistedJob?.job.status === 'approved' &&
+          persistedJob.job.criticResultHash === verdict!.reportHash &&
+          persistedJob.job.resultArtifact?.artifactId === effective.audioArtifactId &&
+          persistedJob.job.resultArtifact.artifactSha256 === audioRow!.sha256,
+        'PERSISTENCE_CONFLICT',
+        `Block ${block.id} provider job no longer carries the specialized approval for the compiled bytes`,
+      )
       inputs.push({
         blockId: block.id,
         generationId: effective.id,
@@ -234,12 +346,7 @@ export function compileSyntheticBlockAudioService(dependencies: {
     const operationId = `compile-${planVersionId}`
     const workDirectory = join(dependencies.workRoot, `concat-${sha256(operationId).slice(0, 24)}`)
     try {
-      const materialized = await Promise.all(inputs.map(async (input) => ({
-        blockId: input.blockId,
-        generationId: input.generationId,
-        sha256: input.audio.sha256,
-        path: (await dependencies.sources.materialize({ operationId, artifactKey: input.audio.artifactKey, sha256: input.audio.sha256, byteSize: input.audio.byteSize })).path,
-      })))
+      const materialized = await materializeBlockAudioSources({ sources: dependencies.sources, operationId, blocks: inputs })
       const result = await dependencies.concatenate({ blocks: materialized, gapMs: settings.gapMs, workDirectory })
 
       // Consolidated words: provider characters per block, shifted by the

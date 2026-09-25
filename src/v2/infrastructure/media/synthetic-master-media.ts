@@ -7,8 +7,10 @@ import type {
   MasterDurationProber,
   MasterDurations,
 } from '../../application/synthetic-master-assets.ts'
+import type { SyntheticAudioDurationReader } from '../../application/synthetic-audio-masters.ts'
 import { assertDomain } from '../../domain/errors.ts'
-import { probeAudioDurationSeconds, probeVideo } from './video-probe.ts'
+import { probeVideo } from './video-probe.ts'
+import { decodedPcmDurationMs } from './synthetic-critic-media-integrity.ts'
 
 /**
  * Verifies a master artifact against the bytes storage actually holds.
@@ -96,17 +98,69 @@ export class FfprobeSyntheticMasterDurationProber implements MasterDurationProbe
     video: Readonly<{ artifactId: string; artifactKey: string }>
   }): Promise<Readonly<MasterDurations>> {
     const operationId = `synthetic-master-probe-${randomUUID()}`
+    let measurementError: unknown
     try {
       const audioPath = await this.materialize(operationId, input.audio.artifactKey, 'final-audio')
       const videoPath = await this.materialize(operationId, input.video.artifactKey, 'normalized-video')
-      const audioSeconds = await probeAudioDurationSeconds(audioPath, { environment: this.environment })
+      // Container duration includes encoder delay/padding for formats such as
+      // MP3 and AAC. The sealed audio range is defined by decoded samples, so
+      // measure the same PCM timeline used by the critic and audio master.
+      const audioDurationMs = await decodedPcmDurationMs(audioPath, this.environment)
+      assertDomain(
+        Number.isSafeInteger(audioDurationMs) && audioDurationMs > 0,
+        'RENDER_OUTPUT_INVALID',
+        'master audio duration is not a measurable duration',
+      )
       const video = await probeVideo(videoPath, { environment: this.environment })
       return Object.freeze({
-        audioDurationMs: positiveMilliseconds(audioSeconds, 'master audio duration'),
+        audioDurationMs,
         videoDurationMs: positiveMilliseconds(video.duration, 'master video duration'),
       })
+    } catch (error) {
+      measurementError = error
+      throw error
     } finally {
-      await this.sources.cleanup(operationId).catch(() => undefined)
+      try {
+        await this.sources.cleanup(operationId)
+      } catch (cleanupError) {
+        if (measurementError !== undefined) {
+          throw new AggregateError(
+            [measurementError, cleanupError],
+            'Synthetic master duration measurement and scratch cleanup both failed',
+          )
+        }
+        throw cleanupError
+      }
+    }
+  }
+}
+
+/** Measures free-form TTS from decoded samples, excluding container padding. */
+export class FfmpegDecodedSyntheticAudioDurationReader implements SyntheticAudioDurationReader {
+  private readonly sources: ArtifactSourceMaterializer
+  private readonly environment: NodeJS.ProcessEnv
+
+  constructor(sources: ArtifactSourceMaterializer, environment: NodeJS.ProcessEnv = process.env) {
+    this.sources = sources
+    this.environment = environment
+  }
+
+  async measure(input: Readonly<{
+    operationId: string
+    artifactKey: string
+    artifactSha256: string
+    byteSize: number
+  }>): Promise<number> {
+    try {
+      const materialized = await this.sources.materialize({
+        operationId: input.operationId,
+        artifactKey: input.artifactKey,
+        sha256: input.artifactSha256,
+        byteSize: input.byteSize,
+      })
+      return await decodedPcmDurationMs(materialized.path, this.environment)
+    } finally {
+      await this.sources.cleanup(input.operationId).catch(() => undefined)
     }
   }
 }

@@ -99,15 +99,64 @@ test('T-FR-092 controlled provider output becomes a person-free real MP4 with di
     capabilities: { operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'], duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: true, supportsIdempotency: true, supportsCancellation: false, completion: 'polling', fetchedAt: '2029-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z' },
     estimate: { currency: 'USD', costMinorUnits: 10, estimatedLatencyMs: 2_000 }, statuses: ['queued','processing','completed'], result: { file: fixture.avatar },
   })
+  const evidenceById = new Map()
+  const receiptByJob = new Map()
+  const provenance = {
+    async recordEvidence({ evidence }) {
+      const existing = evidenceById.get(evidence.id)
+      if (existing) {
+        assert.equal(existing.evidenceHash, evidence.evidenceHash)
+        return { evidence: existing, replayed: true }
+      }
+      evidenceById.set(evidence.id, evidence)
+      return { evidence, replayed: false }
+    },
+    async listEvidenceByJob({ workspaceId, projectId, jobId }) {
+      return [...evidenceById.values()].filter((evidence) =>
+        evidence.workspaceId === workspaceId &&
+        evidence.projectId === projectId &&
+        evidence.jobId === jobId)
+    },
+    async createReceipt({ receipt }) {
+      const existing = receiptByJob.get(receipt.jobId)
+      if (existing) {
+        assert.equal(existing.receiptHash, receipt.receiptHash)
+        return { receipt: existing, replayed: true }
+      }
+      receiptByJob.set(receipt.jobId, receipt)
+      return { receipt, replayed: false }
+    },
+    async readReceiptByJob({ workspaceId, projectId, jobId }) {
+      const receipt = receiptByJob.get(jobId)
+      return receipt?.workspaceId === workspaceId && receipt.projectId === projectId
+        ? receipt
+        : null
+    },
+  }
+  const resultArtifacts = {
+    async listByJob({ workspaceId, projectId, jobId }) {
+      return [{
+        id: 'provider-result-controlled-real', workspaceId, projectId, jobId,
+        schemaVersion: 'provider-result-artifact/v1', role: 'primary-video',
+        providerJobRef: stored.job.providerJobId, artifactId: avatar.artifactId,
+        artifactSha256: avatar.sha256, byteSize: avatar.byteSize, mediaType: 'video',
+        container: 'mp4', adapterId: 'controlled-avatar', adapterVersion: 'version-1',
+        adapterConfigHash: hash('9'), inputHash: planned.inputHash,
+        authorizationHash: planned.authorization.authorizationHash,
+        completedAt: '2029-01-01T00:00:07.000Z', createdAt: '2029-01-01T00:00:07.000Z',
+        recordJson: '{}', recordHash: hash('8'),
+      }]
+    },
+  }
   let tick = 0
   const runOnce = runProviderJobWorkerOnce({
-    jobs, adapters: { get: () => provider },
+    jobs, provenance, resultArtifacts, adapters: { get: () => provider },
     materializer: { async materialize({ job }) { return job.input } },
     ingestor: { async ingest({ providerResult }) { assert.equal(providerResult.file, fixture.avatar); return { artifactId: avatar.artifactId, artifactSha256: avatar.sha256, mediaType: 'video', byteSize: avatar.byteSize } } },
     critic: { async evaluate({ artifact: result }) { assert.equal(result.artifactSha256, avatar.sha256); return { approved: true, resultHash: hash('d') } } },
     clock: () => new Date(Date.parse('2029-01-01T00:00:00.000Z') + (++tick * 1_000)), createLeaseToken: () => `controlled-real-lease-${tick}`, createTransitionId: () => `controlled-real-transition-${tick}`,
   })
-  for (let stage = 0; stage < 7; stage += 1) await runOnce('controlled-real-worker')
+  for (let stage = 0; stage < 8; stage += 1) await runOnce('controlled-real-worker')
   assert.equal(stored.job.status, 'approved')
 
   const planArtifacts = [audio, avatar, broll, overlay]

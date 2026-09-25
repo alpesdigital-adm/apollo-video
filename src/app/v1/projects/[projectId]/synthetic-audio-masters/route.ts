@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { createSyntheticAudioMasterService } from '@/v2/application/synthetic-audio-masters'
 import { DomainError } from '@/v2/domain/errors'
-import { createAssetRightsRepository, createMediaArtifactQueryRepository, createProjectWorkspaceQueryRepository, createProviderJobRepository, createSyntheticAudioMasterRepository, createSyntheticProductionRepository } from '@/v2/infrastructure/repository-factory'
+import { createAssetRightsRepository, createMediaArtifactQueryRepository, createProjectWorkspaceQueryRepository, createProviderJobRepository, createSyntheticAudioMasterEvidence, createSyntheticAudioMasterRepository, createSyntheticCriticReportRepository, createSyntheticProductionRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
@@ -21,7 +21,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const body = parseCreateSyntheticAudioMasterBody(raw)
     const result = await createSyntheticAudioMasterService({
       repository: createSyntheticAudioMasterRepository(), projects: createProjectWorkspaceQueryRepository(), profiles: createSyntheticProductionRepository(),
-      providerJobs: createProviderJobRepository(), artifacts: createMediaArtifactQueryRepository(), rights: createAssetRightsRepository(),
+      providerJobs: createProviderJobRepository(), artifacts: createMediaArtifactQueryRepository(), rights: createAssetRightsRepository(), criticReports: createSyntheticCriticReportRepository(),
+      ...createSyntheticAudioMasterEvidence(process.env),
       clock: () => new Date(), createId: () => `synthetic-audio-master-${randomUUID()}`,
     })({ workspaceId: actor.workspaceId, projectId, ...body, actor, idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '' })
     return NextResponse.json(presentSuccess({ audioMaster: presentSyntheticAudioMaster(result.value), replayed: result.replayed }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })

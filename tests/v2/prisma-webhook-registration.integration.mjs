@@ -319,6 +319,217 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       () => createEndpoint({ ...endpointCreationRequest, idempotencyKey: 'create-webhook-endpoint-2' }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_ALREADY_EXISTS',
     )
+
+    const concurrentKey = 'create-webhook-endpoint-concurrent-mismatch-1'
+    // Synchronize only the first absent read so PostgreSQL itself chooses the
+    // serialization loser. Exhausting all three retries is the controlled unit
+    // test's responsibility; this assertion proves at least one real P2034.
+    let waitingForFirstRead = 0
+    let releaseFirstReads
+    let firstReadBarrier
+    let firstReadBarrierTimer
+    let serializationConflictCount = 0
+    const waitForFirstReads = () => {
+      waitingForFirstRead += 1
+      if (!firstReadBarrier) {
+        firstReadBarrier = new Promise((resolve, reject) => {
+          releaseFirstReads = () => {
+            clearTimeout(firstReadBarrierTimer)
+            resolve()
+          }
+          firstReadBarrierTimer = setTimeout(
+            () => reject(new Error('timed out waiting for concurrent idempotency reads')),
+            10_000,
+          )
+        })
+      }
+      if (waitingForFirstRead === 2) releaseFirstReads()
+      return firstReadBarrier
+    }
+    const barrierClient = new Proxy(client, {
+      get(target, property, receiver) {
+        if (property !== '$transaction') {
+          const value = Reflect.get(target, property, receiver)
+          return typeof value === 'function' ? value.bind(target) : value
+        }
+        return async (work, options) => {
+          try {
+            return await target.$transaction(async (transaction) => {
+              const wrappedTransaction = new Proxy(transaction, {
+                get(transactionTarget, transactionProperty, transactionReceiver) {
+                  if (transactionProperty !== 'v2IdempotencyRecord') {
+                    const value = Reflect.get(
+                      transactionTarget,
+                      transactionProperty,
+                      transactionReceiver,
+                    )
+                    return typeof value === 'function'
+                      ? value.bind(transactionTarget)
+                      : value
+                  }
+                  const delegate = transactionTarget.v2IdempotencyRecord
+                  return new Proxy(delegate, {
+                    get(delegateTarget, delegateProperty, delegateReceiver) {
+                      if (delegateProperty !== 'findUnique') {
+                        const value = Reflect.get(
+                          delegateTarget,
+                          delegateProperty,
+                          delegateReceiver,
+                        )
+                        return typeof value === 'function'
+                          ? value.bind(delegateTarget)
+                          : value
+                      }
+                      return async (args) => {
+                        const record = await delegateTarget.findUnique(args)
+                        const key = args?.where?.workspaceId_clientId_key?.key
+                        if (!record && key === concurrentKey && waitingForFirstRead < 2) {
+                          await waitForFirstReads()
+                        }
+                        return record
+                      }
+                    },
+                  })
+                },
+              })
+              return work(wrappedTransaction)
+            }, options)
+          } catch (error) {
+            if (typeof error === 'object' && error !== null && error.code === 'P2034') {
+              serializationConflictCount += 1
+            }
+            throw error
+          }
+        }
+      },
+    })
+    let concurrentEndpointCreationId = 700_000_000_000
+    const createConcurrentEndpoint = createWebhookEndpointService({
+      repository: new PrismaWebhookEndpointCreationRepository(barrierClient),
+      secrets: createWebhookSigningSecretProtector(endpointCipher),
+      clock: () => new Date(now.getTime() + 275),
+      createId: (kind) => kind === 'idempotency-record'
+        ? `webhook-endpoint-idempotency-${concurrentEndpointCreationId++}`
+        : `00000000-0000-4000-8000-${String(concurrentEndpointCreationId++).padStart(12, '0')}`,
+    })
+    const concurrentRequests = [
+      'https://concurrent-generated-a.example.com/apollo',
+      'https://concurrent-generated-b.example.com/apollo',
+    ].map((url) => createConcurrentEndpoint({
+      workspaceId,
+      url,
+      actor: webhookActor,
+      idempotencyKey: concurrentKey,
+    }).then(
+      (value) => ({ status: 'fulfilled', value }),
+      (reason) => ({ status: 'rejected', reason }),
+    ))
+    let concurrentResults
+    try {
+      concurrentResults = await Promise.all(concurrentRequests)
+    } finally {
+      clearTimeout(firstReadBarrierTimer)
+    }
+    const concurrentWinner = concurrentResults.find((result) => result.status === 'fulfilled')
+    const concurrentLoser = concurrentResults.find((result) => result.status === 'rejected')
+    assert.ok(concurrentWinner)
+    assert.equal(concurrentWinner.value.replayed, false)
+    assert.ok(concurrentLoser)
+    assert.equal(concurrentLoser.reason instanceof DomainError, true)
+    assert.equal(concurrentLoser.reason.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
+    assert.ok(
+      serializationConflictCount >= 1,
+      `expected PostgreSQL to surface P2034, observed ${serializationConflictCount}`,
+    )
+    assert.equal(await client.v2IdempotencyRecord.count({
+      where: { workspaceId, clientId, key: concurrentKey },
+    }), 1)
+    assert.equal(await client.v2WebhookEndpoint.count({
+      where: {
+        workspaceId,
+        url: { in: [
+          'https://concurrent-generated-a.example.com/apollo',
+          'https://concurrent-generated-b.example.com/apollo',
+        ] },
+      },
+    }), 1)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { workspaceId, endpointId: concurrentWinner.value.endpoint.id },
+    }), 1)
+    assert.equal(await client.v2WebhookSigningSecretPayload.count({
+      where: { workspaceId, endpointId: concurrentWinner.value.endpoint.id },
+    }), 1)
+    assert.equal(await client.v2WebhookAdministrationCommand.count({
+      where: {
+        workspaceId,
+        action: 'webhook-endpoint.create',
+        targetId: concurrentWinner.value.endpoint.id,
+        idempotencyKey: concurrentKey,
+      },
+    }), 1)
+    await client.$transaction(async (transaction) => {
+      await transaction.v2WebhookSigningSecret.update({
+        where: { id: concurrentWinner.value.secret.id },
+        data: {
+          status: 'retired',
+          retiredAt: new Date(now.getTime() + 280),
+        },
+      })
+      await transaction.v2WebhookSigningSecretPayload.delete({
+        where: { secretId: concurrentWinner.value.secret.id },
+      })
+    }, { isolationLevel: 'Serializable' })
+    const replayAfterHygiene = await createConcurrentEndpoint({
+      workspaceId,
+      url: concurrentWinner.value.endpoint.url,
+      actor: webhookActor,
+      idempotencyKey: concurrentKey,
+    })
+    assert.equal(replayAfterHygiene.replayed, true)
+    assert.equal(replayAfterHygiene.endpoint.id, concurrentWinner.value.endpoint.id)
+    assert.equal(replayAfterHygiene.secret.id, concurrentWinner.value.secret.id)
+    assert.equal(replayAfterHygiene.secret.status, 'retired')
+    assert.equal(await client.v2WebhookSigningSecretPayload.count({
+      where: { secretId: concurrentWinner.value.secret.id },
+    }), 0)
+    await client.v2WebhookEndpoint.update({
+      where: { id: concurrentWinner.value.endpoint.id },
+      data: { url: 'https://tampered-concurrent-generated.example.com/apollo' },
+    })
+    await assert.rejects(
+      () => createConcurrentEndpoint({
+        workspaceId,
+        url: concurrentWinner.value.endpoint.url,
+        actor: webhookActor,
+        idempotencyKey: concurrentKey,
+      }),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    await client.v2WebhookEndpoint.update({
+      where: { id: concurrentWinner.value.endpoint.id },
+      data: { url: concurrentWinner.value.endpoint.url },
+    })
+    // This fault-focused scenario shares the integration workspace but not its
+    // fixture cardinalities. Remove only its exact winner before the broader
+    // webhook journey continues.
+    await client.$transaction(async (transaction) => {
+      await transaction.v2WebhookAdministrationCommand.deleteMany({
+        where: { workspaceId, idempotencyKey: concurrentKey },
+      })
+      await transaction.v2WebhookSigningSecretPayload.deleteMany({
+        where: { workspaceId, endpointId: concurrentWinner.value.endpoint.id },
+      })
+      await transaction.v2WebhookSigningSecret.deleteMany({
+        where: { workspaceId, endpointId: concurrentWinner.value.endpoint.id },
+      })
+      await transaction.v2WebhookEndpoint.deleteMany({
+        where: { workspaceId, id: concurrentWinner.value.endpoint.id },
+      })
+      await transaction.v2IdempotencyRecord.deleteMany({
+        where: { workspaceId, clientId, key: concurrentKey },
+      })
+    }, { isolationLevel: 'Serializable' })
+
     const openedGeneratedSecret = await new PrismaWebhookSigningSecretProvider(
       endpointCipher,
       client,

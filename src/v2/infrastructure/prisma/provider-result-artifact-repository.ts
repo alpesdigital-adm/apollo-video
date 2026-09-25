@@ -8,6 +8,7 @@ import {
   type ProviderResultArtifactRole,
 } from '../../application/ports/provider-result-artifact-repository.ts'
 import { DomainError, assertDomain } from '../../domain/errors.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -37,6 +38,23 @@ type ProviderResultArtifactRow = {
   observedCostMinorUnits: number | null
   completedAt: Date
   createdAt: Date
+  recordJson: string | null
+  recordHash: string | null
+}
+
+type RecordBody = Omit<ProviderResultArtifactRecord, 'completedAt' | 'createdAt' | 'recordJson' | 'recordHash'>
+
+function recordBody(record: Readonly<ProviderResultArtifactRecord>): Readonly<RecordBody> {
+  return Object.freeze({
+    id: record.id, workspaceId: record.workspaceId, projectId: record.projectId, jobId: record.jobId,
+    schemaVersion: record.schemaVersion, role: record.role, providerJobRef: record.providerJobRef,
+    artifactId: record.artifactId, artifactSha256: record.artifactSha256, byteSize: record.byteSize,
+    mediaType: record.mediaType, container: record.container, adapterId: record.adapterId,
+    adapterVersion: record.adapterVersion, ...(record.modelRef === undefined ? {} : { modelRef: record.modelRef }),
+    adapterConfigHash: record.adapterConfigHash, inputHash: record.inputHash,
+    authorizationHash: record.authorizationHash, ...(record.scriptHash === undefined ? {} : { scriptHash: record.scriptHash }),
+    ...(record.observedCost === undefined ? {} : { observedCost: record.observedCost }),
+  })
 }
 
 function assertRecord(record: Readonly<ProviderResultArtifactRecord>): void {
@@ -49,7 +67,7 @@ function assertRecord(record: Readonly<ProviderResultArtifactRecord>): void {
   assertDomain(HASH.test(record.artifactSha256) && HASH.test(record.adapterConfigHash) && HASH.test(record.inputHash) && HASH.test(record.authorizationHash), 'INVALID_ARGUMENT', 'Provider result artifact hashes are invalid')
   if (record.scriptHash !== undefined) assertDomain(HASH.test(record.scriptHash), 'INVALID_ARGUMENT', 'Provider result artifact scriptHash is invalid')
   assertDomain(Number.isSafeInteger(record.byteSize) && record.byteSize > 0, 'INVALID_ARGUMENT', 'Provider result artifact byteSize is invalid')
-  const mediaByRole: Record<ProviderResultArtifactRole, string> = { 'primary-audio': 'audio', 'primary-video': 'video', 'alignment-evidence': 'data' }
+  const mediaByRole: Record<ProviderResultArtifactRole, string> = { 'primary-audio': 'audio', 'primary-video': 'video', 'alignment-evidence': 'data', 'output-speech-evidence': 'data' }
   assertDomain(record.mediaType === mediaByRole[record.role], 'INVALID_ARGUMENT', 'Provider result artifact media type does not match its role')
   if (record.observedCost) {
     assertDomain(/^[A-Z]{3}$/.test(record.observedCost.currency) && Number.isSafeInteger(record.observedCost.costMinorUnits) && record.observedCost.costMinorUnits >= 0, 'INVALID_ARGUMENT', 'Provider result artifact observed cost is invalid')
@@ -58,12 +76,12 @@ function assertRecord(record: Readonly<ProviderResultArtifactRecord>): void {
 }
 
 function toRecord(row: ProviderResultArtifactRow): Readonly<ProviderResultArtifactRecord> {
-  return Object.freeze({
+  const projected: ProviderResultArtifactRecord = {
     id: row.id,
     workspaceId: row.workspaceId,
     projectId: row.projectId,
     jobId: row.jobId,
-    schemaVersion: PROVIDER_RESULT_ARTIFACT_SCHEMA_VERSION,
+    schemaVersion: row.schemaVersion as typeof PROVIDER_RESULT_ARTIFACT_SCHEMA_VERSION,
     role: row.role as ProviderResultArtifactRole,
     providerJobRef: row.providerJobRef,
     artifactId: row.artifactId,
@@ -83,11 +101,19 @@ function toRecord(row: ProviderResultArtifactRow): Readonly<ProviderResultArtifa
       : { observedCost: Object.freeze({ currency: row.observedCostCurrency, costMinorUnits: row.observedCostMinorUnits }) }),
     completedAt: row.completedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
-  })
-}
-
-function contentIdentity(record: Readonly<Pick<ProviderResultArtifactRecord, 'artifactId' | 'artifactSha256' | 'providerJobRef'>>): string {
-  return `${record.providerJobRef}:${record.artifactId}:${record.artifactSha256}`
+  }
+  assertRecord(projected)
+  if (row.recordJson === null || row.recordHash === null) {
+    assertDomain(row.recordJson === null && row.recordHash === null, 'PERSISTENCE_CONFLICT', 'Provider result artifact attestation is incomplete')
+    return Object.freeze(projected)
+  }
+  assertDomain(HASH.test(row.recordHash), 'PERSISTENCE_CONFLICT', 'Provider result artifact record hash is invalid')
+  let parsed: unknown
+  try { parsed = JSON.parse(row.recordJson) } catch { throw new DomainError('PERSISTENCE_CONFLICT', 'Provider result artifact record JSON is invalid') }
+  const expectedJson = stableSerialize(recordBody(projected))
+  assertDomain(stableSerialize(parsed) === expectedJson, 'PERSISTENCE_CONFLICT', 'Provider result artifact record diverges from projections')
+  assertDomain(calculateCanonicalHash(parsed) === row.recordHash, 'PERSISTENCE_CONFLICT', 'Provider result artifact record hash does not match')
+  return Object.freeze({ ...projected, recordJson: row.recordJson, recordHash: row.recordHash })
 }
 
 export class PrismaProviderResultArtifactRepository implements ProviderResultArtifactRepository {
@@ -105,7 +131,7 @@ export class PrismaProviderResultArtifactRepository implements ProviderResultArt
       assertDomain(record.workspaceId === first!.workspaceId && record.projectId === first!.projectId && record.jobId === first!.jobId, 'INVALID_ARGUMENT', 'Provider result artifacts must belong to one job')
     }
     assertDomain(new Set(input.records.map(({ role }) => role)).size === input.records.length, 'INVALID_ARGUMENT', 'Provider result artifact roles must be unique per job')
-    return this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
+    const persist = () => this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
       const existing = await transaction.v2ProviderResultArtifact.findMany({
         where: { workspaceId: first!.workspaceId, projectId: first!.projectId, jobId: first!.jobId },
         orderBy: { role: 'asc' },
@@ -114,7 +140,9 @@ export class PrismaProviderResultArtifactRepository implements ProviderResultArt
         const byRole = new Map(existing.map((row: ProviderResultArtifactRow) => [row.role, row]))
         const replayMatches = input.records.length === existing.length && input.records.every((record) => {
           const row = byRole.get(record.role)
-          return row !== undefined && contentIdentity(toRecord(row)) === contentIdentity(record)
+          if (row === undefined) return false
+          const persisted = toRecord(row)
+          return persisted.recordHash !== undefined && persisted.recordHash === calculateCanonicalHash(recordBody(record))
         })
         if (!replayMatches) throw new DomainError('PERSISTENCE_CONFLICT', 'Provider result artifacts diverge from the previously persisted result')
         return Object.freeze({ records: existing.map(toRecord), replayed: true })
@@ -144,6 +172,8 @@ export class PrismaProviderResultArtifactRepository implements ProviderResultArt
           observedCostMinorUnits: record.observedCost?.costMinorUnits ?? null,
           completedAt: new Date(record.completedAt),
           createdAt: new Date(record.createdAt),
+          recordJson: stableSerialize(recordBody(record)),
+          recordHash: calculateCanonicalHash(recordBody(record)),
         })),
       })
       const persisted = await transaction.v2ProviderResultArtifact.findMany({
@@ -152,6 +182,21 @@ export class PrismaProviderResultArtifactRepository implements ProviderResultArt
       })
       return Object.freeze({ records: persisted.map(toRecord), replayed: false })
     })
+    try {
+      return await persist()
+    } catch (error) {
+      if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002')) throw error
+      const existing = await this.client.v2ProviderResultArtifact.findMany({
+        where: { workspaceId: first!.workspaceId, projectId: first!.projectId, jobId: first!.jobId }, orderBy: { role: 'asc' },
+      })
+      const byRole = new Map(existing.map((row: ProviderResultArtifactRow) => [row.role, row]))
+      const identical = existing.length === input.records.length && input.records.every((record) => {
+        const row = byRole.get(record.role)
+        return row !== undefined && toRecord(row).recordHash === calculateCanonicalHash(recordBody(record))
+      })
+      if (!identical) throw new DomainError('PERSISTENCE_CONFLICT', 'Provider result artifact concurrent replay diverged')
+      return Object.freeze({ records: existing.map(toRecord), replayed: true })
+    }
   }
 
   async listByJob(input: { workspaceId: string; projectId: string; jobId: string }) {

@@ -167,6 +167,19 @@ export class AlignmentSyntheticCriticPronunciationEvaluator implements Synthetic
     if (approved.length === 0) {
       return unmeasured('the approved script carries no speakable words, so nothing could be compared')
     }
+    if (subject.video) {
+      const output = subject.outputSpeechEvidence
+      if (!output || !subject.scriptHash) return unmeasured('the avatar take has no output-side speech evidence; input alignment cannot prove what the output said')
+      const matches = output.speechEvidence.outputTranscriptHash === subject.scriptHash
+      const findings: SyntheticCriticFinding[] = []
+      if (!output.passed) findings.push({ cause: 'audio-preservation-mismatch', dimension: 'pronunciation', detail: 'decoded output audio does not preserve the complete canonical source range', range: null, observed: output.worstWindowNormalizedErrorBps, limit: 5_000 })
+      if (!matches) findings.push({ cause: 'output-speech-mismatch', dimension: 'pronunciation', detail: 'output-side transcript hash does not match the approved script', range: null, observed: 1, limit: 0 })
+      return Object.freeze({
+        evaluator: Object.freeze({ id: output.speechEvidence.evaluatorId, version: output.speechEvidence.evaluatorVersion, kind: output.speechEvidence.kind, scope: 'output-side transcript evidence bound to the rendered avatar bytes; input alignment is not used' }),
+        measurements: Object.freeze([Object.freeze({ dimension: 'pronunciation' as const, status: 'measured' as const, evaluatorId: output.speechEvidence.evaluatorId, value: matches ? 0 : 1, unit: 'output-script-hash-mismatch', threshold: null, confidence: null, evidenceRefs: Object.freeze([`evidence://${output.evidenceHash}`]), range: null, note: null })]),
+        findings: Object.freeze(findings),
+      })
+    }
     if (!subject.alignmentArtifactId) {
       return unmeasured('the block has no persisted alignment, so the spoken words could not be read')
     }

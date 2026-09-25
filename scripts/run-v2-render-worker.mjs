@@ -15,6 +15,7 @@ const {
   createSourceCleanupWorker,
   createProjectDirectorWorker,
   createPublicOperationWorker,
+  createSyntheticProductionRenderWorker,
 } = repositoryFactory
 const lifecycle = importedLifecycle.createWorkerShutdown
   ? importedLifecycle
@@ -55,6 +56,9 @@ const runNextProjectDirector = createProjectDirectorWorker()
 const runNext = process.env.APOLLO_V2_RENDER_OUTPUT_ROOT?.trim()
   ? createPublicOperationWorker()
   : async () => null
+const runNextSyntheticProduction = process.env.APOLLO_V2_RENDER_OUTPUT_ROOT?.trim()
+  ? createSyntheticProductionRenderWorker()
+  : async () => null
 
 const log = (event) => console.info(JSON.stringify({ worker: 'render', ...event }))
 const shutdown = createWorkerShutdown({
@@ -76,7 +80,7 @@ function waitForPoll() {
 }
 
 /**
- * The chain is five separate claims, not one.
+ * The chain is six separate claims, not one.
  *
  * Until Wave 23 the loop checked a boolean once per iteration, at the top, so a
  * SIGTERM arriving while the proxy branch was inside FFmpeg was not observed until
@@ -90,6 +94,7 @@ const branches = [
   { name: 'project-final-export', run: (signal) => runNextProjectFinal(workerId, signal) },
   { name: 'project-proxy-render', run: (signal) => runNextProjectProxy(workerId, { signal }) },
   { name: 'source-cleanup', run: (signal) => runNextSourceCleanup(workerId, signal) },
+  { name: 'synthetic-production-render', run: (signal) => runNextSyntheticProduction(workerId, signal) },
   { name: 'artifact-render', run: (signal) => runNext(workerId, signal) },
 ]
 

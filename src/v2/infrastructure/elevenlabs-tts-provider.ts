@@ -10,6 +10,7 @@ import type {
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain } from '../domain/errors.ts'
 import { ProviderAdapterError } from '../domain/provider-contract.ts'
+import { createProviderTransportObservation } from '../application/provider-transport-observation.ts'
 
 /*
  * ElevenLabs TTS adapter. Facts verified against the official documentation
@@ -38,6 +39,7 @@ const LOCALE = /^[a-z]{2}(-[A-Z]{2})?$/
 const OUTPUT_FORMATS = Object.freeze({ mp3: 'mp3_44100_128', wav: 'wav_44100' } as const)
 
 type Fetch = typeof fetch
+const NATIVE_FETCH = globalThis.fetch
 
 export interface ElevenLabsAlignment {
   characters: readonly string[]
@@ -144,6 +146,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, ElevenLa
   private readonly requestTimeoutMs: number
   private readonly maxAudioBytes: number
   private readonly maxCharacters: number
+  readonly runtimeClass: 'controlled' | 'live'
 
   constructor(input: {
     apiKey: string
@@ -179,6 +182,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, ElevenLa
     this.apiKey = input.apiKey.trim()
     this.baseUrl = baseUrl.toString().replace(/\/$/, '')
     this.fetch = input.fetch ?? globalThis.fetch
+    this.runtimeClass = input.fetch === undefined && this.fetch === NATIVE_FETCH && baseUrl.origin === 'https://api.elevenlabs.io' ? 'live' : 'controlled'
     this.clock = input.clock ?? (() => new Date())
     this.costMinorUnitsPerThousandCharacters = input.costMinorUnitsPerThousandCharacters
     this.requestTimeoutMs = requestTimeoutMs
@@ -271,6 +275,14 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, ElevenLa
       mediaType: 'audio' as const,
       alignment,
     })
+    await context.observeTransport?.(createProviderTransportObservation({
+      phase: 'submit', runtimeClass: this.runtimeClass, adapterId: this.id,
+      adapterVersion: this.adapterVersion, adapterConfigHash: this.configHash,
+      endpointClass: 'elevenlabs-tts-with-timestamps', method: 'POST',
+      requestHash: calculateCanonicalHash({ textHash: value.scriptHash, voiceId: value.voiceId, modelId: value.modelId, languageCode: value.languageCode, outputFormat: value.outputFormat, seed: value.seed }),
+      responseHash: calculateCanonicalHash({ requestId, audioSha256: result.audioSha256, audioByteSize: result.audioByteSize, alignment: result.alignment }),
+      responseStatus: response.status, providerJobRef: requestId, observedAt: this.clock().toISOString(),
+    }))
     return Object.freeze({
       kind: 'completed' as const,
       bundle: Object.freeze({

@@ -14,7 +14,7 @@ function string(value: unknown, field: string): string {
 export function parseEnqueueProviderJobBody(raw: unknown) {
   const body = record(raw, 'body')
   const requiredKeys = ['projectVersionId', 'profileSnapshotId', 'operation', 'adapterId', 'adapterVersion', 'providerInput', 'sourceArtifactIds', 'use', 'market', 'locale']
-  const keys = [...requiredKeys, 'audioMasterId', 'audioRange']
+  const keys = [...requiredKeys, 'audioMasterId', 'audioRange', 'scriptPlanId', 'scriptBlockId']
   assertDomain(Object.keys(body).every((key) => keys.includes(key)) && requiredKeys.every((key) => key in body), 'INVALID_ARGUMENT', 'body contains missing or unsupported properties')
   assertDomain(body.operation === 'tts' || body.operation === 'audio-avatar', 'INVALID_ARGUMENT', 'body.operation is unsupported')
   const providerInput = record(body.providerInput, 'body.providerInput')
@@ -31,6 +31,7 @@ export function parseEnqueueProviderJobBody(raw: unknown) {
     audioFirst = Object.freeze({ audioMasterId: string(body.audioMasterId, 'body.audioMasterId'), audioRange: Object.freeze({ startWordIndex: range.startWordIndex as number, endWordIndex: range.endWordIndex as number }) })
   } else {
     assertDomain(body.audioMasterId === undefined && body.audioRange === undefined, 'INVALID_ARGUMENT', 'TTS jobs cannot reference an audio master')
+    assertDomain(Boolean(body.scriptPlanId && body.scriptBlockId), 'INVALID_ARGUMENT', 'TTS jobs must reference a synthetic script plan and block')
   }
   return Object.freeze({
     projectVersionId: string(body.projectVersionId, 'body.projectVersionId'),
@@ -43,6 +44,10 @@ export function parseEnqueueProviderJobBody(raw: unknown) {
     use: string(body.use, 'body.use'),
     market: string(body.market, 'body.market'),
     locale: string(body.locale, 'body.locale'),
+    ...(body.operation === 'tts' ? {
+      scriptPlanId: string(body.scriptPlanId, 'body.scriptPlanId'),
+      scriptBlockId: string(body.scriptBlockId, 'body.scriptBlockId'),
+    } : {}),
     ...audioFirst,
   })
 }

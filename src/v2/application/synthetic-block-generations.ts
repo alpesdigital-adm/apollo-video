@@ -19,10 +19,8 @@ import {
   type SyntheticCacheDecisionReasonCode,
 } from '../domain/synthetic-cache-decision.ts'
 import type { SyntheticTtsCacheSubject } from '../domain/synthetic-cache-identity.ts'
-import {
-  isSyntheticCriticApproval,
-  type SyntheticCriticReport,
-} from '../domain/synthetic-critic-report.ts'
+import type { SyntheticCriticReport } from '../domain/synthetic-critic-report.ts'
+import { isCurrentSyntheticCriticApproval } from './synthetic-critic.ts'
 import type { SyntheticPresenterProfileSnapshot } from '../domain/synthetic-production.ts'
 import {
   materializeActorAuditContext,
@@ -122,16 +120,15 @@ export function syntheticBlockVoiceKeyFromProfile(
 }
 
 /**
- * The critic's durable verdicts on one set of bytes, newest first. The cache
- * only ever reads them: a reuse candidate is not the place to decide anything
- * about quality, only the place to obey what was already decided.
+ * The critic's durable verdict addressed by the exact hash sealed on the
+ * paying provider job. A reuse candidate does not select a newer opinion about
+ * the same bytes; it obeys the evidence that approved its origin job.
  */
 export interface CacheCandidateCriticReportReader {
-  readByArtifact(input: {
+  readByHash(input: {
     workspaceId: string
-    artifactId: string
-    limit?: number
-  }): Promise<readonly Readonly<SyntheticCriticReport>[]>
+    reportHash: string
+  }): Promise<Readonly<SyntheticCriticReport> | null>
 }
 
 export interface EnsureBlockGenerationOutcome {
@@ -184,6 +181,16 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
     adapterId: string
     adapterVersion: string
     providerInput: Readonly<Record<string, unknown>>
+    criticBinding: Readonly<{
+      planId: string
+      blockId: string
+      scriptText: string
+      scriptHash: string
+      profileSnapshotId: string
+      use: string
+      market: string
+      locale: string
+    }>
     sourceArtifactIds: readonly string[]
     use: string
     market: string
@@ -471,28 +478,52 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
               rejectedCandidateId = candidate.id
               continue
             }
+            const originProfile = await dependencies.profiles.readProfile({
+              workspaceId: request.workspaceId,
+              snapshotId: candidate.profileSnapshotId,
+            })
+            if (!originProfile) {
+              missReasonCode = 'CANDIDATE_RIGHTS_BLOCKED'
+              rejectedCandidateId = candidate.id
+              continue
+            }
+            try {
+              await assertBlockGenerationConsent(dependencies.profiles, originProfile.snapshot, {
+                workspaceId: request.workspaceId,
+                operation: 'tts',
+                use: request.use,
+                market: request.market,
+                locale,
+                now,
+              })
+            } catch (error) {
+              if (!(error instanceof DomainError) || error.code !== 'ASSET_RIGHTS_BLOCKED') throw error
+              missReasonCode = 'CANDIDATE_RIGHTS_BLOCKED'
+              rejectedCandidateId = candidate.id
+              continue
+            }
             // The critic runs inside the provider job: a job that reached
             // `approved` is a job whose result the critic accepted. A candidate
             // whose paying job cannot be read back, carries no estimate or never
             // reached that state has not been shown to pass, so it is not reused.
             const evidence = await paidJobEvidence(candidate, approvedCandidates)
-            if (!evidence || evidence.jobStatus !== 'approved') {
+            if (!evidence || evidence.jobStatus !== 'approved' || !evidence.criticReportHash) {
               missReasonCode = 'CANDIDATE_CRITIC_REJECTED'
               rejectedCandidateId = candidate.id
               continue
             }
-            // And when the critic wrote down what it thought of these exact
-            // bytes, that verdict overrules the job status: a job can be
-            // `approved` while the report on its output says rejected,
-            // needs-review or evidence-unavailable, and none of those three is
-            // approval. A block with no report yet falls back to the structural
-            // check above rather than blocking every pre-F3.009 candidate.
-            const [verdict] = await dependencies.criticReports.readByArtifact({
+            // The specialized report is mandatory. A generic job hash or an
+            // absent report cannot authorize reuse.
+            const verdict = await dependencies.criticReports.readByHash({
               workspaceId: request.workspaceId,
-              artifactId: candidate.audioArtifactId,
-              limit: 1,
+              reportHash: evidence.criticReportHash,
             })
-            if (verdict && !isSyntheticCriticApproval(verdict.decision)) {
+            if (!verdict || !isCurrentSyntheticCriticApproval(verdict) ||
+              verdict.reportHash !== evidence.criticReportHash ||
+              verdict.projectId !== candidate.projectId || verdict.blockId !== candidate.blockId ||
+              verdict.artifactId !== candidate.audioArtifactId || verdict.scriptHash !== candidate.scriptHash ||
+              verdict.profileSnapshotId !== candidate.profileSnapshotId ||
+              verdict.alignmentArtifactId !== candidate.alignmentArtifactId) {
               missReasonCode = 'CANDIDATE_CRITIC_REJECTED'
               rejectedCandidateId = candidate.id
               continue
@@ -541,15 +572,20 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
               rejectedCandidateId = candidate.id
               continue
             }
-            const currentRights = await dependencies.rights.findCurrentForArtifacts(request.workspaceId, [candidate.audioArtifactId])
-            const decision = evaluateAssetUse(currentRights.get(candidate.audioArtifactId) ?? null, {
+            const currentRights = await dependencies.rights.findCurrentForArtifacts(
+              request.workspaceId,
+              [candidate.audioArtifactId, candidate.alignmentArtifactId],
+            )
+            const rightsContext = {
               workspaceId: request.workspaceId,
               use: request.use,
               market: request.market,
               locale,
-              syntheticOperations: ['tts'],
-            }, now)
-            if (decision.outcome !== 'allow') {
+              syntheticOperations: ['tts'] as const,
+            }
+            const decisions = [candidate.audioArtifactId, candidate.alignmentArtifactId].map((artifactId) =>
+              evaluateAssetUse(currentRights.get(artifactId) ?? null, rightsContext, now))
+            if (decisions.some(({ outcome }) => outcome !== 'allow')) {
               missReasonCode = 'CANDIDATE_RIGHTS_BLOCKED'
               rejectedCandidateId = candidate.id
               continue
@@ -678,6 +714,16 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
             locale,
             outputFormat,
           },
+          criticBinding: {
+            planId: request.planId,
+            blockId: block.id,
+            scriptText: block.exactText,
+            scriptHash: base.scriptHash,
+            profileSnapshotId: profile.profileSnapshotId,
+            use: request.use,
+            market: request.market,
+            locale,
+          },
           sourceArtifactIds: [],
           use: request.use,
           market: request.market,
@@ -715,6 +761,7 @@ export function settleSyntheticBlockGenerationsService(dependencies: {
   generations: SyntheticBlockGenerationRepository
   providerJobs: ProviderJobRepository
   resultArtifacts: ProviderResultArtifactRepository
+  criticReports: CacheCandidateCriticReportReader
   clock: () => Date
 }) {
   return async function execute(request: {
@@ -750,6 +797,20 @@ export function settleSyntheticBlockGenerationsService(dependencies: {
         const audio = ledger.find(({ role }) => role === 'primary-audio')
         const alignment = ledger.find(({ role }) => role === 'alignment-evidence')
         assertDomain(Boolean(audio && alignment), 'PERSISTENCE_CONFLICT', 'Approved TTS job is missing its result artifact ledger entries')
+        assertDomain(Boolean(job.criticResultHash), 'PERSISTENCE_CONFLICT', 'Approved TTS job carries no specialized critic result hash')
+        const verdict = await dependencies.criticReports.readByHash({
+          workspaceId: request.workspaceId,
+          reportHash: job.criticResultHash!,
+        })
+        assertDomain(
+          Boolean(verdict) && isCurrentSyntheticCriticApproval(verdict!) &&
+            verdict!.reportHash === job.criticResultHash && verdict!.projectId === generation.projectId &&
+            verdict!.blockId === generation.blockId && verdict!.artifactSha256 === audio!.artifactSha256 &&
+            verdict!.scriptHash === generation.scriptHash && verdict!.profileSnapshotId === generation.profileSnapshotId &&
+            verdict!.alignmentArtifactId === alignment!.artifactId,
+          'PERSISTENCE_CONFLICT',
+          'Approved TTS job has no matching specialized synthetic critic report',
+        )
         const row = await dependencies.generations.settle({
           workspaceId: request.workspaceId,
           generationId: generation.id,

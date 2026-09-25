@@ -103,17 +103,13 @@ async function waitForServer(baseUrl, server, readLogs) {
  *    SSRF defence to make a test pass, so this journey does not go there.
  *  - Compiling and ffprobing an MP4. No `/v1` route compiles a synthetic MP4;
  *    the only synthetic compilation route is audio (`audio-compilations`).
- *  - The master half of the "missing critic evidence" gate. Proving that a
- *    non-approving report also blocks promotion needs the avatar job above.
- *    The cache half of that gate IS proven here.
+ *  - The master half of the critic-evidence gate. Proving that a non-approving
+ *    avatar report blocks promotion needs the avatar job above. This journey
+ *    proves the TTS half by rejecting a silent take before it becomes reusable.
  *
- * One thing is driven through the application service rather than HTTP, and it
- * is named for what it is: the critic itself. `evaluateSyntheticCriticService`
- * has no write route and is called by no worker — the `synthetic-critic-reports`
- * and `synthetic-cache-decisions` routes are read-only. The service is therefore
- * invoked directly, but with the production adapters over the very bytes the
- * loopback provider delivered and the worker stored; nothing about the
- * measurement is stubbed, and every verdict is read back through `/v1`.
+ * The provider worker invokes the production critic before settling each job.
+ * Reports therefore fence the same real bytes and durable generation binding
+ * that the cache later reuses; the test never writes a verdict out of band.
  */
 test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run end to end through /v1, durable workers and real bytes — master promotion and MP4 compilation excluded, see header', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
@@ -146,6 +142,8 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })
@@ -195,7 +193,6 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     const { registerSyntheticPresenterProfileService } = await import('../../src/v2/application/synthetic-production.ts')
     const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
     const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
-    const { evaluateSyntheticCriticService } = await import('../../src/v2/application/synthetic-critic.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
@@ -205,13 +202,6 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
-    const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
-    const { LocalArtifactSourceMaterializer } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
-    const { LocalArtifactContentStorage } = await import('../../src/v2/infrastructure/media/local-artifact-content-storage.ts')
-    const { StoredSyntheticMasterAlignmentReader } = await import('../../src/v2/infrastructure/media/synthetic-master-alignment-reader.ts')
-    const { FfprobeSyntheticCriticMediaEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-media-integrity.ts')
-    const { AlignmentSyntheticCriticPronunciationEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
-    const { DeterministicSyntheticCriticControlledEvaluator } = await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
 
     // -----------------------------------------------------------------------
     // 0. The controlled provider boundary: a real loopback HTTP server that the
@@ -240,13 +230,12 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     }
     const cleanProbe = probeDurationMs(cleanFixture)
     const silentProbe = probeDurationMs(silentFixture)
-    // The approval every take is judged against. It is measured once, from the
-    // controlled provider's own recipe, before a single block exists — so it is
-    // knowledge the pipeline holds up front, not a reading taken off the take
-    // under judgment. The dead take is built to the very same length, so the
-    // rejection below can only be about signal, never about duration.
-    const EXPECTED_DURATION_MS = cleanProbe.ms
-    assert.equal(silentProbe.ms, EXPECTED_DURATION_MS, 'the dead take must be exactly as long as a healthy one')
+    // The approval every take is judged against is the recipe's decoded PCM
+    // duration, known before a block exists. MP3 container padding is measured
+    // separately and is not mistaken for performed audio. The dead take uses
+    // the same recipe, so rejection below can only be signal, not duration.
+    const EXPECTED_DURATION_MS = TAKE_SECONDS * 1_000
+    assert.equal(silentProbe.ms, cleanProbe.ms, 'the dead and healthy MP3 containers must have equal duration')
     assert.equal(cleanProbe.stream.codec_name, 'mp3')
     assert.equal(Number(cleanProbe.stream.sample_rate), 44_100)
     assert.equal(Number(cleanProbe.stream.channels), 1)
@@ -466,6 +455,8 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     }
     const allApproved = (data) =>
       data.plan.version.blockSequence.every((blockId) => effectiveByBlock(data).get(blockId)?.status === 'approved')
+    const allTerminal = (data) =>
+      data.plan.version.blockSequence.every((blockId) => ['approved', 'failed'].includes(effectiveByBlock(data).get(blockId)?.status))
     const waitForGenerations = async (planId, predicate, label) => {
       const deadline = Date.now() + 240_000
       for (;;) {
@@ -496,8 +487,14 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
       createId: () => `production-journey-rights-${++rightsSequence}`,
     })
     const clearProducedTakes = async () => {
+      const approved = await client.v2SyntheticBlockGeneration.findMany({
+        where: { workspaceId, status: 'approved' },
+        select: { audioArtifactId: true, alignmentArtifactId: true },
+      })
+      const producedArtifactIds = [...new Set(approved.flatMap(({ audioArtifactId, alignmentArtifactId }) =>
+        [audioArtifactId, alignmentArtifactId].filter(Boolean)))]
       const pending = await client.v2MediaArtifact.findMany({
-        where: { workspaceId, mediaType: 'audio', currentRightsSnapshotId: null },
+        where: { workspaceId, id: { in: producedArtifactIds }, currentRightsSnapshotId: null },
       })
       for (const row of pending) {
         await setRights({
@@ -569,12 +566,12 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
       created.payload.data.generations.map(({ action }) => action),
       ['enqueued', 'enqueued', 'enqueued', 'enqueued'],
     )
-    let state = await settle(allApproved, 'the four initial blocks')
+    let state = await settle(allTerminal, 'the four initial blocks, including the rejected dead take')
     assert.equal(providerCalls.length, 4)
     assert.deepEqual([...providerCalls].sort(), [S1, S2, S3, S4].sort(), 'the provider was asked for exactly the four sentences')
     measured.afterPlan = await counts()
     assert.deepEqual(measured.afterPlan, {
-      providerCalls: 4, providerJobs: 4, generations: 4, cacheDecisions: 4, criticReports: 0, blocks: 4,
+      providerCalls: 4, providerJobs: 4, generations: 4, cacheDecisions: 4, criticReports: 4, blocks: 4,
     })
     // Four first-time addresses: every one of them a priced miss with no candidate.
     const openingDecisions = await client.v2SyntheticCacheDecision.findMany({ where: { workspaceId } })
@@ -590,65 +587,17 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     worker = startWorker()
     assert.notEqual(worker.pid, firstWorkerPid, 'the relaunched worker must be a different process')
     measured.workerPids = { first: firstWorkerPid, second: worker.pid }
-    state = await settle(allApproved, 'the plan after the worker restart')
+    state = await settle(allTerminal, 'the plan after the worker restart')
     assert.equal(providerCalls.length, 4, 'a worker restart must not re-pay for settled work')
 
     // -----------------------------------------------------------------------
-    // 4. The critic, with the production adapters, over the bytes the worker
-    //    stored. `evaluateSyntheticCriticService` has no write route, so it is
-    //    driven directly — but every instrument and every byte is real.
+    // 4. The worker-created critic reports, measured by the production adapters
+    //    over the exact bytes the same worker stored.
     // -----------------------------------------------------------------------
-    const criticReports = new PrismaSyntheticCriticReportRepository(client)
-    const artifactRepository = new PrismaMediaArtifactRepository(client)
-    const criticEnvironment = { ...process.env, FFMPEG_PATH: ffmpegPath, FFPROBE_PATH: ffprobePath }
-    let criticTick = 100
-    const evaluateCritic = evaluateSyntheticCriticService({
-      reports: criticReports,
-      media: new FfprobeSyntheticCriticMediaEvaluator({
-        sources: new LocalArtifactSourceMaterializer(artifactRoot),
-        environment: criticEnvironment,
-      }),
-      pronunciation: new AlignmentSyntheticCriticPronunciationEvaluator({
-        alignment: new StoredSyntheticMasterAlignmentReader({
-          artifacts: artifactRepository,
-          storage: new LocalArtifactContentStorage(artifactRoot),
-        }),
-      }),
-      controlled: new DeterministicSyntheticCriticControlledEvaluator(),
-      clock: () => new Date(at(criticTick += 1)),
-      createId: ({ blockId, artifactId }) => `pj-critic-${sha256(`${blockId}:${artifactId}`).slice(0, 40)}`,
-    })
-    const judge = async (blockId, { identityRef, withAlignment = true }) => {
-      const plan = await getPlan(planId)
-      const generation = effectiveByBlock(plan).get(blockId)
-      assert.ok(generation?.audioArtifactId, `block ${blockId} must carry stored audio to judge`)
-      const blocks = await blockRows()
-      const block = blocks.get(blockId)
-      const audioRow = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: generation.audioArtifactId } })
-      return await evaluateCritic({
-        subject: {
-          workspaceId, projectId, blockId,
-          capability: 'tts', adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0', modelRef: null,
-          video: null,
-          audio: {
-            artifactId: audioRow.id, artifactKey: audioRow.artifactKey,
-            sha256: audioRow.sha256, byteSize: Number(audioRow.byteSize),
-          },
-          alignmentArtifactId: withAlignment ? generation.alignmentArtifactId : null,
-          scriptText: block.exactText,
-          expected: {
-            durationMs: EXPECTED_DURATION_MS,
-            fps: null, videoCodec: null,
-            audioCodec: 'mp3', audioSampleRateHz: 44_100,
-            identityRef, declaredIdentityRef: null,
-            rights: { withinGrantedScope: true, reason: null },
-            previousBlock: null,
-          },
-        },
-        profileSnapshotId: profileV1.profile.profileSnapshotId,
-        scriptHash: sha256(block.exactText),
-        actor,
-      })
+    const readVerdict = async (blockId) => {
+      const evidence = await api('GET', `/v1/projects/${projectId}/synthetic-blocks/${blockId}/critic-evidence`)
+      assert.equal(evidence.status, 200, JSON.stringify(evidence.payload))
+      return evidence.payload.data.report
     }
 
     const blocksByText = async () => {
@@ -668,9 +617,7 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
 
     const verdicts = new Map()
     for (const [text, blockId] of await blocksByText()) {
-      const result = await judge(blockId, { identityRef: 'avatar_pj_1' })
-      assert.equal(result.replayed, false)
-      verdicts.set(text, result.report)
+      verdicts.set(text, await readVerdict(blockId))
     }
     measured.firstCriticSweep = Object.fromEntries([...verdicts].map(([text, report]) => [text, report.decision]))
 
@@ -679,7 +626,7 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     const rejected = verdicts.get(S3)
     assert.equal(rejected.decision, 'rejected')
     assert.equal(rejected.recommendedAction, 'retry')
-    assert.equal(rejected.thresholdsVersion, 'synthetic-critic-thresholds/tts/v1')
+    assert.equal(rejected.thresholdsVersion, 'synthetic-critic-thresholds/tts/v2')
     const live = rejected.measurements.find(({ dimension }) => dimension === 'audiovisual-integrity')
     assert.equal(live.status, 'measured')
     assert.equal(live.value, 0, 'the dead take carries no live signal')
@@ -769,11 +716,10 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
 
     // The new bytes are judged on their own: a fresh artifact is a fresh
     // question, and this time the answer is approval.
-    const healed = await judge(s3BlockId, { identityRef: 'avatar_pj_1' })
-    assert.equal(healed.replayed, false)
-    assert.equal(healed.report.decision, 'approved')
-    assert.equal(healed.report.issues.length, 0)
-    assert.notEqual(healed.report.artifactId, rejected.artifactId, 'the retry judged different bytes')
+    const healed = await readVerdict(s3BlockId)
+    assert.equal(healed.decision, 'approved')
+    assert.equal(healed.issues.length, 0)
+    assert.notEqual(healed.artifactId, rejected.artifactId, 'the retry judged different bytes')
 
     // Every block of the plan now stands approved, by the worker and by the critic.
     const approvedReports = await api('GET', `/v1/projects/${projectId}/synthetic-critic-reports?decision=approved&limit=20`)
@@ -806,17 +752,16 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     assert.deepEqual([...new Set(missRows.map(({ reasonCode }) => reasonCode))], ['CACHE_MISS_NO_CANDIDATE'])
     measured.afterVoiceChange = await counts()
     assert.deepEqual(measured.afterVoiceChange, {
-      providerCalls: 9, providerJobs: 9, generations: 9, cacheDecisions: 9, criticReports: 5, blocks: 4,
+      providerCalls: 9, providerJobs: 9, generations: 9, cacheDecisions: 9, criticReports: 9, blocks: 4,
     })
 
     // The new takes are judged too, so every reuse below is backed by a written
     // approval of the very bytes it reuses rather than by a job status alone.
     const voiceBVerdicts = new Map()
     for (const [text, blockId] of await blocksByText()) {
-      const result = await judge(blockId, { identityRef: 'avatar_pj_1' })
-      assert.equal(result.replayed, false)
-      assert.equal(result.report.decision, 'approved', `${text} under the new voice must be approved`)
-      voiceBVerdicts.set(text, result.report)
+      const report = await readVerdict(blockId)
+      assert.equal(report.decision, 'approved', `${text} under the new voice must be approved`)
+      voiceBVerdicts.set(text, report)
     }
     assert.equal(await client.v2SyntheticCriticReport.count({ where: { workspaceId } }), 9)
 
@@ -890,16 +835,16 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     })
 
     // -----------------------------------------------------------------------
-    // 9. A sentence nobody has judged yet, generated normally. It is the subject
-    //    of the missing-evidence gate below.
+    // 9. A fresh sentence is generated and judged by the worker before it can
+    //    become reusable evidence.
     // -----------------------------------------------------------------------
     planState = await getPlan(planId)
     const fresh = await api('POST', planPath(`/${planId}/blocks`), {
-      key: 'pj-insert-unjudged',
+      key: 'pj-insert-fresh-s5',
       payload: { ...context(planState), position: 5, text: S5 },
     })
     assert.equal(fresh.status, 201, JSON.stringify(fresh.payload))
-    state = await settle(allApproved, 'the unjudged sentence')
+    state = await settle(allApproved, 'the freshly judged sentence')
     assert.equal(providerCalls.length, 10)
     const s5BlockId = (await blocksByText()).get(S5)
 
@@ -949,41 +894,30 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     measured.afterTamper = await counts()
 
     // -----------------------------------------------------------------------
-    // 11. Missing mandatory evidence is not approval. The unjudged sentence is
-    //     judged without its alignment: pronunciation cannot be measured, the
-    //     verdict is `evidence-unavailable`, and the cache then refuses to reuse
-    //     those bytes.
-    //
-    //     Only the cache half of this gate is proven here. The master half needs
-    //     an avatar job this journey cannot generate — see the header.
+    // 11. A second S5 reuses the exact worker-approved report. No direct critic
+    //     invocation can manufacture or replace this evidence.
     // -----------------------------------------------------------------------
-    const blind = await judge(s5BlockId, { identityRef: 'avatar_pj_2', withAlignment: false })
-    assert.equal(blind.replayed, false)
-    assert.equal(blind.report.decision, 'evidence-unavailable')
-    assert.equal(blind.report.recommendedAction, 'manual-review')
-    const blindPronunciation = blind.report.measurements.find(({ dimension }) => dimension === 'pronunciation')
-    assert.equal(blindPronunciation.status, 'unavailable')
-    assert.equal(blindPronunciation.value, null, 'an unmeasured dimension never carries a passing number')
-    assert.ok(blind.report.issues.some((entry) => entry.evidence.startsWith('required-evidence-missing:')), JSON.stringify(blind.report.issues))
+    const s5Report = await readVerdict(s5BlockId)
+    assert.equal(s5Report.decision, 'approved')
 
     planState = await getPlan(planId)
     const afterBlindInsert = await api('POST', planPath(`/${planId}/blocks`), {
-      key: 'pj-duplicate-of-unjudged',
+      key: 'pj-duplicate-of-approved-s5',
       payload: { ...context(planState), position: 7, text: S5 },
     })
     assert.equal(afterBlindInsert.status, 201, JSON.stringify(afterBlindInsert.payload))
     assert.deepEqual(
       afterBlindInsert.payload.data.generations.filter(({ action }) => action !== 'up-to-date').map(({ action }) => action),
-      ['enqueued'],
-      'bytes the critic could not vouch for are paid for again, not reused',
+      ['reused'],
+      'worker-approved bytes are reused without another provider call',
     )
-    state = await settle(allApproved, 'the block that could not reuse unvouched bytes')
-    assert.equal(providerCalls.length, 12)
-    const criticRejectedRows = await client.v2SyntheticCacheDecision.findMany({
-      where: { workspaceId, reasonCode: 'CANDIDATE_CRITIC_REJECTED' },
+    state = await settle(allApproved, 'the block that reused worker-approved bytes')
+    assert.equal(providerCalls.length, 11)
+    const s5HitRows = await client.v2SyntheticCacheDecision.findMany({
+      where: { workspaceId, outcome: 'hit', criticReportHash: s5Report.reportHash },
     })
-    assert.equal(criticRejectedRows.length, 1, JSON.stringify(criticRejectedRows))
-    assert.equal(criticRejectedRows[0].outcome, 'miss')
+    assert.equal(s5HitRows.length, 1, JSON.stringify(s5HitRows))
+    const s5Hit = s5HitRows[0]
     measured.afterEvidenceGate = await counts()
 
     // -----------------------------------------------------------------------
@@ -1036,7 +970,7 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
       (data) => effectiveByBlock(data).get(s6Blocks[0])?.status === 'approved',
       'the first of the twin demands',
     )
-    assert.equal(providerCalls.length, 13, 'two demands, one paid call')
+    assert.equal(providerCalls.length, 12, 'two demands, one paid call')
     assert.equal(providerCalls.filter((text) => text === S6).length, 1)
 
     // A reorder costs nothing and is enough to let the deferred twin reuse.
@@ -1052,7 +986,7 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
       'the deferred twin reuses what its sibling paid for',
     )
     state = await settle(allApproved, 'the resolved twin')
-    assert.equal(providerCalls.length, 13, 'resolving the twin costs nothing')
+    assert.equal(providerCalls.length, 12, 'resolving the twin costs nothing')
     const twinHit = (await client.v2SyntheticCacheDecision.findMany({ where: { workspaceId, outcome: 'hit' } }))
       .find((row) => row.decisionHash !== hit.decisionHash)
     assert.equal(twinHit.reasonCode, 'CACHE_HIT_ELIGIBLE')
@@ -1060,8 +994,61 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     measured.singleSubmission = {
       simultaneousDemands: 2, submissions: 1, deferredTwins: twinRows.length, resolvedByReuse: 1,
     }
+
     // -----------------------------------------------------------------------
-    // 13. Revoked consent stops everything before the cache is even consulted:
+    // 13. The public provider-job contract accepts only a plan/block address.
+    //     Text, hash and critic binding come back from persisted server state;
+    //     this direct job writes a report but no block-generation row.
+    // -----------------------------------------------------------------------
+    planState = await getPlan(planId)
+    const publicBlockId = planState.plan.version.blockSequence.find((blockId) => blockId === s2BlockId) ?? planState.plan.version.blockSequence[0]
+    const publicBlock = (await blockRows()).get(publicBlockId)
+    const beforePublicJob = await counts()
+    const publicEnqueue = await api('POST', `/v1/projects/${projectId}/provider-jobs`, {
+      key: 'pj-public-tts-bound-to-block',
+      payload: {
+        projectVersionId,
+        profileSnapshotId: planState.plan.version.profileSnapshotId,
+        operation: 'tts', adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0',
+        providerInput: { text: 'CALLER TEXT MUST BE IGNORED', scriptHash: hash('9'), locale: 'xx-XX', outputFormat: 'mp3' },
+        sourceArtifactIds: [], scriptPlanId: planId, scriptBlockId: publicBlockId,
+        use: 'ads', market: 'BRA', locale: 'pt-BR',
+      },
+    })
+    assert.equal(publicEnqueue.status, 202, JSON.stringify(publicEnqueue.payload))
+    const publicJobId = publicEnqueue.payload.data.job.id
+    const providerJobs = new PrismaProviderJobRepository(client)
+    let publicJob
+    const publicDeadline = Date.now() + 240_000
+    do {
+      publicJob = await providerJobs.read({ workspaceId, projectId, jobId: publicJobId })
+      if (['approved', 'rejected', 'failed'].includes(publicJob?.job.status)) break
+      if (Date.now() > publicDeadline) throw new Error(`timed out waiting for public TTS job ${publicJobId}`)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    } while (true)
+    assert.equal(publicJob.job.status, 'approved', JSON.stringify(publicJob.job.normalizedError))
+    assert.equal(publicJob.job.input.text, publicBlock.exactText)
+    assert.equal(providerCalls.at(-1), publicBlock.exactText)
+    assert.equal(publicJob.job.input.scriptHash, sha256(publicBlock.exactText))
+    assert.equal(publicJob.job.input.locale, 'pt-BR')
+    assert.deepEqual(publicJob.job.input.criticBinding, {
+      planId, blockId: publicBlockId, scriptText: publicBlock.exactText,
+      scriptHash: sha256(publicBlock.exactText), profileSnapshotId: planState.plan.version.profileSnapshotId,
+      use: 'ads', market: 'BRA', locale: 'pt-BR',
+    })
+    assert.equal(await client.v2SyntheticBlockGeneration.count({ where: { workspaceId, providerJobId: publicJobId } }), 0)
+    const publicReport = await client.v2SyntheticCriticReport.findFirst({ where: { workspaceId, reportHash: publicJob.job.criticResultHash } })
+    assert.equal(publicReport?.decision, 'approved')
+    const afterPublicJob = await counts()
+    assert.deepEqual(afterPublicJob, {
+      ...beforePublicJob,
+      providerCalls: beforePublicJob.providerCalls + 1,
+      providerJobs: beforePublicJob.providerJobs + 1,
+      criticReports: beforePublicJob.criticReports + 1,
+    })
+
+    // -----------------------------------------------------------------------
+    // 14. Revoked consent stops everything before the cache is even consulted:
     //     no hit, no job, no call. Registering the revoked version IS the act of
     //     revocation, so it happens here rather than in the setup.
     // -----------------------------------------------------------------------
@@ -1143,18 +1130,18 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     // -----------------------------------------------------------------------
     const final = await counts()
     assert.deepEqual(final, {
-      providerCalls: 13, providerJobs: 13, generations: 15, cacheDecisions: 26, criticReports: 10, blocks: 10,
+      providerCalls: 13, providerJobs: 13, generations: 15, cacheDecisions: 26, criticReports: 13, blocks: 10,
     })
     const summary = await api('GET', `/v1/projects/${projectId}/synthetic-cache-decisions/summary`)
     assert.equal(summary.status, 200, JSON.stringify(summary.payload))
-    assert.equal(summary.payload.data.summary.byOutcome.hit, 2)
-    assert.equal(summary.payload.data.summary.byOutcome.miss, 12)
+    assert.equal(summary.payload.data.summary.byOutcome.hit, 3)
+    assert.equal(summary.payload.data.summary.byOutcome.miss, 11)
     assert.equal(summary.payload.data.summary.byOutcome['forced-regenerate'], 1)
     assert.equal(summary.payload.data.summary.byOutcome.blocked, 11, 'one deferred twin plus one refusal per block')
     const booked = summary.payload.data.summary.byCurrency.find(({ currency }) => currency === hit.currency)
     assert.equal(
-      booked.avoidedCostMinorUnits, hit.avoidedCostMinorUnits + twinHit.avoidedCostMinorUnits,
-      'the booked saving is exactly the two reuses, each priced from the job that paid for it',
+      booked.avoidedCostMinorUnits, hit.avoidedCostMinorUnits + s5Hit.avoidedCostMinorUnits + twinHit.avoidedCostMinorUnits,
+      'the booked saving is exactly the three reuses, each priced from the job that paid for it',
     )
     assert.equal(booked.decisions, 26)
     measured.final = final

@@ -290,18 +290,15 @@ export function createSyntheticCacheDecision(
   const estimatedSavingMinorUnits = minorUnits(input.estimatedSavingMinorUnits, 'cache decision estimatedSavingMinorUnits')
   const avoidedCostMinorUnits = minorUnits(input.avoidedCostMinorUnits, 'cache decision avoidedCostMinorUnits')
 
-  // A hit is the only outcome that avoided money, and it can only have avoided
-  // money by reusing something that exists: no candidate, no saving.
+  // A hit is the only outcome that can avoid money, and it can only describe a
+  // reuse when it names the exact candidate. A controlled or free source may
+  // legitimately avoid zero cost; the ledger must preserve that zero instead
+  // of inventing a charge merely to prove the reuse happened.
   if (input.outcome === 'hit') {
     assertDomain(
       candidateGenerationId !== null || candidateMasterId !== null,
       'INVALID_ARGUMENT',
       'a cache hit must name the candidate it reused',
-    )
-    assertDomain(
-      avoidedCostMinorUnits > 0,
-      'INVALID_ARGUMENT',
-      'a cache hit must record the cost it actually avoided',
     )
   } else {
     assertDomain(

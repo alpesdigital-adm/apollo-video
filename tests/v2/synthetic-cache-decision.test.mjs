@@ -93,15 +93,15 @@ test('T-FR-105 the ledger never carries the script, the consent evidence or a pr
   )
 })
 
-test('T-FR-105 only a real reuse may claim avoided money', () => {
+test('T-FR-105 only a real reuse may claim avoided money and free reuse stays zero', () => {
   assert.equal(hit().avoidedCostMinorUnits, 30)
   assert.throws(
     () => hit({ candidateGenerationId: null, candidateMasterId: null }),
     /must name the candidate it reused/,
   )
-  assert.throws(
-    () => hit({ avoidedCostMinorUnits: 0, estimatedSavingMinorUnits: 0 }),
-    /must record the cost it actually avoided/,
+  assert.equal(
+    hit({ avoidedCostMinorUnits: 0, estimatedSavingMinorUnits: 0 }).avoidedCostMinorUnits,
+    0,
   )
   for (const outcome of ['miss', 'forced-regenerate', 'blocked']) {
     const reasonCode = syntheticCacheDecisionReasonsFor(outcome)[0]

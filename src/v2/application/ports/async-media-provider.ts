@@ -5,6 +5,7 @@ import type {
   ProviderStatus,
   ProviderSubmissionResult,
 } from '../../domain/provider-contract.ts'
+import type { ProviderTransportObservation } from './provider-execution-provenance-repository.ts'
 
 export {
   PROVIDER_COMPLETION_MODES,
@@ -53,9 +54,16 @@ export interface ProviderCapabilities {
 export interface ProviderSubmitContext {
   workspaceId: string
   projectVersionId: string
+  operation: ProviderOperation
   operationId: string
   idempotencyKey: string
   signal?: AbortSignal
+  observeTransport?: (observation: Readonly<ProviderTransportObservation>) => Promise<void>
+}
+
+export interface ProviderRetrieveContext {
+  signal?: AbortSignal
+  observeTransport?: (observation: Readonly<ProviderTransportObservation>) => Promise<void>
 }
 
 export interface ProviderWebhookEvent {
@@ -86,6 +94,8 @@ export interface AsyncMediaProviderAdapter<Input, Result> {
   readonly adapterVersion: string
   readonly modelRef?: string
   readonly configHash: string
+  /** Adapter-owned classification. Absence is treated as controlled. */
+  readonly runtimeClass?: 'controlled' | 'live'
   getCapabilities(signal?: AbortSignal): Promise<Readonly<ProviderCapabilities>>
   estimate(input: Readonly<Input>, signal?: AbortSignal): Promise<Readonly<ProviderEstimate>>
   submit(
@@ -93,7 +103,7 @@ export interface AsyncMediaProviderAdapter<Input, Result> {
     context: Readonly<ProviderSubmitContext>,
   ): Promise<Readonly<ProviderSubmissionResult<Result>>>
   getStatus?(providerJobId: string, signal?: AbortSignal): Promise<ProviderStatus>
-  retrieve?(providerJobId: string, signal?: AbortSignal): Promise<Readonly<Result>>
+  retrieve?(providerJobId: string, signal?: AbortSignal, context?: Readonly<ProviderRetrieveContext>): Promise<Readonly<Result>>
   cancel?(providerJobId: string, signal?: AbortSignal): Promise<void>
   verifyWebhook?(request: unknown): Promise<Readonly<ProviderWebhookEvent>>
 }

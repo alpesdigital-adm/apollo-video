@@ -9,6 +9,11 @@ import {
   createMediaArtifactQueryRepository,
   createProjectWorkspaceQueryRepository,
   createSyntheticProductionRepository,
+  createSyntheticCriticReportRepository,
+  createProviderJobRepository,
+  createSyntheticAudioMasterRepository,
+  createSyntheticScriptPlanRepository,
+  createCanonicalSyntheticMasterReusePreparer,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import {
@@ -45,6 +50,11 @@ export async function POST(
       projects: createProjectWorkspaceQueryRepository(),
       artifacts: createMediaArtifactQueryRepository(),
       rights: createAssetRightsRepository(),
+      criticReports: createSyntheticCriticReportRepository(),
+      providerJobs: createProviderJobRepository(),
+      audioMasters: createSyntheticAudioMasterRepository(),
+      scriptPlans: createSyntheticScriptPlanRepository(),
+      prepareCanonicalReuse: createCanonicalSyntheticMasterReusePreparer(),
       clock: () => new Date(),
       createRunId: () => `synthetic-run-${randomUUID()}`,
       createSnapshotId: () => `snapshot-${randomUUID()}`,

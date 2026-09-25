@@ -50,6 +50,7 @@ import {
   calculateMulticamLongformGateRecordHash,
   listMulticamLongformGateCriteria,
 } from '../application/multicam-longform-gate.ts'
+import { calculateSyntheticPhaseGateRecordHash } from '../application/run-synthetic-phase-gate.ts'
 import {
   buildLegacyRuntimeCriterion,
   calculateLegacyRuntimeAuditHash,
@@ -59,6 +60,7 @@ import {
   type MulticamLongformCriterion,
   type MulticamLongformEvidenceResourceType,
 } from '../domain/multicam-longform-gate.ts'
+import { evaluateSyntheticPhaseGate } from '../domain/synthetic-phase-gate.ts'
 import {
   presentMulticamLongformGateArtifacts,
   presentMulticamLongformGateCriteria,
@@ -67,6 +69,10 @@ import {
   presentMulticamLongformGateOutstanding,
   presentMulticamLongformGateRead,
 } from './multicam-longform-gate-contract.ts'
+import {
+  presentSyntheticPhaseGateList,
+  presentSyntheticPhaseGateRun,
+} from './synthetic-phase-gate-contract.ts'
 import { directionVersionRef, toAngleCandidateWindow } from '../application/multicam-direction.ts'
 import { matchPlanVersionRef } from '../application/multicam-color-match.ts'
 import { captureSessionDerivationRef } from '../domain/capture-session.ts'
@@ -810,6 +816,26 @@ const queuedProductionBatchItemOperationVisibleExample = {
   maxAttempts: 3,
   createdAt,
   updatedAt: createdAt,
+  visibleState: {
+    schemaVersion: 'visible-state/v1',
+    label: 'queued',
+    tone: 'neutral',
+    progress: { mode: 'not-started', percent: 0 },
+    primaryAction: 'view-progress',
+    availableActions: ['view-progress', 'cancel'],
+    terminal: false,
+  },
+}
+const queuedSyntheticProductionRenderOperationVisibleExample = {
+  ...queuedProjectProxyRenderOperationExample,
+  id: 'operation-synthetic-production-render-example-1',
+  projectId,
+  type: 'synthetic-production-render',
+  progress: { completed: 0, total: 4, unit: 'render' },
+  target: {
+    type: 'project-version',
+    id: 'project-version-example-1',
+  },
   visibleState: {
     schemaVersion: 'visible-state/v1',
     label: 'queued',
@@ -5692,6 +5718,10 @@ const syntheticAudioMasterExample = {
   words: [{ word: 'Olá', startMs: 0, endMs: 600, confidence: 0.99 }, { word: 'mundo', startMs: 700, endMs: 1800, confidence: 0.98 }],
   wordsHash: '3'.repeat(64), approvedAt: createdAt, approvalCriticHash: '4'.repeat(64), createdAt, masterHash: '5'.repeat(64),
 }
+const syntheticAudioMasterV2Example = {
+  ...syntheticAudioMasterExample,
+  words: syntheticAudioMasterExample.words.map((word) => ({ ...word, confidence: null })),
+}
 
 const scriptBlockExample = {
   schemaVersion: 'synthetic-script-block/v1',
@@ -5972,6 +6002,63 @@ const transformationJobExample = {
   estimate: { currency: 'USD', costMinorUnits: 900, estimatedLatencyMs: 12_000 },
   createdAt: '2029-03-01T10:00:10.000Z',
   updatedAt: '2029-03-01T10:00:14.000Z',
+}
+
+const transformationFallbackDispatchLedgerExample = {
+  schemaVersion: 'transformation-fallback-ledger/v1',
+  id: 'transformation-fallback-dispatch-example',
+  projectId: 'project-medieval-01',
+  projectVersionId: 'project-version-medieval-01',
+  briefId: transformationBriefExample.id,
+  briefHash: transformationBriefExample.briefHash,
+  ladder: ['video-to-video', 'generated-cutaway', 'source-unchanged'],
+  attempts: [{
+    sequence: 0,
+    rung: 'video-to-video',
+    providerJobId: transformationJobExample.id,
+    providerId: 'atelier-v2v',
+    artifactId: 'artifact-rejected-v2v-example',
+    artifactSha256: '6'.repeat(64),
+    outcome: 'rejected',
+    intentScoreBps: 5_900,
+    criticReportHash: '7'.repeat(64),
+    violatesProtectedContent: false,
+    estimatedCostMinorUnits: 900,
+    observedCostMinorUnits: 900,
+    costCurrency: 'USD',
+    reason: 'critic rejected the generated result',
+  }],
+  currentRung: 'generated-cutaway',
+  bestArtifactId: null,
+  bestArtifactSha256: null,
+  bestIntentScoreBps: null,
+  incurredCostMinorUnits: 900,
+  costCurrency: 'USD',
+  reviewDecision: 'awaiting-review',
+  sourceArtifactId: 'artifact-specialist-take-01',
+  sourceArtifactSha256: 'c'.repeat(64),
+  createdAt: '2029-03-01T10:00:00.000Z',
+  updatedAt: '2029-03-01T10:04:20.000Z',
+  ledgerHash: '8'.repeat(64),
+}
+
+const transformationFallbackJobExample = {
+  ...transformationJobExample,
+  id: 'provider-job-generated-cutaway-example',
+  operation: 'generated-cutaway',
+  transformation: {
+    ...transformationJobExample.transformation,
+    selectionId: 'transformation-provider-selection-generated-cutaway-example',
+    selectionHash: '9'.repeat(64),
+    capabilityId: 'atelier-generated-cutaway-hd',
+    fallback: {
+      ledgerId: transformationFallbackDispatchLedgerExample.id,
+      ledgerHash: transformationFallbackDispatchLedgerExample.ledgerHash,
+      rung: 'generated-cutaway',
+      rejectedJobId: transformationJobExample.id,
+      rejectedReportHash: '7'.repeat(64),
+    },
+  },
 }
 
 const transformationCallbackAcceptedExample = {
@@ -7283,6 +7370,49 @@ const w20GateOutstandingExample = {
   ...explainMulticamLongformGate(w20GateExample.report),
 }
 
+/**
+ * The public synthetic gate example stays deliberately incomplete: the
+ * server supplied one real check with partial evidence and derived every
+ * missing criterion, check and evidence type itself.
+ */
+const syntheticPhaseGateReportExample = evaluateSyntheticPhaseGate({
+  workspaceId,
+  projectId,
+  projectVersionId: 'project-version-example-1',
+  projectVersionHash: 'd'.repeat(64),
+  evidence: [{
+    criterion: 'F3-GATE-001',
+    checks: [{
+      code: 'elevenlabs-audio-alignment-live',
+      passed: true,
+      references: [{
+        type: 'provider-job',
+        id: 'provider-job-example-1',
+        hash: '1'.repeat(64),
+      }],
+    }],
+  }],
+  evaluatedAt: createdAt,
+})
+const syntheticPhaseGateRecordContent = {
+  schemaVersion: 'synthetic-phase-gate/v1' as const,
+  id: 'synthetic-phase-gate-example-1',
+  workspaceId,
+  projectId,
+  projectVersionId: syntheticPhaseGateReportExample.projectVersionId,
+  projectVersionHash: syntheticPhaseGateReportExample.projectVersionHash,
+  report: syntheticPhaseGateReportExample,
+  reportFingerprint: syntheticPhaseGateReportExample.fingerprint,
+  idempotencyKey: 'synthetic-phase-gate-example-key',
+  requestFingerprint: 'e'.repeat(64),
+  createdBy: { type: 'api-client' as const, id: clientId },
+  createdAt,
+}
+const syntheticPhaseGateExample = {
+  ...syntheticPhaseGateRecordContent,
+  recordHash: calculateSyntheticPhaseGateRecordHash(syntheticPhaseGateRecordContent),
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/localization-canonical-list/v1': [{ data: { versions: [{ id: 'canonical-1', projectVersionId: 'version-1', sourceLocale: 'pt-BR', revision: 1, blocks: [], approvedAt: '2026-09-08T12:00:00.000Z', contentHash: 'a'.repeat(64) }] }, meta: { apiVersion: 'v1' } }],
@@ -7415,6 +7545,26 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/transformation-critic-report-read/v1': [{
+      data: {
+        report: {
+          schemaVersion: 'transformation-critic-report/v1',
+          id: 'transformation-critic-example', workspaceId: 'workspace-medieval-01', projectId: transformationBriefExample.projectId,
+          briefId: transformationBriefExample.id, briefHash: transformationBriefExample.briefHash,
+          providerJobId: transformationJobExample.id,
+          policyId: 'transformation-policy-example', policyHash: '1'.repeat(64),
+          sourceArtifactId: transformationBriefExample.sourceArtifactId, sourceArtifactSha256: '2'.repeat(64),
+          resultArtifactId: 'artifact-transformed-example', resultArtifactSha256: '3'.repeat(64),
+          evaluators: [{ id: 'ffprobe-evaluator', kind: 'measured', version: '1.0.0', scope: 'Media integrity' }],
+          measurements: [{ dimension: 'media-integrity', status: 'measured', evaluatorId: 'ffprobe-evaluator',
+            scoreBps: 9000, thresholdBps: 8000, frameRange: null, region: null }],
+          issues: [], hardGates: [], decision: 'approved', action: 'approve',
+          confidenceBps: 9000, intentScoreBps: 9000,
+          evaluatedAt: '2029-03-01T10:04:12.000Z', reportHash: '9'.repeat(64),
+        },
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/transformation-fallback-action-request/v1': [{
       action: 'descend', because: 'critic-rejected-quality',
     }],
@@ -7429,6 +7579,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/transformation-fallback-dispatch-request/v1': [{
+      expectedLedgerHash: transformationFallbackDispatchLedgerExample.ledgerHash,
+      use: 'ads', market: 'BRA', locale: 'pt-BR',
+    }],
+    'apollo://schemas/transformation-fallback-dispatch-result/v1': [{
+      data: {
+        outcome: 'enqueued',
+        ledger: transformationFallbackDispatchLedgerExample,
+        job: transformationFallbackJobExample,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/provider-callback-notification/v1': [{
       providerJobId: 'medieval-v2v-7741',
       status: 'completed',
@@ -7439,15 +7601,39 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       { data: { outcome: 'duplicate' }, meta: { apiVersion: 'v1' } },
       { data: { outcome: 'rejected', rejectedBecause: 'signature-invalid' }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/run-synthetic-phase-gate-request/v1': [{
+      projectVersionId: syntheticPhaseGateExample.projectVersionId,
+      projectVersionHash: syntheticPhaseGateExample.projectVersionHash,
+    }],
+    'apollo://schemas/synthetic-phase-gate-run/v1': [{
+      data: presentSyntheticPhaseGateRun({ gate: syntheticPhaseGateExample, replayed: false }),
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-phase-gate-list/v1': [{
+      data: presentSyntheticPhaseGateList([syntheticPhaseGateExample]),
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/synthetic-critic-report-list/v1': [{
       data: { reports: [syntheticCriticReportExample, syntheticCriticRejectedReportExample] },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/synthetic-critic-report-list/v2': [{
+      data: { reports: [
+        { ...syntheticCriticReportExample, expectationHash: '8'.repeat(64) },
+        { ...syntheticCriticRejectedReportExample, expectationHash: '9'.repeat(64) },
+      ] }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/synthetic-critic-report-read/v1': [{
       data: { report: syntheticCriticReportExample }, meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/synthetic-critic-report-read/v2': [{
+      data: { report: { ...syntheticCriticReportExample, expectationHash: '8'.repeat(64) } }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/synthetic-critic-block-evidence/v1': [{
       data: { report: syntheticCriticRejectedReportExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-critic-block-evidence/v2': [{
+      data: { report: { ...syntheticCriticRejectedReportExample, expectationHash: '9'.repeat(64) } }, meta: { apiVersion: 'v1' },
     }],
     'apollo://schemas/synthetic-cache-decision-list/v1': [{
       data: { decisions: [syntheticCacheDecisionHitExample, syntheticCacheDecisionBlockedExample] },
@@ -7628,6 +7814,8 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     }],
     'apollo://schemas/synthetic-audio-master-mutated/v1': [{ data: { audioMaster: syntheticAudioMasterExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/synthetic-audio-master-read/v1': [{ data: { audioMaster: syntheticAudioMasterExample }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/synthetic-audio-master-mutated/v2': [{ data: { audioMaster: syntheticAudioMasterV2Example, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/synthetic-audio-master-read/v2': [{ data: { audioMaster: syntheticAudioMasterV2Example }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/create-synthetic-production-run-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1',
       audio: { artifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR', scriptHash: 'e'.repeat(64), alignment: [{ text: 'Olá mundo', startMs: 0, endMs: 2000 }] },
@@ -7640,6 +7828,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/synthetic-production-run-read/v1': [{
       data: { run: { id: syntheticPlanExample.id, status: 'compiled', editPlanSnapshotId: 'snapshot-synthetic-example-1', plan: syntheticPlanExample } }, meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/synthetic-production-render-operation-request/v1': [{
+      output: { kind: 'final', aspectRatio: '9:16' },
+    }],
+    'apollo://schemas/synthetic-production-render-operation-created/v1': [{
+      data: {
+        operation: queuedSyntheticProductionRenderOperationVisibleExample,
+        render: {
+          runId: syntheticPlanExample.id,
+          projectVersionId: syntheticPlanExample.projectVersionId,
+          editPlanSnapshotId: 'snapshot-synthetic-example-1',
+          renderInputHash: '3'.repeat(64),
+          outputArtifactId: 'artifact-synthetic-production-render-example-1',
+          outputManifestId: 'manifest-synthetic-production-render-example-1',
+        },
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/enqueue-provider-job-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'audio-avatar',
       adapterId: 'controlled-avatar', adapterVersion: 'version-1', providerInput: { audioArtifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR' },
@@ -7649,6 +7855,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'audio-avatar',
       adapterId: 'controlled-avatar', adapterVersion: 'version-1', providerInput: { aspectRatio: '9:16' },
       sourceArtifactIds: ['artifact-audio-example-1'], audioMasterId: 'synthetic-audio-master-example-1', audioRange: { startWordIndex: 0, endWordIndex: 2 },
+      use: 'ads', market: 'BRA', locale: 'pt-BR',
+    }],
+    'apollo://schemas/enqueue-provider-job-request/v3': [{
+      projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'tts',
+      adapterId: 'controlled-tts', adapterVersion: 'version-1', providerInput: { outputFormat: 'wav' },
+      sourceArtifactIds: [], scriptPlanId: 'synthetic-script-plan-example-1', scriptBlockId: 'synthetic-script-block-example-1',
       use: 'ads', market: 'BRA', locale: 'pt-BR',
     }],
     'apollo://schemas/provider-job-mutated/v1': [{ data: { job: providerJobExample, replayed: false }, meta: { apiVersion: 'v1' } }],
@@ -8548,6 +8760,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v11': [
       { data: { operation: queuedProductionBatchItemOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v12': [
+      { data: { operation: queuedSyntheticProductionRenderOperationVisibleExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -8592,6 +8807,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v10': [
       { data: { operations: [queuedLongFormIndexCostOperationExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v11': [
+      { data: { operations: [queuedSyntheticProductionRenderOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/enqueue-project-director-run-request/v1': [
       {

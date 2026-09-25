@@ -71,6 +71,8 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     await client.v2TransformationCriticReport.deleteMany({ where: { workspaceId } })
     await client.v2TransformationFallbackAttempt.deleteMany({ where: { workspaceId } })
     await client.v2TransformationFallbackLedger.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
@@ -134,6 +136,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
+    const { PrismaProviderExecutionProvenanceRepository } = await import('../../src/v2/infrastructure/prisma/provider-execution-provenance-repository.ts')
     const { PrismaReviewAnnotationRepository } = await import('../../src/v2/infrastructure/prisma/review-annotation-repository.ts')
     const { PrismaReviewCleanupMaskRepository } = await import('../../src/v2/infrastructure/prisma/review-cleanup-mask-repository.ts')
     const { PrismaTransformationProviderRegistryRepository } = await import('../../src/v2/infrastructure/prisma/transformation-provider-registry-repository.ts')
@@ -147,15 +150,17 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const { AuthorizedProviderSubmissionInputMaterializer } = await import('../../src/v2/infrastructure/provider-submission-input-materializer.ts')
     const { HttpTransformationProviderAdapter } = await import('../../src/v2/infrastructure/transformation/http-transformation-provider.ts')
     const { FfmpegTransformationCriticEvaluator } = await import('../../src/v2/infrastructure/transformation/ffmpeg-transformation-critic.ts')
+    const { FfmpegAvatarAudioComparison } = await import('../../src/v2/infrastructure/media/ffmpeg-avatar-audio-comparison.ts')
     const { VerifiedTransformationResultIngestor } = await import('../../src/v2/infrastructure/transformation/transformation-result-ingestion.ts')
 
     const sourcePath = join(root, 'source.mp4')
     const approvedPath = join(root, 'approved.mp4')
     const rejectedPath = join(root, 'rejected.mp4')
-    const common = ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=320x180:r=30:d=3', '-vf']
-    execFileSync(ffmpegPath, [...common, 'drawbox=x=80:y=20:w=80:h=100:color=red:t=fill,drawbox=x=20:y=140:w=100:h=20:color=white:t=fill', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', sourcePath], { windowsHide: true })
-    execFileSync(ffmpegPath, [...common, 'drawbox=x=80:y=20:w=80:h=100:color=red:t=fill', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', approvedPath], { windowsHide: true })
-    execFileSync(ffmpegPath, [...common, 'drawbox=x=80:y=20:w=80:h=100:color=green:t=fill', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', rejectedPath], { windowsHide: true })
+    const common = ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=320x180:r=30:d=3', '-f', 'lavfi', '-i', 'sine=frequency=320:sample_rate=48000:duration=3', '-vf']
+    const encode = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-shortest']
+    execFileSync(ffmpegPath, [...common, 'drawbox=x=80:y=20:w=80:h=100:color=red:t=fill,drawbox=x=20:y=140:w=100:h=20:color=white:t=fill', ...encode, sourcePath], { windowsHide: true })
+    execFileSync(ffmpegPath, [...common, 'drawbox=x=80:y=20:w=80:h=100:color=red:t=fill', ...encode, approvedPath], { windowsHide: true })
+    execFileSync(ffmpegPath, [...common, 'drawbox=x=80:y=20:w=80:h=100:color=green:t=fill', ...encode, rejectedPath], { windowsHide: true })
     const approvedBytes = await readFile(approvedPath)
     const rejectedBytes = await readFile(rejectedPath)
 
@@ -230,7 +235,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const submissions = []
     const outputs = [approvedBytes, rejectedBytes]
     const statusPolls = new Map()
-    const adapter = new HttpTransformationProviderAdapter({ id: 'controlled-inpaint', adapterVersion: '1.0.0', baseUrl: 'http://127.0.0.1:4001', apiKey: 'controlled-provider-key', completion: 'polling', modes: ['object-environment-change'], supportsCancellation: false, priceFixedMinorUnits: 10, pricePerSecondMinorUnits: 2, currency: 'BRL', fetchImplementation: async (url, init = {}) => {
+    const adapter = new HttpTransformationProviderAdapter({ id: 'controlled-inpaint', adapterVersion: '1.0.0', baseUrl: 'http://127.0.0.1:4001', apiKey: 'controlled-provider-key', completion: 'polling', modes: ['object-environment-change'], operations: ['video-to-video'], supportsCancellation: false, priceFixedMinorUnits: 10, pricePerSecondMinorUnits: 2, currency: 'BRL', fetchImplementation: async (url, init = {}) => {
       if (String(url).endsWith('/capabilities')) return new Response(JSON.stringify({ minSeconds: 1, maxSeconds: 30 }), { status: 200, headers: { 'content-type': 'application/json' } })
       assert.equal(new Headers(init.headers).get('x-api-key'), 'controlled-provider-key')
       if (String(url).endsWith('/transformations')) {
@@ -264,21 +269,29 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const sourceMaterializer = new LocalArtifactSourceMaterializer(artifactRoot)
     const materializer = new AuthorizedProviderSubmissionInputMaterializer({ profiles: { readProfile: async () => null }, artifacts, sources: sourceMaterializer })
     const resultArtifacts = new PrismaProviderResultArtifactRepository(client)
+    const provenance = new PrismaProviderExecutionProvenanceRepository(client, () => at(clockSecond))
     const ingestor = new VerifiedTransformationResultIngestor({ workRoot, storage, artifacts, artifactQuery: artifacts, resultArtifacts, prober: { probe: (path, options) => probeVideo(path, { ...options, requireAudio: false }) }, clock: () => at(clockSecond) })
     const quality = new PrismaTransformationQualityRepository(client)
-    const critic = new PersistedTransformationResultCritic({ registry, quality, artifacts, novelty, evaluator: new FfmpegTransformationCriticEvaluator({ sources: sourceMaterializer, prober: { probe: (path, options) => probeVideo(path, { ...options, requireAudio: false }) } }), clock: () => at(clockSecond) })
+    const critic = new PersistedTransformationResultCritic({ registry, quality, artifacts, novelty, evaluator: new FfmpegTransformationCriticEvaluator({ sources: sourceMaterializer, prober: { probe: (path, options) => probeVideo(path, { ...options, requireAudio: true }) }, audioComparison: new FfmpegAvatarAudioComparison({ ...process.env, FFMPEG_PATH: ffmpegPath, FFPROBE_PATH: ffprobePath }) }), clock: () => at(clockSecond) })
     const runFreshWorker = async () => {
       clockSecond += 1
-      return runProviderJobWorkerOnce({ jobs, adapters, materializer, ingestor, critic, clock: () => at(clockSecond), createLeaseToken: () => `transformation-production-lease-${clockSecond}`, createTransitionId: () => `transformation-production-transition-${++transitionSequence}` })(`transformation-production-worker-${clockSecond}`)
+      return runProviderJobWorkerOnce({ jobs, provenance, resultArtifacts, adapters, materializer, ingestor, critic, clock: () => at(clockSecond), createLeaseToken: () => `transformation-production-lease-${clockSecond}`, createTransitionId: () => `transformation-production-transition-${++transitionSequence}` })(`transformation-production-worker-${clockSecond}`)
     }
     const executeToTerminal = async (idempotencyKey) => {
       const requested = await requestJob({ workspaceId, projectId, briefId: brief.id, selectionId: routed.selection.id, use: 'ads', market: 'BRA', locale: 'pt-BR', maskId: refinedMask.persisted.mask.id, outputSpecId: 'output-horizontal', actor, idempotencyKey })
-      for (let stage = 0; stage < 6; stage += 1) await runFreshWorker()
+      for (let stage = 0; stage < 7; stage += 1) await runFreshWorker()
       return jobs.read({ workspaceId, projectId, jobId: requested.persisted.job.id })
     }
 
     const approved = await executeToTerminal('transformation-production-approved')
-    assert.equal(approved.job.status, 'approved')
+    const approvedReport = await quality.readCriticReportByJob({ workspaceId, projectId, providerJobId: approved.job.id })
+    const approvedDiagnostic = approvedReport ? {
+      decision: approvedReport.decision,
+      action: approvedReport.action,
+      hardGates: approvedReport.hardGates,
+      measurements: approvedReport.measurements.map(({ dimension, status, scoreBps, thresholdBps }) => ({ dimension, status, scoreBps, thresholdBps })),
+    } : null
+    assert.equal(approved.job.status, 'approved', JSON.stringify({ normalizedError: approved.job.normalizedError ?? null, critic: approvedDiagnostic }))
     const acceptedArtifact = await artifacts.findById(workspaceId, approved.job.resultArtifact.artifactId)
     assert.notEqual(acceptedArtifact.id, sourceArtifactId)
     assert.equal(await calculateFileSha256(join(artifactRoot, ...acceptedArtifact.artifactKey.split('/'))), acceptedArtifact.sha256)

@@ -195,6 +195,36 @@ test('S3 artifact storage fails closed without bucket versioning or with changed
     }),
     /immutable identity verification|does not match/,
   )
+
+  const unavailableHead = {
+    async send(command) {
+      assert.equal(command.constructor.name, 'HeadObjectCommand')
+      throw new Error('native S3 head failure')
+    },
+  }
+  await assert.rejects(
+    new S3ArtifactSourceMaterializer(join(root, 'head-failure-work'), { bucket: 'apollo-v2', client: unavailableHead }).materialize({
+      operationId: 'operation-head-failure', artifactKey: promoted.key, sha256, byteSize: bytes.length,
+    }),
+    (error) => error?.code === 'PERSISTENCE_CONFLICT' && error.message === 'S3 artifact identity could not be read',
+  )
+
+  let headCalls = 0
+  const unavailableVerificationHead = {
+    async send(command) {
+      assert.equal(command.constructor.name, 'HeadObjectCommand')
+      headCalls += 1
+      if (headCalls === 1) return { VersionId: 'version-present' }
+      throw new Error('native S3 verification head failure')
+    },
+  }
+  await assert.rejects(
+    new S3ArtifactSourceMaterializer(join(root, 'verification-head-failure-work'), { bucket: 'apollo-v2', client: unavailableVerificationHead }).materialize({
+      operationId: 'operation-verification-head-failure', artifactKey: promoted.key, sha256, byteSize: bytes.length,
+    }),
+    (error) => error?.code === 'PERSISTENCE_CONFLICT' && error.message === 'S3 artifact identity could not be read',
+  )
+  assert.equal(headCalls, 2)
 })
 
 test('artifact content composition follows the same configured production driver', async () => {

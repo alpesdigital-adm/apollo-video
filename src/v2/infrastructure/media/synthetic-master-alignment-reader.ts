@@ -3,6 +3,7 @@ import type { ArtifactContentStorage } from '../../application/ports/artifact-co
 import type { MediaArtifactQueryRepository } from '../../application/ports/media-artifact-query-repository.ts'
 import { assertDomain, DomainError } from '../../domain/errors.ts'
 import type { SyntheticSpeechSegmentWord } from '../../domain/synthetic-speech-segment.ts'
+import { validateSyntheticAlignment } from './synthetic-alignment-validation.ts'
 
 interface StoredTtsAlignment {
   schemaVersion?: string
@@ -58,14 +59,10 @@ export class StoredSyntheticMasterAlignmentReader implements MasterAlignmentRead
       throw new DomainError('PERSISTENCE_CONFLICT', 'Stored master alignment is not valid JSON')
     }
 
-    const characters = alignment.characters ?? []
-    const startTimes = alignment.startTimesSeconds ?? []
-    const endTimes = alignment.endTimesSeconds ?? []
-    assertDomain(
-      characters.length > 0 && startTimes.length === characters.length && endTimes.length === characters.length,
-      'PERSISTENCE_CONFLICT',
-      'Stored master alignment is malformed',
-    )
+    const validated = validateSyntheticAlignment(alignment)
+    const characters = validated.characters
+    const startTimes = validated.startTimesSeconds
+    const endTimes = validated.endTimesSeconds
 
     const words: SyntheticSpeechSegmentWord[] = []
     let current: { text: string; startSeconds: number; endSeconds: number } | null = null

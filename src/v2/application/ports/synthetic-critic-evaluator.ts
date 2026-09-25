@@ -4,6 +4,7 @@ import type {
   SyntheticCriticMeasurement,
 } from '../../domain/synthetic-critic-report.ts'
 import type { SyntheticCriticFinding } from '../../domain/synthetic-critic-thresholds.ts'
+import type { AvatarOutputSpeechEvidence } from '../../domain/avatar-output-speech-evidence.ts'
 
 /**
  * The bytes an evaluator is allowed to judge, named by their content address so
@@ -23,6 +24,13 @@ export interface SyntheticCriticArtifactRef {
  */
 export interface SyntheticCriticExpectation {
   durationMs: number | null
+  /**
+   * `fixed` compares against a duration approved before generation (avatar
+   * slot/audio range). `alignment` compares free-form TTS bytes against the
+   * independently persisted provider alignment timeline. The latter is still
+   * untrusted evidence and must be hash-verified and validated before use.
+   */
+  durationMode?: 'fixed' | 'alignment'
   fps: number | null
   videoCodec: string | null
   audioCodec: string | null
@@ -49,6 +57,8 @@ export interface SyntheticCriticExpectation {
 }
 
 export interface SyntheticCriticSubject {
+  /** Durable origin job. Required for output-side avatar evidence. */
+  providerJobId?: string
   workspaceId: string
   projectId: string
   blockId: string
@@ -60,6 +70,10 @@ export interface SyntheticCriticSubject {
   video: Readonly<SyntheticCriticArtifactRef> | null
   audio: Readonly<SyntheticCriticArtifactRef> | null
   alignmentArtifactId: string | null
+  /** Output-side evidence. Input TTS alignment never satisfies this field. */
+  outputSpeechEvidence?: Readonly<AvatarOutputSpeechEvidence> | null
+  outputSpeechEvidenceArtifactId?: string | null
+  scriptHash?: string
   /** The approved text, exactly as approved. */
   scriptText: string
   expected: Readonly<SyntheticCriticExpectation>
@@ -85,6 +99,7 @@ export interface SyntheticCriticMediaFacts {
 
 export interface SyntheticCriticEvaluationContext {
   subject: Readonly<SyntheticCriticSubject>
+  signal?: AbortSignal
   /** What the probe could read. Null means the artifact did not decode. */
   media: Readonly<SyntheticCriticMediaFacts> | null
 }

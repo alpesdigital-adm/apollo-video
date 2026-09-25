@@ -92,6 +92,26 @@ contratos públicos.
 
 ## Evidência de teste e produção
 
+Correção de concorrência Wave 24: após três tentativas
+serializáveis com `P2034`, a criação consulta a linha vencedora pela chave de
+idempotência no mesmo workspace, projeto e cliente. O replay só é aceito quando
+o contexto de autenticação e o fingerprint da requisição coincidem; a leitura
+reidrata e valida o source, o relatório canônico e suas projeções. Sem vencedor,
+o erro permanece `PERSISTENCE_CONFLICT`; divergência de contexto ou payload
+permanece `IDEMPOTENCY_PAYLOAD_MISMATCH`. O caminho `P2002` continua com a mesma
+reconciliação. Regressões determinísticas cobrem esses casos e uma projeção
+corrompida. A prova RED local `w24-contamination-red-20260925-bf04997b`
+reproduziu o conflito anterior após `P2034` exaurido. A prova GREEN local
+`w24-contamination-green-hash-20260925-80410259` passou `1/1` na jornada
+API + PostgreSQL isolado + worker + FFmpeg + revisão, incluindo a reconciliação
+`P2034`/`P2002` e os seis cenários de regressão. Também passaram localmente
+`2520/2520` testes unitários, arquitetura, ESLint e build Next + TypeScript.
+O banco isolado foi encerrado sem conexões remanescentes. CI do novo commit e
+aceitação em produção desta correção continuam pendentes.
+
+As evidências abaixo são históricas da entrega F2.016 (`e00727f`); seus
+números e seu smoke de produção não validam a correção Wave 24:
+
 - commit técnico: `e00727f`;
 - regressão geral: `564/564`;
 - testes do domínio, goldens e long-form: `16/16`;

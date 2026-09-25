@@ -112,7 +112,8 @@ export class DeterministicSyntheticCriticControlledEvaluator implements Syntheti
     }
 
     // --- identity -----------------------------------------------------------
-    if (expected.declaredIdentityRef === null) {
+    const outputIdentityRef = subject.outputSpeechEvidence?.speechEvidence.observedIdentityRef ?? expected.declaredIdentityRef
+    if (outputIdentityRef === null) {
       measurements.push(unavailable(
         'identity',
         'the adapter declared no identity reference for this take, so there was nothing to compare against the approved snapshot',
@@ -120,9 +121,9 @@ export class DeterministicSyntheticCriticControlledEvaluator implements Syntheti
     } else {
       measurements.push(measured(
         'identity',
-        expected.declaredIdentityRef === expected.identityRef ? 1 : 0,
+        outputIdentityRef === expected.identityRef ? 1 : 0,
         'identity-ref-match',
-        evidence,
+        subject.outputSpeechEvidence ? [...evidence, `artifact://${subject.outputSpeechEvidence.videoArtifactId}`, `evidence://${subject.outputSpeechEvidence.evidenceHash}`] : evidence,
       ))
     }
     if (!expected.rights.withinGrantedScope) {

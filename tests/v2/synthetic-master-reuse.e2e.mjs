@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFile, execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import http from 'node:http'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -8,12 +8,15 @@ import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
+import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
+const execFileAsync = promisify(execFile)
 
 const workspaceId = 'master-reuse-e2e-workspace'
 const foreignWorkspaceId = 'master-reuse-e2e-foreign'
@@ -23,6 +26,25 @@ const providerJobId = 'master-reuse-provider-job'
 const hash = (character) => character.repeat(64)
 const at = (second) => new Date(Date.parse('2029-06-01T00:00:00.000Z') + second * 1_000).toISOString()
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
+
+function assertSafeDatabaseUrl() {
+  assert.ok(process.env.V2_DATABASE_URL, 'V2_DATABASE_URL must name an isolated local PostgreSQL')
+  const url = new URL(process.env.V2_DATABASE_URL)
+  assert.ok(['localhost', '127.0.0.1', '::1'].includes(url.hostname))
+  assert.match(url.pathname.slice(1), /^(?:apollo_v2|[a-z0-9_]*e2e[a-z0-9_]*)$/)
+  assert.match(
+    url.searchParams.get('application_name') ?? '',
+    /^apollo-video-e2e-(?:master-reuse|synthetic-phase-gate)-[a-z0-9-]+$/,
+  )
+  for (const [parameter, maximum] of [
+    ['connection_limit', 5],
+    ['pool_timeout', 10],
+    ['connect_timeout', 10],
+  ]) {
+    const value = Number(url.searchParams.get(parameter))
+    assert.ok(Number.isInteger(value) && value >= 1 && value <= maximum)
+  }
+}
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -37,18 +59,96 @@ async function freePort() {
   })
 }
 
-async function waitForServer(baseUrl, server, readLogs) {
+function boundedFetch(input, init, testSignal, timeoutMs = 10_000) {
+  const signals = [testSignal, AbortSignal.timeout(timeoutMs)]
+  if (init?.signal) signals.push(init.signal)
+  return globalThis.fetch(input, { ...init, signal: AbortSignal.any(signals) })
+}
+
+async function waitForServer(baseUrl, server, readLogs, testSignal) {
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
-    if (server.exitCode !== null) {
-      throw new Error(`Next server exited with ${server.exitCode}\n${readLogs().slice(-4_000)}`)
+    if (server.exitCode !== null || server.signalCode !== null) {
+      throw new Error(`Next server exited with ${server.exitCode ?? server.signalCode}\n${readLogs().slice(-4_000)}`)
     }
     try {
-      if ((await globalThis.fetch(`${baseUrl}/v1/health`)).ok) return
+      if ((await boundedFetch(`${baseUrl}/v1/health`, undefined, testSignal)).ok) return
     } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    await delay(250, undefined, { signal: testSignal })
   }
   throw new Error(`Timed out waiting for Next server\n${readLogs().slice(-4_000)}`)
+}
+
+async function childExitWithin(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return true
+  return new Promise((resolve) => {
+    let timer
+    const finish = (exited) => {
+      clearTimeout(timer)
+      child.off('exit', onExit)
+      resolve(exited)
+    }
+    const onExit = () => finish(true)
+    child.once('exit', onExit)
+    timer = setTimeout(() => finish(false), timeoutMs)
+  })
+}
+
+function signalProcessGroup(child, signal) {
+  try {
+    process.kill(-child.pid, signal)
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error
+  }
+}
+
+async function stopChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  if (process.platform === 'win32') {
+    try {
+      await execFileAsync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+        windowsHide: true,
+        timeout: 15_000,
+      })
+    } catch (error) {
+      if (child.exitCode === null && child.signalCode === null) throw error
+    }
+  } else {
+    signalProcessGroup(child, 'SIGTERM')
+  }
+  if (await childExitWithin(child, 5_000)) return
+  if (process.platform === 'win32') {
+    try {
+      await execFileAsync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+        windowsHide: true,
+        timeout: 15_000,
+      })
+    } catch (error) {
+      if (child.exitCode === null && child.signalCode === null) throw error
+    }
+  } else {
+    signalProcessGroup(child, 'SIGKILL')
+  }
+  assert.equal(await childExitWithin(child, 10_000), true, `Next process tree ${child.pid} did not stop`)
+}
+
+async function closeHttpServer(server) {
+  if (!server?.listening) return
+  await new Promise((resolve, reject) => {
+    let timer
+    const finish = (error) => {
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    timer = setTimeout(() => {
+      server.closeAllConnections?.()
+      finish(new Error('Loopback provider server did not close within 10 seconds'))
+    }, 10_000)
+    server.close(finish)
+    server.closeAllConnections?.()
+  })
+  assert.equal(server.listening, false)
 }
 
 /**
@@ -65,17 +165,15 @@ async function waitForServer(baseUrl, server, readLogs) {
  * artifacts, exactly like the F3.007 persistence integration test. What is
  * under test is the master and its reuse, not how the bytes were produced.
  *
- * The fixture carries the three ledger roles the pipeline actually writes —
- * primary-video, primary-audio and alignment-evidence, the only three
- * `provider_result_artifacts_media_check` admits. `normalized-video` is an
- * optional master role reserved for a real normalization stage, so a master
- * promoted straight off a provider job holds three artifacts and its video
- * duration is measured on the provider's own track.
+ * The avatar fixture carries only its primary video and controlled output
+ * speech evidence. Final audio and alignment stay on the canonical upstream
+ * audio master, matching the production boundary used by W24.3.
  */
 test('T-FR-104 a sealed synthetic master is reused across projects through /v1 with zero new provider work', {
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
   timeout: 900_000,
-}, async () => {
+}, async (t) => {
+  assertSafeDatabaseUrl()
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
   const root = await mkdtemp(join(tmpdir(), 'apollo-master-reuse-'))
   const artifactRoot = join(root, 'artifacts')
@@ -83,8 +181,11 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
   let stub = null
   let server = null
   let serverLogs = ''
+  let primaryError
 
   const cleanupWorkspace = async (id) => {
+    await client.v2SyntheticPhaseGateEvidence.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticPhaseGate.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId: id } })
@@ -96,9 +197,12 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     await client.v2SyntheticSpeechSegment.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId: id } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId: id } })
     await client.v2MediaArtifact.updateMany({
@@ -133,8 +237,13 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const { registerSyntheticPresenterProfileService } = await import('../../src/v2/application/synthetic-production.ts')
     const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
     const { catalogSyntheticSpeechSegmentsService } = await import('../../src/v2/application/synthetic-speech-segments.ts')
+    const { runSyntheticPhaseGateService } = await import('../../src/v2/application/run-synthetic-phase-gate.ts')
     const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
+    const { calculateCanonicalHash, stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
+    const { createProviderJob, transitionProviderJob } = await import('../../src/v2/domain/provider-job.ts')
     const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
+    const { createSyntheticAudioMaster, createSyntheticAvatarAudioRange } = await import('../../src/v2/domain/synthetic-audio-master.ts')
+    const { createAvatarOutputSpeechEvidence } = await import('../../src/v2/domain/avatar-output-speech-evidence.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
@@ -145,7 +254,10 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticMasterAssetRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-asset-repository.ts')
     const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
+    const { PrismaSyntheticAudioMasterRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts')
     const { PrismaSyntheticSpeechSegmentRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-speech-segment-repository.ts')
+    const { PrismaSyntheticPhaseGateEvidenceReader } = await import('../../src/v2/infrastructure/prisma/synthetic-phase-gate-evidence-reader.ts')
+    const { PrismaSyntheticPhaseGateRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-phase-gate-repository.ts')
     const { StoredSyntheticMasterAlignmentReader } = await import('../../src/v2/infrastructure/media/synthetic-master-alignment-reader.ts')
     const { LocalArtifactContentStorage } = await import('../../src/v2/infrastructure/media/local-artifact-content-storage.ts')
 
@@ -158,11 +270,13 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       'provider-original': { key: `workspaces/${workspaceId}/masters/provider-original.mp4`, mediaType: 'video', container: 'mp4' },
       'final-audio': { key: `workspaces/${workspaceId}/masters/final-audio.wav`, mediaType: 'audio', container: 'wav' },
       alignment: { key: `workspaces/${workspaceId}/masters/alignment.json`, mediaType: 'data', container: 'json' },
+      'output-speech-evidence': { key: `workspaces/${workspaceId}/masters/output-speech-evidence.json`, mediaType: 'data', container: 'json' },
     }
     const artifactIds = {
       'provider-original': 'master-reuse-original',
       'final-audio': 'master-reuse-audio',
       alignment: 'master-reuse-alignment',
+      'output-speech-evidence': 'master-reuse-output-speech-evidence',
     }
     const scriptText = 'Primeira ideia do roteiro. Segunda ideia bem forte.'
     const alignmentWords = [
@@ -173,7 +287,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       { word: 'Segunda', startMs: 2_300, endMs: 2_900 },
       { word: 'ideia', startMs: 2_900, endMs: 3_300 },
       { word: 'bem', startMs: 3_300, endMs: 3_500 },
-      { word: 'forte.', startMs: 3_500, endMs: 3_900 },
+      { word: 'forte.', startMs: 3_500, endMs: 4_000 },
     ]
     const absolute = (key) => join(artifactRoot, ...key.split('/'))
     for (const key of Object.values(roleFiles).map((file) => file.key)) {
@@ -219,6 +333,13 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       absolute(roleFiles.alignment.key),
       JSON.stringify({ schemaVersion: 'tts-alignment/v1', characters, startTimesSeconds, endTimesSeconds }),
     )
+    await writeFile(absolute(roleFiles['output-speech-evidence'].key), JSON.stringify({
+      schemaVersion: 'controlled-avatar-output-speech/v1',
+      evaluatorId: 'controlled-output-speech',
+      evaluatorVersion: '1.0.0',
+      outputTranscriptHash: sha256(Buffer.from(scriptText, 'utf8')),
+      observedIdentityRef: 'avatar_reuse',
+    }))
     const bytes = {}
     for (const [role, file] of Object.entries(roleFiles)) {
       const content = await readFile(absolute(file.key))
@@ -286,15 +407,21 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       clock: () => new Date(at(0)),
       createId: () => `master-reuse-rights-${++entity}`,
     })
+    const rightsDecisions = []
     for (const role of Object.keys(roleFiles)) {
-      await setRights({
+      const granted = await setRights({
         workspaceId, artifactId: artifactIds[role], baseRevision: assetRightsRevision(artifactIds[role], 0),
         draft: {
           status: 'approved', allowedUses: ['ads'], prohibitedUses: [],
           allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+          allowedSyntheticOperations: ['audio-avatar'],
           consent: { status: 'not-required', allowedUses: [] },
         },
         actor: { type: 'api-client', id: clientId },
+      })
+      rightsDecisions.push({
+        artifactId: artifactIds[role], rightsSnapshotId: granted.snapshot.id,
+        rightsSnapshotHash: granted.snapshot.snapshotHash, validUntil: '2030-01-01T00:00:00.000Z',
       })
     }
 
@@ -315,16 +442,40 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       actor, idempotencyKey: 'master-reuse-profile-v1',
     })
     const profileSnapshotId = profile.profile.profileSnapshotId
+    const audioMaster = createSyntheticAudioMaster({
+      id: 'master-reuse-audio-master', workspaceId, projectId, projectVersionId, profileSnapshotId,
+      source: { kind: 'uploaded' },
+      audio: { artifactId: artifactIds['final-audio'], artifactSha256: bytes['final-audio'].sha256, durationMs: 4_000, locale: 'pt-BR' },
+      alignmentEvidence: { artifactId: artifactIds.alignment, artifactSha256: bytes.alignment.sha256 },
+      words: alignmentWords.map((word) => ({ ...word, confidence: null })),
+      approvedAt: at(0), approvalCriticHash: hash('d'), createdAt: at(1),
+    })
+    await new PrismaSyntheticAudioMasterRepository(client).create({
+      master: audioMaster,
+      profileSnapshotHash: profile.profile.snapshot.snapshotHash,
+      requestFingerprint: hash('c'),
+      idempotencyKey: 'master-reuse-audio-master-key',
+      authenticationAudit: auditContext,
+    })
+    const audioRange = createSyntheticAvatarAudioRange({
+      master: audioMaster, startWordIndex: 0, endWordIndex: audioMaster.words.length,
+    })
+    const authorization = {
+      id: 'master-reuse-authorization', profileSnapshotId,
+      profileSnapshotHash: profile.profile.snapshot.snapshotHash,
+      artifactDecisions: rightsDecisions, evaluatedAt: at(0), expiresAt: '2030-01-01T00:00:00.000Z',
+    }
+    authorization.authorizationHash = calculateCanonicalHash(authorization)
 
     // 3. The approved provider job and its result ledger. This is the fixture:
     //    the generation already happened and was approved by a critic.
-    const criticResultHash = hash('f')
+    let criticResultHash = hash('f')
     await client.v2ProviderJob.create({
       data: {
         id: providerJobId, workspaceId, projectId, originProjectVersionId: projectVersionId,
         schemaVersion: 'provider-job/v1', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         providerJobId: 'heygen_job_reuse', inputJson: '{}', inputHash: hash('1'),
-        authorizationJson: '{}', authorizationHash: hash('2'), status: 'approved',
+        authorizationJson: JSON.stringify(authorization), authorizationHash: authorization.authorizationHash, status: 'approved',
         resultArtifactId: artifactIds['provider-original'], resultArtifactSha256: bytes['provider-original'].sha256,
         criticResultHash, jobJson: '{}', jobHash: hash('3'), requestFingerprint: hash('4'),
         idempotencyKey: 'master-reuse-job-key', createdByClientId: clientId, actorContextHash: auditContext.contextHash,
@@ -332,13 +483,11 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
         submittedAt: new Date(at(2)), completedAt: new Date(at(6)),
       },
     })
-    // The ledger roles the promotion maps onto the four master roles.
-    // The three roles the ledger admits, mapped onto the three required master
-    // roles. There is deliberately no normalization row: no stage writes one.
+    // The avatar ledger owns only its video and controlled output-side evidence.
+    // Audio and alignment remain authoritative on the upstream audio master.
     const resultRoles = {
       'primary-video': 'provider-original',
-      'primary-audio': 'final-audio',
-      'alignment-evidence': 'alignment',
+      'output-speech-evidence': 'output-speech-evidence',
     }
     for (const [resultRole, masterRole] of Object.entries(resultRoles)) {
       await client.v2ProviderResultArtifact.create({
@@ -350,6 +499,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
           mediaType: roleFiles[masterRole].mediaType, container: roleFiles[masterRole].container,
           adapterId: 'heygen-v3', adapterVersion: '3.0.0', modelRef: 'avatar-model-1',
           adapterConfigHash: hash('7'), inputHash: hash('1'), authorizationHash: hash('2'),
+          ...(resultRole === 'output-speech-evidence' ? { scriptHash: sha256(Buffer.from(scriptText, 'utf8')) } : {}),
           completedAt: new Date(at(6)), createdAt: new Date(at(6)),
         },
       })
@@ -394,13 +544,44 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       dimension, status: 'unavailable', evaluatorId: null, value: null, unit: null,
       threshold: null, confidence: null, evidenceRefs: [], range: null, note,
     })
+    const scriptHash = createHash('sha256').update(scriptText, 'utf8').digest('hex')
+    const outputSpeechEvidence = createAvatarOutputSpeechEvidence({
+      jobId: providerJobId,
+      videoArtifactId: artifactIds['provider-original'], videoArtifactSha256: bytes['provider-original'].sha256,
+      sourceAudioArtifactId: artifactIds['final-audio'], sourceAudioRangeHash: audioRange.rangeHash,
+      sourcePcmSha256: hash('8'), outputPcmSha256: hash('9'),
+      sourceDurationMs: 4_000, outputDurationMs: 4_000,
+      policyVersion: 'avatar-audio-pcm-comparison/1.1.0', sampleRateHz: 16_000,
+      alignedLagSamples: 0, correlationBps: 10_000, normalizedErrorBps: 0,
+      comparedSampleCount: 64_000, sourceCoverageBps: 10_000, outputCoverageBps: 10_000,
+      worstWindowCorrelationBps: 10_000, worstWindowNormalizedErrorBps: 0,
+      failedWindowCount: 0, comparedWindowCount: 16, sourceRmsBps: 5_000, outputRmsBps: 5_000, passed: true,
+      speechEvidence: {
+        kind: 'controlled', evaluatorId: 'controlled-output-speech', evaluatorVersion: '1.0.0',
+        outputTranscriptHash: scriptHash, observedIdentityRef: 'avatar_reuse',
+      },
+    })
     const criticVerdict = await new PrismaSyntheticCriticReportRepository(client).record({
       report: createSyntheticCriticReport({
         id: 'master-reuse-critic-report', workspaceId, projectId, blockId: 'master-reuse-block',
+        providerJobId,
         capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         artifactId: artifactIds['provider-original'], artifactSha256: bytes['provider-original'].sha256,
-        audioArtifactId: artifactIds['final-audio'], alignmentArtifactId: artifactIds.alignment,
-        scriptHash: hash('7'), profileSnapshotId, expectedIdentityRef: 'avatar_reuse',
+        audioArtifactId: null, alignmentArtifactId: artifactIds.alignment,
+        outputSpeechEvidence, outputSpeechEvidenceArtifactId: artifactIds['output-speech-evidence'],
+        scriptHash, profileSnapshotId, expectedIdentityRef: 'avatar_reuse',
+        expectationHash: calculateCanonicalHash({
+          durationMs: 4_000, durationMode: 'fixed', fps: null,
+          videoCodec: null, audioCodec: null, audioSampleRateHz: null,
+          identityRef: 'avatar_reuse', declaredIdentityRef: null,
+          rights: { withinGrantedScope: true, reason: null }, previousBlock: null,
+        }),
+        evaluationContextHash: calculateCanonicalHash({
+          fixture: 'master-reuse-evaluation-context/v1',
+          workspaceId, projectId, providerJobId,
+          blockId: 'master-reuse-block', artifactId: artifactIds['provider-original'],
+          artifactSha256: bytes['provider-original'].sha256,
+        }),
         evaluators: [
           { id: 'ffprobe-media-integrity', version: '1.0.0', kind: 'measured', scope: 'timeline and signal read from the artifact' },
           { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
@@ -426,6 +607,78 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       }),
     })
     assert.equal(criticVerdict.value.decision, 'approved')
+    criticResultHash = criticVerdict.value.reportHash
+    let canonicalJob = createProviderJob({
+      id: providerJobId,
+      workspaceId,
+      projectId,
+      originProjectVersionId: projectVersionId,
+      operation: 'audio-avatar',
+      adapterId: 'heygen-v3',
+      adapterVersion: '3.0.0',
+      providerInput: {
+        audioArtifactId: artifactIds['final-audio'],
+        audioMasterId: audioMaster.id,
+        audioMasterHash: audioMaster.masterHash,
+        audioRange,
+        criticBinding: {
+          blockId: 'master-reuse-block', scriptText, scriptHash, profileSnapshotId,
+          expectedDurationMs: 4_000, alignmentArtifactId: artifactIds.alignment,
+          use: 'ads', market: 'BRA', locale: 'pt-BR',
+        },
+      },
+      idempotencyKey: 'master-reuse-job-key',
+      authorization,
+      createdAt: at(1),
+    })
+    canonicalJob = transitionProviderJob(canonicalJob, {
+      status: 'estimated', occurredAt: at(2),
+      estimate: { currency: 'USD', costMinorUnits: 150, estimatedLatencyMs: 4_000 },
+    })
+    canonicalJob = transitionProviderJob(canonicalJob, { status: 'submitting', occurredAt: at(3) })
+    canonicalJob = transitionProviderJob(canonicalJob, {
+      status: 'submitted', occurredAt: at(4), providerJobId: 'heygen_job_reuse',
+    })
+    canonicalJob = transitionProviderJob(canonicalJob, {
+      status: 'retrieving', occurredAt: at(5), providerStatus: 'completed',
+    })
+    canonicalJob = transitionProviderJob(canonicalJob, {
+      status: 'evaluating', occurredAt: at(6),
+      resultArtifact: {
+        artifactId: artifactIds['provider-original'],
+        artifactSha256: bytes['provider-original'].sha256,
+        mediaType: 'video',
+        byteSize: bytes['provider-original'].byteSize,
+      },
+    })
+    canonicalJob = transitionProviderJob(canonicalJob, {
+      status: 'approved', occurredAt: at(7), criticResultHash,
+    })
+    await client.v2ProviderJob.update({
+      where: { id: providerJobId },
+      data: {
+        inputJson: stableSerialize(canonicalJob.input), inputHash: canonicalJob.inputHash,
+        authorizationJson: stableSerialize(canonicalJob.authorization), authorizationHash: canonicalJob.authorization.authorizationHash,
+        estimateJson: stableSerialize(canonicalJob.estimate), estimateHash: canonicalJob.estimateHash,
+        status: canonicalJob.status, providerStatus: canonicalJob.providerStatus,
+        attempt: canonicalJob.attempt, providerJobId: canonicalJob.providerJobId,
+        resultArtifactId: canonicalJob.resultArtifact.artifactId,
+        resultArtifactSha256: canonicalJob.resultArtifact.artifactSha256,
+        criticResultHash: canonicalJob.criticResultHash,
+        jobJson: stableSerialize(canonicalJob), jobHash: canonicalJob.jobHash,
+        actorCredentialId: issued.credential.id, actorEnvironment: 'production',
+        actorAuthenticationKind: 'bearer', actorContextHash: auditContext.contextHash,
+        submittedAt: new Date(canonicalJob.submittedAt), heartbeatAt: new Date(canonicalJob.heartbeatAt),
+        completedAt: new Date(canonicalJob.completedAt), updatedAt: new Date(canonicalJob.updatedAt),
+      },
+    })
+    await client.v2ProviderResultArtifact.updateMany({
+      where: { workspaceId, projectId, jobId: providerJobId },
+      data: {
+        inputHash: canonicalJob.inputHash,
+        authorizationHash: canonicalJob.authorization.authorizationHash,
+      },
+    })
 
     // 4. A loopback provider boundary nothing in this journey may touch. Every
     //    request that reaches it is a paid call the reuse claim would have to
@@ -443,7 +696,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const baseUrl = `http://127.0.0.1:${port}`
     const runtimeEnv = {
       ...process.env,
-      NODE_ENV: 'development',
+      NODE_ENV: 'production',
       __NEXT_PROCESSED_ENV: 'true',
       APOLLO_API_ENVIRONMENT: 'production',
       APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '400',
@@ -460,33 +713,28 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       APOLLO_V2_ELEVENLABS_BASE_URL: `http://127.0.0.1:${stubPort}`,
       APOLLO_V2_PROVIDER_POLL_MS: '200',
     }
-    server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--webpack', '-p', String(port)], {
+    server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-p', String(port)], {
       cwd: process.cwd(), env: runtimeEnv, stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32',
     })
-    server.stdout.on('data', (chunk) => { serverLogs += String(chunk) })
-    server.stderr.on('data', (chunk) => { serverLogs += String(chunk) })
-    await waitForServer(baseUrl, server, () => serverLogs)
+    const retainServerLog = (chunk) => {
+      serverLogs = `${serverLogs}${String(chunk)}`.slice(-64 * 1024)
+    }
+    server.stdout.on('data', retainServerLog)
+    server.stderr.on('data', retainServerLog)
+    await waitForServer(baseUrl, server, () => serverLogs, t.signal)
 
     const api = async (method, path, options = {}) => {
       const token = options.token ?? issued.token
       const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
       if (options.key) headers['idempotency-key'] = options.key
-      // A 404 with a null body is the dev server still lazily compiling the
-      // route (a real 404 carries the {error} envelope). Replaying is safe:
-      // every mutation here carries an idempotency key.
-      const deadline = Date.now() + 30_000
-      for (;;) {
-        const response = await globalThis.fetch(`${baseUrl}${path}`, {
-          method, headers,
-          ...(options.payload === undefined ? {} : { body: JSON.stringify(options.payload) }),
-        })
-        const payload = await response.json().catch(() => null)
-        if (response.status === 404 && payload === null && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 500))
-          continue
-        }
-        return { status: response.status, payload }
-      }
+      const response = await boundedFetch(`${baseUrl}${path}`, {
+        method, headers,
+        ...(options.payload === undefined ? {} : { body: JSON.stringify(options.payload) }),
+      }, t.signal)
+      const payload = await response.json().catch(() => null)
+      return { status: response.status, payload }
     }
 
     const masterPath = `/v1/projects/${projectId}/synthetic-masters`
@@ -553,11 +801,10 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     assert.equal(view.provenance.adapterId, 'heygen-v3')
     assert.equal(view.provenance.capability, 'audio-avatar')
     assert.equal(view.critic.decision, 'approved')
-    // The lineage points at the persisted verdict, not at the provider job's
-    // own critic hash — the master's approval is a document, not a claim.
+    // The lineage and approved job carry the same specialized report seal.
     assert.equal(view.critic.reportId, criticVerdict.value.id)
     assert.equal(view.critic.reportHash, criticVerdict.value.reportHash)
-    assert.notEqual(view.critic.reportHash, criticResultHash)
+    assert.equal(view.critic.reportHash, criticResultHash)
 
     // 8. Cataloguing the master's speech segments. F3.007 ships no HTTP route
     //    for this write, so the application service is driven directly against
@@ -590,7 +837,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     assert.equal(listed.status, 200, JSON.stringify(listed.payload))
     const segments = listed.payload.data.segments
     assert.equal(segments.length, 2)
-    assert.deepEqual(segments.map(({ startMs, endMs }) => [startMs, endMs]), [[0, 1_900], [2_300, 3_900]])
+    assert.deepEqual(segments.map(({ startMs, endMs }) => [startMs, endMs]), [[0, 1_900], [2_300, 4_000]])
     for (const [index, segment] of segments.entries()) {
       assert.ok(segment.endMs > segment.startMs, 'a segment range must be non-empty')
       assert.ok(segment.endMs <= master.audioDurationMs, 'a segment must stay inside the master timeline')
@@ -612,6 +859,86 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       assert.equal(segment.identity.avatarIdentityRef, 'avatar_reuse')
       assert.equal(segment.locale, 'pt-BR')
       assert.match(segment.segmentHash, /^[a-f0-9]{64}$/)
+    }
+
+    // 10. The phase gate collects the catalog from the authoritative rows. It
+    //     remains incomplete: this controlled journey carries no trustworthy
+    //     live-provider receipt, no consumed reuse and no render binding.
+    const gateRepository = new PrismaSyntheticPhaseGateRepository(
+      client,
+      new PrismaSyntheticPhaseGateEvidenceReader(client, () => new Date(at(8))),
+    )
+    const runGate = runSyntheticPhaseGateService({
+      repository: gateRepository,
+      clock: () => new Date(at(8)),
+      createId: () => 'master-reuse-phase-gate',
+    })
+    const gateRequest = {
+      workspaceId,
+      projectId,
+      projectVersionId,
+      projectVersionHash: projectA.version.baseHash,
+      actor,
+      idempotencyKey: 'master-reuse-phase-gate-key',
+    }
+    const evaluatedGate = await runGate(gateRequest)
+    assert.equal(evaluatedGate.replayed, false)
+    assert.equal(evaluatedGate.gate.report.approved, false)
+    assert.deepEqual(evaluatedGate.gate.report.missing, ['F3-GATE-001', 'F3-GATE-003', 'F3-GATE-004'])
+    const catalogueCriterion = evaluatedGate.gate.report.evidence.find(({ criterion }) => criterion === 'F3-GATE-002')
+    assert.ok(catalogueCriterion)
+    const cataloguedCheck = catalogueCriterion.checks.find(({ code }) => code === 'approved-blocks-catalogued')
+    const reuseCheck = catalogueCriterion.checks.find(({ code }) => code === 'cross-project-reuse-with-zero-provider-work')
+    assert.equal(cataloguedCheck.passed, true)
+    assert.deepEqual(cataloguedCheck.missingEvidenceTypes, [])
+    assert.deepEqual(
+      cataloguedCheck.references,
+      [
+        { type: 'speech-segment', id: segments[0].id, hash: segments[0].segmentHash },
+        { type: 'speech-segment', id: segments[1].id, hash: segments[1].segmentHash },
+        { type: 'synthetic-master', id: masterId, hash: master.masterHash },
+      ],
+    )
+    assert.equal(reuseCheck.passed, false)
+    assert.deepEqual(reuseCheck.references, [])
+    assert.deepEqual(reuseCheck.missingEvidenceTypes, ['cache-decision', 'synthetic-master', 'project'])
+    assert.equal(
+      evaluatedGate.gate.report.evidence.some(({ criterion }) => criterion === 'F3-GATE-001'),
+      false,
+      'controlled fixtures must not cover live-provider checks',
+    )
+    const replayedGate = await runGate(gateRequest)
+    assert.equal(replayedGate.replayed, true)
+    assert.equal(replayedGate.gate.recordHash, evaluatedGate.gate.recordHash)
+    assert.equal(replayedGate.gate.report.fingerprint, evaluatedGate.gate.report.fingerprint)
+    const listedGates = await gateRepository.list({ workspaceId, projectId, limit: 10 })
+    assert.equal(listedGates.length, 1)
+    assert.equal(listedGates[0].recordHash, evaluatedGate.gate.recordHash)
+
+    // A current catalog row whose content address no longer agrees with the
+    // sealed master is an invalid source. It is omitted instead of exposed as
+    // a negative check with a still-trusted reference.
+    await client.v2MediaArtifact.update({
+      where: { id: artifactIds['provider-original'] },
+      data: { sha256: hash('9') },
+    })
+    try {
+      const tamperedGate = await runSyntheticPhaseGateService({
+        repository: gateRepository,
+        clock: () => new Date(at(9)),
+        createId: () => 'master-reuse-phase-gate-tampered',
+      })({ ...gateRequest, idempotencyKey: 'master-reuse-phase-gate-tampered-key' })
+      assert.equal(tamperedGate.gate.report.approved, false)
+      assert.ok(tamperedGate.gate.report.missing.includes('F3-GATE-002'))
+      assert.equal(tamperedGate.gate.report.evidence.some(({ criterion }) => criterion === 'F3-GATE-002'), false)
+      assert.equal(tamperedGate.gate.report.evidence.flatMap(({ checks }) => checks)
+        .flatMap(({ references }) => references)
+        .some(({ id }) => id === artifactIds['provider-original']), false)
+    } finally {
+      await client.v2MediaArtifact.update({
+        where: { id: artifactIds['provider-original'] },
+        data: { sha256: bytes['provider-original'].sha256 },
+      })
     }
 
     // ---------------------------------------------------------------------
@@ -723,21 +1050,34 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     assert.equal(await client.v2SyntheticMasterAsset.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2SyntheticMasterArtifact.count({ where: { workspaceId } }), 3)
     assert.equal(providerCalls.length, 0, 'nothing in this journey may reach the provider')
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
-    if (server && server.exitCode === null) {
-      await new Promise((resolve) => {
-        const timeout = setTimeout(() => { server.kill('SIGKILL'); resolve() }, 10_000)
-        timeout.unref?.()
-        server.once('exit', () => { clearTimeout(timeout); resolve() })
-        server.kill('SIGTERM')
-      })
+    const teardownErrors = []
+    for (const teardown of [
+      () => stopChild(server),
+      () => closeHttpServer(stub),
+      () => cleanup(),
+      () => client.$disconnect(),
+      () => rm(root, { recursive: true, force: true }),
+    ]) {
+      try {
+        await teardown()
+      } catch (error) {
+        teardownErrors.push(error)
+      }
     }
-    if (stub) await new Promise((resolve) => stub.close(resolve))
-    await cleanup()
-    await client.$disconnect()
-    await rm(root, { recursive: true, force: true })
     if (process.env.APOLLO_MASTER_REUSE_DEBUG === '1') {
       console.error('server logs tail:', serverLogs.slice(-6_000))
+    }
+    if (teardownErrors.length > 0) {
+      throw new AggregateError(
+        primaryError ? [primaryError, ...teardownErrors] : teardownErrors,
+        primaryError
+          ? 'synthetic master reuse proof and teardown both failed'
+          : 'synthetic master reuse proof teardown failed',
+      )
     }
   }
 })

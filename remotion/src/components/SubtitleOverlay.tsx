@@ -3,6 +3,7 @@ import { SubtitleEntry, ColorPalette, LayoutSegment, SubtitleStyle } from '../li
 import type { SubtitleMvpFormat, SubtitleStylePreset } from '../../../src/v2/domain/subtitle-style-tokens';
 import { SubtitleTikTok } from './SubtitleTikTok';
 import { findActiveLayoutSegment } from './LayoutSegmentLayer';
+import { resolveActiveSubtitleLayers } from '../lib/subtitle-overlay-selection';
 import { useCurrentFrame, useVideoConfig } from 'remotion';
 
 interface SubtitleOverlayProps {
@@ -54,105 +55,34 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
-  const currentTime = frame / config.fps;
   const activeSegment = findActiveLayoutSegment(layoutSegments, frame);
+  const layers = resolveActiveSubtitleLayers({
+    subtitles,
+    frame,
+    fps: config.fps,
+    format,
+    activeLayout: activeSegment?.layout,
+    topFactor,
+    hideFactor,
+  });
 
-  const currentSubtitle = subtitles.find(
-    (sub) => {
-      if (typeof sub.startFrame === 'number' && typeof sub.endFrame === 'number') {
-        return frame >= sub.startFrame && frame < sub.endFrame;
-      }
-
-      return currentTime >= sub.startTime && currentTime < sub.endTime;
-    }
-  );
-
-  if (!currentSubtitle) {
-    return null;
-  }
-
-  const hf = Math.max(0, Math.min(1, hideFactor));
-  if (hf >= 1) {
-    return null;
-  }
-
-  if (format === '9:16') {
-    // split-50's centered two-word mode keeps precedence — it is already on the
-    // seam and must not be displaced.
-    if (activeSegment?.layout === 'split-50') {
-      return (
+  return layers.length === 0 ? null : (
+    <>
+      {layers.map((layer) => (
         <SubtitleTikTok
-          subtitle={currentSubtitle}
+          key={`${layer.sourceIndex}:${layer.placement}`}
+          subtitle={layer.subtitle}
           palette={palette}
-          isVisible={!!currentSubtitle}
-          mode="two-word-center"
+          isVisible
+          mode={layer.mode}
           subtitleStyle={subtitleStyle}
+          placement={layer.placement === 'center' ? undefined : layer.placement}
+          placementOpacity={layer.placementOpacity}
           fontFamily={fontFamily}
           subtitlePreset={subtitlePreset!}
           subtitleFormat={subtitleFormat!}
         />
-      );
-    }
-
-    // Camada 2: quando nenhuma regra de composição forçou o topo, a âncora por
-    // batida (vision) decide. Combinada por max com o topFactor de composição —
-    // palco (top) e âncora concordam; a âncora nunca sobrepõe split-50/hide
-    // (que já saíram acima) nem rebaixa uma cena de palco.
-    const anchorTop = currentSubtitle.anchor === 'top' ? 1 : 0;
-    const tf = Math.max(0, Math.min(1, Math.max(topFactor, anchorTop)));
-    const visible = 1 - hf;
-    // Troca SEQUENCIAL de posição: a cópia de baixo apaga POR COMPLETO antes de
-    // a de cima acender (e vice-versa). O crossfade anterior renderizava as duas
-    // cópias legíveis ao mesmo tempo por ~8 frames em toda troca — lia como
-    // "legenda duplicada" (visto em still real na emenda do cold open).
-    const bottomOpacity = tf < 0.5 ? (1 - tf * 2) * visible : 0;
-    const topOpacity = tf >= 0.5 ? (tf - 0.5) * 2 * visible : 0;
-    return (
-      <>
-        {bottomOpacity > 0.01 && (
-          <SubtitleTikTok
-            subtitle={currentSubtitle}
-            palette={palette}
-            isVisible={!!currentSubtitle}
-            mode="default"
-            subtitleStyle={subtitleStyle}
-            placement="bottom"
-            placementOpacity={bottomOpacity}
-            fontFamily={fontFamily}
-            subtitlePreset={subtitlePreset!}
-            subtitleFormat={subtitleFormat!}
-          />
-        )}
-        {topOpacity > 0.01 && (
-          <SubtitleTikTok
-            subtitle={currentSubtitle}
-            palette={palette}
-            isVisible={!!currentSubtitle}
-            mode="default"
-            subtitleStyle={subtitleStyle}
-            placement="top"
-            placementOpacity={topOpacity}
-            fontFamily={fontFamily}
-            subtitlePreset={subtitlePreset!}
-            subtitleFormat={subtitleFormat!}
-          />
-        )}
-      </>
-    );
-  }
-
-  return (
-    <SubtitleTikTok
-      subtitle={currentSubtitle}
-      palette={palette}
-      isVisible={!!currentSubtitle}
-      mode="default"
-      subtitleStyle={subtitleStyle}
-      placement={currentSubtitle.anchor === 'top' ? 'top' : 'bottom'}
-      placementOpacity={1 - hf}
-      fontFamily={fontFamily}
-      subtitlePreset={subtitlePreset!}
-      subtitleFormat={subtitleFormat!}
-    />
+      ))}
+    </>
   );
 };

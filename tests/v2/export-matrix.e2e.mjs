@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { once } from 'node:events'
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import net from 'node:net'
@@ -44,16 +43,34 @@ async function waitForServer(baseUrl, child, readLogs) {
 }
 
 async function stopChild(child) {
-  if (!child || child.exitCode !== null) return
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise((resolve) => {
+    child.once('exit', () => resolve(true))
+    child.once('error', () => resolve(true))
+  })
   child.kill('SIGTERM')
-  await Promise.race([
-    once(child, 'exit'),
-    new Promise((resolve) => setTimeout(resolve, 5_000)),
+  let gracefulTimer
+  const graceful = await Promise.race([
+    exited,
+    new Promise((resolve) => {
+      gracefulTimer = setTimeout(() => resolve(false), 5_000)
+    }),
   ])
-  if (child.exitCode === null) {
+  clearTimeout(gracefulTimer)
+  if (!graceful && child.exitCode === null && child.signalCode === null) {
     child.kill('SIGKILL')
-    await once(child, 'exit')
+    let forcedTimer
+    const forced = await Promise.race([
+      exited,
+      new Promise((resolve) => {
+        forcedTimer = setTimeout(() => resolve(false), 2_000)
+      }),
+    ])
+    clearTimeout(forcedTimer)
+    if (!forced) throw new Error(`Next server PID ${child.pid} ignored SIGKILL`)
   }
+  if (child.exitCode === null && child.signalCode === null)
+    throw new Error(`Next server PID ${child.pid} did not stop`)
 }
 
 test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics through API, PostgreSQL and the real worker', {

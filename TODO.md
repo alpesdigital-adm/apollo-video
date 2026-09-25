@@ -1735,6 +1735,16 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.019 — Gate sintético
 
+> Checkpoint controlado W24.3 (2026-09-23): a jornada V2 integrada atravessou
+> PostgreSQL, API, workers, storage, Remotion e UI reais; produziu os MP4s A/B,
+> reutilizou em B o master completo aprovado de A sem job, reserva ou submit de
+> provider no projeto consumidor, registrou fallback rejeitado → aprovado e
+> persistiu o gate com 3/4 critérios e 5/8 checks. O resultado permaneceu
+> corretamente `approved=false`, com os três checks ElevenLabs/HeyGen live
+> ausentes. Esta prova controlada não substitui provider live, merge, deploy ou
+> aceite do proprietário. O checkpoint local não inclui CI W24.3; consultar os
+> checks do PR para o commit atual. Por isso nenhuma caixa abaixo é fechada.
+
 - [ ] Produzir áudio via ElevenLabs a partir de texto com alignment utilizável. Evidência T-FR-101.
 - [ ] Produzir avatar via HeyGen a partir de áudio pronto e de áudio gerado. Evidência T-FR-101.
 - [ ] Salvar blocos aprovados em estado bruto e catalogá-los. Evidência T-FR-104.

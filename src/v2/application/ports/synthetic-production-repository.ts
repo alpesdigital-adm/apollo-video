@@ -5,6 +5,7 @@ import type {
   SyntheticPresenterProfileHead,
   SyntheticPresenterProfileSnapshot,
 } from '../../domain/synthetic-production.ts'
+import type { PreparedCanonicalMasterReuse } from './synthetic-master-reuse-repository.ts'
 
 export interface PersistedSyntheticPresenterProfile {
   snapshot: Readonly<SyntheticPresenterProfileSnapshot>
@@ -23,6 +24,7 @@ export interface PersistedSyntheticPresenterProfile {
 export interface PersistedSyntheticProductionRun {
   plan: Readonly<SyntheticPresenterEditPlan>
   editPlanSnapshotId: string
+  audioMaster: Readonly<{ id: string; masterHash: string; originProjectId: string }> | null
   status: 'compiled' | 'rendering' | 'completed' | 'failed' | 'canceled'
   requestFingerprint: string
   idempotencyKey: string
@@ -77,9 +79,15 @@ export interface SyntheticProductionRepository {
   createRun(input: {
     plan: Readonly<SyntheticPresenterEditPlan>
     editPlanSnapshot: Readonly<ProjectSnapshot>
+    audioMaster: Readonly<{
+      id: string
+      masterHash: string
+      originProjectId: string
+    }>
     requestFingerprint: string
     idempotencyKey: string
     authenticationAudit: Readonly<ApiAccessAuditContext>
+    canonicalReuse?: Readonly<PreparedCanonicalMasterReuse>
   }): Promise<Readonly<{
     run: Readonly<PersistedSyntheticProductionRun>
     replayed: boolean

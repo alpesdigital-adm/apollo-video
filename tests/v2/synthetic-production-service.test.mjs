@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
@@ -7,8 +8,17 @@ import {
   registerSyntheticPresenterProfileService,
 } from '../../src/v2/application/synthetic-production.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import {
+  createSyntheticCriticReport,
+  SYNTHETIC_CRITIC_DIMENSIONS,
+} from '../../src/v2/domain/synthetic-critic-report.ts'
+import {
+  AVATAR_AUDIO_COMPARISON_POLICY_VERSION,
+  createAvatarOutputSpeechEvidence,
+} from '../../src/v2/domain/avatar-output-speech-evidence.ts'
 
 const hash = (character) => character.repeat(64)
+const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex')
 const workspaceId = 'workspace-synthetic-service'
 const projectId = 'project-synthetic-service'
 const projectVersionId = 'version-synthetic-service'
@@ -120,6 +130,7 @@ class MemoryRepository {
     const run = Object.freeze({
       plan: input.plan,
       editPlanSnapshotId: input.editPlanSnapshot.id,
+      audioMaster: input.audioMaster,
       status: 'compiled',
       requestFingerprint: input.requestFingerprint,
       idempotencyKey: input.idempotencyKey,
@@ -165,7 +176,103 @@ function fixture() {
       ]))
     },
   }
-  return { repository, artifacts, rights, artifactRepository, rightsRepository }
+  const measured = new Set(['temporal-integrity', 'audiovisual-integrity'])
+  const makeReport = ({ suffix, blockId, artifactId, artifactSha256, jobId, text }) => {
+    const scriptHash = sha256(text)
+    const outputSpeechEvidence = createAvatarOutputSpeechEvidence({
+      jobId,
+      videoArtifactId: artifactId,
+      videoArtifactSha256: artifactSha256,
+      sourceAudioArtifactId: 'audio-master',
+      sourceAudioRangeHash: sha256(`range:${suffix}`),
+      policyVersion: AVATAR_AUDIO_COMPARISON_POLICY_VERSION,
+      sourcePcmSha256: hash('4'), outputPcmSha256: hash('5'), sampleRateHz: 16_000,
+      sourceDurationMs: 1_000, outputDurationMs: 1_000, alignedLagSamples: 0,
+      comparedSampleCount: 16_000, sourceCoverageBps: 10_000, outputCoverageBps: 10_000,
+      correlationBps: 10_000, normalizedErrorBps: 0,
+      worstWindowCorrelationBps: 10_000, worstWindowNormalizedErrorBps: 0,
+      failedWindowCount: 0, comparedWindowCount: 4, sourceRmsBps: 1_000, outputRmsBps: 1_000,
+      passed: true,
+      speechEvidence: {
+        kind: 'controlled', evaluatorId: 'controlled-speech', evaluatorVersion: '1.0.0',
+        outputTranscriptHash: scriptHash, observedIdentityRef: 'identity-ref-service',
+      },
+    })
+    return createSyntheticCriticReport({
+      id: `critic-service-${suffix}`, workspaceId, projectId, providerJobId: jobId, blockId,
+      capability: 'audio-avatar', adapterId: 'controlled-avatar', adapterVersion: 'version-1',
+      artifactId, artifactSha256, audioArtifactId: null, alignmentArtifactId: null,
+      scriptHash, profileSnapshotId: 'presenter-service:v1', expectedIdentityRef: 'identity-ref-service',
+      expectationHash: hash('9'), evaluationContextHash: sha256(`synthetic-production-service-context:${suffix}`),
+      outputSpeechEvidence, outputSpeechEvidenceArtifactId: `speech-evidence-${suffix}`,
+      evaluators: [{ id: 'controlled-service', version: '1.0.0', kind: 'controlled', scope: 'controlled unit fixture' }],
+      measurements: SYNTHETIC_CRITIC_DIMENSIONS.map((dimension) => measured.has(dimension)
+        ? { dimension, status: 'measured', evaluatorId: 'controlled-service', value: 0, unit: 'fixture-score', threshold: 0, confidence: 1, evidenceRefs: [`artifact://${artifactId}`], range: null, note: null }
+        : { dimension, status: 'not-applicable', evaluatorId: null, value: null, unit: null, threshold: null, confidence: null, evidenceRefs: [], range: null, note: 'controlled fixture does not claim visual measurement' }),
+      issues: [], decision: 'approved', recommendedAction: 'none',
+      thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/v1', decidedAt: now,
+    })
+  }
+  const reportValues = [
+    makeReport({ suffix: 'one', blockId: 'block-service-one', artifactId: 'avatar-block-one', artifactSha256: hash('c'), jobId: 'provider-job-service-one', text: 'Olá' }),
+    makeReport({ suffix: 'two', blockId: 'block-service-two', artifactId: 'avatar-block-two', artifactSha256: hash('d'), jobId: 'provider-job-service-two', text: 'mundo' }),
+  ]
+  const reports = new Map(reportValues.map((report) => [report.reportHash, report]))
+  const criticReports = {
+    async readByHash({ workspaceId: requestedWorkspaceId, reportHash }) {
+      const report = reports.get(reportHash)
+      return requestedWorkspaceId === workspaceId && report
+        ? report
+        : null
+    },
+  }
+  const providerJobs = {
+    async readById({ workspaceId: requestedWorkspaceId, jobId }) {
+      const one = jobId === 'provider-job-service-one'
+      const two = jobId === 'provider-job-service-two'
+      if (requestedWorkspaceId !== workspaceId || (!one && !two)) return null
+      const text = one ? 'Olá' : 'mundo'
+      const blockId = one ? 'block-service-one' : 'block-service-two'
+      const artifactId = one ? 'avatar-block-one' : 'avatar-block-two'
+      const artifactSha256 = one ? hash('c') : hash('d')
+      const reportHash = one ? reportValues[0].reportHash : reportValues[1].reportHash
+      const range = one ? [0, 1_000] : [1_000, 2_000]
+      const profileSnapshotId = repository.profiles[0]?.profile.profileSnapshotId ?? ''
+      return { job: {
+        id: jobId, workspaceId, projectId, originProjectVersionId: projectVersionId,
+        status: 'approved', operation: 'audio-avatar',
+        criticResultHash: reportHash,
+        resultArtifact: { artifactId, artifactSha256 },
+        authorization: { profileSnapshotId },
+        input: {
+          audioMasterId: 'synthetic-audio-master-service',
+          audioArtifactId: 'audio-master',
+          audioRange: { startMs: range[0], endMs: range[1] },
+          criticBinding: { blockId, scriptText: text, scriptHash: sha256(text), profileSnapshotId },
+        },
+      } }
+    },
+  }
+  const audioMasters = {
+    async read({ workspaceId: requestedWorkspaceId, projectId: requestedProjectId, audioMasterId }) {
+      if (requestedWorkspaceId !== workspaceId || requestedProjectId !== projectId || audioMasterId !== 'synthetic-audio-master-service') return null
+      return { master: {
+        id: audioMasterId,
+        workspaceId,
+        projectId,
+        projectVersionId,
+        profileSnapshotId: repository.profiles[0]?.profile.profileSnapshotId ?? '',
+        source: { kind: 'tts', text: 'Olá mundo' },
+        audio: { artifactId: 'audio-master', artifactSha256: hash('b'), durationMs: 2_000, locale: 'pt-BR' },
+        words: [
+          { word: 'Olá', startMs: 0, endMs: 1_000 },
+          { word: 'mundo', startMs: 1_000, endMs: 2_000 },
+        ],
+        masterHash: hash('8'),
+      } }
+    },
+  }
+  return { repository, artifacts, rights, artifactRepository, rightsRepository, criticReports, providerJobs, audioMasters, reportValues }
 }
 
 async function registerProfile(dependencies) {
@@ -207,7 +314,7 @@ async function registerProfile(dependencies) {
   })
 }
 
-function runRequest(profileSnapshotId) {
+function runRequest(profileSnapshotId, reportValues) {
   return {
     workspaceId,
     projectId,
@@ -217,7 +324,7 @@ function runRequest(profileSnapshotId) {
       artifactId: 'audio-master',
       durationMs: 2_000,
       locale: 'pt-BR',
-      scriptHash: hash('e'),
+      scriptHash: sha256('Olá mundo'),
       alignment: [
         { text: 'Olá', startMs: 0, endMs: 1_000 },
         { text: 'mundo', startMs: 1_000, endMs: 2_000 },
@@ -232,7 +339,7 @@ function runRequest(profileSnapshotId) {
         providerJobId: 'provider-job-service-one',
         audioSha256: hash('b'),
         artifactId: 'avatar-block-one',
-        critic: { id: 'critic-service-one', resultHash: hash('1'), status: 'approved' },
+        critic: { id: 'critic-service-one', resultHash: reportValues[0].reportHash, status: 'approved' },
       },
       {
         id: 'block-service-two',
@@ -242,7 +349,7 @@ function runRequest(profileSnapshotId) {
         providerJobId: 'provider-job-service-two',
         audioSha256: hash('b'),
         artifactId: 'avatar-block-two',
-        critic: { id: 'critic-service-two', resultHash: hash('3'), status: 'approved' },
+        critic: { id: 'critic-service-two', resultHash: reportValues[1].reportHash, status: 'approved' },
       },
     ],
     captions: true,
@@ -262,7 +369,7 @@ test('T-FR-092 persists authoritative profile and complete synthetic EditPlan', 
     projects: {
       async read() {
         return {
-          project: { id: projectId, workspaceId, currentVersionId: projectVersionId },
+          project: { id: projectId, workspaceId, currentVersionId: projectVersionId, createdAt: now },
           version: { id: projectVersionId, sequence: 1, baseHash: hash('4'), createdAt: now },
           commands: [], directorRuns: [], media: [], transcripts: [], operationIds: [],
         }
@@ -270,19 +377,57 @@ test('T-FR-092 persists authoritative profile and complete synthetic EditPlan', 
     },
     artifacts: dependencies.artifactRepository,
     rights: dependencies.rightsRepository,
+    criticReports: dependencies.criticReports,
+    providerJobs: dependencies.providerJobs,
+    audioMasters: dependencies.audioMasters,
+    scriptPlans: { async readVersion() { return null } },
+    prepareCanonicalReuse: async () => null,
     clock: () => new Date(now),
     createRunId: () => 'synthetic-run-service',
     createSnapshotId: () => 'snapshot-synthetic-service',
   })
-  const created = await execute(runRequest(registered.profile.snapshot.id))
+  const created = await execute(runRequest(registered.profile.profileSnapshotId, dependencies.reportValues))
   assert.equal(created.run.plan.hasRealPerson, false)
   assert.equal(created.run.plan.blocks.length, 2)
   assert.equal(created.run.plan.authorization.decisions.length, 3)
   assert.equal(created.run.plan.authorization.outcome, 'allowed')
   assert.equal(dependencies.repository.runs.length, 1)
-  const replay = await execute(runRequest(registered.profile.snapshot.id))
+  const replay = await execute(runRequest(registered.profile.profileSnapshotId, dependencies.reportValues))
   assert.equal(replay.replayed, true)
   assert.equal(dependencies.repository.runs.length, 1)
+})
+
+test('W24.1 refuses synthetic block text and provider-job lineage swaps', async () => {
+  const dependencies = fixture()
+  const registered = await registerProfile(dependencies)
+  const execute = createSyntheticProductionRunService({
+    repository: dependencies.repository,
+    projects: { async read() { return {
+      project: { id: projectId, workspaceId, currentVersionId: projectVersionId, createdAt: now },
+      version: { id: projectVersionId, sequence: 1, baseHash: hash('4'), createdAt: now },
+      commands: [], directorRuns: [], media: [], transcripts: [], operationIds: [],
+    } } },
+    artifacts: dependencies.artifactRepository,
+    rights: dependencies.rightsRepository,
+    criticReports: dependencies.criticReports,
+    providerJobs: dependencies.providerJobs,
+    audioMasters: dependencies.audioMasters,
+    scriptPlans: { async readVersion() { return null } },
+    prepareCanonicalReuse: async () => null,
+    clock: () => new Date(now),
+    createRunId: () => 'synthetic-run-lineage-negative',
+    createSnapshotId: () => 'snapshot-synthetic-lineage-negative',
+  })
+  const base = runRequest(registered.profile.profileSnapshotId, dependencies.reportValues)
+  await assert.rejects(
+    execute({ ...base, blocks: [{ ...base.blocks[0], text: 'texto trocado' }, base.blocks[1]], idempotencyKey: 'synthetic-run-text-swapped' }),
+    /exact lineage/,
+  )
+  await assert.rejects(
+    execute({ ...base, blocks: [{ ...base.blocks[0], providerJobId: base.blocks[1].providerJobId }, base.blocks[1]], idempotencyKey: 'synthetic-run-job-swapped' }),
+    /exact lineage/,
+  )
+  assert.equal(dependencies.repository.runs.length, 0)
 })
 
 test('T-FR-092 blocks before persistence when one generated artifact loses rights', async () => {
@@ -294,7 +439,7 @@ test('T-FR-092 blocks before persistence when one generated artifact loses right
     projects: {
       async read() {
         return {
-          project: { id: projectId, workspaceId, currentVersionId: projectVersionId },
+          project: { id: projectId, workspaceId, currentVersionId: projectVersionId, createdAt: now },
           version: { id: projectVersionId, sequence: 1, baseHash: hash('4'), createdAt: now },
           commands: [], directorRuns: [], media: [], transcripts: [], operationIds: [],
         }
@@ -302,12 +447,17 @@ test('T-FR-092 blocks before persistence when one generated artifact loses right
     },
     artifacts: dependencies.artifactRepository,
     rights: dependencies.rightsRepository,
+    criticReports: dependencies.criticReports,
+    providerJobs: dependencies.providerJobs,
+    audioMasters: dependencies.audioMasters,
+    scriptPlans: { async readVersion() { return null } },
+    prepareCanonicalReuse: async () => null,
     clock: () => new Date(now),
     createRunId: () => 'synthetic-run-blocked',
     createSnapshotId: () => 'snapshot-synthetic-blocked',
   })
   await assert.rejects(
-    execute(runRequest(registered.profile.snapshot.id)),
+    execute(runRequest(registered.profile.profileSnapshotId, dependencies.reportValues)),
     /without current compatible rights or consent/,
   )
   assert.equal(dependencies.repository.runs.length, 0)

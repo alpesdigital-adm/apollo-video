@@ -8,7 +8,7 @@ import type {
  *
  * Reports are immutable and content-addressed: `record` is idempotent by
  * `reportHash`, and a second attempt at the same block, artifact and thresholds
- * version returns the stored verdict instead of writing a second opinion.
+ * evaluation context returns the stored verdict instead of writing a second opinion.
  * Every read rehydrates fail-closed — the stored hash is recalculated before a
  * report is handed back, so a row edited behind the application is a
  * persistence conflict rather than an approval.
@@ -34,6 +34,7 @@ export interface SyntheticCriticReportRepository {
     blockId: string
     artifactId?: string
     thresholdsVersion?: string
+    evaluationContextHash?: string
     limit?: number
   }): Promise<readonly Readonly<SyntheticCriticReport>[]>
 

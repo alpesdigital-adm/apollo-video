@@ -30,6 +30,7 @@ const context = { workspaceId: 'workspace-one', projectVersionId: 'version-one',
 
 test('T-FR-101 ElevenLabs adapter completes synchronously with verified audio, alignment and provider reference', async () => {
   const requests = []
+  const observations = []
   const adapter = new ElevenLabsTtsProviderAdapter({
     apiKey: 'elevenlabs-test-secret', costMinorUnitsPerThousandCharacters: 30,
     clock: () => new Date('2029-01-01T00:00:00.000Z'),
@@ -49,7 +50,7 @@ test('T-FR-101 ElevenLabs adapter completes synchronously with verified audio, a
   assert.equal(capabilities.supportsCancellation, false)
   assert.ok(Date.parse(capabilities.expiresAt) > Date.parse(capabilities.fetchedAt))
   assert.deepEqual(await adapter.estimate({ text: SCRIPT }), { currency: 'USD', costMinorUnits: 30, estimatedLatencyMs: 5_000 })
-  const submitted = await adapter.submit(submitInput({ languageCode: 'pt-BR', seed: 42 }), context)
+  const submitted = await adapter.submit(submitInput({ languageCode: 'pt-BR', seed: 42 }), { ...context, async observeTransport(value) { observations.push(value) } })
   assert.equal(submitted.kind, 'completed')
   assert.equal(submitted.bundle.providerJobRef, 'elevenlabs_request_123')
   assert.equal(submitted.bundle.completedAt, '2029-01-01T00:00:00.000Z')
@@ -70,6 +71,11 @@ test('T-FR-101 ElevenLabs adapter completes synchronously with verified audio, a
   assert.equal(request.headers.get('xi-api-key'), 'elevenlabs-test-secret')
   assert.deepEqual(JSON.parse(request.body), { text: SCRIPT, model_id: 'eleven_multilingual_v2', language_code: 'pt-BR', seed: 42 })
   assert.equal(JSON.stringify({ result, url: request.url, body: request.body }).includes('elevenlabs-test-secret'), false)
+  assert.equal(observations.length, 1)
+  assert.equal(observations[0].runtimeClass, 'controlled')
+  assert.equal(observations[0].endpointClass, 'elevenlabs-tts-with-timestamps')
+  assert.match(observations[0].observationHash, /^[a-f0-9]{64}$/)
+  assert.equal(JSON.stringify(observations[0]).includes('elevenlabs-test-secret'), false)
 })
 
 test('T-FR-101 ElevenLabs adapter emits WAV when requested and validates the container signature', async () => {

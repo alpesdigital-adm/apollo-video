@@ -242,6 +242,29 @@ jobs:
         env:
           APOLLO_SYNTHETIC_PHASE_GATE_APP_NAME: apollo-video-e2e-synthetic-phase-gate-${{ github.run_id }}
 
+      - name: Run provider execution provenance PostgreSQL proof
+        run: npm run test:integration:provider-execution-provenance
+        env:
+          APOLLO_PROVIDER_EXECUTION_PROVENANCE_PG_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_synthetic_gate_e2e?schema=public&application_name=apollo-video-e2e-provider-execution-provenance-${{ github.run_id }}&connection_limit=2&pool_timeout=10&connect_timeout=10
+
+      - name: Verify provider execution provenance PostgreSQL cleanup
+        if: always()
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where application_name = '$APOLLO_PROVIDER_EXECUTION_PROVENANCE_APP_NAME'")"
+            printf 'postflight attempt=%s backends=%s\n' "$attempt" "$orphans"
+            if test "$orphans" = 0; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+        env:
+          APOLLO_PROVIDER_EXECUTION_PROVENANCE_APP_NAME: apollo-video-e2e-provider-execution-provenance-${{ github.run_id }}
+
       - name: Run source cleanup and separation FFmpeg goldens
         run: npm run test:integration:source-cleanup-goldens
 
@@ -293,6 +316,29 @@ jobs:
 
       - name: Build production application
         run: npm run build
+
+      - name: Run synthetic phase gate public API security proof
+        run: npm run test:integration:synthetic-phase-gate-api
+        env:
+          APOLLO_SYNTHETIC_PHASE_GATE_API_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_synthetic_gate_e2e?schema=public&application_name=apollo-video-e2e-synthetic-phase-gate-api-${{ github.run_id }}&connection_limit=2&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan synthetic phase gate API backends
+        if: always()
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where application_name = '$APOLLO_SYNTHETIC_PHASE_GATE_API_APP_NAME'")"
+            printf 'postflight attempt=%s backends=%s\n' "$attempt" "$orphans"
+            if test "$orphans" = 0; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+        env:
+          APOLLO_SYNTHETIC_PHASE_GATE_API_APP_NAME: apollo-video-e2e-synthetic-phase-gate-api-${{ github.run_id }}
 
       - name: Provision and migrate isolated contamination E2E database
         env:
@@ -1003,14 +1049,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Run synthetic master cross-project reuse E2E against /v1 and PostgreSQL
-        run: npm run test:e2e:synthetic-master-reuse
-        env:
-          # Local artifact storage on purpose: this journey proves reuse costs
-          # nothing, so it must not depend on an object store round trip.
-          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
-          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-master-reuse-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
-
       - name: Run synthetic production, criticism and cache reuse journey against /v1, durable workers and PostgreSQL
         # Require consecutive passes. This is not retry-until-green: the first
         # failure ends the step and retains the server diagnostics below.
@@ -1058,6 +1096,68 @@ jobs:
           APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-critic-report-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
+      - name: Install locked renderer dependencies for the production build
+        run: npm ci --prefix remotion
+
+      - name: Bundle Remotion renderer for the synthetic W24 journey
+        run: npm run remotion:build
+
+      - name: Build production application for the browser journey
+        run: npm run build
+
+      - name: Provision the isolated synthetic W24 journey database
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_synthetic_wave24_e2e
+          npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_synthetic_wave24_e2e?schema=public&application_name=apollo-video-e2e-synthetic-wave24-migrate-ci-${{ github.run_id }}-${{ github.run_attempt }}&connection_limit=1&pool_timeout=10&connect_timeout=10
+
+      - name: Run controlled synthetic W24 provider, reuse, render and gate journey
+        run: npm run test:e2e:synthetic-wave24-journey
+        env:
+          APOLLO_SYNTHETIC_WAVE24_JOURNEY_E2E: "1"
+          APOLLO_WAVE24_RUN_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_WAVE24_EVIDENCE_ROOT: ${{ runner.temp }}/synthetic-wave24-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: synthetic-wave24-ci
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_synthetic_wave24_e2e?schema=public&application_name=apollo-video-e2e-synthetic-wave24-ci-${{ github.run_id }}-${{ github.run_attempt }}&connection_limit=1&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan synthetic W24 journey backends
+        if: always()
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          database="apollo_synthetic_wave24_e2e"
+          app_name="apollo-video-e2e-synthetic-wave24-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where datname = '$database' and application_name = '$app_name'")"
+            if test "$backends" = 0; then break; fi
+            sleep 1
+          done
+          echo "$app_name backends: $backends"
+          test "$backends" = 0
+
+      - name: Publish synthetic W24 MP4, frames, screenshots and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-wave24-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/synthetic-wave24-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Run synthetic master cross-project reuse E2E against /v1 and PostgreSQL
+        run: npm run test:e2e:synthetic-master-reuse
+        env:
+          # Local artifact storage on purpose: this journey proves reuse costs
+          # nothing, so it must not depend on an object store round trip.
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-master-reuse-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
       - name: Verify zero orphan synthetic master reuse backends
         if: always()
         run: |
@@ -1069,12 +1169,6 @@ jobs:
             sleep 1
           done
           test "$backends" = 0
-
-      - name: Install locked renderer dependencies for the production build
-        run: npm ci --prefix remotion
-
-      - name: Build production application for the browser journey
-        run: npm run build
 
       - name: Run localization media fail-closed persistence proof
         run: npm run test:integration:localization-media

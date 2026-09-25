@@ -14,6 +14,13 @@ import type {
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { createRenderInputPayload } from '../../domain/render-input-payload.ts'
+import type { RecipeParameterCipher } from '../../application/ports/recipe-parameter-cipher.ts'
+import {
+  assertSyntheticProductionRenderContext,
+  type SyntheticProductionRenderContext,
+} from '../../domain/synthetic-production-render.ts'
+import { renderInputCipherContext } from '../security/recipe-parameter-cipher.ts'
 import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import {
   hydrateLongFormIndexWorkflow,
@@ -53,7 +60,7 @@ import {
   type PublicEventOutboxTransaction,
 } from './public-event-outbox.ts'
 
-type StoredOperation = Prisma.V2PublicOperationGetPayload<{
+export type StoredOperation = Prisma.V2PublicOperationGetPayload<{
   include: {
     artifactRender: {
       include: {
@@ -77,10 +84,11 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     sourceCleanupPlan: true
     longFormIndexWorkflow: true
     projectDirectorRun: { include: { directorRun: true } }
+    syntheticProductionRender: true
   }
 }>
 
-const OPERATION_INCLUDE = {
+export const OPERATION_INCLUDE = {
   artifactRender: {
     include: {
       manifest: { select: { artifactId: true } },
@@ -103,6 +111,7 @@ const OPERATION_INCLUDE = {
   sourceCleanupPlan: true,
   longFormIndexWorkflow: true,
   projectDirectorRun: { include: { directorRun: true } },
+  syntheticProductionRender: true,
 } as const
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
@@ -167,6 +176,42 @@ function parseStoredRecord(value: string, field: string): Record<string, unknown
     return parsed as Record<string, unknown>
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
+}
+
+function hydrateSyntheticRenderContext(
+  detail: NonNullable<StoredOperation['syntheticProductionRender']>,
+): Readonly<SyntheticProductionRenderContext> {
+  try {
+    const parsed = JSON.parse(detail.contextJson) as SyntheticProductionRenderContext
+    assertSyntheticProductionRenderContext(parsed)
+    if (
+      stableSerialize(parsed) !== detail.contextJson ||
+      parsed.operationId !== detail.operationId ||
+      parsed.workspaceId !== detail.workspaceId ||
+      parsed.projectId !== detail.projectId ||
+      parsed.projectVersionId !== detail.projectVersionId ||
+      parsed.projectVersionHash !== detail.projectVersionHash ||
+      parsed.productionRunId !== detail.productionRunId ||
+      parsed.editPlanSnapshotId !== detail.editPlanSnapshotId ||
+      parsed.editPlanSnapshotHash !== detail.editPlanSnapshotHash ||
+      parsed.planHash !== detail.planHash ||
+      parsed.outputKind !== detail.outputKind ||
+      parsed.aspectRatio !== detail.aspectRatio ||
+      parsed.renderInputRef !== detail.renderInputRef ||
+      parsed.renderInputHash !== detail.renderInputHash ||
+      parsed.propsHash !== detail.propsHash ||
+      parsed.outputArtifactId !== detail.outputArtifactId ||
+      parsed.outputManifestId !== detail.outputManifestId ||
+      parsed.contextHash !== detail.contextHash
+    ) throw new Error('binding mismatch')
+    return parsed
+  } catch {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored synthetic production render context is invalid',
+      { operationId: detail.operationId },
+    )
   }
 }
 const OUTPUT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,510}\.mp4$/
@@ -340,7 +385,7 @@ function operationControlAuditData(audit: Readonly<ApiAccessAuditContext>) {
   }
 }
 
-function hydrateRecord(row: StoredOperation): PublicOperationRecord {
+export function hydratePublicOperationRecord(row: StoredOperation): PublicOperationRecord {
   const authenticationAudit = hydrateOperationAuthenticationAudit(row)
   const renderDetail = row.artifactRender
   const ingestDetail = row.mediaIngest
@@ -352,6 +397,10 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     ? hydrateLongFormCostSource(longFormDetail)
     : undefined
   const directorDetail = row.projectDirectorRun
+  const syntheticRenderDetail = row.syntheticProductionRender
+  const syntheticRenderContext = syntheticRenderDetail
+    ? hydrateSyntheticRenderContext(syntheticRenderDetail)
+    : undefined
   const isRender = row.type === 'artifact-render'
   const isIngest = row.type === 'media-ingest'
   const isProjectRender = row.type === 'project-proxy-render'
@@ -359,6 +408,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const isSourceCleanup = row.type === 'source-cleanup'
   const isLongFormIndex = row.type === 'long-form-index'
   const isDirector = row.type === 'project-director-run'
+  const isSyntheticRender = row.type === 'synthetic-production-render'
   const projectColorBindings = projectRenderDetail
     ? parseColorPipelineBindings(projectRenderDetail.colorPipelineBindingsJson)
     : undefined
@@ -374,8 +424,8 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     ? parseColorPipelineBindings(finalExportDetail.colorPipelineBindingsJson)
     : undefined
   if (
-    ((isDirector && row.targetType !== 'project-version') ||
-      (!isDirector && row.targetType !== 'media-artifact')) ||
+    (((isDirector || isSyntheticRender) && row.targetType !== 'project-version') ||
+      (!isDirector && !isSyntheticRender && row.targetType !== 'media-artifact')) ||
     [
       isRender,
       isIngest,
@@ -384,7 +434,11 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       isSourceCleanup,
       isLongFormIndex,
       isDirector,
+      isSyntheticRender,
     ].filter(Boolean).length !== 1
+    || [renderDetail, ingestDetail, projectRenderDetail, finalExportDetail,
+      sourceCleanupDetail, longFormDetail, directorDetail, syntheticRenderDetail]
+      .filter(Boolean).length !== 1
   ) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
@@ -406,6 +460,14 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     !SHA256_PATTERN.test(renderDetail.inputHash)
   )) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render operation context is invalid', { operationId: row.id })
+  }
+  if (isSyntheticRender && (
+    !syntheticRenderDetail || !syntheticRenderContext ||
+    row.targetId !== syntheticRenderContext.projectVersionId ||
+    row.projectId !== syntheticRenderContext.projectId ||
+    row.workspaceId !== syntheticRenderContext.workspaceId
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored synthetic render operation binding is invalid', { operationId: row.id })
   }
   if (isIngest && (
     !ingestDetail || renderDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || longFormDetail || directorDetail || row.targetId !== ingestDetail.sourceArtifactId ||
@@ -658,9 +720,11 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         : {}),
       cancelable: row.cancelable,
       retryable: row.retryable,
-      target: isDirector ? {
+      target: isDirector || isSyntheticRender ? {
         type: 'project-version',
-        id: directorDetail!.resultVersionId,
+        id: isDirector
+          ? directorDetail!.resultVersionId
+          : syntheticRenderContext!.projectVersionId,
       } : {
         type: 'media-artifact',
         id: isRender
@@ -735,6 +799,23 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         kind: 'artifact-render' as const,
         authorizationId: renderDetail!.authorizationId,
         inputHash: renderDetail!.inputHash,
+      } : isSyntheticRender ? {
+        kind: 'synthetic-production-render' as const,
+        projectId: syntheticRenderContext!.projectId,
+        projectVersionId: syntheticRenderContext!.projectVersionId,
+        projectVersionHash: syntheticRenderContext!.projectVersionHash,
+        productionRunId: syntheticRenderContext!.productionRunId,
+        editPlanSnapshotId: syntheticRenderContext!.editPlanSnapshotId,
+        editPlanSnapshotHash: syntheticRenderContext!.editPlanSnapshotHash,
+        planHash: syntheticRenderContext!.planHash,
+        outputKind: syntheticRenderContext!.outputKind,
+        aspectRatio: syntheticRenderContext!.aspectRatio,
+        renderInputRef: syntheticRenderContext!.renderInputRef,
+        renderInputHash: syntheticRenderContext!.renderInputHash,
+        propsHash: syntheticRenderContext!.propsHash,
+        outputArtifactId: syntheticRenderContext!.outputArtifactId,
+        outputManifestId: syntheticRenderContext!.outputManifestId,
+        contextHash: syntheticRenderContext!.contextHash,
       } : isIngest ? {
         kind: 'media-ingest' as const,
         uploadId: ingestDetail!.uploadId,
@@ -868,7 +949,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
 }
 
 function hydrateClaim(row: StoredOperation): ClaimedPublicOperationRecord {
-  const record = hydrateRecord(row)
+  const record = hydratePublicOperationRecord(row)
   if (
     row.status !== 'running' ||
     row.leaseOwner === null ||
@@ -916,13 +997,28 @@ export async function persistManyOperationStatusEvents(
 export class PrismaPublicOperationRepository implements PublicOperationRepository {
   private readonly client: PrismaClient
   private readonly createEventId: () => string
+  private readonly protectedPayloadCipherSource:
+    | RecipeParameterCipher
+    | (() => RecipeParameterCipher)
+    | undefined
 
   constructor(
     client: PrismaClient,
     createEventId: () => string = randomUUID,
+    protectedPayloadCipher?: RecipeParameterCipher | (() => RecipeParameterCipher),
   ) {
     this.client = client
     this.createEventId = createEventId
+    this.protectedPayloadCipherSource = protectedPayloadCipher
+  }
+
+  private resolveProtectedPayloadCipher(): RecipeParameterCipher {
+    if (!this.protectedPayloadCipherSource) {
+      throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Protected RenderInput persistence is not configured')
+    }
+    return typeof this.protectedPayloadCipherSource === 'function'
+      ? this.protectedPayloadCipherSource()
+      : this.protectedPayloadCipherSource
   }
 
   async cancel(input: {
@@ -943,7 +1039,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         include: OPERATION_INCLUDE,
       })
       if (!stored) return null
-      const current = hydrateRecord(stored)
+      const current = hydratePublicOperationRecord(stored)
       const canceled = cancelPublicOperation(current.operation, canceledAt.toISOString())
       if (canceled.status !== 'canceled' || stored.status === 'canceled') return current
 
@@ -977,7 +1073,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         include: OPERATION_INCLUDE,
       })
       if (!persisted) return null
-      const result = hydrateRecord(persisted)
+      const result = hydratePublicOperationRecord(persisted)
       if (updated.count === 1) {
         await transaction.v2PublicOperationControlCommand.create({
           data: {
@@ -1028,7 +1124,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         include: OPERATION_INCLUDE,
       })
       if (!stored) return null
-      const current = hydrateRecord(stored)
+      const current = hydratePublicOperationRecord(stored)
       const retried = retryPublicOperation(
         current.operation,
         requestedAt.toISOString(),
@@ -1068,7 +1164,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         include: OPERATION_INCLUDE,
       })
       if (!persisted) return null
-      const result = hydrateRecord(persisted)
+      const result = hydratePublicOperationRecord(persisted)
       if (updated.count === 1) {
         await transaction.v2PublicOperationControlCommand.create({
           data: {
@@ -1110,7 +1206,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     operationId: string,
   ): Promise<PublicOperationRecord | null> {
     const stored = await this.findStoredById(workspaceId, operationId)
-    return stored ? hydrateRecord(stored) : null
+    return stored ? hydratePublicOperationRecord(stored) : null
   }
 
   async list(input: PublicOperationListQuery): Promise<readonly PublicOperationRecord[]> {
@@ -1156,7 +1252,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: input.limit,
     })
-    return rows.map(hydrateRecord)
+    return rows.map(hydratePublicOperationRecord)
   }
 
   private findStoredReplay(
@@ -1203,7 +1299,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         { operationId: stored.id },
       )
     }
-    return { ...hydrateRecord(stored), replayed: true }
+    return { ...hydratePublicOperationRecord(stored), replayed: true }
   }
 
   async createOrReplay(input: {
@@ -1224,6 +1320,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       audit.clientId !== input.operation.clientId
     ) throw new DomainError('AUTH_INVALID', 'PublicOperation actor audit is inconsistent')
     const renderContext = input.operation.type === 'artifact-render' && 'authorizationId' in input.context
+      ? input.context
+      : undefined
+    const syntheticRenderContext = input.operation.type === 'synthetic-production-render' && input.context.kind === 'synthetic-production-render'
       ? input.context
       : undefined
     const ingestContext = input.operation.type === 'media-ingest' && 'uploadId' in input.context
@@ -1251,9 +1350,25 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       ) ||
       !SHA256_PATTERN.test(input.requestFingerprint) ||
       (input.traceId !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(input.traceId)) ||
-      (!renderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext && !directorContext) ||
-      (!directorContext && !mediaTarget) ||
+      (!renderContext && !syntheticRenderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext && !directorContext) ||
+      (!directorContext && !syntheticRenderContext && !mediaTarget) ||
       (renderContext && (input.operation.projectId !== undefined || !SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
+      (syntheticRenderContext && (
+        input.operation.projectId !== syntheticRenderContext.projectId ||
+        input.operation.target.type !== 'project-version' ||
+        input.operation.target.id !== syntheticRenderContext.projectVersionId ||
+        !syntheticRenderContext.renderInput ||
+        ![syntheticRenderContext.projectId, syntheticRenderContext.projectVersionId,
+          syntheticRenderContext.productionRunId, syntheticRenderContext.editPlanSnapshotId,
+          syntheticRenderContext.outputArtifactId, syntheticRenderContext.outputManifestId]
+          .every((value) => ID_PATTERN.test(value)) ||
+        ![syntheticRenderContext.projectVersionHash, syntheticRenderContext.editPlanSnapshotHash,
+          syntheticRenderContext.planHash, syntheticRenderContext.renderInputHash,
+          syntheticRenderContext.propsHash, syntheticRenderContext.contextHash]
+          .every((value) => SHA256_PATTERN.test(value)) ||
+        !['proxy', 'final'].includes(syntheticRenderContext.outputKind) ||
+        !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(syntheticRenderContext.aspectRatio)
+      )) ||
       (ingestContext && (
         input.operation.projectId !== ingestContext.projectId ||
         !/^[0-9a-f-]{36}$/.test(ingestContext.uploadId) ||
@@ -1371,11 +1486,119 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               'Idempotency key belongs to a different authentication context',
             )
           }
-          return { ...hydrateRecord(existing), replayed: true }
+          return { ...hydratePublicOperationRecord(existing), replayed: true }
         }
 
         let reusedColorPipelineBindingsJson: string | undefined
         let ingestUploadKind: 'video' | 'audio' | 'image' | undefined
+        let persistedSyntheticRenderContext: SyntheticProductionRenderContext | undefined
+        if (syntheticRenderContext) {
+          const protectedPayloadCipher = this.resolveProtectedPayloadCipher()
+          const payload = createRenderInputPayload(syntheticRenderContext.renderInput!)
+          const contextBody = {
+            schemaVersion: 'synthetic-production-render-context/v1' as const,
+            operationId: input.operation.id,
+            workspaceId: input.operation.workspaceId,
+            projectId: syntheticRenderContext.projectId,
+            projectVersionId: syntheticRenderContext.projectVersionId,
+            projectVersionHash: syntheticRenderContext.projectVersionHash,
+            productionRunId: syntheticRenderContext.productionRunId,
+            editPlanSnapshotId: syntheticRenderContext.editPlanSnapshotId,
+            editPlanSnapshotHash: syntheticRenderContext.editPlanSnapshotHash,
+            planHash: syntheticRenderContext.planHash,
+            outputKind: syntheticRenderContext.outputKind,
+            aspectRatio: syntheticRenderContext.aspectRatio,
+            renderInputRef: payload.ref,
+            renderInputHash: payload.inputHash,
+            propsHash: syntheticRenderContext.propsHash,
+            outputArtifactId: syntheticRenderContext.outputArtifactId,
+            outputManifestId: syntheticRenderContext.outputManifestId,
+            contextHash: syntheticRenderContext.contextHash,
+          }
+          assertSyntheticProductionRenderContext(contextBody)
+          if (
+            payload.ref !== syntheticRenderContext.renderInputRef ||
+            payload.inputHash !== syntheticRenderContext.renderInputHash ||
+            syntheticRenderContext.renderInput!.composition.propsHash !== syntheticRenderContext.propsHash ||
+            syntheticRenderContext.renderInput!.plan.versionId !== syntheticRenderContext.projectVersionId ||
+            syntheticRenderContext.renderInput!.output.aspectRatio !== syntheticRenderContext.aspectRatio
+          ) {
+            throw new DomainError('INVALID_PUBLIC_OPERATION', 'Synthetic RenderInput does not match its operation binding')
+          }
+          const [run, currentProject, snapshot] = await Promise.all([
+            transaction.v2SyntheticProductionRun.findFirst({
+              where: {
+                id: syntheticRenderContext.productionRunId,
+                workspaceId: input.operation.workspaceId,
+                projectId: syntheticRenderContext.projectId,
+                projectVersionId: syntheticRenderContext.projectVersionId,
+                editPlanSnapshotId: syntheticRenderContext.editPlanSnapshotId,
+                planHash: syntheticRenderContext.planHash,
+                status: { in: ['compiled', 'rendering'] },
+              },
+              select: { id: true },
+            }),
+            transaction.v2Project.findFirst({
+              where: {
+                id: syntheticRenderContext.projectId,
+                workspaceId: input.operation.workspaceId,
+                currentVersionId: syntheticRenderContext.projectVersionId,
+                currentVersion: { baseHash: syntheticRenderContext.projectVersionHash },
+              },
+              select: { id: true },
+            }),
+            transaction.v2ProjectSnapshot.findFirst({
+              where: {
+                id: syntheticRenderContext.editPlanSnapshotId,
+                workspaceId: input.operation.workspaceId,
+                projectId: syntheticRenderContext.projectId,
+                kind: 'edit-plan',
+                contentHash: syntheticRenderContext.editPlanSnapshotHash,
+              },
+              select: { id: true },
+            }),
+          ])
+          if (!run || !currentProject || !snapshot) {
+            throw new DomainError('VERSION_CONFLICT', 'Synthetic render source changed before operation persistence')
+          }
+          const storedPayload = await transaction.v2RenderInputPayload.findUnique({
+            where: { workspaceId_ref: { workspaceId: input.operation.workspaceId, ref: payload.ref } },
+          })
+          if (storedPayload) {
+            const opened = await protectedPayloadCipher.open({
+              algorithm: storedPayload.algorithm as 'aes-256-gcm',
+              keyId: storedPayload.keyId,
+              nonce: storedPayload.nonce,
+              ciphertext: storedPayload.ciphertext,
+              authTag: storedPayload.authTag,
+            }, renderInputCipherContext(input.operation.workspaceId, payload.ref))
+            if (
+              storedPayload.inputHash !== payload.inputHash ||
+              storedPayload.canonicalByteSize !== payload.canonicalByteSize ||
+              opened !== payload.canonicalJson
+            ) throw new DomainError('PERSISTENCE_CONFLICT', 'Protected synthetic RenderInput collided with different content')
+          } else {
+            const sealed = await protectedPayloadCipher.seal(
+              payload.canonicalJson,
+              renderInputCipherContext(input.operation.workspaceId, payload.ref),
+            )
+            await transaction.v2RenderInputPayload.create({
+              data: {
+                ref: payload.ref,
+                workspaceId: input.operation.workspaceId,
+                inputHash: payload.inputHash,
+                canonicalByteSize: payload.canonicalByteSize,
+                algorithm: sealed.algorithm,
+                keyId: sealed.keyId,
+                nonce: sealed.nonce,
+                ciphertext: sealed.ciphertext,
+                authTag: sealed.authTag,
+                createdAt: new Date(input.operation.createdAt),
+              },
+            })
+          }
+          persistedSyntheticRenderContext = Object.freeze(contextBody)
+        }
         if (ingestContext) {
           const upload = await transaction.v2MediaUpload.findFirst({
             where: {
@@ -1686,6 +1909,43 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               inputHash: renderContext.inputHash,
             },
           })
+        } else if (syntheticRenderContext) {
+          await transaction.v2SyntheticProductionRenderOperation.create({
+            data: {
+              operationId: input.operation.id,
+              workspaceId: input.operation.workspaceId,
+              projectId: syntheticRenderContext.projectId,
+              projectVersionId: syntheticRenderContext.projectVersionId,
+              projectVersionHash: syntheticRenderContext.projectVersionHash,
+              productionRunId: syntheticRenderContext.productionRunId,
+              editPlanSnapshotId: syntheticRenderContext.editPlanSnapshotId,
+              editPlanSnapshotHash: syntheticRenderContext.editPlanSnapshotHash,
+              planHash: syntheticRenderContext.planHash,
+              outputKind: syntheticRenderContext.outputKind,
+              aspectRatio: syntheticRenderContext.aspectRatio,
+              renderInputRef: syntheticRenderContext.renderInputRef,
+              renderInputHash: syntheticRenderContext.renderInputHash,
+              propsHash: syntheticRenderContext.propsHash,
+              outputArtifactId: syntheticRenderContext.outputArtifactId,
+              outputManifestId: syntheticRenderContext.outputManifestId,
+              contextJson: stableSerialize(persistedSyntheticRenderContext!),
+              contextHash: syntheticRenderContext.contextHash,
+              createdAt: new Date(input.operation.createdAt),
+              updatedAt: new Date(input.operation.updatedAt),
+            },
+          })
+          const updatedRun = await transaction.v2SyntheticProductionRun.updateMany({
+            where: {
+              id: syntheticRenderContext.productionRunId,
+              workspaceId: input.operation.workspaceId,
+              projectId: syntheticRenderContext.projectId,
+              status: { in: ['compiled', 'rendering'] },
+            },
+            data: { status: 'rendering' },
+          })
+          if (updatedRun.count !== 1) {
+            throw new DomainError('VERSION_CONFLICT', 'Synthetic production run cannot enter rendering')
+          }
         } else if (ingestContext) {
           await transaction.v2MediaIngestOperation.create({
             data: {
@@ -1836,7 +2096,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         if (!created) {
           throw new DomainError('PERSISTENCE_CONFLICT', 'PublicOperation was not persisted')
         }
-        const record = hydrateRecord(created)
+        const record = hydratePublicOperationRecord(created)
         await persistOperationStatusEvents(
           transaction,
           undefined,
@@ -1907,7 +2167,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         include: OPERATION_INCLUDE,
       })
       for (const candidate of candidates) {
-        const current = hydrateRecord(candidate).operation
+        const current = hydratePublicOperationRecord(candidate).operation
         if (candidate.attempt >= candidate.maxAttempts) {
           if (candidate.status === 'running') {
             const exhausted = await transaction.v2PublicOperation.updateMany({
@@ -1952,7 +2212,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               await persistOperationStatusEvents(
                 transaction,
                 current.status,
-                hydrateRecord(failed).operation,
+                hydratePublicOperationRecord(failed).operation,
                 this.createEventId,
               )
             }
@@ -2056,7 +2316,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         include: OPERATION_INCLUDE,
       })
       if (!stored) return null
-      const record = hydrateRecord(stored)
+      const record = hydratePublicOperationRecord(stored)
       if (
         stored.status !== 'running' ||
         stored.leaseOwner !== input.leaseOwner ||
@@ -2114,7 +2374,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         include: OPERATION_INCLUDE,
       })
       if (!persisted) return null
-      const result = hydrateRecord(persisted)
+      const result = hydratePublicOperationRecord(persisted)
       await persistOperationStatusEvents(
         transaction,
         record.operation.status,
@@ -2157,7 +2417,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         include: OPERATION_INCLUDE,
       })
       if (!stored) return null
-      const record = hydrateRecord(stored)
+      const record = hydratePublicOperationRecord(stored)
       if (
         stored.status !== 'waiting' ||
         stored.phase !== 'waiting' ||

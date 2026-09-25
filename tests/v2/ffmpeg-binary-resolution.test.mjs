@@ -96,6 +96,7 @@ const BARE_BINARY_NAME =
 const NON_MEDIA_SPAWNS = new Map([
   ['src/v2/infrastructure/image/tesseract-image-vision-provider.ts', ['this.binary']],
   ['src/v2/infrastructure/remotion-render-input-renderer.ts', ["'taskkill'", 'process.execPath']],
+  ['src/v2/infrastructure/synthetic-build-attestation-runner.ts', ["'taskkill'", 'executable']],
 ])
 
 /**
@@ -311,6 +312,8 @@ test('every ffmpeg and ffprobe spawn in src/ takes its path from the resolver', 
     'src/v2/infrastructure/image/tesseract-image-vision-provider.ts::this.binary',
     "src/v2/infrastructure/remotion-render-input-renderer.ts::'taskkill'",
     'src/v2/infrastructure/remotion-render-input-renderer.ts::process.execPath',
+    "src/v2/infrastructure/synthetic-build-attestation-runner.ts::'taskkill'",
+    'src/v2/infrastructure/synthetic-build-attestation-runner.ts::executable',
   ])
   assert.deepEqual(inbound, [
     'src/v2/infrastructure/media/audio-concatenation.ts::ffprobePath',
@@ -320,6 +323,22 @@ test('every ffmpeg and ffprobe spawn in src/ takes its path from the resolver', 
   // And the resolver is the one module allowed to name ffmpeg-static.
   const naming = [...sources].filter(([, source]) => /['"]ffmpeg-static['"]/.test(source)).map(([path]) => path)
   assert.deepEqual(naming, [RESOLVER])
+})
+
+test('the build attestation non-media spawn is fenced to Git, Node and taskkill cleanup', () => {
+  const path = 'src/v2/infrastructure/synthetic-build-attestation-runner.ts'
+  const source = withoutComments(repositorySources().get(path))
+
+  assert.deepEqual(spawnExpressions(source), ["'taskkill'", 'executable'])
+  assert.deepEqual(
+    [...source.matchAll(/this\.executor\.execute\(([^,\n]+)/g)].map((match) => match[1].trim()),
+    ['command[0]', "'git'"],
+  )
+  assert.match(source, /const CHECK_COMMANDS = Object\.freeze\(\{[\s\S]*?architecture:\s*Object\.freeze\(\[process\.execPath,/)
+  assert.match(source, /'domain-language':\s*Object\.freeze\(\[process\.execPath,/)
+  assert.match(source, /'provider-swap':\s*Object\.freeze\(\[\s*process\.execPath,/)
+  assert.match(source, /'compiler-render-contracts':\s*Object\.freeze\(\[\s*process\.execPath,/)
+  assert.match(source, /if \(process\.platform === 'win32'\)[\s\S]*?spawn\('taskkill', \['\/pid', String\(child\.pid\), '\/T', '\/F'\]/)
 })
 
 test('a spawn whose binary comes from a caller is checked in the caller', () => {

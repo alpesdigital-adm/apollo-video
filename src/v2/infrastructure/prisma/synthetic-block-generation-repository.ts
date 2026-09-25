@@ -83,6 +83,13 @@ export class PrismaSyntheticBlockGenerationRepository implements SyntheticBlockG
   private readonly client: PrismaClient
   constructor(client: PrismaClient = getV2PostgresClient()) { this.client = client }
 
+  async findByProviderJob(input: Parameters<SyntheticBlockGenerationRepository['findByProviderJob']>[0]) {
+    const row = await this.client.v2SyntheticBlockGeneration.findFirst({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, providerJobId: input.providerJobId },
+    })
+    return row ? hydrate(row) : null
+  }
+
   async findEffective(input: Parameters<SyntheticBlockGenerationRepository['findEffective']>[0]) {
     const row = await this.client.v2SyntheticBlockGeneration.findFirst({
       where: { workspaceId: input.workspaceId, blockId: input.blockId },

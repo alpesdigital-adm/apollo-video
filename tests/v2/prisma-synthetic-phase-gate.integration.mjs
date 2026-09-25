@@ -50,7 +50,7 @@ function actorFor(createExternalAuditContext, { workspaceId, clientId, credentia
   })
   return Object.freeze({
     ...auditContext,
-    scopes: new Set(['projects:write']),
+    scopes: new Set(['projects:read', 'projects:write']),
     authenticationKind: 'bearer',
     clientKillSwitchEngaged: false,
     workspaceKillSwitchEngaged: false,
@@ -60,7 +60,7 @@ function actorFor(createExternalAuditContext, { workspaceId, clientId, credentia
   })
 }
 
-async function seedWorkspace(prisma, { workspaceId, clientId, now }) {
+async function seedWorkspace(prisma, { workspaceId, clientId, credentialId, now }) {
   await prisma.v2Workspace.create({
     data: {
       id: workspaceId,
@@ -76,12 +76,20 @@ async function seedWorkspace(prisma, { workspaceId, clientId, now }) {
       workspaceId,
       name: `Synthetic phase gate ${clientId}`,
       allowedEnvironmentsJson: '["production"]',
-      scopeGrantsJson: '["projects:write"]',
+      scopeGrantsJson: '["projects:read","projects:write"]',
       createdBy: 'synthetic-phase-gate-pg-e2e',
       createdAt: now,
       updatedAt: now,
     },
   })
+  await prisma.v2ApiCredential.create({ data: {
+    id: credentialId,
+    workspaceId,
+    clientId,
+    secretSalt: 'a'.repeat(22),
+    secretHash: 'b'.repeat(64),
+    createdAt: now,
+  } })
 }
 
 async function seedProjectVersion(prisma, {
@@ -162,6 +170,9 @@ async function removeFixtures(prisma, workspaceIds) {
     await transaction.v2Project.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await transaction.v2ApiCredential.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await transaction.v2ApiClient.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -179,7 +190,7 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
   const { createExternalAuditContext } = await import(
     '../../src/v2/application/authenticate-api-client.ts'
   )
-  const { runSyntheticPhaseGateService } = await import(
+  const { listSyntheticPhaseGatesService, runSyntheticPhaseGateService } = await import(
     '../../src/v2/application/run-synthetic-phase-gate.ts'
   )
   const { PrismaSyntheticPhaseGateRepository } = await import(
@@ -192,6 +203,8 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
   const otherWorkspaceId = `synthetic-gate-other-e2e-${suffix}`
   const clientId = `synthetic-gate-client-${suffix}`
   const otherClientId = `synthetic-gate-other-client-${suffix}`
+  const credentialId = `synthetic-gate-credential-${suffix}`
+  const otherCredentialId = `synthetic-gate-other-credential-${suffix}`
   const projectId = `synthetic-gate-project-${suffix}`
   const versionId = `synthetic-gate-version-${suffix}`
   const versionHash = 'd'.repeat(64)
@@ -205,10 +218,11 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
     )
     assert.equal(session[0]?.name, applicationName)
 
-    await seedWorkspace(prisma, { workspaceId, clientId, now })
+    await seedWorkspace(prisma, { workspaceId, clientId, credentialId, now })
     await seedWorkspace(prisma, {
       workspaceId: otherWorkspaceId,
       clientId: otherClientId,
+      credentialId: otherCredentialId,
       now,
     })
     await seedProjectVersion(prisma, {
@@ -223,12 +237,12 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
     const actor = actorFor(createExternalAuditContext, {
       workspaceId,
       clientId,
-      credentialId: `synthetic-gate-credential-${suffix}`,
+      credentialId,
     })
     const otherActor = actorFor(createExternalAuditContext, {
       workspaceId: otherWorkspaceId,
       clientId: otherClientId,
-      credentialId: `synthetic-gate-other-credential-${suffix}`,
+      credentialId: otherCredentialId,
     })
     const repository = new PrismaSyntheticPhaseGateRepository(prisma)
     const run = runSyntheticPhaseGateService({
@@ -236,6 +250,7 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
       clock: () => now,
       createId: () => `synthetic-phase-gate-${suffix}`,
     })
+    const list = listSyntheticPhaseGatesService({ repository })
     const request = {
       workspaceId,
       projectId,
@@ -245,7 +260,13 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
       idempotencyKey: `synthetic-phase-gate-${suffix}`,
     }
 
-    const created = await run(request)
+    const attempts = await Promise.all([run(request), run(request)])
+    assert.deepEqual(
+      attempts.map((result) => result.replayed).sort(),
+      [false, true],
+    )
+    const created = attempts.find((result) => !result.replayed)
+    assert.ok(created)
     assert.equal(created.replayed, false)
     assert.equal(created.gate.report.approved, false)
     assert.equal(created.gate.report.covered, 0)
@@ -271,6 +292,27 @@ test('T-F3-GATE persists a truthful internal rejection in PostgreSQL and enforce
     assert.equal(replay.gate.id, created.gate.id)
     assert.equal(replay.gate.recordHash, created.gate.recordHash)
     assert.equal(await prisma.v2SyntheticPhaseGate.count({ where: { workspaceId } }), 1)
+
+    const listed = await list({ workspaceId, projectId, actor, limit: 10 })
+    assert.deepEqual(listed.map((gate) => gate.id), [created.gate.id])
+    await assert.rejects(
+      list({
+        workspaceId,
+        projectId,
+        actor: { ...actor, scopes: new Set(['projects:write']) },
+      }),
+      (error) => error.code === 'AUTH_SCOPE_REQUIRED',
+    )
+    await assert.rejects(
+      list({ workspaceId: otherWorkspaceId, projectId, actor }),
+      (error) => error.code === 'AUTH_INVALID',
+    )
+    assert.deepEqual(await list({
+      workspaceId: otherWorkspaceId,
+      projectId,
+      actor: otherActor,
+      limit: 10,
+    }), [])
 
     await assert.rejects(
       run({ ...request, projectVersionHash: 'f'.repeat(64) }),

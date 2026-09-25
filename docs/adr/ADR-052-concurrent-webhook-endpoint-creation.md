@@ -2,7 +2,7 @@
 
 > **Status:** Accepted
 >
-> **Data:** 15 de julho de 2026
+> **Data:** 15 de julho de 2026; emenda W24.0 em 22 de setembro de 2026
 
 ## Contexto
 
@@ -10,7 +10,7 @@
 
 ## Decisão
 
-- A transação permanece serializável e conflitos `P2034` são repetidos no máximo três vezes antes de `PERSISTENCE_CONFLICT`.
+- A transação permanece serializável e conflitos `P2034` são repetidos no máximo três vezes. Se a terceira tentativa conflitar, o repositório consulta o tuple durável `(workspaceId, clientId, idempotencyKey)` e só aceita o vencedor após revalidar expiração, fingerprint, response envelope, audit context, endpoint e signing secret. Payload divergente retorna `IDEMPOTENCY_PAYLOAD_MISMATCH`; vencedor ausente ou incompleto permanece `PERSISTENCE_CONFLICT`.
 - Requests simultâneos com workspace, cliente, chave e URL canônica idênticos convergem para o mesmo endpoint e secret.
 - Exatamente uma resposta é criação 201; a concorrente recupera o resultado durável como replay 200.
 - Se a primeira resposta for descartada depois do commit, repetir o request recupera o endpoint original sem criar outro payload cifrado.
@@ -22,6 +22,7 @@
 - Agentes externos podem repetir cadastros cujo resultado de transporte seja incerto.
 - Endpoint, signing secret e envelope cifrado permanecem uma unidade atômica.
 - Retry limitado absorve conflitos transitórios sem ocultar contenção persistente.
+- A reconciliação lê metadata durável, sem exigir que o payload cifrado ainda exista: a higiene autorizada pode removê-lo depois de retirar/revogar o secret, sem invalidar o replay metadata-only dentro do TTL.
 - A chave HMAC não é exposta pelo cadastro; sua transferência one-shot continua no command de provisionamento.
 
 ## Evidências exigidas
@@ -30,4 +31,6 @@
 - resposta inicial descartada converge sem duplicação;
 - URLs divergentes simultâneas retornam um sucesso e um mismatch;
 - cada endpoint vencedor possui exatamente um signing secret e um payload cifrado;
-- a jornada passa repetidamente no SQLite e a CI hospedada confirma os invariantes no PostgreSQL.
+- um teste controlado esgota três `P2034` e prova a reconciliação ou falha fechada;
+- uma disputa sincronizada em PostgreSQL real observa pelo menos um `P2034`, sem alegar que esgotou as três tentativas;
+- a API pública retorna 201/409 e confirma cardinalidade única de idempotency record, endpoint, secret, payload e command.

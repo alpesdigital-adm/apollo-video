@@ -1,0 +1,1009 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-control.ts'
+import {
+  assertSyntheticProductionRenderQualityReport,
+  calculateSyntheticProductionRenderContextHash,
+  calculateSyntheticProductionRenderQualityHash,
+  assertSyntheticProductionRenderCheckpoint,
+  syntheticProductionRenderOutputKey,
+} from '../../src/v2/domain/synthetic-production-render.ts'
+import { runNextSyntheticProductionRenderService } from '../../src/v2/application/run-synthetic-production-render-worker.ts'
+import { DomainError } from '../../src/v2/domain/errors.ts'
+import {
+  createSyntheticPresenterEditPlan,
+  createSyntheticPresenterProfileSnapshot,
+} from '../../src/v2/domain/synthetic-production.ts'
+import { compileSyntheticPresenterRenderInputs } from '../../src/v2/application/compile-synthetic-presenter-render.ts'
+import { enqueueSyntheticProductionRenderService } from '../../src/v2/application/synthetic-production-render.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import { readConfiguredRenderTargetIdentity } from '../../src/v2/infrastructure/render-target-registry.ts'
+import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
+import { assertCurrentSyntheticRenderAuthority } from '../../src/v2/infrastructure/prisma/synthetic-production-render-repository.ts'
+import { createQueuedPublicOperation } from '../../src/v2/domain/public-operation.ts'
+import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+import { createProtectedPayloadCipherFromEnvironment } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
+
+const hash = (character) => character.repeat(64)
+
+function checkpoint(overrides = {}) {
+  const base = {
+    operationId: 'operation-render-1',
+    outputArtifactId: 'artifact-render-1',
+    attempt: 2,
+    outputKind: 'final',
+    renderInputHash: hash('1'),
+    outputSha256: hash('2'),
+    byteSize: 8192,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    durationInFrames: 300,
+    codec: 'h264',
+    audioCodec: 'aac',
+    container: 'mp4',
+    runtimeIdentity: {
+      commitSha: 'a'.repeat(40),
+      treeHash: hash('3'),
+      contractGraphHash: hash('4'),
+      toolchainHash: hash('5'),
+      renderBundleHash: hash('6'),
+    },
+    committedAt: '2026-09-23T12:00:00.000Z',
+    recordedAt: '2026-09-23T12:00:01.000Z',
+    ...overrides,
+  }
+  return {
+    ...base,
+    outputKey: base.outputKey ?? syntheticProductionRenderOutputKey(base),
+    runtimeIdentityHash: base.runtimeIdentityHash ?? calculateCanonicalHash(base.runtimeIdentity),
+  }
+}
+
+function quality(overrides = {}) {
+  const body = {
+    schemaVersion: 'synthetic-production-render-quality/v1',
+    id: 'quality-render-1',
+    workspaceId: 'workspace-render-1',
+    projectId: 'project-render-1',
+    projectVersionId: 'version-render-1',
+    productionRunId: 'run-render-1',
+    publicOperationId: 'operation-render-1',
+    editPlanSnapshotId: 'snapshot-render-1',
+    planHash: hash('1'),
+    renderInputHash: hash('2'),
+    propsHash: hash('3'),
+    outputKind: 'final',
+    outputArtifactId: 'artifact-render-1',
+    outputManifestId: 'manifest-render-1',
+    outputSha256: hash('4'),
+    byteSize: 8192,
+    expected: { width: 1920, height: 1080, fps: 30, durationInFrames: 300, codec: 'h264', audioCodec: 'aac', container: 'mp4' },
+    measured: { width: 1920, height: 1080, fps: 30, durationInFrames: 300, codec: 'h264', audioCodec: 'aac', container: 'mp4', decodable: true },
+    runtimeIdentityHash: hash('5'),
+    issues: [],
+    passed: true,
+    evaluatedAt: '2026-09-23T12:00:02.000Z',
+    ...overrides,
+  }
+  return { ...body, reportHash: calculateSyntheticProductionRenderQualityHash(body) }
+}
+
+test('synthetic render checkpoint accepts only its server-derived attempt key', () => {
+  const value = checkpoint()
+  assert.equal(assertSyntheticProductionRenderCheckpoint(value), value)
+
+  for (const outputKey of [
+    '../outside.mp4',
+    '/absolute/output.mp4',
+    'synthetic-production-renders\\outside.mp4',
+    syntheticProductionRenderOutputKey({ ...value, attempt: value.attempt + 1 }),
+    syntheticProductionRenderOutputKey({ ...value, outputArtifactId: 'artifact-render-2' }),
+  ]) {
+    assert.throws(
+      () => assertSyntheticProductionRenderCheckpoint({ ...value, outputKey }),
+      (error) => error.code === 'INVALID_ARGUMENT',
+    )
+  }
+})
+
+test('synthetic render checkpoint rejects an identity hash detached from the renderer', () => {
+  const value = checkpoint()
+  assert.throws(
+    () => assertSyntheticProductionRenderCheckpoint({
+      ...value,
+      runtimeIdentity: { ...value.runtimeIdentity, toolchainHash: hash('9') },
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT',
+  )
+})
+
+test('synthetic quality rejects rehashed non-canonical codecs and invented decode state', () => {
+  const valid = quality()
+  assert.equal(assertSyntheticProductionRenderQualityReport(valid), valid)
+
+  const vp9Body = {
+    ...valid,
+    expected: { ...valid.expected, codec: 'vp9' },
+    measured: { ...valid.measured, codec: 'vp9' },
+  }
+  delete vp9Body.reportHash
+  assert.throws(
+    () => assertSyntheticProductionRenderQualityReport({
+      ...vp9Body,
+      reportHash: calculateSyntheticProductionRenderQualityHash(vp9Body),
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT',
+  )
+
+  const undecodableBody = {
+    ...valid,
+    measured: { ...valid.measured, decodable: 'yes' },
+  }
+  delete undecodableBody.reportHash
+  assert.throws(
+    () => assertSyntheticProductionRenderQualityReport({
+      ...undecodableBody,
+      reportHash: calculateSyntheticProductionRenderQualityHash(undecodableBody),
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT',
+  )
+})
+
+test('synthetic quality preserves a measured technical rejection without approving finalization', () => {
+  const base = quality()
+  const body = {
+    ...base,
+    measured: { ...base.measured, width: 1280 },
+    issues: [{ code: 'RENDER_CONTRACT_MISMATCH', severity: 'error', message: 'Decoded width differs from RenderInput.' }],
+    passed: false,
+  }
+  delete body.reportHash
+  const rejected = { ...body, reportHash: calculateSyntheticProductionRenderQualityHash(body) }
+  assert.equal(assertSyntheticProductionRenderQualityReport(rejected), rejected)
+})
+
+function finalizationWorker({ finalize }) {
+  const calls = []
+  const worker = runNextSyntheticProductionRenderService({
+    operations: {
+      async resumeWaiting(command) { calls.push(['resume', command]); return true },
+      async failOrRetry(command) {
+        calls.push(['fail', command])
+        return { operation: { status: command.error.retryable ? 'retrying' : 'failed' } }
+      },
+      async claimNext() { throw new Error('waiting render must finalize before claiming new work') },
+    },
+    renders: {
+      async findReadyToFinalize() {
+        return { workspaceId: 'workspace-render-1', operationId: 'operation-render-1', attempt: 3 }
+      },
+      async finalizeAttested(command) { calls.push(['finalize', command]); return finalize(command) },
+    },
+    protectedInputs: {}, materialize: async () => { throw new Error('not reached') },
+    renderer: {}, inspector: {}, promoter: {}, artifacts: {}, runtimeIdentity: {},
+    clock: () => new Date('2026-09-23T12:00:00.000Z'),
+  })
+  return { worker, calls }
+}
+
+test('synthetic render resumes an attested waiting operation without rendering twice', async () => {
+  const { worker, calls } = finalizationWorker({ finalize: async () => true })
+  assert.deepEqual(await worker('worker-render-finalizer'), {
+    operationId: 'operation-render-1', status: 'succeeded',
+  })
+  assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'finalize'])
+  assert.equal(calls[0][1].attempt, 3)
+  assert.equal(calls[1][1].attempt, 3)
+})
+
+test('synthetic render terminal binding failure settles the resumed lease without rerendering', async () => {
+  const { worker, calls } = finalizationWorker({
+    finalize: async () => { throw new DomainError('PERSISTENCE_CONFLICT', 'tampered attestation') },
+  })
+  assert.deepEqual(await worker('worker-render-finalizer'), {
+    operationId: 'operation-render-1', status: 'failed',
+  })
+  assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'finalize', 'fail'])
+  assert.equal(calls[2][1].error.retryable, false)
+})
+
+function renderWorkerFixture() {
+  const audio = {
+    id: 'audio-render-worker',
+    artifactId: 'artifact-audio-render-worker',
+    artifactKey: 'synthetic/audio-render-worker.wav',
+    kind: 'audio',
+    sha256: hash('a'),
+    byteSize: 1_024,
+    durationMs: 2_000,
+    locale: 'pt-BR',
+    scriptHash: hash('b'),
+    alignment: [{ text: 'Olá mundo', startMs: 0, endMs: 2_000 }],
+  }
+  const video = {
+    id: 'video-render-worker',
+    artifactId: 'artifact-video-render-worker',
+    artifactKey: 'synthetic/video-render-worker.mp4',
+    kind: 'video',
+    sha256: hash('c'),
+    byteSize: 4_096,
+  }
+  const profile = createSyntheticPresenterProfileSnapshot({
+    id: 'profile-render-worker',
+    version: 1,
+    actorIdentityId: 'identity-render-worker',
+    avatar: { adapterId: 'controlled-avatar', adapterVersion: '1.0.0', identityRef: 'avatar-render-worker' },
+    voice: { id: 'voice-render-worker', version: 1, adapterId: 'controlled-tts', adapterVersion: '1.0.0' },
+    defaultLocale: 'pt-BR',
+    status: 'active',
+    disclosure: 'Conteúdo gerado com IA',
+    consent: {
+      id: 'consent-render-worker',
+      evidenceArtifactId: 'artifact-consent-render-worker',
+      evidenceSha256: hash('d'),
+      granted: true,
+      allowedUses: ['ads'],
+      allowedMarkets: ['BRA'],
+      allowedLocales: ['pt-BR'],
+      allowedOperations: ['tts', 'audio-avatar'],
+      expiresAt: '2030-01-01T00:00:00.000Z',
+    },
+  })
+  const plan = createSyntheticPresenterEditPlan({
+    id: 'plan-render-worker',
+    workspaceId: 'workspace-render-worker',
+    projectId: 'project-render-worker',
+    projectVersionId: 'version-render-worker',
+    profile,
+    audio,
+    blocks: [{
+      id: 'block-render-worker',
+      text: 'Olá mundo',
+      rangeMs: [0, 2_000],
+      cacheKey: hash('e'),
+      providerJobId: 'job-render-worker',
+      audioSha256: audio.sha256,
+      artifact: video,
+      critic: { id: 'critic-render-worker', resultHash: hash('f'), status: 'approved' },
+    }],
+    bRoll: [],
+    overlays: [],
+    captions: true,
+    use: 'ads',
+    market: 'BRA',
+    authorization: {
+      id: 'authorization-render-worker',
+      authorizationHash: hash('1'),
+      outcome: 'allowed',
+      use: 'ads',
+      market: 'BRA',
+      locale: 'pt-BR',
+      syntheticOperations: ['tts', 'audio-avatar'],
+      artifactIds: [audio.artifactId, video.artifactId],
+      decisions: [audio.artifactId, video.artifactId].map((artifactId, index) => ({
+        artifactId,
+        rightsSnapshotId: `rights-render-worker-${index}`,
+        rightsSnapshotHash: hash(String(index + 2)),
+        validUntil: '2029-01-01T00:15:00.000Z',
+      })),
+      evaluatedAt: '2029-01-01T00:00:00.000Z',
+      expiresAt: '2029-01-01T00:15:00.000Z',
+    },
+    createdAt: '2029-01-01T00:01:00.000Z',
+  })
+  const runtimeIdentity = {
+    commitSha: 'a'.repeat(40),
+    treeHash: hash('2'),
+    contractGraphHash: hash('3'),
+    toolchainHash: hash('4'),
+    renderBundleHash: hash('5'),
+  }
+  const spec = compileSyntheticPresenterRenderInputs({
+    plan,
+    renderer: { id: 'remotion', version: '4.0.489', digest: runtimeIdentity.toolchainHash },
+    aspectRatio: '16:9',
+  }).final
+  const contextBody = {
+    schemaVersion: 'synthetic-production-render-context/v1',
+    operationId: 'operation-render-worker',
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    projectVersionId: plan.projectVersionId,
+    projectVersionHash: hash('6'),
+    productionRunId: 'run-render-worker',
+    editPlanSnapshotId: 'snapshot-render-worker',
+    editPlanSnapshotHash: plan.planHash,
+    planHash: plan.planHash,
+    outputKind: 'final',
+    aspectRatio: '16:9',
+    renderInputRef: 'protected/render-worker.json',
+    renderInputHash: spec.inputHash,
+    propsHash: spec.composition.propsHash,
+    outputArtifactId: 'artifact-output-render-worker',
+    outputManifestId: 'manifest-output-render-worker',
+  }
+  const context = {
+    ...contextBody,
+    contextHash: calculateSyntheticProductionRenderContextHash(contextBody),
+  }
+  const claimed = {
+    operation: { id: 'operation-render-worker', workspaceId: plan.workspaceId },
+    context: {
+      kind: 'synthetic-production-render',
+      ...context,
+    },
+    authenticationAudit: {},
+    lease: { owner: 'worker-render', attempt: 2, heartbeatAt: '2029-01-01T00:00:00.000Z', expiresAt: '2029-01-01T00:01:00.000Z' },
+  }
+  return { plan, spec, context, claimed, runtimeIdentity }
+}
+
+test('public operation persistence resolves the protected payload cipher only for synthetic renders', async () => {
+  let cipherResolutionCount = 0
+  const missingCipher = () => {
+    cipherResolutionCount += 1
+    return createProtectedPayloadCipherFromEnvironment({})
+  }
+  const nonSyntheticOperation = createQueuedPublicOperation({
+    id: 'operation-lazy-cipher-artifact',
+    workspaceId: 'workspace-lazy-cipher',
+    clientId: 'client-lazy-cipher',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-lazy-cipher',
+      manifestId: 'manifest-lazy-cipher',
+    },
+    createdAt: '2029-01-01T00:00:00.000Z',
+  })
+  const audit = createApiAccessAuditContext({
+    clientId: nonSyntheticOperation.clientId,
+    credentialId: 'credential-lazy-cipher',
+    workspaceId: nonSyntheticOperation.workspaceId,
+    environment: 'production',
+    authenticationKind: 'bearer',
+  })
+  let transactionAttempts = 0
+  const nonSyntheticRepository = new PrismaPublicOperationRepository({
+    async $transaction() {
+      transactionAttempts += 1
+      const conflict = new Error('controlled serialization conflict')
+      conflict.code = 'P2034'
+      throw conflict
+    },
+  }, () => 'event-lazy-cipher', missingCipher)
+  await assert.rejects(
+    nonSyntheticRepository.createOrReplay({
+      operation: nonSyntheticOperation,
+      authenticationAudit: audit,
+      context: {
+        kind: 'artifact-render',
+        authorizationId: 'authorization-lazy-cipher',
+        inputHash: hash('9'),
+      },
+      idempotencyKey: 'operation-lazy-cipher-key',
+      requestFingerprint: hash('8'),
+    }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(transactionAttempts, 3)
+  assert.equal(cipherResolutionCount, 0)
+
+  const { plan, spec, context } = renderWorkerFixture()
+  const syntheticOperation = createQueuedPublicOperation({
+    id: context.operationId,
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    clientId: 'client-lazy-cipher',
+    type: 'synthetic-production-render',
+    target: { type: 'project-version', id: plan.projectVersionId },
+    createdAt: '2029-01-01T00:02:00.000Z',
+  })
+  const syntheticAudit = createApiAccessAuditContext({
+    clientId: syntheticOperation.clientId,
+    credentialId: 'credential-lazy-cipher',
+    workspaceId: syntheticOperation.workspaceId,
+    environment: 'production',
+    authenticationKind: 'bearer',
+  })
+  const syntheticRepository = new PrismaPublicOperationRepository({
+    async $transaction(callback) {
+      return callback({
+        v2PublicOperation: { async findUnique() { return null } },
+      })
+    },
+  }, () => 'event-lazy-cipher', missingCipher)
+  await assert.rejects(
+    syntheticRepository.createOrReplay({
+      operation: syntheticOperation,
+      authenticationAudit: syntheticAudit,
+      context: { kind: 'synthetic-production-render', ...context, renderInput: spec },
+      idempotencyKey: 'synthetic-lazy-cipher-key',
+      requestFingerprint: hash('7'),
+    }),
+    (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED',
+  )
+  assert.equal(cipherResolutionCount, 1)
+})
+
+function rightsRow(snapshot) {
+  return {
+    id: snapshot.id,
+    workspaceId: snapshot.workspaceId,
+    artifactId: snapshot.artifactId,
+    sequence: snapshot.sequence,
+    schemaVersion: snapshot.schemaVersion,
+    snapshotHash: snapshot.snapshotHash,
+    owner: snapshot.owner ?? null,
+    license: snapshot.license ?? null,
+    status: snapshot.status,
+    allowedUsesJson: stableSerialize(snapshot.allowedUses),
+    prohibitedUsesJson: stableSerialize(snapshot.prohibitedUses),
+    allowedWorkspaceIdsJson: stableSerialize(snapshot.allowedWorkspaceIds),
+    allowedMarketsJson: snapshot.allowedMarkets ? stableSerialize(snapshot.allowedMarkets) : null,
+    allowedLocalesJson: snapshot.allowedLocales ? stableSerialize(snapshot.allowedLocales) : null,
+    allowedSyntheticOperationsJson: snapshot.allowedSyntheticOperations
+      ? stableSerialize(snapshot.allowedSyntheticOperations)
+      : null,
+    expiresAt: snapshot.expiresAt ? new Date(snapshot.expiresAt) : null,
+    consentStatus: snapshot.consent.status,
+    consentAllowedUsesJson: stableSerialize(snapshot.consent.allowedUses),
+    consentAllowedMarketsJson: snapshot.consent.allowedMarkets
+      ? stableSerialize(snapshot.consent.allowedMarkets)
+      : null,
+    consentAllowedLocalesJson: snapshot.consent.allowedLocales
+      ? stableSerialize(snapshot.consent.allowedLocales)
+      : null,
+    consentSyntheticOperationsJson: snapshot.consent.allowedSyntheticOperations
+      ? stableSerialize(snapshot.consent.allowedSyntheticOperations)
+      : null,
+    consentExpiresAt: snapshot.consent.expiresAt ? new Date(snapshot.consent.expiresAt) : null,
+    consentDocumentArtifactId: snapshot.consent.documentArtifactId ?? null,
+    sourceNote: snapshot.sourceNote ?? null,
+    createdByType: snapshot.createdBy.type,
+    createdById: snapshot.createdBy.id,
+    createdAt: new Date(snapshot.createdAt),
+  }
+}
+
+function syntheticRenderAuthorityFixture({ revoked = false } = {}) {
+  const base = renderWorkerFixture().plan
+  const profileSnapshotId = `${base.profile.id}:v${base.profile.version}`
+  const artifactRefs = [base.audio, base.blocks[0].artifact]
+  const rights = artifactRefs.map((artifact, index) => createAssetRightsSnapshot({
+    id: `rights-render-authority-${index}`,
+    workspaceId: base.workspaceId,
+    artifactId: artifact.artifactId,
+    sequence: 1,
+    draft: {
+      status: 'approved',
+      allowedUses: ['ads'],
+      prohibitedUses: [],
+      allowedMarkets: ['BRA'],
+      allowedLocales: ['pt-BR'],
+      allowedSyntheticOperations: ['audio-avatar'],
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      consent: {
+        status: 'approved',
+        allowedUses: ['ads'],
+        allowedMarkets: ['BRA'],
+        allowedLocales: ['pt-BR'],
+        allowedSyntheticOperations: ['audio-avatar'],
+        expiresAt: '2030-01-01T00:00:00.000Z',
+      },
+    },
+    createdBy: { type: 'system', id: 'synthetic-render-authority' },
+    createdAt: '2028-12-31T23:59:00.000Z',
+  }))
+  const planAuthorization = {
+    id: 'authorization-render-authority-plan',
+    authorizationHash: hash('c'),
+    outcome: 'allowed',
+    use: base.use,
+    market: base.market,
+    locale: base.locale,
+    syntheticOperations: ['tts', 'audio-avatar'],
+    artifactIds: artifactRefs.map((artifact) => artifact.artifactId),
+    decisions: artifactRefs.map((artifact, index) => ({
+      artifactId: artifact.artifactId,
+      rightsSnapshotId: rights[index].id,
+      rightsSnapshotHash: rights[index].snapshotHash,
+      validUntil: '2029-01-01T00:15:00.000Z',
+    })),
+    evaluatedAt: '2029-01-01T00:00:00.000Z',
+    expiresAt: '2029-01-01T00:15:00.000Z',
+  }
+  const plan = createSyntheticPresenterEditPlan({
+    id: base.id,
+    workspaceId: base.workspaceId,
+    projectId: base.projectId,
+    projectVersionId: base.projectVersionId,
+    profile: base.profile,
+    audio: base.audio,
+    blocks: base.blocks,
+    bRoll: [],
+    overlays: [],
+    captions: true,
+    use: base.use,
+    market: base.market,
+    authorization: planAuthorization,
+    createdAt: base.createdAt,
+  })
+  const profileAudit = createApiAccessAuditContext({
+    clientId: 'client-render-authority',
+    credentialId: 'credential-render-authority',
+    workspaceId: plan.workspaceId,
+    environment: 'production',
+    authenticationKind: 'bearer',
+  })
+  const profileRow = {
+    id: profileSnapshotId,
+    workspaceId: plan.workspaceId,
+    profileId: plan.profile.id,
+    version: plan.profile.version,
+    schemaVersion: 'synthetic-presenter-profile/v1',
+    status: plan.profile.status,
+    actorIdentityId: plan.profile.actorIdentityId,
+    defaultLocale: plan.profile.defaultLocale,
+    disclosure: plan.profile.disclosure,
+    consentSnapshotHash: plan.profile.consent.snapshotHash,
+    profileJson: stableSerialize(plan.profile),
+    profileHash: plan.profile.snapshotHash,
+    requestFingerprint: hash('d'),
+    idempotencyKey: 'render-authority-profile-key',
+    createdByClientId: profileAudit.clientId,
+    actorCredentialId: profileAudit.credentialId,
+    actorEnvironment: profileAudit.environment,
+    actorAuthenticationKind: profileAudit.authenticationKind,
+    actorContextHash: profileAudit.contextHash,
+    delegatedUserId: null,
+    delegatedIdentityId: null,
+    workspaceRole: null,
+    createdAt: new Date('2028-12-31T23:58:00.000Z'),
+  }
+  const currentRights = revoked
+    ? rights.map((snapshot, index) => createAssetRightsSnapshot({
+        id: `rights-render-revoked-${index}`,
+        workspaceId: snapshot.workspaceId,
+        artifactId: snapshot.artifactId,
+        sequence: 2,
+        draft: {
+          status: 'revoked', allowedUses: [], prohibitedUses: [],
+          consent: { status: 'revoked', allowedUses: [] },
+        },
+        createdBy: { type: 'system', id: 'synthetic-render-revocation' },
+        createdAt: '2029-01-01T00:04:00.000Z',
+      }))
+    : rights
+  const run = {
+    id: plan.id,
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    projectVersionId: plan.projectVersionId,
+    editPlanSnapshotId: 'snapshot-render-authority',
+    planHash: plan.planHash,
+    planJson: stableSerialize(plan),
+    status: 'rendering',
+    profileSnapshotId,
+    profileSnapshot: profileRow,
+    use: plan.use,
+    market: plan.market,
+    locale: plan.locale,
+    assets: [
+      { artifactId: plan.audio.artifactId, artifactSha256: plan.audio.sha256, providerJobId: null, criticHash: null },
+      { artifactId: plan.blocks[0].artifact.artifactId, artifactSha256: plan.blocks[0].artifact.sha256, providerJobId: plan.blocks[0].providerJobId, criticHash: plan.blocks[0].critic.resultHash },
+    ],
+  }
+  const mediaArtifacts = artifactRefs.map((artifact, index) => ({
+    id: artifact.artifactId,
+    sha256: artifact.sha256,
+    currentRightsSnapshotId: currentRights[index].id,
+    currentRightsSnapshot: rightsRow(currentRights[index]),
+  }))
+  const client = {
+    v2SyntheticProductionRun: { async findFirst() { return run } },
+    v2SyntheticPresenterProfileHead: {
+      async findUnique() {
+        return { currentVersion: plan.profile.version, currentSnapshot: profileRow }
+      },
+    },
+    v2MediaArtifact: { async findMany() { return mediaArtifacts } },
+    v2ProviderJob: {
+      async findMany() { return [] },
+    },
+    v2SyntheticCriticReport: {
+      async findMany() { return [] },
+    },
+  }
+  const row = {
+    productionRunId: run.id,
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    projectVersionId: plan.projectVersionId,
+    projectVersionHash: hash('f'),
+    editPlanSnapshotId: run.editPlanSnapshotId,
+    editPlanSnapshotHash: plan.planHash,
+    planHash: plan.planHash,
+  }
+  return { client, row, plan }
+}
+
+test('current render authority passes MediaArtifact rights after TTL reevaluation, then rejects an absent critic', async () => {
+  const fixture = syntheticRenderAuthorityFixture()
+  assert.notEqual(fixture.plan.audio.id, fixture.plan.audio.artifactId)
+  assert.notEqual(fixture.plan.blocks[0].artifact.id, fixture.plan.blocks[0].artifact.artifactId)
+  // Empty job/report readers deliberately stop this focused fixture after the
+  // artifact-id set and current-rights checks. The PostgreSQL journey supplies
+  // the real approved job and critic chain.
+  await assert.rejects(
+    assertCurrentSyntheticRenderAuthority(
+      fixture.client,
+      fixture.row,
+      new Date('2029-01-01T00:05:00.000Z'),
+    ),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && /exact current critic approval/.test(error.message),
+  )
+})
+
+test('current synthetic render authority rejects expired authorization and revoked current rights', async () => {
+  const expired = syntheticRenderAuthorityFixture()
+  await assert.rejects(
+    assertCurrentSyntheticRenderAuthority(
+      expired.client,
+      expired.row,
+      new Date('2029-01-01T00:15:00.000Z'),
+    ),
+    (error) => error.code === 'ASSET_RIGHTS_BLOCKED' && /authorization has expired/.test(error.message),
+  )
+
+  const revoked = syntheticRenderAuthorityFixture({ revoked: true })
+  await assert.rejects(
+    assertCurrentSyntheticRenderAuthority(
+      revoked.client,
+      revoked.row,
+      new Date('2029-01-01T00:05:00.000Z'),
+    ),
+    (error) => error.code === 'ASSET_RIGHTS_BLOCKED',
+  )
+})
+
+test('synthetic render enqueue uses the configured renderer and the worker recompiles the sealed render plan', async () => {
+  const { plan, runtimeIdentity } = renderWorkerFixture()
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-render-enqueue',
+    credentialId: 'credential-render-enqueue',
+    workspaceId: plan.workspaceId,
+    environment: 'production',
+  })
+  const actor = Object.freeze({
+    ...auditContext,
+    scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active',
+    auditContext,
+  })
+  let persisted
+  const renderer = readConfiguredRenderTargetIdentity({})
+  const enqueue = enqueueSyntheticProductionRenderService({
+    production: {
+      async readRun() {
+        return { status: 'compiled', plan, editPlanSnapshotId: 'snapshot-render-enqueue' }
+      },
+    },
+    projects: {
+      async read() {
+        return {
+          project: { currentVersionId: plan.projectVersionId },
+          version: { id: plan.projectVersionId, baseHash: hash('6') },
+        }
+      },
+    },
+    operations: {
+      async findReplay() { return null },
+      async createOrReplay(input) {
+        persisted = input
+        return { operation: input.operation, context: input.context, replayed: false }
+      },
+    },
+    runtimeIdentity: { async read() { return runtimeIdentity } },
+    renderer,
+    clock: () => new Date('2029-01-01T00:02:00.000Z'),
+    createId: (kind) => `render-${kind}-enqueue`,
+  })
+  const enqueued = await enqueue({
+    workspaceId: plan.workspaceId,
+    projectId: plan.projectId,
+    runId: plan.id,
+    output: { kind: 'final', aspectRatio: '9:16' },
+    actor,
+    idempotencyKey: 'render-enqueue-key',
+  })
+  assert.equal(enqueued.replayed, false)
+  assert.equal(persisted.context.renderInput.renderer.id, renderer.id)
+  assert.equal(persisted.context.renderInput.renderer.version, renderer.version)
+  assert.equal(persisted.context.planHash, plan.planHash)
+  assert.notEqual(persisted.context.renderInput.plan.hash, plan.planHash)
+
+  const { kind, renderInput, ...context } = persisted.context
+  let materialized = false
+  const worker = runNextSyntheticProductionRenderService({
+    operations: {
+      async claimNext() {
+        return {
+          operation: persisted.operation,
+          context: { kind, ...context },
+          authenticationAudit: persisted.authenticationAudit,
+          lease: {
+            owner: 'worker-render-enqueue', attempt: 1,
+            heartbeatAt: '2029-01-01T00:02:00.000Z', expiresAt: '2029-01-01T00:03:00.000Z',
+          },
+        }
+      },
+      async advancePhase() { return true },
+      async heartbeat() { return false },
+    },
+    renders: {
+      async findReadyToFinalize() { return null },
+      async readBinding() { return { context, plan } },
+    },
+    protectedInputs: { async read() { return renderInput } },
+    runtimeIdentity: { async read() { return runtimeIdentity } },
+    async materialize(_workspaceId, _validUntil, spec) {
+      assert.equal(spec, renderInput)
+      materialized = true
+      return {}
+    },
+    renderer: {}, inspector: {}, promoter: {}, artifacts: {},
+    clock: () => new Date('2029-01-01T00:02:00.000Z'),
+  })
+  assert.deepEqual(await worker('worker-render-enqueue'), {
+    operationId: persisted.operation.id,
+    status: 'lease-lost',
+  })
+  assert.equal(materialized, true)
+})
+
+test('synthetic render worker rejects a coherently rehashed RenderInput from another render plan', async () => {
+  const fixture = renderWorkerFixture()
+  const tamperedSpec = createRenderInputSpec({
+    schemaVersion: fixture.spec.schemaVersion,
+    renderer: fixture.spec.renderer,
+    composition: {
+      id: fixture.spec.composition.id,
+      version: fixture.spec.composition.version,
+      propsSchemaRef: fixture.spec.composition.propsSchemaRef,
+    },
+    plan: {
+      id: 'synthetic-other-render-plan-final',
+      versionId: fixture.spec.plan.versionId,
+      hash: hash('9'),
+    },
+    output: {
+      id: fixture.spec.output.id,
+      locale: fixture.spec.output.locale,
+      aspectRatio: fixture.spec.output.aspectRatio,
+      width: fixture.spec.output.width,
+      height: fixture.spec.output.height,
+      fps: fixture.spec.output.fps,
+      safeArea: fixture.spec.output.safeArea,
+      ...(fixture.spec.output.deliveryProfileId
+        ? { deliveryProfileId: fixture.spec.output.deliveryProfileId }
+        : {}),
+      durationInFrames: fixture.spec.output.durationInFrames,
+    },
+    assets: fixture.spec.assets,
+    props: { ...fixture.spec.props, stylePreset: 'editorial-clean' },
+  })
+  const contextBody = {
+    ...fixture.context,
+    renderInputHash: tamperedSpec.inputHash,
+    propsHash: tamperedSpec.composition.propsHash,
+  }
+  delete contextBody.contextHash
+  const tamperedContext = {
+    ...contextBody,
+    contextHash: calculateSyntheticProductionRenderContextHash(contextBody),
+  }
+  let failure
+  let materializeCalls = 0
+  const worker = runNextSyntheticProductionRenderService({
+    operations: {
+      async claimNext() {
+        return {
+          ...fixture.claimed,
+          context: { kind: 'synthetic-production-render', ...tamperedContext },
+        }
+      },
+      async advancePhase() { return true },
+      async failOrRetry(command) {
+        failure = command.error
+        return { operation: { status: 'failed' } }
+      },
+    },
+    renders: {
+      async findReadyToFinalize() { return null },
+      async readBinding() { return { context: tamperedContext, plan: fixture.plan } },
+    },
+    protectedInputs: { async read() { return tamperedSpec } },
+    runtimeIdentity: { async read() { throw new Error('runtime identity must not be read') } },
+    async materialize() { materializeCalls += 1; throw new Error('must not materialize') },
+    renderer: {}, inspector: {}, promoter: {}, artifacts: {},
+    clock: () => new Date('2029-01-01T00:02:00.000Z'),
+  })
+  assert.deepEqual(await worker('worker-render-tamper'), {
+    operationId: fixture.claimed.operation.id,
+    status: 'failed',
+  })
+  assert.equal(materializeCalls, 0)
+  assert.equal(failure.code, 'persistence_conflict')
+  assert.equal(failure.message, 'Synthetic production render could not be completed')
+  assert.equal(failure.retryable, false)
+})
+
+function renderWorkerDependencies(overrides = {}) {
+  const fixture = renderWorkerFixture()
+  const events = []
+  let persistedCheckpoint = overrides.checkpoint
+  const operations = {
+    async claimNext() { events.push('claim'); return fixture.claimed },
+    async advancePhase(command) { events.push(command.phase); return true },
+    async heartbeat() { events.push('heartbeat'); return true },
+    async wait() { events.push('wait'); return true },
+    async failOrRetry(command) {
+      events.push('fail')
+      overrides.onFailure?.(command.error)
+      return { operation: { status: command.error.retryable ? 'retrying' : 'failed' } }
+    },
+  }
+  const renders = {
+    async findReadyToFinalize() { return null },
+    async readBinding() {
+      return {
+        context: fixture.context,
+        plan: fixture.plan,
+        ...(persistedCheckpoint ? { checkpoint: persistedCheckpoint } : {}),
+      }
+    },
+    async recordCheckpoint(command) {
+      events.push('checkpoint')
+      persistedCheckpoint = command.checkpoint
+      return true
+    },
+    async recordQuality(command) {
+      events.push('quality')
+      overrides.onQuality?.(command.report)
+      return true
+    },
+  }
+  let tick = 0
+  return {
+    fixture,
+    events,
+    dependencies: {
+      operations,
+      renders,
+      protectedInputs: { async read() { return fixture.spec } },
+      async materialize() { return { ...fixture.spec, schemaVersion: 'materialized-render-input/v1' } },
+      renderer: overrides.renderer,
+      inspector: overrides.inspector ?? { async inspect() { throw new Error('inspector must not be reached') } },
+      promoter: overrides.promoter ?? { async promote() { throw new Error('promoter must not be reached') } },
+      artifacts: overrides.artifacts ?? { async persistOrReplay() { throw new Error('artifact persistence must not be reached') } },
+      runtimeIdentity: { async read() { return fixture.runtimeIdentity } },
+      clock: () => new Date(Date.parse('2029-01-01T00:00:00.000Z') + (++tick * 1_000)),
+      leaseDurationMs: 60_000,
+      heartbeatIntervalMs: 30_000,
+    },
+  }
+}
+
+test('synthetic render refuses checkpoint recovery when the durable receipt hash changed', async () => {
+  const fixture = renderWorkerFixture()
+  const persisted = checkpoint({
+    operationId: fixture.claimed.operation.id,
+    outputArtifactId: fixture.context.outputArtifactId,
+    attempt: fixture.claimed.lease.attempt,
+    outputKind: fixture.context.outputKind,
+    renderInputHash: fixture.context.renderInputHash,
+    outputSha256: hash('8'),
+    byteSize: 9_001,
+    runtimeIdentity: fixture.runtimeIdentity,
+  })
+  let inspectCalls = 0
+  let recoverCalls = 0
+  const { dependencies, events } = renderWorkerDependencies({
+    checkpoint: persisted,
+    renderer: {
+      async recover() {
+        recoverCalls += 1
+        return {
+          outputKey: persisted.outputKey,
+          outputSha256: hash('9'),
+          byteSize: persisted.byteSize,
+          inputHash: fixture.context.renderInputHash,
+          committedAt: persisted.committedAt,
+        }
+      },
+    },
+    inspector: { async inspect() { inspectCalls += 1; throw new Error('not reached') } },
+  })
+
+  const worker = runNextSyntheticProductionRenderService(dependencies)
+  assert.deepEqual(await worker('worker-render'), {
+    operationId: fixture.claimed.operation.id,
+    status: 'failed',
+  })
+  assert.equal(recoverCalls, 1)
+  assert.equal(inspectCalls, 0)
+  assert.equal(events.includes('rendering'), true)
+  assert.equal(events.includes('checkpoint'), false)
+  assert.equal(events.at(-1), 'fail')
+})
+
+test('synthetic render persists a technical rejection before failing the operation', async () => {
+  const fixture = renderWorkerFixture()
+  const receipt = {
+    outputKey: syntheticProductionRenderOutputKey({
+      operationId: fixture.claimed.operation.id,
+      outputArtifactId: fixture.context.outputArtifactId,
+      attempt: fixture.claimed.lease.attempt,
+      outputKind: fixture.context.outputKind,
+    }),
+    outputSha256: hash('8'),
+    byteSize: 9_001,
+    inputHash: fixture.context.renderInputHash,
+    committedAt: '2029-01-01T00:00:05.000Z',
+  }
+  let rejectedReport
+  let failure
+  const { dependencies, events } = renderWorkerDependencies({
+    renderer: {
+      async stage() {
+        return {
+          async commit() { return receipt },
+          async discard() {},
+        }
+      },
+    },
+    inspector: {
+      async inspect() {
+        return {
+          width: fixture.spec.output.width - 1,
+          height: fixture.spec.output.height,
+          fps: fixture.spec.output.fps,
+          durationInFrames: fixture.spec.output.durationInFrames,
+          codec: 'h264',
+          audioCodec: 'aac',
+          container: 'mp4',
+          decodable: true,
+        }
+      },
+    },
+    promoter: {
+      async promote() {
+        return { artifactKey: 'synthetic/render-worker.mp4', sha256: receipt.outputSha256, byteSize: receipt.byteSize }
+      },
+    },
+    artifacts: { async persistOrReplay() { return { replayed: false } } },
+    onQuality(report) { rejectedReport = report },
+    onFailure(error) { failure = error },
+  })
+
+  const worker = runNextSyntheticProductionRenderService(dependencies)
+  assert.deepEqual(await worker('worker-render'), {
+    operationId: fixture.claimed.operation.id,
+    status: 'failed',
+  })
+  assert.ok(rejectedReport, `expected quality before failure, received ${failure?.code}; events=${events.join(',')}`)
+  assert.equal(rejectedReport.passed, false)
+  assert.equal(rejectedReport.measured.width, fixture.spec.output.width - 1)
+  assert.equal(rejectedReport.issues[0].code, 'RENDER_CONTRACT_MISMATCH')
+  assert.ok(events.indexOf('quality') < events.indexOf('fail'))
+  assert.equal(events.includes('wait'), false)
+})

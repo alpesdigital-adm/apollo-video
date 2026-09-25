@@ -469,6 +469,12 @@ const coverage = Object.freeze({
   'apollo.projects.synthetic-production-runs.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, profile snapshot, critic results, artifact digests and authorization; serializable persistence rechecks current state before commit',
   },
+  'apollo.projects.synthetic-production-runs.render-operations.create': {
+    mode: 'idempotent-create', evidence: 'the request binds output kind and aspect ratio to the persisted production run while the server rechecks project, immutable plan and render context before atomically reserving one operation and output identity',
+  },
+  'apollo.projects.synthetic-phase-gates.run': {
+    mode: 'identity-bound-action', fields: ['projectVersionId', 'projectVersionHash'], evidence: 'request requires the exact immutable ProjectVersion identity and actor-tenant-bound idempotency; Serializable persistence rechecks the current version, active API client and server-owned evidence before commit',
+  },
   'apollo.projects.synthetic-masters.promote': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the approved provider job, presenter snapshot, exact script hash, locale, use, market, lineage and cost; the sealing transaction rechecks the job critic hash and profile snapshot hash, and a job already promoted returns its master instead of sealing a second one',
   },
@@ -486,6 +492,9 @@ const coverage = Object.freeze({
   },
   'apollo.projects.transformation-fallbacks.act': {
     mode: 'single-flight-action', evidence: 'the ledger id names a content-addressed revision; the service rejects any revision that is no longer latest and an identical already-settled decision converges as replay',
+  },
+  'apollo.projects.transformation-fallbacks.dispatch': {
+    mode: 'identity-bound-action', fields: ['expectedLedgerHash', 'use', 'market', 'locale'], evidence: 'the request names the exact current ledger hash while the server derives the generated-cutaway selection, rejected job and critic report; the actor-bound dispatch fingerprint prevents a second public key from changing the already admitted execution context',
   },
   'apollo.projects.transformation-jobs.cancel': {
     mode: 'single-flight-action', evidence: 'transport revision compare-and-swap; a job already terminal is refused and a cancellation already requested returns the recorded intent unchanged',
@@ -798,8 +807,8 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 70,
-    'identity-bound-action': 9,
+    'idempotent-create': 71,
+    'identity-bound-action': 11,
     'natural-idempotent-create': 11,
     'state-machine-action': 18,
     'single-flight-action': 4,

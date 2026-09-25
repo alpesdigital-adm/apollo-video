@@ -46,6 +46,10 @@ model V2Workspace {
   editorialBeatAdjustments               V2EditorialBeatAdjustment[]
   mediaIngestOperations                  V2MediaIngestOperation[]
   projectProxyRenderOperations           V2ProjectProxyRenderOperation[]
+  syntheticProductionRenderOperations   V2SyntheticProductionRenderOperation[]
+  syntheticProductionRenderReports      V2SyntheticProductionRenderQualityReport[]
+  syntheticBuildAttestations             V2SyntheticBuildAttestation[]
+  syntheticMasterConsumptions            V2SyntheticMasterConsumption[]
   projectFinalExportOperations           V2ProjectFinalExportOperation[]
   projectFinalExportAttempts             V2ProjectFinalExportAttempt[]
   mediaDownloadGrants                    V2MediaDownloadGrant[]
@@ -203,6 +207,9 @@ model V2Workspace {
   providerJobs                           V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
   providerResultArtifacts                V2ProviderResultArtifact[]
+  providerTransportEvidence              V2ProviderTransportEvidence[]
+  providerExecutionReceipts              V2ProviderExecutionReceipt[]
+  providerExecutionReceiptResults        V2ProviderExecutionReceiptResult[]
   syntheticScriptPlans                   V2SyntheticScriptPlan[]
   syntheticScriptPlanVersions            V2SyntheticScriptPlanVersion[]
   syntheticScriptBlocks                  V2SyntheticScriptBlock[]
@@ -218,6 +225,8 @@ model V2Workspace {
   noveltyBudgetDecisionLines             V2NoveltyBudgetDecisionLine[]
   transformationFallbackLedgers          V2TransformationFallbackLedger[]
   transformationFallbackAttempts         V2TransformationFallbackAttempt[]
+  transformationFallbackDispatchRequests V2TransformationFallbackDispatchRequest[]
+  transformationFallbackDispatchClaims V2TransformationFallbackDispatchClaim[]
   transformationCriticReports            V2TransformationCriticReport[]
   transformationCriticMeasurements       V2TransformationCriticMeasurement[]
   transformationCriticIssues             V2TransformationCriticIssue[]
@@ -324,6 +333,9 @@ model V2ApiClient {
   proxyReviewDecisions                  V2ProxyReviewDecision[]
   qualityIterations                     V2QualityIteration[]
   mvpCoreGates                          V2MvpCoreGate[]
+  transformationFallbackDispatchAttempts V2TransformationFallbackAttempt[] @relation("TransformationFallbackDispatchActor")
+  transformationFallbackDispatchRequests V2TransformationFallbackDispatchRequest[] @relation("TransformationFallbackDispatchActor")
+  transformationFallbackDispatchClaims V2TransformationFallbackDispatchClaim[] @relation("TransformationFallbackDispatchClaimActor")
   syntheticPhaseGates                   V2SyntheticPhaseGate[]
   multicamLongformGates                 V2MulticamLongformGate[]
   speechCatalogRuns                     V2SpeechSegmentCatalogRun[]
@@ -766,12 +778,20 @@ model V2Project {
   perceptionTimelines                    V2PerceptionTimeline[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
   syntheticAudioMasters                  V2SyntheticAudioMaster[]
+  syntheticProductionRenderOperations   V2SyntheticProductionRenderOperation[]
+  syntheticProductionRenderReports      V2SyntheticProductionRenderQualityReport[]
+  syntheticBuildAttestations             V2SyntheticBuildAttestation[]
+  syntheticMasterConsumptionsAsConsumer V2SyntheticMasterConsumption[] @relation("SyntheticMasterConsumptionConsumerProject")
+  syntheticMasterConsumptionsAsSource   V2SyntheticMasterConsumption[] @relation("SyntheticMasterConsumptionSourceProject")
   syntheticMasterAssets                  V2SyntheticMasterAsset[]
   syntheticSyntheticSpeechSegments       V2SyntheticSpeechSegment[]
   syntheticProductionAssets              V2SyntheticProductionAsset[]
   providerJobs                           V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
   providerResultArtifacts                V2ProviderResultArtifact[]
+  providerTransportEvidence              V2ProviderTransportEvidence[]
+  providerExecutionReceipts              V2ProviderExecutionReceipt[]
+  providerExecutionReceiptResults        V2ProviderExecutionReceiptResult[]
   syntheticScriptPlans                   V2SyntheticScriptPlan[]
   syntheticScriptPlanVersions            V2SyntheticScriptPlanVersion[]
   syntheticScriptBlocks                  V2SyntheticScriptBlock[]
@@ -783,6 +803,8 @@ model V2Project {
   transformationProviderSelections       V2TransformationProviderSelection[]
   noveltyBudgetDecisions                 V2NoveltyBudgetDecision[]
   transformationFallbackLedgers          V2TransformationFallbackLedger[]
+  transformationFallbackDispatchRequests V2TransformationFallbackDispatchRequest[]
+  transformationFallbackDispatchClaims V2TransformationFallbackDispatchClaim[]
   transformationCriticReports            V2TransformationCriticReport[]
   captureSessionVersions                 V2CaptureSessionVersion[]
   captureSessionHeads                    V2CaptureSessionHead[]
@@ -875,6 +897,7 @@ model V2ProjectSnapshot {
   finalEditPlanOperations V2ProjectFinalExportOperation[] @relation("FinalExportEditPlanSnapshot")
   finalExportOperations   V2ProjectFinalExportOperation[] @relation("FinalExportQualitySnapshot")
   syntheticEditPlanRuns   V2SyntheticProductionRun[]      @relation("SyntheticEditPlanSnapshot")
+  syntheticRenderOperations V2SyntheticProductionRenderOperation[] @relation("SyntheticProductionRenderEditPlanSnapshot")
 
   @@unique([id, projectId, workspaceId])
   @@unique([projectId, kind, contentHash])
@@ -997,6 +1020,11 @@ model V2ProjectVersion {
   proxyReusesAsBase                V2ProjectProxyRenderOperation[]     @relation("ProjectProxyReuseBaseVersion")
   syntheticProductionRuns          V2SyntheticProductionRun[]
   syntheticAudioMasters            V2SyntheticAudioMaster[]
+  syntheticProductionRenderOperations V2SyntheticProductionRenderOperation[]
+  syntheticProductionRenderReports V2SyntheticProductionRenderQualityReport[]
+  syntheticBuildAttestations       V2SyntheticBuildAttestation[]
+  syntheticMasterConsumptionsAsConsumer V2SyntheticMasterConsumption[] @relation("SyntheticMasterConsumptionConsumerVersion")
+  syntheticMasterConsumptionsAsSource V2SyntheticMasterConsumption[] @relation("SyntheticMasterConsumptionSourceVersion")
   syntheticMasterAssets            V2SyntheticMasterAsset[]
   syntheticScriptPlanVersions      V2SyntheticScriptPlanVersion[]
   providerJobs                     V2ProviderJob[]
@@ -1708,6 +1736,10 @@ model V2MediaArtifact {
   syntheticSegmentAudio        V2SyntheticSpeechSegment[]                @relation("SyntheticSegmentAudio")
   syntheticSegmentVideo        V2SyntheticSpeechSegment[]                @relation("SyntheticSegmentVideo")
   syntheticAudioMasters        V2SyntheticAudioMaster[]                  @relation("SyntheticAudioArtifact")
+  syntheticRenderQualityReports V2SyntheticProductionRenderQualityReport[] @relation("SyntheticRenderQualityArtifact")
+  syntheticMasterConsumptions  V2SyntheticMasterConsumption[]            @relation("SyntheticMasterConsumptionSourceArtifact")
+  syntheticCriticOutputSpeechEvidence V2SyntheticCriticReport[]           @relation("SyntheticCriticOutputSpeechEvidence")
+  syntheticCriticSourceAudioEvidence V2SyntheticCriticReport[]            @relation("SyntheticCriticSourceAudioEvidence")
   syntheticAlignmentMasters    V2SyntheticAudioMaster[]                  @relation("SyntheticAlignmentArtifact")
   blockGenerationAudio         V2SyntheticBlockGeneration[]              @relation("BlockGenerationAudio")
   blockGenerationAlignments    V2SyntheticBlockGeneration[]              @relation("BlockGenerationAlignment")
@@ -2050,6 +2082,8 @@ model V2MediaArtifactManifest {
   imageAnalyses              V2ImageAnalysis[]
   imageReuseSources          V2ImageReuseReference[]                   @relation("ImageReuseSourceManifest")
   automaticCatalogRecords    V2AutomaticCatalogRecord[]
+  syntheticRenderQualityReports V2SyntheticProductionRenderQualityReport[] @relation("SyntheticRenderQualityManifest")
+  syntheticBuildAttestations V2SyntheticBuildAttestation[]
 
   @@unique([id, workspaceId])
   @@unique([id, artifactId, workspaceId])
@@ -2096,6 +2130,7 @@ model V2RenderInputPayload {
 
   workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   manifests V2MediaArtifactManifest[]
+  syntheticProductionRenders V2SyntheticProductionRenderOperation[]
 
   @@id([workspaceId, ref])
   @@unique([workspaceId, inputHash])
@@ -2997,6 +3032,7 @@ model V2PublicOperation {
   artifactRender                   V2ArtifactRenderOperation?
   mediaIngest                      V2MediaIngestOperation?
   projectProxyRender               V2ProjectProxyRenderOperation?
+  syntheticProductionRender        V2SyntheticProductionRenderOperation?
   projectFinalExport               V2ProjectFinalExportOperation?
   sourceCleanupPlan                V2SourceCleanupPlan?
   longFormIndexWorkflow            V2LongFormIndexWorkflow?
@@ -3783,6 +3819,7 @@ model V2SyntheticMasterAsset {
   artifacts       V2SyntheticMasterArtifact[]
   speechSegments  V2SyntheticSpeechSegment[]
   cacheDecisions  V2SyntheticCacheDecision[]  @relation("CacheDecisionCandidateMaster")
+  consumptions    V2SyntheticMasterConsumption[]
 
   @@unique([id, workspaceId], map: "synthetic_master_assets_id_workspace_key")
   @@unique([workspaceId, masterHash], map: "synthetic_master_assets_workspace_hash_key")
@@ -3912,6 +3949,7 @@ model V2SyntheticAudioMaster {
   ttsProviderJob      V2ProviderJob?                  @relation("SyntheticAudioTtsJob", fields: [ttsProviderJobId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy           V2ApiClient                     @relation("SyntheticAudioMasterCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   blockConcatenations V2SyntheticBlockConcatenation[]
+  productionRuns      V2SyntheticProductionRun[]      @relation("SyntheticProductionAudioMaster")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, createdByClientId, actorContextHash, idempotencyKey], map: "synthetic_audio_masters_workspace_project_actor_key")
@@ -4126,6 +4164,7 @@ model V2SyntheticCacheDecision {
   project             V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   candidateGeneration V2SyntheticBlockGeneration? @relation("CacheDecisionCandidateGeneration", fields: [candidateGenerationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   candidateMaster     V2SyntheticMasterAsset?     @relation("CacheDecisionCandidateMaster", fields: [candidateMasterId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  masterConsumption   V2SyntheticMasterConsumption?
 
   @@unique([id, workspaceId], map: "synthetic_cache_decisions_id_workspace_key")
   @@unique([workspaceId, decisionHash], map: "synthetic_cache_decisions_workspace_hash_key")
@@ -4207,6 +4246,9 @@ model V2SyntheticProductionRun {
   projectVersionId        String   @db.VarChar(128)
   profileSnapshotId       String   @db.VarChar(128)
   editPlanSnapshotId      String   @db.VarChar(128)
+  audioMasterId           String?  @db.VarChar(128)
+  audioMasterHash         String?  @db.Char(64)
+  audioOriginProjectId    String?  @db.VarChar(128)
   schemaVersion           String   @db.VarChar(64)
   policyVersion           String   @db.VarChar(64)
   status                  String   @db.VarChar(24)
@@ -4235,8 +4277,13 @@ model V2SyntheticProductionRun {
   projectVersion   V2ProjectVersion             @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   profileSnapshot  V2SyntheticPresenterProfile  @relation(fields: [profileSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   editPlanSnapshot V2ProjectSnapshot            @relation("SyntheticEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  audioMaster      V2SyntheticAudioMaster?       @relation("SyntheticProductionAudioMaster", fields: [audioMasterId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_runs_audio_master_fkey")
   createdBy        V2ApiClient                  @relation("SyntheticProductionRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   assets           V2SyntheticProductionAsset[]
+  renderOperations V2SyntheticProductionRenderOperation[]
+  masterConsumption V2SyntheticMasterConsumption?
+  renderQualityReports V2SyntheticProductionRenderQualityReport[]
+  buildAttestations V2SyntheticBuildAttestation[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -4244,6 +4291,7 @@ model V2SyntheticProductionRun {
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, projectVersionId])
   @@index([workspaceId, profileSnapshotId])
+  @@index([workspaceId, audioMasterId], map: "synthetic_production_runs_workspace_audio_master_idx")
   @@index([workspaceId, status, createdAt(sort: Desc)])
   @@map("synthetic_production_runs")
 }
@@ -4324,6 +4372,12 @@ model V2ProviderJob {
   transformationSelectionHash String?   @db.Char(64)
   transformationProviderId    String?   @db.VarChar(128)
   transformationCapabilityId  String?   @db.VarChar(128)
+  fallbackLedgerId            String?   @db.VarChar(128)
+  fallbackLedgerHash          String?   @db.Char(64)
+  fallbackRung                String?   @db.VarChar(24)
+  fallbackRejectedJobId       String?   @db.VarChar(128)
+  fallbackRejectedReportHash  String?   @db.Char(64)
+  fallbackDispatchRequestHash String?   @db.Char(64)
   observedCostCurrency        String?   @db.Char(3)
   observedCostMinorUnits      Int?
   deadlineAt                  DateTime? @db.Timestamptz(3)
@@ -4338,8 +4392,17 @@ model V2ProviderJob {
   transitions          V2ProviderJobTransition[]
   audioMasters         V2SyntheticAudioMaster[]     @relation("SyntheticAudioTtsJob")
   blockGenerations     V2SyntheticBlockGeneration[] @relation("BlockGenerationProviderJob")
+  fallbackLedger       V2TransformationFallbackLedger? @relation("ProviderJobFallbackLedger", fields: [fallbackLedgerId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "provider_jobs_fallback_ledger_fkey")
+  fallbackRejectedJob  V2ProviderJob?               @relation("ProviderJobFallbackRejected", fields: [fallbackRejectedJobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "provider_jobs_fallback_rejected_job_fkey")
+  fallbackJobs         V2ProviderJob[]               @relation("ProviderJobFallbackRejected")
+  fallbackRejectedReport V2TransformationCriticReport? @relation("ProviderJobFallbackReport", fields: [workspaceId, fallbackRejectedReportHash], references: [workspaceId, reportHash], onDelete: Restrict, map: "provider_jobs_fallback_rejected_report_fkey")
+  syntheticCriticReports V2SyntheticCriticReport[] @relation("SyntheticCriticProviderJob")
+  masterConsumptions   V2SyntheticMasterConsumption[] @relation("SyntheticMasterConsumptionSourceJob")
+  fallbackDispatchClaims V2TransformationFallbackDispatchClaim[]
   syntheticMasters     V2SyntheticMasterAsset[]     @relation("SyntheticMasterProviderJob")
   resultArtifacts      V2ProviderResultArtifact[]
+  transportEvidence    V2ProviderTransportEvidence[]
+  executionReceipt     V2ProviderExecutionReceipt?
   transportState       V2ProviderJobTransportState?
   callbackEvents       V2ProviderCallbackEvent[]
 
@@ -4347,7 +4410,9 @@ model V2ProviderJob {
   @@unique([id, workspaceId, projectId])
   @@unique([workspaceId, createdByClientId, actorContextHash, idempotencyKey])
   @@unique([workspaceId, adapterId, providerJobId])
+  @@unique([workspaceId, projectId, fallbackLedgerId, fallbackRung], map: "provider_jobs_fallback_dispatch_key")
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, fallbackLedgerId, createdAt(sort: Desc)], map: "provider_jobs_workspace_fallback_ledger_created_idx")
   @@index([workspaceId, status, leaseExpiresAt, createdAt])
   @@index([workspaceId, originProjectVersionId])
   @@index([workspaceId, resultArtifactId])
@@ -4414,6 +4479,9 @@ model V2TransformationFallbackLedger {
   workspace V2Workspace                       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project   V2Project                         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   attempts  V2TransformationFallbackAttempt[]
+  providerJobs V2ProviderJob[] @relation("ProviderJobFallbackLedger")
+  requestedDispatchClaims V2TransformationFallbackDispatchClaim[] @relation("TransformationFallbackRequestedLedger")
+  resultDispatchClaims V2TransformationFallbackDispatchClaim[] @relation("TransformationFallbackResultLedger")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, briefId])
@@ -4440,14 +4508,91 @@ model V2TransformationFallbackAttempt {
   costCurrency             String  @db.Char(3)
   reason                   String  @db.VarChar(300)
   descendedBecause         String? @db.VarChar(48)
+  dispatchRequestHash      String? @db.Char(64)
+  actorClientId            String? @db.VarChar(80)
+  actorCredentialId        String? @db.VarChar(128)
+  actorEnvironment         String? @db.VarChar(16)
+  actorAuthenticationKind  String? @db.VarChar(16)
+  actorContextHash         String? @db.Char(64)
+  delegatedUserId          String? @db.VarChar(128)
+  delegatedIdentityId      String? @db.VarChar(128)
+  workspaceRole            String? @db.VarChar(32)
 
   workspace V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   ledger    V2TransformationFallbackLedger @relation(fields: [ledgerId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  dispatchActor V2ApiClient? @relation("TransformationFallbackDispatchActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "transformation_fallback_attempts_dispatch_actor_fkey")
 
   @@unique([id, workspaceId])
   @@unique([ledgerId, sequence])
   @@index([workspaceId, providerJobId])
   @@map("transformation_fallback_attempts")
+}
+
+model V2TransformationFallbackDispatchClaim {
+  id                       String    @id @db.VarChar(128)
+  workspaceId              String    @db.VarChar(128)
+  projectId                String    @db.VarChar(128)
+  actorClientId            String    @db.VarChar(80)
+  actorCredentialId        String?   @db.VarChar(128)
+  actorEnvironment         String?   @db.VarChar(16)
+  actorAuthenticationKind  String?   @db.VarChar(16)
+  actorContextHash         String    @db.Char(64)
+  delegatedUserId          String?   @db.VarChar(128)
+  delegatedIdentityId      String?   @db.VarChar(128)
+  workspaceRole            String?   @db.VarChar(32)
+  dispatchRequestHash      String    @db.Char(64)
+  requestedLedgerId        String    @db.VarChar(128)
+  requestedLedgerHash      String    @db.Char(64)
+  briefId                  String    @db.VarChar(128)
+  rung                     String    @db.VarChar(24)
+  outcome                  String    @db.VarChar(16)
+  providerJobId            String?   @db.VarChar(128)
+  resultLedgerId           String?   @db.VarChar(128)
+  resultLedgerHash         String?   @db.Char(64)
+  reason                   String?   @db.VarChar(300)
+  createdAt                DateTime  @db.Timestamptz(3)
+  settledAt                DateTime? @db.Timestamptz(3)
+
+  workspace       V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "transformation_fallback_claims_workspace_fkey")
+  project         V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "transformation_fallback_claims_project_fkey")
+  actor           V2ApiClient @relation("TransformationFallbackDispatchClaimActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "transformation_fallback_claims_actor_fkey")
+  requestedLedger V2TransformationFallbackLedger @relation("TransformationFallbackRequestedLedger", fields: [requestedLedgerId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "transformation_fallback_claims_requested_ledger_fkey")
+  resultLedger    V2TransformationFallbackLedger? @relation("TransformationFallbackResultLedger", fields: [resultLedgerId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "transformation_fallback_claims_result_ledger_fkey")
+  providerJob     V2ProviderJob? @relation(fields: [providerJobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "transformation_fallback_claims_job_fkey")
+  requests        V2TransformationFallbackDispatchRequest[]
+
+  @@unique([id, workspaceId], map: "transformation_fallback_claims_id_workspace_key")
+  @@unique([workspaceId, projectId, requestedLedgerId, rung], map: "transformation_fallback_claims_ledger_rung_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "transformation_fallback_claims_project_idx")
+  @@map("transformation_fallback_dispatch_claims")
+}
+
+model V2TransformationFallbackDispatchRequest {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  actorClientId           String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  idempotencyKey          String   @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  claimId                 String   @db.VarChar(128)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "transformation_fallback_requests_workspace_fkey")
+  project   V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "transformation_fallback_requests_project_fkey")
+  actor     V2ApiClient @relation("TransformationFallbackDispatchActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "transformation_fallback_requests_actor_fkey")
+  claim     V2TransformationFallbackDispatchClaim @relation(fields: [claimId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "transformation_fallback_requests_claim_fkey")
+
+  @@unique([id, workspaceId], map: "transformation_fallback_requests_id_workspace_key")
+  @@unique([workspaceId, actorClientId, idempotencyKey], map: "transformation_fallback_requests_actor_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "transformation_fallback_requests_project_idx")
+  @@map("transformation_fallback_dispatch_requests")
 }
 
 /// F3.016 / FR-116 — the transformation critic. Not the synthetic presenter
@@ -4482,8 +4627,10 @@ model V2TransformationCriticReport {
   project      V2Project                           @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   measurements V2TransformationCriticMeasurement[]
   issues       V2TransformationCriticIssue[]
+  fallbackJobs V2ProviderJob[] @relation("ProviderJobFallbackReport")
 
   @@unique([id, workspaceId])
+  @@unique([workspaceId, reportHash], map: "transformation_critic_reports_workspace_hash_key")
   @@index([workspaceId, briefId, evaluatedAt(sort: Desc)])
   @@index([workspaceId, providerJobId])
   @@map("transformation_critic_reports")
@@ -4712,18 +4859,124 @@ model V2ProviderResultArtifact {
   observedCostMinorUnits Int?
   completedAt            DateTime @db.Timestamptz(3)
   createdAt              DateTime @db.Timestamptz(3)
+  recordJson             String?  @db.Text
+  recordHash             String?  @db.Char(64)
 
   workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project   V2Project       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   job       V2ProviderJob   @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
   artifact  V2MediaArtifact @relation("ProviderResultArtifactMedia", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  receiptResults V2ProviderExecutionReceiptResult[]
 
   @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId, jobId], map: "provider_result_artifacts_id_workspace_project_job_key")
   @@unique([jobId, role])
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, artifactId])
   @@index([workspaceId, adapterId, providerJobRef])
   @@map("provider_result_artifacts")
+}
+
+model V2ProviderTransportEvidence {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  jobId                 String   @db.VarChar(128)
+  schemaVersion         String   @db.VarChar(64)
+  attempt               Int
+  phase                 String   @db.VarChar(16)
+  runtimeClass          String   @db.VarChar(16)
+  adapterId             String   @db.VarChar(128)
+  adapterVersion        String   @db.VarChar(128)
+  adapterConfigHash     String   @db.Char(64)
+  endpointClass         String   @db.VarChar(128)
+  method                String   @db.VarChar(16)
+  requestHash           String   @db.Char(64)
+  responseHash          String   @db.Char(64)
+  responseStatus        Int
+  providerJobRef        String?  @db.VarChar(256)
+  observedAt            DateTime @db.Timestamptz(3)
+  observationHash       String   @db.Char(64)
+  inputHash             String   @db.Char(64)
+  authorizationHash     String   @db.Char(64)
+  jobHash               String   @db.Char(64)
+  leaseOwner            String   @db.VarChar(128)
+  leaseToken            String   @db.VarChar(128)
+  evidenceHash          String   @db.Char(64)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "provider_transport_evidence_workspace_fkey")
+  project   V2Project     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "provider_transport_evidence_project_fkey")
+  job       V2ProviderJob @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "provider_transport_evidence_job_fkey")
+  submitReceipts   V2ProviderExecutionReceipt[] @relation("ProviderReceiptSubmitEvidence")
+  retrieveReceipts V2ProviderExecutionReceipt[] @relation("ProviderReceiptRetrieveEvidence")
+
+  @@unique([id, workspaceId], map: "provider_transport_evidence_id_workspace_key")
+  @@unique([workspaceId, jobId, attempt, phase, observationHash], map: "provider_transport_evidence_attempt_phase_key")
+  @@index([workspaceId, projectId, jobId, phase, observedAt], map: "provider_transport_evidence_job_phase_idx")
+  @@map("provider_transport_evidence")
+}
+
+model V2ProviderExecutionReceipt {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  jobId                String   @db.VarChar(128)
+  attempt              Int
+  schemaVersion        String   @db.VarChar(64)
+  runtimeClass         String   @db.VarChar(16)
+  adapterId            String   @db.VarChar(128)
+  adapterVersion       String   @db.VarChar(128)
+  adapterConfigHash    String   @db.Char(64)
+  inputHash            String   @db.Char(64)
+  authorizationHash    String   @db.Char(64)
+  providerJobRef       String   @db.VarChar(256)
+  leaseOwner           String   @db.VarChar(128)
+  leaseToken           String   @db.VarChar(128)
+  submitEvidenceId     String   @db.VarChar(128)
+  submitEvidenceHash   String   @db.Char(64)
+  retrieveEvidenceId   String?  @db.VarChar(128)
+  retrieveEvidenceHash String?  @db.Char(64)
+  receiptJson          String   @db.Text
+  receiptHash          String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "provider_execution_receipts_workspace_fkey")
+  project   V2Project     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "provider_execution_receipts_project_fkey")
+  job       V2ProviderJob @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "provider_execution_receipts_job_fkey")
+  submitEvidence   V2ProviderTransportEvidence  @relation("ProviderReceiptSubmitEvidence", fields: [submitEvidenceId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "provider_execution_receipts_submit_fkey")
+  retrieveEvidence V2ProviderTransportEvidence? @relation("ProviderReceiptRetrieveEvidence", fields: [retrieveEvidenceId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "provider_execution_receipts_retrieve_fkey")
+  results V2ProviderExecutionReceiptResult[]
+
+  @@unique([id, workspaceId], map: "provider_execution_receipts_id_workspace_key")
+  @@unique([id, workspaceId, projectId], map: "provider_execution_receipts_id_workspace_project_key")
+  @@unique([id, workspaceId, projectId, jobId], map: "provider_execution_receipts_id_workspace_project_job_key")
+  @@unique([jobId, workspaceId, projectId], map: "provider_execution_receipts_job_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "provider_execution_receipts_project_created_idx")
+  @@map("provider_execution_receipts")
+}
+
+model V2ProviderExecutionReceiptResult {
+  receiptId       String @db.VarChar(128)
+  workspaceId     String @db.VarChar(128)
+  projectId       String @db.VarChar(128)
+  jobId           String @db.VarChar(128)
+  resultRecordId  String @db.VarChar(128)
+  resultRecordHash String @db.Char(64)
+  role            String @db.VarChar(32)
+  artifactId      String @db.VarChar(128)
+  artifactSha256  String @db.Char(64)
+  byteSize        BigInt
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "provider_execution_receipt_results_workspace_fkey")
+  project   V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "provider_execution_receipt_results_project_fkey")
+  receipt   V2ProviderExecutionReceipt @relation(fields: [receiptId, workspaceId, projectId, jobId], references: [id, workspaceId, projectId, jobId], onDelete: Cascade, map: "provider_execution_receipt_results_receipt_fkey")
+  result    V2ProviderResultArtifact   @relation(fields: [resultRecordId, workspaceId, projectId, jobId], references: [id, workspaceId, projectId, jobId], onDelete: Restrict, map: "provider_execution_receipt_results_result_fkey")
+
+  @@id([receiptId, resultRecordId])
+  @@unique([receiptId, role], map: "provider_execution_receipt_results_role_key")
+  @@index([workspaceId, projectId, artifactId], map: "provider_execution_receipt_results_artifact_idx")
+  @@map("provider_execution_receipt_results")
 }
 
 model V2TransformationBrief {
@@ -4848,6 +5101,7 @@ model V2TransformationProviderSelection {
   briefHash            String   @db.Char(64)
   selectedProviderId   String?  @db.VarChar(128)
   selectedCapabilityId String?  @db.VarChar(128)
+  requestedOperation   String?  @db.VarChar(32)
   policyJson           String   @db.Text
   candidatesJson       String   @db.Text
   selectedReason       String   @db.VarChar(300)
@@ -8772,6 +9026,7 @@ model V2SyntheticCriticReport {
   id                  String   @id @db.VarChar(128)
   workspaceId         String   @db.VarChar(128)
   projectId           String   @db.VarChar(128)
+  providerJobId       String?  @db.VarChar(128)
   blockId             String   @db.VarChar(128)
   schemaVersion       String   @db.VarChar(64)
   capability          String   @db.VarChar(64)
@@ -8784,6 +9039,35 @@ model V2SyntheticCriticReport {
   scriptHash          String   @db.Char(64)
   profileSnapshotId   String   @db.VarChar(128)
   expectedIdentityRef String   @db.VarChar(256)
+  evaluationContextHash String? @db.Char(64)
+  outputSpeechEvidenceArtifactId String? @db.VarChar(128)
+  sourceAudioArtifactId String? @db.VarChar(128)
+  sourceAudioRangeHash String? @db.Char(64)
+  sourceAudioPcmSha256 String? @db.Char(64)
+  outputAudioPcmSha256 String? @db.Char(64)
+  outputSpeechEvidenceHash String? @db.Char(64)
+  audioSampleRateHz Int?
+  alignedLagSamples Int?
+  sourceRmsBps Int?
+  outputRmsBps Int?
+  audioPassed Boolean?
+  sourceAudioDurationMs Int?
+  outputAudioDurationMs Int?
+  audioComparisonPolicyVersion String? @db.VarChar(128)
+  audioCorrelationBps Int?
+  audioNormalizedErrorBps Int?
+  audioComparedSampleCount Int?
+  sourceCoverageBps Int?
+  outputCoverageBps Int?
+  worstWindowCorrelationBps Int?
+  worstWindowNormalizedErrorBps Int?
+  failedWindowCount Int?
+  comparedWindowCount Int?
+  outputSpeechEvidenceKind String? @db.VarChar(16)
+  outputSpeechEvaluatorId String? @db.VarChar(128)
+  outputSpeechEvaluatorVersion String? @db.VarChar(128)
+  outputTranscriptHash String? @db.Char(64)
+  observedIdentityRef String? @db.VarChar(256)
   decision            String   @db.VarChar(24)
   recommendedAction   String   @db.VarChar(16)
   thresholdsVersion   String   @db.VarChar(128)
@@ -8792,11 +9076,14 @@ model V2SyntheticCriticReport {
   decidedAt           DateTime @db.Timestamptz(3)
 
   workspace         V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  providerJob       V2ProviderJob?                 @relation("SyntheticCriticProviderJob", fields: [providerJobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "synthetic_critic_reports_provider_job_fkey")
   project           V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   block             V2SyntheticScriptBlock         @relation("SyntheticCriticBlock", fields: [blockId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   artifact          V2MediaArtifact                @relation("SyntheticCriticArtifact", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   audioArtifact     V2MediaArtifact?               @relation("SyntheticCriticAudio", fields: [audioArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   alignmentArtifact V2MediaArtifact?               @relation("SyntheticCriticAlignment", fields: [alignmentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  outputSpeechEvidenceArtifact V2MediaArtifact?     @relation("SyntheticCriticOutputSpeechEvidence", fields: [outputSpeechEvidenceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_critic_output_speech_artifact_fkey")
+  sourceAudioEvidenceArtifact V2MediaArtifact?      @relation("SyntheticCriticSourceAudioEvidence", fields: [sourceAudioArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_critic_source_audio_artifact_fkey")
   profileSnapshot   V2SyntheticPresenterProfile    @relation("SyntheticCriticProfile", fields: [profileSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   evaluators        V2SyntheticCriticEvaluator[]
   measurements      V2SyntheticCriticMeasurement[]
@@ -8807,8 +9094,9 @@ model V2SyntheticCriticReport {
   // ever being able to drift from the report's own block.
   @@unique([id, workspaceId, blockId], map: "synthetic_critic_reports_id_workspace_block_key")
   @@unique([workspaceId, reportHash], map: "synthetic_critic_reports_workspace_hash_key")
-  @@unique([workspaceId, blockId, artifactId, thresholdsVersion], map: "synthetic_critic_reports_workspace_take_key")
+  @@unique([workspaceId, evaluationContextHash], map: "synthetic_critic_reports_workspace_context_key")
   @@index([workspaceId, blockId], map: "synthetic_critic_reports_workspace_block_idx")
+  @@index([workspaceId, providerJobId], map: "synthetic_critic_reports_workspace_provider_job_idx")
   @@index([workspaceId, artifactId], map: "synthetic_critic_reports_workspace_artifact_idx")
   @@index([workspaceId, decision], map: "synthetic_critic_reports_workspace_decision_idx")
   @@index([workspaceId, decidedAt(sort: Desc)], map: "synthetic_critic_reports_workspace_decided_idx")
@@ -8874,6 +9162,178 @@ model V2SyntheticCriticIssue {
   @@index([workspaceId, blockId, dimension], map: "synthetic_critic_issues_workspace_block_idx")
   @@index([workspaceId, dimension, severity], map: "synthetic_critic_issues_workspace_dimension_idx")
   @@map("synthetic_critic_issues")
+}
+
+model V2SyntheticProductionRenderOperation {
+  operationId             String    @id @db.VarChar(128)
+  workspaceId             String    @db.VarChar(128)
+  projectId               String    @db.VarChar(128)
+  projectVersionId        String    @db.VarChar(128)
+  projectVersionHash      String    @db.Char(64)
+  productionRunId         String    @db.VarChar(128)
+  editPlanSnapshotId      String    @db.VarChar(128)
+  editPlanSnapshotHash    String    @db.Char(64)
+  planHash                String    @db.Char(64)
+  outputKind              String    @db.VarChar(16)
+  aspectRatio             String    @db.VarChar(16)
+  renderInputRef          String    @db.VarChar(128)
+  renderInputHash         String    @db.Char(64)
+  propsHash               String    @db.Char(64)
+  outputArtifactId        String    @db.VarChar(128)
+  outputManifestId        String    @db.VarChar(128)
+  contextJson             String    @db.Text
+  contextHash             String    @db.Char(64)
+  runtimeCommitSha        String?   @db.VarChar(64)
+  runtimeTreeHash         String?   @db.Char(64)
+  runtimeContractGraphHash String?  @db.Char(64)
+  runtimeToolchainHash    String?   @db.Char(64)
+  runtimeRenderBundleHash String?   @db.Char(64)
+  runtimeIdentityHash     String?   @db.Char(64)
+  checkpointAttempt       Int?
+  checkpointOutputKey     String?   @db.Text
+  checkpointOutputSha256  String?   @db.Char(64)
+  checkpointByteSize      BigInt?
+  checkpointWidth         Int?
+  checkpointHeight        Int?
+  checkpointFps           Float?
+  checkpointDurationFrames Int?
+  checkpointCodec         String?   @db.VarChar(32)
+  checkpointAudioCodec    String?   @db.VarChar(32)
+  checkpointContainer     String?   @db.VarChar(32)
+  checkpointCommittedAt   DateTime? @db.Timestamptz(3)
+  checkpointRecordedAt    DateTime? @db.Timestamptz(3)
+  createdAt               DateTime  @db.Timestamptz(3)
+  updatedAt               DateTime  @db.Timestamptz(3)
+
+  workspace       V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "synthetic_render_ops_workspace_fkey")
+  project         V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_render_ops_project_fkey")
+  projectVersion  V2ProjectVersion             @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "synthetic_render_ops_version_fkey")
+  productionRun   V2SyntheticProductionRun     @relation(fields: [productionRunId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "synthetic_render_ops_run_fkey")
+  editPlanSnapshot V2ProjectSnapshot           @relation("SyntheticProductionRenderEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "synthetic_render_ops_snapshot_fkey")
+  operation       V2PublicOperation             @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "synthetic_render_ops_operation_fkey")
+  renderInput     V2RenderInputPayload          @relation(fields: [workspaceId, renderInputRef], references: [workspaceId, ref], onDelete: Restrict, map: "synthetic_render_ops_input_fkey")
+  qualityReport   V2SyntheticProductionRenderQualityReport?
+  buildAttestation V2SyntheticBuildAttestation?
+
+  @@unique([operationId, workspaceId], map: "synthetic_render_ops_operation_workspace_key")
+  @@unique([workspaceId, productionRunId, outputKind, aspectRatio], map: "synthetic_render_ops_run_kind_ratio_key")
+  @@unique([workspaceId, renderInputHash], map: "synthetic_render_ops_workspace_input_hash_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "synthetic_render_ops_workspace_project_created_idx")
+  @@index([workspaceId, productionRunId], map: "synthetic_render_ops_workspace_run_idx")
+  @@map("synthetic_production_render_operations")
+}
+
+model V2SyntheticProductionRenderQualityReport {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  projectVersionId   String   @db.VarChar(128)
+  productionRunId    String   @db.VarChar(128)
+  operationId        String   @db.VarChar(128)
+  outputArtifactId   String   @db.VarChar(128)
+  outputManifestId   String   @db.VarChar(128)
+  schemaVersion      String   @db.VarChar(64)
+  reportJson         String   @db.Text
+  reportHash         String   @db.Char(64)
+  passed             Boolean
+  evaluatedAt        DateTime @db.Timestamptz(3)
+
+  workspace       V2Workspace                       @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "synthetic_render_quality_workspace_fkey")
+  project         V2Project                         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_render_quality_project_fkey")
+  projectVersion  V2ProjectVersion                  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "synthetic_render_quality_version_fkey")
+  productionRun   V2SyntheticProductionRun          @relation(fields: [productionRunId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "synthetic_render_quality_run_fkey")
+  operation       V2SyntheticProductionRenderOperation @relation(fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Cascade, map: "synthetic_render_quality_operation_fkey")
+  outputArtifact  V2MediaArtifact                   @relation("SyntheticRenderQualityArtifact", fields: [outputArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_render_quality_artifact_fkey")
+  outputManifest  V2MediaArtifactManifest           @relation("SyntheticRenderQualityManifest", fields: [outputManifestId, outputArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict, map: "synthetic_render_quality_manifest_fkey")
+
+  @@unique([id, workspaceId], map: "synthetic_render_quality_id_workspace_key")
+  @@unique([operationId, workspaceId], map: "synthetic_render_quality_operation_workspace_key")
+  @@unique([workspaceId, reportHash], map: "synthetic_render_quality_workspace_hash_key")
+  @@index([workspaceId, productionRunId], map: "synthetic_render_quality_workspace_run_idx")
+  @@map("synthetic_production_render_quality_reports")
+}
+
+model V2SyntheticBuildAttestation {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  projectVersionId         String   @db.VarChar(128)
+  projectVersionHash       String   @db.Char(64)
+  productionRunId          String   @db.VarChar(128)
+  publicOperationId        String   @db.VarChar(128)
+  planSnapshotId           String   @db.VarChar(128)
+  planSnapshotHash         String   @db.Char(64)
+  renderManifestId         String   @db.VarChar(128)
+  renderManifestHash       String   @db.Char(64)
+  runtimeCommitSha         String   @db.VarChar(64)
+  runtimeTreeHash          String   @db.Char(64)
+  runtimeContractGraphHash String   @db.Char(64)
+  runtimeToolchainHash     String   @db.Char(64)
+  runtimeRenderBundleHash  String   @db.Char(64)
+  checksJson               String   @db.Text
+  startedAt                DateTime @db.Timestamptz(3)
+  completedAt              DateTime @db.Timestamptz(3)
+  attestationJson          String   @db.Text
+  attestationHash          String   @db.Char(64)
+  requestFingerprint       String   @db.Char(64)
+  idempotencyKey           String   @db.VarChar(128)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "synthetic_build_attestations_workspace_fkey")
+  project          V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_build_attestations_project_fkey")
+  projectVersion   V2ProjectVersion             @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "synthetic_build_attestations_version_fkey")
+  productionRun    V2SyntheticProductionRun     @relation(fields: [productionRunId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "synthetic_build_attestations_run_fkey")
+  operation        V2SyntheticProductionRenderOperation @relation(fields: [publicOperationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict, map: "synthetic_build_attestations_operation_fkey")
+  renderManifest   V2MediaArtifactManifest      @relation(fields: [renderManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_build_attestations_manifest_fkey")
+
+  @@unique([id, workspaceId], map: "synthetic_build_attestations_id_workspace_key")
+  @@unique([publicOperationId, workspaceId], map: "synthetic_build_attestation_operation_workspace_key")
+  @@unique([workspaceId, projectId, idempotencyKey], map: "synthetic_build_attestations_workspace_actor_key")
+  @@unique([workspaceId, attestationHash], map: "synthetic_build_attestations_workspace_hash_key")
+  @@index([workspaceId, productionRunId], map: "synthetic_build_attestations_workspace_run_idx")
+  @@map("synthetic_build_attestations")
+}
+
+model V2SyntheticMasterConsumption {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  consumerProjectId        String   @db.VarChar(128)
+  consumerProjectVersionId String   @db.VarChar(128)
+  productionRunId          String   @db.VarChar(128)
+  sourceMasterId           String   @db.VarChar(128)
+  sourceMasterHash         String   @db.Char(64)
+  sourceProjectId          String   @db.VarChar(128)
+  sourceProjectVersionId   String   @db.VarChar(128)
+  sourceProviderJobId      String   @db.VarChar(128)
+  sourceArtifactId         String   @db.VarChar(128)
+  sourceArtifactSha256     String   @db.Char(64)
+  cacheDecisionId          String   @db.VarChar(128)
+  cacheDecisionHash        String   @db.Char(64)
+  productionPlanHash       String   @db.Char(64)
+  observationOpenedAt      DateTime @db.Timestamptz(3)
+  schemaVersion            String   @db.VarChar(64)
+  consumptionHash          String   @db.Char(64)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace              V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "synthetic_master_consumptions_workspace_fkey")
+  consumerProject        V2Project                @relation("SyntheticMasterConsumptionConsumerProject", fields: [consumerProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_master_consumptions_consumer_project_fkey")
+  consumerProjectVersion V2ProjectVersion         @relation("SyntheticMasterConsumptionConsumerVersion", fields: [consumerProjectVersionId, consumerProjectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "synthetic_master_consumptions_consumer_version_fkey")
+  productionRun         V2SyntheticProductionRun @relation(fields: [productionRunId, workspaceId, consumerProjectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "synthetic_master_consumptions_run_fkey")
+  sourceMaster          V2SyntheticMasterAsset   @relation(fields: [sourceMasterId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_master_consumptions_source_master_fkey")
+  sourceProject         V2Project                @relation("SyntheticMasterConsumptionSourceProject", fields: [sourceProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_master_consumptions_source_project_fkey")
+  sourceProjectVersion  V2ProjectVersion         @relation("SyntheticMasterConsumptionSourceVersion", fields: [sourceProjectVersionId, sourceProjectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "synthetic_master_consumptions_source_version_fkey")
+  sourceProviderJob     V2ProviderJob            @relation("SyntheticMasterConsumptionSourceJob", fields: [sourceProviderJobId, workspaceId, sourceProjectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "synthetic_master_consumptions_source_job_fkey")
+  sourceArtifact        V2MediaArtifact          @relation("SyntheticMasterConsumptionSourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_master_consumptions_source_artifact_fkey")
+  cacheDecision        V2SyntheticCacheDecision @relation(fields: [cacheDecisionId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "synthetic_master_consumptions_cache_decision_fkey")
+
+  @@unique([id, workspaceId], map: "synthetic_master_consumptions_id_workspace_key")
+  @@unique([productionRunId, workspaceId, consumerProjectId], map: "synthetic_master_consumption_run_workspace_project_key")
+  @@unique([cacheDecisionId, workspaceId], map: "synthetic_master_consumption_decision_workspace_key")
+  @@unique([workspaceId, consumptionHash], map: "synthetic_master_consumptions_workspace_hash_key")
+  @@index([workspaceId, sourceMasterId], map: "synthetic_master_consumptions_source_master_idx")
+  @@index([workspaceId, sourceProjectId, sourceProjectVersionId], map: "synthetic_master_consumptions_source_version_idx")
+  @@index([workspaceId, consumerProjectId, observationOpenedAt], map: "synthetic_master_consumptions_consumer_opened_idx")
+  @@map("synthetic_master_consumptions")
 }
 
 // ---------------------------------------------------------------------------

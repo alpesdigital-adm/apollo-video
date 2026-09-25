@@ -1,5 +1,6 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
+import { createAvatarOutputSpeechEvidence, type AvatarOutputSpeechEvidence } from './avatar-output-speech-evidence.ts'
 
 export const SYNTHETIC_CRITIC_REPORT_SCHEMA_VERSION = 'synthetic-critic-report/v1' as const
 
@@ -98,6 +99,8 @@ export interface SyntheticCriticReport {
   id: string
   workspaceId: string
   projectId: string
+  /** Absent only on historical reports created before job-bound evidence. */
+  providerJobId?: string
   blockId: string
   capability: string
   adapterId: string
@@ -110,6 +113,15 @@ export interface SyntheticCriticReport {
   scriptHash: string
   profileSnapshotId: string
   expectedIdentityRef: string
+  /** Hash of the complete authoritative expectation used for this verdict.
+   * Absent only on historical reports minted before W24.1. */
+  expectationHash?: string
+  /** Hash of every authoritative input that made this evaluation one question.
+   * Absent only on historical reports minted before the context identity was
+   * made durable. */
+  evaluationContextHash?: string
+  outputSpeechEvidence?: Readonly<AvatarOutputSpeechEvidence>
+  outputSpeechEvidenceArtifactId?: string
   evaluators: readonly Readonly<SyntheticCriticEvaluator>[]
   measurements: readonly Readonly<SyntheticCriticMeasurement>[]
   issues: readonly Readonly<SyntheticCriticIssue>[]
@@ -224,6 +236,7 @@ export function calculateSyntheticCriticReportHash(report: Omit<SyntheticCriticR
     id: report.id,
     workspaceId: report.workspaceId,
     projectId: report.projectId,
+    ...(report.providerJobId ? { providerJobId: report.providerJobId } : {}),
     blockId: report.blockId,
     capability: report.capability,
     adapterId: report.adapterId,
@@ -235,6 +248,10 @@ export function calculateSyntheticCriticReportHash(report: Omit<SyntheticCriticR
     scriptHash: report.scriptHash,
     profileSnapshotId: report.profileSnapshotId,
     expectedIdentityRef: report.expectedIdentityRef,
+    ...(report.expectationHash ? { expectationHash: report.expectationHash } : {}),
+    ...(report.evaluationContextHash ? { evaluationContextHash: report.evaluationContextHash } : {}),
+    ...(report.outputSpeechEvidence ? { outputSpeechEvidence: report.outputSpeechEvidence } : {}),
+    ...(report.outputSpeechEvidenceArtifactId ? { outputSpeechEvidenceArtifactId: report.outputSpeechEvidenceArtifactId } : {}),
     evaluators: report.evaluators.map((evaluator) => ({ ...evaluator })),
     measurements: report.measurements.map((measurement) => ({
       ...measurement,
@@ -278,6 +295,18 @@ export function createSyntheticCriticReport(
     'report.alignmentArtifactId is invalid',
   )
   assertDomain(input.expectedIdentityRef.trim().length > 0, 'INVALID_ARGUMENT', 'report.expectedIdentityRef is required')
+  assertDomain(input.expectationHash === undefined || HASH.test(input.expectationHash), 'INVALID_ARGUMENT', 'report.expectationHash is invalid')
+  assertDomain(input.evaluationContextHash === undefined || HASH.test(input.evaluationContextHash), 'INVALID_ARGUMENT', 'report.evaluationContextHash is invalid')
+  const outputSpeechEvidence = input.outputSpeechEvidence
+    ? createAvatarOutputSpeechEvidence(input.outputSpeechEvidence)
+    : undefined
+  if (outputSpeechEvidence) {
+    assertDomain(Boolean(input.outputSpeechEvidenceArtifactId && ID.test(input.outputSpeechEvidenceArtifactId)), 'INVALID_ARGUMENT', 'report output speech evidence artifact is required')
+    assertDomain(input.providerJobId === outputSpeechEvidence.jobId, 'INVALID_ARGUMENT', 'report output speech evidence belongs to another provider job')
+    assertDomain(outputSpeechEvidence.videoArtifactId === input.artifactId, 'INVALID_ARGUMENT', 'report output speech evidence belongs to another artifact')
+    assertDomain(outputSpeechEvidence.videoArtifactSha256 === input.artifactSha256, 'INVALID_ARGUMENT', 'report output speech evidence artifact hash does not match')
+  }
+  assertDomain((outputSpeechEvidence === undefined) === (input.outputSpeechEvidenceArtifactId === undefined), 'INVALID_ARGUMENT', 'report output speech evidence identity is incomplete')
   assertDomain(input.thresholdsVersion.trim().length > 0, 'INVALID_ARGUMENT', 'report.thresholdsVersion is required')
   assertDomain(input.evaluators.length > 0, 'INVALID_ARGUMENT', 'report.evaluators is required')
   for (const evaluator of input.evaluators) {
@@ -334,6 +363,10 @@ export function createSyntheticCriticReport(
       'INVALID_ARGUMENT',
       'an approved report cannot recommend an action',
     )
+    if (outputSpeechEvidence) {
+      assertDomain(outputSpeechEvidence.passed, 'INVALID_ARGUMENT', 'an approved avatar report requires passing audio preservation evidence')
+      assertDomain(outputSpeechEvidence.speechEvidence.outputTranscriptHash === input.scriptHash, 'INVALID_ARGUMENT', 'an approved avatar report requires output speech matching the approved script')
+    }
   } else {
     assertDomain(
       input.recommendedAction !== 'none',
@@ -357,6 +390,7 @@ export function createSyntheticCriticReport(
     id: input.id,
     workspaceId: input.workspaceId,
     projectId: input.projectId,
+    ...(input.providerJobId ? { providerJobId: input.providerJobId } : {}),
     blockId: input.blockId,
     capability: input.capability,
     adapterId: input.adapterId,
@@ -368,6 +402,10 @@ export function createSyntheticCriticReport(
     scriptHash: input.scriptHash,
     profileSnapshotId: input.profileSnapshotId,
     expectedIdentityRef: input.expectedIdentityRef,
+    ...(input.expectationHash ? { expectationHash: input.expectationHash } : {}),
+    ...(input.evaluationContextHash ? { evaluationContextHash: input.evaluationContextHash } : {}),
+    ...(outputSpeechEvidence ? { outputSpeechEvidence } : {}),
+    ...(input.outputSpeechEvidenceArtifactId ? { outputSpeechEvidenceArtifactId: input.outputSpeechEvidenceArtifactId } : {}),
     evaluators: Object.freeze(input.evaluators.map((evaluator) => Object.freeze({ ...evaluator }))),
     measurements,
     issues,
@@ -382,6 +420,12 @@ export function createSyntheticCriticReport(
 export function assertSyntheticCriticReportIntegrity(
   report: Readonly<SyntheticCriticReport>,
 ): Readonly<SyntheticCriticReport> {
+  if (report.outputSpeechEvidence) {
+    const evidence = createAvatarOutputSpeechEvidence(report.outputSpeechEvidence)
+    assertDomain(evidence.evidenceHash === report.outputSpeechEvidence.evidenceHash, 'PERSISTENCE_CONFLICT', 'synthetic critic output speech evidence hash does not match its stored content')
+    assertDomain(evidence.jobId === report.providerJobId, 'PERSISTENCE_CONFLICT', 'synthetic critic output speech evidence belongs to another provider job')
+    assertDomain(evidence.videoArtifactId === report.artifactId && evidence.videoArtifactSha256 === report.artifactSha256, 'PERSISTENCE_CONFLICT', 'synthetic critic output speech evidence belongs to another artifact')
+  }
   const { reportHash, ...body } = report
   assertDomain(
     calculateSyntheticCriticReportHash(body) === reportHash,

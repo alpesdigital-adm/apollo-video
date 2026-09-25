@@ -9,7 +9,7 @@ export interface SyntheticPhaseGateEvidenceQuery {
   projectId: string
   projectVersionId: string
   projectVersionHash: string
-  actorId: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface SyntheticPhaseGateEvidenceContext {

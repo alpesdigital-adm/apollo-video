@@ -1,6 +1,11 @@
 import type { SyntheticBlockGeneration } from '../../domain/synthetic-block-generation.ts'
 
 export interface SyntheticBlockGenerationRepository {
+  findByProviderJob(input: {
+    workspaceId: string
+    projectId: string
+    providerJobId: string
+  }): Promise<Readonly<SyntheticBlockGeneration> | null>
   /** Latest attempt for a block, regardless of status. */
   findEffective(input: {
     workspaceId: string

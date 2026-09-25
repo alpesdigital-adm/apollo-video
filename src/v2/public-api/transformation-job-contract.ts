@@ -100,6 +100,17 @@ export function presentTransformationJob(persisted: Readonly<PersistedProviderJo
             selectionHash: job.transformation.selectionHash,
             providerId: job.transformation.providerId,
             capabilityId: job.transformation.capabilityId,
+            ...(job.transformation.fallback
+              ? {
+                  fallback: Object.freeze({
+                    ledgerId: job.transformation.fallback.ledgerId,
+                    ledgerHash: job.transformation.fallback.ledgerHash,
+                    rung: job.transformation.fallback.rung,
+                    rejectedJobId: job.transformation.fallback.rejectedJobId,
+                    rejectedReportHash: job.transformation.fallback.rejectedReportHash,
+                  }),
+                }
+              : {}),
           }),
         }
       : {}),

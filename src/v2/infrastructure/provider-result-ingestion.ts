@@ -3,7 +3,7 @@ import { lookup } from 'node:dns/promises'
 import { createWriteStream } from 'node:fs'
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { request as httpsRequest } from 'node:https'
-import { isAbsolute, join, normalize, resolve } from 'node:path'
+import { dirname, isAbsolute, join, normalize, resolve } from 'node:path'
 
 import type { MediaArtifactPersistenceRepository } from '../application/ports/media-artifact-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
@@ -18,6 +18,7 @@ import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import type { ProviderJob } from '../domain/provider-job.ts'
 import { validateWebhookResolution } from '../domain/webhook-network.ts'
+import { validateSyntheticAlignment } from './media/synthetic-alignment-validation.ts'
 
 const DEFAULT_MAX_BYTES = 1024 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -141,11 +142,36 @@ export class SafeProviderResultDownloader implements ProviderResultDownloader {
   }
 }
 
-function providerResult(value: unknown): Readonly<{ providerJobId: string; downloadUrl: string; mediaType: 'video' }> {
+export interface ControlledOutputSpeechSidecar {
+  schemaVersion: 'controlled-avatar-output-speech/v1'
+  outputTranscriptHash: string
+  observedIdentityRef: string
+  evaluatorId: string
+  evaluatorVersion: string
+}
+
+export function parseControlledOutputSpeechSidecar(value: unknown): Readonly<ControlledOutputSpeechSidecar> {
+  assertDomain(typeof value === 'object' && value !== null && !Array.isArray(value), 'RENDER_OUTPUT_INVALID', 'Controlled output speech evidence is invalid')
+  const evidence = value as Record<string, unknown>
+  assertDomain(Object.keys(evidence).toSorted().join(',') === 'evaluatorId,evaluatorVersion,observedIdentityRef,outputTranscriptHash,schemaVersion' && evidence.schemaVersion === 'controlled-avatar-output-speech/v1' && typeof evidence.outputTranscriptHash === 'string' && /^[a-f0-9]{64}$/.test(evidence.outputTranscriptHash) && [evidence.observedIdentityRef, evidence.evaluatorId, evidence.evaluatorVersion].every((entry) => typeof entry === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$/.test(entry)), 'RENDER_OUTPUT_INVALID', 'Controlled output speech evidence is invalid')
+  return Object.freeze({
+    schemaVersion: 'controlled-avatar-output-speech/v1',
+    outputTranscriptHash: evidence.outputTranscriptHash as string,
+    observedIdentityRef: evidence.observedIdentityRef as string,
+    evaluatorId: evidence.evaluatorId as string,
+    evaluatorVersion: evidence.evaluatorVersion as string,
+  })
+}
+
+function providerResult(value: unknown): Readonly<{ providerJobId: string; downloadUrl: string; mediaType: 'video'; adapterConfigHash: string; outputSpeechEvidence?: Readonly<ControlledOutputSpeechSidecar> }> {
   assertDomain(typeof value === 'object' && value !== null && !Array.isArray(value), 'RENDER_OUTPUT_INVALID', 'Provider result is invalid')
   const record = value as Record<string, unknown>
-  assertDomain(Object.keys(record).toSorted().join(',') === 'downloadUrl,mediaType,providerJobId' && typeof record.providerJobId === 'string' && typeof record.downloadUrl === 'string' && record.mediaType === 'video', 'RENDER_OUTPUT_INVALID', 'Provider result is invalid')
-  return record as { providerJobId: string; downloadUrl: string; mediaType: 'video' }
+  const keys = Object.keys(record).toSorted().join(',')
+  assertDomain((keys === 'adapterConfigHash,downloadUrl,mediaType,providerJobId' || keys === 'adapterConfigHash,downloadUrl,mediaType,outputSpeechEvidence,providerJobId') && typeof record.providerJobId === 'string' && typeof record.downloadUrl === 'string' && record.mediaType === 'video' && typeof record.adapterConfigHash === 'string' && /^[a-f0-9]{64}$/.test(record.adapterConfigHash), 'RENDER_OUTPUT_INVALID', 'Provider result is invalid')
+  if (record.outputSpeechEvidence !== undefined) {
+    parseControlledOutputSpeechSidecar(record.outputSpeechEvidence)
+  }
+  return record as unknown as ReturnType<typeof providerResult>
 }
 
 export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
@@ -154,6 +180,7 @@ export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
     storage: VerifiedMediaStorage
     artifacts: MediaArtifactPersistenceRepository
     artifactQuery: MediaArtifactQueryRepository
+    resultArtifacts: ProviderResultArtifactRepository
     prober: MediaSourceProber
     clock?: () => Date
   }
@@ -165,6 +192,8 @@ export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
   async ingest(input: { job: Readonly<ProviderJob>; providerResult: unknown; signal?: AbortSignal }) {
     const result = providerResult(input.providerResult)
     assertDomain(result.providerJobId === input.job.providerJobId, 'PERSISTENCE_CONFLICT', 'Provider result identity does not match the durable job')
+    let ownedEvidencePath: string | null = null
+    let operationFailure: unknown = null
     try {
       const downloaded = await this.dependencies.downloader.download({ operationId: input.job.id, url: result.downloadUrl, signal: input.signal })
       const probe = await this.dependencies.prober.probe(downloaded.path, { signal: input.signal })
@@ -184,14 +213,70 @@ export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
         sources: sources.map((source) => ({ artifactKey: source.artifactKey, sha256: source.sha256, role: 'provider-authorized-input', execution: { tool: { id: 'heygen', version: 'v3', digest: TOOL_DIGEST }, model: { provider: 'heygen', id: `job-${identityHash.slice(0, 32)}`, version: input.job.adapterVersion, config: { operation: input.job.operation, profileSnapshotHash: input.job.authorization.profileSnapshotHash } } } })),
         probe: { width: probe.width, height: probe.height, duration: probe.duration, fps: probe.fps },
       })
-      await this.dependencies.artifacts.persistOrReplay({
+      const persisted = await this.dependencies.artifacts.persistOrReplay({
         workspaceId: input.job.workspaceId, artifactId, manifestId,
         lineageIds: sources.map((source, index) => `lineage-${calculateCanonicalHash({ manifestId, artifactId: source.id, index })}`),
         manifest, createdAt: (this.dependencies.clock ?? (() => new Date()))().toISOString(),
       })
-      return Object.freeze({ artifactId, artifactSha256: stored.sha256, mediaType: 'video' as const, byteSize: stored.byteSize })
+      const now = (this.dependencies.clock ?? (() => new Date()))().toISOString()
+      const records: Parameters<ProviderResultArtifactRepository['persistOrReplay']>[0]['records'][number][] = [{
+        id: `provider-result-artifact-${identityHash.slice(0, 24)}-video`, workspaceId: input.job.workspaceId,
+        projectId: input.job.projectId, jobId: input.job.id, schemaVersion: PROVIDER_RESULT_ARTIFACT_SCHEMA_VERSION,
+        role: 'primary-video', providerJobRef: result.providerJobId, artifactId: persisted.artifactId,
+        artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
+        adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion,
+        adapterConfigHash: result.adapterConfigHash, inputHash: input.job.inputHash,
+        authorizationHash: input.job.authorization.authorizationHash, completedAt: now, createdAt: now,
+      }]
+      if (result.outputSpeechEvidence) {
+        const criticBinding = input.job.input.criticBinding as Record<string, unknown> | undefined
+        assertDomain(criticBinding && typeof criticBinding.scriptHash === 'string' && /^[a-f0-9]{64}$/.test(criticBinding.scriptHash), 'PERSISTENCE_CONFLICT', 'Avatar output speech evidence has no authoritative script binding')
+        const evidenceJson = stableSerialize(result.outputSpeechEvidence)
+        const evidenceBytes = Buffer.from(evidenceJson, 'utf8')
+        const evidenceSha256 = createHash('sha256').update(evidenceBytes).digest('hex')
+        const evidencePath = join(dirname(downloaded.path), `${input.job.id}-${identityHash.slice(0, 16)}-controlled-output-speech.json`)
+        await writeFile(evidencePath, evidenceBytes, { flag: 'wx' })
+        ownedEvidencePath = evidencePath
+        const storedEvidence = await this.dependencies.storage.promoteDerived({ workspaceId: input.job.workspaceId, sourcePath: evidencePath, sha256: evidenceSha256, extension: 'json', prefix: 'synthetic-provider-output-speech' })
+        const evidenceArtifactId = `provider-output-speech-${identityHash.slice(0, 32)}`
+        const evidenceManifestId = `provider-output-speech-manifest-${identityHash.slice(0, 32)}`
+        const evidenceArtifact = await this.dependencies.artifacts.persistOrReplay({
+          workspaceId: input.job.workspaceId, artifactId: evidenceArtifactId, manifestId: evidenceManifestId,
+          lineageIds: [`lineage-${calculateCanonicalHash({ manifestId: evidenceManifestId, artifactId: persisted.artifactId, index: 0 })}`],
+          manifest: createMediaArtifactManifestV2({
+            artifactKey: storedEvidence.key, artifactSha256: storedEvidence.sha256, byteSize: storedEvidence.byteSize, mediaType: 'data', container: 'json',
+            recipe: { id: 'controlled-avatar-output-speech', version: '1.0.0', parameters: { jobId: input.job.id, providerJobId: result.providerJobId, videoArtifactId: persisted.artifactId } },
+            sources: [{ artifactKey: stored.key, sha256: stored.sha256, role: 'avatar-primary-video', execution: { tool: { id: 'controlled-output-speech-boundary', version: '1.0.0', digest: TOOL_DIGEST } } }],
+          }),
+          createdAt: now,
+        })
+        records.push({
+          id: `provider-result-artifact-${identityHash.slice(0, 24)}-output-speech`, workspaceId: input.job.workspaceId,
+          projectId: input.job.projectId, jobId: input.job.id, schemaVersion: PROVIDER_RESULT_ARTIFACT_SCHEMA_VERSION,
+          role: 'output-speech-evidence', providerJobRef: result.providerJobId, artifactId: evidenceArtifact.artifactId,
+          artifactSha256: storedEvidence.sha256, byteSize: storedEvidence.byteSize, mediaType: 'data', container: 'json',
+          adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion, adapterConfigHash: result.adapterConfigHash,
+          inputHash: input.job.inputHash, authorizationHash: input.job.authorization.authorizationHash, completedAt: now, createdAt: now,
+          scriptHash: criticBinding.scriptHash,
+        })
+      }
+      await this.dependencies.resultArtifacts.persistOrReplay({ records })
+      return Object.freeze({ artifactId: persisted.artifactId, artifactSha256: stored.sha256, mediaType: 'video' as const, byteSize: stored.byteSize })
+    } catch (error) {
+      operationFailure = error
+      throw error
     } finally {
-      await this.dependencies.downloader.cleanup(input.job.id)
+      const cleanup = await Promise.allSettled([
+        ...(ownedEvidencePath ? [rm(ownedEvidencePath, { force: true })] : []),
+        this.dependencies.downloader.cleanup(input.job.id),
+      ])
+      const cleanupFailures = cleanup.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+          operationFailure ? [operationFailure, ...cleanupFailures] : cleanupFailures,
+          'Provider result ingestion cleanup failed',
+        )
+      }
     }
   }
 }
@@ -226,7 +311,8 @@ function ttsProviderResult(value: unknown): Readonly<{
     'RENDER_OUTPUT_INVALID',
     'TTS provider result is invalid',
   )
-  return record as ReturnType<typeof ttsProviderResult>
+  const alignment = validateSyntheticAlignment(record.alignment)
+  return Object.freeze({ ...record, alignment }) as ReturnType<typeof ttsProviderResult>
 }
 
 /**
@@ -332,11 +418,11 @@ export class VerifiedTtsResultIngestor implements ProviderResultIngestor {
         recipe: { id: 'synthetic-tts-alignment', version: '1.0.0', parameters: { jobId: input.job.id, providerJobRef: result.requestId, adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion, adapterConfigHash: result.adapterConfigHash, scriptHash: result.scriptHash, audioSha256: result.audioSha256 } },
         sources: [{ artifactKey: storedAudio.key, sha256: storedAudio.sha256, role: 'tts-primary-audio', execution }],
       })
-      await this.dependencies.artifacts.persistOrReplay({
+      const persistedAudio = await this.dependencies.artifacts.persistOrReplay({
         workspaceId: input.job.workspaceId, artifactId: audioArtifactId, manifestId: `tts-audio-manifest-${identityHash.slice(0, 32)}`,
         lineageIds: [], manifest: audioManifest, createdAt: now,
       })
-      await this.dependencies.artifacts.persistOrReplay({
+      const persistedAlignment = await this.dependencies.artifacts.persistOrReplay({
         workspaceId: input.job.workspaceId, artifactId: alignmentArtifactId, manifestId: `tts-alignment-manifest-${identityHash.slice(0, 32)}`,
         lineageIds: [`lineage-${calculateCanonicalHash({ manifestId: `tts-alignment-manifest-${identityHash.slice(0, 32)}`, artifactId: audioArtifactId, index: 0 })}`],
         manifest: alignmentManifest, createdAt: now,
@@ -359,11 +445,11 @@ export class VerifiedTtsResultIngestor implements ProviderResultIngestor {
       }
       await this.dependencies.resultArtifacts.persistOrReplay({
         records: [
-          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-audio`, role: 'primary-audio', artifactId: audioArtifactId, artifactSha256: storedAudio.sha256, byteSize: storedAudio.byteSize, mediaType: 'audio', container: result.audioContainer },
-          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-alignment`, role: 'alignment-evidence', artifactId: alignmentArtifactId, artifactSha256: storedAlignment.sha256, byteSize: storedAlignment.byteSize, mediaType: 'data', container: 'json' },
+          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-audio`, role: 'primary-audio', artifactId: persistedAudio.artifactId, artifactSha256: storedAudio.sha256, byteSize: storedAudio.byteSize, mediaType: 'audio', container: result.audioContainer },
+          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-alignment`, role: 'alignment-evidence', artifactId: persistedAlignment.artifactId, artifactSha256: storedAlignment.sha256, byteSize: storedAlignment.byteSize, mediaType: 'data', container: 'json' },
         ],
       })
-      return Object.freeze({ artifactId: audioArtifactId, artifactSha256: storedAudio.sha256, mediaType: 'audio' as const, byteSize: storedAudio.byteSize })
+      return Object.freeze({ artifactId: persistedAudio.artifactId, artifactSha256: storedAudio.sha256, mediaType: 'audio' as const, byteSize: storedAudio.byteSize })
     } finally {
       await rm(directory, { recursive: true, force: true }).catch(() => undefined)
     }

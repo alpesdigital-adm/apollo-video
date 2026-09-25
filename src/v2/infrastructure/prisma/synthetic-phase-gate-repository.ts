@@ -7,6 +7,7 @@ import {
   calculateSyntheticPhaseGateRecordHash,
   type SyntheticPhaseGateReport,
 } from '../../application/run-synthetic-phase-gate.ts'
+import { collectSyntheticPhaseGateEvidence } from '../../application/collect-synthetic-phase-gate-evidence.ts'
 import type {
   PersistedSyntheticPhaseGate,
   SyntheticPhaseGateEvidenceQuery,
@@ -24,6 +25,15 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import { PrismaSyntheticPhaseGateEvidenceReader } from './synthetic-phase-gate-evidence-reader.ts'
+
+interface TransactionalSyntheticPhaseGateEvidenceReader {
+  read(input: Readonly<SyntheticPhaseGateEvidenceQuery>): ReturnType<PrismaSyntheticPhaseGateEvidenceReader['read']>
+  readWithClient(
+    client: Prisma.TransactionClient,
+    input: Readonly<SyntheticPhaseGateEvidenceQuery>,
+  ): ReturnType<PrismaSyntheticPhaseGateEvidenceReader['readWithClient']>
+}
 
 type GateRow = Prisma.V2SyntheticPhaseGateGetPayload<{
   include: { evidence: true }
@@ -69,6 +79,31 @@ function flattenEvidence(report: Readonly<SyntheticPhaseGateReport>) {
       }))))
 }
 
+function reportEvidenceInput(value: unknown) {
+  if (!Array.isArray(value)) return null
+  return value.map((criterion) => {
+    const item = record(criterion)
+    if (!item || !Array.isArray(item.checks)) return criterion
+    return {
+      criterion: item.criterion,
+      checks: item.checks.flatMap((check) => {
+        const candidate = record(check)
+        if (!candidate || !Array.isArray(candidate.references)) return [check]
+        // The evaluator expands an omitted check into a normalized fail-closed
+        // row with no references. That normalized row is report output, not a
+        // valid caller/collector input, so omit only that exact representation
+        // before replaying the evaluator. The full report is compared below.
+        if (candidate.references.length === 0) return []
+        return [{
+          code: candidate.code,
+          passed: candidate.passed,
+          references: candidate.references,
+        }]
+      }),
+    }
+  })
+}
+
 function hydrateGate(row: GateRow): Readonly<PersistedSyntheticPhaseGate> {
   hydrateExternalActorAudit(row, row.createdById)
   const reportValue = record(parseJson(row.reportJson, 'synthetic phase gate report'))
@@ -78,12 +113,19 @@ function hydrateGate(row: GateRow): Readonly<PersistedSyntheticPhaseGate> {
       'Stored synthetic phase gate report is invalid',
     )
   }
+  const evidenceInput = reportEvidenceInput(reportValue.evidence)
+  if (!evidenceInput) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored synthetic phase gate evidence is invalid',
+    )
+  }
   const report = evaluateSyntheticPhaseGate({
     workspaceId: row.workspaceId,
     projectId: row.projectId,
     projectVersionId: row.projectVersionId,
     projectVersionHash: row.projectVersionHash,
-    evidence: reportValue.evidence as never,
+    evidence: evidenceInput as never,
     evaluatedAt: String(reportValue.evaluatedAt),
   })
   if (
@@ -156,11 +198,15 @@ function hydrateGate(row: GateRow): Readonly<PersistedSyntheticPhaseGate> {
 export class PrismaSyntheticPhaseGateRepository
 implements SyntheticPhaseGateRepository {
   private readonly client: PrismaClient
+  private readonly evidenceReader: TransactionalSyntheticPhaseGateEvidenceReader
 
   constructor(
     client: PrismaClient = getV2PostgresClient(),
+    evidenceReader: TransactionalSyntheticPhaseGateEvidenceReader =
+      new PrismaSyntheticPhaseGateEvidenceReader(client),
   ) {
     this.client = client
+    this.evidenceReader = evidenceReader
   }
 
   async findIdempotent(input: {
@@ -182,28 +228,12 @@ implements SyntheticPhaseGateRepository {
   }
 
   async readEvidence(input: Readonly<SyntheticPhaseGateEvidenceQuery>) {
-    const [project, actor] = await Promise.all([
-      this.client.v2Project.findFirst({
-        where: { id: input.projectId, workspaceId: input.workspaceId },
-        include: { currentVersion: true },
-      }),
-      this.client.v2ApiClient.findFirst({
-        where: {
-          id: input.actorId,
-          workspaceId: input.workspaceId,
-          status: 'active',
-        },
-      }),
-    ])
-    if (!project?.currentVersion || !actor) return null
-
-    // An empty set is deliberate until each production evidence projection is
-    // implemented. It persists a truthful rejected gate instead of promoting
-    // isolated tests or caller-authored claims into phase acceptance.
+    const sources = await this.evidenceReader.read(input)
+    if (!sources) return null
     return Object.freeze({
-      projectVersionId: project.currentVersion.id,
-      projectVersionHash: project.currentVersion.baseHash,
-      evidence: Object.freeze([]),
+      projectVersionId: sources.projectVersionId,
+      projectVersionHash: sources.projectVersionHash,
+      evidence: collectSyntheticPhaseGateEvidence(sources),
     })
   }
 
@@ -261,8 +291,38 @@ implements SyntheticPhaseGateRepository {
             'Synthetic phase gate project version changed before commit',
           )
         }
+        const currentSources = await this.evidenceReader.readWithClient(
+          transaction,
+          {
+            workspaceId: gate.workspaceId,
+            projectId: gate.projectId,
+            projectVersionId: gate.projectVersionId,
+            projectVersionHash: gate.projectVersionHash,
+            authenticationAudit,
+          },
+        )
+        if (!currentSources) {
+          throw new DomainError(
+            'VERSION_CONFLICT',
+            'Synthetic phase gate evidence disappeared before commit',
+          )
+        }
+        const currentReport = evaluateSyntheticPhaseGate({
+          workspaceId: gate.workspaceId,
+          projectId: gate.projectId,
+          projectVersionId: currentSources.projectVersionId,
+          projectVersionHash: currentSources.projectVersionHash,
+          evidence: collectSyntheticPhaseGateEvidence(currentSources),
+          evaluatedAt: gate.report.evaluatedAt,
+        })
+        if (stableSerialize(currentReport) !== stableSerialize(gate.report)) {
+          throw new DomainError(
+            'VERSION_CONFLICT',
+            'Synthetic phase gate evidence changed before commit',
+          )
+        }
         const evidence = flattenEvidence(gate.report)
-        const row = await transaction.v2SyntheticPhaseGate.create({
+        await transaction.v2SyntheticPhaseGate.create({
           data: {
             id: gate.id,
             workspaceId: gate.workspaceId,
@@ -287,15 +347,27 @@ implements SyntheticPhaseGateRepository {
               gate.createdBy.id,
             ),
             createdAt: new Date(gate.createdAt),
-            evidence: {
-              create: evidence.map((item) => ({
-                workspaceId: gate.workspaceId,
-                ...item,
-              })),
-            },
           },
+        })
+        if (evidence.length > 0) {
+          await transaction.v2SyntheticPhaseGateEvidence.createMany({
+            data: evidence.map((item) => ({
+              gateId: gate.id,
+              workspaceId: gate.workspaceId,
+              ...item,
+            })),
+          })
+        }
+        const row = await transaction.v2SyntheticPhaseGate.findUnique({
+          where: { id: gate.id },
           include: { evidence: true },
         })
+        if (!row) {
+          throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Synthetic phase gate disappeared during commit',
+          )
+        }
         return Object.freeze({ gate: hydrateGate(row), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
@@ -303,6 +375,21 @@ implements SyntheticPhaseGateRepository {
         return this.persist(gate, authenticationAudit, attempt + 1)
       }
       if (isPrismaCode(error, 'P2034')) {
+        const replay = await this.findIdempotent({
+          workspaceId: gate.workspaceId,
+          projectId: gate.projectId,
+          idempotencyKey: gate.idempotencyKey,
+          actorContextHash: authenticationAudit.contextHash,
+        })
+        if (replay) {
+          if (replay.requestFingerprint !== gate.requestFingerprint) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key was used with a different synthetic phase gate request',
+            )
+          }
+          return Object.freeze({ gate: replay, replayed: true })
+        }
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
           'Synthetic phase gate conflicted with another transaction',

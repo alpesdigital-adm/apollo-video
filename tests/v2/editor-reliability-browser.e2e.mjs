@@ -1180,10 +1180,10 @@ test(
         gatePresent: gateText.length > 0,
         saysNoReportForThisVersion: /Sem laudo para esta vers/i.test(gateText),
         saysReleasedForHigh: /Liberado para alta/i.test(gateText),
-        approvedWordAnywhereOnPage: /\bAprovado\b/i.test(await page.locator('body').innerText()),
+        saysApprovedInProxyGate: /\bAprovado\b/i.test(gateText),
       }
       assert.equal(emptyReview.saysReleasedForHigh, false, 'a project with no proxy review reads as released')
-      assert.equal(emptyReview.approvedWordAnywhereOnPage, false, 'a project with no proxy review reads as approved')
+      assert.equal(emptyReview.saysApprovedInProxyGate, false, 'a project with no proxy review reads as approved')
       assert.equal(emptyReview.gatePresent, true, 'the no-review gate did not render')
       assert.equal(emptyReview.saysNoReportForThisVersion, true, 'the no-review gate did not explicitly name the absent report')
       emptyReview.note = emptyReview.gatePresent

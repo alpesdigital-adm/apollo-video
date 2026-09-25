@@ -40,6 +40,7 @@ export interface TransformationProviderResult {
   mediaByteSize: number
   container: 'mp4'
   mediaType: 'video'
+  adapterConfigHash: string
   observedCost?: Readonly<{ currency: string; costMinorUnits: number }>
 }
 
@@ -51,7 +52,8 @@ function transformationResult(value: unknown): Readonly<TransformationProviderRe
       typeof result.mediaSha256 === 'string' &&
       Number.isSafeInteger(result.mediaByteSize) &&
       result.container === 'mp4' &&
-      result.mediaType === 'video',
+      result.mediaType === 'video' &&
+      typeof result.adapterConfigHash === 'string' && /^[a-f0-9]{64}$/.test(result.adapterConfigHash),
     'PERSISTENCE_CONFLICT',
     'Transformation provider result has an unusable shape',
   )
@@ -199,7 +201,7 @@ export class VerifiedTransformationResultIngestor implements ProviderResultInges
         probe: { width: probe.width, height: probe.height, duration: probe.duration, fps: probe.fps },
       })
 
-      await this.dependencies.artifacts.persistOrReplay({
+      const persistedArtifact = await this.dependencies.artifacts.persistOrReplay({
         workspaceId: input.job.workspaceId,
         artifactId,
         manifestId,
@@ -218,25 +220,23 @@ export class VerifiedTransformationResultIngestor implements ProviderResultInges
           providerJobRef: result.providerJobId,
           adapterId: input.job.adapterId,
           adapterVersion: input.job.adapterVersion,
-          adapterConfigHash: input.job.inputHash,
+          adapterConfigHash: result.adapterConfigHash,
           inputHash: input.job.inputHash,
           authorizationHash: input.job.authorization.authorizationHash,
           role: 'primary-video',
-          artifactId,
+          artifactId: persistedArtifact.artifactId,
           artifactSha256: stored.sha256,
           byteSize: stored.byteSize,
           mediaType: 'video',
           container: 'mp4',
-          ...(result.observedCost
-            ? { observedCostCurrency: result.observedCost.currency, observedCostMinorUnits: result.observedCost.costMinorUnits }
-            : {}),
+          ...(result.observedCost ? { observedCost: result.observedCost } : {}),
           completedAt: now,
           createdAt: now,
         }],
       })
 
       return Object.freeze({
-        artifactId,
+        artifactId: persistedArtifact.artifactId,
         artifactSha256: stored.sha256,
         mediaType: 'video' as const,
         byteSize: stored.byteSize,

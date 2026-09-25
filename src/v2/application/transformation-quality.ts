@@ -69,14 +69,18 @@ function criticChangeRegion(job: Readonly<ProviderJob>) {
 }
 
 export class PersistedTransformationResultCritic {
-  constructor(private readonly dependencies: {
+  private readonly dependencies: {
     registry: TransformationProviderRegistryRepository
     quality: TransformationQualityRepository
     artifacts: MediaArtifactQueryRepository
     novelty: NoveltyBudgetRepository
     evaluator: TransformationCriticEvaluator
     clock?: () => Date
-  }) {}
+  }
+
+  constructor(dependencies: PersistedTransformationResultCritic['dependencies']) {
+    this.dependencies = dependencies
+  }
 
   async evaluate(input: {
     job: Readonly<ProviderJob>
@@ -229,6 +233,26 @@ export function readTransformationQualityService(dependencies: {
       reports,
       novelty,
     })
+  }
+}
+
+export function readTransformationCriticReportService(dependencies: {
+  quality: TransformationQualityRepository
+}) {
+  return async function execute(input: {
+    workspaceId: string
+    projectId: string
+    reportId: string
+    actor: Readonly<AuthenticatedExternalActor>
+  }) {
+    requireScope(input.actor, 'projects:read')
+    const workspaceId = id(input.workspaceId, 'workspaceId')
+    const projectId = id(input.projectId, 'projectId')
+    const reportId = id(input.reportId, 'reportId')
+    assertDomain(input.actor.workspaceId === workspaceId, 'AUTH_INVALID', 'Actor does not belong to workspace')
+    const report = await dependencies.quality.readCriticReport({ workspaceId, projectId, reportId })
+    if (!report) throw new DomainError('ASSET_NOT_FOUND', 'Transformation critic report was not found')
+    return report
   }
 }
 

@@ -11,6 +11,18 @@ const remotionLock = await readJson('remotion/package-lock.json')
 const failures = []
 const equal = (actual, expected, label) => { if (actual !== expected) failures.push(`${label}: expected ${expected}, found ${actual ?? '<missing>'}`) }
 const locked = (lock, name) => lock.packages?.[`node_modules/${name}`]?.version
+const storagePins = {
+  minioImage: 'apollo-minio-source:RELEASE.2025-04-22T22-12-26Z-mc.RELEASE.2025-04-16T18-13-26Z',
+  minioRelease: 'RELEASE.2025-04-22T22-12-26Z',
+  minioSourceCommit: '0d7408fc9969caf07de6a8c3a84f9fbb10a6739e',
+  minioArchiveSha256: '7eb30a913fea30f18069abf194e1e78e4983b558cc526911ae1c11396a9859a5',
+  mcRelease: 'RELEASE.2025-04-16T18-13-26Z',
+  mcSourceCommit: 'b00526b153a31b36767991a4f5ce2cced435ee8e',
+  mcArchiveSha256: '4cd13e34daeeb8481c3ba8686b082f161b8dc1f7aad52d715a706a587349c6ae',
+  builderImage: 'golang:1.24.2-alpine3.21@sha256:7772cb5322baa875edd74705556d08f0eeca7b9c4b5367754ce3f2f00041ccee',
+  runtimeImage: 'alpine:3.21.3@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c',
+}
+for (const [name, expected] of Object.entries(storagePins)) equal(versions.storage[name], expected, `storage ${name}`)
 
 equal(rootPackage.engines?.node, `>=${versions.node.minimum}`, 'Node minimum')
 for (const [name, expected] of [['next', versions.web.next], ['react', versions.web.react], ['react-dom', versions.web.reactDom]]) {
@@ -44,10 +56,29 @@ equal(rootPackage.overrides?.['js-yaml'], versions.clients.jsYaml, 'js-yaml over
 equal(locked(rootLock, 'js-yaml'), versions.clients.jsYaml, 'js-yaml root lock')
 if (locked(rootLock, 'form-data') || locked(remotionLock, 'form-data')) failures.push('form-data must remain absent from locked dependency trees')
 
-const [dockerfile, postgresCompose, storageCompose, adr001, adr002, adr008] = await Promise.all(['Dockerfile', 'infra/postgres/compose.yml', 'infra/object-storage/compose.yml', 'docs/adr/ADR-001-v2-modular-architecture.md', 'docs/adr/ADR-002-database-and-migrations.md', 'docs/adr/ADR-008-render-architecture-cache.md'].map((path) => readFile(resolve(root, path), 'utf8')))
+const [dockerfile, postgresCompose, storageCompose, storageDockerfile, adr001, adr002, adr003, adr008] = await Promise.all(['Dockerfile', 'infra/postgres/compose.yml', 'infra/object-storage/compose.yml', 'infra/object-storage/Dockerfile', 'docs/adr/ADR-001-v2-modular-architecture.md', 'docs/adr/ADR-002-database-and-migrations.md', 'docs/adr/ADR-003-object-storage-content-addressing.md', 'docs/adr/ADR-008-render-architecture-cache.md'].map((path) => readFile(resolve(root, path), 'utf8')))
 if (!dockerfile.includes(`FROM node:${versions.node.containerMajor}-bookworm-slim`)) failures.push('Dockerfile Node image drifted')
 if (!postgresCompose.includes(`image: ${versions.database.image}`)) failures.push('PostgreSQL/pgvector image drifted')
-if (!storageCompose.includes(`image: ${versions.storage.minioImage}`)) failures.push('MinIO image drifted')
+if ((storageCompose.match(/^\s+image: /gm) ?? []).length !== 2 || storageCompose.split(`image: ${versions.storage.minioImage}`).length !== 3) failures.push('MinIO services must use the pinned local image')
+if (storageDockerfile.split(`FROM ${versions.storage.builderImage}`).length !== 3 || !storageDockerfile.includes(`FROM ${versions.storage.runtimeImage}`)) failures.push('MinIO builder/runtime base images drifted')
+for (const [component, commit, hash] of [['minio', versions.storage.minioSourceCommit, versions.storage.minioArchiveSha256], ['mc', versions.storage.mcSourceCommit, versions.storage.mcArchiveSha256]]) {
+  if (!storageDockerfile.includes(`ADD --checksum=sha256:${hash} https://codeload.github.com/minio/${component}/tar.gz/${commit}`)) failures.push(`${component} source archive pin drifted`)
+  if (!storageDockerfile.includes(`cmd.CommitID=${commit}`) || !storageDockerfile.includes(`cmd.ShortCommitID=${commit.slice(0, 12)}`)) failures.push(`${component} binary commit metadata drifted`)
+}
+for (const [component, release] of [['minio', versions.storage.minioRelease], ['mc', versions.storage.mcRelease]]) {
+  if (!storageDockerfile.includes(`github.com/minio/${component}/cmd.ReleaseTag=${release}`)) failures.push(`${component} release metadata drifted`)
+}
+if ((storageDockerfile.match(/CGO_ENABLED=0 GOTOOLCHAIN=local go build -mod=readonly -tags kqueue -trimpath/g) ?? []).length !== 2) failures.push('MinIO and mc must use upstream-compatible static build flags and read-only modules')
+if ((storageDockerfile.match(/GOTOOLCHAIN=local go mod verify/g) ?? []).length !== 2) failures.push('MinIO and mc must verify downloaded Go modules')
+if (!storageDockerfile.includes('org.opencontainers.image.licenses="AGPL-3.0-or-later"')) failures.push('MinIO source image must declare the upstream AGPL license')
+for (const component of ['minio', 'mc']) {
+  const builder = component === 'minio' ? 'minio-build' : 'mc-build'
+  for (const notice of ['LICENSE', 'CREDITS']) {
+    if (!storageDockerfile.includes(`COPY --from=${builder} /src/${component}/${notice} /licenses/${component}/${notice}`)) failures.push(`${component} ${notice} notice must be included in the runtime image`)
+  }
+}
+if (!storageDockerfile.includes('COPY --from=minio-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt')) failures.push('MinIO runtime must include the builder CA bundle')
+for (const token of [versions.storage.minioSourceCommit, versions.storage.mcSourceCommit, versions.storage.minioArchiveSha256, versions.storage.mcArchiveSha256, versions.storage.builderImage, versions.storage.runtimeImage]) if (!adr003.includes(token)) failures.push(`ADR-003 does not declare ${token}`)
 for (const [label, document, expected] of [['ADR-001', adr001, [versions.web.next, versions.web.react, `Node ${versions.node.containerMajor}`]], ['ADR-002', adr002, [versions.database.image, `Prisma ${versions.database.prisma}`]], ['ADR-008', adr008, [`FFmpeg ${versions.render.ffmpegTarget}`, `ffprobe ${versions.render.ffprobeTarget}`, `Remotion ${versions.render.remotion}`]]]) for (const token of expected) if (!document.includes(token)) failures.push(`${label} does not declare ${token}`)
 
 if (failures.length) { console.error(failures.join('\n')); process.exit(1) }

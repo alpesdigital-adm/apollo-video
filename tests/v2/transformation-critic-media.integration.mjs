@@ -10,6 +10,7 @@ import { createTransformationBrief } from '../../src/v2/domain/transformation-br
 import { createNoveltyBudgetPolicy, evaluateNoveltyBudget } from '../../src/v2/domain/novelty-budget.ts'
 import { FfmpegTransformationCriticEvaluator } from '../../src/v2/infrastructure/transformation/ffmpeg-transformation-critic.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
+import { FfmpegAvatarAudioComparison } from '../../src/v2/infrastructure/media/ffmpeg-avatar-audio-comparison.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpeg = require('ffmpeg-static')
@@ -128,15 +129,17 @@ test('T-FR-123 burned subtitle, logo and complex-background cleanup pass protect
       const sourcePath = join(root, `${fixture.name}-source.mp4`)
       const resultPath = join(root, `${fixture.name}-result.mp4`)
       const protectedBox = 'drawbox=x=112:y=32:w=70:h=90:color=red:t=fill'
-      execFileSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', fixture.input, '-vf', `${protectedBox},${fixture.target}`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', sourcePath], { windowsHide: true })
-      execFileSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', fixture.input, '-vf', protectedBox, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', resultPath], { windowsHide: true })
+      const audioInput = 'sine=frequency=440:sample_rate=48000:duration=3'
+      execFileSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', fixture.input, '-f', 'lavfi', '-i', audioInput, '-vf', `${protectedBox},${fixture.target}`, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-y', sourcePath], { windowsHide: true })
+      execFileSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', fixture.input, '-f', 'lavfi', '-i', audioInput, '-vf', protectedBox, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-y', resultPath], { windowsHide: true })
       const paths = new Map([['source', sourcePath], ['result', resultPath]])
       const evaluator = new FfmpegTransformationCriticEvaluator({
         sources: {
           async materialize(input) { return { path: paths.get(input.artifactKey), sha256: input.sha256, byteSize: input.byteSize } },
           async cleanup() {},
         },
-        prober: { probe(path, options) { return probeVideo(path, { ...options, requireAudio: false }) } },
+        prober: { probe(path, options) { return probeVideo(path, { ...options, requireAudio: true }) } },
+        audioComparison: new FfmpegAvatarAudioComparison({ ...process.env, FFMPEG_PATH: ffmpeg }),
       })
       const brief = createTransformationBrief({
         workspaceId: 'workspace-cleanup-visual', projectId: 'project-cleanup-visual', projectVersionId: 'version-cleanup-visual',
@@ -159,6 +162,24 @@ test('T-FR-123 burned subtitle, logo and complex-background cleanup pass protect
       assert.equal(outcome.measurements.length, 14)
       assert.ok(outcome.intentScoreBps >= 7_500)
       assert.deepEqual(outcome.measurements.find((entry) => entry.dimension === 'intent-adherence').region, targetRegions[fixture.name])
+
+      if (fixture.name === 'burned-subtitle') {
+        const truncatedPath = join(root, 'burned-subtitle-truncated-audio.mp4')
+        execFileSync(ffmpeg, [
+          '-v', 'error', '-i', resultPath, '-filter_complex', '[0:a]atrim=duration=1.5[a]',
+          '-map', '0:v:0', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-y', truncatedPath,
+        ], { windowsHide: true })
+        paths.set('truncated', truncatedPath)
+        const truncated = await evaluator.evaluate({
+          brief,
+          source: artifact(`source-${fixture.name}`, 'source', digest('2')),
+          result: artifact(`result-${fixture.name}-truncated`, 'truncated', digest('6')),
+          changeRegion: targetRegions[fixture.name], intentThresholdBps: 7_500,
+          operationId: `cleanup-${fixture.name}-truncated`,
+        })
+        assert.equal(truncated.decision, 'rejected')
+        assert.ok(truncated.hardGates.includes('preserve-list'))
+      }
     }
   } finally {
     await rm(root, { recursive: true, force: true })

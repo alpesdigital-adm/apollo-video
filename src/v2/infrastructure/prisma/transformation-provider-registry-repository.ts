@@ -11,6 +11,7 @@ import {
 import type { TransformationProviderRegistryRepository } from '../../application/ports/transformation-provider-registry-repository.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { PROVIDER_OPERATIONS, type ProviderOperation } from '../../domain/provider-contract.ts'
 import { assertTransformationBrief, type TransformationBrief } from '../../domain/transformation-brief.ts'
 import {
   createTransformationProviderDefinition,
@@ -87,6 +88,10 @@ function hydrateBrief(row: V2TransformationBrief): Readonly<TransformationBrief>
 }
 
 function hydrateSelection(row: V2TransformationProviderSelection): Readonly<TransformationProviderSelection> {
+  if (row.requestedOperation !== null && !PROVIDER_OPERATIONS.includes(row.requestedOperation as ProviderOperation)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Provider selection requested operation is invalid')
+  }
+  const requestedOperation = row.requestedOperation as ProviderOperation | null
   const body = {
     schemaVersion: row.schemaVersion as TransformationProviderSelection['schemaVersion'],
     id: row.id,
@@ -95,6 +100,7 @@ function hydrateSelection(row: V2TransformationProviderSelection): Readonly<Tran
     projectVersionId: row.projectVersionId,
     briefId: row.briefId,
     briefHash: row.briefHash,
+    ...(requestedOperation ? { requestedOperation } : {}),
     ...(row.selectedProviderId ? { selectedProviderId: row.selectedProviderId } : {}),
     ...(row.selectedCapabilityId ? { selectedCapabilityId: row.selectedCapabilityId } : {}),
     candidates: parseJson<TransformationProviderSelection['candidates']>(row.candidatesJson, 'provider selection candidates'),
@@ -222,6 +228,7 @@ export class PrismaTransformationProviderRegistryRepository implements Transform
       await this.client.v2TransformationProviderSelection.create({ data: {
         id: selection.id, workspaceId: selection.workspaceId, projectId: selection.projectId, projectVersionId: selection.projectVersionId,
         briefId: selection.briefId, schemaVersion: selection.schemaVersion, briefHash: selection.briefHash,
+        requestedOperation: selection.requestedOperation ?? null,
         selectedProviderId: selection.selectedProviderId ?? null, selectedCapabilityId: selection.selectedCapabilityId ?? null,
         policyJson: stableSerialize(selection.policy), candidatesJson: stableSerialize(selection.candidates), selectedReason: selection.selectedReason,
         selectionHash: selection.selectionHash, createdAt: new Date(selection.createdAt),

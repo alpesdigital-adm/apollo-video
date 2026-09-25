@@ -55,7 +55,7 @@ const AVATAR = 'heygen-v3'
 const GENERIC_AVATAR = 'synthesia-v2'
 const GENERIC_POLICY = 'synthetic-critic-thresholds/audio-avatar/v1'
 const ADAPTER_POLICY = 'synthetic-critic-thresholds/audio-avatar/heygen-v3/v1'
-const TTS_POLICY = 'synthetic-critic-thresholds/tts/v1'
+const TTS_POLICY = 'synthetic-critic-thresholds/tts/v2'
 
 /** Everything a take was approved to be, before it was generated. */
 const CLEAN_EXPECTATION = Object.freeze({
@@ -86,7 +86,7 @@ const EVAL_SET = Object.freeze([
   },
   {
     id: 'muted-audio',
-    why: 'a take with no measurable audio is rejected, and the fix is to ask the provider again',
+    why: 'a take with no measurable audio also fails canonical audio preservation and must be retried',
     capability: 'audio-avatar',
     adapterId: GENERIC_AVATAR,
     video: 'silent.mp4',
@@ -95,7 +95,7 @@ const EVAL_SET = Object.freeze([
     thresholdsVersion: GENERIC_POLICY,
     decision: 'rejected',
     action: 'retry',
-    causes: ['audio-silent'],
+    causes: ['audio-preservation-mismatch', 'audio-silent'],
   },
   {
     id: 'frozen-video',
@@ -120,8 +120,8 @@ const EVAL_SET = Object.freeze([
     expected: CLEAN_EXPECTATION,
     thresholdsVersion: GENERIC_POLICY,
     decision: 'rejected',
-    action: 'retry',
-    causes: ['duration-drift'],
+    action: 'fallback',
+    causes: ['audio-preservation-mismatch', 'duration-drift'],
   },
   {
     id: 'omitted-word',
@@ -134,7 +134,7 @@ const EVAL_SET = Object.freeze([
     thresholdsVersion: GENERIC_POLICY,
     decision: 'rejected',
     action: 'retry',
-    causes: ['word-omitted'],
+    causes: ['output-speech-mismatch'],
   },
   {
     id: 'added-word',
@@ -145,9 +145,9 @@ const EVAL_SET = Object.freeze([
     words: SPOKEN_EXTRA_WORD,
     expected: CLEAN_EXPECTATION,
     thresholdsVersion: GENERIC_POLICY,
-    decision: 'needs-review',
-    action: 'manual-review',
-    causes: ['word-added'],
+    decision: 'rejected',
+    action: 'retry',
+    causes: ['output-speech-mismatch'],
   },
   {
     id: 'empty-alignment',
@@ -161,6 +161,7 @@ const EVAL_SET = Object.freeze([
     decision: 'evidence-unavailable',
     action: 'manual-review',
     causes: ['required-evidence-missing'],
+    omitOutputEvidence: true,
   },
   {
     id: 'corrupt-blob',
@@ -174,6 +175,7 @@ const EVAL_SET = Object.freeze([
     decision: 'rejected',
     action: 'retry',
     causes: ['blob-undecodable', 'required-evidence-missing'],
+    omitOutputEvidence: true,
   },
   {
     id: 'identity-mismatch',
@@ -213,9 +215,9 @@ const EVAL_SET = Object.freeze([
     words: SPOKEN,
     expected: CLEAN_EXPECTATION,
     thresholdsVersion: GENERIC_POLICY,
-    decision: 'needs-review',
-    action: 'manual-review',
-    causes: ['audio-silence-window'],
+    decision: 'rejected',
+    action: 'fallback',
+    causes: ['audio-preservation-mismatch', 'audio-silence-window'],
   },
   {
     id: 'continuity-break',
@@ -253,7 +255,7 @@ const EVAL_SET = Object.freeze([
     thresholdsVersion: ADAPTER_POLICY,
     decision: 'rejected',
     action: 'fallback',
-    causes: ['lip-sync-below-threshold'],
+    causes: ['audio-preservation-mismatch', 'lip-sync-below-threshold'],
   },
   {
     id: 'speech-only-clean',
@@ -274,7 +276,7 @@ const UNDEPLOYED = ['visual-artifacts', 'framing', 'eyes', 'teeth', 'hands']
 
 function inMemoryReports() {
   const rows = new Map()
-  const takeKey = (report) => `${report.workspaceId}|${report.blockId}|${report.artifactId}|${report.thresholdsVersion}`
+  const takeKey = (report) => `${report.workspaceId}|${report.evaluationContextHash}`
   const sorted = (predicate, limit) => Object.freeze([...rows.values()]
     .filter(predicate)
     .sort((left, right) => right.decidedAt.localeCompare(left.decidedAt))
@@ -297,12 +299,13 @@ function inMemoryReports() {
     async readByHash({ workspaceId, reportHash }) {
       return [...rows.values()].find((row) => row.workspaceId === workspaceId && row.reportHash === reportHash) ?? null
     },
-    async readByBlock({ workspaceId, blockId, artifactId, thresholdsVersion, limit }) {
+    async readByBlock({ workspaceId, blockId, artifactId, thresholdsVersion, evaluationContextHash, limit }) {
       return sorted((row) =>
         row.workspaceId === workspaceId &&
         row.blockId === blockId &&
         (!artifactId || row.artifactId === artifactId) &&
-        (!thresholdsVersion || row.thresholdsVersion === thresholdsVersion), limit)
+        (!thresholdsVersion || row.thresholdsVersion === thresholdsVersion) &&
+        (!evaluationContextHash || row.evaluationContextHash === evaluationContextHash), limit)
     },
     async readByArtifact({ workspaceId, artifactId, limit }) {
       return sorted((row) => row.workspaceId === workspaceId && row.artifactId === artifactId, limit)
@@ -330,6 +333,10 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
     await import('../../src/v2/infrastructure/media/synthetic-critic-pronunciation.ts')
   const { DeterministicSyntheticCriticControlledEvaluator } =
     await import('../../src/v2/infrastructure/media/synthetic-critic-controlled-probe.ts')
+  const { FfmpegAvatarAudioComparison } =
+    await import('../../src/v2/infrastructure/media/ffmpeg-avatar-audio-comparison.ts')
+  const { createAvatarOutputSpeechEvidence } =
+    await import('../../src/v2/domain/avatar-output-speech-evidence.ts')
 
   const workspaceId = 'critic-eval-workspace'
   const audit = createExternalAuditContext({
@@ -391,7 +398,8 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
       }),
       controlled: new DeterministicSyntheticCriticControlledEvaluator(),
       clock: () => new Date(Date.parse('2026-09-01T00:00:00.000Z') + (minted += 1) * 1_000),
-      createId: ({ blockId }) => `critic-report-${blockId}`,
+      createId: ({ evaluationContextHash }) =>
+        `critic-report-${evaluationContextHash.slice(0, 48)}`,
     })
 
     let currentWords = SPOKEN
@@ -409,7 +417,36 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
       await t.test(`${evaluation.id} — ${evaluation.why}`, async () => {
         currentWords = evaluation.words
         const blockId = `block-${evaluation.id}`
+        const scriptHash = createHash('sha256').update(SCRIPT, 'utf8').digest('hex')
+        let outputSpeechEvidence
+        if (evaluation.video && !evaluation.omitOutputEvidence) {
+          const intentionallyChangedAudio = ['muted-audio', 'duration-drift', 'silence-window', 'audio-video-offset'].includes(evaluation.id)
+          const sourceAudio = identities.get(intentionallyChangedAudio ? (evaluation.audio ?? 'speech.m4a') : evaluation.video)
+          const outputVideo = identities.get(evaluation.video)
+          const comparison = await new FfmpegAvatarAudioComparison(process.env).compare({
+            sourcePath: sourceAudio.path,
+            resultPath: outputVideo.path,
+            sourceStartMs: 0,
+            // AAC containers carry a short encoder tail. When the same file is
+            // the canonical source, include that tail so the PCM comparison is
+            // about content rather than container padding.
+            sourceDurationMs: intentionallyChangedAudio
+              ? (evaluation.id === 'audio-video-offset' ? 3_500 : 3_000)
+              : 3_008,
+          })
+          const spokenHash = createHash('sha256').update(evaluation.words.map(({ word }) => word).join(' '), 'utf8').digest('hex')
+          outputSpeechEvidence = createAvatarOutputSpeechEvidence({
+            ...comparison,
+            jobId: `provider-job-${evaluation.id}`,
+            videoArtifactId: ref(evaluation.video).artifactId,
+            videoArtifactSha256: outputVideo.sha256,
+            sourceAudioArtifactId: `artifact-${(intentionallyChangedAudio ? (evaluation.audio ?? 'speech.m4a') : evaluation.video).replace(/[^A-Za-z0-9]/g, '-')}`,
+            sourceAudioRangeHash: createHash('sha256').update(`range:${evaluation.id}`).digest('hex'),
+            speechEvidence: { kind: 'controlled', evaluatorId: 'controlled-output-sidecar', evaluatorVersion: '1.0.0', outputTranscriptHash: evaluation.words === SPOKEN ? scriptHash : spokenHash, observedIdentityRef: evaluation.expected.declaredIdentityRef },
+          })
+        }
         const subject = {
+          providerJobId: evaluation.video ? `provider-job-${evaluation.id}` : undefined,
           workspaceId,
           projectId: 'critic-eval-project',
           blockId,
@@ -420,13 +457,15 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
           video: evaluation.video ? ref(evaluation.video) : null,
           audio: evaluation.audio ? ref(evaluation.audio) : null,
           alignmentArtifactId: evaluation.words.length === 0 ? null : 'artifact-alignment',
+          ...(outputSpeechEvidence ? { outputSpeechEvidence, outputSpeechEvidenceArtifactId: `artifact-output-speech-${evaluation.id}` } : {}),
+          scriptHash,
           scriptText: SCRIPT,
           expected: evaluation.expected,
         }
         const result = await evaluate({
           subject,
           profileSnapshotId: 'ana:v2',
-          scriptHash: createHash('sha256').update(SCRIPT, 'utf8').digest('hex'),
+          scriptHash,
           actor,
         })
         const report = result.report
@@ -492,9 +531,48 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
       })
     }
 
+    await t.test('the same block and bytes with a new alignment is a new opinion, while its exact replay converges', async () => {
+      currentWords = SPOKEN
+      const subject = {
+        workspaceId,
+        projectId: 'critic-eval-project',
+        blockId: 'block-alignment-context',
+        capability: 'audio-avatar',
+        adapterId: GENERIC_AVATAR,
+        adapterVersion: '1.0.0',
+        modelRef: null,
+        video: ref('clean.mp4'),
+        audio: null,
+        alignmentArtifactId: 'artifact-alignment-first',
+        scriptText: SCRIPT,
+        expected: CLEAN_EXPECTATION,
+      }
+      const request = {
+        profileSnapshotId: 'ana:v2',
+        scriptHash: createHash('sha256').update(SCRIPT, 'utf8').digest('hex'),
+        actor,
+      }
+      const first = await evaluate({ ...request, subject })
+      const second = await evaluate({
+        ...request,
+        subject: { ...subject, alignmentArtifactId: 'artifact-alignment-second' },
+      })
+      const replay = await evaluate({ ...request, subject })
+
+      assert.equal(first.replayed, false)
+      assert.equal(second.replayed, false)
+      assert.equal(replay.replayed, true)
+      assert.equal(replay.report.id, first.report.id)
+      assert.notEqual(first.report.evaluationContextHash, second.report.evaluationContextHash)
+      assert.notEqual(first.report.id, second.report.id)
+      assert.notEqual(first.report.reportHash, second.report.reportHash)
+      assert.equal(first.report.artifactId, second.report.artifactId)
+      assert.equal(first.report.thresholdsVersion, second.report.thresholdsVersion)
+    })
+
     await t.test('every declared case ran, and the reports stay queryable by block and by artifact', async () => {
       assert.equal(EVAL_SET.length, 14, 'the eval set is versioned: adding or removing a case is a deliberate edit')
-      assert.equal(reports.stored.size, EVAL_SET.length)
+      assert.equal(reports.stored.size, EVAL_SET.length + 2)
 
       const read = readSyntheticCriticReportsService({ reports })
       const byBlock = await read({ workspaceId, actor, blockId: 'block-muted-audio' })
@@ -506,7 +584,7 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
       assert.ok(byArtifact.length >= 6)
 
       const byProject = await read({ workspaceId, actor, projectId: 'critic-eval-project', limit: 100 })
-      assert.equal(byProject.length, EVAL_SET.length)
+      assert.equal(byProject.length, EVAL_SET.length + 2)
 
       const foreign = await read({ workspaceId, actor, blockId: 'block-that-never-existed' })
       assert.equal(foreign.length, 0)
@@ -535,6 +613,35 @@ test(`T-FR-106 ${EVAL_SET_VERSION}: the critic reaches the declared verdict on k
         }),
         /another workspace/,
       )
+    })
+
+    await t.test('the same take gets a distinct id under a new thresholds policy and converges within one policy', async () => {
+      currentWords = SPOKEN
+      const common = {
+        workspaceId,
+        projectId: 'critic-eval-project',
+        blockId: 'block-policy-versioning',
+        capability: 'audio-avatar',
+        adapterVersion: '1.0.0',
+        modelRef: null,
+        video: ref('clean.mp4'),
+        audio: null,
+        alignmentArtifactId: 'artifact-alignment',
+        scriptText: SCRIPT,
+        expected: CLEAN_EXPECTATION,
+      }
+      const request = {
+        profileSnapshotId: 'ana:v2',
+        scriptHash: createHash('sha256').update(SCRIPT, 'utf8').digest('hex'),
+        actor,
+      }
+      const generic = await evaluate({ ...request, subject: { ...common, adapterId: GENERIC_AVATAR } })
+      const specialized = await evaluate({ ...request, subject: { ...common, adapterId: AVATAR } })
+      const replay = await evaluate({ ...request, subject: { ...common, adapterId: GENERIC_AVATAR } })
+      assert.notEqual(generic.report.thresholdsVersion, specialized.report.thresholdsVersion)
+      assert.notEqual(generic.report.id, specialized.report.id)
+      assert.equal(replay.replayed, true)
+      assert.equal(replay.report.id, generic.report.id)
     })
 
     await t.test('a capability with no published thresholds is never judged against an improvised default', async () => {

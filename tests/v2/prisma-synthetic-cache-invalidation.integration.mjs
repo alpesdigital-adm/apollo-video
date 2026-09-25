@@ -11,6 +11,7 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
+const ffprobePath = require('ffprobe-static').path
 
 const workspaceId = 'cache-invalidation-int-workspace'
 const clientId = 'cache-invalidation-int-client'
@@ -26,17 +27,27 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
   const root = await mkdtemp(join(tmpdir(), 'apollo-cache-invalidation-'))
   const artifactRoot = join(root, 'artifacts')
   const workRoot = join(root, 'work')
+  const compileWorkRoot = join(root, 'compile-work')
   await mkdir(artifactRoot, { recursive: true })
   await mkdir(workRoot, { recursive: true })
+  await mkdir(compileWorkRoot, { recursive: true })
 
   const cleanup = async () => {
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticBlockConcatenation.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
@@ -71,7 +82,10 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       ensureSyntheticBlockGenerationsService,
       settleSyntheticBlockGenerationsService,
     } = await import('../../src/v2/application/synthetic-block-generations.ts')
+    const { compileSyntheticBlockAudioService } = await import('../../src/v2/application/synthetic-block-audio-compilation.ts')
+    const { createSyntheticAudioMasterService } = await import('../../src/v2/application/synthetic-audio-masters.ts')
     const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../src/v2/domain/asset-rights.ts')
+    const { createSyntheticCriticReport, SYNTHETIC_CRITIC_DIMENSIONS } = await import('../../src/v2/domain/synthetic-critic-report.ts')
     const { createAssetRightsChangeIntent } = await import('../../src/v2/domain/asset-rights-change.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
@@ -83,14 +97,17 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
+    const { PrismaProviderExecutionProvenanceRepository } = await import('../../src/v2/infrastructure/prisma/provider-execution-provenance-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticAudioMasterRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts')
     const { PrismaSyntheticScriptPlanRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-script-plan-repository.ts')
     const { PrismaSyntheticBlockGenerationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-generation-repository.ts')
+    const { PrismaSyntheticBlockConcatenationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-concatenation-repository.ts')
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
     const { PrismaSyntheticCacheSubmissionClaimRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-submission-claim-repository.ts')
     const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
+    const { concatenateBlockAudio } = await import('../../src/v2/infrastructure/media/audio-concatenation.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
     const { AuthorizedProviderSubmissionInputMaterializer } = await import('../../src/v2/infrastructure/provider-submission-input-materializer.ts')
@@ -162,6 +179,13 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       actor, idempotencyKey: key,
     })
     const profileV1 = await registerProfile(profileInput(1, 'cacheinv-profile-v1'))
+    const profileBInput = profileInput(1, 'cacheinv-profile-b-v1')
+    const profileB = await registerProfile({
+      ...profileBInput,
+      profileId: 'cacheinv-presenter-b',
+      actorIdentityId: 'cacheinv-identity-b',
+      consent: { ...profileBInput.consent, id: 'cacheinv-consent-b-v1' },
+    })
 
     // Controlled provider boundary: every paid call is counted here, so the
     // assertions below measure real HTTP traffic, not intentions.
@@ -194,24 +218,28 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const storage = new LocalMediaUploadStorage(artifactRoot)
     const providerRepository = new PrismaProviderJobRepository(client)
     const resultArtifactRepository = new PrismaProviderResultArtifactRepository(client)
+    const provenanceRepository = new PrismaProviderExecutionProvenanceRepository(client)
     const rightsRepository = new PrismaAssetRightsRepository(client)
     const projects = new PrismaProjectWorkspaceQueryRepository(client)
     const plans = new PrismaSyntheticScriptPlanRepository(client)
     const generations = new PrismaSyntheticBlockGenerationRepository(client)
+    const concatenations = new PrismaSyntheticBlockConcatenationRepository(client)
+    const audioMasters = new PrismaSyntheticAudioMasterRepository(client)
     const cacheDecisions = new PrismaSyntheticCacheDecisionRepository(client)
     let providerTransition = 0
     let second = 0
     const tick = () => new Date(at((second += 1) + 4))
     const enqueue = enqueueProviderJobService({
       jobs: providerRepository, adapters: registry, profiles: syntheticRepository,
-      audioMasters: new PrismaSyntheticAudioMasterRepository(client), projects, artifacts: artifactRepository,
+      audioMasters, projects, artifacts: artifactRepository,
       rights: rightsRepository, clock: () => new Date(at(2)),
       createJobId: () => `cacheinv-job-${++entity}`,
       createTransitionId: () => `cacheinv-transition-${++providerTransition}`,
     })
+    const sourceMaterializer = new LocalArtifactSourceMaterializer(artifactRoot)
     const materializer = new AuthorizedProviderSubmissionInputMaterializer({
       profiles: syntheticRepository, artifacts: artifactRepository,
-      sources: new LocalArtifactSourceMaterializer(artifactRoot), clock: () => new Date(at(2)),
+      sources: sourceMaterializer, clock: () => new Date(at(2)),
     })
     const ttsIngestor = new VerifiedTtsResultIngestor({
       workRoot, storage, artifacts: artifactRepository, artifactQuery: artifactRepository,
@@ -219,11 +247,47 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       audioProber: { probeDurationSeconds: (path, options) => probeAudioDurationSeconds(path, options) },
       clock: () => new Date(at(3)),
     })
-    const ttsCritic = new PersistedTtsResultCritic(artifactRepository, resultArtifactRepository)
+    const transportTtsCritic = new PersistedTtsResultCritic(artifactRepository, resultArtifactRepository)
+    const criticReports = new PrismaSyntheticCriticReportRepository(client)
+    let criticOrdinal = 0
+    const ttsCritic = {
+      async evaluate(input) {
+        const transport = await transportTtsCritic.evaluate(input)
+        const ledger = await resultArtifactRepository.listByJob({
+          workspaceId: input.job.workspaceId, projectId: input.job.projectId, jobId: input.job.id,
+        })
+        const alignment = ledger.find(({ role }) => role === 'alignment-evidence')
+        const binding = input.job.input.criticBinding
+        assert.ok(alignment && binding, 'controlled cache invalidation critic needs persisted alignment and block binding')
+        const measured = new Set(['pronunciation', 'temporal-integrity', 'audiovisual-integrity'])
+        const report = createSyntheticCriticReport({
+          id: `cacheinv-critic-${++criticOrdinal}`,
+          workspaceId: input.job.workspaceId, projectId: input.job.projectId, blockId: binding.blockId,
+          capability: 'tts', adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion,
+          artifactId: input.artifact.artifactId, artifactSha256: input.artifact.artifactSha256,
+          audioArtifactId: input.artifact.artifactId, alignmentArtifactId: alignment.artifactId,
+          scriptHash: binding.scriptHash, profileSnapshotId: binding.profileSnapshotId,
+          expectedIdentityRef: 'avatar_cacheinv', expectationHash: hash('e'),
+          evaluationContextHash: createHash('sha256')
+            .update(`cacheinv-context:${binding.blockId}:${input.artifact.artifactSha256}:${alignment.artifactId}`)
+            .digest('hex'),
+          evaluators: [{ id: 'cacheinv-controlled-critic', version: '1.0.0', kind: 'controlled', scope: 'controlled cache invalidation fixture only; no live provider claim' }],
+          measurements: SYNTHETIC_CRITIC_DIMENSIONS.map((dimension) => measured.has(dimension)
+            ? { dimension, status: 'measured', evaluatorId: 'cacheinv-controlled-critic', value: 0, unit: 'fixture-score', threshold: 0, confidence: 1, evidenceRefs: [`artifact://${input.artifact.artifactId}`], range: null, note: null }
+            : { dimension, status: 'not-applicable', evaluatorId: null, value: null, unit: null, threshold: null, confidence: null, evidenceRefs: [], range: null, note: 'speech-only controlled fixture has no visual signal' }),
+          issues: [], decision: 'approved', recommendedAction: 'none',
+          thresholdsVersion: 'synthetic-critic-thresholds/tts/v2', decidedAt: at(20 + criticOrdinal),
+        })
+        await criticReports.record({ report })
+        return { approved: transport.approved, resultHash: report.reportHash }
+      },
+    }
     const drainWorkers = async () => {
       for (let quiet = 0; quiet < 2;) {
         const worked = await runProviderJobWorkerOnce({
-          jobs: providerRepository, adapters: registry, materializer,
+          jobs: providerRepository, provenance: provenanceRepository,
+          resultArtifacts: resultArtifactRepository,
+          adapters: registry, materializer,
           ingestor: ttsIngestor, critic: ttsCritic,
           clock: tick,
           createLeaseToken: () => `cacheinv-lease-${second}`,
@@ -249,34 +313,52 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
       rights: rightsRepository, cacheDecisions, providerJobs: providerRepository,
       resultArtifacts: resultArtifactRepository,
-      criticReports: new PrismaSyntheticCriticReportRepository(client),
+      criticReports,
       submissionClaims: new PrismaSyntheticCacheSubmissionClaimRepository(client),
       enqueueProviderJob: enqueue, clock: ensureClock,
     })
     const settle = settleSyntheticBlockGenerationsService({
       generations, providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
+      criticReports,
       clock: () => new Date(at(9)),
+    })
+    const createAudioMaster = createSyntheticAudioMasterService({
+      repository: audioMasters, projects, profiles: syntheticRepository,
+      providerJobs: providerRepository, artifacts: artifactRepository, rights: rightsRepository,
+      criticReports,
+      clock: () => new Date(at(70)), createId: () => `cacheinv-master-${++entity}`,
+    })
+    const compile = compileSyntheticBlockAudioService({
+      plans, generations, providerJobs: providerRepository, criticReports, profiles: syntheticRepository,
+      artifacts: artifactRepository, artifactPersistence: artifactRepository,
+      rights: rightsRepository, concatenations, sources: sourceMaterializer, storage,
+      mutatePlan, createAudioMaster,
+      concatenate: (input) => concatenateBlockAudio({ ...input, ffmpegPath, ffprobePath }),
+      workRoot: compileWorkRoot,
+      clock: () => new Date(at(70)),
     })
 
     const grantRights = async (planId, markets = ['BRA']) => {
       const approved = await generations.listByPlan({ workspaceId, planId, statuses: ['approved'] })
       for (const generation of approved) {
-        const artifactId = generation.audioArtifactId
-        const row = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId }, select: { rightsRevision: true } })
-        if (row.rightsRevision > 0) continue
-        const snapshot = createAssetRightsSnapshot({
-          id: `cacheinv-rights-${artifactId}`, workspaceId, artifactId, sequence: 1,
-          draft: {
-            status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: markets, allowedLocales: ['pt-BR'],
-            allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
-            consent: { status: 'not-required', allowedUses: [] },
-          },
-          createdBy: { type: 'api-client', id: clientId }, createdAt: at(8),
-        })
-        await rightsRepository.setCurrent(snapshot, assetRightsRevision(artifactId, 0), createAssetRightsChangeIntent({
-          workspaceId, artifactId, snapshotHash: snapshot.snapshotHash, baseRevision: assetRightsRevision(artifactId, 0),
-          actor: { kind: 'internal', actorType: 'api-client', actorId: clientId }, changedAt: at(8),
-        }))
+        for (const artifactId of [generation.audioArtifactId, generation.alignmentArtifactId]) {
+          assert.ok(artifactId)
+          const row = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId }, select: { rightsRevision: true } })
+          if (row.rightsRevision > 0) continue
+          const snapshot = createAssetRightsSnapshot({
+            id: `cacheinv-rights-${artifactId}`, workspaceId, artifactId, sequence: 1,
+            draft: {
+              status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: markets, allowedLocales: ['pt-BR'],
+              allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
+              consent: { status: 'not-required', allowedUses: [] },
+            },
+            createdBy: { type: 'api-client', id: clientId }, createdAt: at(8),
+          })
+          await rightsRepository.setCurrent(snapshot, assetRightsRevision(artifactId, 0), createAssetRightsChangeIntent({
+            workspaceId, artifactId, snapshotHash: snapshot.snapshotHash, baseRevision: assetRightsRevision(artifactId, 0),
+            actor: { kind: 'internal', actorType: 'api-client', actorId: clientId }, changedAt: at(8),
+          }))
+        }
       }
     }
 
@@ -595,6 +677,98 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const beforeReplay = await cacheDecisions.summarize({ workspaceId, projectId: main.project.id })
     await ensure(mainArguments())
     assert.deepEqual(await cacheDecisions.summarize({ workspaceId, projectId: main.project.id }), beforeReplay)
+
+    // ------------------------------------------------------------------
+    // Origin consent — profile B intentionally shares A's voice address,
+    // text and locale. While A's current head still authorizes that voice,
+    // B may reuse A's approved worker result. The reused row keeps B as its
+    // destination profile and points back to the paying A generation.
+    // ------------------------------------------------------------------
+    const originText = 'Delta quarta frase.'
+    const consentReusePlan = await createPlan({
+      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      profileSnapshotId: profileB.profile.profileSnapshotId, locale: 'pt-BR',
+      scriptText: originText,
+      actor, idempotencyKey: 'cacheinv-origin-consent-hit-plan',
+    })
+    const callsBeforeConsentHit = providerCalls.length
+    const jobsBeforeConsentHit = await jobCount()
+    await markLedger()
+    const consentHit = await ensure({
+      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      planId: consentReusePlan.plan.head.id, use: 'ads', market: 'BRA', actor,
+    })
+    assert.deepEqual(consentHit.map(({ action }) => action), ['reused'])
+    assert.equal(providerCalls.length, callsBeforeConsentHit, 'authorized cross-profile reuse pays nothing')
+    assert.equal(await jobCount(), jobsBeforeConsentHit, 'authorized cross-profile reuse creates no provider job')
+    const consentHitDecision = await decisionsSince()
+    assert.deepEqual(consentHitDecision.map(({ outcome }) => outcome), ['hit'])
+    assert.deepEqual(consentHitDecision.map(({ reasonCode }) => reasonCode), ['CACHE_HIT_ELIGIBLE'])
+    const reusedBlockId = consentReusePlan.plan.version.blockSequence[0]
+    const reusedByB = await generations.findEffective({ workspaceId, blockId: reusedBlockId })
+    assert.equal(reusedByB.profileSnapshotId, profileB.profile.profileSnapshotId, 'the destination remains profile B')
+    assert.ok(reusedByB.sourceGenerationId, 'the reused row preserves its paying origin generation')
+    const payingOrigin = await client.v2SyntheticBlockGeneration.findUniqueOrThrow({
+      where: { id: reusedByB.sourceGenerationId },
+    })
+    assert.equal(payingOrigin.profileSnapshotId, profileV1.profile.profileSnapshotId)
+    assert.equal(payingOrigin.status, 'approved')
+    assert.ok(payingOrigin.audioArtifactId && payingOrigin.alignmentArtifactId)
+
+    // Revocation changes A's head only. B remains a valid destination, but a
+    // new B request may no longer hit bytes whose consent authority is A.
+    const revokedA = await registerProfile(profileInput(2, 'cacheinv-profile-a-v2-revoked', { revokedAt: at(40) }))
+    const [headA, headB] = await Promise.all([
+      syntheticRepository.readProfileHead({ workspaceId, profileId: profileV1.profile.snapshot.id }),
+      syntheticRepository.readProfileHead({ workspaceId, profileId: profileB.profile.snapshot.id }),
+    ])
+    assert.equal(headA.head.currentSnapshotId, revokedA.profile.profileSnapshotId)
+    assert.equal(headA.current.snapshot.consent.revokedAt, at(40))
+    assert.equal(headB.head.currentSnapshotId, profileB.profile.profileSnapshotId)
+    assert.equal(headB.current.snapshot.consent.revokedAt ?? null, null, 'revoking A must not mutate destination profile B')
+
+    const postRevocationPlan = await createPlan({
+      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      profileSnapshotId: profileB.profile.profileSnapshotId, locale: 'pt-BR',
+      scriptText: originText,
+      actor, idempotencyKey: 'cacheinv-origin-consent-miss-plan',
+    })
+    await markLedger()
+    const jobsBeforeRevokedOrigin = await jobCount()
+    const postRevocation = await ensure({
+      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      planId: postRevocationPlan.plan.head.id, use: 'ads', market: 'BRA', actor,
+    })
+    assert.deepEqual(postRevocation.map(({ action }) => action), ['enqueued'])
+    assert.equal(postRevocation.some(({ action }) => action === 'reused'), false, 'revoked origin A must produce zero cache hits')
+    assert.equal(providerCalls.length, callsBeforeConsentHit, 'a miss only enqueues; it does not call the provider inline')
+    assert.equal(await jobCount(), jobsBeforeRevokedOrigin + 1)
+    const revokedOriginDecision = await decisionsSince()
+    assert.deepEqual(revokedOriginDecision.map(({ outcome }) => outcome), ['miss'])
+    assert.deepEqual(revokedOriginDecision.map(({ reasonCode }) => reasonCode), ['CANDIDATE_RIGHTS_BLOCKED'])
+    const currentHeadBAfterMiss = await syntheticRepository.readProfileHead({ workspaceId, profileId: profileB.profile.snapshot.id })
+    assert.equal(currentHeadBAfterMiss.head.currentSnapshotId, profileB.profile.profileSnapshotId)
+    assert.equal(currentHeadBAfterMiss.current.snapshot.consent.revokedAt ?? null, null)
+
+    // B's earlier hit still has an approved job, artifacts, rights and critic
+    // report behind it. Compilation must nevertheless follow sourceGenerationId
+    // to A and reject the now-revoked origin before creating a concatenation or
+    // consolidated master.
+    const concatenationsBeforeRevokedCompile = await client.v2SyntheticBlockConcatenation.count({ where: { workspaceId } })
+    const mastersBeforeRevokedCompile = await client.v2SyntheticAudioMaster.count({ where: { workspaceId } })
+    await assert.rejects(
+      compile({
+        workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+        planId: consentReusePlan.plan.head.id,
+        baseVersionId: consentReusePlan.plan.version.id,
+        baseHash: consentReusePlan.plan.version.planVersionHash,
+        settings: { gapMs: 200, outputFormat: 'mp3' }, use: 'ads', market: 'BRA', actor,
+        idempotencyKey: 'cacheinv-origin-consent-compile-blocked',
+      }),
+      (error) => error.code === 'ASSET_RIGHTS_BLOCKED',
+    )
+    assert.equal(await client.v2SyntheticBlockConcatenation.count({ where: { workspaceId } }), concatenationsBeforeRevokedCompile)
+    assert.equal(await client.v2SyntheticAudioMaster.count({ where: { workspaceId } }), mastersBeforeRevokedCompile)
   } finally {
     await cleanup()
     await client.$disconnect()

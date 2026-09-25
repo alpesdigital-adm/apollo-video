@@ -2045,6 +2045,41 @@ test('authenticated public API manages projects, clients and artifact inspection
       mismatchedConcurrentEndpointBodies.find((body) => body.error).error.code,
       'IDEMPOTENCY_PAYLOAD_MISMATCH',
     )
+    const mismatchedConcurrentEndpointWinner = mismatchedConcurrentEndpointBodies.find(
+      (body) => body.data,
+    )
+    assert.ok(mismatchedConcurrentEndpointWinner)
+    const mismatchedConcurrentEndpointId =
+      mismatchedConcurrentEndpointWinner.data.endpoint.id
+    assert.equal(await client.v2IdempotencyRecord.count({
+      where: {
+        workspaceId,
+        key: 'public-endpoint-concurrent-mismatch-1',
+      },
+    }), 1)
+    assert.equal(await client.v2WebhookEndpoint.count({
+      where: {
+        workspaceId,
+        url: { in: [
+          'https://concurrent-hooks-a.example.com/apollo',
+          'https://concurrent-hooks-b.example.com/apollo',
+        ] },
+      },
+    }), 1)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { workspaceId, endpointId: mismatchedConcurrentEndpointId },
+    }), 1)
+    assert.equal(await client.v2WebhookSigningSecretPayload.count({
+      where: { workspaceId, endpointId: mismatchedConcurrentEndpointId },
+    }), 1)
+    assert.equal(await client.v2WebhookAdministrationCommand.count({
+      where: {
+        workspaceId,
+        action: 'webhook-endpoint.create',
+        targetId: mismatchedConcurrentEndpointId,
+        idempotencyKey: 'public-endpoint-concurrent-mismatch-1',
+      },
+    }), 1)
     assert.equal((await createWebhookEndpointRequest('', createEndpointBody)).status, 422)
     const createdEndpointSecret = await client.v2WebhookSigningSecret.findFirstOrThrow({
       where: { endpointId: createdEndpoint.data.endpoint.id, workspaceId },

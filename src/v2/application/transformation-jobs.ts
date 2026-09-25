@@ -23,6 +23,7 @@ import {
   transitionProviderJob,
   type ProviderJobAuthorization,
 } from '../domain/provider-job.ts'
+import { descendFallbackLadder, nextFallbackRung, recordFallbackAttempt } from '../domain/transformation-fallback.ts'
 import {
   assertTransformationBrief,
   projectTransformationProviderInput,
@@ -45,9 +46,192 @@ import type { ProviderJobRepository } from './ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from './ports/provider-job-runtime.ts'
 import type { ReviewCleanupMaskRepository } from './ports/review-cleanup-mask-repository.ts'
 import type { TransformationProviderRegistryRepository } from './ports/transformation-provider-registry-repository.ts'
+import type { TransformationFallbackDispatchClaim, TransformationQualityRepository } from './ports/transformation-quality-repository.ts'
+import type { TransformationRoutingPolicy, TransformationProviderSelection } from '../domain/transformation-provider-registry.ts'
+import { routeTransformationFallbackService } from './transformation-provider-registry.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
+const IDEMPOTENCY_KEY = /^[\x21-\x7E]{8,128}$/
 const DEFAULT_DEADLINE_MS = 60 * 60 * 1_000
+
+export interface GeneratedCutawayFallbackEnqueueInput {
+  workspaceId: string
+  projectId: string
+  briefId: string
+  selection: Readonly<TransformationProviderSelection>
+  fallback: NonNullable<import('../domain/provider-job.ts').ProviderJobTransformationOrigin['fallback']>
+  use: string
+  market: string
+  locale: string
+  actor: Readonly<AuthenticatedExternalActor>
+  idempotencyKey: string
+}
+
+/** Dispatches the current fallback rung from persisted state. The caller may
+ * identify the ledger revision, but cannot choose the rung, operation,
+ * provider, rejected result or critic report. */
+export function dispatchGeneratedCutawayFallbackService(dependencies: {
+  quality: TransformationQualityRepository
+  registry: TransformationProviderRegistryRepository
+  jobs: ProviderJobRepository
+  enqueue: (input: Readonly<GeneratedCutawayFallbackEnqueueInput>) => Promise<Readonly<{ persisted: Readonly<import('./ports/provider-job-repository.ts').PersistedProviderJob>; replayed: boolean }>>
+  clock: () => Date
+}) {
+  return async function execute(request: {
+    workspaceId: string
+    projectId: string
+    ledgerId: string
+    expectedLedgerHash: string
+    use: string
+    market: string
+    locale: string
+    actor: Readonly<AuthenticatedExternalActor>
+    idempotencyKey: string
+  }) {
+    requireScope(request.actor, 'projects:write')
+    assertDomain(request.actor.workspaceId === request.workspaceId, 'AUTH_INVALID', 'Fallback actor does not belong to workspace')
+    assertDomain(IDEMPOTENCY_KEY.test(request.idempotencyKey), 'INVALID_ARGUMENT', 'Idempotency-Key is invalid')
+    const audit = materializeActorAuditContext(request.actor)
+    const dispatchRequestHash = calculateCanonicalHash({
+      schemaVersion: 'generated-cutaway-dispatch-request/v1', workspaceId: request.workspaceId, projectId: request.projectId,
+      ledgerId: request.ledgerId, expectedLedgerHash: request.expectedLedgerHash,
+      use: request.use, market: request.market, locale: request.locale, actorContextHash: audit.contextHash,
+    })
+    const replaySettledClaim = async (claim: Readonly<TransformationFallbackDispatchClaim>) => {
+      const claimedLedger = await dependencies.quality.readFallbackLedger({ workspaceId: request.workspaceId, projectId: request.projectId, ledgerId: claim.requestedLedgerId })
+      assertDomain(Boolean(claimedLedger) && claimedLedger!.ledgerHash === claim.requestedLedgerHash, 'PERSISTENCE_CONFLICT', 'Fallback dispatch claim refers to a missing ledger revision')
+      if (claim.outcome === 'enqueued') {
+        const job = claim.providerJobId
+          ? await dependencies.jobs.read({ workspaceId: request.workspaceId, projectId: request.projectId, jobId: claim.providerJobId })
+          : null
+        assertDomain(Boolean(job), 'PERSISTENCE_CONFLICT', 'Settled fallback dispatch refers to a missing provider job')
+        const origin = job!.job.transformation?.fallback
+        assertDomain(
+          Boolean(origin) && origin!.ledgerId === claim.requestedLedgerId &&
+            origin!.ledgerHash === claim.requestedLedgerHash && origin!.rung === claim.rung &&
+            origin!.dispatchRequestHash === claim.dispatchRequestHash,
+          'PERSISTENCE_CONFLICT',
+          'Settled fallback dispatch job does not match its durable claim',
+        )
+        return Object.freeze({ outcome: 'replayed' as const, ledger: claimedLedger!, job: job! })
+      }
+      if (claim.outcome === 'skipped') {
+        const settledLedger = claim.resultLedgerId
+          ? await dependencies.quality.readFallbackLedger({ workspaceId: request.workspaceId, projectId: request.projectId, ledgerId: claim.resultLedgerId })
+          : null
+        assertDomain(Boolean(settledLedger) && settledLedger!.ledgerHash === claim.resultLedgerHash, 'PERSISTENCE_CONFLICT', 'Settled fallback skip refers to a missing ledger')
+        assertDomain(Boolean(dependencies.quality.findFallbackDispatchAttempt), 'PERSISTENCE_NOT_CONFIGURED', 'Fallback dispatch audit repository is unavailable')
+        const attempt = await dependencies.quality.findFallbackDispatchAttempt!({ workspaceId: request.workspaceId, projectId: request.projectId, briefId: claim.briefId, rung: claim.rung })
+        assertDomain(
+          Boolean(attempt) && attempt!.ledger.id === settledLedger!.id &&
+            attempt!.requestHash === claim.dispatchRequestHash &&
+            attempt!.authenticationAudit.contextHash === claim.authenticationAudit.contextHash,
+          'PERSISTENCE_CONFLICT',
+          'Settled fallback skip does not match its durable claim',
+        )
+        return Object.freeze({ outcome: 'skipped' as const, ledger: settledLedger!, reason: 'capability-unavailable' as const })
+      }
+      return null
+    }
+    const publicReplay = await dependencies.quality.readFallbackDispatchRequest({
+      workspaceId: request.workspaceId, actorClientId: audit.clientId, idempotencyKey: request.idempotencyKey,
+    })
+    if (publicReplay) {
+      assertDomain(publicReplay.requestFingerprint === dispatchRequestHash && publicReplay.authenticationAudit.contextHash === audit.contextHash, 'IDEMPOTENCY_PAYLOAD_MISMATCH', 'Fallback dispatch idempotency key was already used for a different request')
+      const settled = await replaySettledClaim(publicReplay.claim)
+      if (settled) return settled
+    }
+    const current = await dependencies.quality.readFallbackLedger({ workspaceId: request.workspaceId, projectId: request.projectId, ledgerId: request.ledgerId })
+    if (!current) throw new DomainError('ASSET_NOT_FOUND', 'Transformation fallback ledger was not found')
+    assertDomain(current.ledgerHash === request.expectedLedgerHash, 'VERSION_CONFLICT', 'Transformation fallback ledger hash is stale')
+    const dispatchClaim = await dependencies.quality.claimFallbackDispatch({
+      claimId: `fallback-claim-${calculateCanonicalHash({ workspaceId: request.workspaceId, projectId: request.projectId, ledgerId: current.id, rung: 'generated-cutaway' }).slice(0, 48)}`,
+      requestId: `fallback-request-${calculateCanonicalHash({ workspaceId: request.workspaceId, actorClientId: audit.clientId, idempotencyKey: request.idempotencyKey }).slice(0, 48)}`,
+      workspaceId: request.workspaceId, projectId: request.projectId,
+      ledgerId: current.id, ledgerHash: current.ledgerHash, briefId: current.briefId,
+      rung: 'generated-cutaway', idempotencyKey: request.idempotencyKey,
+      requestFingerprint: dispatchRequestHash, authenticationAudit: audit,
+      createdAt: dependencies.clock().toISOString(),
+    })
+    const settledClaim = await replaySettledClaim(dispatchClaim.claim)
+    if (settledClaim) return settledClaim
+    assertDomain(Boolean(dependencies.jobs.findFallbackDispatch), 'PERSISTENCE_NOT_CONFIGURED', 'Fallback dispatch repository is unavailable')
+    const priorDispatch = await dependencies.jobs.findFallbackDispatch!({ workspaceId: request.workspaceId, projectId: request.projectId, ledgerId: current.id, rung: 'generated-cutaway' })
+    if (priorDispatch) {
+      const origin = priorDispatch.job.transformation?.fallback
+      assertDomain(Boolean(origin) && origin!.ledgerHash === current.ledgerHash && origin!.rung === 'generated-cutaway', 'PERSISTENCE_CONFLICT', 'Persisted fallback dispatch does not match its ledger claim')
+      assertDomain(origin!.dispatchRequestHash === dispatchRequestHash, 'IDEMPOTENCY_PAYLOAD_MISMATCH', 'Fallback dispatch already exists with a different request context')
+      await dependencies.quality.settleFallbackDispatch({
+        workspaceId: request.workspaceId, projectId: request.projectId,
+        claimId: dispatchClaim.claim.id, expectedLedgerId: current.id, outcome: 'enqueued',
+        providerJobId: priorDispatch.job.id, settledAt: dependencies.clock().toISOString(),
+      })
+      return Object.freeze({ outcome: 'replayed' as const, ledger: current, job: priorDispatch })
+    }
+    assertDomain(Boolean(dependencies.quality.findFallbackDispatchAttempt), 'PERSISTENCE_NOT_CONFIGURED', 'Fallback dispatch audit repository is unavailable')
+    const priorSkip = await dependencies.quality.findFallbackDispatchAttempt!({ workspaceId: request.workspaceId, projectId: request.projectId, briefId: current.briefId, rung: 'generated-cutaway' })
+    if (priorSkip) {
+      assertDomain(priorSkip.requestHash === dispatchRequestHash && priorSkip.authenticationAudit.contextHash === audit.contextHash, 'IDEMPOTENCY_PAYLOAD_MISMATCH', 'Fallback skip already exists with a different request context')
+      await dependencies.quality.settleFallbackDispatch({
+        workspaceId: request.workspaceId, projectId: request.projectId,
+        claimId: dispatchClaim.claim.id, expectedLedgerId: current.id, outcome: 'skipped',
+        resultLedgerId: priorSkip.ledger.id, resultLedgerHash: priorSkip.ledger.ledgerHash,
+        reason: 'capability-unavailable', settledAt: dependencies.clock().toISOString(),
+      })
+      return Object.freeze({ outcome: 'skipped' as const, ledger: priorSkip.ledger, reason: 'capability-unavailable' as const })
+    }
+    const latest = await dependencies.quality.readLatestFallbackLedger({ workspaceId: request.workspaceId, projectId: request.projectId, briefId: current.briefId })
+    assertDomain(latest?.id === current.id && latest.ledgerHash === request.expectedLedgerHash && current.ledgerHash === request.expectedLedgerHash, 'VERSION_CONFLICT', 'Transformation fallback ledger has a newer revision')
+    assertDomain(current.reviewDecision === 'awaiting-review' && current.currentRung === 'generated-cutaway', 'PRECONDITION_REQUIRED', 'Generated cutaway is not the current fallback rung')
+    const rejectedAttempt = [...current.attempts].reverse().find((attempt) => attempt.outcome === 'rejected')
+    assertDomain(Boolean(rejectedAttempt?.providerJobId && rejectedAttempt.criticReportHash), 'PERSISTENCE_CONFLICT', 'Fallback has no rejected provider result and critic report')
+    const rejectedJob = await dependencies.jobs.read({ workspaceId: request.workspaceId, projectId: request.projectId, jobId: rejectedAttempt!.providerJobId! })
+    assertDomain(Boolean(rejectedJob?.job.transformation) && rejectedJob!.job.transformation!.briefId === current.briefId && rejectedJob!.job.transformation!.briefHash === current.briefHash, 'PERSISTENCE_CONFLICT', 'Fallback rejected job is missing or bound to another brief')
+    const report = await dependencies.quality.readCriticReportByJob({ workspaceId: request.workspaceId, projectId: request.projectId, providerJobId: rejectedAttempt!.providerJobId! })
+    assertDomain(Boolean(report) && report!.reportHash === rejectedAttempt!.criticReportHash && report!.briefId === current.briefId && report!.briefHash === current.briefHash && report!.decision === 'rejected' && report!.action === 'fallback', 'PERSISTENCE_CONFLICT', 'Fallback rejection is not bound to its persisted critic report')
+    const originalSelections = await dependencies.registry.listSelections({ workspaceId: request.workspaceId, projectId: request.projectId, briefId: current.briefId })
+    const originalSelection = originalSelections.find((selection) => selection.id === rejectedJob!.job.transformation!.selectionId)
+    assertDomain(Boolean(originalSelection) && originalSelection!.selectionHash === rejectedJob!.job.transformation!.selectionHash && originalSelection!.briefHash === current.briefHash, 'PERSISTENCE_CONFLICT', 'Fallback cannot recover the routing policy that authorized the rejected attempt')
+
+    const routed = await routeTransformationFallbackService({ repository: dependencies.registry, workspaceId: request.workspaceId, projectId: request.projectId, briefId: current.briefId, policy: originalSelection!.policy, createdAt: dependencies.clock().toISOString() })
+    const selection = routed.selection
+    if (!selection.selectedProviderId || !selection.selectedCapabilityId) {
+      const skippedAt = new Date(Math.max(Date.parse(current.updatedAt) + 1, dependencies.clock().getTime())).toISOString()
+      const attempted = recordFallbackAttempt({ ledger: current, attempt: {
+        rung: 'generated-cutaway', outcome: 'skipped', intentScoreBps: null, violatesProtectedContent: false,
+        estimatedCostMinorUnits: 0, observedCostMinorUnits: 0, costCurrency: current.costCurrency,
+        reason: 'no registered healthy capability can execute generated-cutaway', descendedBecause: 'capability-unavailable',
+      }, occurredAt: skippedAt })
+      const next = nextFallbackRung(attempted.ladder, attempted.currentRung)
+      const settled = next ? descendFallbackLadder({ ledger: attempted, because: 'capability-unavailable', occurredAt: new Date(Math.max(Date.parse(attempted.updatedAt) + 1, dependencies.clock().getTime())).toISOString() }) : attempted
+      const persisted = await dependencies.quality.recordFallbackLedger({
+        ledger: settled,
+        previousLedgerHash: current.ledgerHash,
+        dispatch: { attemptSequence: current.attempts.length + 1, requestHash: dispatchRequestHash, authenticationAudit: audit },
+      })
+      await dependencies.quality.settleFallbackDispatch({
+        workspaceId: request.workspaceId, projectId: request.projectId,
+        claimId: dispatchClaim.claim.id, expectedLedgerId: current.id, outcome: 'skipped',
+        resultLedgerId: persisted.ledger.id, resultLedgerHash: persisted.ledger.ledgerHash,
+        reason: 'capability-unavailable', settledAt: dependencies.clock().toISOString(),
+      })
+      return Object.freeze({ outcome: 'skipped' as const, ledger: persisted.ledger, reason: 'capability-unavailable' as const })
+    }
+    const dispatchIdentityHash = calculateCanonicalHash({ schemaVersion: 'generated-cutaway-dispatch/v1', workspaceId: request.workspaceId, projectId: request.projectId, briefId: current.briefId, ledgerId: current.id, ledgerHash: current.ledgerHash, rung: 'generated-cutaway' })
+    const result = await dependencies.enqueue({
+      workspaceId: request.workspaceId, projectId: request.projectId, briefId: current.briefId, selection,
+      fallback: { ledgerId: current.id, ledgerHash: current.ledgerHash, rung: 'generated-cutaway', rejectedJobId: rejectedAttempt!.providerJobId!, rejectedReportHash: rejectedAttempt!.criticReportHash!, dispatchRequestHash },
+      use: request.use, market: request.market, locale: request.locale, actor: request.actor,
+      idempotencyKey: `fallback-${dispatchIdentityHash.slice(0, 48)}`,
+    })
+    await dependencies.quality.settleFallbackDispatch({
+      workspaceId: request.workspaceId, projectId: request.projectId,
+      claimId: dispatchClaim.claim.id, expectedLedgerId: current.id, outcome: 'enqueued',
+      providerJobId: result.persisted.job.id, settledAt: dependencies.clock().toISOString(),
+    })
+    return Object.freeze({ outcome: result.replayed ? 'replayed' as const : 'enqueued' as const, ledger: current, job: result.persisted })
+  }
+}
 
 function identity(value: string, field: string): string {
   assertDomain(ID.test(value), 'INVALID_ARGUMENT', `${field} is invalid`)
@@ -117,7 +301,7 @@ export function requestTransformationJobService(dependencies: {
   webhookConfigured?: (providerId: string) => boolean
   deadlineMs?: number
 }) {
-  return async function execute(request: {
+  type Request = {
     workspaceId: string
     projectId: string
     briefId: string
@@ -130,7 +314,12 @@ export function requestTransformationJobService(dependencies: {
     outputSpecId?: string
     actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
-  }) {
+  }
+  type InternalFallback = Readonly<{
+    operation: 'generated-cutaway'
+    origin: NonNullable<import('../domain/provider-job.ts').ProviderJobTransformationOrigin['fallback']>
+  }>
+  const execute = async function execute(request: Request, internalFallback?: InternalFallback) {
     requireScope(request.actor, 'projects:write')
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
@@ -152,6 +341,7 @@ export function requestTransformationJobService(dependencies: {
       maskId: request.maskId ?? null,
       outputSpecId: request.outputSpecId ?? null,
       actorContextHash: audit.contextHash,
+      fallback: internalFallback?.origin ?? null,
     })
     const replay = await dependencies.jobs.findReplay({
       workspaceId,
@@ -192,7 +382,15 @@ export function requestTransformationJobService(dependencies: {
     assertDomain(Date.parse(capabilities.expiresAt) > now.getTime(), 'PRECONDITION_REQUIRED', 'Transformation provider capabilities are stale')
 
     const contract = TRANSFORMATION_MODE_CONTRACTS[brief.mode]
-    const operation = contract.providerCapability
+    const operation = internalFallback?.operation ?? contract.providerCapability
+    assertDomain(
+      internalFallback
+        ? selection.requestedOperation === operation && brief.fallbackLadder.includes('generated-cutaway')
+        : selection.requestedOperation === undefined,
+      'PERSISTENCE_CONFLICT',
+      'Routing selection operation does not match this transformation request',
+    )
+    assertDomain(capability.operation === operation && capability.modes.includes(brief.mode), 'PERSISTENCE_CONFLICT', 'Selected provider capability does not satisfy this brief mode')
     assertDomain(
       capabilities.operations.includes(operation as (typeof capabilities.operations)[number]),
       'PRECONDITION_REQUIRED',
@@ -333,6 +531,7 @@ export function requestTransformationJobService(dependencies: {
         selectionHash: selection.selectionHash,
         providerId: provider.id,
         capabilityId: capability.id,
+        ...(internalFallback ? { fallback: internalFallback.origin } : {}),
       },
     })
 
@@ -356,6 +555,9 @@ export function requestTransformationJobService(dependencies: {
       transportState,
     })
   }
+  return Object.assign(execute, {
+    enqueueGeneratedCutawayFallback: (request: Request, origin: InternalFallback['origin']) => execute(request, { operation: 'generated-cutaway', origin }),
+  })
 }
 
 export function readTransformationJobService(dependencies: { jobs: ProviderJobRepository }) {

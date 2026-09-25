@@ -7,7 +7,8 @@ export interface SyntheticAudioWord {
   word: string
   startMs: number
   endMs: number
-  confidence: number
+  /** Provider confidence when available; null means the alignment exposes no score. */
+  confidence: number | null
 }
 
 export type SyntheticAudioSource = Readonly<
@@ -97,7 +98,7 @@ export function createSyntheticAudioMaster(input: Omit<SyntheticAudioMaster, 'sc
     const word = entry.word.normalize('NFC').trim()
     assertDomain(word.length > 0 && word.length <= 240, 'INVALID_ARGUMENT', `words[${index}].word is invalid`)
     assertDomain(Number.isSafeInteger(entry.startMs) && Number.isSafeInteger(entry.endMs) && entry.startMs >= previousEnd && entry.endMs > entry.startMs && entry.endMs <= input.audio.durationMs, 'INVALID_ARGUMENT', `words[${index}] timing is invalid`)
-    assertDomain(Number.isFinite(entry.confidence) && entry.confidence >= 0 && entry.confidence <= 1, 'INVALID_ARGUMENT', `words[${index}].confidence is invalid`)
+    assertDomain(entry.confidence === null || (Number.isFinite(entry.confidence) && entry.confidence >= 0 && entry.confidence <= 1), 'INVALID_ARGUMENT', `words[${index}].confidence is invalid`)
     previousEnd = entry.endMs
     return Object.freeze({ word, startMs: entry.startMs, endMs: entry.endMs, confidence: entry.confidence })
   })

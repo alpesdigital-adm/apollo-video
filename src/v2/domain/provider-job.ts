@@ -84,6 +84,14 @@ export interface ProviderJobTransformationOrigin {
   selectionHash: string
   providerId: string
   capabilityId: string
+  fallback?: Readonly<{
+    ledgerId: string
+    ledgerHash: string
+    rung: 'generated-cutaway'
+    rejectedJobId: string
+    rejectedReportHash: string
+    dispatchRequestHash: string
+  }>
 }
 
 export interface ProviderJob {
@@ -244,6 +252,17 @@ export function createProviderJob(input: {
     })) id(value, `transformation.${field}`)
     assertDomain(HASH.test(input.transformation.briefHash), 'INVALID_ARGUMENT', 'transformation.briefHash is invalid')
     assertDomain(HASH.test(input.transformation.selectionHash), 'INVALID_ARGUMENT', 'transformation.selectionHash is invalid')
+    if (input.transformation.fallback) {
+      for (const [field, value] of Object.entries({
+        ledgerId: input.transformation.fallback.ledgerId,
+        rejectedJobId: input.transformation.fallback.rejectedJobId,
+      })) id(value, `transformation.fallback.${field}`)
+      assertDomain(HASH.test(input.transformation.fallback.ledgerHash), 'INVALID_ARGUMENT', 'transformation.fallback.ledgerHash is invalid')
+      assertDomain(HASH.test(input.transformation.fallback.rejectedReportHash), 'INVALID_ARGUMENT', 'transformation.fallback.rejectedReportHash is invalid')
+      assertDomain(HASH.test(input.transformation.fallback.dispatchRequestHash), 'INVALID_ARGUMENT', 'transformation fallback dispatch request hash is invalid')
+      assertDomain(input.transformation.fallback.rung === 'generated-cutaway', 'INVALID_ARGUMENT', 'transformation fallback rung is invalid')
+      assertDomain(input.operation === 'generated-cutaway', 'INVALID_ARGUMENT', 'A generated-cutaway fallback must use its dedicated provider operation')
+    }
   }
   const providerInput = JSON.parse(stableSerialize(input.providerInput)) as Record<string, unknown>
   return seal({
@@ -274,16 +293,14 @@ const ALLOWED_TRANSITIONS: Readonly<Record<ProviderJobStatus, readonly ProviderJ
   planned: ['estimated', 'failed', 'canceled', 'expired', 'superseded'],
   estimated: ['submitting', 'failed', 'canceled', 'expired', 'superseded'],
   submitting: ['submitted', 'failed', 'canceled', 'expired', 'superseded'],
-  // `estimated` reappears as a target from every in-flight status: that is a
-  // retryable transport failure sending the same job back for another
-  // submission. It is the same job — same brief, same authorization, same
-  // idempotency key — so it keeps its identity and only `attempt` moves. A
-  // fresh creative attempt is a different job entirely and is not this edge.
-  submitted: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
+  // Same-state edges park a known provider effect behind durable backoff.
+  // Returning a job with providerJobId to `estimated` would submit and bill it
+  // again; only failures before a provider reference exists may take that edge.
+  submitted: ['submitted', 'queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   queued: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   processing: ['processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   'suspected-stalled': ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
-  retrieving: ['evaluating', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
+  retrieving: ['retrieving', 'evaluating', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   evaluating: ['approved', 'rejected', 'failed', 'canceled', 'expired', 'superseded'],
   approved: [], rejected: [], failed: [], canceled: [], expired: [], superseded: [],
 })

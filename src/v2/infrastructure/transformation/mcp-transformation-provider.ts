@@ -7,7 +7,10 @@ import type {
   AsyncMediaProviderAdapter,
   ProviderCapabilities,
   ProviderSubmitContext,
+  ProviderRetrieveContext,
+  ProviderOperation,
 } from '../../application/ports/async-media-provider.ts'
+import { createProviderTransportObservation } from '../../application/provider-transport-observation.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { assertDomain } from '../../domain/errors.ts'
 import {
@@ -50,6 +53,7 @@ export interface McpTransformationProviderConfig {
   endpoint: string
   apiKey: string
   modes: readonly string[]
+  operations: readonly ProviderOperation[]
   modelRef?: string
   timeoutMs?: number
   maxResultBytes?: number
@@ -99,6 +103,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
   private readonly endpoint: URL
   private readonly apiKey: string
   private readonly modes: readonly string[]
+  private readonly operations: readonly ProviderOperation[]
   private readonly timeoutMs: number
   private readonly maxResultBytes: number
   private readonly cancellable: boolean
@@ -118,12 +123,14 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     )
     assertDomain(config.apiKey.trim().length >= 8, 'PERSISTENCE_NOT_CONFIGURED', 'Transformation provider credential is invalid')
     assertDomain(config.modes.length > 0, 'PERSISTENCE_NOT_CONFIGURED', 'Transformation provider declares no modes')
+    assertDomain(config.operations.length > 0, 'PERSISTENCE_NOT_CONFIGURED', 'Transformation provider declares no operations')
     this.id = config.id
     this.adapterVersion = config.adapterVersion
     this.modelRef = config.modelRef
     this.endpoint = endpoint
     this.apiKey = config.apiKey.trim()
     this.modes = Object.freeze([...config.modes])
+    this.operations = Object.freeze([...new Set(config.operations)])
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.maxResultBytes = config.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES
     this.cancellable = config.supportsCancellation ?? true
@@ -138,6 +145,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
       endpoint: `${endpoint.origin}${endpoint.pathname}`,
       transport: 'mcp',
       modes: this.modes,
+      operations: this.operations,
       modelRef: this.modelRef ?? null,
       timeoutMs: this.timeoutMs,
       maxResultBytes: this.maxResultBytes,
@@ -178,7 +186,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     const payload = await this.withSession<Record<string, unknown>>('describe_capabilities', {}, signal)
     const now = Date.now()
     return Object.freeze({
-      operations: Object.freeze(['video-to-video', 'background-replace', 'camera-motion'] as const),
+      operations: this.operations,
       inputFormats: Object.freeze(['mp4']),
       outputFormats: Object.freeze(['mp4']),
       duration: Object.freeze({
@@ -214,12 +222,20 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
   ): Promise<Readonly<ProviderSubmissionResult<HttpTransformationResult>>> {
     const payload = await this.withSession<Record<string, unknown>>('submit_transformation', {
       input,
+      operation: context.operation,
       operationId: context.operationId,
       idempotencyKey: context.idempotencyKey,
     }, context.signal)
     if (typeof payload.providerJobId !== 'string' || payload.providerJobId.length === 0) {
       throw new ProviderAdapterError('PROVIDER_MALFORMED_RESPONSE', false, undefined, 'Provider MCP tool did not return a job identifier')
     }
+    await context.observeTransport?.(createProviderTransportObservation({
+      phase: 'submit', runtimeClass: 'controlled', adapterId: this.id, adapterVersion: this.adapterVersion,
+      adapterConfigHash: this.configHash, endpointClass: 'transformation-mcp-tool', method: 'CALL',
+      requestHash: calculateCanonicalHash({ tool: 'submit_transformation', input, operation: context.operation, operationId: context.operationId, idempotencyKeyHash: calculateCanonicalHash(context.idempotencyKey) }),
+      responseHash: calculateCanonicalHash({ providerJobId: payload.providerJobId }), responseStatus: 200,
+      providerJobRef: payload.providerJobId, observedAt: new Date().toISOString(),
+    }))
     return Object.freeze({ kind: 'accepted' as const, providerJobId: payload.providerJobId })
   }
 
@@ -231,7 +247,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
     return payload.status as ProviderStatus
   }
 
-  async retrieve(providerJobId: string, signal?: AbortSignal): Promise<Readonly<HttpTransformationResult>> {
+  async retrieve(providerJobId: string, signal?: AbortSignal, context?: Readonly<ProviderRetrieveContext>): Promise<Readonly<HttpTransformationResult>> {
     const payload = await this.withSession<Record<string, unknown>>('get_transformation_result', { providerJobId }, signal)
     if (typeof payload.mediaBase64 !== 'string' || payload.mediaBase64.length === 0) {
       throw new ProviderAdapterError('PROVIDER_MALFORMED_RESPONSE', false, undefined, 'Provider MCP result carried no media')
@@ -245,17 +261,26 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HttpTran
       throw new ProviderAdapterError('PROVIDER_RESULT_CORRUPTED', false, undefined, 'Provider MCP result checksum does not match its bytes')
     }
     const cost = payload.observedCost as { currency?: unknown; costMinorUnits?: unknown } | undefined
-    return Object.freeze({
+    const result = Object.freeze({
       providerJobId,
       mediaBytes,
       mediaSha256,
       mediaByteSize: mediaBytes.byteLength,
       container: 'mp4' as const,
       mediaType: 'video' as const,
+      adapterConfigHash: this.configHash,
       ...(cost && typeof cost.currency === 'string' && Number.isSafeInteger(cost.costMinorUnits)
         ? { observedCost: Object.freeze({ currency: cost.currency, costMinorUnits: cost.costMinorUnits as number }) }
         : {}),
     })
+    await context?.observeTransport?.(createProviderTransportObservation({
+      phase: 'retrieve', runtimeClass: 'controlled', adapterId: this.id, adapterVersion: this.adapterVersion,
+      adapterConfigHash: this.configHash, endpointClass: 'transformation-mcp-tool', method: 'CALL',
+      requestHash: calculateCanonicalHash({ tool: 'get_transformation_result', providerJobId }),
+      responseHash: calculateCanonicalHash({ providerJobId, mediaSha256, mediaByteSize: mediaBytes.byteLength, observedCost: result.observedCost }),
+      responseStatus: 200, providerJobRef: providerJobId, observedAt: new Date().toISOString(),
+    }))
+    return result
   }
 
   async cancel(providerJobId: string, signal?: AbortSignal): Promise<void> {

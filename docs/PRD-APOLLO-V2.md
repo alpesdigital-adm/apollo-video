@@ -1010,6 +1010,8 @@ Salvar sempre:
 
 > Implementação: aggregate `synthetic-master-asset/v1`, content-addressed e imutável, mais o catálogo de frases reutilizáveis `synthetic_speech_segments` (ADR-145, spec 06 §13). Composição continua derivada e fora do master.
 
+> Checkpoint controlado W24.3: o consumo cross-project liga o master completo, job de origem, decisão de cache, plano, run e render por hashes, reabrindo fonte, critic e autoridade na transação serializável. A jornada local comprovou composição B distinta e ausência de jobs, reservas e submits no projeto consumidor. Esta prova não altera FR-101 nem substitui execução ElevenLabs/HeyGen live.
+
 ### FR-105 — Cache
 
 Hash de script + áudio + perfil + provider + config evita regeneração.

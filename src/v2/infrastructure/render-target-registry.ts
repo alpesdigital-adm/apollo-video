@@ -3,12 +3,21 @@ import type { RenderInputSpecV1 } from '../domain/render-input.ts'
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 
+export function readConfiguredRenderTargetIdentity(
+  environment: NodeJS.ProcessEnv = process.env,
+): Readonly<{ id: string; version: string }> {
+  return Object.freeze({
+    id: environment.APOLLO_RENDERER_ID?.trim().toLowerCase() || 'remotion',
+    version: environment.APOLLO_RENDERER_VERSION?.trim().toLowerCase() || '4.0.489',
+  })
+}
+
 export function createConfiguredRenderTargetRegistry(
   environment: NodeJS.ProcessEnv = process.env,
 ): RenderTargetRegistry {
+  const identity = readConfiguredRenderTargetIdentity(environment)
   const renderer = {
-    id: environment.APOLLO_RENDERER_ID?.trim().toLowerCase() || 'remotion',
-    version: environment.APOLLO_RENDERER_VERSION?.trim().toLowerCase() || '4.0.489',
+    ...identity,
     digest: environment.APOLLO_RENDERER_DIGEST?.trim().toLowerCase() || '',
   }
   const rendererConfigured = SHA256_PATTERN.test(renderer.digest)

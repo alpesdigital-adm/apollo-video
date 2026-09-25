@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain } from '../domain/errors.ts'
@@ -9,10 +11,8 @@ import {
   type SyntheticMasterArtifactRole,
   type SyntheticMasterAsset,
 } from '../domain/synthetic-master-asset.ts'
-import {
-  isSyntheticCriticApproval,
-  type SyntheticCriticReport,
-} from '../domain/synthetic-critic-report.ts'
+import type { SyntheticCriticReport } from '../domain/synthetic-critic-report.ts'
+import { isCurrentSyntheticCriticApproval } from './synthetic-critic.ts'
 import { assertSyntheticPresenterPolicy } from '../domain/synthetic-presenter-policy-engine.ts'
 import type { AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import { materializeActorAuditContext, requireScope } from './authenticate-api-client.ts'
@@ -36,6 +36,17 @@ export interface PromotableProviderJob {
   providerJobId: string | null
   status: string
   criticResultHash: string | null
+  authorization: Readonly<{ profileSnapshotId: string }>
+  audioRange: Readonly<{ startMs: number; endMs: number; rangeHash: string }> | null
+  audioMaster: Readonly<{
+    id: string
+    masterHash: string
+    profileSnapshotId: string
+    sourceProviderJobId: string | null
+    audio: Readonly<{ artifactId: string; artifactSha256: string; durationMs: number; locale: string }>
+    alignmentEvidence: Readonly<{ artifactId: string; artifactSha256: string }>
+  }> | null
+  resultArtifact: Readonly<{ artifactId: string; artifactSha256: string }> | null
   authorizationHash: string
   submittedAt: string | null
   completedAt: string | null
@@ -50,19 +61,15 @@ export interface AssetRightsReader {
 }
 
 /**
- * The critic's durable verdicts on one set of bytes, newest first.
- *
- * Promotion reads them and nothing else: a verdict is only evidence when it was
- * written down. The full report repository satisfies this shape, so the port is
- * narrowed here to make plain that promotion never records a verdict, it only
- * consults one.
+ * The critic's durable verdict addressed by its immutable hash. Promotion must
+ * open the exact report sealed on the provider job; another legitimate opinion
+ * about the same bytes cannot supersede or substitute that job's evidence.
  */
 export interface PromotionCriticReportReader {
-  readByArtifact(input: {
+  readByHash(input: {
     workspaceId: string
-    artifactId: string
-    limit?: number
-  }): Promise<readonly Readonly<SyntheticCriticReport>[]>
+    reportHash: string
+  }): Promise<Readonly<SyntheticCriticReport> | null>
 }
 
 /**
@@ -150,6 +157,20 @@ export function promoteSyntheticMasterAssetService(dependencies: {
     const audit = materializeActorAuditContext(request.actor)
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(idempotencyKey.length >= 8, 'INVALID_ARGUMENT', 'Idempotency key is required')
+    const scriptHash = createHash('sha256').update(request.scriptText, 'utf8').digest('hex')
+    const requestFingerprint = calculateCanonicalHash({
+      schemaVersion: 'synthetic-master-promotion-request/v1',
+      workspaceId: request.workspaceId,
+      projectId: request.projectId,
+      providerJobId: request.providerJobId,
+      profileSnapshotId: request.profileSnapshotId,
+      scriptHash,
+      locale: request.locale,
+      use: request.use,
+      market: request.market,
+      lineage: [...request.lineage],
+      cost: { currency: request.cost.currency, minorUnits: request.cost.minorUnits },
+    })
 
     const replay = await dependencies.masters.findReplay({
       workspaceId: request.workspaceId,
@@ -158,7 +179,14 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       actorContextHash: audit.contextHash,
       idempotencyKey,
     })
-    if (replay) return Object.freeze({ master: replay.master, replayed: true })
+    if (replay) {
+      assertDomain(
+        replay.requestFingerprint === requestFingerprint,
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Synthetic master promotion idempotency key was already used for a different request',
+      )
+      return Object.freeze({ master: replay.master, replayed: true })
+    }
 
     // 1. The job must be terminal, approved and ours.
     const job = await dependencies.jobs.read({ workspaceId: request.workspaceId, jobId: request.providerJobId })
@@ -180,6 +208,11 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       'PRECONDITION_REQUIRED',
       'Provider job has no provider reference',
     )
+    assertDomain(
+      job!.authorization.profileSnapshotId === request.profileSnapshotId,
+      'PERSISTENCE_CONFLICT',
+      'Provider job was approved for a different presenter snapshot',
+    )
 
     // A job already promoted returns its master instead of sealing a second one.
     const sealed = await dependencies.masters.findByProviderJob({
@@ -194,11 +227,54 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       projectId: request.projectId,
       jobId: request.providerJobId,
     })
-    const byRole = new Map<SyntheticMasterArtifactRole, (typeof results)[number]>()
+    type PromotionArtifact = (typeof results)[number] | Readonly<{
+      artifactId: string
+      artifactSha256: string
+      byteSize?: number
+      modelRef?: string
+      adapterConfigHash?: string
+    }>
+    const byRole = new Map<SyntheticMasterArtifactRole, PromotionArtifact>()
     for (const result of results) {
       const role = ROLE_BY_PROVIDER_ROLE[result.role]
       if (!role || byRole.has(role)) continue
       byRole.set(role, result)
+    }
+    const audioMaster = job!.audioMaster
+    assertDomain(Boolean(audioMaster), 'PERSISTENCE_CONFLICT', 'Audio-avatar job has no canonical audio master')
+    assertDomain(
+      audioMaster!.profileSnapshotId === request.profileSnapshotId &&
+        job!.audioRange?.startMs === 0 &&
+        job!.audioRange?.endMs === audioMaster!.audio.durationMs,
+      'PERSISTENCE_CONFLICT',
+      'Audio-avatar job does not bind the full canonical audio master',
+    )
+    byRole.set('final-audio', Object.freeze({
+      artifactId: audioMaster!.audio.artifactId,
+      artifactSha256: audioMaster!.audio.artifactSha256,
+    }))
+    byRole.set('alignment', Object.freeze({
+      artifactId: audioMaster!.alignmentEvidence.artifactId,
+      artifactSha256: audioMaster!.alignmentEvidence.artifactSha256,
+    }))
+    if (audioMaster!.sourceProviderJobId) {
+      const upstream = await dependencies.resultArtifacts.listByJob({
+        workspaceId: request.workspaceId,
+        projectId: request.projectId,
+        jobId: audioMaster!.sourceProviderJobId,
+      })
+      const upstreamAudio = upstream.find((result) => result.role === 'primary-audio')
+      const upstreamAlignment = upstream.find((result) => result.role === 'alignment-evidence')
+      assertDomain(
+        upstreamAudio?.artifactId === audioMaster!.audio.artifactId &&
+          upstreamAudio.artifactSha256 === audioMaster!.audio.artifactSha256 &&
+          upstreamAlignment?.artifactId === audioMaster!.alignmentEvidence.artifactId &&
+          upstreamAlignment.artifactSha256 === audioMaster!.alignmentEvidence.artifactSha256,
+        'PERSISTENCE_CONFLICT',
+        'TTS provider result ledger does not match the canonical audio master',
+      )
+      byRole.set('final-audio', upstreamAudio)
+      byRole.set('alignment', upstreamAlignment)
     }
     for (const role of SYNTHETIC_MASTER_REQUIRED_ARTIFACT_ROLES) {
       assertDomain(byRole.has(role), 'PRECONDITION_REQUIRED', `Provider job has no ${role} artifact to promote`)
@@ -223,7 +299,8 @@ export function promoteSyntheticMasterAssetService(dependencies: {
         `Master ${role} artifact is not available`,
       )
       assertDomain(
-        artifact!.sha256 === result.artifactSha256 && artifact!.byteSize === BigInt(result.byteSize),
+        artifact!.sha256 === result.artifactSha256 &&
+          (result.byteSize === undefined || artifact!.byteSize === BigInt(result.byteSize)),
         'PERSISTENCE_CONFLICT',
         `Master ${role} artifact drifted from the provider result ledger`,
       )
@@ -280,41 +357,56 @@ export function promoteSyntheticMasterAssetService(dependencies: {
     }
 
     const audio = catalogued.get('final-audio')!
+    const providerOriginal = byRole.get('provider-original')!
+    assertDomain(
+      typeof providerOriginal.adapterConfigHash === 'string' && providerOriginal.adapterConfigHash.length === 64,
+      'PERSISTENCE_CONFLICT',
+      'Avatar provider result has no adapter configuration identity',
+    )
     // The normalized track when a normalization stage produced one; otherwise
     // the provider's own video, which is what the master actually holds.
     const video = catalogued.get('normalized-video') ?? catalogued.get('provider-original')!
 
     // 6. The critic must have approved these exact bytes, in writing.
     //
-    // The provider job's `criticResultHash` says a critic ran; it does not say
-    // what it decided about which artifact. The durable report does, so it is
-    // the approving evidence from here on. The job hash is deliberately kept —
-    // it is re-checked inside the sealing transaction below, which is the only
-    // thing that can catch the job changing between this validation and the
-    // commit. The two answer different questions and both must hold.
-    const verdicts = await dependencies.criticReports.readByArtifact({
+    // The provider job and durable specialized report must be the same approval
+    // seal for the exact result. A generic transport hash or a report for a
+    // different script, profile, alignment or set of bytes cannot authorize a
+    // reusable master.
+    const verdict = await dependencies.criticReports.readByHash({
       workspaceId: request.workspaceId,
-      artifactId: video.id,
-      limit: 1,
+      reportHash: job!.criticResultHash!,
     })
     // Absence of a verdict is not approval: an unjudged take is unjudged.
     assertDomain(
-      verdicts.length > 0,
+      Boolean(verdict),
       'PRECONDITION_REQUIRED',
       'No persisted critic report judges the artifact being promoted',
     )
-    // Newest first, so this is the verdict currently in force. An older
-    // approval never survives a newer rejection of the same bytes.
-    const verdict = verdicts[0]!
     assertDomain(
-      isSyntheticCriticApproval(verdict.decision),
+      isCurrentSyntheticCriticApproval(verdict!),
       'PRECONDITION_REQUIRED',
-      `The critic did not approve the artifact being promoted: its current verdict is ${verdict.decision}`,
+      `The critic did not approve the artifact being promoted: its job verdict is ${verdict!.decision}`,
     )
     assertDomain(
-      verdict.projectId === request.projectId && verdict.artifactSha256 === video.sha256,
+      verdict!.reportHash === job!.criticResultHash &&
+        verdict!.projectId === request.projectId &&
+        verdict!.artifactId === video.id &&
+        verdict!.artifactSha256 === video.sha256 &&
+        verdict!.profileSnapshotId === request.profileSnapshotId &&
+        verdict!.scriptHash === scriptHash &&
+        verdict!.alignmentArtifactId === byRole.get('alignment')!.artifactId &&
+        verdict!.audioArtifactId === null &&
+        verdict!.providerJobId === job!.id &&
+        verdict!.outputSpeechEvidence?.passed === true &&
+        verdict!.outputSpeechEvidence.sourceAudioArtifactId === audio.id &&
+        verdict!.outputSpeechEvidence.sourceAudioRangeHash === job!.audioRange?.rangeHash &&
+        verdict!.outputSpeechEvidence.speechEvidence.outputTranscriptHash === verdict!.scriptHash &&
+        job!.audioRange?.startMs === 0 &&
+        job!.resultArtifact?.artifactId === video.id &&
+        job!.resultArtifact.artifactSha256 === video.sha256,
       'PERSISTENCE_CONFLICT',
-      'The approving critic report does not describe the artifact being promoted',
+      'The provider job and approving critic report do not describe the exact master being promoted',
     )
 
     // 7. Audio and video must describe the same performance.
@@ -322,6 +414,12 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       audio: { artifactId: audio.id, artifactKey: audio.artifactKey },
       video: { artifactId: video.id, artifactKey: video.artifactKey },
     })
+    assertDomain(
+      job!.audioRange?.endMs === measured.audioDurationMs &&
+        verdict!.outputSpeechEvidence?.sourceDurationMs === measured.audioDurationMs,
+      'PERSISTENCE_CONFLICT',
+      'The approving avatar evidence does not cover the full promoted audio master',
+    )
 
     const master = createSyntheticMasterAsset({
       id: dependencies.createId(),
@@ -355,8 +453,8 @@ export function promoteSyntheticMasterAssetService(dependencies: {
         adapterId: job!.adapterId,
         adapterVersion: job!.adapterVersion,
         capability: job!.operation,
-        modelRef: byRole.get('provider-original')!.modelRef ?? null,
-        adapterConfigHash: byRole.get('provider-original')!.adapterConfigHash,
+        modelRef: providerOriginal.modelRef ?? null,
+        adapterConfigHash: providerOriginal.adapterConfigHash,
         providerJobId: job!.id,
         providerJobRef: job!.providerJobId!,
       },
@@ -371,8 +469,8 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       critic: {
         // The approving evidence is the persisted report itself, so the master
         // points at a verdict a reader can open, re-hash and disagree with.
-        reportId: verdict.id,
-        reportHash: verdict.reportHash,
+        reportId: verdict!.id,
+        reportHash: verdict!.reportHash,
         // Narrowed by the approval gate above, not by assumption.
         decision: 'approved',
       },
@@ -384,19 +482,8 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       master,
       profileSnapshotHash: profile!.snapshot.snapshotHash,
       criticResultHash: job!.criticResultHash!,
-      requestFingerprint: calculateCanonicalHash({
-        schemaVersion: 'synthetic-master-promotion-request/v1',
-        workspaceId: request.workspaceId,
-        projectId: request.projectId,
-        providerJobId: request.providerJobId,
-        profileSnapshotId: request.profileSnapshotId,
-        scriptHash: master.scriptHash,
-        locale: request.locale,
-        use: request.use,
-        market: request.market,
-        lineage: [...request.lineage],
-        cost: { currency: request.cost.currency, minorUnits: request.cost.minorUnits },
-      }),
+      authorityScope: { use: request.use, market: request.market, locale: request.locale },
+      requestFingerprint,
       idempotencyKey,
       authenticationAudit: audit,
     })
