@@ -13,7 +13,8 @@ Provider-live execution, production deployment and acceptance are still open;
 CI for the current W24.3 commit is reported by the PR checks. All W24.2
 local gates listed below passed under Astra supervision, and CI run
 `35859804992` passed both jobs at `46cae59d81916f597f47b50a077682e5413261a4`.
-This
+Wave 25 adds only the editor history of the last 20 evaluations, recorded in
+its own section below; it changes no gate, API or acceptance. This
 document is not an approval record or a production acceptance record.
 
 ## Purpose
@@ -155,6 +156,104 @@ observed 68 owned process identities and ended with zero alive, zero database
 backends, the cluster stopped, port 55571 free, scratch removed and no cleanup
 errors. The complete unit suite at the preceding checkpoint passed 2,519/2,519;
 the static gates and application/Remotion builds also passed locally.
+
+## Wave 25 — history of the last 20 evaluations in the editor
+
+Scope of the change: only `src/components/SyntheticPhaseGatePanel.tsx`, the
+pure module `src/v2/ui/synthetic-phase-gate-history.ts` it delegates to, the
+browser helper/journey and this document. The public API, persistence,
+contract, domain, authorization, idempotency and `EditorReads` are unchanged;
+no endpoint, capability, schema, migration, deep link, export, comparator or
+dependency was added. `docs/quality/ui-capability-parity-report.json` was
+regenerated because the panel's POST call site moved one line.
+
+Behaviour, as implemented and proven:
+
+- The panel reads `GET /v1/projects/{id}/synthetic-phase-gates?limit=20` (it
+  used to request 100 and keep one) and shows the list **in the order the
+  server returns it** (`createdAt desc, id desc`); it never sorts locally and
+  never shows more than twenty. Gate ids are random, so recency is a property
+  of the received order, not of the id.
+- A native, labelled `<select>` lists every evaluation with its date, version
+  and state (approved, failed, incomplete). The first gate of the server order
+  is selected on load and again after a full reload. Selecting an entry is a
+  pure state change: it issues no request, starts no render, provider,
+  operation or job.
+- Everything visible — summary, the eight checks, references and their
+  addresses, `reportFingerprint`/`recordHash`, version and date — derives from
+  the single selected gate and changes together.
+- Exactly one of three labels accompanies the selected gate: the latest of the
+  current version; a historical evaluation of the **same** version (never
+  called obsolete); or an evaluation whose `projectVersionId` **or**
+  `projectVersionHash` differs from the editor's current props. A permanent
+  note states that the verdict belongs to the selected snapshot and that no
+  historical evaluation equals approval of the current version.
+- "Avaliar versão atual" fires only on an explicit click and always posts the
+  editor's current `projectVersionId`/`projectVersionHash`, whatever is
+  selected. On success the returned gate is inserted (or, on an idempotent
+  replay, replaced in place), selected and pinned; the canonical list is then
+  re-read and reconciled, and a late response cannot move the selection away
+  from a gate that is still listed. The idempotency key stays bound to the
+  props identity, is reused after an uncertain HTTP result and reset after
+  success, as before.
+
+Evidence for Wave 25, kept separate from the W24 acceptance record above:
+
+- Unit: `tests/v2/synthetic-phase-gate-history.test.mjs` (cap, insert/replace,
+  pinned reconciliation, three-way classification) and a structural guard in
+  `tests/v2/project-editor-ui.test.mjs` (`limit=20`, no local sort, the
+  history identifiers, the POST body from props); the full unit suite passed
+  2,528/2,528 with none skipped (2,520 before this wave).
+- Browser, real (PostgreSQL, public API, workers, artifact storage with the
+  local driver, Chromium, authenticated editor), inside
+  `tests/v2/synthetic-wave24-journey.e2e.mjs`: three evaluations of the same
+  project and version were persisted through the canonical POST as the
+  journey's API client — before any render (1/4 criteria, 3/8 checks: the
+  reuse and provider-swap checks are absent because both are read from the
+  consumer's attested render), after the renders (3/4, 5/8) and a repeat after
+  the renders (3/4, 5/8 with a new id, `recordHash` and `createdAt`). The
+  editor read `?limit=20`; its options equalled the API list, ids and order;
+  the newest gate was selected by default and again after a page reload;
+  selecting the older gates changed summary, verdict, the eight check states,
+  references with their hashes, fingerprint, record, date and version
+  together, each compared with that gate's API record; the historical label
+  appeared and the stale label did not; **zero** page requests and no change
+  in the editor's read counters during a 1.5 s window after each selection;
+  with the oldest gate selected, "Avaliar versão atual" posted the editor's
+  current version and hash, the returned gate became the selected one and the
+  list grew from 3 to 4. The database held exactly four gates afterwards,
+  none of them controlled.
+- Browser, controlled transport (`page.route` answers on the same
+  authenticated page, labelled `controlled-transport` in the evidence and
+  never reaching the server): identical `createdAt` answered in both orders
+  keeps the received order — a proof that the UI does not re-sort, not a
+  statement about PostgreSQL ordering; 25 gates answered render exactly 20
+  options; a gate of another version/hash shows the stale label and never the
+  historical one — not an end-to-end proof of a real version change; a POST
+  that times out is retried with the same idempotency key and a later POST
+  after a success gets a new key, every body carrying the editor's version;
+  GET 403 and 429 show the failure text and a retry with no gate data, and 401
+  redirects to `/login`; an A→B→A navigation with B's read held back rendered
+  no B data under A — on the real page the editor remounts on project change
+  and the browser aborted B's request, so that protection is the unmount, not
+  the panel's own fence.
+- Local supervised runs (throwaway PostgreSQL 16, pool of one, Chromium): three
+  runs by the executor during development passed in 134.9 s, 88.1 s and
+  89.8 s, and a fourth run by the coordinator on the final code commit
+  `cea5e659` passed 11/11 (the journey and its ten W25 subtests) in 136.2 s
+  with 59 observed process identities and none alive at the end. Four runs,
+  88.1–136.2 s, each ending with zero database backends, the cluster stopped,
+  port 55571 free and the scratch removed, with no cleanup errors.
+- Screenshots retained with the evidence: the selector, its options, the
+  historical state, the divergent (controlled) state and the panel.
+- CI: the two jobs for the PR head commit are reported by the PR checks; the
+  Isolated Compose job runs this journey and publishes its evidence. As with
+  W24.3 above, no CI run id is recorded in this document.
+
+What Wave 25 does not claim: no evaluation in the history approves the
+current version; the W24 gate remains 3/4 criteria and 5/8 checks with
+`approved=false` and the three live-provider checks absent; no live provider,
+merge, deployment, owner acceptance or TODO closure.
 
 ## Remaining integration
 
