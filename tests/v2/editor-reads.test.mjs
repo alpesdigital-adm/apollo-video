@@ -163,6 +163,23 @@ test('classifyReadFailure names the refusal and keeps the 409 code', () => {
   assert.equal(limited.retryAfterMs, 7_000)
 })
 
+test('classifyReadFailure keeps the code of a 422 ASSET_NOT_FOUND, which is not a 404', () => {
+  // A report that is missing, or filed under another project, is answered with
+  // 422 ASSET_NOT_FOUND. The status says "error"; only the code says "not
+  // found", so the code must travel with the failure for the page to name it.
+  const missing = classifyReadFailure(
+    422,
+    { error: { code: 'ASSET_NOT_FOUND', message: 'Transformation critic report was not found', requestId: 'req-422' } },
+    new Headers(),
+    1_000,
+  )
+  assert.equal(missing.kind, 'error')
+  assert.equal(missing.status, 422)
+  assert.equal(missing.code, 'ASSET_NOT_FOUND')
+  assert.equal(missing.requestId, 'req-422')
+  assert.equal(missing.retryAfterMs, undefined)
+})
+
 test('classifyReadFailure never puts a credential on screen', () => {
   const leaky = classifyReadFailure(
     401,
