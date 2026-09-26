@@ -1765,12 +1765,31 @@ export async function assertSyntheticPhaseGateBrowser(input) {
     const evaluatedAtText = async (iso) => collapse(await page.evaluate((value) =>
       new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(value)), iso))
     const captureCriticViewer = async (path, label) => {
-      await bounded(criticViewerNode.evaluate((node) => node.scrollIntoView({
-        block: 'start',
-        inline: 'nearest',
-        behavior: 'instant',
-      })), input.signal, `${label} scroll`)
-      await bounded(criticViewerNode.screenshot({ path }), input.signal, `${label} screenshot`)
+      // The editor's sticky top bar paints over the top of a capture taller
+      // than the viewport (title, "Fechar" and the decision badge). It is
+      // hidden for the capture only, without changing layout, and restored.
+      const barVisibility = await bounded(page.evaluate(() => {
+        const bar = document.querySelector('main > header')
+        if (!bar) return null
+        const previous = bar.style.visibility
+        bar.style.visibility = 'hidden'
+        return previous
+      }), input.signal, `${label} capture layout`)
+      try {
+        await bounded(criticViewerNode.evaluate((node) => node.scrollIntoView({
+          block: 'start',
+          inline: 'nearest',
+          behavior: 'instant',
+        })), input.signal, `${label} scroll`)
+        await bounded(criticViewerNode.screenshot({ path }), input.signal, `${label} screenshot`)
+      } finally {
+        if (barVisibility !== null) {
+          await bounded(page.evaluate((previous) => {
+            const bar = document.querySelector('main > header')
+            if (bar) bar.style.visibility = previous
+          }, barVisibility), input.signal, `${label} capture restore`)
+        }
+      }
       criticEvidence.screenshots.push({ file: path, label })
       return path
     }
@@ -1828,15 +1847,21 @@ export async function assertSyntheticPhaseGateBrowser(input) {
       const mark = ledger.length
       const countersBefore = await bounded(editorReadCounters(), input.signal, `${label} counters`)
       const urlBefore = page.url()
+      const panelBefore = await bounded(readPanel(), input.signal, `${label} panel before`)
       await bounded(criticOpen.click(), input.signal, label)
       const view = await waitForCriticView((current) => current.viewer?.state === 'ready', label)
       await quiesce(`${label} settled`)
       const requests = requestsSince(mark)
       const countersAfter = await bounded(editorReadCounters(), input.signal, `${label} counters`)
+      const panelAfter = await bounded(readPanel(), input.signal, `${label} panel after`)
       assert.deepEqual(requests.map(({ method, path }) => `${method} ${path}`), [`GET ${criticPath}`],
         `${label}: exactly one GET of the report and nothing else`)
       assert.deepEqual(counterDelta(countersBefore, countersAfter), oneCriticRead, `${label}: one editor read issued`)
       assert.equal(page.url(), urlBefore, `${label}: no navigation`)
+      // Opening changes which report is open and nothing else in the panel.
+      assert.equal(panelAfter.selectedGateId, panelBefore.selectedGateId, `${label}: the selected evaluation is unchanged`)
+      assert.deepEqual(comparableView(panelAfter), comparableView(panelBefore), `${label}: the gate view is unchanged`)
+      assert.deepEqual(panelAfter.options, panelBefore.options, `${label}: the history is unchanged`)
       assert.equal(view.viewer.reportId, criticRecord.id, `${label}: data-report-id`)
       assert.equal(view.viewer.reportHash, criticRecord.reportHash, `${label}: data-report-hash`)
       assert.equal(view.references[0]?.open.ariaExpanded, 'true', `${label}: aria-expanded`)
