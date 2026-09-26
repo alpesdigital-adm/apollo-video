@@ -26,6 +26,14 @@ const syntheticPhaseGateHistorySource = readFileSync(
   new URL('../../src/v2/ui/synthetic-phase-gate-history.ts', import.meta.url),
   'utf8',
 )
+const transformationCriticReportViewerSource = readFileSync(
+  new URL('../../src/components/TransformationCriticReportViewer.tsx', import.meta.url),
+  'utf8',
+)
+const transformationCriticReportViewSource = readFileSync(
+  new URL('../../src/v2/ui/transformation-critic-report-view.ts', import.meta.url),
+  'utf8',
+)
 
 test('T-FR-012 project editor shows persisted owner trust, summary and assumptions', () => {
   assert.match(projectEditorSource, /parseProductionBrief\(workspace\?\.brief\?\.productionBrief\)/)
@@ -678,4 +686,109 @@ test('W25 synthetic phase gate panel shows the server-ordered history of the las
   assert.match(onChange[1], /selectionPinned: 'user'/, 'a choice made by the operator is pinned')
   assert.doesNotMatch(onChange[1], /fetch\(|load\(|run\(|invalidate\(|\.read\(/, 'choosing a gate issues no request')
   assert.doesNotMatch(source, /createdBy/, 'the author is not in the public gate contract and is never fabricated')
+})
+
+test('W27 the gate opens its transformation critic report inline and only reads it', () => {
+  // Structural guards over the wiring. The reading rules are proved by
+  // tests/v2/transformation-critic-report-view.test.mjs, the 422 code by
+  // tests/v2/editor-reads.test.mjs; the behaviour in a real browser belongs
+  // to the Wave 27 browser proof.
+  const panel = syntheticPhaseGatePanelSource
+  const viewer = transformationCriticReportViewerSource
+  for (const text of [
+    'Abrir JSON',
+    'Ver relatório',
+    'data-testid="synthetic-phase-gate-critic-reference"',
+    'data-testid="synthetic-phase-gate-critic-json"',
+    'data-testid="synthetic-phase-gate-critic-open"',
+    'TransformationCriticReportViewer',
+  ]) {
+    assert.ok(panel.includes(text), `the panel renders ${text}`)
+  }
+  assert.match(panel, /aria-expanded=\{open\}/, 'the button states whether its report is open')
+  assert.match(panel, /disabled=\{open && criticViewerPhase === 'loading'\}/, 'an open report is not asked again while it loads')
+  assert.match(
+    panel,
+    /key=\{`\$\{props\.projectId\}\\u0000\$\{openReport\.gateId\}\\u0000\$\{openReport\.referenceId\}\\u0000\$\{openReport\.referenceHash\}`\}/,
+    'a change of project, gate or reference unmounts the viewer',
+  )
+  const criteriaAt = panel.indexOf('{CRITERIA.map(')
+  const viewerAt = panel.indexOf('<TransformationCriticReportViewer')
+  const runAt = panel.indexOf('data-testid="synthetic-phase-gate-run"')
+  assert.ok(criteriaAt !== -1 && criteriaAt < viewerAt && viewerAt < runAt, 'the viewer sits after the criteria and before the run button')
+  assert.equal(panel.split('<TransformationCriticReportViewer').length - 1, 1, 'the viewer is rendered once')
+  const toggle = panel.match(/const toggleCriticReport = \([^)]*\) => \{([\s\S]*?)\n {2}\}/)
+  assert.ok(toggle, 'the "Ver relatório" button has a toggle handler')
+  assert.doesNotMatch(
+    toggle[1],
+    /fetch\(|load\(|run\(|invalidate\(|setScope\(|abortAll\(|\.read\(|setHistory\(/,
+    'opening or closing a report only changes which report is open',
+  )
+  const onChange = panel.match(/onChange=\{\(event\) => \{([\s\S]*?)\n\s*\}\}/)
+  assert.ok(onChange, 'the history selector has a change handler')
+  assert.match(onChange[1], /setOpenReport\(null\)/, 'choosing another gate closes the report')
+
+  for (const text of [
+    "name: 'transformation-critic-report'",
+    'props.reads.read<',
+    'explicitRetry',
+    'matchesTransformationCriticReportReference',
+    'createLatestReadFence',
+    "router.replace('/login')",
+    'viewerFailureText(failure)',
+    'Registrada no relatório; nada é executado a partir daqui.',
+    'Lista vazia não significa aprovação: vale a decisão registrada acima.',
+    'Ausência de issues não significa aprovação.',
+  ]) {
+    assert.ok(viewer.includes(text), `the viewer contains ${text}`)
+  }
+  for (const text of ['dangerouslySetInnerHTML', 'fetch(', 'setScope(', 'abortAll(', 'invalidate(', 'canonical-hash', 'method:']) {
+    assert.ok(!viewer.includes(text), `the viewer never contains ${text}`)
+  }
+  assert.doesNotMatch(viewer, /<a[\s>]|\shref=|\sid=\{/, 'nothing in the answer becomes a link, an address or an element id')
+  // The failure texts are decided by the pure rules the viewer renders through.
+  assert.match(transformationCriticReportViewSource, /failure\.code === 'ASSET_NOT_FOUND'/, 'a missing report is named by its 422 code')
+  for (const testId of [
+    'transformation-critic-report-viewer',
+    'transformation-critic-report-close',
+    'transformation-critic-report-loading',
+    'transformation-critic-report-error',
+    'transformation-critic-report-retry',
+    'transformation-critic-report-decision',
+    'transformation-critic-report-action',
+    'transformation-critic-report-evaluated-at',
+    'transformation-critic-report-hard-gates',
+    'transformation-critic-report-hard-gate',
+    'transformation-critic-report-measurements',
+    'transformation-critic-report-measurement',
+    'transformation-critic-report-scores',
+    'transformation-critic-report-issues',
+    'transformation-critic-report-issue',
+    'transformation-critic-report-details',
+  ]) {
+    assert.ok(viewer.includes(`data-testid="${testId}"`), `${testId} is rendered`)
+  }
+  for (const attribute of [
+    'data-state=',
+    'data-reference-id=',
+    'data-reference-hash=',
+    'data-report-id=',
+    'data-report-hash=',
+    'data-failure-kind=',
+    'data-failure-code=',
+    'data-decision=',
+    'data-action=',
+    'data-evaluated-at=',
+    'data-count=',
+    'data-dimension=',
+    'data-status=',
+    'data-evaluator-id=',
+    'data-evaluator-kind=',
+    'data-severity=',
+    'data-start-frame=',
+    'data-end-frame=',
+    'data-field=',
+  ]) {
+    assert.ok(viewer.includes(attribute), `${attribute} is rendered`)
+  }
 })
