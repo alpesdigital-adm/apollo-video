@@ -1673,6 +1673,27 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
 
     assert.equal(typeof project.project.name, 'string')
     assert.equal(typeof consumerProject.project.name, 'string')
+    // W27: the journey actor's own read of the critic report the gate
+    // references (the viewer is compared with this record), and the persisted
+    // rows the read-only viewer must never add to or remove.
+    const readTransformationCriticReportAsJourneyActor = async (reportId) => (await readExpectedPublicResponse(
+      await boundedFetch(
+        `${baseUrl}/v1/projects/${encodeURIComponent(project.project.id)}/transformation-critic-reports/${encodeURIComponent(reportId)}`,
+        { headers: { authorization: `Bearer ${issued.token}`, accept: 'application/json' } },
+        t.signal,
+      ),
+      'transformation critic report read as the journey actor',
+      200,
+      t,
+    )).data.report
+    const readCriticViewerPersistedCounts = async () => ({
+      transformationCriticReports: await client.v2TransformationCriticReport.count({ where: { workspaceId } }),
+      transformationCriticMeasurements: await client.v2TransformationCriticMeasurement.count({ where: { workspaceId } }),
+      transformationCriticIssues: await client.v2TransformationCriticIssue.count({ where: { workspaceId } }),
+      syntheticCriticReports: await client.v2SyntheticCriticReport.count({ where: { workspaceId } }),
+      syntheticPhaseGates: await client.v2SyntheticPhaseGate.count({ where: { workspaceId } }),
+      syntheticPhaseGateEvidence: await client.v2SyntheticPhaseGateEvidence.count({ where: { workspaceId } }),
+    })
     const browserEvidence = await assertSyntheticPhaseGateBrowser({
       baseUrl,
       projectId: project.project.id,
@@ -1702,6 +1723,10 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
           versionHash: consumerProject.version.baseHash,
         },
       },
+      criticViewer: {
+        readReport: readTransformationCriticReportAsJourneyActor,
+        readPersistedCounts: readCriticViewerPersistedCounts,
+      },
       step: async (name, action) => {
         let failure = null
         await t.test(name, async () => {
@@ -1726,6 +1751,12 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     assert.deepEqual(historyAfterBrowser.slice(1).map(({ id }) => id), historyGates.map(({ id }) => id))
     assert.equal(historyAfterBrowser.some(({ id }) => id.startsWith('controlled-')), false)
     assert.equal(await client.v2SyntheticPhaseGate.count({ where: { workspaceId } }), historyGates.length + 1)
+    // W27: the viewer only reads. The critic reports and gates the W27 block
+    // found are exactly what the database holds after the browser section.
+    const criticViewerCountsAfterBrowser = await readCriticViewerPersistedCounts()
+    assert.deepEqual(criticViewerCountsAfterBrowser, browserEvidence.criticViewer.countsBefore,
+      'the W27 critic report viewer block must not persist or remove anything')
+    assert.equal(criticViewerCountsAfterBrowser.syntheticPhaseGates, historyGates.length + 1)
     await writeFile(join(evidenceRoot, 'result.json'), `${JSON.stringify({
       runId: process.env.APOLLO_WAVE24_RUN_ID,
       sourceProjectId: project.project.id,
@@ -1761,6 +1792,14 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         preRenderGateId: preRenderGate.id,
         editorEvaluationId: browserEvidence.history.editorEvaluationId,
         browserEvidence: browserEvidence.history.evidencePath,
+      },
+      criticReportViewer: {
+        reportId: browserEvidence.criticViewer.reportId,
+        reportHash: browserEvidence.criticViewer.reportHash,
+        persistedCountsBeforeW27: browserEvidence.criticViewer.countsBefore,
+        persistedCountsAfterW27: browserEvidence.criticViewer.countsAfter,
+        persistedCountsAfterBrowser: criticViewerCountsAfterBrowser,
+        browserEvidence: browserEvidence.criticViewer.evidencePath,
       },
     }, null, 2)}\n`, 'utf8')
 
