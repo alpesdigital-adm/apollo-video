@@ -14,6 +14,9 @@ import {
   SYNTHETIC_PHASE_GATE_HISTORY_LIMIT,
   type SyntheticPhaseGateSelection,
 } from '@/v2/ui/synthetic-phase-gate-history'
+import type { CriticReportViewerPhase } from '@/v2/ui/transformation-critic-report-view'
+
+import TransformationCriticReportViewer from './TransformationCriticReportViewer'
 
 const CRITERIA = Object.freeze([
   Object.freeze({
@@ -52,6 +55,13 @@ interface GateReference {
   type: string
   id: string
   hash: string
+}
+
+/** The critic report opened inline: a reference of one gate, never a URL. */
+interface OpenCriticReport {
+  gateId: string
+  referenceId: string
+  referenceHash: string
 }
 
 interface GateCheck {
@@ -158,6 +168,8 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
   const [failure, setFailure] = useState<string | null>(null)
   const [publishedCapabilityIds, setPublishedCapabilityIds] = useState<ReadonlySet<string>>(new Set())
   const [running, setRunning] = useState(false)
+  const [openReport, setOpenReport] = useState<Readonly<OpenCriticReport> | null>(null)
+  const [criticViewerPhase, setCriticViewerPhase] = useState<CriticReportViewerPhase>('loading')
   const readFenceRef = useRef(createLatestReadFence())
   const mutationGenerationRef = useRef(0)
   const mutationPendingRef = useRef(false)
@@ -254,6 +266,7 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
       // pin survives it: the new identity starts from its own first gate.
       setHistory(EMPTY_HISTORY)
       setFailure(null)
+      setOpenReport(null)
     }
     void load()
     return () => readFence.invalidate()
@@ -358,6 +371,34 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
   )
   const selectedGateId = visibleGate?.id ?? null
 
+  // The opened critic report belongs to the visible gate. It is shown only
+  // while that gate still carries the reference and the exact read capability
+  // is still published; otherwise it is forgotten, so it never reopens alone.
+  const criticReportHref = useMemo(() => {
+    if (openReport === null || visibleGate === null || openReport.gateId !== visibleGate.id) return null
+    const reference = visibleGate.report.evidence
+      .flatMap((criterion) => criterion.checks)
+      .flatMap((check) => check.references)
+      .find((candidate) => candidate.type === 'transformation-critic-report' &&
+        candidate.id === openReport.referenceId && candidate.hash === openReport.referenceHash)
+    if (!reference) return null
+    return addressSyntheticPhaseGateReference({ gateProjectId: props.projectId, reference, publishedCapabilityIds })?.href ?? null
+  }, [openReport, props.projectId, publishedCapabilityIds, visibleGate])
+  useEffect(() => {
+    if (openReport !== null && criticReportHref === null) setOpenReport(null)
+  }, [criticReportHref, openReport])
+  const closeCriticReport = useCallback(() => setOpenReport(null), [])
+  // Opening or closing a report only changes which report is open: the panel
+  // issues nothing, and neither its history nor its reads are touched.
+  const toggleCriticReport = (gateId: string, reference: Readonly<GateReference>) => {
+    setCriticViewerPhase('loading')
+    setOpenReport((current) =>
+      current !== null && current.gateId === gateId &&
+        current.referenceId === reference.id && current.referenceHash === reference.hash
+        ? null
+        : Object.freeze({ gateId, referenceId: reference.id, referenceHash: reference.hash }))
+  }
+
   const checksByCode = useMemo(() => new Map(
     visibleGate?.report.evidence.flatMap((criterion) => criterion.checks).map((check) => [check.code, check]) ?? [],
   ), [visibleGate])
@@ -408,6 +449,7 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
               disabled={state === 'loading' || running}
               onChange={(event) => {
                 const gateId = event.target.value
+                setOpenReport(null)
                 setHistory((current) => ({ ...current, selectedGateId: gateId, selectionPinned: 'user' }))
               }}
               value={selectedGateId ?? ''}
@@ -451,7 +493,22 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
                     {check?.references.length ? <ul className="mt-2 space-y-1 border-t border-white/[0.05] pt-2">{check.references.map((reference) => {
                       const address = addressSyntheticPhaseGateReference({ gateProjectId: props.projectId, reference, publishedCapabilityIds })
                       const content = <><span>{reference.type}</span> <span className="font-mono text-[#696374]" title={reference.hash}>{reference.id} · {shortHash(reference.hash)}</span></>
-                      return <li className="truncate text-[8px] text-[#858090]" key={`${reference.type}:${reference.id}:${reference.hash}`}>{address ? <a className="underline decoration-white/20 underline-offset-2 hover:text-[#bdb6cb]" href={address.href}>{content}</a> : content}</li>
+                      const key = `${reference.type}:${reference.id}:${reference.hash}`
+                      if (reference.type === 'transformation-critic-report' && address && selectedGateId !== null) {
+                        const gateId = selectedGateId
+                        const open = openReport !== null && criticReportHref !== null &&
+                          openReport.referenceId === reference.id && openReport.referenceHash === reference.hash
+                        return (
+                          <li className="text-[8px] text-[#858090]" data-reference-hash={reference.hash} data-reference-id={reference.id} data-testid="synthetic-phase-gate-critic-reference" key={key}>
+                            <p className="truncate">{content}</p>
+                            <div className="mt-1 flex items-center gap-3">
+                              <a className="underline decoration-white/20 underline-offset-2 hover:text-[#bdb6cb]" data-testid="synthetic-phase-gate-critic-json" href={address.href}>Abrir JSON</a>
+                              <button aria-expanded={open} className="rounded border border-[#8f86e8]/30 bg-[#8f86e8]/10 px-1.5 py-0.5 font-semibold text-[#b5aef4] transition hover:bg-[#8f86e8]/15 disabled:cursor-not-allowed disabled:opacity-45" data-reference-hash={reference.hash} data-reference-id={reference.id} data-testid="synthetic-phase-gate-critic-open" disabled={open && criticViewerPhase === 'loading'} onClick={() => { toggleCriticReport(gateId, reference) }} type="button">Ver relatório</button>
+                            </div>
+                          </li>
+                        )
+                      }
+                      return <li className="truncate text-[8px] text-[#858090]" key={key}>{address ? <a className="underline decoration-white/20 underline-offset-2 hover:text-[#bdb6cb]" href={address.href}>{content}</a> : content}</li>
                     })}</ul> : null}
                   </li>
                 )
@@ -459,6 +516,17 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
             </ul>
           </article>
         ))}
+        {openReport !== null && criticReportHref !== null ? (
+          <TransformationCriticReportViewer
+            href={criticReportHref}
+            key={`${props.projectId}\u0000${openReport.gateId}\u0000${openReport.referenceId}\u0000${openReport.referenceHash}`}
+            onClose={closeCriticReport}
+            onPhaseChange={setCriticViewerPhase}
+            projectId={props.projectId}
+            reads={props.reads}
+            reference={{ id: openReport.referenceId, hash: openReport.referenceHash }}
+          />
+        ) : null}
         <div>
           <button className="w-full rounded-lg border border-[#8f86e8]/30 bg-[#8f86e8]/10 px-3 py-2.5 text-xs font-semibold text-[#b5aef4] transition hover:bg-[#8f86e8]/15 disabled:cursor-not-allowed disabled:opacity-45" data-testid="synthetic-phase-gate-run" disabled={running || state === 'loading'} onClick={() => { void run() }} type="button">{running ? 'Avaliando evidências…' : 'Avaliar versão atual'}</button>
           <p className="mt-2 text-[9px] leading-4 text-[#77728a]" data-testid="synthetic-phase-gate-run-note">{`Avalia a versão atual do editor (${props.projectVersionId}), independentemente da avaliação selecionada.`}</p>
