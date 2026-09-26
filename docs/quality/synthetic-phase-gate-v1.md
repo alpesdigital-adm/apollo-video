@@ -14,7 +14,9 @@ CI for the current W24.3 commit is reported by the PR checks. All W24.2
 local gates listed below passed under Astra supervision, and CI run
 `35859804992` passed both jobs at `46cae59d81916f597f47b50a077682e5413261a4`.
 Wave 25 adds only the editor history of the last 20 evaluations, recorded in
-its own section below; it changes no gate, API or acceptance. This
+its own section below; it changes no gate, API or acceptance. Wave 27 adds only the inline reading
+of the critic report a gate references, also in its own section, and changes
+nothing else either. This
 document is not an approval record or a production acceptance record.
 
 ## Purpose
@@ -254,6 +256,130 @@ What Wave 25 does not claim: no evaluation in the history approves the
 current version; the W24 gate remains 3/4 criteria and 5/8 checks with
 `approved=false` and the three live-provider checks absent; no live provider,
 merge, deployment, owner acceptance or TODO closure.
+
+## Wave 27 — inline viewer of the referenced transformation critic report
+
+Scope of the change: `src/components/SyntheticPhaseGatePanel.tsx` (the
+`transformation-critic-report` reference now carries the existing link,
+labelled "Abrir JSON", and a "Ver relatório" button), the new small client
+component `src/components/TransformationCriticReportViewer.tsx`, the pure
+module `src/v2/ui/transformation-critic-report-view.ts`, focused unit tests,
+the browser helper/journey and this document. No page, API, schema,
+migration, dependency, provider, chart, video seek, comparison, export or
+accept/evaluate action was added; the gate calculation, its state, the
+authorization, the `EditorReads` coordinator and `TransformationReviewPanel`
+are unchanged. `docs/quality/ui-capability-parity-report.json` was regenerated
+because the panel's POST call site moved one line; the parity scanner records
+only reads made on a variable named `reads`, so the viewer's `props.reads.read`
+is not listed there, exactly like the panel's own reads.
+
+Behaviour, as implemented and proven:
+
+- "Ver relatório" appears only for a `transformation-critic-report`
+  reference whose exact capability
+  `apollo.projects.transformation-critic-reports.get` is published to the
+  session; the address is the canonical one from
+  `addressSyntheticPhaseGateReference`, never built from report content.
+  "Abrir JSON" keeps pointing at the same public GET.
+- The click issues one GET through the existing session and `EditorReads`
+  (own identity/visibility fence; no `setScope`, `abortAll` or invalidation
+  of other reads). Opening, closing, retrying and selecting another history
+  entry never POST. A repeated click during the load does not stack requests.
+- Before anything is shown, `report.projectId` must equal the gate's
+  project and `report.id`/`report.reportHash` must equal the reference's
+  id/hash (the reference carries no `projectId`; the report carries no
+  `projectVersionId`, and no such link is invented). The client never
+  recomputes the hash; the backend already revalidates the record. A mismatch
+  closes the reading and shows an error with no partial data.
+- The reading shows the decision, the suggested action as a recorded
+  suggestion that nothing executes, the evaluation date, the hard gates
+  (an empty list is stated not to mean approval), each measurement with
+  dimension, `measured` / `not-applicable` / `unavailable`, score and
+  threshold in basis points (`null` renders as "indisponível", never as
+  zero), its note and its origin resolved by `evaluatorId` (`measured` as a
+  real measurement, `controlled` as a controlled proof, never as a real
+  visual evaluation), the overall scores only when present, and each issue
+  with severity, dimension, description and its range in frames (never
+  converted to seconds). Ids, hashes and lineage sit in an expandable
+  technical details block. All dynamic text is rendered by React; no HTML,
+  link or identity is derived from the response.
+- The viewer closes and clears when the gate, project, version or hash of
+  the editor changes, when the capability is no longer published, on manual
+  close and on unmount; a late answer after any of those is discarded.
+- Errors have their own state and an explicit retry: 401 follows the session
+  flow, 403 shows the refusal, 429 shows the coordinator's remaining wait,
+  and a missing report on the existing route is 422 `ASSET_NOT_FOUND`. No
+  old report stays on screen after an error; the JSON link stays available.
+
+Evidence for Wave 27, kept separate from the W24, W25 and W26 records:
+
+- Unit: `tests/v2/transformation-critic-report-view.test.mjs` (reference match
+  with each of project, id and hash diverging; `null` basis points render
+  `indisponível` and never `0 bps`; frames label; evaluator origin measured,
+  controlled and missing; failure texts), the 422 `ASSET_NOT_FOUND`
+  classification added to `tests/v2/editor-reads.test.mjs`, and a W27
+  structural guard in `tests/v2/project-editor-ui.test.mjs` (labels, testids,
+  read name, identity match, fence, `/login`, and the absence of
+  `dangerouslySetInnerHTML`, `fetch(`, `setScope(`, `abortAll(`, `invalidate(`
+  and `canonical-hash` in the viewer). The full unit suite passed 2,541/2,541
+  with none skipped (2,532 on `main`).
+- Browser, real (PostgreSQL, public API, workers, artifact storage with the
+  local driver, Chromium, authenticated editor) inside
+  `tests/v2/synthetic-wave24-journey.e2e.mjs`, after the W25 steps and on the
+  history they leave behind: the newest gate of the project that holds the
+  persisted rejected critic report lists that reference with the record's id
+  and hash, "Abrir JSON" at the canonical address and "Ver relatório", and no
+  other reference carries a control; opening issued exactly one GET to the
+  report URL and no POST, with the editor URL, the selected gate and the
+  history unchanged; every rendered field was compared with the record read
+  over the API by the journey actor (the same record the W26 step reads) —
+  decision `rejected`, action `fallback`, the evaluation date, the
+  `preserve-list` hard gate, all fourteen measurements with status, scores
+  and thresholds (`indisponível` for null), notes, frame ranges and the origin
+  resolved by `evaluatorId` (measured versus controlled), the overall scores,
+  the blocking issue in frames 0–60 with its violated preserve, and the
+  thirteen technical fields — and the viewer contained no link; "Fechar"
+  closed it, reopening issued a second GET with the same hash and the button
+  toggled it closed; choosing an older evaluation closed the viewer with zero
+  requests in the 1.5 s window and it did not reopen on returning to the
+  newest; the database counts of critic reports, measurements, issues, gates
+  and evidence rows were identical before and after.
+- Browser, controlled transport (`page.route` on the report URL only, on the
+  same authenticated page, labelled `controlled-transport` in the evidence
+  and never reaching the server; refusals shaped with the route's own codes
+  `AUTH_SCOPE_REQUIRED` and `GOVERNANCE_LIMIT_EXCEEDED`): 403 showed the
+  refusal with no report id and, after the intercept was removed, an explicit
+  retry read the real report; 429 with `Retry-After: 2` showed the wait, an
+  immediate retry was refused locally by the coordinator without any request
+  and a retry after the wait read the real report; a 422 `ASSET_NOT_FOUND`
+  envelope showed the not-found error with no data; the same record answered
+  with `projectId`, `id` or `reportHash` changed showed the identity error
+  each time and no report data at any point; an answer held until after
+  "Fechar" rendered nothing; A→B→A across history entries (the journey's
+  second project has no gate) with the older entry's answer held rendered no
+  B data under A — the viewer unmounts on the switch, as in W25; 401, run
+  last, redirected to `/login`. Every controlled step recorded zero POST.
+- Local supervised runs (throwaway PostgreSQL 16, pool of one, Chromium):
+  the journey passed 25/25 (the W24.3 journey, ten W25 subtests, one W26
+  step and thirteen W27 subtests) in four runs — three by the executor during
+  development (journey 115 s, 101 s and 100 s, the last two on the final code
+  commit `3b65fcab`) and one by the coordinator on that commit (106.4 s, 60
+  observed process identities, none alive at the end) — each ending with zero
+  database backends, the cluster stopped, port 55571 free, no owned process
+  alive and the scratch removed, with no cleanup errors.
+- Screenshots retained with the evidence: the open viewer on the real
+  rejected report and an error state.
+- CI: the two jobs for the PR head commit are reported by the PR checks; the
+  Isolated Compose job runs this journey and publishes its evidence. As with
+  W24.3 and W25 above, no CI run id is recorded in this document.
+
+Limitations and what Wave 27 does not claim: the viewer reads an existing
+record and changes nothing about the gate — the F3 gate remains 3/4 criteria
+and 5/8 checks with `approved=false` and the three live-provider checks
+absent; a controlled evaluator shown in the viewer is a controlled proof,
+not a real visual evaluation; controlled transport cases prove the viewer's
+handling, not the real report; no live provider, merge, deployment, owner
+acceptance or TODO closure.
 
 ## Remaining integration
 
