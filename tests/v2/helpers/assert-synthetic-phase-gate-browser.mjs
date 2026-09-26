@@ -98,6 +98,10 @@ const CRITIC_DETAIL_FIELDS = Object.freeze([
 ])
 const CRITIC_JSON_CONTROL = 'synthetic-phase-gate-critic-json'
 const CRITIC_OPEN_CONTROL = 'synthetic-phase-gate-critic-open'
+// The codes the report route itself answers with (PUBLIC_ERROR_CATALOG), so
+// each controlled refusal is shaped like a real one.
+const CRITIC_FORBIDDEN_CODE = 'AUTH_SCOPE_REQUIRED'
+const CRITIC_RATE_LIMIT_CODE = 'GOVERNANCE_LIMIT_EXCEEDED'
 
 export function summarizeSyntheticPhaseGateCoverage(report) {
   const evidenceByCriterion = new Map(report.evidence.map((criterion) => [criterion.criterion, criterion]))
@@ -2026,11 +2030,11 @@ export async function assertSyntheticPhaseGateBrowser(input) {
       const mark = ledger.length
       const answered = []
       let failed
-      await criticRoute(refuseWith(403, 'FORBIDDEN', {}, answered), async () => {
+      await criticRoute(refuseWith(403, CRITIC_FORBIDDEN_CODE, {}, answered), async () => {
         await bounded(criticOpen.click(), input.signal, 'W27 403 open')
         failed = await waitForCriticView((current) => current.viewer?.state === 'error', 'W27 403 error')
       })
-      assertCriticFailure(failed, { kind: 'forbidden', code: 'FORBIDDEN', text: CRITIC_TEXT.forbidden }, 'W27 403')
+      assertCriticFailure(failed, { kind: 'forbidden', code: CRITIC_FORBIDDEN_CODE, text: CRITIC_TEXT.forbidden }, 'W27 403')
       // The route is gone; only the explicit retry may clear the remembered refusal.
       await quiesce('W27 403 retry')
       const retryMark = ledger.length
@@ -2064,14 +2068,14 @@ export async function assertSyntheticPhaseGateBrowser(input) {
       let limitedAt = 0
       let limited
       let immediate
-      const limitHandler = refuseWith(429, 'RATE_LIMITED', { 'retry-after': '2' }, answered)
+      const limitHandler = refuseWith(429, CRITIC_RATE_LIMIT_CODE, { 'retry-after': '2' }, answered)
       await criticRoute(async (route) => {
         await limitHandler(route)
         limitedAt = Date.now()
       }, async () => {
         await bounded(criticOpen.click(), input.signal, 'W27 429 open')
         limited = await waitForCriticView((current) => current.viewer?.state === 'error', 'W27 429 error')
-        assertCriticFailure(limited, { kind: 'rate-limited', code: 'RATE_LIMITED', text: criticRateLimitedText(2) }, 'W27 429')
+        assertCriticFailure(limited, { kind: 'rate-limited', code: CRITIC_RATE_LIMIT_CODE, text: criticRateLimitedText(2) }, 'W27 429')
         // Immediate retry, still inside the server's wait.
         const immediateMark = ledger.length
         const countersBefore = await bounded(editorReadCounters(), input.signal, 'W27 429 counters')
@@ -2086,7 +2090,7 @@ export async function assertSyntheticPhaseGateBrowser(input) {
         const shownSeconds = Number(after.viewer?.error?.message?.match(/pausa de (\d+) s/)?.[1])
         assert.ok(clickedAt - limitedAt < 2_000, 'the immediate retry happened inside the 2 s wait')
         assert.ok([1, 2].includes(shownSeconds), `W27 429 immediate retry shows the remaining wait: ${after.viewer?.error?.message}`)
-        assertCriticFailure(after, { kind: 'rate-limited', code: 'RATE_LIMITED', text: criticRateLimitedText(shownSeconds) }, 'W27 429 immediate retry')
+        assertCriticFailure(after, { kind: 'rate-limited', code: CRITIC_RATE_LIMIT_CODE, text: criticRateLimitedText(shownSeconds) }, 'W27 429 immediate retry')
         assert.deepEqual(reportReads(requests), [], 'the coordinator refuses locally inside the wait: nothing reaches the report URL')
         assert.deepEqual(counterDelta(countersBefore, countersAfter), {}, 'no editor read was issued by the immediate retry')
         immediate = {
