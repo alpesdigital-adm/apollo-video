@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import ts from 'typescript'
+import { addressSyntheticPhaseGateReference } from '../../src/v2/ui/synthetic-phase-gate-addresses.ts'
 
 import {
   PROOF_INTEGRITY_DIMENSIONS,
@@ -686,6 +688,35 @@ test('W25 synthetic phase gate panel shows the server-ordered history of the las
   assert.match(onChange[1], /selectionPinned: 'user'/, 'a choice made by the operator is pinned')
   assert.doesNotMatch(onChange[1], /fetch\(|load\(|run\(|invalidate\(|\.read\(/, 'choosing a gate issues no request')
   assert.doesNotMatch(source, /createdBy/, 'the author is not in the public gate contract and is never fabricated')
+})
+
+test('W28 viewer read constructs the canonical encoded report URL from IDs', () => {
+  const source = ts.createSourceFile('viewer.tsx', transformationCriticReportViewerSource,
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let url
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === 'props.reads.read' &&
+        ts.isObjectLiteralExpression(node.arguments[0])) {
+      url = node.arguments[0].properties.find((property) =>
+        ts.isPropertyAssignment(property) && property.name.getText(source) === 'url')?.initializer
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  assert.ok(url && ts.isTemplateExpression(url), 'the coordinator URL is a canonical template, not an opaque href')
+  assert.doesNotMatch(transformationCriticReportViewerSource, /href: string|props\.href/)
+  assert.doesNotMatch(syntheticPhaseGatePanelSource, /href=\{criticReportHref\}/)
+  const projectId = 'project / with spaces'
+  const referenceId = 'critic/?#'
+  const actual = Function('props', 'referenceId', `return ${url.getText(source)}`)(
+    { projectId }, referenceId,
+  )
+  const expected = addressSyntheticPhaseGateReference({
+    gateProjectId: projectId,
+    reference: { type: 'transformation-critic-report', id: referenceId, hash: 'a'.repeat(64) },
+    publishedCapabilityIds: new Set(['apollo.projects.transformation-critic-reports.get']),
+  })
+  assert.equal(actual, expected.href)
 })
 
 test('W27 the gate opens its transformation critic report inline and only reads it', () => {

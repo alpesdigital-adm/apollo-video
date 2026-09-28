@@ -573,6 +573,12 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.034 — Paridade API-first [FR-240]
 
+Nota parcial de 2026-09-26 (Wave 28): correção local da omissão de três GETs
+`props.reads.read` no inventário AST (gate sintético, capabilities e relatório
+crítico), com rejeição de descriptor/URL opacos e URL do viewer construída dos
+IDs. Evidência e limites em `docs/PACOTE-WAVE28-PARIDADE-LEITURAS-UI.md`;
+sem novo aceite do owner, provider-live, produção ou mudança das caixas/380 de 1.259.
+
 - [x] Criar `PublicCapability` registry com exposure, scopes, schema, custo e confirmação. Evidência F0.034: `capability-registry.ts` é a fonte canônica das 189 capabilities e exige exposure, operation kind, scopes, input/output schema refs, cost class e confirmation, além de endpoint, auth, idempotência e preconditions. O commit `6a96e39` removeu a confiança exclusiva no TypeScript: allowlists e padrões runtime rejeitam drift nos seis metadados centrais, high/variable cost sem gate e schemas inexistentes; T-F0.034 falsifica cada dimensão e o verificador resolve todos os refs. O run `30810405231` aprovou 834 testes, baseline de 189 capabilities, build, PostgreSQL/MinIO, Remotion, Prisma/API e teardown. Evidência: T-F0.034 e ADR-134.
 - [x] Associar cada ação operável da UI a um `capabilityId`. Evidência F0.034: o scanner TypeScript percorre todos os componentes TSX e helpers `.ts` client-side, classifica inclusive o upload assinado e resolve 73 call sites para 66 capabilities públicas únicas por método e endpoint. Chamadas dinâmicas desconhecidas, IDs duplicados e endpoints não registrados falham fechado. O run `30811367434` aprovou o commit `9e60f32` e toda a matriz hospedada. Evidência: T-FR-240, relatório de paridade e ADR-134.
 - [x] Fazer UI e API chamarem o mesmo application service/Command handler. Evidência F0.034: para cada binding da UI, o gate resolve a rota `/v1` canônica e atravessa estaticamente funções locais/importadas até ao menos um service V2 da camada Application; assim UI e clientes externos entram pelo mesmo handler público, inclusive discovery/autenticação. O run `30811899810` aprovou `4acebab`, 836 testes e a matriz completa. Evidência: T-FR-240, relatório de paridade e ADR-134.
