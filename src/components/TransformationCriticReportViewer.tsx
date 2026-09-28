@@ -70,7 +70,6 @@ function decisionTone(decision: string): string {
 export default function TransformationCriticReportViewer(props: Readonly<{
   projectId: string
   reference: Readonly<{ id: string; hash: string }>
-  href: string
   reads: EditorReads
   onClose: () => void
   /** Lets the panel keep its "Ver relatório" button disabled while this read is loading. */
@@ -100,7 +99,7 @@ export default function TransformationCriticReportViewer(props: Readonly<{
       // about a project version, so no versionId travels with it.
       result = await props.reads.read<{ report?: PublicCriticReport }>({
         name: 'transformation-critic-report',
-        url: props.href,
+        url: `/v1/projects/${encodeURIComponent(props.projectId)}/transformation-critic-reports/${encodeURIComponent(referenceId)}`,
       }, { explicitRetry })
     } catch (error) {
       result = {
@@ -147,7 +146,7 @@ export default function TransformationCriticReportViewer(props: Readonly<{
     }
     setReport(candidate)
     setPhase('ready')
-  }, [props.href, props.projectId, props.reads, referenceHash, referenceId, router])
+  }, [props.projectId, props.reads, referenceHash, referenceId, router])
 
   useEffect(() => {
     closedRef.current = false

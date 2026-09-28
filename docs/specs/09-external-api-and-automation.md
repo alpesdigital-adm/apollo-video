@@ -115,6 +115,13 @@ CI gera um relatório cruzando:
 
 Falha de paridade bloqueia release quando uma ação de produto não possui capability pública ou justificativa `internal-only` válida. A justificativa só é permitida para administração interna/infrastructure primitive, não para esconder feature da API.
 
+Wave 28 (2026-09-26): o scanner do relatório inclui tanto `reads.read` quanto
+`props.reads.read`, inclusive variantes com colchetes literais, optional chain
+e parênteses. Cada descriptor deve ser literal e ter URL `/v1` classificável;
+descriptor indireto, URL opaca, destino não-`/v1` e método computado falham
+fechado. Outros `library.read` não são transportes Apollo. O relatório W27
+omitia três GETs do gate sintético/viewer; esta correção não amplia contratos.
+
 ## 6. Versionamento e depreciação
 
 - Base path: `/v1`.

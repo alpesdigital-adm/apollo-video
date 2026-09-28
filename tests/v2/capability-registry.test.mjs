@@ -408,6 +408,147 @@ export default function Probe() {
   }
 })
 
+test('T-F0-034 scanner rejects a descriptor spread that replaces the declared url', async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-spread-'))
+  try {
+    await mkdir(resolve(fixtureRoot, 'src/app/probe'), { recursive: true })
+    await mkdir(resolve(fixtureRoot, 'src/components'), { recursive: true })
+    await writeFile(resolve(fixtureRoot, 'src/app/probe/page.tsx'), `
+'use client'
+export default function Probe(props) {
+  const descriptor = { url: '/legacy/hidden' }
+  void props.reads.read({ name: 'capabilities', url: '/v1/capabilities', ...descriptor })
+  return null
+}
+`)
+    assert.throws(() => discoverUiNetworkActions(fixtureRoot),
+      /read coordinator descriptor.*(spread|unambiguous)/)
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
+})
+
+test('T-F0-034 scanner refuses ambiguous descriptor keys and non-GET method metadata', async () => {
+  const cases = [
+    ['spread before url', "...descriptor, name: 'capabilities', url: '/v1/capabilities'"],
+    ['duplicate url', "name: 'capabilities', url: '/v1/capabilities', url: '/legacy/hidden'"],
+    ['literal computed url', "name: 'capabilities', url: '/v1/capabilities', ['url']: '/legacy/hidden'"],
+    ['dynamic computed url', "name: 'capabilities', url: '/v1/capabilities', [props.key]: '/legacy/hidden'"],
+    ['computed method', "name: 'capabilities', url: '/v1/capabilities', ['method']: 'POST'"],
+    ['url accessor', "name: 'capabilities', url: '/v1/capabilities', get url() { return '/legacy/hidden' }"],
+    ['method accessor', "name: 'capabilities', url: '/v1/capabilities', get method() { return 'POST' }"],
+    ['POST method', "name: 'capabilities', url: '/v1/capabilities', method: 'POST'"],
+    ['opaque method', "name: 'capabilities', url: '/v1/capabilities', method: props.method"],
+    ['duplicate method', "name: 'capabilities', url: '/v1/capabilities', method: 'GET', method: 'POST'"],
+    ['shorthand url', "name: 'capabilities', url: '/v1/capabilities', url"],
+    ['shorthand method', "name: 'capabilities', url: '/v1/capabilities', method"],
+  ]
+  for (const [label, properties] of cases) {
+    // Successful scans are cached by root; each variant needs a distinct root.
+    const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-ambiguous-'))
+    try {
+      await mkdir(resolve(fixtureRoot, 'src/app/probe'), { recursive: true })
+      await mkdir(resolve(fixtureRoot, 'src/components'), { recursive: true })
+      await writeFile(resolve(fixtureRoot, 'src/app/probe/page.tsx'), `
+'use client'
+export default function Probe(props) {
+  const descriptor = { url: '/legacy/hidden' }
+  void props.reads.read({ ${properties} })
+  return null
+}
+`)
+      assert.throws(() => discoverUiNetworkActions(fixtureRoot),
+        /read coordinator descriptor/, label)
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true })
+    }
+  }
+})
+
+test('T-F0-034 scanner binds reads.read and props.reads.read without counting unrelated reads', async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-coordinator-'))
+  try {
+    await mkdir(resolve(fixtureRoot, 'src/app/probe'), { recursive: true })
+    await mkdir(resolve(fixtureRoot, 'src/components'), { recursive: true })
+    await writeFile(resolve(fixtureRoot, 'src/app/probe/page.tsx'), `
+'use client'
+export default function Probe(props) {
+  const query = 'limit=20'
+  void reads.read({ name: 'gates', url: \`/v1/projects/\${props.projectId}/synthetic-phase-gates\`, query })
+  void props.reads.read({ name: 'capabilities', url: '/v1/capabilities', method: 'GET' })
+  void library.read({ url: '/v1/not-a-coordinator' })
+  return null
+}
+`)
+    const actions = discoverUiNetworkActions(fixtureRoot)
+    assert.deepEqual(actions.map(({ method, path }) => ({ method, path })), [
+      { method: 'GET', path: '/v1/projects/{param}/synthetic-phase-gates' },
+      { method: 'GET', path: '/v1/capabilities' },
+    ])
+    const bindings = bindUiNetworkActionsToCapabilities(actions, FOUNDATION_CAPABILITIES)
+    assert.deepEqual(bindings.map(({ capabilityId }) => capabilityId), [
+      'apollo.projects.synthetic-phase-gates.list', 'apollo.capabilities.list',
+    ])
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
+})
+
+test('T-F0-034 props coordinator rejects opaque URL and non-v1 URL', async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-opaque-'))
+  try {
+    await mkdir(resolve(fixtureRoot, 'src/app/probe'), { recursive: true })
+    await mkdir(resolve(fixtureRoot, 'src/components'), { recursive: true })
+    const page = resolve(fixtureRoot, 'src/app/probe/page.tsx')
+    for (const url of ['props.href', "'/legacy/projects'"]) {
+      await writeFile(page, `'use client'\nexport default function Probe(props) { void props.reads.read({ name: 'probe', url: ${url} }); return null }\n`)
+      assert.throws(() => discoverUiNetworkActions(fixtureRoot),
+        /read coordinator descriptor.*(static url|\/v1)/)
+    }
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
+})
+
+test('T-F0-034 scanner classifies parenthesized optional and literal-bracket coordinator reads', async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-spelling-'))
+  try {
+    await mkdir(resolve(fixtureRoot, 'src/app/probe'), { recursive: true })
+    await mkdir(resolve(fixtureRoot, 'src/components'), { recursive: true })
+    await writeFile(resolve(fixtureRoot, 'src/app/probe/page.tsx'), `
+'use client'
+export default function Probe(props) {
+  void (props['reads'])?.['read']?.({ name: 'capabilities', url: '/v1/capabilities' })
+  void (reads)?.read?.({ name: 'capabilities', url: '/v1/capabilities' })
+  return null
+}
+`)
+    const actions = discoverUiNetworkActions(fixtureRoot)
+    assert.deepEqual(actions.map((action) => action.path), ['/v1/capabilities', '/v1/capabilities'])
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
+})
+
+test('T-F0-034 scanner rejects indirect descriptor and computed coordinator method', async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-indirect-'))
+  try {
+    await mkdir(resolve(fixtureRoot, 'src/app/probe'), { recursive: true })
+    await mkdir(resolve(fixtureRoot, 'src/components'), { recursive: true })
+    const page = resolve(fixtureRoot, 'src/app/probe/page.tsx')
+    for (const call of [
+      'props.reads.read(descriptor)',
+      "props.reads[method]({ name: 'capabilities', url: '/v1/capabilities' })",
+    ]) {
+      await writeFile(page, `'use client'\nexport default function Probe(props) { const descriptor = { url: '/v1/capabilities' }; void ${call}; return null }\n`)
+      assert.throws(() => discoverUiNetworkActions(fixtureRoot),
+        /(?:canonical reads\.read descriptor|read coordinator.*method)/)
+    }
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
+})
+
 test('T-F0-034 scanner does not treat unrelated library read methods as Apollo transport', async () => {
   const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'apollo-parity-library-read-'))
   try {
@@ -484,6 +625,30 @@ test('T-F0-034 the parity report counts what it claims instead of publishing two
     ['GET /v1/health'],
     'the report must name the endpoint that reaches nothing',
   )
+})
+
+test('T-FR-240 W28 repository binds each previously missed GET exactly once to its public capability', () => {
+  const report = createUiCapabilityParityReport(root)
+  const cases = [
+    ['src/components/SyntheticPhaseGatePanel.tsx', '/v1/projects/{param}/synthetic-phase-gates', 'apollo.projects.synthetic-phase-gates.list'],
+    ['src/components/SyntheticPhaseGatePanel.tsx', '/v1/capabilities', 'apollo.capabilities.list'],
+    ['src/components/TransformationCriticReportViewer.tsx', '/v1/projects/{param}/transformation-critic-reports/{param}', 'apollo.projects.transformation-critic-reports.get'],
+  ]
+  for (const [file, path, capabilityId] of cases) {
+    const rows = report.rows.filter((row) => row.uiAction.startsWith(`${file}:`) &&
+      row.endpoint === `GET ${FOUNDATION_CAPABILITIES.find((entry) => entry.id === capabilityId)?.endpoint.path}`)
+    assert.equal(rows.length, 1, `${file} must bind exactly one ${path} GET`)
+    assert.equal(rows[0].capabilityId, capabilityId)
+    assert.ok(rows[0].applicationServices.length > 0, 'the bound endpoint reaches an application service')
+    const action = discoverUiNetworkActions(root).find((entry) => entry.id === rows[0].uiAction)
+    assert.equal(action.path, path)
+    assert.equal(action.method, 'GET')
+  }
+  assert.ok(report.rows.some((row) => row.endpoint.startsWith('POST ')), 'existing mutations remain in the inventory')
+  expectDomainError(() => bindUiNetworkActionsToCapabilities(
+    [{ id: 'new-unregistered-get', method: 'GET', path: '/v1/unregistered' }],
+    FOUNDATION_CAPABILITIES,
+  ), 'CAPABILITY_PARITY_MISSING')
 })
 
 test('T-F0-034 generated parity report covers actions, capabilities, endpoints and tests', () => {

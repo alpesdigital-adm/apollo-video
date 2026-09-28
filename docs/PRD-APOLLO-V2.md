@@ -2393,6 +2393,13 @@ Critérios adicionais de paridade:
 
 Evidência executável F0.034: o relatório versionado `ui-capability-parity-report/v1` deriva do AST da UI e do registry canônico, relaciona 73 call sites a 66 capabilities/endpoints e aos Application services alcançáveis e cobre as 189 capabilities públicas. Seis superfícies estritamente internas possuem allowlist tipada e justificativa; exceções textuais livres são recusadas. Os gates `api:v1:validate` e `api:parity:validate` bloqueiam capability externa sem contrato, interna sem justificativa, ação da UI sem binding, rota divergente ou drift do relatório. O run hospedado `30812924567` aprovou a matriz completa com zero lacunas.
 
+Nota local Wave 28 (2026-09-26): os totais históricos acima não abrangiam três
+GETs `props.reads.read` do gate sintético/viewer. O scanner agora os classifica,
+rejeita descriptors/URLs opacos e vincula-os às capabilities públicas existentes;
+o viewer constrói a URL canônica a partir de IDs. Relatório regenerado e testes
+locais em `docs/PACOTE-WAVE28-PARIDADE-LEITURAS-UI.md`; sem alegar novo aceite,
+deploy, produção ou provider-live.
+
 ### FR-241 — Contrato público e descoberta
 
 A API deve publicar OpenAPI e JSON Schemas versionados, IDs estáveis, enums, paginação, filtros, erros estruturados, exemplos e capability discovery. Alteração incompatível exige nova versão e janela de depreciação.

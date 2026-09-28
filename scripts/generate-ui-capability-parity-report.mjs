@@ -86,9 +86,37 @@ function isReadCoordinatorTransport(node) {
     call.expression.text === 'createEditorReads')
 }
 
-function objectProperty(literal, name) {
-  return literal.properties.find((candidate) =>
-    ts.isPropertyAssignment(candidate) && candidate.name.getText().replaceAll(/["']/g, '') === name)
+function unparenthesized(node) {
+  while (ts.isParenthesizedExpression(node)) node = node.expression
+  return node
+}
+
+function member(node) {
+  node = unparenthesized(node)
+  if (ts.isPropertyAccessExpression(node)) return { receiver: unparenthesized(node.expression), name: node.name.text }
+  if (ts.isElementAccessExpression(node)) {
+    return {
+      receiver: unparenthesized(node.expression),
+      name: ts.isStringLiteralLike(node.argumentExpression) ? node.argumentExpression.text : undefined,
+    }
+  }
+  return null
+}
+
+// Deliberately limited to the known editor coordinator forms, not alias/dataflow inference.
+function coordinatorCall(call) {
+  const method = member(call.expression)
+  if (!method) return false
+  const owner = member(method.receiver)
+  const direct = ts.isIdentifier(method.receiver) && method.receiver.text === 'reads'
+  const prop = owner && ts.isIdentifier(owner.receiver) && owner.receiver.text === 'props'
+  if (!direct && !prop) return false
+  if (prop && owner.name !== 'reads') {
+    assert.ok(owner.name !== undefined, 'read coordinator receiver must use literal props.reads')
+    return false
+  }
+  assert.ok(method.name !== undefined, 'read coordinator method must be literal read')
+  return method.name === 'read'
 }
 
 export function discoverUiNetworkActions(root) {
@@ -103,25 +131,44 @@ export function discoverUiNetworkActions(root) {
     const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     const visit = (node) => {
       // Reads issued through the editor read coordinator declare their path in
-      // the descriptor's `url`; they are GET by construction (the coordinator
-      // throws on any other method).
-      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
-          ts.isIdentifier(node.expression.expression) &&
-          node.expression.expression.text === 'reads' &&
-          node.expression.name.text === 'read') {
+      // the descriptor's `url`; the coordinator accepts GET only. Refuse
+      // syntax that could replace that URL or disguise a non-GET method.
+      if (ts.isCallExpression(node) && coordinatorCall(node)) {
         assert.ok(node.arguments[0] && ts.isObjectLiteralExpression(node.arguments[0]),
           `canonical reads.read descriptor must be an object literal with a static url: ${relative(root, path)}`)
-        const urlProperty = objectProperty(node.arguments[0], 'url')
+        let urlProperty
+        let methodSeen = false
+        for (const property of node.arguments[0].properties) {
+          if (ts.isShorthandPropertyAssignment(property)) {
+            assert.ok(property.name.text !== 'url' && property.name.text !== 'method',
+              `read coordinator descriptor must not use shorthand url or method: ${relative(root, path)}`)
+            continue
+          }
+          assert.ok(ts.isPropertyAssignment(property) &&
+            (ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name)),
+          `read coordinator descriptor must not use spreads, computed keys or accessors: ${relative(root, path)}`)
+          const name = property.name.text
+          if (name === 'url') {
+            assert.ok(!urlProperty, `read coordinator descriptor requires an unambiguous url: ${relative(root, path)}`)
+            urlProperty = property
+          }
+          if (name === 'method') {
+            assert.ok(!methodSeen && ts.isStringLiteralLike(property.initializer) &&
+              property.initializer.text === 'GET',
+            `read coordinator descriptor method must be an unambiguous GET: ${relative(root, path)}`)
+            methodSeen = true
+          }
+        }
         const pathPattern = urlProperty ? staticUiPath(urlProperty.initializer) : undefined
         assert.ok(pathPattern, `read coordinator descriptor without a static url: ${relative(root, path)}`)
-        if (pathPattern.startsWith('/v1/')) {
-          const line = file.getLineAndCharacterOfPosition(node.getStart()).line + 1
-          actions.push({
-            id: `${relative(root, path).replaceAll('\\', '/')}:${line}`,
-            method: 'GET',
-            path: pathPattern.split('?', 1)[0],
-          })
-        }
+        assert.ok(pathPattern.startsWith('/v1/'),
+          `read coordinator descriptor must target a static /v1 url: ${relative(root, path)}`)
+        const line = file.getLineAndCharacterOfPosition(node.getStart()).line + 1
+        actions.push({
+          id: `${relative(root, path).replaceAll('\\', '/')}:${line}`,
+          method: 'GET',
+          path: pathPattern.split('?', 1)[0],
+        })
         ts.forEachChild(node, visit)
         return
       }

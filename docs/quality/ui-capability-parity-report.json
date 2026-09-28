@@ -1,9 +1,9 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 168,
-    "capabilities": 150,
-    "endpoints": 150,
+    "uiActions": 171,
+    "capabilities": 152,
+    "endpoints": 152,
     "registeredCapabilities": 374,
     "operableCapabilities": 374,
     "publicContractCapabilities": 374,
@@ -2584,6 +2584,45 @@
       ]
     },
     {
+      "uiAction": "src/components/SyntheticPhaseGatePanel.tsx:196",
+      "capabilityId": "apollo.projects.synthetic-phase-gates.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-phase-gates",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listSyntheticPhaseGatesService",
+        "requireScope",
+        "runSyntheticPhaseGateService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPhaseGatePanel.tsx:202",
+      "capabilityId": "apollo.capabilities.list",
+      "capabilityVersion": "3.0.0",
+      "endpoint": "GET /v1/capabilities",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "uiAction": "src/components/SyntheticPhaseGatePanel.tsx:298",
       "capabilityId": "apollo.projects.synthetic-phase-gates.run",
       "capabilityVersion": "1.0.0",
@@ -2752,6 +2791,25 @@
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/TransformationCriticReportViewer.tsx:100",
+      "capabilityId": "apollo.projects.transformation-critic-reports.get",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/transformation-critic-reports/{reportId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readTransformationCriticReportService"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",

@@ -389,3 +389,59 @@ provider services before the three `F3-GATE-001` checks can pass.
 Adapter names, controlled receipts and controlled PostgreSQL evidence do not
 prove provider-live acceptance. Merge, deployment, owner acceptance and TODO
 closure also remain open; no F3.019 acceptance is claimed here.
+
+## Wave 28 — correção local da omissão de paridade
+
+Em 2026-09-26, W28 reparou a omissão histórica do scanner descrita no trecho
+W27 acima, sem reescrever seu escopo ou suas evidências: `reads.read` e
+`props.reads.read` agora entram no gate fail-closed `/v1`. Os dois GETs do
+painel e o GET do viewer aparecem uma vez cada no inventário regenerado. O
+viewer monta a URL codificada dos IDs; o address builder existente continua
+a condicionar permissão e "Abrir JSON". Testes locais de AST, URL e binding não
+são prova provider-live nem produção. Ver
+`docs/PACOTE-WAVE28-PARIDADE-LEITURAS-UI.md`.
+
+A revisão independente do scanner W28 encontrou bypass por spread após `url`:
+o scanner anterior contava a primeira URL literal, mesmo se a efetiva fosse
+substituída. A correção local recusa spreads, chaves computadas, accessors,
+duplicações de `url`/`method` e metadata de método diferente de `GET`. Regressão
+RED→GREEN, 90/90 testes scoped sem skips, paridade, contratos públicos,
+arquitetura, ESLint, typecheck e whitespace passaram nos logs
+`apollo-sprint28-fix-*.log` fora do repositório. Esse era o checkpoint anterior;
+a recusa inicial de Luna permanece histórica, não o parecer final. Alias/dataflow
+não integra este scanner.
+
+Na versão final dos cinco arquivos de código/teste, sem alterações posteriores,
+Astra repetiu a suíte completa com unset local de conversão MSYS: 2.549/2.549,
+zero falhas, skips ou cancelamentos (`apollo-sprint28-resume-tests.log`). As oito
+falhas iniciais de fake Docker foram resolvidas pelo ambiente do comando, sem
+alterar ou pular testes (14/14 direcionados também passaram). `npm run lint` e
+`npm run lint:code` passaram; o typecheck encadeado excedeu 180 s, Astra verificou
+que seus processos órfãos haviam terminado e o retry isolado passou com limite
+de 600 s (`apollo-sprint28-resume-typecheck.log`). Paridade, contratos públicos
+e `git diff --check` passaram; `api:v1:validate` manteve o baseline de 374
+capabilities, 654 schemas, 720 examples e 305 paths. O relatório permaneceu em
+171 ações, 152 capabilities/endpoints, 374 registradas, zero unbound e zero
+rotas sem Application service. O build local final saiu com código 0,
+com URL de banco explicitamente sobrescrita para um endereço local não atendido
+(`apollo-sprint28-resume-build.log`),
+sem provar conexão com Postgres. Luna aprovou a revisão independente final,
+sem achados bloqueantes (`apollo-sprint28-luna-final-review.jsonl`).
+
+O browser local controlado passou seis casos Viewer/EditorReads, incluindo
+codificação de IDs, GET único sem POST, reabertura, divergências de projeto e
+hash, resposta tardia e retry explícito após 403 (`apollo-sprint28-resume-browser.log`,
+`apollo-sprint28-browser-summary.json`). Usou fixture de schema example e router
+mock estável em loopback, não API autenticada/Postgres; a primeira versão do
+mock repetia GETs e foi corrigida sem relaxar a asserção. Três screenshots de
+estados controlados foram inspecionadas (`apollo-sprint28-browser-{open,identity-error,403-error}.png`);
+isso não é aceite visual de produção. Browser e servidor foram fechados,
+listener retornou `ECONNREFUSED` e nenhum Chrome Playwright permaneceu. Logs e
+capturas ficam em `C:/Users/leand/AppData/Local/hermes/cache/scratch/`.
+
+Implementação conectada somente na árvore local, revisão independente e
+validação local limitada passaram. A jornada/render W24, E2E autenticado,
+provider-live e MP4 final não foram repetidos por W28; commit, CI da versão
+final, deploy e aceite do proprietário permanecem abertos. Nenhuma caixa do
+TODO mudou (380/1.259); não houve chamadas ao runtime/provedor Apollo ao vivo
+nem à produção nesta validação, sem alegar ausência de custos de agentes LLM.

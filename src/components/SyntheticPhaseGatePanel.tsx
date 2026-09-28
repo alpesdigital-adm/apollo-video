@@ -518,7 +518,6 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
         ))}
         {openReport !== null && criticReportHref !== null ? (
           <TransformationCriticReportViewer
-            href={criticReportHref}
             key={`${props.projectId}\u0000${openReport.gateId}\u0000${openReport.referenceId}\u0000${openReport.referenceHash}`}
             onClose={closeCriticReport}
             onPhaseChange={setCriticViewerPhase}
