@@ -1,0 +1,9 @@
+{
+  "run_id": "replace-me",
+  "owner_id": "replace-me",
+  "root": "/opt/apollo-validation/replace-me",
+  "expected_droplet_id": 0,
+  "expected_commit": "0000000000000000000000000000000000000000",
+  "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "duration_seconds": 10800
+}

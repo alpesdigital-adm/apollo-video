@@ -2,6 +2,8 @@
 
 Companion of ADR-159 and of the section "Infraestrutura DigitalOcean e operação segura" of `AGENTS.md`. This document specifies the executable mechanisms of Wave 23. It does not claim that any of them is deployed: the fifth state (implantado e aceito) remains false until the owner says otherwise.
 
+Para a sequência operacional de validação descartável isolada na DigitalOcean, consultar `docs/runbooks/DIGITALOCEAN-DISPOSABLE-VALIDATION.md`. Ela não amplia o escopo deste mecanismo de produção, não altera seus limites ou gates e não serve como evidência de execução remota ou aceite.
+
 Hosting amendment, 2026-09-19: DigitalOcean is the only remote hosting provider for Apollo, including production. The former Hostinger host is forbidden. Local development and isolated CI remain supported. The deploy and backup entrypoints reject the former host's known hostname/IP before Docker, PostgreSQL, locks or filesystem mutations. The production profile is now `digitalocean-production`, with no alias for `shared-production`, and requires `APOLLO_HOSTING_PROVIDER=digitalocean`. Production refuses an explicit remote Docker endpoint and exports the default local context/socket so child processes cannot inherit a remote context saved by `docker context use`. This declaration and the local denylist are guards against accidental reuse, not cloud identity attestation: the actual droplet must be independently confirmed before any deployment. The required `APOLLO_DOCKER_NETWORK` replaces the old implicit network. No VPS, DNS, database or remote service was migrated by this amendment.
 
 ## 1. Operational state directory

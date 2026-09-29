@@ -108,6 +108,19 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Require Python 3.12 or newer for disposable operations tests
+        run: |
+          if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
+            printf 'Python 3.12+ is required for disposable operations tests.\n' >&2
+            exit 1
+          fi
+
+      - name: Run disposable operations suite on the Linux runner
+        run: npm run test:ops:disposable:linux
+        env:
+          PYTHON: python3
+          TMPDIR: ${{ runner.temp }}
+
       - name: Install locked renderer dependencies
         run: npm ci --prefix remotion
 
