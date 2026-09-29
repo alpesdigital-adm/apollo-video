@@ -17,5 +17,5 @@
     "runtimeImage": "alpine:3.21.3@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c",
     "awsSdkS3": "3.1100.0"
   },
-  "clients": { "aiSdk": "7.0.30", "mcpSdk": "1.29.0", "typescript": "5.9.3", "uuid": "11.1.1", "postcss": "8.5.25", "fastUri": "3.1.7", "hono": "4.13.7", "ipAddress": "10.3.1", "sharp": "0.35.4", "jsYaml": "4.3.2" }
+  "clients": { "aiSdk": "7.0.30", "mcpSdk": "1.29.0", "typescript": "5.9.3", "uuid": "11.1.1", "postcss": "8.5.25", "fastUri": "3.1.7", "hono": "4.13.7", "ipAddress": "10.5.1", "sharp": "0.35.4", "jsYaml": "4.3.2" }
 }
