@@ -5,6 +5,7 @@ No Hermes dependency. --check has no credential import/network. --execute requir
 private local token loader and is intentionally irreversible after a POST intent.
 """
 import argparse
+import errno
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -269,6 +270,13 @@ def journal(run_dir, status, **fields):
     with os.fdopen(fd, 'ab') as file:
         file.write(data); file.flush(); os.fsync(file.fileno())
 
+def safe_journal(run_dir, status, **fields):
+    """Diagnostics are best effort and cannot replace a transport failure."""
+    try:
+        journal(run_dir, status, **fields)
+    except Exception:
+        pass
+
 
 def host_key(run_dir):
     """Unique per-run ED25519 host key, pinned client-side; never a token."""
@@ -423,8 +431,8 @@ def open_pinned_ssh(ip, host_path, login_key):
 def remote_write(sftp, path, source):
     try:
         sftp.lstat(path)
-    except IOError:
-        pass
+    except OSError as exc:
+        if exc.errno != errno.ENOENT: raise
     else:
         raise Blocked('remote_path_exists')
     with sftp.open(path, 'wx') as output:
@@ -436,6 +444,80 @@ def remote_write(sftp, path, source):
                     output.write(chunk)
         output.flush()
     sftp.chmod(path, 0o600)
+
+def transfer_source(sftp, archive, root, expected_sha, run_dir, pump, deadline):
+    """Bounded checkpoints on the original SFTP/guard transport, never a new owner."""
+    started = time.monotonic()
+    deadline = min(deadline, started + 1200)
+    last_progress = started
+    written = read = 0
+    phase = 'upload'; operation = 'upload_open'
+    safe_journal(run_dir, 'transfer_started', phase=phase, operation=operation,
+                 duration_seconds=0, bytes_written=0, bytes_read=0)
+
+    def checkpoint():
+        nonlocal last_progress
+        pump()
+        now = time.monotonic()
+        if now >= deadline: raise Blocked('guard_deadline_unknown')
+        if now - last_progress >= 10:
+            safe_journal(run_dir, 'transfer_progress', phase=phase, operation=operation,
+                         duration_seconds=max(0, now - started), bytes_written=written, bytes_read=read)
+            last_progress = now
+
+    try:
+        checkpoint()
+        uploaded = root + '/source.tar'
+        try: sftp.lstat(uploaded)
+        except OSError as exc:
+            if exc.errno != errno.ENOENT: raise
+        else: raise Blocked('remote_path_exists')
+        with sftp.open(uploaded, 'wx') as output, archive.open('rb') as local:
+            operation = 'upload_write'
+            while True:
+                checkpoint()
+                block = local.read(32768)
+                if not block: break
+                output.write(block)
+                written += len(block)
+                checkpoint()
+            operation = 'upload_flush'
+            output.flush()
+        operation = 'upload_chmod'
+        sftp.chmod(uploaded, 0o600)
+        operation = 'upload_stat'
+        checkpoint()
+        info = sftp.lstat(uploaded)
+        if not stat.S_ISREG(info.st_mode) or info.st_size != archive.stat().st_size:
+            raise Blocked('upload_byte_count')
+        phase = 'readback'; operation = 'readback_open'
+        safe_journal(run_dir, 'transfer_phase', phase=phase, operation=operation,
+                     duration_seconds=max(0, time.monotonic() - started), bytes_written=written, bytes_read=read)
+        digest = hashlib.sha256()
+        with sftp.open(uploaded, 'rb') as remote:
+            operation = 'readback_read'
+            while True:
+                checkpoint()
+                block = remote.read(32768)
+                if not block: break
+                read += len(block)
+                if read > info.st_size: raise Blocked('upload_byte_count')
+                digest.update(block)
+                checkpoint()
+        if read != info.st_size or digest.hexdigest() != expected_sha:
+            raise Blocked('upload_readback_digest')
+        phase = 'marker'; operation = 'marker_write'
+        checkpoint()
+        remote_write(sftp, root + '/upload.complete', (expected_sha + '\n').encode())
+        safe_journal(run_dir, 'transfer_finished', phase=phase, operation=operation,
+                     duration_seconds=max(0, time.monotonic() - started), bytes_written=written, bytes_read=read)
+        return expected_sha
+    except BaseException as exc:
+        safe_journal(run_dir, 'transfer_failed', phase=phase, operation=operation,
+                     callsite='transfer_source', error_type=type(exc).__name__,
+                     duration_seconds=max(0, time.monotonic() - started),
+                     bytes_written=written, bytes_read=read)
+        raise
 
 
 def read_sftp(sftp, path, max_bytes):
@@ -493,8 +575,33 @@ def guard_session(ssh, sftp, c, droplet, archive, run_dir):
     channel = transport.open_session(timeout=10)
     channel.settimeout(10)
     channel.exec_command('python3 ' + tools_dir + '/remote_guard.py ' + tools_dir + '/config.json')
-    upload = False; receipt = None; lines = b''; owner = None; seen_result = False
+    upload = False; lines = b''; owner = None; seen_result = False
     end = min(stamp(droplet['created_at']) + 10800 + 120, time.time() + guard_c['duration_seconds'] + 150)
+    deadline = time.monotonic() + max(0, end - time.time())
+
+    def pump_transfer():
+        nonlocal lines
+        if time.time() >= end or time.monotonic() >= deadline:
+            raise Blocked('guard_deadline_unknown')
+        if not transport.is_active(): raise Blocked('ssh_transport_lost')
+        # Both channels belong to the one transport. Never persist raw stderr/stdout.
+        for _ in range(4):
+            if not channel.recv_stderr_ready(): break
+            channel.recv_stderr(65536)
+        for _ in range(4):
+            if not channel.recv_ready(): break
+            lines += channel.recv(65536)
+            if len(lines) > 262144: raise Blocked('guard_line_limit')
+        while b'\n' in lines:
+            raw, lines = lines.split(b'\n', 1)
+            try: event = json.loads(raw)
+            except (ValueError, UnicodeDecodeError): raise Blocked('guard_event') from None
+            if type(event) is not dict: raise Blocked('guard_event')
+            if event.get('event') in ('result', 'upload_ready'):
+                raise Blocked('guard_result_during_upload')
+        if lines: raise Blocked('guard_event_incomplete_during_upload')
+        if channel.exit_status_ready(): raise Blocked('guard_exit_during_upload')
+
     while time.time() < end:
         if not transport.is_active(): raise Blocked('ssh_transport_lost')
         if owner is None:
@@ -511,18 +618,8 @@ def guard_session(ssh, sftp, c, droplet, archive, run_dir):
                 if event.get('event') == 'upload_ready':
                     if upload or owner is None or event.get('run_id') != c['run_id'] or event.get('root') != root:
                         raise Blocked('upload_identity')
-                    uploaded = root + '/source.tar'
-                    remote_write(sftp, uploaded, archive)
-                    info = sftp.lstat(uploaded)
-                    if not stat.S_ISREG(info.st_mode) or info.st_size != archive.stat().st_size:
-                        raise Blocked('upload_byte_count')
-                    digest = hashlib.sha256()
-                    with sftp.open(uploaded, 'rb') as remote:
-                        for block in iter(lambda: remote.read(1024 * 1024), b''):
-                            digest.update(block)
-                    receipt = digest.hexdigest()
-                    if receipt != c['source_sha256']: raise Blocked('upload_readback_digest')
-                    remote_write(sftp, root + '/upload.complete', (receipt + '\n').encode())
+                    transfer_source(sftp, archive, root, c['source_sha256'], run_dir,
+                                    pump_transfer, deadline)
                     upload = True
                 elif event.get('event') == 'result':
                     seen_result = True
@@ -827,10 +924,12 @@ def execute(c, loader):
         atomic_record(run_dir / 'start.json', state)
         api = None; ssh = None; sftp = None
         journal(run_dir, 'started', controller_pid=os.getpid())
+        phase = 'loader'; started_at = time.monotonic()
         try:
             token = loader.load_token()
             api = OfficialAPI(token)
             del token
+            phase = 'preflight'
             registered, rate = preflight(api, c)
             state['hourly_usd'] = rate
             journal(run_dir, 'inventory_verified', hourly_usd=rate)
@@ -839,11 +938,13 @@ def execute(c, loader):
             cloud = cloud_init(host_private, host_public)
             del host_private
             name = NAME_PREFIX + c['run_id']
+            phase = 'tag_create'
             tag = create_once(api, run_dir, c['run_id'], 'tag', '/v2/tags', {'name': name})
             tag_read = required_get(api, '/v2/tags/' + name, 'tag')
             if tag.get('name') != name or tag_read.get('name') != name:
                 raise Blocked('tag_readback')
             journal(run_dir, 'tag_verified', name=name)
+            phase = 'firewall_create'
             firewall = create_once(api, run_dir, c['run_id'], 'firewall', '/v2/firewalls', {
                 'name': name, 'tags': [name], 'droplet_ids': [],
                 'inbound_rules': [{'protocol': 'tcp', 'ports': '22',
@@ -860,6 +961,7 @@ def execute(c, loader):
                    'firewall_name': name, 'tag': name, 'droplet_id': -1}):
                 raise Blocked('firewall_readback')
             journal(run_dir, 'firewall_verified', firewall_id=firewall_id)
+            phase = 'droplet_create'
             response = create_once(api, run_dir, c['run_id'], 'droplet', '/v2/droplets', {
                 'name': name, 'region': c['region'], 'size': c['size'], 'image': 'ubuntu-24-04-x64',
                 'ssh_keys': [c['ssh_key_id']], 'backups': False, 'ipv6': False,
@@ -869,21 +971,25 @@ def execute(c, loader):
             droplet_id = response.get('id')
             if type(droplet_id) is not int or droplet_id <= 0:
                 raise Blocked('droplet_identity_unknown')
+            phase = 'droplet_readback'
             droplet, ip = fresh_droplet(api, droplet_id, c, name, response)
             journal(run_dir, 'droplet_verified', droplet_id=droplet_id,
                     created_at=droplet['created_at'])
             if time.time() >= stamp(droplet['created_at']) + 10800 - 2700:
                 raise Blocked('cleanup_reserve_elapsed')
             remaining_guard_seconds(stamp(droplet['created_at']))
+            phase = 'setup_ssh'
             ssh_ready(ip, time.monotonic() + 600)
             ssh = open_pinned_ssh(ip, host_path, login_key)
             sftp = ssh.open_sftp()
             sftp.get_channel().settimeout(10)
             journal(run_dir, 'ssh_pinned', droplet_id=droplet_id)
+            phase = 'guard'
             owner, exit_code, uploaded = guard_session(ssh, sftp, c, droplet,
                                                        Path(c['source_bundle']), run_dir)
             journal(run_dir, 'guard_exited', guard_exit=exit_code,
                     owner_pid=owner['pid'], owner_deadline_utc=owner['deadlineUTC'])
+            phase = 'collect_and_cleanup'
             record, result, acceptance = finish_and_delete(c, run_dir, api, ssh, sftp, owner,
                                                exit_code, droplet, firewall, held)
             sftp = None; ssh = None
@@ -895,8 +1001,10 @@ def execute(c, loader):
             journal(run_dir, result, work_outcome=state['work_outcome'], acceptance=acceptance['status'])
             return state
         except BaseException as exc:
-            journal(run_dir, 'needs_owner_intervention', error_type=type(exc).__name__,
-                    **({'readback_check': str(exc)} if isinstance(exc, DropletReadbackBlocked) else {}))
+            safe_journal(run_dir, 'needs_owner_intervention', phase=phase, callsite='execute',
+                         duration_seconds=max(0, time.monotonic() - started_at),
+                         error_type=type(exc).__name__,
+                         **({'readback_check': str(exc)} if isinstance(exc, DropletReadbackBlocked) else {}))
             raise
         finally:
             if sftp is not None: sftp.close()

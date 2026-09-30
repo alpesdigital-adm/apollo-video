@@ -1,6 +1,7 @@
 """Offline, no credential or provider access. Fakes exercise the real controller/watchdog contracts."""
 import importlib.util
 import hashlib
+import errno
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 import unittest
 from unittest.mock import patch
@@ -152,6 +154,9 @@ class ControllerTest(unittest.TestCase):
              patch.object(controller, 'host_key', return_value=(self.root / 'host', 'fixture', 'fixture')), \
              patch.object(controller, 'cloud_init', return_value='#cloud-config\n'):
             with self.assertRaises(StopAfterPost): controller.execute(c, Loader())
+        failed = [json.loads(line) for line in (self.root / c['run_id'] / 'controller.jsonl').read_text().splitlines()][-1]
+        self.assertEqual((failed['status'], failed['phase'], failed['callsite'], failed['error_type']),
+                         ('needs_owner_intervention', 'droplet_create', 'execute', 'StopAfterPost'))
         posts = [(path, payload) for method, path, payload in api.calls if method == 'POST']
         self.assertEqual([path for path, _ in posts], ['/v2/tags', '/v2/firewalls', '/v2/droplets'])
         self.assertEqual(posts[-1][1]['region'], c['region'])
@@ -906,6 +911,164 @@ class ControllerTest(unittest.TestCase):
         self.assertGreater(valid, 10000)
         self.assertLess(valid, 10800)
 
+    def test_transfer_failure_records_safe_phase_and_preserves_primary_error(self):
+        class SFTP:
+            def lstat(self, path): raise FileNotFoundError(errno.ENOENT, 'absent')
+            def open(self, path, mode): raise TimeoutError('private-path argv authorization=secret')
+        run_dir = self.root / 'failure'; run_dir.mkdir()
+        with self.assertRaises(TimeoutError):
+            controller.transfer_source(SFTP(), self.bundle, '/remote', self.config['source_sha256'],
+                                       run_dir, lambda: None, time.monotonic() + 10)
+        rows = [json.loads(line) for line in (run_dir / 'controller.jsonl').read_text().splitlines()]
+        self.assertEqual([r['status'] for r in rows], ['transfer_started', 'transfer_failed'])
+        self.assertEqual(rows[-1]['error_type'], 'TimeoutError')
+        self.assertEqual(rows[-1]['operation'], 'upload_open')
+        self.assertEqual(rows[-1]['phase'], 'upload')
+        self.assertEqual(rows[-1]['callsite'], 'transfer_source')
+        self.assertGreaterEqual(rows[-1]['duration_seconds'], 0)
+        self.assertTrue(rows[-1]['at_utc'].endswith('Z'))
+        self.assertNotIn('secret', (run_dir / 'controller.jsonl').read_text())
+
+    def test_remote_lstat_only_enoent_allows_open(self):
+        class SFTP:
+            def __init__(self, error): self.error = error; self.opens = []
+            def lstat(self, path): raise self.error
+            def open(self, path, mode):
+                self.opens.append((path, mode))
+                raise AssertionError('open forbidden after failed stat')
+        for error in (TimeoutError('private argv secret'), PermissionError(errno.EACCES, 'private path')):
+            for operation in ('tool', 'source'):
+                with self.subTest(error=type(error).__name__, operation=operation):
+                    sftp = SFTP(error)
+                    run_dir = self.root / ('stat-' + str(len(list(self.root.glob('stat-*')))))
+                    run_dir.mkdir()
+                    with self.assertRaises(type(error)):
+                        if operation == 'tool':
+                            controller.remote_write(sftp, '/remote/tool', b'fixture')
+                        else:
+                            controller.transfer_source(sftp, self.bundle, '/remote', self.config['source_sha256'],
+                                                       run_dir, lambda: None, time.monotonic() + 10)
+                    self.assertFalse(sftp.opens)
+                    if operation == 'source':
+                        row = json.loads((run_dir / 'controller.jsonl').read_text().splitlines()[-1])
+                        self.assertEqual((row['phase'], row['operation'], row['error_type']),
+                                         ('upload', 'upload_open', type(error).__name__))
+
+    def test_transfer_upload_budget_is_not_extended_by_guard_deadline(self):
+        clock = [0.0]
+        class SFTP:
+            def __init__(self): self.bytes = b''; self.marker_attempted = False
+            def lstat(self, path):
+                if path.endswith('upload.complete') or not self.bytes:
+                    raise FileNotFoundError(errno.ENOENT, 'missing')
+                return type('Info', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(self.bytes)})()
+            def open(self, path, mode):
+                if path.endswith('upload.complete'):
+                    self.marker_attempted = True
+                    raise AssertionError('marker after expired upload budget')
+                if mode == 'rb': return io.BytesIO(self.bytes)
+                parent = self
+                class Output(io.BytesIO):
+                    def write(inner, data):
+                        parent.bytes += data
+                        return len(data)
+                return Output()
+            def chmod(self, path, mode): pass
+        sftp = SFTP(); run_dir = self.root / 'upload-budget'; run_dir.mkdir()
+        def pump():
+            if sftp.bytes: clock[0] = 1200.01
+        with patch.object(controller.time, 'monotonic', side_effect=lambda: clock[0]):
+            with self.assertRaisesRegex(controller.Blocked, 'guard_deadline_unknown'):
+                controller.transfer_source(sftp, self.bundle, '/remote', self.config['source_sha256'],
+                                           run_dir, pump, 3600)
+        self.assertFalse(sftp.marker_attempted)
+        self.assertEqual(json.loads((run_dir / 'controller.jsonl').read_text().splitlines()[-1])['status'],
+                         'transfer_failed')
+
+    def test_transfer_checks_between_sftp_packet_sized_calls(self):
+        archive = self.root / 'chunks.tar'; archive.write_bytes(b'A' * (2 * 1024 * 1024 + 7))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        class SFTP:
+            def __init__(self): self.files = {}; self.writes = []; self.reads = []
+            def lstat(self, path):
+                if path not in self.files: raise FileNotFoundError(errno.ENOENT, 'missing')
+                return type('Info', (), {'st_mode': stat.S_IFREG | 0o600,
+                                         'st_size': len(self.files[path])})()
+            def open(self, path, mode):
+                if mode == 'rb':
+                    parent = self
+                    class Input(io.BytesIO):
+                        def read(inner, count=None):
+                            parent.reads.append(-1 if count is None else count)
+                            return super().read(-1 if count is None else count)
+                    return Input(self.files[path])
+                parent = self
+                class Output(io.BytesIO):
+                    def write(inner, data):
+                        parent.writes.append(len(data))
+                        return super().write(data)
+                    def close(inner):
+                        parent.files[path] = inner.getvalue()
+                        super().close()
+                return Output()
+            def chmod(self, path, mode): pass
+        sftp = SFTP(); run_dir = self.root / 'packet-size'; run_dir.mkdir()
+        self.assertEqual(controller.transfer_source(sftp, archive, '/remote', digest, run_dir,
+                                                    lambda: None, time.monotonic() + 30), digest)
+        self.assertEqual(sftp.files['/remote/source.tar'], archive.read_bytes())
+        self.assertEqual(sftp.files['/remote/upload.complete'], (digest + '\n').encode())
+        self.assertTrue(sftp.writes and sftp.reads)
+        self.assertLessEqual(max(sftp.writes), 32768)
+        self.assertLessEqual(max(sftp.reads), 32768)
+
+    def test_execute_failure_journal_cannot_mask_primary_error(self):
+        class Loader:
+            def load_token(self): return 'fake-only'
+        original = controller.journal
+        def failing_final(run_dir, status, **fields):
+            if status == 'needs_owner_intervention': raise OSError('journal-private-path')
+            return original(run_dir, status, **fields)
+        with patch.object(controller, 'check_artifacts', return_value=1), \
+             patch.object(controller, 'OfficialAPI', return_value=object()), \
+             patch.object(controller, 'preflight', side_effect=TimeoutError('argv secret')), \
+             patch.object(controller, 'journal', side_effect=failing_final):
+            with self.assertRaisesRegex(TimeoutError, 'argv secret'):
+                controller.execute(self.config, Loader())
+        self.assertFalse((self.root / self.config['run_id'] / 'result.json').exists())
+
+    def test_transfer_deadline_and_result_block_marker_between_chunks(self):
+        class Output(io.BytesIO):
+            def __exit__(self, *args): pass
+        class SFTP:
+            def __init__(self): self.files = {}; self.writes = []
+            def lstat(self, path):
+                if path not in self.files: raise FileNotFoundError(errno.ENOENT, 'missing')
+                return type('Info', (), {'st_mode': stat.S_IFREG | 0o600,
+                                         'st_size': len(self.files[path])})()
+            def open(self, path, mode):
+                self.writes.append(path)
+                if path.endswith('/upload.complete'): raise AssertionError('marker sent')
+                class Sink(Output):
+                    def write(inner, data):
+                        self.files[path] = self.files.get(path, b'') + data
+                        return len(data)
+                return Sink()
+            def chmod(self, path, mode): pass
+        archive = self.root / 'large.tar'; archive.write_bytes(b'x' * (2 * 1024 * 1024))
+        for error in (controller.Blocked('guard_result_during_upload'), controller.Blocked('guard_deadline_unknown')):
+            with self.subTest(error=str(error)):
+                sftp = SFTP(); run_dir = self.root / ('case-' + str(len(list(self.root.glob('case-*')))))
+                run_dir.mkdir()
+                calls = [0]
+                def pump():
+                    calls[0] += 1
+                    if calls[0] == 2: raise error
+                with self.assertRaises(controller.Blocked):
+                    controller.transfer_source(sftp, archive, '/remote', hashlib.sha256(archive.read_bytes()).hexdigest(),
+                                               run_dir, pump, time.monotonic() + 10)
+                self.assertGreaterEqual(calls[0], 2)
+                self.assertFalse(any(p.endswith('upload.complete') for p in sftp.writes))
+
     def test_guard_stderr_only_and_simultaneous_stdout_keep_result(self):
         class Channel:
             def __init__(self, stdout):
@@ -913,6 +1076,8 @@ class ControllerTest(unittest.TestCase):
                 self.stderr = b'diagnostic\n'
                 self.stdout_reads = 0
                 self.stderr_reads = 0
+                self.hold_open = False
+                self.sftp_files = {}
             def settimeout(self, value): pass
             def exec_command(self, command): pass
             def recv_ready(self): return bool(self.stdout)
@@ -926,7 +1091,9 @@ class ControllerTest(unittest.TestCase):
                 self.stderr_reads += 1
                 data, self.stderr = self.stderr, b''
                 return data
-            def exit_status_ready(self): return not self.stderr
+            def exit_status_ready(self):
+                return not self.stderr and (not self.hold_open or
+                    any(path.endswith('upload.complete') for path in getattr(self, 'sftp_files', {})))
             def recv_exit_status(self): return 0
         class Transport:
             def __init__(self, channel): self.channel = channel
@@ -939,15 +1106,26 @@ class ControllerTest(unittest.TestCase):
             def __init__(self): self.files = {}
             def mkdir(self, path, mode): pass
             def lstat(self, path):
+                if path not in self.files: raise FileNotFoundError(errno.ENOENT, 'not found')
                 content = self.files[path]
                 return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
-            def open(self, path, mode): return io.BytesIO(self.files[path])
-        for simultaneous in (False, True):
+            def open(self, path, mode):
+                if mode == 'wx':
+                    files = self.files
+                    class Output(io.BytesIO):
+                        def close(inner):
+                            files[path] = inner.getvalue()
+                            super().close()
+                    return Output()
+                return io.BytesIO(self.files[path])
+            def chmod(self, path, mode): pass
+        for simultaneous in (False, True, 'partial'):
             with self.subTest(simultaneous=simultaneous):
                 events = (json.dumps({'event': 'upload_ready', 'run_id': self.config['run_id'],
                     'root': '/opt/apollo-validation/' + str(self.config['run_id'])}).encode() + b'\n'
-                    if simultaneous else b'') + b'{"event":"result"}\n'
+                    if simultaneous else b'') + (b'{"event":"result"' if simultaneous == 'partial' else b'{"event":"result"}\n')
                 channel = Channel(events if simultaneous else b'')
+                channel.hold_open = simultaneous == 'partial'
                 if not simultaneous:
                     original = channel.recv_stderr
                     def stderr_then_result(count):
@@ -959,16 +1137,25 @@ class ControllerTest(unittest.TestCase):
                 c = {**self.config, 'tool_sha256': tool_digests}
                 owner = {'pid': 123, 'deadlineUTC': '2030-01-01T00:00:00Z'}
                 sftp = SFTP()
+                channel.sftp_files = sftp.files
                 def write(sftp, path, source):
                     sftp.files[path] = source.read_bytes() if isinstance(source, Path) else source
                 with patch.object(controller, 'remote_write', side_effect=write), patch.object(controller, 'read_sftp',
                     side_effect=lambda sftp, path, limit: (controller.BOOTSTRAP / path.split('/')[-1]).read_bytes()), \
                     patch.object(controller, 'owner_record', return_value=owner), \
                     patch.object(controller, 'remaining_guard_seconds', return_value=600):
-                    observed, exit_code, uploaded = controller.guard_session(SSH(channel), sftp, c,
-                        {'id': 12345, 'created_at': '2030-01-01T00:00:00Z'}, self.bundle, self.root)
-                self.assertEqual((observed, exit_code, uploaded), (owner, 0, simultaneous))
-                self.assertEqual((channel.stdout_reads, channel.stderr_reads), (1, 1))
+                    if simultaneous:
+                        expected = 'guard_event_incomplete_during_upload' if simultaneous == 'partial' else 'guard_result_during_upload'
+                        with self.assertRaisesRegex(controller.Blocked, expected):
+                            controller.guard_session(SSH(channel), sftp, c,
+                                {'id': 12345, 'created_at': '2030-01-01T00:00:00Z'}, self.bundle, self.root)
+                        self.assertNotIn('/opt/apollo-validation/' + c['run_id'] + '/upload.complete', sftp.files)
+                    else:
+                        observed, exit_code, uploaded = controller.guard_session(SSH(channel), sftp, c,
+                            {'id': 12345, 'created_at': '2030-01-01T00:00:00Z'}, self.bundle, self.root)
+                        self.assertEqual((observed, exit_code, uploaded), (owner, 0, False))
+                self.assertGreaterEqual(channel.stdout_reads, 1)
+                self.assertEqual(channel.stderr_reads, 1)
 
 
 if __name__ == '__main__': unittest.main()
