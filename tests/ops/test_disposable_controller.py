@@ -41,6 +41,29 @@ class ControllerTest(unittest.TestCase):
                            backups=False, ipv6=False, monitoring=False, dns=None,
                            tool_sha256={name: 'a' * 64 for name in controller.TOOLS})
 
+    def monitored_evidence(self):
+        """Exercise the actual guard producer with a controlled host and 10 s clock."""
+        if hasattr(self, '_monitor_files'):
+            return self._monitor_files
+        import test_disposable_contract as contract
+        guard = contract.guard
+        remote = self.root/'monitor-host'; (remote/'evidence').mkdir(parents=True)
+        host = dict(busy=1, steal=0, iowait=0, load1=0, ncpu=8,
+                    load_ratio=0, available_kib=4*1024**2, oom_total=0)
+        clock = [0.0]
+        with patch.object(guard, 'counters', return_value=(100, 10, 0, 0)), \
+             patch.object(guard, 'host_read', side_effect=lambda prev: (prev, host.copy())), \
+             patch.object(guard, 'emit'), \
+             patch.object(guard.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(guard.time, 'sleep', side_effect=lambda seconds: clock.__setitem__(0, clock[0]+seconds)):
+            monitor = guard.Monitor(remote, self.config['run_id'])
+            monitor.window('preflight')
+            monitor.window('postflight')
+        self.assertEqual(monitor.samples, 36)
+        self._monitor_files = {name: (remote/'evidence'/name).read_bytes()
+                               for name in ('samples.jsonl', 'monitor-diagnostics.jsonl')}
+        return self._monitor_files
+
     def test_offline_check_rejects_placeholder_and_disallowed_paid_options(self):
         self.assertEqual(controller.validate_config(self.config)['run_id'], 'w27w28-01')
         for field, value in [('size', 's-2vcpu-4gb'), ('region', 'sfo3'), ('max_hours', 5),
@@ -506,6 +529,7 @@ class ControllerTest(unittest.TestCase):
         run_dir = Path(m['postflight_file']).parent
         postflight = Path(m['postflight_file']).read_bytes()
         samples = (run_dir / 'samples.jsonl').read_bytes()
+        diagnostics = self.monitored_evidence()['monitor-diagnostics.jsonl']
 
         class Transport:
             active = False
@@ -520,10 +544,12 @@ class ControllerTest(unittest.TestCase):
             closed = False
             def lstat(self, path):
                 content = (postflight if path.endswith('postflight.json') else
+                           diagnostics if path.endswith('monitor-diagnostics.jsonl') else
                            b'bad mp4' if path.endswith('.mp4') else samples)
                 return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
             def open(self, path, mode):
                 return io.BytesIO(postflight if path.endswith('postflight.json') else
+                                  diagnostics if path.endswith('monitor-diagnostics.jsonl') else
                                   b'bad mp4' if path.endswith('.mp4') else samples)
             def listdir_attr(self, path):
                 return [type('Stat', (), {'filename': 'project-a-final.mp4',
@@ -569,7 +595,7 @@ class ControllerTest(unittest.TestCase):
                                              'deadlineUTC': m['owner_deadline_utc']}, 1)
 
     def test_visual_readback_rejects_invalid_mp4_even_if_sftp_says_regular(self):
-        data = {'postflight.json': b'{}', 'samples.jsonl': b'{}\n',
+        data = {**self.monitored_evidence(), 'postflight.json': b'{}',
                 'batch-results.jsonl': b'{}\n', 'visual.mp4': b'not an MP4'}
         class SFTP:
             def lstat(self, path):
@@ -586,6 +612,110 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(acceptance['status'], 'failed')
         self.assertIn('visual_mp4_header', acceptance['errors'])
         self.assertTrue((run_dir / 'visual-inventory.json').is_file())
+
+    def test_monitor_diagnostics_collected_sanitized_before_failed_postflight_gate(self):
+        import test_watchdog as fixtures
+        fixture = fixtures.WatchdogTest(); fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        m = fixture.m
+        self.config['run_id'] = m['run_id']
+        run_dir = Path(m['postflight_file']).parent
+        post = json.loads(Path(m['postflight_file']).read_text())
+        post.update(exit_code=1, cleanup_ok=False, cleanup_outcome='unverified',
+                    work_outcome='failed', work_errors=['monitor failure'], error='monitor failure',
+                    errors=['monitor failure'])
+        sample = (run_dir/'samples.jsonl').read_bytes()
+        diagnosis = (b'{"kind":"sample","sequence":1,"stage":"continuous",'
+                     b'"monotonic_at":100.0,"duration_seconds":4.0,"outcome":"failed"}\n'
+                     b'{"kind":"probe","sequence":1,"stage":"continuous",'
+                     b'"monotonic_at":100.0,"duration_seconds":4.0,"outcome":"timeout",'
+                     b'"probe":"docker.top.runner","timeout_seconds":4,"terminated":true,"return_code":-15,"url":"do-not-copy"}\n')
+        payload = {'postflight.json': json.dumps(post).encode(), 'samples.jsonl': sample,
+                   'monitor-diagnostics.jsonl': diagnosis, 'batch-results.jsonl': b'{}\n'}
+        class SFTP:
+            def lstat(self, path):
+                data = payload[path.split('/')[-1]]
+                return SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_size=len(data))
+            def open(self, path, mode): return io.BytesIO(payload[path.split('/')[-1]])
+            def listdir_attr(self, path): return []
+        from types import SimpleNamespace
+        record, acceptance = controller.collect_evidence(SFTP(), self.config, self.root)
+        self.assertEqual(record['work_outcome'], 'failed')
+        self.assertEqual(acceptance['status'], 'failed')
+        trace = self.root/'monitor-diagnostics.jsonl'
+        self.assertTrue(trace.is_file())
+        self.assertNotIn('do-not-copy', trace.read_text())
+        self.assertEqual(json.loads(trace.read_text().splitlines()[-1])['probe'], 'docker.top.runner')
+        self.assertEqual([json.loads(line) for line in (self.root/'samples.jsonl').read_text().splitlines()],
+                         [json.loads(line) for line in sample.splitlines()])
+        self.assertEqual(len(self.root.joinpath('samples.jsonl').read_text().splitlines()), 36)
+        self.assertFalse(controller.watchdog.terminal_ready({**m, 'postflight_file': str(self.root/'postflight.json')}))
+
+    def test_monitor_diagnostics_conservative_full_run_producer_to_consumer(self):
+        import test_disposable_contract as contract
+        guard = contract.guard
+        remote = self.root/'full-monitor'; (remote/'evidence').mkdir(parents=True)
+        host = dict(busy=1, steal=0, iowait=0, load1=0, ncpu=8,
+                    load_ratio=0, available_kib=4*1024**2, oom_total=0)
+        with patch.object(guard, 'counters', return_value=(100, 10, 0, 0)):
+            monitor = guard.Monitor(remote, self.config['run_id'])
+        monitor.pg = 'run-pg'; monitor.runner = 'run-runner'
+        def probe(probe_id, observer):
+            observer(probe_id, 'started', 4, 0, None, None)
+            observer(probe_id, 'completed', 4, .01, True, 0)
+        def identity(name, run, **kw):
+            probe(kw['probe_id'], kw['observer'])
+            return True, 123
+        def command(argv, **kw):
+            probe(kw['probe_id'], kw['observer'])
+            return '1|40|0|0'
+        def find_next(name, **kw):
+            probe('docker.top.runner', kw['observer'])
+            return False, None
+        reads = [0]
+        def host_read(previous):
+            reads[0] += 1
+            if reads[0] == 1301: raise guard.GateClosed('host read failed')
+            return previous, host.copy()
+        with patch.object(guard, 'host_read', side_effect=host_read), \
+             patch.object(guard, 'container_identity', side_effect=identity), \
+             patch.object(guard, 'command', side_effect=command), \
+             patch.object(monitor, 'find_next', side_effect=find_next), patch.object(guard, 'emit'):
+            for _ in range(1300): monitor.sample('continuous')
+            with self.assertRaisesRegex(guard.GateClosed, 'host read failed'):
+                monitor.sample('postflight')
+        raw = (remote/'evidence'/'monitor-diagnostics.jsonl').read_bytes()
+        self.assertEqual(len(raw.splitlines()), 13002)
+        self.assertLessEqual(len(raw), 4 * 1024 * 1024)
+        from types import SimpleNamespace
+        class SFTP:
+            def lstat(self, path):
+                return SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_size=len(raw))
+            def open(self, path, mode): return io.BytesIO(raw)
+        parsed = controller.monitor_diagnostics(
+            controller.read_sftp(SFTP(), 'monitor-diagnostics.jsonl', 4 * 1024 * 1024))
+        self.assertEqual(len(parsed.splitlines()), 13002)
+        self.assertEqual(json.loads(parsed.splitlines()[-1])['outcome'], 'failed')
+        self.assertEqual(len(controller.sanitized_samples((remote/'evidence'/'samples.jsonl').read_bytes()).splitlines()), 1300)
+
+    def test_monitor_diagnostics_missing_or_malformed_blocks_collection(self):
+        from types import SimpleNamespace
+        source = self.monitored_evidence()
+        for label, diagnosis in [('missing', None), ('truncated', source['monitor-diagnostics.jsonl'][:-1]),
+                                 ('invalid', b'{"kind":"sample","sequence":1}\n')]:
+            with self.subTest(label=label):
+                payload = {'postflight.json': b'{}', 'samples.jsonl': source['samples.jsonl']}
+                if diagnosis is not None: payload['monitor-diagnostics.jsonl'] = diagnosis
+                class SFTP:
+                    def lstat(self, path):
+                        name = path.rsplit('/', 1)[-1]
+                        if name not in payload: raise IOError('missing diagnosis')
+                        return SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_size=len(payload[name]))
+                    def open(self, path, mode): return io.BytesIO(payload[path.rsplit('/', 1)[-1]])
+                run_dir = self.root/label; run_dir.mkdir()
+                with self.assertRaises((IOError, controller.Blocked)):
+                    controller.collect_evidence(SFTP(), self.config, run_dir)
+                self.assertFalse((run_dir/'samples.jsonl').exists())
 
     def test_public_metadata_allowlist_sanitizes_nested_fields_and_retains_ids(self):
         mp4 = b'\x00\x00\x00\x0cftyp' + b'fixture'
@@ -616,7 +746,7 @@ class ControllerTest(unittest.TestCase):
             files[f'project-{project}-final-render-identity.json'] = json.dumps(identity).encode()
             files[f'project-{project}-final-render-terminal.json'] = json.dumps(terminal).encode()
         files.update({'postflight.json': b'{"work_outcome":"success"}',
-                      'samples.jsonl': b'{}\n', 'batch-results.jsonl': b'{}\n',
+                      **self.monitored_evidence(), 'batch-results.jsonl': b'{}\n',
                       'synthetic-phase-gate.png': b'\x89PNG\r\n\x1a\nfixture',
                       'project-a-final.mp4': mp4, 'project-b-final.mp4': mp4,
                       'next.log': b'sensitive', 'private.env': b'sensitive'})
@@ -628,7 +758,7 @@ class ControllerTest(unittest.TestCase):
             def listdir_attr(self, path):
                 return [type('Stat', (), {'filename': name, 'st_mode': stat.S_IFREG | 0o600,
                         'st_size': len(content)})() for name, content in files.items()
-                        if name not in ('postflight.json', 'samples.jsonl', 'batch-results.jsonl')]
+                        if name not in ('postflight.json', 'samples.jsonl', 'monitor-diagnostics.jsonl', 'batch-results.jsonl')]
         run_dir = self.root / 'metadata'
         run_dir.mkdir(mode=0o700)
         _, acceptance = controller.collect_evidence(SFTP(), self.config, run_dir)
@@ -650,7 +780,7 @@ class ControllerTest(unittest.TestCase):
 
         def fixture():
             files: dict[str, Any] = {'postflight.json': b'{"work_outcome":"success"}',
-                     'samples.jsonl': b'{}\n', 'batch-results.jsonl': b'{}\n',
+                     **self.monitored_evidence(), 'batch-results.jsonl': b'{}\n',
                      'result.json': json.dumps({'runId': self.config['run_id'],
                          'nested': [{'authorization': 'Bearer sensitive'}]}).encode(),
                      'synthetic-phase-gate.png': b'\x89PNG\r\n\x1a\nfixture',
@@ -683,7 +813,7 @@ class ControllerTest(unittest.TestCase):
                 def listdir_attr(self, path):
                     return [type('Stat', (), {'filename': name, 'st_mode': stat.S_IFREG | 0o600,
                             'st_size': len(self.content(name))})() for name in files
-                            if name not in ('postflight.json', 'samples.jsonl', 'batch-results.jsonl')]
+                            if name not in ('postflight.json', 'samples.jsonl', 'monitor-diagnostics.jsonl', 'batch-results.jsonl')]
             run_dir = self.root / label
             run_dir.mkdir()
             return controller.collect_evidence(SFTP(), self.config, run_dir)[1], run_dir
@@ -726,7 +856,7 @@ class ControllerTest(unittest.TestCase):
 
     def test_success_without_required_browser_json_fails_acceptance(self):
         files = {'postflight.json': b'{"work_outcome":"success"}',
-                 'samples.jsonl': b'{}\n', 'batch-results.jsonl': b'{}\n'}
+                 **self.monitored_evidence(), 'batch-results.jsonl': b'{}\n'}
         class SFTP:
             def lstat(self, path):
                 content = files[path.rsplit('/', 1)[-1]]

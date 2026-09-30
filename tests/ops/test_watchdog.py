@@ -123,8 +123,8 @@ class WatchdogTest(unittest.TestCase):
         m.update(droplet_name=name, firewall_name=name, tag=name)
 
     def postflight(self, **changes):
-        windows = {'preflight': {'started': 0.0, 'finished': 60.0},
-                   'postflight': {'started': 120.0, 'finished': 180.0}}
+        windows = {'preflight': {'started': 0.0, 'finished': 300.0},
+                   'postflight': {'started': 360.0, 'finished': 420.0}}
         record = {
             'run_id': self.m['run_id'], 'owner_id': self.m['owner_id'],
             'expected_droplet_id': self.m['droplet_id'],
@@ -144,7 +144,7 @@ class WatchdogTest(unittest.TestCase):
             'errors': [], 'phases': [{'phase': 'pg_start', 'exit_code': 0},
                                     {'phase': 'runner_create', 'exit_code': 0},
                                     {'phase': 'runner', 'exit_code': 0},
-                                    {'phase': 'runner_exit', 'exit_code': 0}], 'samples': 12,
+                                    {'phase': 'runner_exit', 'exit_code': 0}], 'samples': 36,
             'windows': windows,
         }
         record.update(changes)
@@ -155,8 +155,26 @@ class WatchdogTest(unittest.TestCase):
                   'load1': 0, 'ncpu': 8, 'load_ratio': 0, 'available_kib': 4194304,
                   'oom_delta': 0, 'pg': 'N/A (not started)', 'app': 'N/A (not started)', 'reason': None}
         (path.parent/'samples.jsonl').write_text(''.join(json.dumps({**sample, 'stage': stage,
-            'monotonic_at': float(tick)})+'\n' for stage, base in (('preflight', 0), ('postflight', 120))
-            for tick in range(base + 10, base + 61, 10)), encoding='utf-8')
+            'monotonic_at': float(tick)})+'\n' for stage, base, duration in
+            (('preflight', 0, 300), ('postflight', 360, 60))
+            for tick in range(base + 10, base + duration + 1, 10)), encoding='utf-8')
+
+    def test_short_preflight_window_and_six_samples_cannot_authorize_delete(self):
+        path = Path(self.m['postflight_file']).parent/'samples.jsonl'
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        short = [r for r in rows if r['stage'] == 'preflight'][:6]
+        short += [r for r in rows if r['stage'] == 'postflight']
+        short.sort(key=lambda row: row['monotonic_at'])
+        for window, samples in (({'started': 0.0, 'finished': 60.0}, rows),
+                                ({'started': 0.0, 'finished': 60.0}, short),
+                                ({'started': 0.0, 'finished': 300.0}, short)):
+            with self.subTest(window=window, samples=len(samples)):
+                self.api = FakeAPI(self.m)
+                self.postflight(samples=len(samples), windows={
+                    'preflight': window, 'postflight': {'started': 360.0, 'finished': 420.0}})
+                path.write_text(''.join(json.dumps(row)+'\n' for row in samples))
+                self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
+                self.assertEqual(self.api.calls, [])
 
     def run_it(self, mode='delete', m=None):
         return watchdog.run(self.m if m is None else m, self.api, mode=mode)
@@ -404,11 +422,11 @@ class WatchdogTest(unittest.TestCase):
         baseline = [json.loads(line) for line in path.read_text().splitlines()]
         cases = {
             'identical': lambda rows: [r.update(monotonic_at=123.0) for r in rows],
-            'backwards': lambda rows: rows[7].update(monotonic_at=rows[6]['monotonic_at'] - 1),
+            'backwards': lambda rows: rows[31].update(monotonic_at=rows[30]['monotonic_at'] - 1),
             'gap': lambda rows: rows[2].update(monotonic_at=32.0),
             'first_late': lambda rows: rows[0].update(monotonic_at=12.0),
-            'last_early': lambda rows: rows[5].update(monotonic_at=48.0),
-            'outside': lambda rows: rows[6].update(monotonic_at=119.0),
+            'last_early': lambda rows: rows[29].update(monotonic_at=288.0),
+            'outside': lambda rows: rows[30].update(monotonic_at=359.0),
             'missing': lambda rows: rows[0].pop('monotonic_at'),
             'boolean': lambda rows: rows[0].update(monotonic_at=True),
             'nonfinite': lambda rows: rows[0].update(monotonic_at=float('nan')),
@@ -421,20 +439,20 @@ class WatchdogTest(unittest.TestCase):
                 self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
                 self.assert_no_delete()
         self.postflight()
-        for bad in ({'started': 0.0, 'finished': 59.0},
-                    {'started': True, 'finished': 60.0},
-                    {'started': float('inf'), 'finished': 60.0},
-                    {'started': 0.0, 'finished': 72.0}):
+        for bad in ({'started': 0.0, 'finished': 299.0},
+                    {'started': True, 'finished': 300.0},
+                    {'started': float('inf'), 'finished': 300.0},
+                    {'started': 0.0, 'finished': 312.0}):
             with self.subTest(window=bad):
-                windows = {'preflight': bad, 'postflight': {'started': 120.0, 'finished': 180.0}}
+                windows = {'preflight': bad, 'postflight': {'started': 360.0, 'finished': 420.0}}
                 self.postflight(windows=windows)
                 self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
                 self.assert_no_delete()
-        self.postflight(windows={'preflight': {'started': 0.0, 'finished': 130.0},
-                                 'postflight': {'started': 120.0, 'finished': 180.0}})
+        self.postflight(windows={'preflight': {'started': 0.0, 'finished': 370.0},
+                                 'postflight': {'started': 360.0, 'finished': 420.0}})
         self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
         self.assert_no_delete()
-        self.postflight(windows={'preflight': {'started': 0.0, 'finished': 60.0}})
+        self.postflight(windows={'preflight': {'started': 0.0, 'finished': 300.0}})
         self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
         self.assert_no_delete()
         self.postflight()

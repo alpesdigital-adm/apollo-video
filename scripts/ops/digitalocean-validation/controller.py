@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -589,11 +590,98 @@ def sanitize_public(value):
         return [sanitize_public(item) for item in value]
     return value
 
+MONITOR_PROBES = frozenset(('docker.inspect.pg', 'docker.exec.pg_activity',
+                            'docker.inspect.runner', 'docker.top.runner',
+                            'docker.probe_exit_code.runner'))
+MONITOR_STAGES = frozenset(('preflight', 'continuous', 'pg_admission',
+                            'cleanup_between_stops', 'postflight'))
+MAX_MONITOR_EVENTS = 2000 * 12  # sequence cap * sample start/end plus five probe start/end pairs
+
+def monitor_diagnostics(raw):
+    """Allowlist only typed monitor fields; never copy a remote string or argv."""
+    if not raw or not raw.endswith(b'\n'):
+        raise Blocked('monitor_diagnostics_incomplete')
+    rows = []
+    try:
+        for line in raw.splitlines():
+            row = json.loads(line)
+            kind = row['kind']; outcome = row['outcome']
+            if (type(row) is not dict or kind not in ('sample', 'probe')
+                    or row['stage'] not in MONITOR_STAGES
+                    or type(row['sequence']) is not int or not 1 <= row['sequence'] <= 2000
+                    or outcome not in ({'started', 'completed', 'failed'} if kind == 'sample'
+                                       else {'started', 'completed', 'timeout', 'aborted', 'failed'})
+                    or any(type(row[key]) not in (int, float) or not math.isfinite(row[key])
+                           or row[key] < 0 for key in ('monotonic_at', 'duration_seconds'))):
+                raise ValueError('shape')
+            safe = {key: row[key] for key in ('kind', 'sequence', 'stage', 'monotonic_at',
+                                               'duration_seconds', 'outcome')}
+            if kind == 'probe':
+                if (row['probe'] not in MONITOR_PROBES or type(row['timeout_seconds']) not in (int, float)
+                        or not math.isfinite(row['timeout_seconds']) or not 0 < row['timeout_seconds'] <= 8
+                        or row['terminated'] is not None and type(row['terminated']) is not bool
+                        or row['return_code'] is not None and type(row['return_code']) is not int):
+                    raise ValueError('probe')
+                safe.update({key: row[key] for key in ('probe', 'timeout_seconds', 'terminated', 'return_code')})
+            rows.append(safe)
+            if len(rows) > MAX_MONITOR_EVENTS: raise ValueError('count')
+    except (KeyError, TypeError, ValueError, UnicodeDecodeError):
+        raise Blocked('monitor_diagnostics_invalid') from None
+    if not rows: raise Blocked('monitor_diagnostics_incomplete')
+    return ''.join(json.dumps(row, sort_keys=True)+'\n' for row in rows).encode()
+
+def sanitized_samples(raw):
+    """Preserve numeric readings and known operational states, never arbitrary remote text."""
+    if not raw or not raw.endswith(b'\n'):
+        raise Blocked('samples_incomplete')
+    rows = []
+    numeric = ('at', 'monotonic_at', 'busy', 'steal', 'iowait', 'load1', 'load_ratio')
+    integers = ('ncpu', 'available_kib', 'oom_delta')
+    try:
+        for line in raw.splitlines():
+            row = json.loads(line)
+            if (type(row) is not dict or row['stage'] not in MONITOR_STAGES
+                    or any(type(row[k]) not in (float, int) or not math.isfinite(row[k]) or row[k] < 0 for k in numeric)
+                    or any(type(row[k]) is not int or row[k] < 0 for k in integers)
+                    or row['reason'] is not None and (type(row['reason']) is not str or
+                        not re.fullmatch('[a-z_]{1,40}', row['reason']))):
+                raise ValueError('sample')
+            pg, app = row['pg'], row['app']
+            if type(pg) is str and pg != 'N/A (not started)': raise ValueError('pg')
+            if type(app) is str and app != 'N/A (not started)': raise ValueError('app')
+            if type(pg) is dict:
+                if set(pg) == {'state', 'orphan_backends'}:
+                    if pg != {'state':'stopped', 'orphan_backends':'N/A (see cleanup verification)'}: raise ValueError('pg')
+                elif set(pg) != {'total', 'max_connections', 'ours', 'strangers'} or any(type(v) is not int or v < 0 for v in pg.values()):
+                    raise ValueError('pg')
+            elif type(pg) is not str: raise ValueError('pg')
+            if type(app) is dict:
+                if set(app) == {'port', 'status', 'latency_seconds'}:
+                    if (type(app['port']) is not int or not 1 <= app['port'] <= 65535
+                            or app['status'] is not None and type(app['status']) is not int
+                            or type(app['latency_seconds']) not in (int, float)
+                            or not math.isfinite(app['latency_seconds']) or app['latency_seconds'] < 0): raise ValueError('app')
+                elif set(app) == {'state', 'runner_exit', 'last_port'}:
+                    if app['state'] != 'expected_teardown' or type(app['runner_exit']) is not str or not re.fullmatch('[0-9]{1,3}',app['runner_exit']) or app['last_port'] is not None and type(app['last_port']) is not int: raise ValueError('app')
+                elif set(app) == {'state', 'last_port'}:
+                    if app['state'] != 'expected_teardown' or app['last_port'] is not None and type(app['last_port']) is not int: raise ValueError('app')
+                elif app not in ({'state':'created_not_started'}, {'state':'stopped', 'runner_exit':0}): raise ValueError('app')
+            elif type(app) is not str: raise ValueError('app')
+            safe = {k: row[k] for k in (*numeric, *integers, 'stage', 'reason', 'pg', 'app')}
+            rows.append(safe)
+            if len(rows) > 2000: raise ValueError('count')
+    except (KeyError, TypeError, ValueError, UnicodeDecodeError):
+        raise Blocked('samples_invalid') from None
+    return ''.join(json.dumps(row, sort_keys=True)+'\n' for row in rows).encode()
+
 def collect_evidence(sftp, c, run_dir):
     """Safety proof is mandatory; editorial readback errors never authorize deletion."""
     root = '/opt/apollo-validation/' + c['run_id'] + '/evidence/'
-    for name, limit in (('postflight.json', 131072), ('samples.jsonl', 2 * 1024 * 1024)):
-        atomic_bytes(run_dir / name, read_sftp(sftp, root + name, limit))
+    atomic_bytes(run_dir / 'postflight.json', read_sftp(sftp, root + 'postflight.json', 131072))
+    diagnostic = read_sftp(sftp, root + 'monitor-diagnostics.jsonl', 4 * 1024 * 1024)
+    atomic_bytes(run_dir / 'monitor-diagnostics.jsonl', monitor_diagnostics(diagnostic))
+    samples = read_sftp(sftp, root + 'samples.jsonl', 2 * 1024 * 1024)
+    atomic_bytes(run_dir / 'samples.jsonl', sanitized_samples(samples))
     record = watchdog.read_record(str(run_dir / 'postflight.json'))
     errors = []
     try:

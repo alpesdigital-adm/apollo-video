@@ -2,6 +2,16 @@
 
 ## Escopo, autoridade e estado
 
+Correção local de observabilidade em 30/09/2026 ainda sem gate verde: o guard
+registra callsites e amostras falhas em `monitor-diagnostics.jsonl`, e o controller
+tenta coletar a evidência filtrada antes de rejeitar postflight. Isso não explica
+o timeout real de `next-build` nem confirma hipótese sobre Docker/cgroup.
+O owner já autorizou retomada condicionada a monitor corrigido/validado e cinco
+minutos de estabilidade: o preflight do guard foi ampliado para 300 s com ticks
+de 10 s; postflight permanece 60 s. Não iniciar rodada até testes locais e CI
+Linux passarem e a identidade de novo alvo descartável ser confirmada. A suíte
+local desta edição ainda falhou: ver relatório privado de Sol em scratch.
+
 Este runbook descreve uma validação isolada, não um deploy em produção.
 Aplicam-se `AGENTS.md` (inclusive exclusividade e segurança de E2E remoto),
 `docs/specs/11-host-safety-and-serial-operations.md` e os gates do produto.
@@ -96,8 +106,9 @@ Usar `evidence_root` privado, absoluto, nativo do SO do operador, fora do repo.
 Não normalizar caminho para encaixar um manifesto que falha na validação.
 Conferir ACL efetiva no Windows operacionalmente: o helper não prova
 criptograficamente a privacidade das ACLs nesse sistema.
-Arquivar `postflight.json` em `<evidence_root>/<run_id>/postflight.json` e
-`samples.jsonl` no mesmo diretório. `prework_file` é campo obrigatório inerte
+Arquivar `postflight.json` em `<evidence_root>/<run_id>/postflight.json`,
+`samples.jsonl` e `monitor-diagnostics.jsonl` no mesmo diretório.
+`prework_file` é campo obrigatório inerte
 do schema do manifesto: não exige criar nem guardar `prework.json`, e não
 substitui evidência terminal.
 Lock local: `<evidence_root>/apollo-validation-owner.lock`; nunca removê-lo.
