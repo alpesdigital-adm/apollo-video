@@ -1,0 +1,15 @@
+# Primeiro readback de droplet descartável — 30/09/2026
+
+Estado: correção local sob testes controlados; não homologada remotamente nem aceita como produto.
+
+Os horários da tentativa abaixo estão em UTC. A autorização operacional vigente
+permite o ambiente isolado em NYC3, mantendo os limites de duração/custo e a
+exclusão verificada; aprovação de código, isoladamente, não autoriza execução.
+
+Após CI `36717184411` verde (PR #65 mergeado), a primeira criação DO ocorreu às 13:20:29. O controller bloqueou em `droplet_identity` às 13:20:30, antes de SSH/upload/app. Não há payload preservado do primeiro POST/GET: não sabemos qual campo estava nulo, ausente ou divergente. GET posterior completo mostrou `active`, ID 604968051, nome/tag, região NYC3, tamanho Intel, VPC e imagem esperados; `created_at` 13:20:37, posterior à falha. Essa observação não prova o conteúdo da primeira leitura.
+
+Astra realizou inspeção SSH pinned somente leitura por 120 s/13 amostras, confirmou ausência de app, Docker, PG e root do run e encerramento terminal/fechamento do SSH; GET da API confirmou 404 de droplet, firewall e tag. Snapshot preservado. Não há recurso em execução, mas não houve homologação.
+
+Falha de protocolo reproduzida localmente: `fresh_droplet()` exigia campos de provisão completos antes de aguardar `active` e comparava GET com campos ainda ausentes no POST. A correção mantém ID/nome vinculados imediatamente ao POST e GET, bloqueia divergência conhecida, aguarda somente GET sob o deadline existente de 600 s para campos ausentes/None em `new` e exige identidade final completa/exata em `active` antes do SSH; IP público pode chegar depois. Estados inesperados e timeout bloqueiam sem retry de POST, DELETE de erro nem redução de gates. O diagnóstico do controller/journal registra só nome do check, estado permitido e presença dos campos, jamais valores, payload HTTP, headers, IP ou segredos. Testes usam API e relógio controlados; não demonstram comportamento DO ao vivo. Nova verificação Linux/CI e rodada real dependem de autorização operacional separada; TODO/PRD não foram aceitos.
+
+Classificação conservadora da correção local: um `ip_address` público igual a `''` ainda não fornece endereço e permite somente mais GETs dentro dos 600 s; IP não vazio inválido, não global, IPv6 ou múltiplos públicos bloqueia. Um `created_at` válido no POST não precisa ter serialização byte a byte idêntica no GET; o timestamp final do GET permanece obrigatório e válido, e é ele que vincula manifesto e janela de cleanup. ID/nome/config conhecidos divergentes seguem bloqueados. Campo `region` ou `image` inteiro ausente/None pode completar em `new`, mas objeto presente sem `slug`, com `slug: null` ou `slug: ''` continua fail-closed mesmo em `new`: não há contrato de resposta comprovado que autorize classificá-lo como transitório. Isso é política conservadora, não diagnóstico do campo que causou a primeira falha real (payload inicial não preservado). Testes separados cobrem essas três formas em POST/GET e a janela; não há nova prova remota.

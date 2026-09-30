@@ -48,6 +48,10 @@ class Blocked(RuntimeError):
     """Unknown or unsafe state; no automatic retry of remote mutation."""
 
 
+class DropletReadbackBlocked(Blocked):
+    """Field/state names only, safe to persist as operator diagnostics."""
+
+
 def stamp(value):
     return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
 
@@ -303,31 +307,91 @@ def local_login_key(path, registered):
 
 
 def fresh_droplet(api, droplet_id, c, name, created_response):
+    """Wait for a complete authorized readback, never relaxing a known mismatch."""
+    expected = {'tags': [name], 'region': c['region'], 'size_slug': c['size'],
+                'vpc_uuid': c['vpc_id'], 'image': 'ubuntu-24-04-x64'}
+
+    def identity(value, source, complete):
+        if type(value) is not dict:
+            raise DropletReadbackBlocked('droplet_identity:' + source + '.body')
+        for field, wanted in (('id', droplet_id), ('name', name)):
+            if type(value.get(field)) is not type(wanted) or value[field] != wanted:
+                raise DropletReadbackBlocked('droplet_identity:' + source + '.' + field)
+        missing = []
+        for field, wanted in expected.items():
+            actual = value.get(field)
+            if actual is None:
+                missing.append(field)
+                continue
+            if field in ('region', 'image'):
+                if type(actual) is not dict:
+                    raise DropletReadbackBlocked('droplet_identity:' + source + '.' + field)
+                # No proven contract makes a nested missing/blank slug provisional.
+                actual = actual.get('slug')
+                if actual is None:
+                    raise DropletReadbackBlocked('droplet_identity:' + source + '.' + field)
+            if type(actual) is not type(wanted) or actual != wanted:
+                raise DropletReadbackBlocked('droplet_identity:' + source + '.' + field)
+        created_at = value.get('created_at')
+        if created_at is None:
+            missing.append('created_at')
+        else:
+            try:
+                if type(created_at) is not str or not created_at.endswith('Z'):
+                    raise ValueError('timestamp')
+                stamp(created_at)
+            except (ValueError, OverflowError):
+                raise DropletReadbackBlocked('droplet_identity:' + source + '.created_at') from None
+        if complete and missing:
+            raise DropletReadbackBlocked('droplet_identity_incomplete:' + ','.join(missing))
+        return missing
+
+    identity(created_response, 'post', False)
+    if created_response.get('status') is not None and created_response['status'] not in ('new', 'active'):
+        raise DropletReadbackBlocked('droplet_state:post')
     deadline = time.monotonic() + 600
+    last_presence = 'state=not_found'
     while time.monotonic() < deadline:
         status, body = api.request('GET', '/v2/droplets/' + str(droplet_id))
         if status == 200:
+            if type(body) is not dict: raise DropletReadbackBlocked('droplet_identity:readback.body')
             d = body.get('droplet')
-            if (type(d) is not dict or type(d.get('id')) is not int or d['id'] != droplet_id
-                    or d.get('name') != name or d.get('tags') != [name]
-                    or d.get('region', {}).get('slug') != c['region'] or d.get('size_slug') != c['size']
-                    or d.get('vpc_uuid') != c['vpc_id']
-                    or d.get('image', {}).get('slug') != 'ubuntu-24-04-x64'
-                    or type(d.get('created_at')) is not str
-                    or any(d.get(k) != created_response.get(k) for k in ('id', 'name', 'size_slug', 'vpc_uuid'))):
-                raise Blocked('droplet_identity')
-            addresses = [n.get('ip_address') for n in d.get('networks', {}).get('v4', [])
-                         if type(n) is dict and n.get('type') == 'public']
-            if d.get('status') == 'active' and len(addresses) == 1:
-                if type(addresses[0]) is not str: raise Blocked('public_ip')
-                ip = ipaddress.ip_address(addresses[0])
-                if ip.version != 4 or not ip.is_global: raise Blocked('public_ip')
-                stamp(d['created_at'])
-                return d, str(ip)
-            if d.get('status') not in ('new', 'active'): raise Blocked('droplet_state')
-        elif status != 404: raise Blocked('droplet_readback')
-        time.sleep(5)
-    raise Blocked('droplet_readback_timeout')
+            if type(d) is not dict: raise DropletReadbackBlocked('droplet_identity:readback.body')
+            state = d.get('status')
+            if state not in ('new', 'active'): raise DropletReadbackBlocked('droplet_state:readback')
+            missing = identity(d, 'readback', state == 'active')
+            last_presence = 'state=' + state + ';missing=' + (','.join(missing) if missing else 'none')
+            if state == 'active':
+                networks = d.get('networks')
+                if networks is None:
+                    addresses = []
+                elif type(networks) is not dict:
+                    raise DropletReadbackBlocked('public_ip:networks')
+                else:
+                    v4 = networks.get('v4')
+                    if v4 is None:
+                        addresses = []
+                    elif type(v4) is not list:
+                        raise DropletReadbackBlocked('public_ip:networks.v4')
+                    else:
+                        if any(type(n) is not dict for n in v4):
+                            raise DropletReadbackBlocked('public_ip:networks.v4')
+                        addresses = [n.get('ip_address') for n in v4 if n.get('type') == 'public']
+                if len(addresses) > 1: raise DropletReadbackBlocked('public_ip:multiple')
+                if len(addresses) == 1:
+                    if addresses[0] is not None and addresses[0] != '':
+                        try:
+                            if type(addresses[0]) is not str: raise ValueError('ip')
+                            ip = ipaddress.ip_address(addresses[0])
+                        except ValueError:
+                            raise DropletReadbackBlocked('public_ip:invalid') from None
+                        if ip.version != 4 or not ip.is_global:
+                            raise DropletReadbackBlocked('public_ip:invalid')
+                        return d, str(ip)
+                last_presence += ';public_ip=missing'
+        elif status != 404: raise DropletReadbackBlocked('droplet_readback')
+        time.sleep(min(5, max(0, deadline - time.monotonic())))
+    raise DropletReadbackBlocked('droplet_readback_timeout:' + last_presence)
 
 
 def ssh_ready(ip, deadline):
@@ -743,7 +807,8 @@ def execute(c, loader):
             journal(run_dir, result, work_outcome=state['work_outcome'], acceptance=acceptance['status'])
             return state
         except BaseException as exc:
-            journal(run_dir, 'needs_owner_intervention', error_type=type(exc).__name__)
+            journal(run_dir, 'needs_owner_intervention', error_type=type(exc).__name__,
+                    **({'readback_check': str(exc)} if isinstance(exc, DropletReadbackBlocked) else {}))
             raise
         finally:
             if sftp is not None: sftp.close()
