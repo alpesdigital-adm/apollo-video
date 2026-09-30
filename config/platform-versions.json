@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "node": { "minimum": "20.9.0", "containerMajor": "22" },
-  "web": { "next": "16.3.4", "react": "19.2.7", "reactDom": "19.2.7" },
+  "web": { "next": "16.3.6", "react": "19.2.7", "reactDom": "19.2.7" },
   "render": { "remotion": "4.0.489", "ffmpegTarget": "8.1.1", "ffprobeTarget": "8.1.1" },
   "database": { "postgresMajor": "16", "pgvector": "0.8.5", "image": "pgvector/pgvector:0.8.5-pg16-trixie", "prisma": "5.22.0" },
   "storage": {
