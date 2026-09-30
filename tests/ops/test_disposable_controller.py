@@ -170,6 +170,251 @@ class ControllerTest(unittest.TestCase):
         with self.assertRaises(controller.Blocked):
             controller.fresh_droplet(API(), 12345, c, name, droplet)
 
+    def test_droplet_readback_waits_for_new_identity_then_active_and_network(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        full = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': '2030-01-01T00:00:00Z',
+                'status': 'active', 'networks': {'v4': [{'type': 'public', 'ip_address': '8.8.8.8'}]}}
+        class API:
+            def __init__(self, snapshots): self.snapshots = iter(snapshots); self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path))
+                return 200, {'droplet': next(self.snapshots)}
+        clock = [0]
+        def sleep(seconds): clock[0] += seconds
+        partial = {'id': 12345, 'name': name, 'status': 'new', 'vpc_uuid': None,
+                   'region': None, 'created_at': None}
+        api = API([partial, {**full, 'networks': {'v4': []}}, full])
+        with patch.object(controller.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(controller.time, 'sleep', side_effect=sleep):
+            self.assertEqual(controller.fresh_droplet(api, 12345, c, name,
+                {'id': 12345, 'name': name, 'vpc_uuid': None})[1], '8.8.8.8')
+        self.assertEqual(api.calls, [('GET', '/v2/droplets/12345')] * 3)
+        self.assertEqual(clock[0], 10)
+
+    def test_empty_public_ip_waits_for_get_only_then_accepts_global_ipv4(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        full = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': '2030-01-01T00:00:00Z',
+                'status': 'active', 'networks': {'v4': [{'type': 'public', 'ip_address': '8.8.8.8'}]}}
+        class API:
+            def __init__(self, snapshots): self.snapshots = iter(snapshots); self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                return 200, {'droplet': next(self.snapshots)}
+        blank = {**full, 'networks': {'v4': [{'type': 'public', 'ip_address': ''}]}}
+        api = API([blank, full])
+        clock = [0]
+        with patch.object(controller.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(controller.time, 'sleep', side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+             patch.object(controller, 'open_pinned_ssh', side_effect=AssertionError('SSH forbidden')):
+            self.assertEqual(controller.fresh_droplet(api, 12345, c, name,
+                {'id': 12345, 'name': name})[1], '8.8.8.8')
+        self.assertEqual(api.calls, [('GET', '/v2/droplets/12345', None)] * 2)
+        self.assertEqual(clock[0], 5)
+
+    def test_empty_public_ip_times_out_without_ssh_or_mutation(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        blank = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                 'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                 'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': '2030-01-01T00:00:00Z',
+                 'status': 'active', 'networks': {'v4': [{'type': 'public', 'ip_address': ''}]}}
+        class API:
+            def __init__(self): self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                return 200, {'droplet': blank}
+        api = API()
+        clock = [0]
+        with patch.object(controller.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(controller.time, 'sleep', side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+             patch.object(controller, 'open_pinned_ssh', side_effect=AssertionError('SSH forbidden')):
+            with self.assertRaisesRegex(controller.Blocked, 'droplet_readback_timeout:.*public_ip=missing'):
+                controller.fresh_droplet(api, 12345, c, name, {'id': 12345, 'name': name})
+        self.assertEqual(clock[0], 600)
+        self.assertTrue(api.calls)
+        self.assertEqual({method for method, _, _ in api.calls}, {'GET'})
+
+    def test_nonempty_bad_public_ip_and_multiple_addresses_block(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        full = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': '2030-01-01T00:00:00Z',
+                'status': 'active'}
+        class API:
+            def __init__(self, addresses): self.addresses = addresses; self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                return 200, {'droplet': {**full, 'networks': {'v4': self.addresses}}}
+        for address in ('not-an-ip', '10.0.0.1', '2001:4860:4860::8888'):
+            with self.subTest(address=address):
+                api = API([{'type': 'public', 'ip_address': address}])
+                with self.assertRaisesRegex(controller.Blocked, 'public_ip:invalid'):
+                    controller.fresh_droplet(api, 12345, c, name, {'id': 12345, 'name': name})
+                self.assertEqual(len(api.calls), 1)
+        api = API([{'type': 'public', 'ip_address': ''},
+                   {'type': 'public', 'ip_address': '8.8.8.8'}])
+        with self.assertRaisesRegex(controller.Blocked, 'public_ip:multiple'):
+            controller.fresh_droplet(api, 12345, c, name, {'id': 12345, 'name': name})
+        self.assertEqual(len(api.calls), 1)
+
+    def test_valid_post_and_different_fractional_final_timestamp_bind_cleanup(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        final = '2030-01-01T00:00:37.123456Z'
+        droplet = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                   'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                   'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': final,
+                   'status': 'active', 'networks': {'v4': [{'type': 'public', 'ip_address': '8.8.8.8'}]}}
+        class API:
+            def request(self, method, path, payload=None):
+                self_outer.assertEqual((method, path, payload), ('GET', '/v2/droplets/12345', None))
+                return 200, {'droplet': droplet}
+        self_outer = self
+        observed, ip = controller.fresh_droplet(API(), 12345, c, name,
+                                                 {'id': 12345, 'name': name, 'created_at': '2030-01-01T00:00:00Z'})
+        self.assertEqual((observed['created_at'], ip), (final, '8.8.8.8'))
+        m = controller.manifest(c, self.root / c['run_id'], observed,
+                                {'id': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'},
+                                {'pid': 1234, 'deadlineUTC': '2030-01-01T01:00:00Z'})
+        self.assertEqual(m['created_at'], final)
+        self.assertEqual(m['not_before'], int(controller.stamp(final)))
+        with patch.object(controller.time, 'time', return_value=controller.stamp(final) + 60):
+            self.assertEqual(controller.remaining_guard_seconds(controller.stamp(observed['created_at'])), 10620)
+
+    def test_invalid_final_timestamp_still_blocks(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        full = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                'image': {'slug': 'ubuntu-24-04-x64'}, 'status': 'active',
+                'networks': {'v4': [{'type': 'public', 'ip_address': '8.8.8.8'}]}}
+        class API:
+            def __init__(self, value): self.value = value; self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                return 200, {'droplet': {**full, 'created_at': self.value}}
+        for invalid in ('not-a-timestamp', '2030-01-01T00:00:00+00:00', '', 123):
+            with self.subTest(invalid=invalid):
+                api = API(invalid)
+                with self.assertRaisesRegex(controller.Blocked, 'readback.created_at'):
+                    controller.fresh_droplet(api, 12345, c, name,
+                                             {'id': 12345, 'name': name, 'created_at': '2030-01-01T00:00:00Z'})
+                self.assertEqual(len(api.calls), 1)
+
+    def test_region_and_image_objects_without_usable_slug_fail_closed(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        full = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': '2030-01-01T00:00:00Z',
+                'status': 'active', 'networks': {'v4': [{'type': 'public', 'ip_address': '8.8.8.8'}]}}
+        class API:
+            def __init__(self, value): self.value = value; self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                return 200, {'droplet': self.value}
+        for field in ('region', 'image'):
+            for shape in ('absent', 'none', 'empty'):
+                for source in ('post', 'new', 'active'):
+                    with self.subTest(field=field, shape=shape, source=source):
+                        nested = {} if shape == 'absent' else {'slug': None if shape == 'none' else ''}
+                        posted = {'id': 12345, 'name': name}
+                        d = {**full, 'status': 'new' if source == 'new' else 'active'}
+                        (posted if source == 'post' else d)[field] = nested
+                        api = API(d)
+                        with self.assertRaisesRegex(controller.Blocked, field):
+                            controller.fresh_droplet(api, 12345, c, name, posted)
+                        self.assertLessEqual(len(api.calls), 1)
+
+    def test_droplet_readback_known_contradictions_fail_immediately(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        full = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': '2030-01-01T00:00:00Z',
+                'status': 'active', 'networks': {'v4': [{'type': 'public', 'ip_address': '8.8.8.8'}]}}
+        wrong = {'region': {'slug': 'nyc1'}, 'size_slug': 'other',
+                 'vpc_uuid': 'different', 'tags': ['other'], 'image': {'slug': 'other'}}
+        class API:
+            def __init__(self, droplet): self.droplet = droplet; self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path))
+                return 200, {'droplet': self.droplet}
+        for source in ('post', 'new', 'active'):
+            for field, value in wrong.items():
+                with self.subTest(source=source, field=field):
+                    posted = {'id': 12345, 'name': name}
+                    d = dict(full if source != 'new' else {**full, 'status': 'new'})
+                    if source == 'post': posted[field] = value
+                    else: d[field] = value
+                    api = API(d)
+                    with self.assertRaisesRegex(controller.Blocked, field) as failure:
+                        controller.fresh_droplet(api, 12345, c, name, posted)
+                    self.assertNotIn('different', str(failure.exception))
+                    self.assertLessEqual(len(api.calls), 1)
+        for source in ('post', 'readback'):
+            for field, value in (('id', 12346), ('name', 'other')):
+                with self.subTest(source=source, field=field):
+                    posted = {'id': 12345, 'name': name}
+                    d = dict(full)
+                    (posted if source == 'post' else d)[field] = value
+                    with self.assertRaisesRegex(controller.Blocked, field):
+                        controller.fresh_droplet(API(d), 12345, c, name, posted)
+
+    def test_droplet_active_missing_identity_and_bad_states_fail_closed(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        full = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': '2030-01-01T00:00:00Z',
+                'status': 'active', 'networks': {'v4': [{'type': 'public', 'ip_address': '8.8.8.8'}]}}
+        class API:
+            def __init__(self, value): self.value = value
+            def request(self, method, path, payload=None): return 200, {'droplet': self.value}
+        for field in ('tags', 'region', 'size_slug', 'vpc_uuid', 'image', 'created_at'):
+            for absent in ('missing', None):
+                with self.subTest(field=field, absent=absent):
+                    d = dict(full)
+                    if absent == 'missing': d.pop(field)
+                    else: d[field] = None
+                    with self.assertRaisesRegex(controller.Blocked, field):
+                        controller.fresh_droplet(API(d), 12345, c, name, {'id': 12345, 'name': name})
+        for status in ('off', 'archive', None, {'unexpected': 'secret'}):
+            with self.subTest(status=status), self.assertRaisesRegex(controller.Blocked, 'droplet_state'):
+                controller.fresh_droplet(API({**full, 'status': status}), 12345, c, name,
+                                         {'id': 12345, 'name': name})
+        for malformed in (None, [], {'id': 12345, 'name': name, 'status': 'active',
+                                     'region': 'secret-value'}):
+            with self.subTest(malformed=type(malformed)), self.assertRaises(controller.Blocked) as failure:
+                controller.fresh_droplet(API(malformed), 12345, c, name, {'id': 12345, 'name': name})
+            self.assertNotIn('secret-value', str(failure.exception))
+
+    def test_droplet_incomplete_new_times_out_without_mutation_or_ssh(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        class API:
+            def __init__(self): self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                return 200, {'droplet': {'id': 12345, 'name': name, 'status': 'new', 'vpc_uuid': None}}
+        api = API()
+        clock = [0]
+        with patch.object(controller.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(controller.time, 'sleep', side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+             patch.object(controller, 'open_pinned_ssh', side_effect=AssertionError('SSH forbidden')):
+            with self.assertRaisesRegex(controller.Blocked, 'droplet_readback_timeout.*vpc_uuid'):
+                controller.fresh_droplet(api, 12345, c, name, {'id': 12345, 'name': name})
+        self.assertTrue(api.calls)
+        self.assertEqual({method for method, _, _ in api.calls}, {'GET'})
+        self.assertEqual(clock[0], 600)
+
     def test_cross_process_lock_is_exclusive_not_a_chat_lease(self):
         lock = str(self.root / 'apollo-validation-owner.lock')
         with controller.watchdog.claim_lock(lock):

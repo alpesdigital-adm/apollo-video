@@ -19,12 +19,38 @@ preflight atual antes de qualquer mutação. A VPC default NYC3 já existe: Astr
 deve confirmar membros vazios antes de usá-la; não criar nem remover VPC.
 Snapshot preservado, nenhuma produção/DNS/provider pago; execução real só Astra.
 Código local e testes controlados não homologam operação remota.
-Ambiente observado: Windows real, WSL sem distribuições e Docker CLI ausente.
-O passo Linux adicionado ao CI ainda não foi executado nesta rodada.
-Não ocorreu uso de provedor real nem de VM nesta rodada.
-Portanto, isto é procedimento especificado e implementação local testada com
-controles, ainda sem prova Linux executada nesta rodada,
-não processo remoto homologado nem aceite de produto W27/W28, F3 ou W29.
+Atualização de 30/09/2026: CI Linux `36717184411` verde após merge PR #65.
+Houve uma primeira criação real às 13:20:29; o controller bloqueou no gate
+`droplet_identity` às 13:20:30, antes de SSH, upload ou app. O payload do primeiro
+POST/GET não foi preservado; não é possível identificar qual campo estava ausente
+ou incorreto. GET posterior completo mostrou droplet active com ID 604968051,
+nome/tag, região NYC3, plano Intel, VPC e imagem esperados, e `created_at`
+13:20:37 (depois do bloqueio). Não usar esse GET para reconstituir o primeiro.
+Astra fez inspeção SSH pinned somente leitura por 120 s/13 amostras, confirmou
+ausência de app/Docker/PG/root e processo SSH terminal/fechado, depois conferiu
+404 por API de droplet/firewall/tag. Snapshot foi preservado. Nenhum recurso
+permanece em execução; isto não foi homologação nem aceite do produto.
+O readback corrigido espera apenas GET por até 600 s: ID/nome do POST e GET são
+obrigatórios imediatamente; divergência conhecida bloqueia; campos de provisão
+ausentes em `new` podem completar, mas `active` exige identidade completa/exata
+antes de aceitar IP e abrir SSH. IP ausente pode aguardar; timeout ou estado
+inesperado bloqueia, sem segundo POST ou DELETE de erro. Diagnóstico local usa
+somente nomes de checks/estado/presença, não valores nem payload HTTP. Novo
+CI Linux e nova rodada real continuam pendentes para esta correção.
+`ip_address` público `''` é ausência provisória (apenas GET até o deadline),
+mas IP não vazio inválido/privado/IPv6 ou múltiplos públicos bloqueiam.
+O `created_at` válido do POST não exige igualdade byte a byte com o do GET;
+o timestamp final válido do GET ancora manifesto e cleanup. Divergência conhecida
+de ID/nome/config ainda bloqueia. Em `new`, campo `region`/`image` inteiro
+ausente/None pode completar; objeto presente sem `slug`, com `slug: null` ou
+`slug: ''` continua fail-closed por falta de contrato de resposta comprovado
+para tratá-lo como provisório. Essa classificação não identifica o campo real
+da falha inicial, cujo POST/GET não foi preservado.
+O registro local abaixo refere-se à rodada anterior à criação acima: Windows
+real, WSL sem distribuições e Docker CLI ausente. Naquela rodada não houve uso
+de provedor real nem de VM. O CI #36717184411 pertence à revisão PR #65,
+não comprova esta correção. Não há processo remoto homologado nem aceite de
+produto W27/W28, F3 ou W29.
 Não transformar README de scratch anterior em fonte de verdade atual.
 A evidência local e suas limitações estão registradas em
 `docs/quality/digitalocean-disposable-validation-local.md`; ela não libera a VM.
