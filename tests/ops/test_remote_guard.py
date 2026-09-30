@@ -354,6 +354,168 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(g.GateClosed):
             g.command([sys.executable, '-c', 'import time; time.sleep(10)'], timeout=.05)
 
+    def test_monitor_timeout_at_each_real_probe_retains_safe_partial_trace(self):
+        host = dict(busy=1, steal=0, iowait=0, load1=0, ncpu=8,
+                    load_ratio=0, available_kib=4 * 1024**2, oom_total=0)
+        real_command = g.command
+        for target, budget in (('docker.inspect.pg', 8), ('docker.exec.pg_activity', 4),
+                               ('docker.inspect.runner', 8), ('docker.top.runner', 4),
+                               ('docker.probe_exit_code.runner', 4)):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as td:
+                root = Path(td); (root/'evidence').mkdir()
+                with patch.object(g, 'counters', return_value=(100, 10, 0, 0)):
+                    m = g.Monitor(root, 'w28-1')
+                m.pg = 'w28-1-pg'; m.runner = 'w28-1-runner'
+                def invoke(argv, **kw):
+                    probe = kw.get('probe_id')
+                    if probe == target:
+                        self.assertEqual(kw['timeout'], budget)
+                        return real_command([sys.executable, '-c',
+                            'import time; time.sleep(10) # private-argv-url-token'],
+                            timeout=.05, probe_id=probe, observer=kw['observer'])
+                    if probe == 'docker.inspect.pg': return 'w28-1|true|123'
+                    if probe == 'docker.exec.pg_activity': return '1|40|0|0'
+                    if probe == 'docker.inspect.runner':
+                        return 'w28-1|false|0' if target == 'docker.probe_exit_code.runner' else 'w28-1|true|123'
+                    if probe == 'docker.top.runner': return 'PID COMMAND\n'
+                    if probe == 'docker.probe_exit_code.runner': return '0'
+                    self.fail('unknown probe')
+                with patch.object(g, 'host_read', side_effect=lambda previous: (previous, host.copy())), \
+                     patch.object(g, 'command', side_effect=invoke):
+                    with self.assertRaisesRegex(g.GateClosed, target):
+                        m.sample('continuous')
+                self.assertEqual(m.samples, 0)
+                trace = [json.loads(line) for line in (root/'evidence'/'monitor-diagnostics.jsonl').read_text().splitlines()]
+                self.assertEqual(trace[0]['outcome'], 'started')
+                self.assertEqual(trace[-1]['outcome'], 'failed')
+                self.assertEqual(trace[-1]['stage'], 'continuous')
+                self.assertEqual(trace[-1]['sequence'], 1)
+                probe = next(row for row in trace if row.get('probe') == target and row['outcome'] == 'timeout')
+                self.assertTrue(probe['terminated'])
+                self.assertGreaterEqual(probe['duration_seconds'], 0)
+                self.assertEqual(probe['timeout_seconds'], .05)
+                self.assertNotIn('private-argv-url-token', json.dumps(trace))
+                self.assertNotIn('private-argv-url-token', str(m.failure))
+
+    def test_preflight_requires_300_seconds_and_30_ten_second_samples(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); (root/'evidence').mkdir()
+            with patch.object(g, 'counters', return_value=(100, 10, 0, 0)):
+                m = g.Monitor(root, 'w28-1')
+            clock = [0.0]
+            host = dict(busy=1, steal=0, iowait=0, load1=0, ncpu=8,
+                        load_ratio=0, available_kib=4 * 1024**2, oom_total=0)
+            with patch.object(g.time, 'monotonic', side_effect=lambda: clock[0]), \
+                 patch.object(g.time, 'sleep', side_effect=lambda n: clock.__setitem__(0, clock[0]+n)), \
+                 patch.object(g, 'host_read', side_effect=lambda previous: (previous, host.copy())):
+                m.window('preflight')
+            self.assertEqual(m.windows['preflight'], {'started': 0.0, 'finished': 300.0})
+            self.assertEqual(m.samples, 30)
+            ticks = [json.loads(line)['monotonic_at'] for line in (root/'evidence'/'samples.jsonl').read_text().splitlines()]
+            self.assertEqual(ticks, list(range(10, 301, 10)))
+
+    def test_monitor_failure_is_sticky_while_postflight_keeps_sampling(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); (root/'evidence').mkdir()
+            with patch.object(g, 'counters', return_value=(100, 10, 0, 0)):
+                m = g.Monitor(root, 'w28-1')
+            m.pg = 'w28-1-pg'
+            host = dict(busy=1, steal=0, iowait=0, load1=0, ncpu=8,
+                        load_ratio=0, available_kib=4*1024**2, oom_total=0)
+            calls = [0]
+            def identity(*args, **kwargs):
+                calls[0] += 1
+                if calls[0] == 1: raise g.GateClosed('docker.inspect.pg: command deadline exceeded')
+                return True, 123
+            waits = [0]
+            def wait(seconds):
+                waits[0] += 1
+                return waits[0] > 2
+            with patch.object(g, 'host_read', side_effect=lambda prev: (prev, host.copy())), \
+                 patch.object(g, 'container_identity', side_effect=identity), \
+                 patch.object(g, 'command', return_value='1|40|0|0'), \
+                 patch.object(g, 'emit'), patch.object(m.stop, 'wait', side_effect=wait):
+                m.start()
+                m.thread.join(2)
+                self.assertFalse(m.thread.is_alive())
+                with self.assertRaisesRegex(g.GateClosed, 'docker.inspect.pg'):
+                    m.check()
+                original = m.failure
+                m.pg = 'stopped'
+                m.sample('postflight')
+                self.assertEqual(m.failure, original)
+                m.finish()
+            trace = [json.loads(line) for line in (root/'evidence'/'monitor-diagnostics.jsonl').read_text().splitlines()]
+            self.assertEqual([r['outcome'] for r in trace if r['kind'] == 'sample'],
+                             ['started', 'failed', 'started', 'completed', 'started', 'completed'])
+            self.assertEqual(m.samples, 2)
+
+    def test_timeout_probe_reaps_real_subprocess_and_reader(self):
+        created = []
+        real_popen = g.subprocess.Popen
+        def start(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            created.append(proc)
+            return proc
+        events = []
+        with patch.object(g.subprocess, 'Popen', side_effect=start):
+            with self.assertRaisesRegex(g.GateClosed, 'docker.top.runner: command deadline exceeded'):
+                g.command([sys.executable, '-c', 'import time; time.sleep(10)'], timeout=.05,
+                          probe_id='docker.top.runner', observer=lambda *event: events.append(event))
+        self.assertEqual(len(created), 1)
+        self.assertIsNotNone(created[0].poll())
+        self.assertTrue(created[0].stdout.closed)
+        self.assertEqual(events[-1][1], 'timeout')
+        self.assertTrue(events[-1][4])
+
+    def test_nonzero_probe_emits_failed_after_exit(self):
+        events = []
+        with self.assertRaisesRegex(g.GateClosed, 'docker.top.runner: command exited nonzero'):
+            g.command([sys.executable, '-c', 'raise SystemExit(7)'], timeout=3,
+                      probe_id='docker.top.runner', observer=lambda *event: events.append(event))
+        self.assertEqual([event[1] for event in events], ['started', 'failed'])
+        self.assertEqual(events[-1][4:], (True, 7))
+
+    def test_reader_error_probe_emits_failed_after_join(self):
+        events = []
+        with patch.object(g, 'redact', side_effect=OSError('reader fixture')):
+            with self.assertRaisesRegex(g.GateClosed, 'command output reader failed'):
+                g.command([sys.executable, '-c', 'print("reader fixture")'], timeout=3,
+                          probe_id='docker.top.runner', observer=lambda *event: events.append(event))
+        self.assertEqual([event[1] for event in events], ['started', 'failed'])
+        self.assertEqual(events[-1][4:], (True, 0))
+
+    def test_probe_reader_still_alive_after_join_emits_failed_even_if_close_raises(self):
+        real_popen = g.subprocess.Popen
+        for close_error in (False, True):
+            with self.subTest(close_error=close_error):
+                events = []; joins = []; created = []
+                class StuckReader:
+                    def __init__(self, *args, **kwargs): pass
+                    def start(self): pass
+                    def join(self, timeout): joins.append(timeout)
+                    def is_alive(self): return True
+                class Pipe:
+                    def __init__(self, wrapped): self.wrapped = wrapped
+                    def close(self):
+                        self.wrapped.close()
+                        if close_error: raise OSError('pipe close failed')
+                def start(*args, **kwargs):
+                    proc = real_popen(*args, **kwargs)
+                    proc.stdout = Pipe(proc.stdout)
+                    created.append(proc)
+                    return proc
+                with patch.object(g.threading, 'Thread', StuckReader), \
+                     patch.object(g.subprocess, 'Popen', side_effect=start):
+                    with self.assertRaisesRegex(g.GateClosed, 'command output reader did not terminate'):
+                        g.command([sys.executable, '-c', 'pass'], timeout=3,
+                                  probe_id='docker.top.runner', observer=lambda *event: events.append(event))
+                self.assertEqual(joins, [8])
+                self.assertEqual([event[1] for event in events], ['started', 'failed'])
+                self.assertEqual(events[-1][4:], (True, 0))
+                self.assertEqual(created[0].returncode, 0)
+                self.assertTrue(created[0].stdout.wrapped.closed)
+
     def test_command_joins_delayed_reader_before_return_or_error(self):
         entered = threading.Event()
         original = g.redact
@@ -422,14 +584,16 @@ class GuardTests(unittest.TestCase):
             m.runner = 'w28-1-runner'
             host = dict(busy=1, steal=0, iowait=0, load1=0, ncpu=8,
                         load_ratio=0, available_kib=4*1024**2, oom_total=0)
+            clock = [500]
             with patch.object(g, 'host_read', side_effect=lambda previous: (m.prev, host.copy())), \
                  patch.object(g, 'container_identity', return_value=(True, 100)), \
                  patch.object(m, 'find_next', side_effect=[(False, None), (True, None), (True, None)]), \
-                 patch.object(g.time, 'monotonic', side_effect=[500, 500, 500, 500, 681, 681]):
+                 patch.object(g.time, 'monotonic', side_effect=lambda: clock[0]):
                 m.sample('build')
                 self.assertIsNone(m.next_started)
                 m.sample('journey')
                 self.assertTrue(m.next_seen)
+                clock[0] = 681
                 with self.assertRaisesRegex(g.GateClosed, 'next_startup'):
                     m.sample('journey')
 
@@ -571,6 +735,7 @@ class GuardTests(unittest.TestCase):
 
     def test_failed_postflight_does_not_publish_window(self):
         with tempfile.TemporaryDirectory() as td:
+            (Path(td)/'evidence').mkdir()
             with patch.object(g, 'counters', return_value=(100, 10, 0, 0)):
                 m = g.Monitor(Path(td), 'w28-1')
             clock = [0]

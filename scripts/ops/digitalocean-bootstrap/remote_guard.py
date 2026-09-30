@@ -40,6 +40,9 @@ REDACT = re.compile(r'(?i)(postgres(?:ql)?://[^\s:@/]+:)[^@\s]+(@|%40)|((?:PASSW
 OWNER_LOCK = Path('/run/lock/apollo-validation-owner.lock')
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 100000
+MONITOR_PROBES = frozenset(('docker.inspect.pg', 'docker.exec.pg_activity',
+                            'docker.inspect.runner', 'docker.top.runner',
+                            'docker.probe_exit_code.runner'))
 
 
 class GateClosed(RuntimeError):
@@ -261,14 +264,22 @@ def write_pg_env(path, password):
         f.write('POSTGRES_USER=postgres\nPOSTGRES_DB=postgres\nPOSTGRES_PASSWORD='+password+'\nPGPASSWORD='+password+'\n')
 
 
-def command(argv, *, timeout, log=None, input_data=None, secrets_values=(), monitor=None, env=None, scope=False, cwd=None):
+def command(argv, *, timeout, log=None, input_data=None, secrets_values=(), monitor=None, env=None, scope=False, cwd=None, probe_id=None, observer=None):
+    if probe_id is not None and (probe_id not in MONITOR_PROBES or observer is None):
+        raise GateClosed('invalid monitor probe')
     if scope:
         argv = ['systemd-run', '--quiet', '--scope', '--slice='+SLICE, '-p', 'AllowedCPUs=0,1', '--'] + list(argv)
     argv = list(map(str, argv))
     output = []; reader_errors = []
-    proc = subprocess.Popen(argv, stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
-                            env=env, cwd=cwd)
+    began = time.monotonic()
+    if probe_id: observer(probe_id, 'started', timeout, 0, None, None)
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+                                env=env, cwd=cwd)
+    except BaseException:
+        if probe_id: observer(probe_id, 'failed', timeout, time.monotonic()-began, None, None)
+        raise
     def reader():
         try:
             for line in iter(proc.stdout.readline, b''):
@@ -281,6 +292,7 @@ def command(argv, *, timeout, log=None, input_data=None, secrets_values=(), moni
         except BaseException as exc:
             reader_errors.append(type(exc).__name__)
     t = threading.Thread(target=reader, daemon=True); t.start()
+    outcome = 'completed'
     try:
         if input_data is not None:
             proc.stdin.write(input_data.encode()); proc.stdin.close()
@@ -288,9 +300,11 @@ def command(argv, *, timeout, log=None, input_data=None, secrets_values=(), moni
         while proc.poll() is None:
             if monitor: monitor.check()
             if time.monotonic() >= end:
-                raise GateClosed('command deadline exceeded')
+                outcome = 'timeout'
+                raise GateClosed((probe_id + ': ' if probe_id else '') + 'command deadline exceeded')
             time.sleep(.2)
     except BaseException:
+        if outcome != 'timeout': outcome = 'aborted'
         if proc.poll() is None:
             if hasattr(os, 'killpg'): os.killpg(proc.pid, signal.SIGTERM)
             else: proc.terminate()  # unittest on Windows; deployed guard is Linux only
@@ -303,19 +317,33 @@ def command(argv, *, timeout, log=None, input_data=None, secrets_values=(), moni
     finally:
         if proc.stdin and not proc.stdin.closed: proc.stdin.close()
         t.join(timeout=8)
-        if t.is_alive():
-            proc.stdout.close()
-            raise GateClosed('command output reader did not terminate')
-        proc.stdout.close()
-        proc.wait()
+        reader_stuck = t.is_alive()
+        close_error = None
+        waited = False
+        try:
+            try: proc.stdout.close()
+            except BaseException as exc: close_error = exc
+            proc.wait()
+            waited = True
+        finally:
+            if reader_stuck or (outcome == 'completed' and
+                                (close_error or not waited or reader_errors or proc.returncode)):
+                outcome = 'failed'
+            if probe_id:
+                observer(probe_id, outcome, timeout, time.monotonic()-began,
+                         proc.returncode is not None, proc.returncode)
+        if reader_stuck: raise GateClosed('command output reader did not terminate')
+        if close_error: raise close_error
     if reader_errors: raise GateClosed('command output reader failed: '+reader_errors[0])
     if proc.returncode:
+        if probe_id: raise GateClosed(probe_id + ': command exited nonzero')
         raise GateClosed(f'command exited {proc.returncode}: {redact(" ".join(argv[:3]), secrets_values)}: {"".join(output)[-300:]}')
     return ''.join(output).strip()
 
 
-def container_identity(name, run):
-    out = command(['docker', 'inspect', '-f', '{{index .Config.Labels "apollo.run"}}|{{.State.Running}}|{{.State.Pid}}', name], timeout=8)
+def container_identity(name, run, *, probe_id=None, observer=None):
+    observed = {'probe_id': probe_id, 'observer': observer} if probe_id else {}
+    out = command(['docker', 'inspect', '-f', '{{index .Config.Labels "apollo.run"}}|{{.State.Running}}|{{.State.Pid}}', name], timeout=8, **observed)
     parts = out.split('|')
     if len(parts) != 3 or parts[0] != run or parts[1] not in ('true', 'false') or not parts[2].isdigit():
         raise GateClosed('container identity mismatch: '+name)
@@ -354,7 +382,7 @@ class Monitor:
         self.thread = None; self.high = 0; self.prev = counters(); self.last_oom = None
         self.pg = None; self.runner = None; self.runner_running_seen = False
         self.next_started = None; self.next_seen = False; self.next_ready = False
-        self.port = None; self.samples = 0; self.windows = {}
+        self.port = None; self.samples = 0; self.windows = {}; self.sequence = 0
         self.lock = threading.Lock()
         self.stage = 'continuous'; self.closed = threading.Event()
         self.stdin_thread = None
@@ -399,9 +427,32 @@ class Monitor:
 
     def sample(self, stage):
         with self.lock:
-            self._sample(stage)
+            self.sequence += 1
+            began = time.monotonic()
+            self.diagnostic('sample', stage, 'started', began)
+            try:
+                self._sample(stage)
+            except BaseException:
+                self.diagnostic('sample', stage, 'failed', began)
+                raise
+            self.diagnostic('sample', stage, 'completed', began)
+
+    def diagnostic(self, kind, stage, outcome, began, **fields):
+        now = time.monotonic()
+        row = {'kind': kind, 'sequence': self.sequence, 'stage': stage,
+               'monotonic_at': now, 'duration_seconds': max(0, now-began),
+               'outcome': outcome, **fields}
+        with open(self.root/'evidence'/'monitor-diagnostics.jsonl', 'a', encoding='utf8') as f:
+            f.write(json.dumps(row, sort_keys=True)+'\n')
+
+    def probe_event(self, probe, outcome, timeout, duration, terminated, return_code):
+        now = time.monotonic()
+        self.diagnostic('probe', self.probe_stage, outcome, now-duration,
+                        probe=probe, timeout_seconds=timeout, terminated=terminated,
+                        return_code=return_code)
 
     def _sample(self, stage):
+        self.probe_stage = stage
         self.prev, v = host_read(self.prev)
         oom = v.pop('oom_total')
         v['oom_delta'] = oom if self.last_oom is None else oom - self.last_oom
@@ -410,19 +461,20 @@ class Monitor:
         record = {'stage': stage, 'at': time.time(), 'monotonic_at': time.monotonic(),
                   **v, 'pg': 'N/A (not started)', 'app': 'N/A (not started)', 'reason': reason}
         if self.pg and self.pg != 'stopped':
-            running, _ = container_identity(self.pg, self.run)
+            running, _ = container_identity(self.pg, self.run, probe_id='docker.inspect.pg', observer=self.probe_event)
             if not running: reason = reason or 'pg_stopped'
             else:
-                raw = command(['docker','exec',self.pg,'psql','-U','postgres','-d','postgres','-At','-F','|','-c',pg_activity_sql(self.run)],timeout=4)
+                raw = command(['docker','exec',self.pg,'psql','-U','postgres','-d','postgres','-At','-F','|','-c',pg_activity_sql(self.run)],timeout=4,
+                              probe_id='docker.exec.pg_activity', observer=self.probe_event)
                 total, maximum, ours, strangers = map(int, raw.split('|'))
                 record['pg'] = {'total': total, 'max_connections': maximum, 'ours': ours, 'strangers': strangers}
                 if maximum <= 0 or total * 2 > maximum or strangers: reason = reason or 'pg_connections'
         elif self.pg == 'stopped': record['pg'] = {'state':'stopped', 'orphan_backends':'N/A (see cleanup verification)'}
         if self.runner and self.runner != 'stopped':
-            running, _ = container_identity(self.runner, self.run)
+            running, _ = container_identity(self.runner, self.run, probe_id='docker.inspect.runner', observer=self.probe_event)
             if running:
                 self.runner_running_seen = True
-                seen, port = self.find_next(self.runner)
+                seen, port = self.find_next(self.runner, observer=self.probe_event)
                 if seen:
                     self.next_seen = True
                     if self.next_started is None: self.next_started = time.monotonic()
@@ -446,7 +498,8 @@ class Monitor:
                 if not self.next_ready and self.next_started is not None and time.monotonic()-self.next_started > 180:
                     reason = reason or 'next_startup'
             else:
-                status = command(['docker','inspect','-f','{{.State.ExitCode}}',self.runner],timeout=4)
+                status = command(['docker','inspect','-f','{{.State.ExitCode}}',self.runner],timeout=4,
+                                 probe_id='docker.probe_exit_code.runner', observer=self.probe_event)
                 marker = self.root/'evidence'/'journey'/self.run/'next.log'
                 if not self.runner_running_seen and status == '0':
                     record['app'] = {'state':'created_not_started'}
@@ -462,9 +515,10 @@ class Monitor:
         if reason: raise GateClosed(reason)
 
     @staticmethod
-    def find_next(container_name, proc=Path('/proc')):
+    def find_next(container_name, proc=Path('/proc'), *, observer=None):
         # Caller verified label. Docker top scopes host PIDs; argv survives Next's process.title rewrite.
-        raw = command(['docker', 'top', container_name, '-eo', 'pid,args'], timeout=4)
+        observed = {'probe_id': 'docker.top.runner', 'observer': observer} if observer else {}
+        raw = command(['docker', 'top', container_name, '-eo', 'pid,args'], timeout=4, **observed)
         pids = set()
         for line in raw.splitlines()[1:]:
             match = re.match(r'\s*(\d+)\s+(.+)', line)
@@ -494,15 +548,17 @@ class Monitor:
 
     def window(self, stage):
         if stage != 'postflight': self.check()
+        seconds = 300 if stage == 'preflight' else 60
+        ticks = seconds // 10
         started = time.monotonic()
         if self.thread:
             with self.lock: self.stage = stage; before = self.samples
-            deadline = started + 80
+            deadline = started + seconds + 20
             try:
                 while True:
                     with self.lock: count = self.samples - before
                     now = time.monotonic()
-                    if count >= 6 and now - started >= 60: break
+                    if count >= ticks and now - started >= seconds: break
                     if stage != 'postflight': self.check()
                     if now >= deadline or not self.thread.is_alive():
                         raise GateClosed('postflight sampling incomplete or monitor stopped')
@@ -513,7 +569,7 @@ class Monitor:
         else:
             tick = started
             errors = []
-            for _ in range(6):
+            for _ in range(ticks):
                 tick += 10
                 time.sleep(max(0,tick-time.monotonic()))
                 try:
@@ -525,7 +581,7 @@ class Monitor:
                     errors.append(str(exc))
             if errors: raise GateClosed('postflight sampling inconclusive: '+errors[0])
         finished = time.monotonic()
-        if finished - started < 60: raise GateClosed('sampling window shorter than 60 seconds')
+        if finished - started < seconds: raise GateClosed('sampling window too short')
         self.windows[stage] = {'started': started, 'finished': finished}
 
     def start(self):

@@ -154,19 +154,19 @@ def read_record(path):
 def valid_windows(windows):
     if type(windows) is not dict or set(windows) != {'preflight', 'postflight'}:
         return False
-    for stage in ('preflight', 'postflight'):
+    for stage, minimum in (('preflight', 300), ('postflight', 60)):
         window = windows[stage]
         if type(window) is not dict or set(window) != {'started', 'finished'}:
             return False
         start, end = window['started'], window['finished']
         if (type(start) is not float or type(end) is not float
                 or not math.isfinite(start) or not math.isfinite(end)
-                or end - start < 60):
+                or end - start < minimum):
             return False
     return windows['preflight']['finished'] <= windows['postflight']['started']
 
 def valid_samples(path, count, windows):
-    if type(count) is not int or count < 12:
+    if type(count) is not int or count < 36:
         return False
     if not valid_windows(windows):
         return False
@@ -218,7 +218,8 @@ def valid_samples(path, count, windows):
             return False
     for stage, ticks in stages.items():
         window = windows[stage]
-        if (len(ticks) < 6 or ticks[0] - window['started'] > 11
+        if (len(ticks) < (30 if stage == 'preflight' else 6)
+                or ticks[0] - window['started'] > 11
                 or window['finished'] - ticks[-1] > 11
                 or any(b - a > 11 for a, b in zip(ticks, ticks[1:]))):
             return False

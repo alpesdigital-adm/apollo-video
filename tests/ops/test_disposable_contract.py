@@ -83,11 +83,11 @@ class ProducerConsumerContract(unittest.TestCase):
                     record = run.postflight_result(0, None, [])
         Path(self.m['postflight_file']).write_text(json.dumps(record))
         (root/'samples.jsonl').write_bytes((run.root/'evidence'/'samples.jsonl').read_bytes())
-        self.assertEqual(record['samples'], 13)
+        self.assertEqual(record['samples'], 37)  # 30 preflight + one stop-gap + 6 postflight
         self.assertEqual(record['windows'], monitor.windows)
         for stage in ('preflight', 'postflight'):
             self.assertGreaterEqual(record['windows'][stage]['finished'] -
-                                    record['windows'][stage]['started'], 60)
+                                    record['windows'][stage]['started'], 300 if stage == 'preflight' else 60)
         self.assertEqual(record['container_states'], {'runner': 'stopped', 'pg': 'stopped'})
         self.assertEqual(record['orphan_backends'], 0)
         self.assertTrue(fixtures.watchdog.terminal_ready(fixtures.watchdog.validate_manifest(self.m)))
