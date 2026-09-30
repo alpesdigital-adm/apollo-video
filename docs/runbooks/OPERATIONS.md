@@ -2,6 +2,8 @@
 
 ## Hosting decision — 2026-09-19
 
+Para uma validação descartável futura na DigitalOcean, seguir `docs/runbooks/DIGITALOCEAN-DISPOSABLE-VALIDATION.md`. Esse procedimento separado não é deploy de produção, não substitui os gates abaixo nem constitui homologação de VM, limpeza ou aceite do produto.
+
 Apollo uses DigitalOcean only, including production. Do not access or use the former Hostinger host (`srv1512423.hstgr.cloud` / `187.77.245.144`) for Apollo through SSH, API, browser, database, storage or workers. Historical incident records remain evidence, not permission to reuse it. Do not delete or stop residual/shared services without a separately authorised, exact-target operation.
 
 The deployment entrypoint now requires the `digitalocean-production` profile and `APOLLO_HOSTING_PROVIDER=digitalocean` for production; the previous profile is rejected, not aliased. `APOLLO_DOCKER_NETWORK` must identify an existing network on the confirmed target, with the needed reverse proxy and PostgreSQL connectivity. This script does not provision that network, Traefik, a droplet or DNS. The backup entrypoint has the same hosting guard; the guard is not a resource supervisor for backups.

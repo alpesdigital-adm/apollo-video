@@ -22,6 +22,8 @@
     "infra:local:up": "docker compose --env-file .env.local -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml up -d --build --wait",
     "infra:local:down": "docker compose --env-file .env.local -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml down",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test",
+    "test:ops:disposable": "node scripts/ops/run-disposable-validation-tests.mjs",
+    "test:ops:disposable:linux": "node scripts/ops/run-disposable-validation-tests.mjs --require-linux",
     "security:audit": "npm audit --audit-level=low",
     "security:audit:remotion": "npm audit --prefix remotion --audit-level=low",
     "test:integration:media": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/ffmpeg-ingest.integration.mjs tests/v2/ffmpeg-color-pipeline.integration.mjs",

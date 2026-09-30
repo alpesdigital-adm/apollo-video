@@ -1,4 +1,5 @@
 *.sh text eol=lf
+*.py text eol=lf
 
 # `git diff --check` is a required gate (CI step "Reject trailing whitespace and
 # blank lines at end of file"), and its default `blank-at-eol` rule reads a
