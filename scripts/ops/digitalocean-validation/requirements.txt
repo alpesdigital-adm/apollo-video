@@ -1,0 +1,3 @@
+# Disposable controller and offline operations tests; isolated CI venv only.
+paramiko==5.0.0
+cryptography==50.0.1

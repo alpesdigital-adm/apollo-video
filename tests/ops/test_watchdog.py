@@ -132,8 +132,18 @@ class WatchdogTest(unittest.TestCase):
             'owner_pid': self.m['owner_pid'],
             'owner_deadline_utc': self.m['owner_deadline_utc'],
             'exit_code': 0, 'cleanup_ok': True, 'orphan_backends': 0,
+            'work_outcome': 'success', 'work_errors': [],
+            'cleanup_outcome': 'verified', 'cleanup_errors': [],
+            'terminal_evidence': {
+                'root_owned': True, 'root_identity': [1, 2],
+                'runner': {'creation': 'created_verified', 'terminal': 'stopped'},
+                'pg': {'creation': 'created_verified', 'terminal': 'stopped'},
+                'backend_proof': 'observed_zero',
+            },
             'container_states': {'runner': 'stopped', 'pg': 'stopped'},
-            'errors': [], 'phases': [{'phase': 'runner', 'exit_code': 0},
+            'errors': [], 'phases': [{'phase': 'pg_start', 'exit_code': 0},
+                                    {'phase': 'runner_create', 'exit_code': 0},
+                                    {'phase': 'runner', 'exit_code': 0},
                                     {'phase': 'runner_exit', 'exit_code': 0}], 'samples': 12,
             'windows': windows,
         }
@@ -311,6 +321,64 @@ class WatchdogTest(unittest.TestCase):
                 self.postflight(**case)
                 self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
                 self.assertEqual(self.api.calls, [])
+
+    def test_failed_work_with_verified_cleanup_allows_only_disposable_deletion(self):
+        self.postflight(exit_code=1, work_outcome='failed', work_errors=['editorial failed'],
+                        error='editorial failed', errors=['editorial failed'],
+                        phases=[{'phase': 'pg_start', 'exit_code': 0},
+                                {'phase': 'runner_create', 'exit_code': 0},
+                                {'phase': 'runner', 'exit_code': 1}])
+        self.assertEqual(self.run_it(), 'deleted_verified')
+        self.assertEqual(len(self.api.deletes), 3)
+        self.assertNotIn('/v2/snapshots/' + self.m['snapshot_id'], self.api.deletes)
+
+    def test_never_created_requires_dispatch_and_explicit_not_applicable_backend(self):
+        never = {'root_owned': True, 'root_identity': [1, 2],
+                 'runner': {'creation': 'not_dispatched_verified', 'terminal': 'never_started'},
+                 'pg': {'creation': 'not_dispatched_verified', 'terminal': 'never_started'},
+                 'backend_proof': 'not_applicable_no_pg_created'}
+        failed = dict(exit_code=1, work_outcome='failed', work_errors=['pre-PG failed'],
+                      error='pre-PG failed', errors=['pre-PG failed'], phases=[{'phase': 'source_hash', 'exit_code': 1}],
+                      container_states={'runner': 'never_started', 'pg': 'never_started'},
+                      orphan_backends='N/A', terminal_evidence=never)
+        self.postflight(**failed)
+        self.assertEqual(self.run_it(), 'deleted_verified')
+        for change in ({'orphan_backends': 0}, {'terminal_evidence': {**never, 'backend_proof': 'observed_zero'}},
+                       {'phases': [{'phase': 'pg_start', 'exit_code': 1}]},
+                       {'terminal_evidence': {**never, 'pg': {'creation': 'attempted', 'terminal': 'never_started'}}},
+                       {'terminal_evidence': {**never, 'root_owned': False}}):
+            with self.subTest(change=change):
+                self.api = FakeAPI(self.m)
+                self.postflight(**(failed | change))
+                self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
+                self.assert_no_delete()
+
+    def test_contradictory_cleanup_and_work_records_never_delete(self):
+        base = dict(exit_code=1, work_outcome='failed', work_errors=['failed'],
+                    error='failed', errors=['failed'], phases=[{'phase': 'pg_start', 'exit_code': 0},
+                                                              {'phase': 'runner_create', 'exit_code': 0},
+                                                              {'phase': 'runner', 'exit_code': 1}])
+        self.postflight(**base)
+        self.assertEqual(self.run_it(), 'deleted_verified')
+        self.api = FakeAPI(self.m)
+        terminal = json.loads(Path(self.m['postflight_file']).read_text())['terminal_evidence']
+        for change in ({'work_errors': []}, {'exit_code': 0}, {'cleanup_errors': ['uncertain']},
+                       {'cleanup_outcome': 'unverified'}, {'terminal_evidence': {'root_owned': True}},
+                       {'terminal_evidence': {**terminal, 'backend_proof': 'not_applicable_no_pg_created'}},
+                       {'orphan_backends': True}, {'container_states': {'runner': 'running', 'pg': 'stopped'}}):
+            with self.subTest(change=change):
+                self.postflight(**(base | change))
+                self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
+                self.assert_no_delete()
+
+    def test_created_containers_need_successful_dispatch_phases_not_claims_only(self):
+        for phases in ([{'phase': 'runner', 'exit_code': 0}, {'phase': 'runner_exit', 'exit_code': 0}],
+                       [{'phase': 'pg_start', 'exit_code': 1}, {'phase': 'runner_create', 'exit_code': 0},
+                        {'phase': 'runner', 'exit_code': 0}, {'phase': 'runner_exit', 'exit_code': 0}]):
+            with self.subTest(phases=phases):
+                self.postflight(phases=phases)
+                self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
+                self.assert_no_delete()
 
     def test_samples_must_be_actual_bounded_complete_stage_records(self):
         path = Path(self.m['postflight_file']).parent/'samples.jsonl'

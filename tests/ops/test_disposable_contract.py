@@ -31,6 +31,9 @@ class ProducerConsumerContract(unittest.TestCase):
         run = guard.Run(config)
         run.root = root.parent
         (run.root/'evidence').mkdir(exist_ok=True)
+        run.owns_root = True
+        root_stat = run.root.stat()
+        run.root_identity = (root_stat.st_dev, root_stat.st_ino)
         host = dict(busy=1, steal=0, iowait=0, load1=0, ncpu=8,
                     load_ratio=0, available_kib=4 * 1024**2, oom_total=0)
         states = {run.runner: (True, 123), run.pg: (True, 456)}
@@ -53,6 +56,8 @@ class ProducerConsumerContract(unittest.TestCase):
             monitor = guard.Monitor(run.root, run.run)
             run.monitor = monitor
             monitor.window('preflight')
+            run.step('pg_start', ['fake-pg'], scope=False)
+            run.step('runner_create', ['fake-create'], scope=False)
             run.step('runner', ['fake-runner'], scope=False)
             run.step('runner_exit', ['docker', 'inspect'], scope=False)
             run.create_attempted.update((run.runner, run.pg))
@@ -85,6 +90,27 @@ class ProducerConsumerContract(unittest.TestCase):
                                     record['windows'][stage]['started'], 60)
         self.assertEqual(record['container_states'], {'runner': 'stopped', 'pg': 'stopped'})
         self.assertEqual(record['orphan_backends'], 0)
+        self.assertTrue(fixtures.watchdog.terminal_ready(fixtures.watchdog.validate_manifest(self.m)))
+        self.assertEqual(self.api.calls, [])
+        # Same real producer state with failed editorial work: no reclassification.
+        run.phases[-1] = {'phase': 'runner_exit', 'exit_code': 1}
+        failed = run.postflight_result(1, 'runner failed', [])
+        Path(self.m['postflight_file']).write_text(json.dumps(failed))
+        self.assertEqual(failed['work_outcome'], 'failed')
+        self.assertEqual(failed['exit_code'], 1)
+        self.assertTrue(fixtures.watchdog.terminal_ready(fixtures.watchdog.validate_manifest(self.m)))
+        # Fresh run stopped before dispatch: N/A is not a query returning zero.
+        never = guard.Run(config)
+        never.root = run.root; never.owns_root = True; never.root_identity = run.root_identity
+        never.owner_record = run.owner_record; never.monitor = monitor
+        with patch.object(guard, 'command', side_effect=guard.GateClosed('source rejected')):
+            with self.assertRaises(guard.GateClosed):
+                never.step('source_hash', ['fake-source'], scope=False)
+        self.assertEqual(never.cleanup(), [])
+        not_created = never.postflight_result(1, 'source rejected', [])
+        Path(self.m['postflight_file']).write_text(json.dumps(not_created))
+        self.assertEqual(not_created['orphan_backends'], 'N/A')
+        self.assertEqual(not_created['terminal_evidence']['backend_proof'], 'not_applicable_no_pg_created')
         self.assertTrue(fixtures.watchdog.terminal_ready(fixtures.watchdog.validate_manifest(self.m)))
         self.assertEqual(self.api.calls, [])
         Path(root/'samples.jsonl').unlink()

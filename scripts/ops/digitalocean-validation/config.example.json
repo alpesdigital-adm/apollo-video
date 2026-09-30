@@ -1,0 +1,28 @@
+{
+  "run_id": "replace-me",
+  "owner_id": "replace-me",
+  "evidence_root": "C:/Users/OPERATOR/AppData/Local/apollo-validation",
+  "expected_commit": "0000000000000000000000000000000000000000",
+  "source_bundle": "C:/Users/OPERATOR/AppData/Local/apollo-validation/source.tar",
+  "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "tool_sha256": {
+    "remote_guard.py": "0000000000000000000000000000000000000000000000000000000000000000",
+    "batch.sh": "0000000000000000000000000000000000000000000000000000000000000000",
+    "Dockerfile.runner": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "snapshot_id": "0",
+  "vpc_id": "00000000-0000-0000-0000-000000000000",
+  "ssh_key_id": 0,
+  "ssh_key_fingerprint": "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00",
+  "key_path": "C:/Users/OPERATOR/AppData/Local/apollo-validation/approved-ssh-key",
+  "ssh_cidr": "0.0.0.0/32",
+  "delete_authorized": false,
+  "region": "nyc1",
+  "size": "s-8vcpu-16gb-amd",
+  "max_hours": 4,
+  "max_usd": "1.00",
+  "backups": false,
+  "ipv6": false,
+  "monitoring": false,
+  "dns": null
+}
