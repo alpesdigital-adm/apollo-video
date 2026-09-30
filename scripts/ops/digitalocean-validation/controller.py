@@ -37,6 +37,8 @@ spec.loader.exec_module(watchdog)
 BASE = 'https://api.digitalocean.com'
 NAME_PREFIX = 'apollo-validation-'
 TOOLS = ('remote_guard.py', 'batch.sh', 'Dockerfile.runner')
+AUTHORIZED_PLANS = frozenset((('nyc1', 's-8vcpu-16gb-amd'),
+                              ('nyc3', 's-8vcpu-16gb-intel')))
 GET_PATH = re.compile(r'/v2/(?:droplets\?per_page=200&page=[1-9][0-9]*|sizes\?per_page=200&page=[1-9][0-9]*|droplets\?tag_name=apollo-validation-[a-z0-9-]+|(?:droplets|snapshots|account/keys)/[1-9][0-9]*|(?:vpcs|firewalls)/[0-9a-f-]{36}|tags/apollo-validation-[a-z0-9-]+)\Z')
 POST_PATHS = {'/v2/tags', '/v2/firewalls', '/v2/droplets'}
 DELETE_PATH = re.compile(r'/v2/(?:droplets/[1-9][0-9]*|firewalls/[0-9a-f-]{36}|tags/apollo-validation-[a-z0-9-]+)\Z')
@@ -73,7 +75,8 @@ def validate_config(c):
         raise ValueError('config_fields')
     if not watchdog.SLUG.fullmatch(c['run_id']) or not watchdog.OWNER.fullmatch(c['owner_id']):
         raise ValueError('run_or_owner')
-    if c['region'] != 'nyc1' or c['size'] != 's-8vcpu-16gb-amd':
+    if (type(c['region']) is not str or type(c['size']) is not str
+            or (c['region'], c['size']) not in AUTHORIZED_PLANS):
         raise ValueError('plan')
     if (type(c['max_hours']) is not int or c['max_hours'] != 4 or str(c['max_usd']) not in ('1', '1.0', '1.00')
             or c['delete_authorized'] is not True):
@@ -224,12 +227,12 @@ def preflight(api, c):
         raise Blocked('price_unknown') from None
     if (not rate.is_finite() or rate <= 0 or rate * 4 > Decimal('1.00')
             or size.get('vcpus') != 8 or size.get('memory') != 16384
-            or 'nyc1' not in size.get('regions', []) or size.get('available') is not True):
+            or c['region'] not in size.get('regions', []) or size.get('available') is not True):
         raise Blocked('price_or_size_gate')
     snapshot = required_get(api, '/v2/snapshots/' + c['snapshot_id'], 'snapshot')
     if str(snapshot.get('id')) != c['snapshot_id']: raise Blocked('snapshot_identity')
     vpc = required_get(api, '/v2/vpcs/' + c['vpc_id'], 'vpc')
-    if vpc.get('id') != c['vpc_id'] or vpc.get('region') != 'nyc1': raise Blocked('vpc_identity')
+    if vpc.get('id') != c['vpc_id'] or vpc.get('region') != c['region']: raise Blocked('vpc_identity')
     key = required_get(api, '/v2/account/keys/' + str(c['ssh_key_id']), 'ssh_key')
     if (key.get('id') != c['ssh_key_id'] or key.get('fingerprint') != c['ssh_key_fingerprint']
             or type(key.get('public_key')) is not str):
@@ -638,7 +641,7 @@ def manifest(c, run_dir, droplet, firewall, owner):
     return dict(run_id=c['run_id'], owner_id=c['owner_id'], environment='disposable-validation',
                 scope='apollo-validation', owner_pid=owner['pid'], owner_deadline_utc=owner['deadlineUTC'],
                 expected_commit=c['expected_commit'], droplet_id=droplet['id'], droplet_name=name,
-                firewall_id=firewall['id'], firewall_name=name, tag=name, region='nyc1', size=c['size'],
+                firewall_id=firewall['id'], firewall_name=name, tag=name, region=c['region'], size=c['size'],
                 vpc_id=c['vpc_id'], snapshot_id=c['snapshot_id'], created_at=droplet['created_at'],
                 not_before=int(stamp(droplet['created_at'])), delete_authorized=True,
                 run_terminal_verified=False, owner_released=False, incident_active=False,
@@ -706,7 +709,7 @@ def execute(c, loader):
                 raise Blocked('firewall_readback')
             journal(run_dir, 'firewall_verified', firewall_id=firewall_id)
             response = create_once(api, run_dir, c['run_id'], 'droplet', '/v2/droplets', {
-                'name': name, 'region': 'nyc1', 'size': c['size'], 'image': 'ubuntu-24-04-x64',
+                'name': name, 'region': c['region'], 'size': c['size'], 'image': 'ubuntu-24-04-x64',
                 'ssh_keys': [c['ssh_key_id']], 'backups': False, 'ipv6': False,
                 'monitoring': False, 'tags': [name], 'vpc_uuid': c['vpc_id'],
                 'user_data': cloud})

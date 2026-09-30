@@ -50,6 +50,126 @@ class ControllerTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     controller.validate_config({**self.config, field: value})
 
+    def test_only_explicit_region_size_pairs_are_authorized(self):
+        allowed = (('nyc1', 's-8vcpu-16gb-amd'), ('nyc3', 's-8vcpu-16gb-intel'))
+        for region, size in allowed:
+            with self.subTest(region=region, size=size):
+                self.assertEqual(controller.validate_config({**self.config, 'region': region,
+                                                             'size': size})['region'], region)
+        for region, size in (('nyc1', 's-8vcpu-16gb-intel'),
+                             ('nyc3', 's-8vcpu-16gb-amd'),
+                             ('sfo3', 's-8vcpu-16gb-intel'),
+                             ('nyc2', 's-8vcpu-16gb-amd')):
+            with self.subTest(region=region, size=size), self.assertRaises(ValueError):
+                controller.validate_config({**self.config, 'region': region, 'size': size})
+        for field in ('region', 'size'):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                controller.validate_config({**self.config, field: ['nyc3']})
+
+    def test_nyc3_preflight_binds_size_price_region_and_existing_vpc(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        class API:
+            def __init__(self, **changes):
+                self.calls = []
+                self.size = {'slug': c['size'], 'vcpus': 8, 'memory': 16384,
+                             'available': True, 'regions': ['nyc3'], 'price_hourly': '0.16667'}
+                self.vpc = {'id': c['vpc_id'], 'region': 'nyc3'}
+                for field, value in changes.items():
+                    (self.vpc if field == 'vpc_region' else self.size)[
+                        'region' if field == 'vpc_region' else field] = value
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                if method != 'GET': raise AssertionError('unexpected mutation')
+                if '/droplets?' in path: return 200, {'droplets': [], 'meta': {'total': 0}, 'links': {}}
+                if '/sizes?' in path: return 200, {'sizes': [self.size], 'meta': {'total': 1}, 'links': {}}
+                if '/snapshots/' in path: return 200, {'snapshot': {'id': c['snapshot_id']}}
+                if '/vpcs/' in path: return 200, {'vpc': self.vpc}
+                if '/keys/' in path: return 200, {'ssh_key': {'id': c['ssh_key_id'],
+                    'fingerprint': c['ssh_key_fingerprint'], 'public_key': 'ssh-ed25519 test'}}
+                raise AssertionError(path)
+        api = API()
+        self.assertEqual(controller.preflight(api, c)[1], '0.16667')
+        self.assertEqual(len(api.calls), 5)
+        for changed in ({'vcpus': 4}, {'memory': 8192}, {'available': False},
+                        {'regions': ['nyc1']}, {'price_hourly': '0.25001'},
+                        {'vpc_region': 'nyc1'}):
+            with self.subTest(changed=changed):
+                bad = API(**changed)
+                with self.assertRaises(controller.Blocked): controller.preflight(bad, c)
+                self.assertFalse(any(method != 'GET' for method, _, _ in bad.calls))
+
+    def test_nyc3_droplet_post_and_manifest_use_configured_region(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        class StopAfterPost(Exception): pass
+        class API:
+            def __init__(self): self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                if (method, path) == ('POST', '/v2/tags'):
+                    return 201, {'tag': {'name': payload['name']}}
+                if (method, path) == ('GET', '/v2/tags/apollo-validation-' + c['run_id']):
+                    return 200, {'tag': {'name': path.removeprefix('/v2/tags/')}}
+                if (method, path) == ('POST', '/v2/firewalls'):
+                    return 201, {'firewall': {'id': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'}}
+                if (method, path) == ('GET', '/v2/firewalls/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'):
+                    return 200, {'firewall': {'id': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                                             'name': 'apollo-validation-' + c['run_id'],
+                                             'tags': ['apollo-validation-' + c['run_id']],
+                                             'droplet_ids': []}}
+                if (method, path) == ('POST', '/v2/droplets'): raise StopAfterPost
+                raise AssertionError((method, path))
+        api = API()
+        class Loader:
+            @staticmethod
+            def load_token(): return 'fixture-only'
+        with patch.object(controller, 'check_artifacts', return_value=1), \
+             patch.object(controller, 'OfficialAPI', return_value=api), \
+             patch.object(controller, 'preflight', return_value=({'fingerprint': c['ssh_key_fingerprint']}, '0.16667')), \
+             patch.object(controller, 'local_login_key', return_value=object()), \
+             patch.object(controller, 'host_key', return_value=(self.root / 'host', 'fixture', 'fixture')), \
+             patch.object(controller, 'cloud_init', return_value='#cloud-config\n'):
+            with self.assertRaises(StopAfterPost): controller.execute(c, Loader())
+        posts = [(path, payload) for method, path, payload in api.calls if method == 'POST']
+        self.assertEqual([path for path, _ in posts], ['/v2/tags', '/v2/firewalls', '/v2/droplets'])
+        self.assertEqual(posts[-1][1]['region'], c['region'])
+        self.assertEqual(posts[-1][1]['size'], c['size'])
+        self.assertEqual(posts[-1][1]['vpc_uuid'], c['vpc_id'])
+        self.assertEqual((posts[-1][1]['backups'], posts[-1][1]['ipv6'], posts[-1][1]['monitoring']),
+                         (False, False, False))
+        droplet = {'id': 12345, 'created_at': '2030-01-01T00:00:00Z'}
+        m = controller.manifest(c, self.root / c['run_id'], droplet,
+                                {'id': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'},
+                                {'pid': 1234, 'deadlineUTC': '2030-01-01T01:00:00Z'})
+        self.assertEqual((m['region'], m['size']), (c['region'], c['size']))
+
+    def test_nyc3_readback_region_mismatch_blocks_before_deletion(self):
+        import test_watchdog as fixtures
+        fixture = fixtures.WatchdogTest()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        m, api = fixture.m, fixture.api
+        m.update(region='nyc3', size='s-8vcpu-16gb-intel')
+        api.droplet['droplet'].update(region={'slug': 'nyc1'}, size_slug=m['size'])
+        self.assertEqual(fixtures.watchdog.run(m, api, mode='delete'), 'blocked_identity')
+        self.assertEqual(api.deletes, [])
+
+    def test_nyc3_creation_readback_requires_matching_region(self):
+        c = controller.validate_config({**self.config, 'region': 'nyc3', 'size': 's-8vcpu-16gb-intel'})
+        name = 'apollo-validation-' + c['run_id']
+        droplet = {'id': 12345, 'name': name, 'tags': [name], 'region': {'slug': 'nyc3'},
+                   'size_slug': c['size'], 'vpc_uuid': c['vpc_id'],
+                   'image': {'slug': 'ubuntu-24-04-x64'}, 'created_at': '2030-01-01T00:00:00Z',
+                   'status': 'active', 'networks': {'v4': [{'type': 'public', 'ip_address': '8.8.8.8'}]}}
+        class API:
+            def request(self, method, path, payload=None):
+                self_outer.assertEqual((method, path), ('GET', '/v2/droplets/12345'))
+                return 200, {'droplet': droplet}
+        self_outer = self
+        self.assertEqual(controller.fresh_droplet(API(), 12345, c, name, droplet)[1], '8.8.8.8')
+        droplet['region'] = {'slug': 'nyc1'}
+        with self.assertRaises(controller.Blocked):
+            controller.fresh_droplet(API(), 12345, c, name, droplet)
+
     def test_cross_process_lock_is_exclusive_not_a_chat_lease(self):
         lock = str(self.root / 'apollo-validation-owner.lock')
         with controller.watchdog.claim_lock(lock):

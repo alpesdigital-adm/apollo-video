@@ -10,6 +10,14 @@ A validação não altera critérios de aceite nem autoriza acesso por si só.
 Usar a autorização explícita já vigente, se ainda válida e escopada para a
 rodada/alvos; seus tetos são quatro horas e US$ 1. Não renová-la nem ampliá-la
 por inferência. Se vencida ou fora do escopo, parar e pedir nova decisão.
+Em 30/09/2026 o owner autorizou também NYC3, com os mesmos limites e isolamento:
+somente `nyc3` + `s-8vcpu-16gb-intel` ou o par original `nyc1` +
+`s-8vcpu-16gb-amd`. Não há fallback automático nem permissão para pares cruzados.
+NYC1 foi recusada no preflight real por indisponibilidade dos planos 8/16;
+NYC3/Intel foi informada disponível a US$ 0,16667/h nessa consulta, mas requer
+preflight atual antes de qualquer mutação. A VPC default NYC3 já existe: Astra
+deve confirmar membros vazios antes de usá-la; não criar nem remover VPC.
+Snapshot preservado, nenhuma produção/DNS/provider pago; execução real só Astra.
 Código local e testes controlados não homologam operação remota.
 Ambiente observado: Windows real, WSL sem distribuições e Docker CLI ausente.
 O passo Linux adicionado ao CI ainda não foi executado nesta rodada.
