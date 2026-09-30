@@ -21,6 +21,10 @@ MAX_ARCHIVE_BYTES = 512 * 1024 * 1024  # Total unpacked regular-file bytes.
 MAX_ARCHIVE_MEMBERS = 100000  # Files and directories, including Git metadata.
 GIT_TOTAL_SECONDS = 300
 GIT_COMMAND_SECONDS = 120
+SOURCE_CREDENTIAL_ROUTES = frozenset({
+    'src/app/v1/workspaces/[workspaceId]/clients/[clientId]/credentials/route.ts',
+    'src/app/v1/workspaces/[workspaceId]/clients/[clientId]/credentials/[credentialId]/route.ts',
+})
 
 
 class BundleError(Exception):
@@ -93,7 +97,9 @@ def entries(cwd, env):
             raise BundleError('unsafe tracked path')
         if (any(p in ('node_modules', 'output', '.ssh', '.aws') for p in parts)
                 or any(p == '.env' or (p.startswith('.env.') and not p.endswith('.example'))
-                       or p.lower() in ('.npmrc', '.pypirc', 'id_rsa', 'credentials', 'secrets')
+                       or p.lower() in ('.npmrc', '.pypirc', 'id_rsa')
+                       or (re.fullmatch(r'(?:credentials?|secrets?)(?:\..+)?', p.lower())
+                           and not (p == 'credentials' and path in SOURCE_CREDENTIAL_ROUTES))
                        or p.lower().endswith(('.pem', '.key')) for p in parts)):
             raise BundleError('tracked runtime or credential path')
         if mode not in (b'100644', b'100755'):

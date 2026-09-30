@@ -1,10 +1,13 @@
 # Validação local do procedimento descartável — 29/09/2026
 
+Este é o registro da etapa local anterior à publicação no PR #63. Os resultados
+abaixo não são uma declaração sobre o CI posterior; ver a seção de publicação.
+
 ## Resultado e limite do aceite
 
 Os ajustes operacionais e o runbook foram incorporados à árvore local do projeto.
 A base Git local e remota conferida é `2c147de6eb96b85fc432b4c2b6c92249f21919dc`.
-Os arquivos novos desta rodada ainda não foram commitados, enviados ou implantados.
+Na coleta local, os arquivos novos ainda não tinham sido commitados ou enviados.
 Não confundir essa base com uma revisão publicada contendo os novos scripts.
 
 Estado: **implementado e integrado entre componentes em testes locais controlados**.
@@ -110,3 +113,52 @@ fonte para a rodada seguinte.
 `TODO.md`, `AGENTS.md`, `package-lock.json` e `config/host-safety-policy.json`
 permaneceram idênticos ao HEAD conferido. W29 não foi retomada. Nenhum token,
 config operacional real ou arquivo de credenciais integra esta documentação.
+
+## Publicação e primeira execução Linux — PR #63
+
+Após autorização para prosseguir, a implementação local foi publicada no commit
+`5b25800ce2b2d5ae003c2a54fa5af8be994059c1`, na branch
+`chore/disposable-validation-ops`. A primeira execução Linux, CI `36645462027`,
+**reprovou** a etapa operacional: 107 testes, 9 falhas, zero erros e dois skips
+exclusivos do Windows. Os três smokes Linux realmente executaram e passaram;
+isso não tornou a suíte completa verde. Nenhuma falha foi creditada como sucesso.
+
+Uma prova adicional usou um clone limpo do commit publicado e encontrou um
+bloqueio que as fixtures pequenas não cobriam: o empacotador confundia os
+diretórios `credentials` de duas rotas TypeScript `/v1` com material secreto.
+O pacote não foi publicado após a falha. Uma correção não pode liberar arquivos
+de credenciais genericamente nem enfraquecer o bloqueio de `.env` e chaves.
+
+As nove falhas Linux e o bloqueio do pacote foram preservados em
+`apollo-ops-pr63/initial-validation-failures.json`, fora do repositório. Os
+checks do PR #63 e seus recibos posteriores são a referência para a revisão
+efetivamente validada; o verde local registrado acima não substitui esses gates.
+Não houve provisionamento, SSH, exclusão DigitalOcean ou deploy nesta publicação.
+
+### Correção candidata e regressões
+
+- O produtor reconhece apenas os dois caminhos exatos de `route.ts` como código
+  da API e rejeita outros arquivos no mesmo subtree, inclusive material secreto.
+  Os negativos também cobrem `credentials.json` e `secrets.json` fora das rotas.
+- A fixture de cleanup cria o diretório do run com `0700`, como exige o runtime;
+  o negativo POSIX exige rejeição de diretório `0755` sem DELETE nem intent.
+  O teste de symlink exige rejeição no estágio de manifesto e zero chamadas API.
+  Nenhuma proteção de `watchdog.py` foi removida para acomodar as fixtures.
+- O CI passa a empacotar seu checkout real limpo e ler o pacote com
+  `remote_guard.safe_extract()`. Confere commit, Git shallow/clean, presença das
+  rotas, hash, bytes e contagem; o tar permanece fora da árvore e é removido ao
+  encerrar a etapa. O recibo de saída não inclui o caminho privado do executor.
+
+Astra reexecutou a suíte local: **111 testes, zero falhas/erros e seis skips**
+(três smokes Linux, dois de permissões POSIX e um de symlink indisponível no
+Windows), sem exceções de threads. A prova local do produtor corrigido e do
+extrator usou o payload antigo `5b25800c`: 3.046 membros e 53.002.240 bytes.
+Isso não substitui a prova do novo commit no CI. A revisão independente não
+encontrou bloqueantes; sugeriu limitar e isolar ainda mais os subprocessos Git
+do helper de readback, hoje restrito à prova local/CI e à saída do produtor.
+
+Arquitetura e infraestrutura passaram. Uma cadeia local atingiu 150 segundos
+durante ESLint; o processo remanescente foi identificado, encerrado e sua
+ausência conferida antes da repetição. Essa tentativa não foi creditada.
+ESLint executado separadamente com prazo maior retornou zero. A nova execução
+Linux e o recibo do checkout revisado devem ser conferidos nos checks do PR #63.

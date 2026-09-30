@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -138,7 +139,7 @@ class WatchdogTest(unittest.TestCase):
         }
         record.update(changes)
         path = Path(self.m['postflight_file'])
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         path.write_text(json.dumps(record), encoding='utf-8')
         sample = {'at': 1.0, 'busy': 1, 'steal': 0, 'iowait': 0,
                   'load1': 0, 'ncpu': 8, 'load_ratio': 0, 'available_kib': 4194304,
@@ -258,6 +259,21 @@ class WatchdogTest(unittest.TestCase):
             self.assertEqual(self.api.calls, [])
             Path(self.m['evidence_root']).chmod(0o700)
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX permission bits required')
+    def test_fixture_run_directory_is_private_and_delete_uses_it(self):
+        directory = Path(self.m['postflight_file']).parent
+        self.assertEqual(stat.S_IMODE(directory.stat().st_mode) & 0o077, 0)
+        self.assertEqual(self.run_it(), 'deleted_verified')
+        self.assertEqual(len(self.api.deletes), 3)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX permission bits required')
+    def test_public_run_directory_blocks_delete_before_any_intent(self):
+        directory = Path(self.m['postflight_file']).parent
+        directory.chmod(0o755)
+        self.assertEqual(self.run_it(), 'blocked_api_error')
+        self.assert_no_delete()
+        self.assertEqual(list(directory.glob('delete-*.intent.json')), [])
+
     def test_symlinked_evidence_blocks(self):
         link = Path(self.tmp.name) / 'linked-postflight.json'
         try:
@@ -267,7 +283,7 @@ class WatchdogTest(unittest.TestCase):
         original = Path(self.m['postflight_file'])
         original.unlink()
         original.symlink_to(link)
-        self.assertEqual(self.run_it(), 'blocked_unverified_terminal')
+        self.assertEqual(self.run_it(), 'blocked_manifest')
         self.assertEqual(self.api.calls, [])
 
     def test_prework_json_cannot_bypass_missing_postflight(self):

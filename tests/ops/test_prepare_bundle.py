@@ -148,6 +148,46 @@ class PrepareBundleTest(unittest.TestCase):
             self.assertIn('.env.example', archive.getnames())
             self.assertIn('.env.local.example', archive.getnames())
 
+    def test_only_the_two_clients_credentials_routes_are_source(self):
+        base = 'src/app/v1/workspaces/[workspaceId]/clients/[clientId]/credentials'
+        routes = [f'{base}/route.ts', f'{base}/[credentialId]/route.ts']
+        for name in routes:
+            file = self.repo / name
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text('export const GET = () => new Response("fixture");\n')
+        self.git('add', *routes)
+        self.git('commit', '-qm', 'fixture source routes')
+        result = self.run_cli('--expected-commit', self.git('rev-parse', 'HEAD').stdout.strip())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with tarfile.open(self.output) as archive:
+            self.assertTrue(set(routes).issubset(archive.getnames()))
+
+    def test_credential_material_and_other_routes_stay_excluded(self):
+        base = 'src/app/v1/workspaces/[workspaceId]/clients/[clientId]/credentials'
+        paths = [f'{base}/credentials.json', f'{base}/secrets.json',
+                 f'{base}/[credentialId]/credentials.json', f'{base}/[credentialId]/secret.json',
+                 f'{base}/client.key', f'{base}/.env.production',
+                 f'{base}/backup.json', f'{base}/other.ts',
+                 f'{base}/[credentialId]/other.ts',
+                 'src/config/credentials.json', 'src/config/secrets.json',
+                 'src/config/credentials/route.ts', 'src/config/secrets/route.ts']
+        for name in paths:
+            with self.subTest(path=name):
+                file = self.repo / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text('fixture only\n')
+                self.git('add', '--', name)
+                self.git('commit', '-qm', 'fixture forbidden path')
+                result = self.run_cli()
+                published = self.output.exists()
+                if published:
+                    self.output.unlink()  # A failed assertion must not mask later subtests.
+                self.git('rm', '-q', '--', name)
+                self.git('commit', '-qm', 'remove forbidden fixture')
+                self.assertNotEqual(result.returncode, 0, name)
+                self.assertIn('tracked runtime or credential path', result.stderr)
+                self.assertFalse(published, name)
+
     def test_executable_bit_comes_from_git_index(self):
         self.git('config', 'core.filemode', 'false')
         self.git('update-index', '--chmod=+x', 'readme.txt')

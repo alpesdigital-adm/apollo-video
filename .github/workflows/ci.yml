@@ -121,6 +121,21 @@ jobs:
           PYTHON: python3
           TMPDIR: ${{ runner.temp }}
 
+      - name: Package and read back the real clean checkout offline
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/apollo-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar"
+          receipt="$RUNNER_TEMP/apollo-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.receipt.json"
+          trap 'rm -f "$archive"' EXIT
+          python3 scripts/ops/digitalocean-bootstrap/prepare_bundle.py \
+            --source "$GITHUB_WORKSPACE" --expected-commit "$(git rev-parse HEAD)" \
+            --output "$archive" > "$receipt"
+          python3 tests/ops/prove_real_bundle.py --archive "$archive" \
+            --receipt "$receipt" --expected-commit "$(git rev-parse HEAD)"
+        env:
+          TMPDIR: ${{ runner.temp }}
+          PYTHONDONTWRITEBYTECODE: "1"
+
       - name: Install locked renderer dependencies
         run: npm ci --prefix remotion
 
