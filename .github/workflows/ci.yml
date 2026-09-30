@@ -115,10 +115,15 @@ jobs:
             exit 1
           fi
 
+      - name: Install isolated pinned Python dependencies for disposable operations
+        run: |
+          python3 -m venv "$RUNNER_TEMP/apollo-ops-python"
+          "$RUNNER_TEMP/apollo-ops-python/bin/python" -m pip install --only-binary=:all: -r scripts/ops/digitalocean-validation/requirements.txt
+
       - name: Run disposable operations suite on the Linux runner
         run: npm run test:ops:disposable:linux
         env:
-          PYTHON: python3
+          PYTHON: ${{ runner.temp }}/apollo-ops-python/bin/python
           TMPDIR: ${{ runner.temp }}
 
       - name: Package and read back the real clean checkout offline

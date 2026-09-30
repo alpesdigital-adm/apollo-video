@@ -1199,6 +1199,8 @@ test(
       // Transport-controlled: stubbed refusals. NOT evidence about governance.
       const annotationsGlob = `**/v1/projects/*/annotations*`
       const stub = { strength: 'transport-stub', note: 'page.route() interception — says nothing about PostgreSQL or governance' }
+      evidence.stubbedRefusals = stub // Keep the partial/final state even when a 429 assertion or wait fails.
+      const rateLimitedGets = []
 
       await page.route(annotationsGlob, async (route) => {
         if (route.request().method() !== 'GET') return route.fallback()
@@ -1207,18 +1209,65 @@ test(
           headers: { 'content-type': 'application/json', 'retry-after': '3' },
           body: JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'stubbed', requestId: 'stub-429' } }),
         })
+        rateLimitedGets.push({
+          path: tokenizePath(new URL(route.request().url()).pathname, tokens),
+          status: 429,
+          code: 'RATE_LIMITED',
+          requestId: 'stub-429',
+        })
       })
-      await openProjectCard(page, baseUrl, clean.name)
-      await waitForEditorSettle(page)
-      stub.rateLimited = await refusalBlock(page)
-      stub.rateLimited.readLedger = await readLedger(page)
+      recorder.start('stub-429')
+      let rateLimitedFailure = null
+      try {
+        await Promise.all([
+          page.waitForResponse((response) =>
+            response.request().method() === 'GET' &&
+            response.status() === 429 &&
+            new URL(response.url()).pathname === `/v1/projects/${clean.projectId}/annotations`,
+          { timeout: 10_000 }),
+          openProjectCard(page, baseUrl, clean.name),
+        ])
+        await page.getByTestId('review-unavailable-code')
+          .filter({ hasText: /RATE_LIMITED.*stub-429/ })
+          .waitFor({ state: 'visible', timeout: 10_000 })
+      } catch (error) {
+        rateLimitedFailure = error
+      } finally {
+        // Capture the public UI before asserting (and on either timeout); never
+        // let a failed diagnostic or screenshot replace the primary failure.
+        const captureErrors = []
+        stub.rateLimited = await refusalBlock(page).catch((error) => {
+          captureErrors.push(`refusalBlock: ${redactDiagnostic(error)}`)
+          return { codeText: null, captureUnavailable: true }
+        })
+        stub.rateLimited.readLedger = await readLedger(page)
+        stub.rateLimited.interceptedGets = [...rateLimitedGets]
+        stub.rateLimited.recorder = recorder.diagnostic('stub-429')
+        try {
+          const phase = await recorder.stop()
+          phase.gets = phase.entries.filter((entry) => entry.method === 'GET').length
+          evidence.phases.push(phase)
+          stub.rateLimited.phase = phase
+        } catch (error) {
+          captureErrors.push(`recorder.stop: ${redactDiagnostic(error)}`)
+        }
+        try {
+          await page.screenshot({ path: join(evidenceDir, 'stub-429.png') })
+        } catch (error) {
+          captureErrors.push(`screenshot: ${redactDiagnostic(error)}`)
+        }
+        if (captureErrors.length) stub.rateLimited.captureErrors = captureErrors
+        if (!rateLimitedFailure && captureErrors.length)
+          rateLimitedFailure = new Error(`429 evidence capture failed: ${captureErrors.join(' | ')}`)
+      }
+      if (rateLimitedFailure) throw rateLimitedFailure
+      assert.ok(rateLimitedGets.length > 0, 'the controlled 429 GET was not intercepted')
       assert.ok(stub.rateLimited.blockVisible > 0, '429 did not render the review-unavailable warning')
       assert.ok((stub.rateLimited.codeText ?? '').includes('RATE_LIMITED'), '429 warning omitted RATE_LIMITED')
       assert.ok((stub.rateLimited.codeText ?? '').includes('stub-429'), '429 warning omitted its request id')
       assert.equal(stub.rateLimited.retryPresent > 0, true, '429 warning omitted retry control')
       assert.equal(stub.rateLimited.retryDisabled, true, '429 retry was enabled before Retry-After elapsed')
       assert.equal(stub.rateLimited.retryCountsDown, true, '429 retry did not expose its countdown')
-      await page.screenshot({ path: join(evidenceDir, 'stub-429.png') })
       await page.unroute(annotationsGlob)
 
       let unauthorizedServed = 0

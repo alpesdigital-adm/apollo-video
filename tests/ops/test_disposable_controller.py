@@ -1,0 +1,479 @@
+"""Offline, no credential or provider access. Fakes exercise the real controller/watchdog contracts."""
+import importlib.util
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tempfile
+from typing import Any
+import unittest
+from unittest.mock import patch
+
+SOURCE = Path(__file__).resolve().parents[2] / 'scripts/ops/digitalocean-validation/controller.py'
+spec = importlib.util.spec_from_file_location('disposable_controller', SOURCE)
+controller = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(controller)
+
+
+class ControllerTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / 'private'
+        self.root.mkdir(mode=0o700)
+        fixed_root = patch.object(controller, 'FIXED_EVIDENCE_ROOT', self.root)
+        fixed_root.start()
+        self.addCleanup(fixed_root.stop)
+        self.bundle = self.root / 'source.tar'
+        self.bundle.write_bytes(b'archive fixture')
+        import hashlib
+        self.config = dict(run_id='w27w28-01', owner_id='controller01', evidence_root=str(self.root),
+                           expected_commit='7fbf38ff3c2fb83d1ecf2e6f908197cf9a79c723',
+                           source_bundle=str(self.bundle), source_sha256=hashlib.sha256(self.bundle.read_bytes()).hexdigest(),
+                           snapshot_id='987654321', vpc_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                           ssh_key_id=123, ssh_key_fingerprint='aa:' * 15 + 'bb', key_path=str(self.root / 'id_ed25519'),
+                           ssh_cidr='8.8.8.8/32', delete_authorized=True,
+                           region='nyc1', size='s-8vcpu-16gb-amd', max_hours=4, max_usd='1.00',
+                           backups=False, ipv6=False, monitoring=False, dns=None,
+                           tool_sha256={name: 'a' * 64 for name in controller.TOOLS})
+
+    def test_offline_check_rejects_placeholder_and_disallowed_paid_options(self):
+        self.assertEqual(controller.validate_config(self.config)['run_id'], 'w27w28-01')
+        for field, value in [('size', 's-2vcpu-4gb'), ('region', 'sfo3'), ('max_hours', 5),
+                             ('max_usd', '2'), ('backups', True), ('monitoring', True),
+                             ('dns', 'example.com'), ('snapshot_id', '000'), ('delete_authorized', False)]:
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    controller.validate_config({**self.config, field: value})
+
+    def test_cross_process_lock_is_exclusive_not_a_chat_lease(self):
+        lock = str(self.root / 'apollo-validation-owner.lock')
+        with controller.watchdog.claim_lock(lock):
+            child = subprocess.run([sys.executable, '-c',
+                'import importlib.util,sys; s=importlib.util.spec_from_file_location("w",sys.argv[1]);'
+                'w=importlib.util.module_from_spec(s);s.loader.exec_module(w);'
+                'with_lock=w.claim_lock(sys.argv[2]);'
+                'next(with_lock.__enter__() for _ in range(1))',
+                str(controller.WATCHDOG_PATH), lock], capture_output=True, timeout=10)
+            self.assertNotEqual(child.returncode, 0)
+            self.assertIn(b'OwnerActive', child.stderr)
+            with self.assertRaises(controller.watchdog.OwnerActive):
+                with controller.watchdog.claim_lock(lock):
+                    pass
+
+    def test_inventory_requires_all_pages_and_rejects_ambiguous_apollo_test(self):
+        class API:
+            def __init__(self): self.calls = []
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path))
+                if path.endswith('page=1'):
+                    return 200, {'droplets': [{'id': 1, 'name': 'other', 'tags': []}],
+                                 'meta': {'total': 2}, 'links': {'pages': {'next': 'https://api.digitalocean.com/v2/droplets?per_page=200&page=2'}}}
+                return 200, {'droplets': [{'id': 2, 'name': 'apollo-validation-prior', 'tags': []}],
+                             'meta': {'total': 2}, 'links': {'pages': {}}}
+        api = API()
+        with self.assertRaises(controller.Blocked): controller.require_empty_inventory(api)
+        self.assertEqual(len(api.calls), 2)
+        self.assertEqual(api.calls[0][0], 'GET')
+
+    def test_post_intent_not_retried_after_timeout(self):
+        class API:
+            count = 0
+            def request(self, method, path, payload=None):
+                self.count += 1
+                raise TimeoutError('no response')
+        api = API()
+        with self.assertRaises(TimeoutError):
+            controller.create_once(api, self.root, 'w27w28-01', 'droplet', '/v2/droplets', {'name': 'test'})
+        with self.assertRaises(controller.Blocked):
+            controller.create_once(api, self.root, 'w27w28-01', 'droplet', '/v2/droplets', {'name': 'test'})
+        self.assertEqual(api.count, 1)
+
+    def test_rate_and_identity_gate_before_any_post(self):
+        class API:
+            def __init__(self, price): self.price = price; self.calls = []; self.config = config
+            def request(self, method, path, payload=None):
+                self.calls.append((method, path))
+                if method != 'GET': raise AssertionError('unexpected mutation')
+                if '/droplets?' in path: return 200, {'droplets': [], 'meta': {'total': 0}, 'links': {}}
+                if '/sizes?' in path:
+                    return 200, {'sizes': [{'slug': 's-8vcpu-16gb-amd', 'vcpus': 8,
+                          'memory': 16384, 'available': True, 'regions': ['nyc1'],
+                          'price_hourly': self.price}], 'meta': {'total': 1}, 'links': {}}
+                if '/snapshots/' in path: return 200, {'snapshot': {'id': self.config['snapshot_id']}}
+                if '/vpcs/' in path: return 200, {'vpc': {'id': self.config['vpc_id'], 'region': 'nyc1'}}
+                if '/keys/' in path: return 200, {'ssh_key': {'id': 123,
+                    'fingerprint': self.config['ssh_key_fingerprint'], 'public_key': 'ssh-ed25519 test'}}
+                raise AssertionError(path)
+        config = self.config
+        for price in ('0.26', 'NaN', '-1'):
+            api = API(price)
+            with self.subTest(price=price), self.assertRaises(controller.Blocked):
+                controller.preflight(api, self.config)
+            self.assertEqual([method for method, _ in api.calls], ['GET', 'GET'])
+        api = API('0.249')
+        self.assertEqual(controller.preflight(api, self.config)[1], '0.249')
+        self.assertEqual(len(api.calls), 5)
+
+    def test_generated_host_key_is_pinned_and_not_login_key(self):
+        import paramiko
+        key_path, private, public = controller.host_key(self.root)
+        self.assertEqual(paramiko.Ed25519Key.from_private_key_file(str(key_path)).get_name(), 'ssh-ed25519')
+        self.assertTrue(public.startswith('ssh-ed25519 '))
+        cloud = controller.cloud_init(private, public)
+        self.assertIn('ssh_keys:\n  ed25519_private: |', cloud)
+        self.assertIn('  ed25519_public: ' + public, cloud)
+        self.assertNotIn('Bearer', cloud)
+
+    def test_real_watchdog_contract_blocks_ssh_loss_and_deletes_after_readback(self):
+        import test_watchdog as fixtures
+        fixture = fixtures.WatchdogTest()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        m, api = fixture.m, fixture.api
+        self.config.update({k: m[k] for k in ('run_id', 'owner_id', 'expected_commit',
+                                              'snapshot_id', 'vpc_id', 'region', 'size')})
+        self.config['evidence_root'] = m['evidence_root']
+        run_dir = Path(m['postflight_file']).parent
+        postflight = Path(m['postflight_file']).read_bytes()
+        samples = (run_dir / 'samples.jsonl').read_bytes()
+
+        class Transport:
+            active = False
+            def is_active(self): return self.active
+        transport = Transport()
+        class SSH:
+            closed = False
+            def get_transport(self): return transport
+            def close(self): self.closed = True
+        ssh = SSH()
+        class SFTP:
+            closed = False
+            def lstat(self, path):
+                content = (postflight if path.endswith('postflight.json') else
+                           b'bad mp4' if path.endswith('.mp4') else samples)
+                return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
+            def open(self, path, mode):
+                return io.BytesIO(postflight if path.endswith('postflight.json') else
+                                  b'bad mp4' if path.endswith('.mp4') else samples)
+            def listdir_attr(self, path):
+                return [type('Stat', (), {'filename': 'project-a-final.mp4',
+                        'st_mode': stat.S_IFREG | 0o600, 'st_size': 7})()]
+            def close(self): self.closed = True
+        sftp = SFTP()
+        owner = {'pid': m['owner_pid'], 'deadlineUTC': m['owner_deadline_utc']}
+        droplet = {'id': m['droplet_id'], 'created_at': m['created_at']}
+        firewall = {'id': m['firewall_id']}
+        held = {'path': m['lockfile'], 'active': True}
+        with fixtures.watchdog.claim_lock(m['lockfile']):
+            with self.assertRaises(controller.Blocked):
+                controller.finish_and_delete(self.config, run_dir, api, ssh, sftp, owner, 0,
+                                             droplet, firewall, held)
+            self.assertEqual(api.calls, [])
+            self.assertFalse(ssh.closed)
+            transport.active = True
+            Path(m['postflight_file']).unlink()
+            (run_dir / 'samples.jsonl').unlink()
+            record, status, acceptance = controller.finish_and_delete(self.config, run_dir, api, ssh, sftp,
+                                                            owner, 0, droplet, firewall, held)
+            self.assertTrue(ssh.closed and sftp.closed)
+            self.assertEqual(status, 'deleted_verified')
+            self.assertEqual(record['work_outcome'], 'success')
+            self.assertEqual(acceptance['status'], 'failed')
+            self.assertIn('synthetic-phase-gate.png', acceptance['missing'])
+            self.assertIn('visual_mp4_header', acceptance['errors'])
+            self.assertEqual(len(api.deletes), 3)
+            self.assertFalse(any('snapshot' in p for p in api.deletes))
+
+    def test_owner_pid_deadline_and_exit_cannot_be_invented(self):
+        import test_watchdog as fixtures
+        fixture = fixtures.WatchdogTest()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        m = fixture.m
+        for changed in ({'pid': m['owner_pid'] + 1, 'deadlineUTC': m['owner_deadline_utc']},
+                        {'pid': m['owner_pid'], 'deadlineUTC': '2030-01-01T00:00:00Z'}):
+            with self.subTest(changed=changed), self.assertRaises(controller.Blocked):
+                controller.verify_postflight(m, changed, 0)
+        with self.assertRaises(controller.Blocked):
+            controller.verify_postflight(m, {'pid': m['owner_pid'],
+                                             'deadlineUTC': m['owner_deadline_utc']}, 1)
+
+    def test_visual_readback_rejects_invalid_mp4_even_if_sftp_says_regular(self):
+        data = {'postflight.json': b'{}', 'samples.jsonl': b'{}\n',
+                'batch-results.jsonl': b'{}\n', 'visual.mp4': b'not an MP4'}
+        class SFTP:
+            def lstat(self, path):
+                content = data[path.split('/')[-1]]
+                return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
+            def open(self, path, mode): return io.BytesIO(data[path.split('/')[-1]])
+            def listdir_attr(self, path):
+                return [type('Stat', (), {'filename': 'visual.mp4', 'st_mode': stat.S_IFREG | 0o600,
+                                          'st_size': len(data['visual.mp4'])})()]
+        run_dir = self.root / 'visual-run'
+        run_dir.mkdir(mode=0o700)
+        record, acceptance = controller.collect_evidence(SFTP(), self.config, run_dir)
+        self.assertEqual(record, {})
+        self.assertEqual(acceptance['status'], 'failed')
+        self.assertIn('visual_mp4_header', acceptance['errors'])
+        self.assertTrue((run_dir / 'visual-inventory.json').is_file())
+
+    def test_public_metadata_allowlist_sanitizes_nested_fields_and_retains_ids(self):
+        mp4 = b'\x00\x00\x00\x0cftyp' + b'fixture'
+        digest = hashlib.sha256(mp4).hexdigest()
+        names = controller.PUBLIC_JSON
+        files = {name: json.dumps({'outputKey': 'artifact/ref', 'reportId': 'report-123',
+                 'nested': [{'authorization': 'Bearer sensitive', 'apiToken': 'sensitive',
+                             'cookie': 'sensitive', 'senha': 'sensitive', 'secretValue': 'sensitive'}],
+                 'real': {'verified': True}, 'outputSha256': digest,
+                 'productionRunId': 'production-id'}).encode() for name in names}
+        files['result.json'] = json.dumps({'runId': self.config['run_id'],
+            'nested': [{'authorization': 'Bearer sensitive'}]}).encode()
+        for project in ('a', 'b'):
+            identity: dict[str, Any] = {field: f'{field}-{project}-opaque' for field in (
+                'workspaceId', 'projectId', 'projectVersionId', 'productionRunId',
+                'publicOperationId', 'outputArtifactId', 'outputManifestId')}
+            identity.update(outputSha256=digest, attempt=1, outputKey='artifact/ref',
+                            reportId='report-123', nested=[{'authorization': 'Bearer sensitive',
+                            'apiToken': 'sensitive', 'cookie': 'sensitive', 'senha': 'sensitive',
+                            'secretValue': 'sensitive'}])
+            terminal = {'operation': {'id': identity['publicOperationId'], 'status': 'succeeded',
+                         'phase': 'completed'}, 'checkpoint': {'outputSha256': digest, 'attempt': 1},
+                        'qualityReport': {**{key: identity[key] for key in (
+                            'workspaceId', 'projectId', 'projectVersionId', 'productionRunId',
+                            'publicOperationId', 'outputArtifactId', 'outputManifestId', 'outputSha256')},
+                            'passed': True},
+                        'attestation': {'identity': {'commitSha': self.config['expected_commit']}}}
+            files[f'project-{project}-final-render-identity.json'] = json.dumps(identity).encode()
+            files[f'project-{project}-final-render-terminal.json'] = json.dumps(terminal).encode()
+        files.update({'postflight.json': b'{"work_outcome":"success"}',
+                      'samples.jsonl': b'{}\n', 'batch-results.jsonl': b'{}\n',
+                      'synthetic-phase-gate.png': b'\x89PNG\r\n\x1a\nfixture',
+                      'project-a-final.mp4': mp4, 'project-b-final.mp4': mp4,
+                      'next.log': b'sensitive', 'private.env': b'sensitive'})
+        class SFTP:
+            def lstat(self, path):
+                content = files[path.rsplit('/', 1)[-1]]
+                return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
+            def open(self, path, mode): return io.BytesIO(files[path.rsplit('/', 1)[-1]])
+            def listdir_attr(self, path):
+                return [type('Stat', (), {'filename': name, 'st_mode': stat.S_IFREG | 0o600,
+                        'st_size': len(content)})() for name, content in files.items()
+                        if name not in ('postflight.json', 'samples.jsonl', 'batch-results.jsonl')]
+        run_dir = self.root / 'metadata'
+        run_dir.mkdir(mode=0o700)
+        _, acceptance = controller.collect_evidence(SFTP(), self.config, run_dir)
+        self.assertEqual(acceptance, {'status': 'passed', 'missing': [], 'errors': []})
+        saved = json.loads((run_dir / 'visual-project-a-final-render-identity.json').read_text())
+        self.assertEqual((saved['outputKey'], saved['reportId']), ('artifact/ref', 'report-123'))
+        self.assertEqual(set(saved['nested'][0].values()), {'[REDACTED]'})
+        self.assertFalse((run_dir / 'visual-next.log').exists())
+        self.assertFalse((run_dir / 'visual-private.env').exists())
+        inventory = json.loads((run_dir / 'visual-inventory.json').read_text())
+        self.assertEqual(len(inventory['renders']), 2)
+        self.assertEqual(len(inventory['collected']), len(names) + 3)
+
+    def test_render_binding_rejects_blank_mismatch_other_run_and_commit(self):
+        mp4 = b'\x00\x00\x00\x0cftyp' + b'fixture'
+        digest = hashlib.sha256(mp4).hexdigest()
+        fields = ('workspaceId', 'projectId', 'projectVersionId', 'productionRunId',
+                  'publicOperationId', 'outputArtifactId', 'outputManifestId', 'outputSha256')
+
+        def fixture():
+            files: dict[str, Any] = {'postflight.json': b'{"work_outcome":"success"}',
+                     'samples.jsonl': b'{}\n', 'batch-results.jsonl': b'{}\n',
+                     'result.json': json.dumps({'runId': self.config['run_id'],
+                         'nested': [{'authorization': 'Bearer sensitive'}]}).encode(),
+                     'synthetic-phase-gate.png': b'\x89PNG\r\n\x1a\nfixture',
+                     'synthetic-phase-gate-history-browser.json': b'{"real":true}',
+                     'transformation-critic-report-viewer-browser.json': b'{"real":true}'}
+            for project in ('a', 'b'):
+                identity: dict[str, Any] = {field: f'{field}-{project}-opaque' for field in fields[:-1]}
+                identity.update(outputSha256=digest, attempt=1)
+                terminal = {'operation': {'id': identity['publicOperationId'], 'status': 'succeeded',
+                                          'phase': 'completed'},
+                            'checkpoint': {'outputSha256': digest, 'attempt': 1},
+                            'qualityReport': {**{key: identity[key] for key in fields}, 'passed': True},
+                            'attestation': {'identity': {'commitSha': self.config['expected_commit']}}}
+                files[f'project-{project}-final.mp4'] = mp4
+                files[f'project-{project}-final-render-identity.json'] = identity
+                files[f'project-{project}-final-render-terminal.json'] = terminal
+            return files
+
+        def collect(files, label):
+            class SFTP:
+                def lstat(self, path):
+                    content = self.content(path)
+                    return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
+                def content(self, path):
+                    name = path.rsplit('/', 1)[-1]
+                    if name not in files: raise IOError('missing producer file')
+                    data = files[name]
+                    return json.dumps(data).encode() if isinstance(data, dict) else data
+                def open(self, path, mode): return io.BytesIO(self.content(path))
+                def listdir_attr(self, path):
+                    return [type('Stat', (), {'filename': name, 'st_mode': stat.S_IFREG | 0o600,
+                            'st_size': len(self.content(name))})() for name in files
+                            if name not in ('postflight.json', 'samples.jsonl', 'batch-results.jsonl')]
+            run_dir = self.root / label
+            run_dir.mkdir()
+            return controller.collect_evidence(SFTP(), self.config, run_dir)[1], run_dir
+
+        valid, run_dir = collect(fixture(), 'valid')
+        self.assertEqual(valid, {'status': 'passed', 'missing': [], 'errors': []})
+        self.assertEqual(json.loads((run_dir / 'visual-result.json').read_text())['runId'],
+                         self.config['run_id'])
+        self.assertEqual(json.loads((run_dir / 'visual-result.json').read_text())['nested'][0],
+                         {'authorization': '[REDACTED]'})
+        mutations = []
+        for field in fields[:-1]:
+            for value in ('', '  ', 'different-opaque-id'):
+                mutations.append((f'identity-{field}-{repr(value)}',
+                    lambda f, field=field, value=value: f['project-a-final-render-identity.json'].__setitem__(field, value)))
+            mutations.append((f'report-{field}', lambda f, field=field:
+                f['project-a-final-render-terminal.json']['qualityReport'].__setitem__(field, 'other-id')))
+        mutations.extend([
+            ('identity-hash', lambda f: f['project-a-final-render-identity.json'].__setitem__('outputSha256', '0' * 64)),
+            ('report-hash', lambda f: f['project-a-final-render-terminal.json']['qualityReport'].__setitem__('outputSha256', '0' * 64)),
+            ('checkpoint-hash', lambda f: f['project-a-final-render-terminal.json']['checkpoint'].__setitem__('outputSha256', '0' * 64)),
+            ('operation-id', lambda f: f['project-a-final-render-terminal.json']['operation'].__setitem__('id', 'other-id')),
+            ('operation-status', lambda f: f['project-a-final-render-terminal.json']['operation'].__setitem__('status', 'waiting')),
+            ('attempt-bool', lambda f: f['project-a-final-render-identity.json'].__setitem__('attempt', True)),
+            ('attempt-mismatch', lambda f: f['project-a-final-render-terminal.json']['checkpoint'].__setitem__('attempt', 2)),
+            ('attempt-missing', lambda f: f['project-a-final-render-identity.json'].pop('attempt')),
+            ('report-project-missing', lambda f: f['project-a-final-render-terminal.json']['qualityReport'].pop('projectId')),
+            ('terminal-missing', lambda f: f.pop('project-a-final-render-terminal.json')),
+            ('quality-failed', lambda f: f['project-a-final-render-terminal.json']['qualityReport'].__setitem__('passed', False)),
+            ('old-commit', lambda f: f['project-a-final-render-terminal.json']['attestation']['identity'].__setitem__('commitSha', '0' * 40)),
+            ('project-b-commit', lambda f: f['project-b-final-render-terminal.json']['attestation']['identity'].__setitem__('commitSha', '0' * 40)),
+            ('other-run', lambda f: f.__setitem__('result.json', b'{"runId":"other-run"}')),
+        ])
+        for index, (label, mutate) in enumerate(mutations):
+            with self.subTest(label=label):
+                files = fixture()
+                mutate(files)
+                acceptance, _ = collect(files, f'invalid-{index}')
+                self.assertEqual(acceptance['status'], 'failed', acceptance)
+
+    def test_success_without_required_browser_json_fails_acceptance(self):
+        files = {'postflight.json': b'{"work_outcome":"success"}',
+                 'samples.jsonl': b'{}\n', 'batch-results.jsonl': b'{}\n'}
+        class SFTP:
+            def lstat(self, path):
+                content = files[path.rsplit('/', 1)[-1]]
+                return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
+            def open(self, path, mode): return io.BytesIO(files[path.rsplit('/', 1)[-1]])
+            def listdir_attr(self, path): return []
+        run_dir = self.root / 'missing'
+        run_dir.mkdir(mode=0o700)
+        _, acceptance = controller.collect_evidence(SFTP(), self.config, run_dir)
+        self.assertEqual(acceptance['status'], 'failed')
+        self.assertIn('transformation-critic-report-viewer-browser.json', acceptance['missing'])
+        self.assertIn('project-b-final.mp4', acceptance['missing'])
+
+    def test_required_sample_readback_failure_never_becomes_editorial_only(self):
+        class SFTP:
+            def lstat(self, path): raise IOError('missing required proof')
+        run_dir = self.root / 'no-proof'
+        run_dir.mkdir(mode=0o700)
+        with self.assertRaises(IOError):
+            controller.collect_evidence(SFTP(), self.config, run_dir)
+        self.assertFalse((run_dir / 'visual-inventory.json').exists())
+
+    def test_cli_nonzero_on_failed_work_or_acceptance_even_after_verified_delete(self):
+        import contextlib
+        for work, acceptance, expected in (('success', 'passed', 0),
+                                            ('failed', 'passed', 1),
+                                            ('success', 'failed', 1)):
+            with self.subTest(work=work, acceptance=acceptance), \
+                 patch.object(controller, 'validate_config', return_value=self.config), \
+                 patch.object(controller.watchdog, 'read_record', return_value=self.config), \
+                 patch.object(controller, 'check_artifacts', return_value=7), \
+                 patch.object(controller, 'load_private_loader', return_value=object()), \
+                 patch.object(controller, 'execute', return_value={
+                     'status': 'deleted_verified', 'cleanup_outcome': 'deleted_verified',
+                     'work_outcome': work, 'acceptance': {'status': acceptance}}), \
+                 contextlib.redirect_stdout(io.StringIO()) as output:
+                code = controller.main(['--execute', '--config', str(self.root / 'no-config'),
+                                        '--token-loader', str(self.root / 'no-loader')])
+            self.assertEqual(code, expected)
+            self.assertEqual(json.loads(output.getvalue())['status'], 'deleted_verified')
+
+    def test_guard_deadline_uses_elapsed_time_not_fresh_three_hours(self):
+        import time
+        with self.assertRaises(controller.Blocked):
+            controller.remaining_guard_seconds(time.time() - 10800)
+        valid = controller.remaining_guard_seconds(time.time() - 60)
+        self.assertGreater(valid, 10000)
+        self.assertLess(valid, 10800)
+
+    def test_guard_stderr_only_and_simultaneous_stdout_keep_result(self):
+        class Channel:
+            def __init__(self, stdout):
+                self.stdout = stdout
+                self.stderr = b'diagnostic\n'
+                self.stdout_reads = 0
+                self.stderr_reads = 0
+            def settimeout(self, value): pass
+            def exec_command(self, command): pass
+            def recv_ready(self): return bool(self.stdout)
+            def recv(self, count):
+                if not self.stdout: raise AssertionError('stdout read while only stderr ready')
+                self.stdout_reads += 1
+                data, self.stdout = self.stdout, b''
+                return data
+            def recv_stderr_ready(self): return bool(self.stderr)
+            def recv_stderr(self, count):
+                self.stderr_reads += 1
+                data, self.stderr = self.stderr, b''
+                return data
+            def exit_status_ready(self): return not self.stderr
+            def recv_exit_status(self): return 0
+        class Transport:
+            def __init__(self, channel): self.channel = channel
+            def is_active(self): return True
+            def open_session(self, timeout): return self.channel
+        class SSH:
+            def __init__(self, channel): self.transport = Transport(channel)
+            def get_transport(self): return self.transport
+        class SFTP:
+            def __init__(self): self.files = {}
+            def mkdir(self, path, mode): pass
+            def lstat(self, path):
+                content = self.files[path]
+                return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
+            def open(self, path, mode): return io.BytesIO(self.files[path])
+        for simultaneous in (False, True):
+            with self.subTest(simultaneous=simultaneous):
+                events = (json.dumps({'event': 'upload_ready', 'run_id': self.config['run_id'],
+                    'root': '/opt/apollo-validation/' + str(self.config['run_id'])}).encode() + b'\n'
+                    if simultaneous else b'') + b'{"event":"result"}\n'
+                channel = Channel(events if simultaneous else b'')
+                if not simultaneous:
+                    original = channel.recv_stderr
+                    def stderr_then_result(count):
+                        channel.stdout = events
+                        return original(count)
+                    channel.recv_stderr = stderr_then_result
+                tool_digests = {tool: __import__('hashlib').sha256((controller.BOOTSTRAP / tool).read_bytes()).hexdigest()
+                                for tool in controller.TOOLS}
+                c = {**self.config, 'tool_sha256': tool_digests}
+                owner = {'pid': 123, 'deadlineUTC': '2030-01-01T00:00:00Z'}
+                sftp = SFTP()
+                def write(sftp, path, source):
+                    sftp.files[path] = source.read_bytes() if isinstance(source, Path) else source
+                with patch.object(controller, 'remote_write', side_effect=write), patch.object(controller, 'read_sftp',
+                    side_effect=lambda sftp, path, limit: (controller.BOOTSTRAP / path.split('/')[-1]).read_bytes()), \
+                    patch.object(controller, 'owner_record', return_value=owner), \
+                    patch.object(controller, 'remaining_guard_seconds', return_value=600):
+                    observed, exit_code, uploaded = controller.guard_session(SSH(channel), sftp, c,
+                        {'id': 12345, 'created_at': '2030-01-01T00:00:00Z'}, self.bundle, self.root)
+                self.assertEqual((observed, exit_code, uploaded), (owner, 0, simultaneous))
+                self.assertEqual((channel.stdout_reads, channel.stderr_reads), (1, 1))
+
+
+if __name__ == '__main__': unittest.main()

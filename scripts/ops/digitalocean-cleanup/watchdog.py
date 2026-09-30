@@ -3,11 +3,9 @@ not cryptographic proof of remote termination. Never run without an exclusive ow
 
 Operator handoff: copy the guard's evidence/postflight.json and samples.jsonl
 unchanged into a private evidence_root/<run_id>/ beside each other; separately
-verify the owner release, terminal container state, zero PG backends and resource
-identity before constructing the manifest and authorizing delete. Check-only is
-local; inspect/delete need separately approved API access. If the E2E fails, PG
-never starts, evidence is missing or postflight is inconclusive, leave deletion
-blocked for a separate operator procedure; never synthesize zero/N/A metrics.
+verify owner release, process terminality and resource identity. A failed E2E
+does not prove cleanup failed; a never-dispatched PG is not zero backends.
+Missing or inconclusive evidence blocks deletion. Check-only is local.
 """
 import argparse
 import contextlib
@@ -227,6 +225,69 @@ def valid_samples(path, count, windows):
     return True
 
 
+def valid_terminal_record(record):
+    """Work outcome is independent of verified terminal cleanup; contradictions fail closed."""
+    if type(record.get('exit_code')) is not int or type(record.get('phases')) is not list:
+        return False
+    phases = record['phases']
+    if any(type(p) is not dict or type(p.get('phase')) is not str or
+           type(p.get('exit_code')) is not int for p in phases):
+        return False
+    work = record.get('work_errors')
+    cleanup = record.get('cleanup_errors')
+    if (type(work) is not list or type(cleanup) is not list or
+            any(type(item) is not str or not item for item in work + cleanup)
+            or cleanup or record.get('errors') != work + cleanup or
+            record.get('error') != (work[0] if len(work) == 1 else None) or
+            record.get('cleanup_ok') is not True or record.get('cleanup_outcome') != 'verified'):
+        return False
+    outcome = record.get('work_outcome')
+    if outcome == 'success':
+        if (record['exit_code'] != 0 or work or any(p['exit_code'] != 0 for p in phases)
+                or not any(p['phase'] == 'runner' for p in phases)
+                or not phases or phases[-1]['phase'] != 'runner_exit'):
+            return False
+    elif outcome == 'failed':
+        if record['exit_code'] == 0 or not work:
+            return False
+    else:
+        return False
+    evidence = record.get('terminal_evidence')
+    if type(evidence) is not dict or set(evidence) != {
+            'root_owned', 'root_identity', 'runner', 'pg', 'backend_proof'}:
+        return False
+    identity = evidence['root_identity']
+    if (evidence['root_owned'] is not True or type(identity) is not list or len(identity) != 2
+            or any(type(number) is not int or number < 0 for number in identity)
+            or type(record.get('container_states')) is not dict):
+        return False
+    states = record['container_states']
+    if set(states) != {'runner', 'pg'}:
+        return False
+    for kind, phase in (('runner', 'runner_create'), ('pg', 'pg_start')):
+        part = evidence[kind]
+        if type(part) is not dict or set(part) != {'creation', 'terminal'} or part['terminal'] != states[kind]:
+            return False
+        if part['creation'] == 'not_dispatched_verified':
+            if states[kind] != 'never_started' or any(p['phase'] == phase for p in phases):
+                return False
+        elif part['creation'] == 'created_verified':
+            dispatches = [p for p in phases if p['phase'] == phase]
+            if (states[kind] not in TERMINAL_STATES or len(dispatches) != 1
+                    or dispatches[0]['exit_code'] != 0):
+                return False
+        else:
+            return False
+    if evidence['runner']['creation'] == 'created_verified' and evidence['pg']['creation'] != 'created_verified':
+        return False
+    if evidence['pg']['creation'] == 'not_dispatched_verified':
+        if record.get('orphan_backends') != 'N/A' or evidence['backend_proof'] != 'not_applicable_no_pg_created':
+            return False
+    elif (type(record.get('orphan_backends')) is not int or record['orphan_backends'] != 0
+          or evidence['backend_proof'] != 'observed_zero'):
+        return False
+    return True
+
 def terminal_ready(m):
     if (m['owner_released'] is not True or m['incident_active'] is not False
             or m['ssh_timeout_unresolved'] is not False or m['run_terminal_verified'] is not True):
@@ -239,19 +300,7 @@ def terminal_ready(m):
         return (type(record) is dict
                 and all(type(record.get(key)) is type(value) and record[key] == value
                         for key, value in bound.items())
-                and type(record.get('exit_code')) is int and record['exit_code'] == 0
-                and record.get('cleanup_ok') is True
-                and type(record.get('orphan_backends')) is int and record['orphan_backends'] == 0
-                and type(record.get('container_states')) is dict
-                and all(record['container_states'].get(key) in TERMINAL_STATES
-                        for key in ('runner', 'pg'))
-                and record.get('errors') == []
-                and type(record.get('phases')) is list and bool(record['phases'])
-                and type(record['phases'][-1]) is dict
-                and record['phases'][-1].get('phase') == 'runner_exit'
-                and any(type(p) is dict and p.get('phase') == 'runner' for p in record['phases'])
-                and all(type(p) is dict and type(p.get('exit_code')) is int and p['exit_code'] == 0
-                        for p in record['phases'])
+                and valid_terminal_record(record)
                 and valid_samples(Path(m['postflight_file']).parent / 'samples.jsonl',
                                   record.get('samples'), record.get('windows')))
     except (OSError, ValueError, TypeError, KeyError):

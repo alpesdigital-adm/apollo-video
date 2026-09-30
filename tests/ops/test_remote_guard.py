@@ -384,6 +384,13 @@ class GuardTests(unittest.TestCase):
             with patch.object(g, 'container_identity', side_effect=FileNotFoundError('docker absent')):
                 self.assertTrue(r.cleanup())
             self.assertEqual(r.orphans, 'N/A')
+            self.assertFalse(r.postflight_result(1, 'PG start uncertain', ['ambiguous'])['cleanup_ok'])
+            r = g.Run(self.cfg('/opt/apollo-w28-w28-1')); r.root = Path(td)
+            r.create_attempted.add(r.pg); r.creation_dispatch['pg'] = 'attempted'
+            with patch.object(g, 'container_identity', side_effect=g.GateClosed('No such object')):
+                self.assertTrue(r.cleanup())
+            self.assertEqual(r.orphans, 'N/A')
+            self.assertEqual(r.container_states['pg'], 'uncertain')
 
     def test_pg_tcp_password_env_not_argv_and_private_file(self):
         with tempfile.TemporaryDirectory() as td:
@@ -615,6 +622,26 @@ class GuardTests(unittest.TestCase):
             r = g.Run(self.cfg('/opt/apollo-w28-w28-1')); r.root = Path(td)
             self.assertEqual(r.cleanup(), [])
             self.assertEqual(r.orphans, 'N/A')
+
+    def test_failed_work_keeps_exit_and_phases_but_separates_cleanup_proof(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = g.Run(self.cfg('/opt/apollo-w28-w28-1')); r.root = Path(td)
+            r.owns_root = True
+            info = r.root.stat(); r.root_identity = (info.st_dev, info.st_ino)
+            r.owner_record = {'pid': 111, 'deadlineUTC': '2026-09-30T00:00:00Z'}
+            r.phases = [{'phase': 'runner', 'exit_code': 1}]
+            self.assertEqual(r.cleanup(), [])
+            result = r.postflight_result(1, 'journey failed', [])
+            self.assertEqual(result['exit_code'], 1)
+            self.assertEqual(result['phases'], [{'phase': 'runner', 'exit_code': 1}])
+            self.assertEqual(result['work_outcome'], 'failed')
+            self.assertEqual(result['work_errors'], ['journey failed'])
+            self.assertEqual(result['cleanup_outcome'], 'verified')
+            self.assertEqual(result['cleanup_errors'], [])
+            self.assertTrue(result['cleanup_ok'])
+            self.assertEqual(result['terminal_evidence']['pg']['creation'], 'not_dispatched_verified')
+            self.assertEqual(result['terminal_evidence']['backend_proof'], 'not_applicable_no_pg_created')
+            self.assertEqual(result['orphan_backends'], 'N/A')
 
     def test_next_renamed_process_socket_inodes_and_pid_scope(self):
         with tempfile.TemporaryDirectory() as td:

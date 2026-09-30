@@ -134,11 +134,16 @@ não registrar nem reproduzir seu valor, inclusive nos exemplos abaixo.
 18. Antes de criar, registrar como obter prova terminal independente,
     como isolar incidente e quem autoriza contenção se SSH falhar.
     Se não houver contingência executável de modo independente, parar.
-19. Um postflight inconclusivo, PG nunca iniciado ou erro bloqueia o helper
-    de delete; não existe bypass de prework para fabricar um final verde.
-    Descrever a contenção/limpeza excepcional ao owner, com identidade e
-    prova próprias e autorização separada. Nunca forjar `orphan_backends=0`,
-    mudar flags ou excluir intents para liberar deleção.
+19. Erro de trabalho não prova erro de cleanup: `work_outcome=failed` mantém
+    `exit_code`, erro e fases falhas, mas somente `cleanup_outcome=verified`
+    com prova terminal íntegra pode liberar deleção do descartável. PG nunca
+    despachado requer `not_dispatched_verified` após término do guard e root
+    próprio, runner igualmente não despachado, e `backend_proof` =
+    `not_applicable_no_pg_created` com `orphan_backends="N/A"`; não equivale a
+    zero observado. Criação/start tentados e ambíguos, postflight inconclusivo
+    ou falha pré-root/identidade bloqueiam delete. Não existe bypass de prework;
+    descrever contenção excepcional ao owner com prova própria. Nunca forjar
+    zero, mudar flags ou excluir intents para liberar deleção.
 
 ### 4. Provisionamento isolado (somente após gates anteriores)
 
@@ -202,12 +207,22 @@ não registrar nem reproduzir seu valor, inclusive nos exemplos abaixo.
 
 33. Aguardar o supervisor terminar na sessão original; capturar exit code,
     PID e deadline, eventos, estados de runner/PG e backends do próprio run.
-34. Confirmar containers terminais (stopped), runner antes de PG, zero
-    backends do `application_name` e ausência de filho/reconexão.
-    Falta de confirmação após timeout não autoriza retry ou cleanup remoto.
+34. Confirmar containers criados terminais (stopped), runner antes de PG,
+    zero backends do `application_name` observado enquanto PG acessível e
+    ausência de filho/reconexão. Para PG/runner nunca criados, exigir prova
+    explícita de não-despacho do comando e reconciliação após término do guard,
+    com backend `not_applicable_no_pg_created`, nunca zero inventado.
+    Falta de confirmação após timeout/SSH perdido não autoriza retry, outro
+    canal mutável, ação sobre host inteiro ou cleanup remoto inferido.
 35. Exigir `postflight.json` com run, owner, droplet ID, commit, PID e deadline
-    UTC Z idênticos ao manifesto; `container_states` de runner e PG stopped,
-    `cleanup_ok=true`, `exit_code=0`, `orphan_backends=0`, erros vazios.
+    UTC Z idênticos ao manifesto; `terminal_evidence` registra root próprio,
+    identidade, despacho e estado terminal de runner/PG, e prova de backend
+    distinta para PG criado (`observed_zero` e contagem inteira 0) ou não
+    criado (`not_applicable_no_pg_created` e `"N/A"`). `cleanup_ok=true`,
+    `cleanup_outcome=verified` e `cleanup_errors=[]` significam somente
+    cleanup comprovado. `work_outcome`, `work_errors`, `exit_code` e `phases`
+    preservam o resultado do trabalho: sucesso exige fases e saída zero;
+    falha editorial/teste não vira sucesso só porque o ambiente foi limpo.
 36. Exigir `samples >= 12`, `windows` no postflight e `samples.jsonl` ao lado,
     com contagem exata e >=6 amostras preflight e >=6 postflight sem `reason`.
     Cada janela monotônica `started`/`finished` dura >=60 s reais, não se
@@ -220,7 +235,10 @@ não registrar nem reproduzir seu valor, inclusive nos exemplos abaixo.
     privado; jamais arquivar `state/pg.env` ou `state/runner.env`.
 38. Encerrar SFTP e SSH, atestar liberação do owner e terminalidade antes
     de colocar `owner_released=true` e `run_terminal_verified=true` no manifesto.
-    Timeout SSH não resolvido ou incidente ativo mantém flags bloqueantes.
+    EOF de stdin não é prova de término; timeout/perda real de SSH sem postflight
+    observável e incidente ativo mantêm flags bloqueantes. Uma sessão original
+    ainda viva pode entregar postflight de trabalho falho após cleanup; não
+    abrir sessão ou owner paralelo para fabricar readback.
 39. Após soltar o lease operacional, `watchdog.py --manifest <MANIFEST_JSON> --mode inspect`
     confere por GET identidade de droplet, firewall, tag e snapshot.
     Divergência, recurso compartilhado, falta de snapshot ou API incerta bloqueiam.

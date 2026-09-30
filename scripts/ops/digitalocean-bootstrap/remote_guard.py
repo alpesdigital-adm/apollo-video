@@ -7,8 +7,8 @@ replace its droplet ID, commit and source digest with independently verified
 values. The nominal 8 CPU/16 GiB DigitalOcean plan is an external admission
 prerequisite; /proc/meminfo MemTotal measures usable RAM, not plan size.
 
-On a failed journey or PG not started, postflight records N/A for unverified
-backends and cannot authorize cleanup. No automatic failure-path cloud deletion.
+Work failure is not cleanup proof. A never-dispatched PG has a distinct backend
+state; ambiguous creation or lost terminal evidence never authorizes deletion.
 """
 import argparse
 import hashlib
@@ -569,6 +569,7 @@ class Run:
         self.deadline = time.monotonic()+c['duration_seconds']; self.reserve = 180
         self.phases = []; self.pids = {}; self.orphans = 'N/A'; self.cleanup_ok = False
         self.create_attempted = set(); self.created = set()
+        self.creation_dispatch = {'runner': 'not_dispatched', 'pg': 'not_dispatched'}
         self.owner_record = None; self.in_cleanup = False; self.signal_reason = None
         self.owns_root = False; self.root_identity = None
         self.container_states = {'runner':'never_started','pg':'never_started'}
@@ -670,6 +671,7 @@ class Run:
         pg_env = state/'pg.env'; write_pg_env(pg_env, self.secret)
         self.step('pg_network',['docker','network','create','--driver','bridge','--label','apollo.run='+self.run,self.run+'-pgnet'],20)
         self.create_attempted.add(self.pg)
+        self.creation_dispatch['pg'] = 'attempted'
         self.step('pg_start',['docker','run','-d','--name',self.pg,'--label','apollo.run='+self.run,'--network',self.run+'-pgnet','--cgroup-parent='+SLICE,'--cpuset-cpus=0,1','--cpus=0.5','--memory=2g','--memory-swap=2g','--pids-limit=256','--restart=no','--env-file',str(pg_env),'-p','127.0.0.1:55432:5432',image,'-c','max_connections=40'],30)
         self.pids['pg']=container_identity(self.pg,self.run)[1]
         self.created.add(self.pg)
@@ -700,6 +702,7 @@ class Run:
         (src/'.env').touch(exist_ok=True)  # generated untracked file, removed after run by archive owner
         runner_args=runner_arguments(root,self.run,runner_env,tools_dir)
         self.create_attempted.add(self.runner)
+        self.creation_dispatch['runner'] = 'attempted'
         self.step('runner_create',runner_args,30)
         container_identity(self.runner,self.run)
         self.created.add(self.runner)
@@ -770,10 +773,10 @@ class Run:
             try:
                 running,pid=container_identity(name,self.run)
                 self.created.add(name)
+                self.creation_dispatch['runner' if name == self.runner else 'pg'] = 'created'
             except (GateClosed, OSError) as e:
-                if 'No such object' in str(e) and name not in self.created:
-                    if name == self.runner: runner_checked=True
-                    continue
+                # Absence after an attempted Docker create can be transient; never
+                # infer that a daemon-side create is finished from one inspect.
                 self.container_states['runner' if name==self.runner else 'pg']='uncertain'
                 errors.append('ambiguous create/inspect '+name+': '+str(e)); continue
             self.pids[name]=pid
@@ -817,14 +820,47 @@ class Run:
             return self._main_locked()
 
     def postflight_result(self, exit_code, error, cleanup):
+        try:
+            info = self.root.stat() if not self.root.is_symlink() else None
+            owned = (self.owns_root and info is not None and self.root_identity is not None
+                     and (info.st_dev, info.st_ino) == self.root_identity)
+        except OSError:
+            owned = False
+        creation = {}
+        for kind, name in (('runner', self.runner), ('pg', self.pg)):
+            if name in self.created and self.creation_dispatch[kind] == 'created':
+                state = 'created_verified'
+            elif (name not in self.create_attempted and name not in self.created
+                  and self.creation_dispatch[kind] == 'not_dispatched'
+                  and not any(p.get('phase') == ('runner_create' if kind == 'runner' else 'pg_start')
+                              for p in self.phases)):
+                state = 'not_dispatched_verified'
+            else:
+                state = 'unverified'
+            creation[kind] = {'creation': state, 'terminal': self.container_states[kind]}
+        pg_created = creation['pg']['creation'] == 'created_verified'
+        backend = ('observed_zero' if pg_created and type(self.orphans) is int and self.orphans == 0
+                   else 'not_applicable_no_pg_created' if creation['pg']['creation'] == 'not_dispatched_verified'
+                   and self.orphans == 'N/A' else 'unverified')
+        terminal = {'root_owned': bool(owned), 'root_identity': list(self.root_identity) if owned else None,
+                    **creation, 'backend_proof': backend}
+        verified = (owned and self.cleanup_ok and not cleanup
+                    and all((part['creation'] == 'created_verified' and part['terminal'] == 'stopped')
+                            or (part['creation'] == 'not_dispatched_verified' and part['terminal'] == 'never_started')
+                            for part in creation.values())
+                    and backend != 'unverified' and (pg_created or creation['runner']['creation'] == 'not_dispatched_verified'))
+        work_errors = [error] if error else []
         return {'run_id':self.run,'owner_pid':self.owner_record['pid'] if self.owner_record else os.getpid(),
                 'owner_id':self.c['owner_id'], 'expected_droplet_id':self.c['expected_droplet_id'],
                 'source_commit':self.c['expected_commit'],
                 'owner_deadline_utc':self.owner_record['deadlineUTC'] if self.owner_record else None,
-                'exit_code':exit_code,'cleanup_ok':not cleanup and self.cleanup_ok and not error,
+                'exit_code':exit_code,'cleanup_ok':bool(verified),
+                'work_outcome':'success' if exit_code == 0 and not work_errors else 'failed',
+                'work_errors':work_errors,'cleanup_outcome':'verified' if verified else 'unverified',
+                'terminal_evidence':terminal,
                 'orphan_backends':self.orphans,'pids':self.pids,'error':error,
                 'container_states':self.container_states,
-                'cleanup_errors':cleanup,'errors':([error] if error else [])+cleanup,'phases':self.phases,
+                'cleanup_errors':cleanup,'errors':work_errors+cleanup,'phases':self.phases,
                 'samples':self.monitor.samples if self.monitor else 0,
                 'windows':self.monitor.windows if self.monitor else {}}
 
@@ -878,8 +914,8 @@ class Run:
                     try: self.monitor.finish()
                     except BaseException as exc: cleanup.append('monitor finish: '+str(exc))
                 if self.signal_reason: cleanup.append(self.signal_reason)
-                if cleanup or error: exit_code=1
                 result=self.postflight_result(exit_code,error,cleanup)
+                if cleanup or error: exit_code=1
                 try:
                     evidence = self.root/'evidence'
                     if not evidence.exists(): evidence.mkdir(mode=0o700)
