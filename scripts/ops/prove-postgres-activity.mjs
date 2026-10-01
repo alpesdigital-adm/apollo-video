@@ -25,6 +25,7 @@ const db = 'apollo_synthetic_wave24_e2e'
 let cluster
 let postmasterPid
 let proofComplete = false
+let startupError
 const clients = []
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const deadline = Date.now() + 115_000
@@ -82,7 +83,12 @@ try {
   await mkdir(scratch, { recursive: true })
   // The helper's opt-in external DB is forbidden in this child only; never consume product URLs.
   delete process.env.APOLLO_RUNTIME_SAFETY_DATABASE_URL
-  cluster = await startRuntimeSafetyCluster({ scratchDir: scratch, runId: run })
+  try {
+    cluster = await startRuntimeSafetyCluster({ scratchDir: scratch, runId: run })
+  } catch (error) {
+    startupError = error
+    throw error
+  }
   assert.equal(cluster.owned, true)
   assert.notEqual(cluster.port, 5432)
   assert.equal(new URL(cluster.baseUrl).hostname, '127.0.0.1')
@@ -168,12 +174,23 @@ try {
   } catch (error) {
     stopError = error
   } finally {
-    if (!clientError && !stopError && (!cluster || !existsSync(cluster.dataDirectory))) {
-      await rm(scratch, { recursive: true, force: true })
-      assert.equal(existsSync(scratch), false, 'scratch directory persists')
+    if (!clientError && !stopError &&
+      (cluster?.owned && !existsSync(cluster.dataDirectory) || startupError?.ownedTeardownVerified === true)) {
+      try {
+        await rm(scratch, { recursive: true, force: true })
+        assert.equal(existsSync(scratch), false, 'scratch directory persists')
+      } catch (error) {
+        if (startupError) startupError.message += '\ncaller scratch cleanup inconclusive; evidence retained'
+        else stopError = error
+      }
     }
   }
-  if (clientError) throw clientError
-  if (stopError) throw stopError
+  if (startupError) {
+    if (clientError || stopError) startupError.message += '\ncaller cleanup inconclusive; scratch retained'
+    // The startup failure, with its bounded log tail, remains the reported exception.
+  } else {
+    if (clientError) throw clientError
+    if (stopError) throw stopError
+  }
   if (proofComplete) console.log(JSON.stringify({ phase: 'green', port: cluster.port, postmasterPid }))
 }

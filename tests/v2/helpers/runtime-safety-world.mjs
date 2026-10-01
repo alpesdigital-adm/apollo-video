@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import { journeyStorageDriver, journeyStorageEnvironment } from './journey-object-storage.mjs'
+import { probeClosedPort } from '../../../scripts/ops/postgres-activity-cleanup.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -93,6 +94,50 @@ function runPgCommand(name, args, { detach = false, timeoutMs = 120_000 } = {}) 
   })
 }
 
+async function readOwnedPostmasterPid(dataDirectory, platform = process.platform) {
+  let contents
+  try { contents = await readFile(join(dataDirectory, 'postmaster.pid'), 'utf8') } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+  const [first, directory] = contents.split(/\r?\n/)
+  const pid = Number(first)
+  assert.ok(Number.isSafeInteger(pid) && pid > 1, 'invalid owned postmaster.pid')
+  const pidDirectory = resolve(directory)
+  const ownedDirectory = resolve(dataDirectory)
+  assert.equal(platform === 'win32' ? pidDirectory.toLowerCase() : pidDirectory,
+    platform === 'win32' ? ownedDirectory.toLowerCase() : ownedDirectory,
+    'postmaster.pid does not belong to this run data directory')
+  return pid
+}
+
+function ownedPostmasterAlive(pid) {
+  try { process.kill(pid, 0); return true } catch (error) {
+    if (error.code === 'ESRCH') return false
+    return null // EPERM and unexpected probe failures cannot prove a process exited.
+  }
+}
+
+async function serverLogTail(path) {
+  let file
+  try {
+    file = await open(path, 'r')
+    const { size } = await file.stat()
+    const length = Math.min(size, 8192)
+    const buffer = Buffer.alloc(length)
+    const { bytesRead } = await file.read(buffer, 0, length, size - length)
+    return buffer.subarray(0, bytesRead).toString('utf8')
+      .replace(/(?:postgres(?:ql)?:\/\/)[^\s"']+/gi, '[redacted URL]')
+      // This is a bounded startup diagnostic from the cluster just created by this
+      // run, before any workload. These patterns are not general log sanitization.
+      .replace(/\b(?:Proxy-)?Authorization[ \t]*:[ \t]*(?:Bearer|Basic)[ \t]+(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+)/gi, '[redacted credential]')
+      .replace(/\b(?:password[ \t]+is|(?:password|token|secret|api[_-]?key)[ \t]*[=:])[ \t]*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+)/gi, '[redacted credential]') || '(empty)'
+  } catch (error) {
+    if (error.code === 'ENOENT') return '(not created)'
+    return `(unreadable: ${error.code ?? 'unknown'})`
+  } finally { await file?.close().catch(() => undefined) }
+}
+
 /**
  * The database URL rules AGENTS.md makes binding for every E2E run.
  *
@@ -144,7 +189,10 @@ export function assertIsolatedRuntimeSafetyDatabase(databaseUrl) {
  * disposable by construction: it is never dropped, because the whole data directory
  * goes instead, and state between journeys resets by deleting the run's own rows.
  */
-export async function startRuntimeSafetyCluster({ scratchDir, runId }) {
+export async function startRuntimeSafetyCluster({ scratchDir, runId }, {
+  command = runPgCommand, freePort = findFreePort, closedPort = probeClosedPort,
+  pidAlive = ownedPostmasterAlive, platform = process.platform,
+} = {}) {
   // Deliberately NOT `V2_DATABASE_URL`: the suite is launched with
   // `--env-file-if-exists=.env`, and the checked-in `.env` names a port nothing is
   // listening on. Taking it would make the suite fail against a server that does not
@@ -161,20 +209,9 @@ export async function startRuntimeSafetyCluster({ scratchDir, runId }) {
     }
   }
 
-  const port = await findFreePort()
+  const port = await freePort()
+  assert.notEqual(port, 5432, 'a disposable cluster must never use the shared PostgreSQL port')
   const dataDirectory = join(scratchDir, `pgdata-${runId}`)
-  await rm(dataDirectory, { recursive: true, force: true })
-  await runPgCommand('initdb', [
-    '-D', dataDirectory, '-U', 'postgres', '-A', 'trust', '-E', 'UTF8', '--locale=C',
-  ], { timeoutMs: 180_000 })
-  // `detach: true`: the postmaster this starts must not inherit a pipe of ours.
-  await runPgCommand('pg_ctl', [
-    '-D', dataDirectory,
-    '-l', join(dataDirectory, 'server.log'),
-    '-o', `-p ${port} -c listen_addresses=127.0.0.1 -c fsync=off`,
-    '-w', 'start',
-  ], { detach: true, timeoutMs: 120_000 })
-
   /**
    * Ends the cluster and does not claim to have, unless it has.
    *
@@ -185,24 +222,52 @@ export async function startRuntimeSafetyCluster({ scratchDir, runId }) {
    * disconnect cleanly; the directory is only removed once the port is actually free.
    */
   let stopped = false
+  let ownedPid = null
   const stop = async () => {
     if (stopped) return { stopped: true, alreadyStopped: true, port }
     const attempts = []
+    // pg_ctl is scoped by this run's data directory, never by a port alone.
+    // A failed start may have left a postmaster without a listener yet.
     for (const mode of ['fast', 'immediate', 'immediate', 'immediate']) {
-      if (!(await isPortListening(port))) break
-      const result = await runPgCommand(
+      const pid = await readOwnedPostmasterPid(dataDirectory, platform)
+      if (pid && !ownedPid) ownedPid = pid
+      const alive = ownedPid ? await pidAlive(ownedPid) : false
+      const free = await closedPort(port)
+      if (alive === false && free && pid === null) break
+      if (!pid || alive !== true) break // never signal an unverified process
+      const result = await command(
         'pg_ctl', ['-D', dataDirectory, '-m', mode, 'stop'], { timeoutMs: 60_000 },
       ).then(() => ({ mode, ok: true }), (error) => ({ mode, ok: false, error: String(error).slice(0, 200) }))
       attempts.push(result)
       await delay(500)
     }
-    const free = !(await isPortListening(port))
-    stopped = free
-    if (free) await rm(dataDirectory, { recursive: true, force: true }).catch(() => undefined)
-    return { stopped: free, port, portFree: free, dataDirectory: free ? null : dataDirectory, attempts }
+    const free = await closedPort(port)
+    const remainingPid = await readOwnedPostmasterPid(dataDirectory, platform)
+    const alive = ownedPid ? await pidAlive(ownedPid) : false
+    const verified = free && alive === false && remainingPid === null
+    if (verified) {
+      await rm(dataDirectory, { recursive: true, force: true })
+      stopped = true
+    }
+    return { stopped: verified, port, portFree: free, postmasterDead: alive === false,
+      dataDirectory: verified ? null : dataDirectory, attempts }
   }
 
+  let stage = 'initdb'
   try {
+    await rm(dataDirectory, { recursive: true, force: true })
+    await command('initdb', [
+      '-D', dataDirectory, '-U', 'postgres', '-A', 'trust', '-E', 'UTF8', '--locale=C',
+    ], { timeoutMs: 180_000 })
+    stage = 'pg_ctl start'
+    // The postmaster must not inherit a pipe of ours; its diagnostics go to server.log.
+    await command('pg_ctl', [
+      '-D', dataDirectory,
+      '-l', join(dataDirectory, 'server.log'),
+      '-o', `-p ${port} -c listen_addresses=127.0.0.1 -c fsync=off`,
+      '-w', 'start',
+    ], { detach: true, timeoutMs: 120_000 })
+    stage = 'readiness'
     // `pg_ctl -w start` returning is NOT proof the server accepts connections: on
     // Windows it answered while the postmaster was still coming up, `createdb` got
     // ECONNREFUSED, and the failure path then left the cluster listening. Readiness
@@ -211,7 +276,7 @@ export async function startRuntimeSafetyCluster({ scratchDir, runId }) {
     let ready = false
     let lastReadyError = null
     while (Date.now() < readyBy) {
-      const probe = await runPgCommand(
+      const probe = await command(
         'pg_isready', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres'],
         { timeoutMs: 15_000 },
       ).then(() => ({ ok: true }), (error) => ({ ok: false, error: String(error).slice(0, 200) }))
@@ -221,18 +286,24 @@ export async function startRuntimeSafetyCluster({ scratchDir, runId }) {
     }
     if (!ready) throw new Error(`the throwaway cluster on ${port} never became ready: ${lastReadyError}`)
 
-    await runPgCommand('createdb', [
+    stage = 'createdb'
+    await command('createdb', [
       '-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', 'apollo_v2_e2e',
     ], { timeoutMs: 60_000 })
   } catch (error) {
-    const teardown = await stop()
-    if (!teardown.stopped) {
-      throw new Error(
-        `${error instanceof Error ? error.message : String(error)}\n` +
-        `AND the cluster could not be stopped: ${JSON.stringify(teardown)}`,
-      )
+    // Capture before teardown: verified cleanup removes the log with the data dir.
+    const logTail = stage === 'pg_ctl start' || stage === 'initdb'
+      ? await serverLogTail(join(dataDirectory, 'server.log')) : '(not a startup failure)'
+    let teardown
+    try { teardown = await stop() } catch (cleanupError) {
+      teardown = { stopped: false, cleanupError: cleanupError?.message ?? String(cleanupError) }
     }
-    throw error
+    const original = error instanceof Error ? error : new Error(String(error))
+    original.ownedTeardownVerified = teardown.stopped === true
+    original.message += `\nowned PG startup: stage=${stage} runId=${runId} port=${port} ` +
+      `cleanupVerified=${original.ownedTeardownVerified} teardown=${JSON.stringify(teardown)} ` +
+      `server.log tail (max 8192 bytes):\n${logTail}`
+    throw original
   }
 
   return {
