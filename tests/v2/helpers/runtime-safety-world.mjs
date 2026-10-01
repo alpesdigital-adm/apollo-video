@@ -264,7 +264,7 @@ export async function startRuntimeSafetyCluster({ scratchDir, runId }, {
     await command('pg_ctl', [
       '-D', dataDirectory,
       '-l', join(dataDirectory, 'server.log'),
-      '-o', `-p ${port} -c listen_addresses=127.0.0.1 -c fsync=off`,
+      '-o', `-p ${port} -c listen_addresses=127.0.0.1 -c unix_socket_directories= -c fsync=off`,
       '-w', 'start',
     ], { detach: true, timeoutMs: 120_000 })
     stage = 'readiness'

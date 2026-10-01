@@ -5,6 +5,56 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { startRuntimeSafetyCluster } from '../v2/helpers/runtime-safety-world.mjs'
 
+test('owned startup overrides inherited Unix socket directory while retaining loopback TCP and high port', async (t) => {
+  const scratchDir = await mkdtemp(join(tmpdir(), 'apollo-pg-socket-test-'))
+  t.after(async () => { await rm(scratchDir, { recursive: true, force: true }) })
+  const dataDirectory = join(scratchDir, 'pgdata-socket')
+  let startupOptions
+  const cluster = await startRuntimeSafetyCluster({ scratchDir, runId: 'socket' }, {
+    freePort: async () => 55577,
+    closedPort: async () => true,
+    command: async (name, args) => {
+      if (name === 'initdb') await mkdir(dataDirectory)
+      if (name === 'pg_ctl' && args.includes('start')) {
+        startupOptions = args[args.indexOf('-o') + 1]
+        // Controlled inherited Linux configuration: without the override PG tries
+        // /var/run/postgresql and fails before the TCP-only cluster becomes usable.
+        if (!startupOptions.includes('-c unix_socket_directories= -c')) {
+          throw new Error('FATAL: could not create lock file /var/run/postgresql/.s.PGSQL.55577.lock: Permission denied')
+        }
+      }
+    },
+  })
+  try {
+    assert.equal(cluster.owned, true)
+    assert.match(startupOptions, /-p 55577(?: |$)/)
+    assert.match(startupOptions, /-c listen_addresses=127\.0\.0\.1(?: |$)/)
+    assert.equal(new URL(cluster.baseUrl).hostname, '127.0.0.1')
+    assert.equal(cluster.port, 55577)
+  } finally {
+    assert.equal((await cluster.stop()).stopped, true)
+  }
+})
+
+test('provided cluster returns before any owned startup option or command', async () => {
+  const previous = process.env.APOLLO_RUNTIME_SAFETY_DATABASE_URL
+  const provided = 'postgresql://postgres@127.0.0.1:55588/apollo_v2_e2e?schema=public'
+  process.env.APOLLO_RUNTIME_SAFETY_DATABASE_URL = provided
+  try {
+    const cluster = await startRuntimeSafetyCluster({ scratchDir: 'unused', runId: 'provided' }, {
+      freePort: () => { throw new Error('must not allocate a port') },
+      command: () => { throw new Error('must not run PostgreSQL commands') },
+    })
+    assert.equal(cluster.owned, false)
+    assert.equal(cluster.baseUrl, provided)
+    assert.equal(cluster.port, 55588)
+    assert.deepEqual(await cluster.stop(), { stopped: false, reason: 'the compose service is not owned by this run' })
+  } finally {
+    if (previous === undefined) delete process.env.APOLLO_RUNTIME_SAFETY_DATABASE_URL
+    else process.env.APOLLO_RUNTIME_SAFETY_DATABASE_URL = previous
+  }
+})
+
 async function scenario(t, { log, pid = false, listener = false, stopWorks = true,
   initFails = false, probeUnknown = false, wrongDirectory = false,
   pidDirectoryCaseMismatch = false, platform = process.platform }) {
