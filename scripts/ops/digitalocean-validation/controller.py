@@ -528,6 +528,56 @@ def read_sftp(sftp, path, max_bytes):
     if len(data) > max_bytes or len(data) != info.st_size: raise Blocked('remote_evidence_short')
     return data
 
+FAILED_PHASES = frozenset(('whitespace', 'npm-ci', 'remotion-ci', 'prisma-generate',
+    'security-audit', 'security-audit-remotion', 'architecture', 'eslint', 'domain',
+    'infra-contracts', 'platform', 'public-api', 'parity', 'migration-validation',
+    'typecheck', 'focused-w28-regressions', 'migration', 'remotion-bundle',
+    'browser-presence', 'next-build', 'remotion-browser', 'synthetic-wave24-journey'))
+DIAGNOSTIC_LINES = (
+    re.compile(r'Prisma schema loaded from prisma/v2/schema\.prisma\Z'),
+    re.compile(r'Error: P[0-9]{4}\Z'),
+    re.compile(r'npm error code E[A-Z0-9]{2,32}\Z'),
+)
+
+def collect_failed_phase(sftp, c, run_dir, phase, exit_code):
+    """Only typed phase identity and exact known-safe log lines survive; never archive raw logs.
+
+    Unknown text (including split credentials) is discarded, not regex-redacted.
+    """
+    allowed = type(phase) is str and phase in FAILED_PHASES
+    result = {'phase': phase if allowed else 'unknown',
+              'exit_code': exit_code if type(exit_code) is int else None,
+              'status': 'unavailable', 'lines': []}
+    if allowed and type(exit_code) is int and exit_code != 0:
+        try:
+            root = '/opt/apollo-validation/' + c['run_id']
+            raw = read_sftp(sftp, root + '/logs/' + phase + '.log', 65536)
+            source_lines = raw.decode('utf-8', 'replace').splitlines()
+            safe_lines = [line for line in source_lines
+                          if any(pattern.fullmatch(line) for pattern in DIAGNOSTIC_LINES)]
+            result.update(status='filtered_excerpt', filter_category='exact_safe_lines_only',
+                          source_bytes=len(raw), source_lines=len(source_lines),
+                          discarded_lines=len(source_lines) - min(len(safe_lines), 32),
+                          lines=safe_lines[:32])
+        except (OSError, Blocked, ValueError):
+            pass
+    atomic_record(run_dir / 'failed-phase-diagnostic.json', result)
+
+def collect_batch_diagnostic(sftp, c, run_dir):
+    """Best-effort only; a missing diagnostic never changes the cleanup gate."""
+    try:
+        root = '/opt/apollo-validation/' + c['run_id']
+        raw = read_sftp(sftp, root + '/evidence/batch-results.jsonl', 131072)
+        rows = [json.loads(line) for line in raw.splitlines()]
+        if len(rows) > len(FAILED_PHASES) or any(type(row) is not dict for row in rows):
+            raise ValueError('batch shape')
+        failed = [row for row in rows if type(row.get('exit_code')) is int and row['exit_code'] != 0]
+        if failed:
+            row = failed[-1]
+            collect_failed_phase(sftp, c, run_dir, row.get('phase'), row['exit_code'])
+    except (OSError, Blocked, ValueError, TypeError):
+        safe_journal(run_dir, 'failed_phase_diagnostic_unavailable')
+
 
 def owner_record(sftp, c, created_at):
     record = json.loads(read_sftp(sftp, '/run/lock/apollo-validation-owner.lock', 4096))
@@ -640,6 +690,7 @@ def finish_and_delete(c, run_dir, api, ssh, sftp, owner, exit_code, droplet, fir
     transport = ssh.get_transport()
     if transport is None or not transport.is_active():
         raise Blocked('ssh_loss_without_postflight')
+    collect_batch_diagnostic(sftp, c, run_dir)
     record, acceptance = collect_evidence(sftp, c, run_dir)
     m = manifest(c, run_dir, droplet, firewall, owner)
     verify_postflight(m, owner, exit_code)

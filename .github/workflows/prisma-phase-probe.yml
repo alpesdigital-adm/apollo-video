@@ -1,0 +1,40 @@
+name: Focused Prisma phase probe
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/prisma-phase-probe.yml'
+      - 'scripts/ops/digitalocean-validation/prisma-phase-probe.sh'
+      - 'scripts/ops/digitalocean-validation/controller.py'
+      - 'scripts/ops/digitalocean-bootstrap/batch.sh'
+      - 'scripts/ops/digitalocean-bootstrap/batch-phase.sh'
+      - 'tests/ops/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  focused-prisma:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Run capacity-gated Dockerfile.runner experiment
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/apollo-prisma-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -m 700 "$evidence"
+          printf '%s\n' "$evidence" > "$RUNNER_TEMP/apollo-prisma-evidence-path"
+          timeout --signal=TERM --kill-after=60s 1980s bash scripts/ops/digitalocean-validation/prisma-phase-probe.sh \
+            "ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$evidence"
+      - name: Preserve bounded sanitized evidence on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prisma-phase-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/apollo-prisma-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 7

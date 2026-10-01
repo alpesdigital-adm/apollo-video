@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+[[ ${BASH_SOURCE[0]} == "$0" ]] || exit 64
 ROOT=${1:?root}
 RUN=${2:?run id}
 [[ $RUN =~ ^[a-z0-9]([a-z0-9-]{0,27}[a-z0-9])?$ && $ROOT == "/opt/apollo-validation/$RUN" ]] || exit 64
@@ -11,6 +12,7 @@ for dir in "$SRC" "$STATE" "$EVID" "$LOG"; do
   [[ -d $dir && ! -L $dir ]] || exit 65
 done
 [[ -w $STATE && -w $EVID && -w $LOG ]] || exit 65
+source "$SRC/scripts/ops/digitalocean-bootstrap/batch-phase.sh"
 # Probe actual writes rather than trusting root's -w result or a stale mount.
 for dir in "$STATE" "$EVID" "$LOG"; do
   probe="$dir/.apollo-write-probe-$$"
@@ -21,19 +23,6 @@ cd "$SRC"
 export CI=1 APOLLO_RESOURCE_PROFILE=isolated-ci
 # The W24 opt-in is deliberately absent for the focused unit/contract regressions.
 unset APOLLO_SYNTHETIC_WAVE24_JOURNEY_E2E || :
-phase() {
-  local label=$1 limit=$2 rc=0
-  shift 2
-  printf 'PHASE_START %s\n' "$label"
-  timeout --signal=TERM --kill-after=15s "${limit}s" "$@" >"$LOG/$label.log" 2>&1 || rc=$?
-  # No env or secrets in phase summaries. TAP and build logs remain outside source.
-  printf '{"phase":"%s","exit_code":%d}\n' "$label" "$rc" >> "$EVID/batch-results.jsonl"
-  printf 'PHASE_RESULT %s %d\n' "$label" "$rc"
-  if (( rc != 0 )); then
-    # Do not dump logs indiscriminately: Node/Prisma failure text may contain URL credentials.
-    exit "$rc"
-  fi
-}
 node --version > "$EVID/node-version.txt"
 npm --version > "$EVID/npm-version.txt"
 git rev-parse HEAD > "$EVID/head.txt"
