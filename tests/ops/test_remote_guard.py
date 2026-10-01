@@ -851,8 +851,24 @@ class GuardTests(unittest.TestCase):
                     m.sample('preflight')
 
     def test_other_e2e_application_is_not_ours(self):
-        self.assertEqual(g.pg_activity_sql('w28-1').count("application_name='apollo-video-e2e-synthetic-wave24-w28-1'"), 1)
-        self.assertNotIn('like', g.pg_activity_sql('w28-1').lower())
+        sql = g.pg_activity_sql('w28-1').lower()
+        self.assertIn("backend_type='client backend'", sql)
+        self.assertIn("usename='apollo_e2e'", sql)
+        self.assertIn("application_name='apollo-video-e2e-synthetic-wave24-w28-1'", sql)
+        self.assertIn("application_name is distinct from 'apollo-video-e2e-synthetic-wave24-w28-1'", sql)
+        self.assertIn("'autovacuum worker','parallel worker'", sql)
+        self.assertIn('backend_type is null', sql)
+        self.assertNotIn('like', sql)
+
+    def test_pg_capacity_threshold_and_four_integer_fields_remain_closed(self):
+        sql = g.pg_activity_sql('w28-1')
+        self.assertTrue(sql.startswith("select count(*),current_setting('max_connections'),"))
+        self.assertEqual(sql.count(' filter(where '), 2)
+        # _sample retains the conservative 50% gate and strict unpacking; a
+        # malformed/missing PG field cannot silently turn into zero.
+        source = Path(g.__file__ or '').read_text()
+        self.assertIn("total, maximum, ours, strangers = map(int, raw.split('|'))", source)
+        self.assertIn('total * 2 > maximum or strangers', source)
 
     def test_guard_thresholds_match_canonical_policy(self):
         policy = json.loads((Path(__file__).resolve().parents[2] / 'config' / 'host-safety-policy.json').read_text())

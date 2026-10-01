@@ -126,6 +126,31 @@ jobs:
           PYTHON: ${{ runner.temp }}/apollo-ops-python/bin/python
           TMPDIR: ${{ runner.temp }}
 
+      - name: Require PostgreSQL 16 server and client binaries for isolated activity proof
+        run: |
+          set -euo pipefail
+          for binary in initdb pg_ctl psql pg_isready createdb; do
+            path="/usr/lib/postgresql/16/bin/$binary"
+            if [ ! -x "$path" ]; then
+              printf 'PostgreSQL 16 binary required: %s\n' "$path" >&2
+              exit 1
+            fi
+            version="$($path --version)"
+            case "$version" in
+              *' 16.'*) printf '%s\n' "$version" ;;
+              *) printf 'PostgreSQL 16 required: %s reported %s\n' "$path" "$version" >&2; exit 1 ;;
+            esac
+          done
+
+      - name: Prove PostgreSQL activity classification on an owned PG16 cluster
+        run: npm run test:ops:postgres-activity
+        timeout-minutes: 4
+        env:
+          PYTHON: ${{ runner.temp }}/apollo-ops-python/bin/python
+          TMPDIR: ${{ runner.temp }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          APOLLO_RUNTIME_SAFETY_DATABASE_URL: ""
+
       - name: Package and read back the real clean checkout offline
         run: |
           set -euo pipefail

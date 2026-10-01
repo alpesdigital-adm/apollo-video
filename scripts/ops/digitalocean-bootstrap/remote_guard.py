@@ -127,8 +127,13 @@ def owner_lock(run, duration, path=OWNER_LOCK):
 def pg_activity_sql(run):
     name = pg_application_name(run)
     return ("select count(*),current_setting('max_connections'),"
-            "count(*) filter(where datname='"+DB+"' and application_name='"+name+"'),"
-            "count(*) filter(where datname='"+DB+"' and application_name<>'"+name+"' and pid<>pg_backend_pid()) "
+            "count(*) filter(where datname='"+DB+"' and backend_type='client backend' "
+            "and usename='apollo_e2e' and application_name='"+name+"'),"
+            "count(*) filter(where datname='"+DB+"' and pid is distinct from pg_backend_pid() "
+            "and (backend_type is null or backend_type not in ('autovacuum worker','parallel worker')) "
+            "and (backend_type is distinct from 'client backend' "
+            "or usename is distinct from 'apollo_e2e' "
+            "or application_name is distinct from '"+name+"')) "
             "from pg_stat_activity")
 
 def pg_application_name(run):
