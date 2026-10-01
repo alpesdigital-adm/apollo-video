@@ -982,14 +982,14 @@ class ControllerTest(unittest.TestCase):
     def test_probe_snapshot_parses_real_cgroup_fields(self):
         text = (SOURCE.parent / 'prisma-phase-probe.sh').read_text()
         parser = text.split("python3 -c 'import json,re,sys\n", 1)[1].split("' > \"$evidence/cgroup-", 1)[0]
-        fixture = ('cpu.stat\nusage_usec 123\nuser_usec 45\n'
+        fixture = ('cpu.stat\nusage_usec 123\nuser_usec 45\ncore_sched.force_idle_usec 7\n'
                    'memory.current\n4096\nmemory.peak\n8192\n'
                    'memory.events\noom 0\noom_kill 1\n')
         result = subprocess.run([sys.executable, '-c', 'import json,re,sys\n' + parser],
                                 input=fixture, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {
-            'cpu.stat': {'usage_usec': 123, 'user_usec': 45},
+            'cpu.stat': {'usage_usec': 123, 'user_usec': 45, 'core_sched.force_idle_usec': 7},
             'memory.current': {'value': 4096}, 'memory.peak': {'value': 8192},
             'memory.events': {'oom': 0, 'oom_kill': 1}})
         unsafe = fixture.replace('oom 0', 'oom;bad 0')

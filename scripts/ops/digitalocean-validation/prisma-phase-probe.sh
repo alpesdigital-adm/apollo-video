@@ -118,7 +118,7 @@ for line in lines:
     assert current is not None
     fields=line.split(); assert len(fields) in (1,2)
     assert fields[-1].isascii() and fields[-1].isdecimal()
-    assert len(fields)==1 or re.fullmatch(r"[a-z][a-z0-9_]*",fields[0],re.ASCII)
+    assert len(fields)==1 or re.fullmatch(r"[a-z][a-z0-9_.]*",fields[0],re.ASCII)
     sections[current][fields[0] if len(fields)==2 else "value"]=int(fields[-1])
 assert set(sections)==set(keys) and all(sections.values())
 print(json.dumps(sections,sort_keys=True))' > "$evidence/cgroup-$stage-$moment.json"
