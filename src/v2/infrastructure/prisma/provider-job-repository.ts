@@ -511,9 +511,12 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
         return Object.freeze({ persisted: Object.freeze({ ...parseJob(row), transportState }), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      // Serializable write conflicts against a concurrently polling worker
-      // are transient: retry the create instead of surfacing them.
-      if (isPrismaCode(error, 'P2034') && attempt < 4) continue
+      // Yield after a transient serialization conflict so a competing
+      // transaction can finish before the next fresh authority check.
+      if (isPrismaCode(error, 'P2034') && attempt < 4) {
+        await new Promise<void>((resolve) => setTimeout(resolve, attempt * 10))
+        continue
+      }
       if (!isPrismaCode(error, 'P2002')) throw error
       const fallback = input.job.transformation?.fallback
       if (fallback) {
