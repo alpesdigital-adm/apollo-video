@@ -633,12 +633,13 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     marker = await markLedger()
     jobsBefore = await jobCount()
     const callsBefore = providerCalls.length
+    const twinArguments = {
+      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      planId: twinPlan.plan.head.id, use: 'ads', market: 'BRA', actor,
+    }
     const [mainPass, twinPass] = await Promise.all([
       ensure(mainArguments()),
-      ensure({
-        workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
-        planId: twinPlan.plan.head.id, use: 'ads', market: 'BRA', actor,
-      }),
+      ensure(twinArguments),
     ])
     const contendedOutcomes = [
       mainPass.find(({ blockId }) => blockId === contendedBlock),
@@ -649,6 +650,12 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       ['deferred-duplicate', 'enqueued'],
       'concurrent requests for one cache address submit exactly once',
     )
+    const contendedRequests = [
+      { args: mainArguments(), blockId: contendedBlock },
+      { args: twinArguments, blockId: twinPlan.plan.version.blockSequence[0] },
+    ]
+    const loserIndex = contendedOutcomes.findIndex(({ action }) => action === 'deferred-duplicate')
+    const winnerIndex = contendedOutcomes.findIndex(({ action }) => action === 'enqueued')
     assert.equal(await jobCount(), jobsBefore + 1, 'exactly one provider job is created for the contended address')
     added = await decisionsSince()
     assert.deepEqual(
@@ -666,8 +673,10 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     await settle({ workspaceId, projectId: twin.project.id, planId: twinPlan.plan.head.id, actor })
     await grantRights(twinPlan.plan.head.id)
     await grantRights(planId)
-    const afterTwinSettled = await ensure(mainArguments())
-    assert.equal(afterTwinSettled.find(({ blockId }) => blockId === contendedBlock)?.action, 'reused')
+    const afterLoserSettled = await ensure(contendedRequests[loserIndex].args)
+    assert.equal(afterLoserSettled.find(({ blockId }) => blockId === contendedRequests[loserIndex].blockId)?.action, 'reused')
+    const afterWinnerSettled = await ensure(contendedRequests[winnerIndex].args)
+    assert.equal(afterWinnerSettled.find(({ blockId }) => blockId === contendedRequests[winnerIndex].blockId)?.action, 'up-to-date')
     assert.equal(providerCalls.length, callsBefore + 1, 'the deferred duplicate reuses instead of paying')
 
     // The ledger never carries the script it decided about.
