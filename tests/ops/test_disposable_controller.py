@@ -5,6 +5,7 @@ import errno
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import stat
 import subprocess
@@ -883,6 +884,150 @@ class ControllerTest(unittest.TestCase):
         with self.assertRaises(IOError):
             controller.collect_evidence(SFTP(), self.config, run_dir)
         self.assertFalse((run_dir / 'visual-inventory.json').exists())
+
+    def test_failed_batch_phase_diagnostic_is_collected_before_delete_without_raw_secrets(self):
+        import test_watchdog as fixtures
+        fixture = fixtures.WatchdogTest(); fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        m, api = fixture.m, fixture.api
+        self.config.update({k: m[k] for k in ('run_id', 'owner_id', 'expected_commit',
+                                              'snapshot_id', 'vpc_id', 'region', 'size')})
+        run_dir = Path(m['postflight_file']).parent
+        post = json.loads(Path(m['postflight_file']).read_text())
+        post.update(work_outcome='failed', exit_code=124)
+        secret = 'CANARY-private-secret-123'
+        log = (b'Prisma schema loaded from prisma/v2/schema.prisma\n'
+               + f'postgresql://user:{secret}@localhost/db?token={secret}\nAuthorization: Bearer\n{secret}\npassword={secret}\n'.encode())
+        files = {'postflight.json': json.dumps(post).encode(),
+                 'samples.jsonl': (run_dir / 'samples.jsonl').read_bytes(),
+                 'monitor-diagnostics.jsonl': self.monitored_evidence()['monitor-diagnostics.jsonl'],
+                 'batch-results.jsonl': b'{"phase":"prisma-generate","exit_code":124}\n',
+                 'prisma-generate.log': log}
+        for existing in ('postflight.json', 'samples.jsonl'):
+            (run_dir / existing).unlink()
+        events = []
+        class SFTP:
+            def lstat(self, path):
+                events.append(('read', path))
+                content = files[path.rsplit('/', 1)[-1]]
+                return type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_size': len(content)})()
+            def open(self, path, mode): return io.BytesIO(files[path.rsplit('/', 1)[-1]])
+            def listdir_attr(self, path): return []
+            def close(self): events.append(('close', ''))
+        class SSH:
+            def get_transport(self):
+                return type('Transport', (), {'is_active': lambda self: True})()
+            def close(self): events.append(('ssh_close', ''))
+        def delete(*args, **kwargs):
+            events.append(('delete', ''))
+            return 'deleted_verified'
+        with patch.object(controller.watchdog, 'run', side_effect=delete), \
+             patch.object(controller.watchdog, 'terminal_ready', return_value=True), \
+             patch.object(controller.watchdog, 'validate_manifest'):
+            controller.finish_and_delete(self.config, run_dir, api, SSH(), SFTP(),
+                {'pid': m['owner_pid'], 'deadlineUTC': m['owner_deadline_utc']}, 124,
+                {'id': m['droplet_id'], 'created_at': m['created_at']},
+                {'id': m['firewall_id']}, {'active': True, 'path': m['lockfile']})
+        saved = (run_dir / 'failed-phase-diagnostic.json').read_text()
+        self.assertIn('prisma-generate', saved)
+        self.assertIn('schema loaded', saved)
+        self.assertNotIn(secret, saved)
+        self.assertNotIn('postgresql://', saved)
+        self.assertLess(next(i for i, e in enumerate(events) if e[0] == 'read' and e[1].endswith('prisma-generate.log')),
+                        next(i for i, e in enumerate(events) if e[0] == 'delete'))
+
+    def test_failed_phase_diagnostic_rejects_unknown_phase_missing_symlink_and_oversize(self):
+        from types import SimpleNamespace
+        for phase, mode, content in ((['prisma-generate'], stat.S_IFREG, b'x'),
+                                     ('../secret', stat.S_IFREG, b'x'),
+                                     ('prisma-generate', stat.S_IFLNK, b'x'),
+                                     ('prisma-generate', stat.S_IFREG, b'x' * 65537),
+                                     ('prisma-generate', stat.S_IFREG, None)):
+            with self.subTest(phase=phase, mode=mode, size=len(content or b'')):
+                class SFTP:
+                    def lstat(self, path):
+                        if content is None: raise FileNotFoundError(errno.ENOENT, 'absent')
+                        return SimpleNamespace(st_mode=mode, st_size=len(content))
+                    def open(self, path, mode):
+                        if content is None or phase == '../secret' or len(content) > 65536 or not stat.S_ISREG(mode):
+                            raise AssertionError('unsafe read')
+                        return io.BytesIO(content)
+                run = self.root / ('diagnostic-' + str(len(list(self.root.glob('diagnostic-*')))))
+                run.mkdir()
+                controller.collect_failed_phase(SFTP(), self.config, run, phase, 124)
+                result = json.loads((run / 'failed-phase-diagnostic.json').read_text())
+                self.assertEqual(result['status'], 'unavailable')
+                self.assertFalse((run / 'prisma-generate.log').exists())
+
+    def test_focused_ci_probe_contract_preserves_budget_and_real_generator(self):
+        source = SOURCE.parents[0] / 'prisma-phase-probe.sh'
+        text = source.read_text()
+        self.assertIn('Dockerfile.runner', text)
+        self.assertIn('npm ci --prefix remotion', text)
+        self.assertIn('npm run db:v2:generate', text)
+        self.assertIn('timeout --signal=TERM --kill-after=15s 180s', text)
+        self.assertIn('--cpus=1.5', text)
+        self.assertIn('--memory=9g', text)
+        self.assertIn('--memory-swap=9g', text)
+        self.assertIn('--cpuset-cpus=0,1', text)
+        self.assertIn('trap cleanup EXIT', text)
+        self.assertNotIn('DEBUG=*', text)
+        for flag in ('--network=host', '--pids-limit=1536', '--shm-size=512m', '--init'):
+            self.assertIn(flag, text)
+        self.assertIn('work_exit_code', text)
+        self.assertIn('cleanup_verified', text)
+        self.assertIn('memory.peak', text)
+        self.assertIn('cpu.stat', text)
+        self.assertIn('source_sha256', text)
+
+    def test_probe_snapshot_parses_real_cgroup_fields(self):
+        text = (SOURCE.parent / 'prisma-phase-probe.sh').read_text()
+        parser = text.split("python3 -c 'import json,re,sys\n", 1)[1].split("' > \"$evidence/cgroup-", 1)[0]
+        fixture = ('cpu.stat\nusage_usec 123\nuser_usec 45\ncore_sched.force_idle_usec 7\n'
+                   'memory.current\n4096\nmemory.peak\n8192\n'
+                   'memory.events\noom 0\noom_kill 1\n')
+        result = subprocess.run([sys.executable, '-c', 'import json,re,sys\n' + parser],
+                                input=fixture, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {
+            'cpu.stat': {'usage_usec': 123, 'user_usec': 45, 'core_sched.force_idle_usec': 7},
+            'memory.current': {'value': 4096}, 'memory.peak': {'value': 8192},
+            'memory.events': {'oom': 0, 'oom_kill': 1}})
+        unsafe = fixture.replace('oom 0', 'oom;bad 0')
+        rejected = subprocess.run([sys.executable, '-c', 'import json,re,sys\n' + parser],
+                                  input=unsafe, text=True, capture_output=True)
+        self.assertNotEqual(rejected.returncode, 0)
+
+    def test_failed_phase_diagnostic_counts_discarded_material_without_leaking(self):
+        from types import SimpleNamespace
+        secret = b'CANARY-do-not-publish'
+        raw = b'Prisma schema loaded from prisma/v2/schema.prisma\n' + secret + b'\n' + b'x\n' * 35
+        class SFTP:
+            def lstat(self, path):
+                return SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_size=len(raw))
+            def open(self, path, mode): return io.BytesIO(raw)
+        controller.collect_failed_phase(SFTP(), self.config, self.root, 'prisma-generate', 124)
+        saved = json.loads((self.root/'failed-phase-diagnostic.json').read_text())
+        self.assertEqual(saved['status'], 'filtered_excerpt')
+        self.assertEqual(saved['filter_category'], 'exact_safe_lines_only')
+        self.assertEqual(saved['source_bytes'], len(raw))
+        self.assertEqual(saved['discarded_lines'], 36)
+        self.assertNotIn(secret.decode(), json.dumps(saved))
+
+    def test_real_batch_phase_timeout_124_preserves_log_and_result(self):
+        # Source only the production phase function; no Docker, PG or full guard.
+        shell = SOURCE.parents[1] / 'digitalocean-bootstrap' / 'batch-phase.sh'
+        log = self.root / 'logs'; log.mkdir()
+        evidence = self.root / 'evidence'; evidence.mkdir()
+        script = 'source "$1"; LOG="$2"; EVID="$3"; phase prisma-generate 1 bash -c "printf safe-marker; sleep 3"'
+        bash = ('C:/Program Files/Git/usr/bin/bash.exe' if os.name == 'nt' else 'bash')
+        paths = [str(path).replace('\\', '/') for path in (shell, log, evidence)]
+        result = subprocess.run([str(bash), '-c', script, 'batch-fixture', *paths],
+                                capture_output=True, timeout=12)
+        self.assertEqual(result.returncode, 124, (result.stderr, result.stdout,
+            (log / 'prisma-generate.log').read_bytes() if (log / 'prisma-generate.log').exists() else b'no log'))
+        self.assertIn(b'safe-marker', (log / 'prisma-generate.log').read_bytes())
+        self.assertEqual(json.loads((evidence / 'batch-results.jsonl').read_text()),
+                         {'phase': 'prisma-generate', 'exit_code': 124})
 
     def test_cli_nonzero_on_failed_work_or_acceptance_even_after_verified_delete(self):
         import contextlib

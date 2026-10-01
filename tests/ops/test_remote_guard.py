@@ -902,6 +902,9 @@ class GuardTests(unittest.TestCase):
                 bash = 'C:/Program Files/Git/usr/bin/bash.exe'
             for part in ('source', 'state', 'evidence', 'logs'):
                 (root/part).mkdir()
+            bundled = root/'source/scripts/ops/digitalocean-bootstrap/batch-phase.sh'
+            bundled.parent.mkdir(parents=True)
+            shutil.copyfile(script.with_name('batch-phase.sh'), bundled)
             result = subprocess.run([bash, '-c', head + '\nphase smoke 3 bash -c "printf smoke-output"', 'batch', shell_root, 'w28-1'],
                                     capture_output=True, text=True, errors='replace', timeout=8)
             self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
@@ -912,6 +915,47 @@ class GuardTests(unittest.TestCase):
             blocked = subprocess.run([bash, '-c', head + '\nphase smoke 3 true', 'batch', shell_root, 'w28-1'],
                                      capture_output=True, text=True, errors='replace', timeout=8)
             self.assertNotEqual(blocked.returncode, 0)
+
+    def test_batch_from_isolated_tools_sources_only_bundle_helper_and_reaches_phase(self):
+        script = Path(__file__).resolve().parents[2] / 'scripts/ops/digitalocean-bootstrap/batch.sh'
+        helper = script.with_name('batch-phase.sh')
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / 'run'; tools = Path(td) / 'tools'; tools.mkdir()
+            for part in ('source', 'state', 'evidence', 'logs'):
+                (root / part).mkdir(parents=True)
+            bundled = root / 'source/scripts/ops/digitalocean-bootstrap/batch-phase.sh'
+            bundled.parent.mkdir(parents=True)
+            shutil.copyfile(helper, bundled)
+            self.assertFalse((tools / 'batch-phase.sh').exists())
+            # Replace only the fixed /opt identity gate to allow an isolated local fixture.
+            text = script.read_text()
+            original = '$ROOT == "/opt/apollo-validation/$RUN"'
+            self.assertEqual(text.count(original), 1)
+            shell_root = '/' + root.drive[0].lower() + root.as_posix()[2:] if root.drive else str(root)
+            fixture = text.replace(original, '$ROOT == "' + shell_root + '"')
+            # Avoid a commit or a repository in the fixture; leave the real phase intact.
+            fixture = fixture.replace('git rev-parse HEAD > "$EVID/head.txt"',
+                                      'printf "fixture\\n" > "$EVID/head.txt"')
+            (tools / 'batch.sh').write_text(fixture)
+            bash = 'C:/Program Files/Git/usr/bin/bash.exe' if os.name == 'nt' else 'bash'
+            # Stop at the first real phase: no installs or later commands are invoked.
+            bin_dir = Path(td) / 'bin'; bin_dir.mkdir()
+            npm = bin_dir / 'npm'
+            npm.write_text('#!/usr/bin/env bash\n'
+                           'if [[ $1 == --version ]]; then printf "1\\n"; else exit 77; fi\n')
+            npm.chmod(0o755)
+            shell_bin = '/' + bin_dir.drive[0].lower() + bin_dir.as_posix()[2:] if bin_dir.drive else str(bin_dir)
+            command = ('export PATH="$3:$PATH"; node() { printf "v1\\n"; }; '
+                       'git() { printf "fixture\\n"; }; ffmpeg() { printf "ffmpeg fixture\\n"; }; '
+                       'export -f node git ffmpeg; '
+                       'bash "$2" "$1" fixture')
+            result = subprocess.run([bash, '-c', command, 'fixture', shell_root,
+                                     str(tools / 'batch.sh').replace('\\', '/'), shell_bin],
+                                    capture_output=True, text=True, timeout=12)
+            self.assertEqual(result.returncode, 77, (result.stdout, result.stderr))
+            self.assertIn('PHASE_START whitespace', result.stdout)
+            self.assertEqual(json.loads((root / 'evidence/batch-results.jsonl').read_text()),
+                             {'phase': 'whitespace', 'exit_code': 77})
 
     def test_runner_arguments_mount_only_owned_paths_and_logs(self):
         root = '/opt/apollo-validation/demo'
