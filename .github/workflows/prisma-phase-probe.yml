@@ -28,7 +28,7 @@ jobs:
           evidence="$RUNNER_TEMP/apollo-prisma-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -m 700 "$evidence"
           printf '%s\n' "$evidence" > "$RUNNER_TEMP/apollo-prisma-evidence-path"
-          timeout --signal=TERM --kill-after=60s 1980s bash scripts/ops/digitalocean-validation/prisma-phase-probe.sh \
+          timeout --signal=TERM --kill-after=60s 1920s bash scripts/ops/digitalocean-validation/prisma-phase-probe.sh \
             "ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$evidence"
       - name: Preserve bounded sanitized evidence on success or failure
         if: always()
