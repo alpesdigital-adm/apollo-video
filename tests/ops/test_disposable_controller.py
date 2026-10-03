@@ -978,6 +978,40 @@ class ControllerTest(unittest.TestCase):
         self.assertIn('memory.peak', text)
         self.assertIn('cpu.stat', text)
         self.assertIn('source_sha256', text)
+        self.assertIn('npm ci --foreground-scripts', text)
+        self.assertIn('npm ci --prefix remotion --foreground-scripts', text)
+        self.assertIn('capture "\u0024stage" guard timeout --signal=TERM --kill-after=15s 180s', text)
+        self.assertIn('capture "\u0024stage" baseline timeout --signal=TERM --kill-after=15s 180s', text)
+
+    def test_probe_diagnostics_bounds_generated_events_without_exposing_paths(self):
+        script = (SOURCE.parent / 'prisma-phase-probe.sh').read_text()
+        parser = script.split("python3 - \"$raw\" \"$evidence\" <<'PY' || cleanup_error=true\n", 1)[1].split('\nPY', 1)[0]
+        raw = self.root / 'raw'
+        evidence = self.root / 'evidence'
+        raw.mkdir()
+        evidence.mkdir()
+        secret = '/private/token=CANARY'
+        lines = ['\x1b[32mPrisma schema loaded from prisma/v2/schema.prisma\x1b[0m',
+                 f'Generated Prisma Client (v5.22.0) to {secret} in 9999999s']
+        lines += [f'✔ Generated Prisma Client (v5.22.0) to {secret} in {i}.50s' for i in range(34)]
+        lines[2] = '\x1b[32m' + lines[2] + '\x1b[0m'
+        lines += ['CANARY']
+        (raw / 'npm-ci').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        (raw / 'remotion-ci').write_text('X' * 65537)
+        result = subprocess.run([sys.executable, '-X', 'utf8', '-', str(raw), str(evidence)], input=parser,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = (evidence / 'diagnostics.json').read_text()
+        self.assertNotIn('CANARY', output)
+        records = {item['stage']: item for item in json.loads(output)}
+        npm = records['npm-ci']
+        self.assertEqual(npm['schema_loaded_count'], 1)
+        self.assertEqual(len(npm['generated_events']), 32)
+        self.assertEqual(npm['generated_events'][0], {'version': '5.22.0', 'elapsed': 0.5, 'unit': 's'})
+        self.assertEqual(npm['discarded_lines'], len(lines) - 1 - 32)
+        self.assertEqual(records['remotion-ci']['status'], 'unavailable_oversized')
+        self.assertIsNone(records['remotion-ci']['schema_loaded_count'])
+        self.assertEqual(records['remotion-ci']['generated_events'], [])
 
     def test_probe_snapshot_parses_real_cgroup_fields(self):
         text = (SOURCE.parent / 'prisma-phase-probe.sh').read_text()
@@ -1018,7 +1052,7 @@ class ControllerTest(unittest.TestCase):
         shell = SOURCE.parents[1] / 'digitalocean-bootstrap' / 'batch-phase.sh'
         log = self.root / 'logs'; log.mkdir()
         evidence = self.root / 'evidence'; evidence.mkdir()
-        script = 'source "$1"; LOG="$2"; EVID="$3"; phase prisma-generate 1 bash -c "printf safe-marker; sleep 3"'
+        script = 'PATH="/usr/bin:$PATH"; source "$1"; LOG="$2"; EVID="$3"; phase prisma-generate 1 bash -c "printf safe-marker; sleep 3"'
         bash = ('C:/Program Files/Git/usr/bin/bash.exe' if os.name == 'nt' else 'bash')
         paths = [str(path).replace('\\', '/') for path in (shell, log, evidence)]
         result = subprocess.run([str(bash), '-c', script, 'batch-fixture', *paths],
@@ -1026,8 +1060,11 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(result.returncode, 124, (result.stderr, result.stdout,
             (log / 'prisma-generate.log').read_bytes() if (log / 'prisma-generate.log').exists() else b'no log'))
         self.assertIn(b'safe-marker', (log / 'prisma-generate.log').read_bytes())
-        self.assertEqual(json.loads((evidence / 'batch-results.jsonl').read_text()),
-                         {'phase': 'prisma-generate', 'exit_code': 124})
+        phase_result = json.loads((evidence / 'batch-results.jsonl').read_text())
+        self.assertEqual(phase_result['phase'], 'prisma-generate')
+        self.assertEqual(phase_result['exit_code'], 124)
+        self.assertGreaterEqual(phase_result['elapsed_seconds'], 1)
+        self.assertLessEqual(phase_result['elapsed_seconds'], 12)
 
     def test_cli_nonzero_on_failed_work_or_acceptance_even_after_verified_delete(self):
         import contextlib

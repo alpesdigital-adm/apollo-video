@@ -19,18 +19,31 @@ from pathlib import Path
 raw, evidence = map(Path, sys.argv[1:])
 patterns = (r'Prisma schema loaded from prisma/v2/schema\.prisma',
             r'Error: P[0-9]{4}', r'npm error code E[A-Z0-9]{2,32}')
+generated = re.compile(r'(?:✔ )?Generated Prisma Client \(v([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\) to .{1,300} in ([0-9]{1,7}(?:\.[0-9]{1,3})?)(ms|s)')
 records = []
 for path in sorted(raw.iterdir()):
-    if path.name not in ('build', 'npm-ci', 'remotion-ci', 'prisma-generate'):
+    if path.name not in ('build', 'npm-ci', 'remotion-ci',
+                         'prisma-guard-1', 'prisma-guard-2',
+                         'prisma-baseline-1', 'prisma-baseline-2'):
         continue
     size = path.stat().st_size
     source = [] if size > 65536 else path.read_text(errors='replace').splitlines()
-    safe = [line for line in source if any(re.fullmatch(pattern, line) for pattern in patterns)]
+    normalized = [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in source]
+    safe = [line for line in normalized if any(re.fullmatch(pattern, line) for pattern in patterns)]
+    generated_events = []
+    for line in normalized:
+        match = generated.fullmatch(line)
+        if match and len(generated_events) < 32:
+            version, elapsed, unit = match.groups()
+            duration = float(elapsed)
+            if duration <= 1000000:
+                generated_events.append({'version': version, 'elapsed': duration, 'unit': unit})
     records.append({'stage': path.name, 'status': 'unavailable_oversized' if size > 65536 else 'filtered_excerpt',
-                    'filter_category': 'exact_safe_lines_only', 'source_bytes': size,
+                    'filter_category': 'exact_safe_lines_and_numeric_generated_events', 'source_bytes': size,
                     'source_lines': None if size > 65536 else len(source),
-                    'discarded_lines': None if size > 65536 else len(source) - min(32, len(safe)),
-                    'lines': safe[:32]})
+                    'discarded_lines': None if size > 65536 else len(source) - min(32, len(safe)) - len(generated_events),
+                    'schema_loaded_count': None if size > 65536 else sum(line == 'Prisma schema loaded from prisma/v2/schema.prisma' for line in normalized),
+                    'generated_events': generated_events, 'lines': safe[:32]})
 (evidence / 'diagnostics.json').write_text(json.dumps(records, sort_keys=True) + '\n')
 PY
   # An empty, successful ps is explicit absence; daemon errors never imply absence.
@@ -98,13 +111,26 @@ assert quota * 2 == period * 3 and int(mem) == 9 * 1024**3 and int(swap) == 0
 assert cpuset == '0-1' or cpuset == '0,1', 'effective cpuset mismatch'
 PY
 capture() {
-  local stage=$1 rc=0; shift
-  printf 'stage=%s start_utc=%s\n' "$stage" "$(date -u +%FT%TZ)" >> "$evidence/stages.txt"
+  local stage=$1 profile=$2 rc=0 started; shift 2
+  local -a env_args=(-e CI=1 -e APOLLO_RESOURCE_PROFILE=isolated-ci
+    -e V2_DATABASE_URL=postgresql://apollo:generate-only@127.0.0.1:5432/apollo_v2?schema=public)
+  if [[ $profile == guard ]]; then
+    env_args+=(-e HOME=/tmp/apollo-prisma-probe/home
+      -e TMPDIR=/tmp/apollo-prisma-probe/tmp
+      -e npm_config_cache=/tmp/apollo-prisma-probe/cache
+      -e UV_THREADPOOL_SIZE=2 -e NODE_OPTIONS=--max-old-space-size=4096
+      -e CIRCLE_NODE_TOTAL=2 -e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1)
+  elif [[ $profile != baseline ]]; then
+    return 64
+  fi
+  started=$(date +%s)
+  printf 'stage=%s profile=%s start_utc=%s\n' "$stage" "$profile" "$(date -u +%FT%TZ)" >> "$evidence/stages.txt"
   snapshot "$stage" before
-  docker exec -e CI=1 -e APOLLO_RESOURCE_PROFILE=isolated-ci "$name" \
+  docker exec "${env_args[@]}" "$name" \
     bash -c 'cd /work && exec "$@"' bash "$@" > "$raw/$stage" 2>&1 || rc=$?
   snapshot "$stage" after
-  printf 'stage=%s exit=%s end_utc=%s\n' "$stage" "$rc" "$(date -u +%FT%TZ)" >> "$evidence/stages.txt"
+  printf 'stage=%s profile=%s exit=%s elapsed_seconds=%s end_utc=%s\n' \
+    "$stage" "$profile" "$rc" "$(($(date +%s)-started))" "$(date -u +%FT%TZ)" >> "$evidence/stages.txt"
   return "$rc"
 }
 snapshot() {
@@ -125,10 +151,17 @@ print(json.dumps(sections,sort_keys=True))' > "$evidence/cgroup-$stage-$moment.j
 }
 docker exec "$name" node --version | python3 -c 'import re,sys; s=sys.stdin.read().strip(); assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+",s); print(s)' > "$evidence/node-version.txt"
 docker exec "$name" npm --version | python3 -c 'import re,sys; s=sys.stdin.read().strip(); assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",s); print(s)' > "$evidence/npm-version.txt"
-capture npm-ci timeout --signal=TERM --kill-after=15s 550s npm ci
-capture remotion-ci timeout --signal=TERM --kill-after=15s 450s npm ci --prefix remotion
+docker exec "$name" sh -c 'umask 077; mkdir -p /tmp/apollo-prisma-probe/home /tmp/apollo-prisma-probe/tmp /tmp/apollo-prisma-probe/cache; test -d /tmp/apollo-prisma-probe/home && test -d /tmp/apollo-prisma-probe/tmp && test -d /tmp/apollo-prisma-probe/cache'
+capture npm-ci guard timeout --signal=TERM --kill-after=15s 550s npm ci --foreground-scripts
+capture remotion-ci guard timeout --signal=TERM --kill-after=15s 450s npm ci --prefix remotion --foreground-scripts
 docker exec "$name" node -p "require('/work/node_modules/prisma/package.json').version" |
   python3 -c 'import re,sys; s=sys.stdin.read().strip(); assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",s), "Prisma version unavailable"; print(s)' > "$evidence/prisma-version.txt"
-# The original phase budget remains 180 seconds; no retry or altered Prisma runtime.
-capture prisma-generate timeout --signal=TERM --kill-after=15s 180s npm run db:v2:generate
+# Each explicit generation retains the original 180-second bound. A failure
+# stops the experiment; baseline never starts after a failed guard run.
+for stage in prisma-guard-1 prisma-guard-2; do
+  capture "$stage" guard timeout --signal=TERM --kill-after=15s 180s npm run db:v2:generate
+done
+for stage in prisma-baseline-1 prisma-baseline-2; do
+  capture "$stage" baseline timeout --signal=TERM --kill-after=15s 180s npm run db:v2:generate
+done
 state=completed_focused_only

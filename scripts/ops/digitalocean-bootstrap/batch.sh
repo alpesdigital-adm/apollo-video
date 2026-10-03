@@ -30,7 +30,7 @@ ffmpeg -version | sed -n '1p' > "$EVID/ffmpeg-version.txt"
 phase whitespace 90 npm run lint:whitespace
 phase npm-ci 1200 npm ci
 phase remotion-ci 900 npm ci --prefix remotion
-phase prisma-generate 180 npm run db:v2:generate
+phase prisma-generate 360 npm run db:v2:generate
 phase security-audit 300 npm run security:audit
 phase security-audit-remotion 300 npm run security:audit:remotion
 phase architecture 90 npm run lint
