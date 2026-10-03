@@ -945,7 +945,7 @@ class GuardTests(unittest.TestCase):
                            'if [[ $1 == --version ]]; then printf "1\\n"; else exit 77; fi\n')
             npm.chmod(0o755)
             shell_bin = '/' + bin_dir.drive[0].lower() + bin_dir.as_posix()[2:] if bin_dir.drive else str(bin_dir)
-            command = ('export PATH="$3:$PATH"; node() { printf "v1\\n"; }; '
+            command = ('export PATH="$3:/usr/bin:$PATH"; node() { printf "v1\\n"; }; '
                        'git() { printf "fixture\\n"; }; ffmpeg() { printf "ffmpeg fixture\\n"; }; '
                        'export -f node git ffmpeg; '
                        'bash "$2" "$1" fixture')
@@ -954,8 +954,11 @@ class GuardTests(unittest.TestCase):
                                     capture_output=True, text=True, timeout=12)
             self.assertEqual(result.returncode, 77, (result.stdout, result.stderr))
             self.assertIn('PHASE_START whitespace', result.stdout)
-            self.assertEqual(json.loads((root / 'evidence/batch-results.jsonl').read_text()),
-                             {'phase': 'whitespace', 'exit_code': 77})
+            phase_result = json.loads((root / 'evidence/batch-results.jsonl').read_text())
+            self.assertEqual(phase_result['phase'], 'whitespace')
+            self.assertEqual(phase_result['exit_code'], 77)
+            self.assertIsInstance(phase_result['elapsed_seconds'], int)
+            self.assertGreaterEqual(phase_result['elapsed_seconds'], 0)
 
     def test_runner_arguments_mount_only_owned_paths_and_logs(self):
         root = '/opt/apollo-validation/demo'
