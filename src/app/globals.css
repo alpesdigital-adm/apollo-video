@@ -1,6 +1,5 @@
-@import 'tailwindcss/base';
-@import 'tailwindcss/components';
-@import 'tailwindcss/utilities';
+@import 'tailwindcss' source('..');
+@config '../../tailwind.config.ts';
 
 /* Root color scheme */
 :root {
@@ -43,10 +42,10 @@
 @keyframes accent-pulse {
   0%,
   100% {
-    @apply opacity-100;
+    opacity: 1;
   }
   50% {
-    @apply opacity-75;
+    opacity: 0.75;
   }
 }
 
@@ -121,7 +120,7 @@ body {
 
 /* Button styles */
 .btn-primary {
-  @apply px-6 py-2 rounded-lg bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-black font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95;
+  @apply px-6 py-2 rounded-lg bg-linear-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-black font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95;
 }
 
 .btn-secondary {
@@ -143,7 +142,7 @@ body {
 
 /* Input styles */
 .input-field {
-  @apply w-full px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-white placeholder-zinc-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 outline-none transition-all;
+  @apply w-full px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-white placeholder-zinc-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 outline-hidden transition-all;
 }
 
 /* Badge styles */
@@ -152,19 +151,19 @@ body {
 }
 
 .badge-primary {
-  @apply badge bg-amber-400/20 text-amber-400;
+  @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-400/20 text-amber-400;
 }
 
 .badge-success {
-  @apply badge bg-emerald-400/20 text-emerald-400;
+  @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-400/20 text-emerald-400;
 }
 
 .badge-warning {
-  @apply badge bg-yellow-400/20 text-yellow-400;
+  @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-yellow-400/20 text-yellow-400;
 }
 
 .badge-error {
-  @apply badge bg-red-400/20 text-red-400;
+  @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-400/20 text-red-400;
 }
 
 /* Grid animations */

@@ -1,0 +1,58 @@
+diff --git a/upstream/dist/utils/get-root-dirs.js b/fork/dist/utils/get-root-dirs.js
+index 47108c94..0f5c0a71 100644
+--- a/upstream/dist/utils/get-root-dirs.js
++++ b/fork/dist/utils/get-root-dirs.js
+@@ -8,12 +8,15 @@ Object.defineProperty(exports, "getRootDirs", {
+         return getRootDirs;
+     }
+ });
+-var _fastglob = require("fast-glob");
++var _tinyglobby = require("tinyglobby");
+ /**
+  * Process a Next.js root directory glob.
+  */ var processRootDir = function(rootDir) {
+-    return (0, _fastglob.globSync)(rootDir.replace(/\\/g, '/'), {
+-        onlyDirectories: true
++    return (0, _tinyglobby.globSync)(rootDir.replace(/\\/g, '/'), {
++        onlyDirectories: true,
++        expandDirectories: false
++    }).map(function(dir) {
++        return dir.length > 1 && !/^[A-Za-z]:\/$/.test(dir) ? dir.replace(/\/$/, '') : dir;
+     });
+ };
+ var getRootDirs = function(context) {
+diff --git a/upstream/package.json b/fork/package.json
+index f5f24edb..8e5a757a 100644
+--- a/upstream/package.json
++++ b/fork/package.json
+@@ -1,6 +1,7 @@
+ {
+   "name": "@next/eslint-plugin-next",
+-  "version": "16.3.6",
++  "version": "16.3.6-apollo.1",
++  "private": true,
+   "description": "ESLint plugin for Next.js.",
+   "main": "dist/index.js",
+   "types": "dist/index.d.ts",
+@@ -14,16 +15,9 @@
+   ],
+   "dependencies": {
+     "@eslint-community/eslint-utils": "4.9.1",
+-    "fast-glob": "3.3.1"
++    "tinyglobby": "0.2.17"
+   },
+-  "devDependencies": {
+-    "@types/eslint": "9.6.1",
+-    "@types/estree": "1.0.8",
+-    "eslint": "9.37.0"
+-  },
+-  "scripts": {
+-    "dev": "pnpm build",
+-    "build": "swc -d dist src && pnpm types",
+-    "types": "tsc --project tsconfig.json --skipLibCheck --declaration --emitDeclarationOnly --esModuleInterop --declarationDir dist"
++  "peerDependencies": {
++    "eslint": ">=9.0.0"
+   }
+-}
+\ No newline at end of file
++}

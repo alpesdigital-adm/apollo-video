@@ -671,7 +671,7 @@ export default function Dashboard() {
                 </a>
                 <div className="hidden items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 py-2 text-[#77736b] sm:flex">
                   <ApiIcon className="h-4 w-4" path="m20 20-4.4-4.4m2.4-4.1a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
-                  <input aria-label="Buscar projetos" className="w-40 bg-transparent text-sm text-[#e6e1d8] outline-none placeholder:text-[#5e5b55] xl:w-56" onChange={(event) => setFilter('text', event.target.value)} placeholder="Buscar projeto" value={filters.text} />
+                  <input aria-label="Buscar projetos" className="w-40 bg-transparent text-sm text-[#e6e1d8] outline-hidden placeholder:text-[#5e5b55] xl:w-56" onChange={(event) => setFilter('text', event.target.value)} placeholder="Buscar projeto" value={filters.text} />
                 </div>
                 <LogoutButton />
               </div>
@@ -738,9 +738,9 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 py-2 text-[#77736b] sm:hidden">
                     <ApiIcon className="h-4 w-4" path="m20 20-4.4-4.4m2.4-4.1a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
-                    <input aria-label="Buscar projetos" className="min-w-0 bg-transparent text-sm text-[#e6e1d8] outline-none placeholder:text-[#5e5b55]" onChange={(event) => setFilter('text', event.target.value)} placeholder="Buscar" value={filters.text} />
+                    <input aria-label="Buscar projetos" className="min-w-0 bg-transparent text-sm text-[#e6e1d8] outline-hidden placeholder:text-[#5e5b55]" onChange={(event) => setFilter('text', event.target.value)} placeholder="Buscar" value={filters.text} />
                   </div>
-                  <select aria-label="Filtrar por status" className="h-10 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setFilter('status', event.target.value as ProjectDashboardFilters['status'])} value={filters.status}>
+                  <select aria-label="Filtrar por status" className="h-10 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs text-[#aaa59c] outline-hidden focus:border-[#d7a936]/50" onChange={(event) => setFilter('status', event.target.value as ProjectDashboardFilters['status'])} value={filters.status}>
                     <option value="">Todos os status</option>
                     <option value="draft">Configuração</option>
                     <option value="ingesting">Ingestão</option>
@@ -763,33 +763,33 @@ export default function Dashboard() {
               <div className="mt-4 grid gap-3 rounded-2xl border border-white/[0.06] bg-[#0a0a0a] p-4 sm:grid-cols-2 xl:grid-cols-4">
                 <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
                   Objetivo
-                  <select className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setFilter('objective', event.target.value as ProjectDashboardFilters['objective'])} value={filters.objective}>
+                  <select className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-hidden focus:border-[#d7a936]/50" onChange={(event) => setFilter('objective', event.target.value as ProjectDashboardFilters['objective'])} value={filters.objective}>
                     <option value="">Todos</option>
                     {STRATEGIC_OBJECTIVES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                   </select>
                 </label>
                 <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
                   Formato
-                  <select className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setFilter('format', event.target.value as ProjectDashboardFilters['format'])} value={filters.format}>
+                  <select className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-hidden focus:border-[#d7a936]/50" onChange={(event) => setFilter('format', event.target.value as ProjectDashboardFilters['format'])} value={filters.format}>
                     <option value="">Todos</option>
                     {OUTPUT_ASPECT_RATIOS.map((item) => <option key={item} value={item}>{item}</option>)}
                   </select>
                 </label>
                 <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
                   Idioma
-                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#ddd8cf] outline-none placeholder:text-[#55524d] focus:border-[#d7a936]/50" maxLength={35} onChange={(event) => setFilter('locale', event.target.value)} placeholder="pt-BR" value={filters.locale} />
+                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#ddd8cf] outline-hidden placeholder:text-[#55524d] focus:border-[#d7a936]/50" maxLength={35} onChange={(event) => setFilter('locale', event.target.value)} placeholder="pt-BR" value={filters.locale} />
                 </label>
                 <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
                   Responsável
-                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#ddd8cf] outline-none placeholder:text-[#55524d] focus:border-[#d7a936]/50" maxLength={128} onChange={(event) => setFilter('ownerId', event.target.value)} placeholder="ID do responsável" value={filters.ownerId} />
+                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#ddd8cf] outline-hidden placeholder:text-[#55524d] focus:border-[#d7a936]/50" maxLength={128} onChange={(event) => setFilter('ownerId', event.target.value)} placeholder="ID do responsável" value={filters.ownerId} />
                 </label>
                 <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
                   Criado a partir de
-                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setFilter('createdFrom', event.target.value)} type="date" value={filters.createdFrom} />
+                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-hidden focus:border-[#d7a936]/50" onChange={(event) => setFilter('createdFrom', event.target.value)} type="date" value={filters.createdFrom} />
                 </label>
                 <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
                   Criado até
-                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-none focus:border-[#d7a936]/50" min={filters.createdFrom || undefined} onChange={(event) => setFilter('createdTo', event.target.value)} type="date" value={filters.createdTo} />
+                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-hidden focus:border-[#d7a936]/50" min={filters.createdFrom || undefined} onChange={(event) => setFilter('createdTo', event.target.value)} type="date" value={filters.createdTo} />
                 </label>
                 <div className="flex items-end sm:col-span-2">
                   <button className="h-10 rounded-xl border border-white/[0.08] px-4 text-xs font-medium text-[#99958d] transition hover:border-[#d7a936]/30 hover:text-[#e1bb5a] disabled:cursor-not-allowed disabled:opacity-40" disabled={!hasActiveFilters} onClick={() => setFilters({ ...EMPTY_PROJECT_DASHBOARD_FILTERS })} type="button">
@@ -938,7 +938,7 @@ export default function Dashboard() {
               <div className="space-y-7 px-5 py-6 sm:px-7">
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Nome da produção</span>
-                  <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Campanha Imersão — descoberta" required value={name} />
+                  <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Campanha Imersão — descoberta" required value={name} />
                 </label>
 
                 <fieldset>
@@ -968,7 +968,7 @@ export default function Dashboard() {
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Destino da ação</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">obrigatório para {selectedObjective.label.toLocaleLowerCase('pt-BR')}</span>
-                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={2048} onChange={(event) => setDestination(event.target.value)} placeholder={objective === 'whatsapp' ? '+5511999999999 ou https://wa.me/...' : objective === 'booking' ? 'https://agenda.example/...' : objective === 'download' ? 'https://arquivos.example/material.pdf' : 'https://seu-dominio.com/...'} required value={destination} />
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={2048} onChange={(event) => setDestination(event.target.value)} placeholder={objective === 'whatsapp' ? '+5511999999999 ou https://wa.me/...' : objective === 'booking' ? 'https://agenda.example/...' : objective === 'download' ? 'https://arquivos.example/material.pdf' : 'https://seu-dominio.com/...'} required value={destination} />
                     {['lead-generation', 'sale'].includes(objective) ? <span className="mt-1.5 block text-[10px] text-[#68645d]">Para links externos, use HTTPS.</span> : null}
                   </label>
                 ) : null}
@@ -977,24 +977,24 @@ export default function Dashboard() {
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">CTA verbal</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">opcional, não será inventado</span>
-                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVerbalCta(event.target.value)} placeholder="Ex.: Agende sua conversa" value={verbalCta} />
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVerbalCta(event.target.value)} placeholder="Ex.: Agende sua conversa" value={verbalCta} />
                   </label>
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">CTA visual</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">opcional</span>
-                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVisualCta(event.target.value)} placeholder="Ex.: Saiba mais" value={visualCta} />
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVisualCta(event.target.value)} placeholder="Ex.: Saiba mais" value={visualCta} />
                   </label>
                   <label className="block sm:col-span-2">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Disclosures</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">um por linha, opcional</span>
-                    <textarea className="mt-2 min-h-20 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-3 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={2000} onChange={(event) => setDisclosures(event.target.value)} placeholder="Condições no site" value={disclosures} />
+                    <textarea className="mt-2 min-h-20 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-3 text-sm text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={2000} onChange={(event) => setDisclosures(event.target.value)} placeholder="Condições no site" value={disclosures} />
                   </label>
                 </div>
 
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Briefing para o Diretor</span>
                   <span className="ml-2 text-[10px] text-[#77736c]">opcional</span>
-                  <textarea className="mt-2 min-h-32 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={10000} onChange={(event) => setBriefing(event.target.value)} placeholder="Público, oferta, tom, restrições, referências, elementos que devem ou não aparecer..." value={briefing} />
+                  <textarea className="mt-2 min-h-32 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-hidden transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={10000} onChange={(event) => setBriefing(event.target.value)} placeholder="Público, oferta, tom, restrições, referências, elementos que devem ou não aparecer..." value={briefing} />
                   <span className="mt-1.5 flex justify-between text-[10px] text-[#625f59]"><span>Se ficar vazio, o Diretor registra explicitamente as premissas ausentes.</span><span>{briefing.length}/10.000</span></span>
                 </label>
                 <section className="rounded-xl border border-[#d9a43a]/20 bg-[#d9a43a]/[0.035] p-4" data-testid="production-brief-preview">
@@ -1038,7 +1038,7 @@ export default function Dashboard() {
 
                 <label className="mt-6 block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Idioma principal</span>
-                  <select className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#c7c1b8] outline-none focus:border-[#d5a535]/55" onChange={(event) => setLocale(event.target.value)} value={locale}>
+                  <select className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#c7c1b8] outline-hidden focus:border-[#d5a535]/55" onChange={(event) => setLocale(event.target.value)} value={locale}>
                     <option value="pt-BR">Português (Brasil)</option>
                     <option value="en-US">English (US)</option>
                     <option value="es-ES">Español</option>
@@ -1088,7 +1088,7 @@ export default function Dashboard() {
             {quickActionDialog.kind === 'rename' ? (
               <label className="mt-5 block text-xs font-medium text-[#aaa59c]">
                 Nome
-                <input autoFocus className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-none focus:border-[#d5a535]/55" maxLength={120} onChange={(event) => setQuickActionName(event.target.value)} value={quickActionName} />
+                <input autoFocus className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={120} onChange={(event) => setQuickActionName(event.target.value)} value={quickActionName} />
               </label>
             ) : (
               <p className="mt-4 text-sm leading-6 text-[#918c83]">

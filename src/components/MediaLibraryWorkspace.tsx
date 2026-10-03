@@ -96,7 +96,7 @@ export default function MediaLibraryWorkspace() {
           <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#c19a43]">Mesa de seleção</p>
           <div className="mt-3 flex flex-col justify-between gap-6 xl:flex-row xl:items-end">
             <div><h1 className="text-4xl font-semibold tracking-[-0.045em] sm:text-5xl">Biblioteca de mídia</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-[#938d83]">Encontre material do workspace, confira a licença atual e insira no projeto sem duplicar arquivos.</p></div>
-            <label className="grid gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8f887e]">Projeto de destino<select className="min-w-[260px] border border-white/[0.12] bg-[#10100f] px-3 py-3 text-sm normal-case tracking-normal text-[#eee8dc] outline-none focus:border-[#d2a841]" value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">Escolha um projeto</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+            <label className="grid gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8f887e]">Projeto de destino<select className="min-w-[260px] border border-white/[0.12] bg-[#10100f] px-3 py-3 text-sm normal-case tracking-normal text-[#eee8dc] outline-hidden focus:border-[#d2a841]" value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">Escolha um projeto</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
           </div>
         </header>
 

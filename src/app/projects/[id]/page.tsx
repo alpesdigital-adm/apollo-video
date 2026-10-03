@@ -3383,7 +3383,7 @@ export default function ProjectWorkspacePage() {
               Objetivo desta direção
             </label>
             <select
-              className="mt-2 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55"
+              className="mt-2 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55"
               disabled={directorRunning || operationActive}
               id="director-objective"
               onChange={(event) => {
@@ -3416,16 +3416,16 @@ export default function ProjectWorkspacePage() {
               {OBJECTIVES_REQUIRING_DESTINATION.has(directorObjective) ? (
                 <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">
                   Destino obrigatório
-                  <input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55" maxLength={2048} onChange={(event) => setDirectorDestination(event.target.value)} placeholder={directorObjective === 'whatsapp' ? '+5511999999999 ou https://wa.me/...' : directorObjective === 'booking' ? 'https://agenda.example/...' : directorObjective === 'download' ? 'https://arquivos.example/material.pdf' : 'https://destino.example/...'} value={directorDestination} />
+                  <input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={2048} onChange={(event) => setDirectorDestination(event.target.value)} placeholder={directorObjective === 'whatsapp' ? '+5511999999999 ou https://wa.me/...' : directorObjective === 'booking' ? 'https://agenda.example/...' : directorObjective === 'download' ? 'https://arquivos.example/material.pdf' : 'https://destino.example/...'} value={directorDestination} />
                 </label>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">CTA verbal<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVerbalCta(event.target.value)} value={directorVerbalCta} /></label>
-                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">CTA visual<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVisualCta(event.target.value)} value={directorVisualCta} /></label>
+                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">CTA verbal<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVerbalCta(event.target.value)} value={directorVerbalCta} /></label>
+                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">CTA visual<input className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={160} onChange={(event) => setDirectorVisualCta(event.target.value)} value={directorVisualCta} /></label>
               </div>
-              <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Disclosures · um por linha<textarea className="mt-1.5 min-h-16 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55" maxLength={2000} onChange={(event) => setDirectorDisclosures(event.target.value)} value={directorDisclosures} /></label>
+              <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Disclosures · um por linha<textarea className="mt-1.5 min-h-16 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={2000} onChange={(event) => setDirectorDisclosures(event.target.value)} value={directorDisclosures} /></label>
               {directorObjectiveChanged || directorDesiredActionChanged ? (
-                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Motivo obrigatório<textarea className="mt-1.5 min-h-20 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55" maxLength={1000} onChange={(event) => setDirectorObjectiveReason(event.target.value)} placeholder="Explique a mudança de objetivo ou ação desejada." value={directorObjectiveReason} /></label>
+                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">Motivo obrigatório<textarea className="mt-1.5 min-h-20 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-hidden focus:border-[#d9a43a]/55" maxLength={1000} onChange={(event) => setDirectorObjectiveReason(event.target.value)} placeholder="Explique a mudança de objetivo ou ação desejada." value={directorObjectiveReason} /></label>
               ) : null}
             </div>
           </div>
@@ -3742,7 +3742,7 @@ export default function ProjectWorkspacePage() {
                       <label className="flex items-center gap-2 border border-white/[0.09] px-3 py-1.5 text-[8px] uppercase tracking-[0.1em] text-[#706b63]">
                         Substituir
                         <select
-                          className="max-w-36 bg-transparent text-[9px] normal-case text-[#b3ada4] outline-none"
+                          className="max-w-36 bg-transparent text-[9px] normal-case text-[#b3ada4] outline-hidden"
                           data-testid="manual-replace"
                           disabled={manualBusy}
                           onChange={(event) => {
@@ -3774,7 +3774,7 @@ export default function ProjectWorkspacePage() {
                           <label key={field}>
                             <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#55514c]">{label}</span>
                             <input
-                              className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-none focus:border-[#d9aa3d]/45"
+                              className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-hidden focus:border-[#d9aa3d]/45"
                               data-testid={`manual-crop-${field}`}
                               max="1"
                               min="0"
@@ -3812,7 +3812,7 @@ export default function ProjectWorkspacePage() {
                         <label className={field === 'text' ? 'col-span-2' : ''} key={field}>
                           <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#55514c]">{label}</span>
                           <input
-                            className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-none focus:border-[#d9aa3d]/45"
+                            className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-hidden focus:border-[#d9aa3d]/45"
                             onChange={(event) => setManualInspector((current) => ({ ...current, [field]: event.target.value }))}
                             placeholder={label}
                             value={manualInspector[field] ?? ''}
@@ -3822,7 +3822,7 @@ export default function ProjectWorkspacePage() {
                       <label>
                         <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#55514c]">Ganho</span>
                         <input
-                          className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-none focus:border-[#d9aa3d]/45"
+                          className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-hidden focus:border-[#d9aa3d]/45"
                           max="4"
                           min="0"
                           onChange={(event) => setManualInspector((current) => ({ ...current, audioGain: Number(event.target.value) }))}
@@ -4173,7 +4173,7 @@ export default function ProjectWorkspacePage() {
                       ) : null}
                       {reviewElementResolution === 'ready' && reviewElementCandidates.length > 1 && !reviewElementConfirmed ? <p className="mt-2 text-[9px] text-[#ad8c45]">Há camadas sobrepostas. Confirme qual delas deve receber o ajuste.</p> : null}
                     </div>
-                    <textarea autoFocus className="mt-2 min-h-24 w-full resize-y border border-white/[0.1] bg-[#050505] px-3 py-3 text-sm leading-6 text-[#e3ddd3] outline-none transition placeholder:text-[#4e4b45] focus:border-[#d9aa3d]/55" id="review-instruction" maxLength={4000} onChange={(event) => setReviewText(event.target.value)} placeholder="Ex.: mover a legenda para não cobrir o rosto, somente neste trecho." value={reviewText} />
+                    <textarea autoFocus className="mt-2 min-h-24 w-full resize-y border border-white/[0.1] bg-[#050505] px-3 py-3 text-sm leading-6 text-[#e3ddd3] outline-hidden transition placeholder:text-[#4e4b45] focus:border-[#d9aa3d]/55" id="review-instruction" maxLength={4000} onChange={(event) => setReviewText(event.target.value)} placeholder="Ex.: mover a legenda para não cobrir o rosto, somente neste trecho." value={reviewText} />
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'point' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'}`} onClick={() => { setReviewScope('point'); setReviewRegion(null) }} type="button">Neste ponto</button>
                       <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'region' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'} disabled:opacity-30`} disabled={!reviewRegion} onClick={() => setReviewScope('region')} type="button">Área marcada</button>
@@ -4183,7 +4183,7 @@ export default function ProjectWorkspacePage() {
                       <label className="block">
                         <span className="text-[9px] uppercase tracking-[0.16em] text-[#747067]">Onde a correção deve valer?</span>
                         <select
-                          className="mt-2 w-full border border-white/[0.1] bg-[#050505] px-3 py-2.5 text-xs text-[#d4cec4] outline-none focus:border-[#d9aa3d]/55"
+                          className="mt-2 w-full border border-white/[0.1] bg-[#050505] px-3 py-2.5 text-xs text-[#d4cec4] outline-hidden focus:border-[#d9aa3d]/55"
                           data-testid="review-application-scope"
                           onChange={(event) => { setReviewApplicationScope(event.target.value as ReviewApplicationScopeKind); setReviewGlobal(false); setReviewGlobalConfirmed(false) }}
                           value={reviewApplicationScope}
@@ -4198,7 +4198,7 @@ export default function ProjectWorkspacePage() {
                         <label className="block">
                           <span className="text-[9px] uppercase tracking-[0.16em] text-[#747067]">Duração do trecho</span>
                           <span className="mt-2 flex items-center border border-white/[0.1] bg-[#050505] px-3">
-                            <input className="w-full bg-transparent py-2.5 text-xs text-[#d4cec4] outline-none" data-testid="review-range-duration" max={Math.max(0.1, review.session.durationFrames / review.session.fps)} min="0.1" onChange={(event) => setReviewRangeDurationSeconds(Math.max(0.1, Number(event.target.value) || 0.1))} step="0.1" type="number" value={reviewRangeDurationSeconds} />
+                            <input className="w-full bg-transparent py-2.5 text-xs text-[#d4cec4] outline-hidden" data-testid="review-range-duration" max={Math.max(0.1, review.session.durationFrames / review.session.fps)} min="0.1" onChange={(event) => setReviewRangeDurationSeconds(Math.max(0.1, Number(event.target.value) || 0.1))} step="0.1" type="number" value={reviewRangeDurationSeconds} />
                             <i className="text-[9px] not-italic text-[#656159]">s</i>
                           </span>
                         </label>
@@ -4368,7 +4368,7 @@ export default function ProjectWorkspacePage() {
                     </span>
                     <div className="flex">
                       <input
-                        className="min-w-0 flex-1 border border-white/[0.09] bg-[#050505] px-3 py-2.5 text-xs text-[#d0c9bf] outline-none placeholder:text-[#4e4a45] focus:border-[#d9aa3d]/50"
+                        className="min-w-0 flex-1 border border-white/[0.09] bg-[#050505] px-3 py-2.5 text-xs text-[#d0c9bf] outline-hidden placeholder:text-[#4e4a45] focus:border-[#d9aa3d]/50"
                         data-testid="contiguous-topic-search"
                         onChange={(event) => {
                           setContiguousSearchText(event.target.value)
@@ -4458,7 +4458,7 @@ export default function ProjectWorkspacePage() {
                       Objetivo
                     </span>
                     <select
-                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 text-[10px] text-[#bdb6ac] outline-none focus:border-[#d9aa3d]/45"
+                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 text-[10px] text-[#bdb6ac] outline-hidden focus:border-[#d9aa3d]/45"
                       data-testid="contiguous-objective"
                       onChange={(event) => {
                         setContiguousObjective(
@@ -4481,7 +4481,7 @@ export default function ProjectWorkspacePage() {
                       Duração · s
                     </span>
                     <input
-                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 font-mono text-[10px] text-[#bdb6ac] outline-none focus:border-[#d9aa3d]/45"
+                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 font-mono text-[10px] text-[#bdb6ac] outline-hidden focus:border-[#d9aa3d]/45"
                       data-testid="contiguous-duration"
                       max="3600"
                       min="1"
@@ -4502,7 +4502,7 @@ export default function ProjectWorkspacePage() {
                       Tolerância · s
                     </span>
                     <input
-                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 font-mono text-[10px] text-[#bdb6ac] outline-none focus:border-[#d9aa3d]/45"
+                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 font-mono text-[10px] text-[#bdb6ac] outline-hidden focus:border-[#d9aa3d]/45"
                       data-testid="contiguous-tolerance"
                       max={Math.max(0, contiguousDurationSeconds)}
                       min="0"
@@ -4523,7 +4523,7 @@ export default function ProjectWorkspacePage() {
                       Saída
                     </span>
                     <select
-                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 text-[10px] text-[#bdb6ac] outline-none focus:border-[#d9aa3d]/45"
+                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 text-[10px] text-[#bdb6ac] outline-hidden focus:border-[#d9aa3d]/45"
                       onChange={(event) => {
                         setContiguousFps(Number(event.target.value))
                         setContiguousExtraction(null)
@@ -4735,7 +4735,7 @@ export default function ProjectWorkspacePage() {
                 <label className="grid gap-1 text-[8px] uppercase tracking-[0.14em] text-[#6f6a62]">
                   Leitura
                   <select
-                    className="min-w-48 border border-white/[0.09] bg-[#0d0d0d] px-3 py-2 text-[10px] normal-case tracking-normal text-[#bdb6ac] outline-none focus:border-[#d8aa3d]/55"
+                    className="min-w-48 border border-white/[0.09] bg-[#0d0d0d] px-3 py-2 text-[10px] normal-case tracking-normal text-[#bdb6ac] outline-hidden focus:border-[#d8aa3d]/55"
                     data-testid="source-deconstruction-select"
                     onChange={(event) =>
                       setSelectedSourceDeconstructionId(event.target.value)}
@@ -4886,7 +4886,7 @@ export default function ProjectWorkspacePage() {
                 <label className="grid gap-1 text-[8px] uppercase tracking-[0.14em] text-[#6f6a62]">
                   Diagnóstico
                   <select
-                    className="min-w-48 border border-white/[0.09] bg-[#0d0d0d] px-3 py-2 text-[10px] normal-case tracking-normal text-[#bdb6ac] outline-none focus:border-[#d8aa3d]/55"
+                    className="min-w-48 border border-white/[0.09] bg-[#0d0d0d] px-3 py-2 text-[10px] normal-case tracking-normal text-[#bdb6ac] outline-hidden focus:border-[#d8aa3d]/55"
                     data-testid="contamination-report-select"
                     onChange={(event) =>
                       setSelectedContaminationReportId(event.target.value)}

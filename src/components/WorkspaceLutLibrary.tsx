@@ -49,7 +49,7 @@ const LICENSE_LABELS: Record<LicensePolicy, string> = {
   licensed: 'Licenciada',
   restricted: 'Uso restrito',
 }
-const inputClass = 'w-full border border-white/[0.1] bg-[#0a0a0a] px-3 py-2.5 text-xs text-[#e2ddd4] outline-none transition placeholder:text-[#555149] focus:border-[#c6a15a]/60'
+const inputClass = 'w-full border border-white/[0.1] bg-[#0a0a0a] px-3 py-2.5 text-xs text-[#e2ddd4] outline-hidden transition placeholder:text-[#555149] focus:border-[#c6a15a]/60'
 const buttonClass = 'border border-white/[0.11] bg-white/[0.035] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#d8d2c8] transition hover:border-[#c6a15a]/55 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c6a15a] disabled:cursor-not-allowed disabled:opacity-35'
 
 async function readJson<T>(response: Response): Promise<T> {
