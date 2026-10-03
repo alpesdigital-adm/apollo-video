@@ -444,7 +444,7 @@ export default function SyntheticPhaseGatePanel(props: Readonly<{
           <div className="mt-3">
             <select
               aria-label="Histórico de avaliações"
-              className="w-full rounded-lg border border-white/[0.08] bg-[#111018] px-2.5 py-2 font-mono text-[9px] text-[#c2bdcf] outline-none transition focus:border-[#8f86e8]/45 disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full rounded-lg border border-white/[0.08] bg-[#111018] px-2.5 py-2 font-mono text-[9px] text-[#c2bdcf] outline-hidden transition focus:border-[#8f86e8]/45 disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="synthetic-phase-gate-history"
               disabled={state === 'loading' || running}
               onChange={(event) => {

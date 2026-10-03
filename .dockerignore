@@ -2,6 +2,7 @@
 .github
 .next
 node_modules
+**/node_modules
 generated
 remotion/node_modules
 remotion/build

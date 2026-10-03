@@ -2888,7 +2888,7 @@ export default function BatchesPage() {
                                       </span>
                                       <select
                                         aria-label="Escolher preview de edição em lote"
-                                        className="h-9 max-w-[200px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#55b8b1]/45"
+                                        className="h-9 max-w-[200px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-hidden focus:border-[#55b8b1]/45"
                                         onChange={(event) => {
                                           setActiveBatchEditPreflightId(
                                             event.target.value || null,
@@ -2914,7 +2914,7 @@ export default function BatchesPage() {
                                       </span>
                                       <select
                                         aria-label="Escolher resultado de edição em lote"
-                                        className="h-9 max-w-[200px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#55b8b1]/45"
+                                        className="h-9 max-w-[200px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-hidden focus:border-[#55b8b1]/45"
                                         onChange={(event) =>
                                           setActiveBatchEditCommandId(
                                             event.target.value,
@@ -3060,7 +3060,7 @@ export default function BatchesPage() {
                                   </span>
                                   <select
                                     aria-label="Tipo de edição em lote"
-                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 text-[10px] text-[#d8d1c6] outline-none focus:border-[#55b8b1]/45"
+                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 text-[10px] text-[#d8d1c6] outline-hidden focus:border-[#55b8b1]/45"
                                     onChange={(event) => {
                                       const type = event.target.value as BatchEditOperationType
                                       setBatchEditOperationType(type)
@@ -3086,7 +3086,7 @@ export default function BatchesPage() {
                                   </span>
                                   <input
                                     aria-label="Referência da edição em lote"
-                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 font-mono text-[10px] text-[#d8d1c6] outline-none placeholder:text-[#55514b] focus:border-[#55b8b1]/45"
+                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 font-mono text-[10px] text-[#d8d1c6] outline-hidden placeholder:text-[#55514b] focus:border-[#55b8b1]/45"
                                     maxLength={128}
                                     onChange={(event) => {
                                       setBatchEditValueRef(event.target.value)
@@ -3102,7 +3102,7 @@ export default function BatchesPage() {
                                   </span>
                                   <select
                                     aria-label="Política de falha da edição em lote"
-                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 text-[9px] text-[#d8d1c6] outline-none focus:border-[#55b8b1]/45"
+                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 text-[9px] text-[#d8d1c6] outline-hidden focus:border-[#55b8b1]/45"
                                     onChange={(event) => {
                                       setBatchEditMode(event.target.value as BatchEditMode)
                                       invalidateBatchEditDraft()
@@ -3391,9 +3391,9 @@ export default function BatchesPage() {
                   <div className="flex gap-2">
                     <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-[#77736b]">
                       <Icon className="h-4 w-4 shrink-0" path="m20 20-4.4-4.4m2.4-4.1a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
-                      <input aria-label="Buscar lotes" className="h-10 min-w-0 flex-1 bg-transparent text-sm text-[#e6e1d8] outline-none placeholder:text-[#5e5b55]" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar lote" value={query} />
+                      <input aria-label="Buscar lotes" className="h-10 min-w-0 flex-1 bg-transparent text-sm text-[#e6e1d8] outline-hidden placeholder:text-[#5e5b55]" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar lote" value={query} />
                     </label>
-                    <select aria-label="Filtrar lotes por status" className="h-10 max-w-[150px] rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setStatusFilter(event.target.value as 'all' | BatchStatus)} value={statusFilter}>
+                    <select aria-label="Filtrar lotes por status" className="h-10 max-w-[150px] rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs text-[#aaa59c] outline-hidden focus:border-[#d7a936]/50" onChange={(event) => setStatusFilter(event.target.value as 'all' | BatchStatus)} value={statusFilter}>
                       {STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
                     </select>
                   </div>
@@ -3628,7 +3628,7 @@ export default function BatchesPage() {
                               </div>
                               <div className="flex shrink-0 items-center gap-2">
                                 {alignments.length > 1 ? (
-                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); setActiveCompatibilityGraphId(null); setActiveVariantRecipeId(null); resetVariantPortfolio(); takeLibraryIdempotencyKey.current = null; compatibilityGraphIdempotencyKey.current = null; variantRecipeIdempotencyKey.current = null }} value={activeAlignment.id}>
+                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-hidden" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); setActiveCompatibilityGraphId(null); setActiveVariantRecipeId(null); resetVariantPortfolio(); takeLibraryIdempotencyKey.current = null; compatibilityGraphIdempotencyKey.current = null; variantRecipeIdempotencyKey.current = null }} value={activeAlignment.id}>
                                     {alignments.map((alignment) => <option key={alignment.id} value={alignment.id}>{alignment.document.title} · r{alignment.revision}</option>)}
                                   </select>
                                 ) : null}
@@ -3757,7 +3757,7 @@ export default function BatchesPage() {
                                   {activeAlignmentLibraries.length > 1 && activeTakeLibrary ? (
                                     <select
                                       aria-label="Escolher avaliação de takes"
-                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#d5a535]/45"
+                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-hidden focus:border-[#d5a535]/45"
                                       onChange={(event) => {
                                         setActiveTakeLibraryId(event.target.value)
                                         setActiveCompatibilityGraphId(null)
@@ -3921,7 +3921,7 @@ export default function BatchesPage() {
                                   {activeCompatibilityGraphs.length > 1 && activeCompatibilityGraph ? (
                                     <select
                                       aria-label="Escolher mapa de compatibilidade"
-                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#7895d4]/45"
+                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-hidden focus:border-[#7895d4]/45"
                                       onChange={(event) => {
                                         setActiveCompatibilityGraphId(
                                           event.target.value,
@@ -4061,7 +4061,7 @@ export default function BatchesPage() {
                                   {activeVariantRecipes.length > 1 && activeVariantRecipe ? (
                                     <select
                                       aria-label="Escolher receita de variante"
-                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#c09a5a]/45"
+                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-hidden focus:border-[#c09a5a]/45"
                                       onChange={(event) =>
                                         setActiveVariantRecipeId(
                                           event.target.value,
@@ -4216,7 +4216,7 @@ export default function BatchesPage() {
                                       <span className="mb-1 block text-[8px] uppercase tracking-[0.12em] text-[#625e57]">Preflight salvo</span>
                                       <select
                                         aria-label="Escolher preflight de portfólio"
-                                        className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#7792d2]/45"
+                                        className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-hidden focus:border-[#7792d2]/45"
                                         onChange={(event) => {
                                           setActiveVariantPortfolioPreflightId(event.target.value)
                                           setPortfolioConfirmationToken(null)
@@ -4235,7 +4235,7 @@ export default function BatchesPage() {
                                     <span className="mb-1 block text-[8px] uppercase tracking-[0.12em] text-[#625e57]">Receitas desejadas</span>
                                     <input
                                       aria-label="Quantidade de receitas desejadas"
-                                      className="h-9 w-24 rounded-lg border border-white/[0.08] bg-[#090909] px-3 font-mono text-[11px] text-[#d8d1c6] outline-none focus:border-[#7792d2]/45"
+                                      className="h-9 w-24 rounded-lg border border-white/[0.08] bg-[#090909] px-3 font-mono text-[11px] text-[#d8d1c6] outline-hidden focus:border-[#7792d2]/45"
                                       inputMode="numeric"
                                       max={activeVariantPortfolioPreflight?.policy.maxRecipeLimit ?? 1000}
                                       min={1}
@@ -4447,17 +4447,17 @@ export default function BatchesPage() {
                 <div className="grid gap-4 sm:grid-cols-[1fr_130px]">
                   <label>
                     <span className="text-xs font-semibold text-[#c8c2b8]">Nome do roteiro</span>
-                    <input autoFocus className="mt-2 h-11 min-w-0 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={200} onChange={(event) => { setScriptTitle(event.target.value); scriptIdempotencyKey.current = null }} required value={scriptTitle} />
+                    <input autoFocus className="mt-2 h-11 min-w-0 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={200} onChange={(event) => { setScriptTitle(event.target.value); scriptIdempotencyKey.current = null }} required value={scriptTitle} />
                   </label>
                   <label>
                     <span className="text-xs font-semibold text-[#c8c2b8]">Idioma</span>
-                    <input className="mt-2 h-11 min-w-0 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-none focus:border-[#d5a535]/55" maxLength={35} onChange={(event) => { setScriptLocale(event.target.value); scriptIdempotencyKey.current = null }} required value={scriptLocale} />
+                    <input className="mt-2 h-11 min-w-0 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={35} onChange={(event) => { setScriptLocale(event.target.value); scriptIdempotencyKey.current = null }} required value={scriptLocale} />
                   </label>
                 </div>
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Texto planejado</span>
                   <span className="ml-2 text-[10px] text-[#77736c]">um marcador por bloco</span>
-                  <textarea className="mt-2 min-h-[390px] min-w-0 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 font-mono text-[12px] leading-6 text-[#eee8de] outline-none placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={500000} onChange={(event) => { setScriptRawText(event.target.value); scriptIdempotencyKey.current = null }} placeholder={'HOOK 1: Uma abertura completa.\nCORPO 1: O argumento principal.\nPROVA 1: A evidência.\nCTA 1: A chamada para ação.'} required spellCheck value={scriptRawText} />
+                  <textarea className="mt-2 min-h-[390px] min-w-0 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 font-mono text-[12px] leading-6 text-[#eee8de] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={500000} onChange={(event) => { setScriptRawText(event.target.value); scriptIdempotencyKey.current = null }} placeholder={'HOOK 1: Uma abertura completa.\nCORPO 1: O argumento principal.\nPROVA 1: A evidência.\nCTA 1: A chamada para ação.'} required spellCheck value={scriptRawText} />
                 </label>
                 <p className="text-[9px] leading-4 text-[#656159]">Marcadores aceitos: HOOK/GANCHO, BODY/CORPO, PROOF/PROVA, OBJECTION/OBJEÇÃO, BRIDGE/PONTE, OFFER/OFERTA e CTA.</p>
               </div>
@@ -4482,7 +4482,7 @@ export default function BatchesPage() {
                         {checked ? (
                           <label className="mt-3 block border-t border-white/[0.055] pt-2">
                             <span className="text-[8px] uppercase tracking-[0.12em] text-[#625e57]">Pista de papel</span>
-                            <select className="mt-1 h-8 w-full rounded-lg border border-white/[0.07] bg-[#080808] px-2 text-[10px] text-[#9d978e] outline-none" onChange={(event) => { setScriptRoleHints((current) => ({ ...current, [transcript.id]: event.target.value as ScriptRole | '' })); scriptIdempotencyKey.current = null }} value={scriptRoleHints[transcript.id] ?? ''}>
+                            <select className="mt-1 h-8 w-full rounded-lg border border-white/[0.07] bg-[#080808] px-2 text-[10px] text-[#9d978e] outline-hidden" onChange={(event) => { setScriptRoleHints((current) => ({ ...current, [transcript.id]: event.target.value as ScriptRole | '' })); scriptIdempotencyKey.current = null }} value={scriptRoleHints[transcript.id] ?? ''}>
                               <option value="">Detectar automaticamente</option>
                               {(Object.keys(SCRIPT_ROLE_LABELS) as ScriptRole[]).map((role) => <option key={role} value={role}>{SCRIPT_ROLE_LABELS[role]}</option>)}
                             </select>
@@ -4536,14 +4536,14 @@ export default function BatchesPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Projeto</span>
-                    <select className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-none focus:border-[#d5a535]/55" onChange={(event) => { setProjectId(event.target.value); idempotencyKey.current = null }} required value={projectId}>
+                    <select className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" onChange={(event) => { setProjectId(event.target.value); idempotencyKey.current = null }} required value={projectId}>
                       <option value="">Selecione</option>
                       {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
                     </select>
                   </label>
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Nome do lote</span>
-                    <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={200} onChange={(event) => { setName(event.target.value); idempotencyKey.current = null }} placeholder="Ex.: Hooks validados · agosto" required value={name} />
+                    <input autoFocus className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={200} onChange={(event) => { setName(event.target.value); idempotencyKey.current = null }} placeholder="Ex.: Hooks validados · agosto" required value={name} />
                   </label>
                 </div>
 
@@ -4579,7 +4579,7 @@ export default function BatchesPage() {
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Receitas editoriais</span>
                   <span className="ml-2 text-[10px] text-[#77736c]">uma por linha</span>
-                  <textarea className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-none placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={3000} onChange={(event) => { setRecipeText(event.target.value); idempotencyKey.current = null }} placeholder={'Hook direto + corpo + CTA\nHook de prova + corpo + CTA'} value={recipeText} />
+                  <textarea className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-hidden placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={3000} onChange={(event) => { setRecipeText(event.target.value); idempotencyKey.current = null }} placeholder={'Hook direto + corpo + CTA\nHook de prova + corpo + CTA'} value={recipeText} />
                   <p className="mt-1.5 text-[9px] text-[#68645d]">{recipes.length} receita{recipes.length === 1 ? '' : 's'} válida{recipes.length === 1 ? '' : 's'}</p>
                 </label>
 
@@ -4601,13 +4601,13 @@ export default function BatchesPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Idioma</span>
-                    <input className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none focus:border-[#d5a535]/55" maxLength={35} onChange={(event) => setLocale(event.target.value)} pattern="[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}" required value={locale} />
+                    <input className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-hidden focus:border-[#d5a535]/55" maxLength={35} onChange={(event) => setLocale(event.target.value)} pattern="[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}" required value={locale} />
                   </label>
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Teto de custo</span>
                     <div className="mt-2 flex h-11 items-center rounded-xl border border-white/[0.09] bg-[#080808] px-4 focus-within:border-[#d5a535]/55">
                       <span className="mr-2 text-[10px] text-[#6f6b64]">USD</span>
-                      <input className="min-w-0 flex-1 bg-transparent text-sm text-[#f2eee7] outline-none" min="0" onChange={(event) => setBudget(event.target.value)} required step="0.01" type="number" value={budget} />
+                      <input className="min-w-0 flex-1 bg-transparent text-sm text-[#f2eee7] outline-hidden" min="0" onChange={(event) => setBudget(event.target.value)} required step="0.01" type="number" value={budget} />
                     </div>
                   </label>
                 </div>

@@ -104,7 +104,7 @@ export default function WorkspaceSelector() {
     <div className="mt-6" data-testid="workspace-selector">
       <label className="mb-1.5 block text-[9px] font-semibold uppercase tracking-[0.18em] text-[#69645c]" htmlFor="workspace-selector">Workspace</label>
       <select
-        className="w-full rounded-lg border border-white/[0.08] bg-[#111] px-2.5 py-2 text-xs text-[#d8d2c7] outline-none focus:border-[#e0af37]/50 disabled:opacity-60"
+        className="w-full rounded-lg border border-white/[0.08] bg-[#111] px-2.5 py-2 text-xs text-[#d8d2c7] outline-hidden focus:border-[#e0af37]/50 disabled:opacity-60"
         disabled={state === 'switching' || workspaces.length < 2}
         id="workspace-selector"
         onChange={(event) => void switchWorkspace(event.target.value)}

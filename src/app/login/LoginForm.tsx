@@ -89,12 +89,12 @@ export default function LoginForm({ mode, recoveryUrl }: Readonly<{
       <div className="space-y-5">
         <label className="block">
           <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#868b9c]">Usuário</span>
-          <input autoComplete="username" autoFocus className="h-12 w-full rounded-xl border border-white/10 bg-[#0a0b10] px-4 text-[15px] text-white outline-none transition placeholder:text-[#555a69] hover:border-white/20 focus:border-[#7167ff] focus:ring-4 focus:ring-[#7167ff]/10" name="username" onChange={(event) => setUsername(event.target.value)} placeholder="Seu usuário" required value={username} />
+          <input autoComplete="username" autoFocus className="h-12 w-full rounded-xl border border-white/10 bg-[#0a0b10] px-4 text-[15px] text-white outline-hidden transition placeholder:text-[#555a69] hover:border-white/20 focus:border-[#7167ff] focus:ring-4 focus:ring-[#7167ff]/10" name="username" onChange={(event) => setUsername(event.target.value)} placeholder="Seu usuário" required value={username} />
         </label>
         <label className="block">
           <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#868b9c]">Senha</span>
           <span className="relative block">
-            <input autoComplete="current-password" className="h-12 w-full rounded-xl border border-white/10 bg-[#0a0b10] px-4 pr-12 text-[15px] text-white outline-none transition placeholder:text-[#555a69] hover:border-white/20 focus:border-[#7167ff] focus:ring-4 focus:ring-[#7167ff]/10" name="password" onChange={(event) => setPassword(event.target.value)} placeholder="Sua senha" required type={showPassword ? 'text' : 'password'} value={password} />
+            <input autoComplete="current-password" className="h-12 w-full rounded-xl border border-white/10 bg-[#0a0b10] px-4 pr-12 text-[15px] text-white outline-hidden transition placeholder:text-[#555a69] hover:border-white/20 focus:border-[#7167ff] focus:ring-4 focus:ring-[#7167ff]/10" name="password" onChange={(event) => setPassword(event.target.value)} placeholder="Sua senha" required type={showPassword ? 'text' : 'password'} value={password} />
             <button aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} className="absolute inset-y-0 right-0 grid w-12 place-items-center text-[#777c8c] transition hover:text-white focus-visible:text-white" onClick={() => setShowPassword((value) => !value)} type="button"><EyeIcon crossed={showPassword} /></button>
           </span>
         </label>

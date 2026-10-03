@@ -18,3 +18,7 @@
 # — a stray blank line at the end of a document is still sloppiness, not a line
 # break — and every other path keeps the full default rule set.
 *.md whitespace=-blank-at-eol
+
+# Preserve the exact upstream byte in this vendored file; the upstream SHA-256
+# manifest test covers it. All other code keeps the default whitespace rules.
+tools/vendor/eslint-plugin-next/dist/utils/node-attributes.js whitespace=-blank-at-eol

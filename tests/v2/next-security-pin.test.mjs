@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 const readJson = (relativePath) => JSON.parse(readFileSync(new URL(`../../${relativePath}`, import.meta.url), 'utf8'))
 const patched = '16.3.6'
+const forkVersion = '16.3.6-apollo.2'
+const forkTarball = 'tools/vendor/next-eslint-plugin-next-16.3.6-apollo.2.tgz'
 // GHSA-vcvr-r3jv-pc5j: affected >=16.2.0 <16.3.6; this is a pin check, not an exploit test.
 const parts = (version) => version.split('.').map(Number)
 const compare = (left, right) => {
@@ -37,10 +40,19 @@ test('npm lock root and resolved Next/eslint-config-next use patched pair', () =
   assert.equal(lock.packages['node_modules/next'].version, patched)
   assert.equal(lock.packages['node_modules/eslint-config-next'].version, patched)
   assert.equal(lock.packages['node_modules/@next/env'].version, patched)
-  assert.equal(lock.packages['node_modules/@next/eslint-plugin-next'].version, patched)
+  const fork = lock.packages['node_modules/@next/eslint-plugin-next']
+  assert.equal(fork.version, forkVersion)
+  assert.equal(fork.resolved, `file:${forkTarball}`)
+  const bytes = readFileSync(new URL(`../../${forkTarball}`, import.meta.url))
+  assert.equal(fork.integrity, `sha512-${createHash('sha512').update(bytes).digest('base64')}`)
+  assert.equal(readJson('tools/vendor/eslint-plugin-next/package.json').version, forkVersion)
+  const upstream = readJson('tools/vendor/eslint-plugin-next/UPSTREAM_SHA256.json')
+  assert.equal(typeof upstream['dist/index.js'], 'string')
+  assert.equal(upstream['package.json'].length, 64)
 })
 
 test('installed Next/eslint-config-next packages use patched pair', () => {
   assert.equal(readJson('node_modules/next/package.json').version, patched)
   assert.equal(readJson('node_modules/eslint-config-next/package.json').version, patched)
+  assert.equal(readJson('node_modules/@next/eslint-plugin-next/package.json').version, forkVersion)
 })
