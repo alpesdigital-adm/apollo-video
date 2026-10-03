@@ -1,5 +1,7 @@
 # Apollo v2 — Matriz de rastreabilidade
 
+> Estado atual dos escopos e bloqueios: [PROJECT-STATUS.md](./PROJECT-STATUS.md). Esta matriz liga requisitos a evidências; o registro estruturado separa construção, integração, validação, implantação e aceite e não altera a auditoria do TODO.
+
 > **Fonte:** PRD v1.2  
 > **Objetivo:** garantir que cada requisito tenha fase, spec, dependência, evidência de aceite e teste.
 

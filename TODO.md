@@ -8,6 +8,14 @@
 
 ---
 
+## Consulta rápida e controle das waves
+
+O estado atual está em [`docs/PROJECT-STATUS.md`](./docs/PROJECT-STATUS.md), gerado de [`docs/quality/project-status.json`](./docs/quality/project-status.json). Execute `npm run project:status` para consultar em instantes; use `-- --state validado`, `-- --state pendente-validacao`, `-- --state em-construcao` ou `-- --state fila` para listar os escopos de cada estado. Use `-- --classification` para consultar a triagem ainda sem classificação; esses casos não entram na contagem de validações pendentes identificadas.
+
+O registro cobre todas as caixas deste TODO com IDs estáveis e separa construção, integração, validação, implantação e aceite. “Validado” é validação técnica do escopo declarado; não altera `[x]` nem o percentual de entrega. Classificação desconhecida fica explícita como pendência de classificação, sem inferir fila a partir de caixa aberta. “Em construção” pode representar implementação parcial pausada; não implica um agente trabalhando agora.
+
+Toda wave deve atualizar o registro, suas provas e bloqueios, executar `npm run project:status -- --write` e passar `npm run project:status:check`. O CI rejeita cobertura incompleta, IDs duplicados, divergência da auditoria e painel desatualizado. Ele verifica consistência das declarações; a revisão da prova e o aceite continuam humanos. Notas históricas abaixo preservam o contexto da execução; para integração atual e bloqueios, consulte o painel.
+
 ## Auditoria de execução — 2026-07-28
 
 Após o E2E revelar que a interface nova ainda acionava o pipeline legado, todas as caixas foram reavaliadas. O status anterior de 1.247/1.255 não representava produto entregue: misturava documentação, funções isoladas, fixtures e testes com jornadas integradas inexistentes.
@@ -2646,7 +2654,7 @@ Para cada decisão:
 | Non-goals | 12/12 |
 | Riscos | 11/11 |
 | Fases do roadmap | 6/6 |
-| Microtarefas/checks abertos | 1.204 |
+| Microtarefas/checks abertos | 879 |
 
 Esta contagem valida presença e fase, não conclusão. Quando o PRD mudar, atualizar este quadro e executar novamente a comparação de IDs com a matriz de rastreabilidade.
 

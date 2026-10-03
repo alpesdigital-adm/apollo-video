@@ -1,6 +1,38 @@
 # Synthetic phase gate v1
 
-## Status
+## Current integration and validation — 2026-10-03
+
+W24–W28 are incorporated in `main` at `32150e9fca20f02a12887e19bc63c1b759bcd552`.
+W27 PR #60 and W28 PR #61 were merged; the follow-up validation fixes were
+merged in PR #73. CI run [37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536)
+passed both jobs, including 2,590 unit tests and 25 controlled journey checks.
+This supersedes historical statements below that a branch was not yet merged.
+
+The isolated DigitalOcean run `w2728-261003-d92f61` completed all 22 phases
+with exit code zero, 351 health samples and zero orphan processes/backends in
+postflight. The report viewer performed two GETs and zero POSTs; the observed
+history remained stable until an explicit evaluation. Real PostgreSQL, API,
+workers, storage, browser and Remotion were exercised with controlled provider
+results. The two H.264 1080×1920 MP4s decoded completely with FFmpeg:
+
+- `9552acee190f4f7394a8c18716ad0e3012bf9c051b9aa4d40133cfa2f78a543f`
+- `de0aafc9120cbb533c13474c42d3a92c612ca73943151bd8f8cbbc982ef526cd`
+
+Viewer, history and extracted visual frames were inspected. Audio was not
+auditioned in that review. Resource deletion was reconciled through API 404
+responses for the run's droplet, firewall and tag at `2026-10-03T14:42:47Z`.
+The owner-local report and artifacts are under
+`C:/Users/leand/AppData/Local/apollo-validation/`; the current status registry
+links the specific report rather than treating its private evidence as a
+public CI artifact.
+
+This is technical validation of the controlled scope, not production acceptance.
+F3 remains **3/4 criteria, 5/8 checks, approved=false**. ElevenLabs alignment and
+the two HeyGen live-provider checks remain open, as do production identity,
+DNS, persistent media, backup/restore and owner acceptance. Consult
+[`../PROJECT-STATUS.md`](../PROJECT-STATUS.md) for current blockers.
+
+## Historical status
 
 Domain evaluator, immutable PostgreSQL persistence, the authoritative W24.2
 collector for provider execution and master catalogues, and the authenticated

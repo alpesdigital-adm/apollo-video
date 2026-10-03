@@ -7,6 +7,8 @@
 > **Produto:** Apollo Video  
 > **Natureza do documento:** PRD mestre, cobrindo visão final e entregas incrementais
 
+O estado de execução por escopo, com provas e bloqueios separados de implantação e aceite, está em [PROJECT-STATUS.md](./PROJECT-STATUS.md). O percentual auditado continua derivado de [TODO.md](../TODO.md), sem somar waves ou validações técnicas como produto entregue.
+
 ### Alterações da versão 1.2
 
 - API externa como contrato obrigatório e paritário para todas as capacidades operáveis.

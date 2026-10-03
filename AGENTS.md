@@ -363,4 +363,6 @@ O backup é para segurança operacional, não para manter compatibilidade no pro
 
 ## Regra final
 
+Antes de entregar qualquer wave, atualize `docs/quality/project-status.json` com IDs do TODO, escopo, evidências e bloqueios; gere `docs/PROJECT-STATUS.md` com `npm run project:status -- --write` e execute `npm run project:status:check`. Consulte esse registro para o estado atual, mantendo notas antigas como histórico. Construção, integração, validação técnica, implantação e aceite são estados separados; nenhuma mudança de estado remarca automaticamente o TODO.
+
 Quando houver conflito entre velocidade e comprovação, escolha comprovação. Quando houver conflito entre reaproveitar legado e reimplementar corretamente, remova o legado. Quando não existir evidência observável, diga que não está concluído.

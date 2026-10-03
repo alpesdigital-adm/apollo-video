@@ -108,6 +108,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Verify project status coverage and generated dashboard
+        run: npm run project:status:check
+
       - name: Require Python 3.12 or newer for disposable operations tests
         run: |
           if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
