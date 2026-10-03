@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-03T21:03:26.326Z",
+  "updatedAt": "2026-10-03T22:44:17.610Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -14482,6 +14482,63 @@
       ],
       "nextAction": "Conferir CI/artifact do commit efetivo; depois atender gates de produção e obter aceite separado para esta caixa, sem promoção automática do TODO.",
       "notes": "W29 validada tecnicamente em ambiente local controlado. Nenhum provider live, MP4 novo, deploy ou aceite do proprietário é inferido; 380/1259 caixas auditadas sem alteração."
+    },
+    {
+      "id": "W30",
+      "title": "W30 — persistência autenticada dos filtros do dashboard",
+      "kind": "wave",
+      "todoSections": [
+        "F1.002"
+      ],
+      "todoItems": [
+        "acd8f12f509c-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "A jornada autenticada W30 e seus guards de evidência ainda não foram escritos; o codec e a UI existentes não comprovam este pacote."
+        },
+        {
+          "kind": "validation",
+          "text": "Falta executar e revisar a prova real de URL/sessão, reload, histórico, limpeza e zero resultados com API/PostgreSQL/Chromium e CI no SHA final."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite final separado permanece pendente; nenhuma caixa TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE30-FILTROS-DASHBOARD-AUTENTICADOS.md",
+          "scope": "Plano de até 3h de desenvolvimento para uma caixa de persistência, com texto/status como amostra; não comprova oito facetas, paginação ou toda F1.002.",
+          "role": "planned-not-started"
+        },
+        {
+          "type": "repo",
+          "ref": "src/v2/ui/project-dashboard-filters.ts",
+          "scope": "Codec existente orienta o planejamento; não é prova E2E W30.",
+          "role": "classification"
+        },
+        {
+          "type": "repo",
+          "ref": "src/app/ProjectsPageClient.tsx",
+          "scope": "Dashboard existente na rota /; persistência e popstate precisam de comprovação autenticada.",
+          "role": "classification"
+        }
+      ],
+      "nextAction": "Executar o pacote limitado a 3h de desenvolvimento; registrar evidências e bloqueios mesmo se parcial, preservando W29 e sem promoção automática do TODO.",
+      "notes": "Somente especificado e na fila. Mantém os estados da capability F1.002 e a auditoria 380/1259; CI/revisão separados da estimativa de desenvolvimento, sem alegar implantação ou aceite."
     }
   ]
 }

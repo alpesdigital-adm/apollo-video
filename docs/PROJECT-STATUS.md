@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-03T21:03:26.326Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
+Atualizado: 2026-10-03T22:44:17.610Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
 
-Snapshot SHA256: `3b8e86096a079e17d9cce7c62df270306edda403b467d66ca9501d0e162ede25`.
+Snapshot SHA256: `2ec68aa9e7420532f920d3249ccac5573d4723720ffc6797daaa4bcd536ebd70`.
 
 TODO auditado: **380/1259** microtarefas entregues. Este número vem de `TODO.md`; os estados abaixo descrevem somente os escopos declarados, sem somar progresso.
 
@@ -23,7 +23,7 @@ IDs de caixas preservam a identidade ao trocar `[ ]` por `[x]`; mudar ou duplica
 | wave | validado | 6 |
 | wave | pendente-validacao | 0 |
 | wave | em-construcao | 0 |
-| wave | fila | 0 |
+| wave | fila | 1 |
 | capability | validado | 76 |
 | capability | pendente-validacao | 1 |
 | capability | em-construcao | 191 |
@@ -50,6 +50,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | W27 | W27 — viewer do relatório crítico | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), [integration: PR 60](https://github.com/alpesdigital-adm/apollo-video/pull/60), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W28 | W28 — paridade das leituras UI/API | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), [integration: PR 61](https://github.com/alpesdigital-adm/apollo-video/pull/61), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W29 | W29 — jornada autenticada de comparação LUT e preservação do histórico | validado | main | controlled-e2e | pending | pending | não | [classification: tests/v2/workspace-lut-library-ui.test.mjs](../tests/v2/workspace-lut-library-ui.test.mjs), [implementation: docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md](../docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md), privado (controlled-e2e; referência local no JSON), privado (controlled-e2e; referência local no JSON), [integration: tests/v2/helpers/workspace-lut-browser-proof.mjs](../tests/v2/helpers/workspace-lut-browser-proof.mjs) | Conferir CI/artifact do commit efetivo; depois atender gates de produção e obter aceite separado para esta caixa, sem promoção automática do TODO. |
+| W30 | W30 — persistência autenticada dos filtros do dashboard | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PACOTE-WAVE30-FILTROS-DASHBOARD-AUTENTICADOS.md](../docs/PACOTE-WAVE30-FILTROS-DASHBOARD-AUTENTICADOS.md), [classification: src/v2/ui/project-dashboard-filters.ts](../src/v2/ui/project-dashboard-filters.ts), [classification: src/app/ProjectsPageClient.tsx](../src/app/ProjectsPageClient.tsx) | Executar o pacote limitado a 3h de desenvolvimento; registrar evidências e bloqueios mesmo se parcial, preservando W29 e sem promoção automática do TODO. |
 
 ## Capabilities — validado
 
