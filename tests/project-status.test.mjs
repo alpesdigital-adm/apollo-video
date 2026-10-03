@@ -47,10 +47,10 @@ test('validated means scoped technical evidence, not delivery or owner-only', as
 test('rejects false validated claims and missing scoped evidence', () => {
   const data = fixture();
   data.items[0].validation = 'isolated';
-  assert.throws(() => validateStatus(data, todo), /requires scoped E2E/);
+  assert.throws(() => validateStatus(data, todo), /requires scoped validation evidence/);
   data.items[0].validation = 'real-e2e';
   data.items[0].evidence = [];
-  assert.throws(() => validateStatus(data, todo), /requires scoped E2E/);
+  assert.throws(() => validateStatus(data, todo), /requires scoped validation evidence/);
   data.items[0].evidence = [{ type: 'ci', ref: 'https://example.com/actions/runs/1', scope: 'Wrong host', role: 'controlled-e2e' }];
   assert.throws(() => validateStatus(data, todo), /GitHub ci URL/);
   data.items[0].evidence = [{ type: 'repo', ref: 'missing.md', scope: 'Missing source', role: 'controlled-e2e' }];
@@ -91,6 +91,30 @@ test('historical acceptance is allowed without implying current deployment', () 
   data.items[0].evidence.push({ type: 'private', ref: 'historical-proof', scope: 'Aceite anterior', role: 'historical-acceptance' });
   assert.doesNotThrow(() => validateStatus(data, todo));
   assert.equal(ownerOnly(data.items[0]), false);
+});
+
+test('a document may be validated only when the repo document is the declared result', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'apollo-status-document-'));
+  try {
+    await writeFile(path.join(dir, 'decision.md'), '# Decisão registrada\n');
+    const data = fixture();
+    const item = data.items[0];
+    item.resultKind = 'document';
+    item.validation = 'documented';
+    item.deployment = 'not-applicable';
+    item.acceptance = 'not-applicable';
+    item.evidence = [{ type: 'repo', ref: 'decision.md', scope: 'A decisão documentada é o resultado desta caixa', role: 'document-result' }];
+    assert.doesNotThrow(() => validateStatus(data, todo, dir));
+    assert.equal(ownerOnly(item), false);
+    delete item.resultKind;
+    assert.throws(() => validateStatus(data, todo, dir), /documented validation requires document result/);
+    item.resultKind = 'document';
+    item.evidence[0].role = 'implementation';
+    assert.throws(() => validateStatus(data, todo, dir), /existing repo document-result/);
+    item.evidence[0].role = 'document-result';
+    item.evidence[0].type = 'private';
+    assert.throws(() => validateStatus(data, todo, dir), /existing repo document-result/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test('TODO IDs survive checkbox changes and distinguish repeated text', () => {

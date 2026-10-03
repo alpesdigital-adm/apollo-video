@@ -13,14 +13,14 @@ const enums = {
   kind: ['wave', 'capability'],
   construction: ['not-started', 'implemented', 'in-progress', 'unknown'],
   integration: ['main', 'not-integrated', 'unknown'],
-  validation: ['none', 'isolated', 'controlled-e2e', 'real-e2e', 'accepted', 'unknown'],
+  validation: ['none', 'isolated', 'controlled-e2e', 'real-e2e', 'accepted', 'documented', 'unknown'],
   deployment: ['pending', 'historical', 'current', 'not-applicable'],
   acceptance: ['pending', 'accepted', 'not-applicable'],
 };
 const blockerKinds = ['implementation', 'validation', 'live-provider', 'deployment', 'owner-acceptance', 'classification'];
 const evidenceTypes = ['repo', 'ci', 'pr', 'private'];
-const evidenceRoles = ['classification', 'implementation', 'integration', 'planned-not-started', 'controlled-e2e', 'real-e2e', 'deployment', 'owner-acceptance', 'historical-acceptance'];
-const verifiedValidation = ['controlled-e2e', 'real-e2e', 'accepted'];
+const evidenceRoles = ['classification', 'implementation', 'integration', 'planned-not-started', 'controlled-e2e', 'real-e2e', 'deployment', 'owner-acceptance', 'historical-acceptance', 'document-result'];
+const verifiedValidation = ['controlled-e2e', 'real-e2e', 'accepted', 'documented'];
 const shaPattern = /^[a-f0-9]{40}$/i;
 
 function nonempty(value) { return typeof value === 'string' && value.trim().length > 0; }
@@ -134,10 +134,12 @@ export function validateStatus(data, todoText, evidenceRoot = root) {
     const itemKeys = ['id', 'title', 'kind', 'todoSections', 'state', 'construction', 'integration', 'validation', 'deployment', 'acceptance', 'blockers', 'evidence', 'nextAction'];
     if (item?.notes !== undefined) itemKeys.push('notes');
     if (item?.todoItems !== undefined) itemKeys.push('todoItems');
+    if (item?.resultKind !== undefined) itemKeys.push('resultKind');
     exactKeys(item, itemKeys, label);
     assert(nonempty(item.id) && !ids.has(item.id), `${label}: missing/duplicate id`); ids.add(item.id);
     assert(nonempty(item.title) && nonempty(item.nextAction), `${label}: title/nextAction required`);
     if (item.notes !== undefined) assert(nonempty(item.notes), `${label}.notes must be nonempty`);
+    if (item.resultKind !== undefined) validEnum(item.resultKind, ['product', 'document'], `${label}.resultKind`);
     validEnum(item.kind, enums.kind, `${label}.kind`);
     uniqueStrings(item.todoSections, `${label}.todoSections`);
     assert(item.todoSections.length > 0, `${label}.todoSections required`);
@@ -183,13 +185,22 @@ export function validateStatus(data, todoText, evidenceRoot = root) {
     }
     if (item.state === 'validado') {
       assert(item.construction === 'implemented' && item.integration === 'main', `${label}: validated item must be implemented on main`);
-      assert(verifiedValidation.includes(item.validation) && item.evidence.length > 0, `${label}: validated item requires scoped E2E/acceptance evidence`);
+      assert(verifiedValidation.includes(item.validation) && item.evidence.length > 0, `${label}: validated item requires scoped validation evidence`);
+      if (item.validation === 'documented') {
+        assert(item.resultKind === 'document' && item.deployment === 'not-applicable' && item.acceptance === 'not-applicable',
+          `${label}: documented validation requires document result with inapplicable deployment/acceptance`);
+        assert(item.evidence.some((evidence) => evidence.role === 'document-result' && evidence.type === 'repo'),
+          `${label}: documented result needs an existing repo document-result`);
+      } else {
+        assert(item.resultKind !== 'document', `${label}: product validation cannot claim a document result`);
+      }
       const requiredRole = item.validation === 'accepted'
         ? (item.deployment === 'historical' ? 'historical-acceptance' : 'owner-acceptance')
-        : item.validation;
+        : item.validation === 'documented' ? 'document-result' : item.validation;
       assert(item.evidence.some((evidence) => evidence.role === requiredRole && evidence.type !== 'pr'),
         `${label}: validated item needs non-PR evidence matching validation`);
     }
+    if (item.validation === 'documented') assert(item.state === 'validado', `${label}: documented validation must be scoped validated`);
     if (item.validation === 'accepted') {
       assert(item.acceptance === 'accepted', `${label}: accepted validation requires acceptance accepted`);
     }
@@ -273,10 +284,12 @@ export function renderDashboard(data) {
     `Atualizado: ${data.updatedAt}. Evidência-base: \`${data.evidenceBaseCommit}\`.`, '',
     `Snapshot SHA256: \`${dataHash}\`.`, '',
     `TODO auditado: **${data.audit.delivered}/${data.audit.total}** microtarefas entregues. Este número vem de \`TODO.md\`; os estados abaixo descrevem somente os escopos declarados, sem somar progresso.`, '',
-    ...(data.coverage ? [`Seções do TODO classificadas: **${data.coverage.classified}/${data.coverage.total}**; classificação pendente: **${data.coverage.unclassified}**.`, ''] : []),
+    ...(data.coverage ? [`Organização do registro: **${data.coverage.classified}/${data.coverage.total}** seções completas; **${data.coverage.unclassified}** pendentes de classificação. Isto não altera as **${data.audit.delivered}/${data.audit.total}** caixas auditadas como entrega.`, ''] : []),
     `Só aceite do owner: **${view.ownerOnlyCount}** linhas. Triagem de classificação: **${view.classificationCount} linhas / ${view.classificationTaskCount} caixas**.`, '',
-    `Validação pendente identificada: **${view.counts.capability['pendente-validacao']} linha / ${view.taskCounts['pendente-validacao']} caixa**. As ${view.classificationTaskCount} caixas em triagem não entram nessa contagem.`, '',
-    'Zero linhas em fila confirmada não significa backlog concluído; caixas abertas sem prova de início ficam com classificação pendente.', '',
+    `Validação pendente identificada: **${view.counts.capability['pendente-validacao']} linha(s) / ${view.taskCounts['pendente-validacao']} caixa(s)**. As ${view.classificationTaskCount} caixas em triagem não entram nessa contagem.`, '',
+    ...(view.counts.capability.fila === 0
+      ? ['Zero linhas em fila confirmada não significa backlog concluído; caixas abertas sem prova de início exigem classificação.', '']
+      : [`Fila confirmada: **${view.counts.capability.fila} linha(s) / ${view.taskCounts.fila} caixa(s)**. A fila registra apenas escopo planejado com prova de que ainda não começou.`, '']),
     '“Caixas” conta as tarefas incluídas em cada escopo; não significa que toda subtarefa de um grupo parcial já começou.', '',
     'IDs de caixas preservam a identidade ao trocar `[ ]` por `[x]`; mudar ou duplicar o texto exige revisar o mapa de IDs. O papel declarado de uma evidência não dispensa revisão semântica do seu conteúdo.', '',
     '| Tipo | Estado | Itens |', '| --- | --- | ---: |',
@@ -291,13 +304,13 @@ export function renderDashboard(data) {
     ...waveItems.map((item) => `| ${[item.id, item.title, item.state, item.integration, item.validation, item.deployment, item.acceptance, item.ownerOnly ? 'sim' : 'não', evidenceLinks(item), item.nextAction].map(escapeCell).join(' | ')} |`), '',
     ...states.flatMap((state) => [
       `## Capabilities — ${state}`, '',
-      '| ID | Escopo | Caixas | Implantação | Aceite | Bloqueio | Evidências | Próxima ação |', '| --- | --- | ---: | --- | --- | --- | --- | --- |',
-      ...classifiedItems.filter((item) => item.state === state).map((item) => `| ${[item.id, item.title, item.todoItems?.length ?? 0, item.deployment, item.acceptance, item.blockers.map((blocker) => blocker.kind).join(', ') || 'nenhum', evidenceLinks(item), item.nextAction].map(escapeCell).join(' | ')} |`), '',
+      '| ID | Escopo | Caixas | Resultado | Validação | Implantação | Aceite | Bloqueio | Evidências | Próxima ação |', '| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |',
+      ...classifiedItems.filter((item) => item.state === state).map((item) => `| ${[item.id, item.title, item.todoItems?.length ?? 0, item.resultKind ?? 'product', item.validation, item.deployment, item.acceptance, item.blockers.map((blocker) => blocker.kind).join(', ') || 'nenhum', evidenceLinks(item), item.nextAction].map(escapeCell).join(' | ')} |`), '',
     ]),
     '## Classificação pendente', '',
     `**${view.classificationTaskCount} caixas** em ${unclassifiedItems.length} linhas sem evidência suficiente para um dos quatro estados. Cada linha exige revisão semântica da evidência; o status do checkbox sozinho não prova validação nem início.`, '',
     ...(unclassifiedItems.length ? unclassifiedItems.map((item) => `- ${item.id}: ${item.title} (${item.todoItems?.length ?? 0} caixas) — ${item.nextAction}`) : ['Nenhuma linha com bloqueio de classificação.']), '',
-    '“Validado” significa validação técnica somente do escopo da linha. Implantação e aceite do proprietário permanecem campos separados.', '',
+    '“Validado” identifica o escopo da linha: `documented` prova um documento como resultado; `accepted` preserva um aceite histórico ou atual declarado; `controlled-e2e`/`real-e2e` indicam validação técnica. Nenhuma dessas etiquetas transforma automaticamente outro escopo em produto implantado e aceito.', '',
   ];
   return lines.join('\n');
 }
@@ -338,7 +351,7 @@ export async function main(argv = process.argv.slice(2)) {
     const view = snapshot(data, opts.state, opts.classification);
     console.log(`TODO auditado: ${data.audit.delivered}/${data.audit.total}; linhas: ${enums.kind.map((kind) => `${kind}[${states.map((state) => `${state}=${view.counts[kind][state]}`).join(', ')}]`).join('; ')}`);
     console.log(`Caixas por estado capability: ${states.map((state) => `${state}=${view.taskCounts[state]}`).join(', ')}; triagem=${view.classificationTaskCount} caixas/${view.classificationCount} linhas; só aceite do owner=${view.ownerOnlyCount}`);
-    if (data.coverage) console.log(`Seções: ${data.coverage.classified}/${data.coverage.total} classificadas; ${data.coverage.unclassified} pendentes. Zero fila confirmada não significa backlog concluído.`);
+    if (data.coverage) console.log(`Organização do registro: ${data.coverage.classified}/${data.coverage.total} seções completas; ${data.coverage.unclassified} pendentes. Fila confirmada: ${view.counts.capability.fila} linha(s), ${view.taskCounts.fila} caixa(s).`);
     if (opts.state || opts.classification || opts.all) for (const item of view.items) console.log(`${item.id}\t${needsClassification(item) ? 'triagem' : item.state}\t${item.title}${item.ownerOnly ? '\towner acceptance only' : ''}`);
   }
 }
