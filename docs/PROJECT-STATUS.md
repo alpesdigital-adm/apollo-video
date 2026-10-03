@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-03T19:59:32.242Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
+Atualizado: 2026-10-03T21:03:26.326Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
 
-Snapshot SHA256: `3ea05bd08fd1be4b6bf20d92e5524ea0b0b58fbf9f6dd3e2883c055bbf857e39`.
+Snapshot SHA256: `3b8e86096a079e17d9cce7c62df270306edda403b467d66ca9501d0e162ede25`.
 
 TODO auditado: **380/1259** microtarefas entregues. Este número vem de `TODO.md`; os estados abaixo descrevem somente os escopos declarados, sem somar progresso.
 
@@ -10,7 +10,7 @@ Organização do registro: **250/250** seções completas; **0** pendentes de cl
 
 Só aceite do owner: **0** linhas. Triagem de classificação: **0 linhas / 0 caixas**.
 
-Validação pendente identificada: **2 linha(s) / 4 caixa(s)**. As 0 caixas em triagem não entram nessa contagem.
+Validação pendente identificada: **1 linha(s) / 3 caixa(s)**. As 0 caixas em triagem não entram nessa contagem.
 
 Fila confirmada: **1 linha(s) / 2 caixa(s)**. A fila registra apenas escopo planejado com prova de que ainda não começou.
 
@@ -20,12 +20,12 @@ IDs de caixas preservam a identidade ao trocar `[ ]` por `[x]`; mudar ou duplica
 
 | Tipo | Estado | Itens |
 | --- | --- | ---: |
-| wave | validado | 5 |
+| wave | validado | 6 |
 | wave | pendente-validacao | 0 |
 | wave | em-construcao | 0 |
-| wave | fila | 1 |
-| capability | validado | 75 |
-| capability | pendente-validacao | 2 |
+| wave | fila | 0 |
+| capability | validado | 76 |
+| capability | pendente-validacao | 1 |
 | capability | em-construcao | 191 |
 | capability | fila | 1 |
 
@@ -33,8 +33,8 @@ Triagem de classificação: 0 linhas capability.
 
 | Estado da capability | Caixas TODO |
 | --- | ---: |
-| validado | 377 |
-| pendente-validacao | 4 |
+| validado | 378 |
+| pendente-validacao | 3 |
 | em-construcao | 876 |
 | fila | 2 |
 
@@ -49,7 +49,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | W26 | W26 — API de leitura do relatório crítico | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W27 | W27 — viewer do relatório crítico | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), [integration: PR 60](https://github.com/alpesdigital-adm/apollo-video/pull/60), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W28 | W28 — paridade das leituras UI/API | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), [integration: PR 61](https://github.com/alpesdigital-adm/apollo-video/pull/61), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
-| W29 | W29 — jornada autenticada de comparação LUT e preservação do histórico | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md](../docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md), [classification: tests/v2/workspace-lut-library-ui.test.mjs](../tests/v2/workspace-lut-library-ui.test.mjs) | Executar o pacote W29 estimado em até 3h de desenvolvimento; registrar prova técnica, integração, implantação e aceite separadamente. |
+| W29 | W29 — jornada autenticada de comparação LUT e preservação do histórico | validado | main | controlled-e2e | pending | pending | não | [classification: tests/v2/workspace-lut-library-ui.test.mjs](../tests/v2/workspace-lut-library-ui.test.mjs), [implementation: docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md](../docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md), privado (controlled-e2e; referência local no JSON), privado (controlled-e2e; referência local no JSON), [integration: tests/v2/helpers/workspace-lut-browser-proof.mjs](../tests/v2/helpers/workspace-lut-browser-proof.mjs) | Conferir CI/artifact do commit efetivo; depois atender gates de produção e obter aceite separado para esta caixa, sem promoção automática do TODO. |
 
 ## Capabilities — validado
 
@@ -116,6 +116,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | F2.024-checked | F2.024 — Repositório semântico cross-asset [FR-136] — escopo auditado | 5 | product | accepted | historical | accepted | nenhum | [historical-acceptance: TODO.md](../TODO.md), [historical-acceptance: TODO.md](../TODO.md), privado (classification; referência local no JSON) | Preservar o aceite histórico e avaliar o gate atual separadamente. |
 | F2.025-checked | F2.025 — ColorPipeline [FR-180] — escopo auditado | 4 | product | accepted | historical | accepted | nenhum | [historical-acceptance: TODO.md](../TODO.md), [historical-acceptance: TODO.md](../TODO.md), privado (classification; referência local no JSON) | Preservar o aceite histórico e avaliar o gate atual separadamente. |
 | F2.026-checked | F2.026 — Workspace LUT Library [FR-181] — escopo auditado | 4 | product | accepted | historical | accepted | nenhum | [historical-acceptance: TODO.md](../TODO.md), privado (classification; referência local no JSON) | Preservar o aceite histórico e avaliar o gate atual separadamente. |
+| F2.026-open | F2.026 — Workspace LUT Library [FR-181] — escopo aberto | 1 | product | controlled-e2e | pending | pending | deployment, owner-acceptance | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), [implementation: docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md](../docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md), privado (controlled-e2e; referência local no JSON), privado (controlled-e2e; referência local no JSON), [integration: tests/v2/helpers/workspace-lut-browser-proof.mjs](../tests/v2/helpers/workspace-lut-browser-proof.mjs) | Conferir CI/artifact do commit efetivo; depois atender gates de produção e obter aceite separado para esta caixa, sem promoção automática do TODO. |
 | F2.027-checked | F2.027 — ColorPlan [FR-182] — escopo auditado | 4 | product | accepted | historical | accepted | nenhum | [historical-acceptance: TODO.md](../TODO.md), [historical-acceptance: TODO.md](../TODO.md), privado (classification; referência local no JSON) | Preservar o aceite histórico e avaliar o gate atual separadamente. |
 | F2.028-checked | F2.028 — Export matrix [FR-235] — escopo auditado | 6 | product | accepted | historical | accepted | nenhum | [historical-acceptance: TODO.md](../TODO.md), [historical-acceptance: TODO.md](../TODO.md), privado (classification; referência local no JSON) | Preservar o aceite histórico e avaliar o gate atual separadamente. |
 | F2.029-checked | F2.029 — Jornadas de reuso e lote — escopo auditado | 7 | product | accepted | historical | accepted | nenhum | [historical-acceptance: TODO.md](../TODO.md), [historical-acceptance: TODO.md](../TODO.md), privado (classification; referência local no JSON) | Preservar o aceite histórico e avaliar o gate atual separadamente. |
@@ -136,7 +137,6 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | ID | Escopo | Caixas | Resultado | Validação | Implantação | Aceite | Bloqueio | Evidências | Próxima ação |
 | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |
 | F0.041-checked | F0.041 — Transferência externa de mídia [FR-247] — escopo auditado | 3 | product | isolated | pending | pending | validation | [classification: TODO.md](../TODO.md), [implementation: src/v2/application/begin-media-upload.ts](../src/v2/application/begin-media-upload.ts) | Localizar o run/artifact histórico do upload de 145 MB e reconciliar a prova específica, sem alterar caixas automaticamente. |
-| F2.026-open | F2.026 — Workspace LUT Library [FR-181] — escopo aberto | 1 | product | isolated | pending | pending | validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), [classification: docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md](../docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md) | Executar W29: comparação autenticada em /brand, retirada segura, histórico imutável e revisão dos previews; registrar resultado e aceite separadamente. |
 
 ## Capabilities — em-construcao
 

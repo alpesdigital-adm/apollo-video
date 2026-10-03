@@ -1790,6 +1790,8 @@ reconstroem a versão histórica selecionada. A UI `/brand` publicada oferece
 comparação A/B e remoção lógica, mas o aceite visual autenticado desta tela
 permanece pendente e não é contado como entregue.
 
+W29 (2026-10-03): a comparação autenticada de `/brand` foi comprovada em PostgreSQL descartável, API V2, FFmpeg e Chromium reais. Duas LUTs produzem PNGs 512×288 com hashes distintos e inversão de cor verificada; alternar A/B não cria Commands, versões, seleção ou revisões. A UI impede retirar o padrão; após `none`, retirar e reativar a LUT referenciada preserva linhas imutáveis, previews v1/v2 e o snapshot do projeto. Reload confirma o padrão versionado restaurado. Capturas desktop/mobile foram revisadas pelo desenvolvedor. Esta é validação técnica controlada: implantação atual e aceite do proprietário permanecem pendentes; a caixa visual continua aberta. Prova e limites: `docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md`.
+
 ### FR-182 — ColorPlan
 
 Plano global com correções por fonte e overrides por segmento.

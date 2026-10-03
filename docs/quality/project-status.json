@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-03T19:59:32.242Z",
+  "updatedAt": "2026-10-03T21:03:26.326Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -8851,16 +8851,20 @@
       "todoItems": [
         "d5c7c7de03a2-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
       "integration": "main",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "validation",
-          "text": "Authenticated visual comparison remains open."
+          "kind": "deployment",
+          "text": "Implantação atual DigitalOcean não comprovada para este escopo; W29 não provisiona nem implanta produção."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite final do proprietário ainda pendente; TODO permanece aberto."
         }
       ],
       "evidence": [
@@ -8879,12 +8883,30 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md",
-          "scope": "W29 planeja a comprovação autenticada desta única caixa aberta, sem mudar seu estado técnico nesta preparação.",
-          "role": "classification"
+          "scope": "Escopo implementado, prova local supervisionada e limites de entrega W29.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/wave29-20261003/w29-api-final-70779de3/w29/w29-manifest.json",
+          "scope": "Run local real com PostgreSQL/API/FFmpeg/Chromium: A/B sem mutação, none, retirada/reativação da LUT referenciada e histórico imutável; 4/4 suites API/session/OIDC sem skip.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/wave29-20261003/visual-review.json",
+          "scope": "Astra revisou dois PNGs e três capturas desktop/mobile; guard CI falsificado com bytes alterados, captura vazia e browser não terminal. Postflight: 18 identidades próprias encerradas, zero backends, cluster parado, porta livre.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/workspace-lut-browser-proof.mjs",
+          "scope": "Jornada autenticada conectada à suite pública existente e ao job CI, sem mudanças no runtime do produto.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Executar W29: comparação autenticada em /brand, retirada segura, histórico imutável e revisão dos previews; registrar resultado e aceite separadamente.",
-      "notes": "Remaining authenticated /brand visual comparison is explicitly open."
+      "nextAction": "Conferir CI/artifact do commit efetivo; depois atender gates de produção e obter aceite separado para esta caixa, sem promoção automática do TODO.",
+      "notes": "W29 validada tecnicamente em ambiente local controlado. Nenhum provider live, MP4 novo, deploy ou aceite do proprietário é inferido; 380/1259 caixas auditadas sem alteração."
     },
     {
       "id": "F2.027-checked",
@@ -14410,46 +14432,56 @@
       "todoItems": [
         "d5c7c7de03a2-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
-      "integration": "not-integrated",
-      "validation": "none",
+      "state": "validado",
+      "construction": "implemented",
+      "integration": "main",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "A jornada de browser autenticado e o registro visual deste pacote ainda não foram construídos; UI/API LUT existentes são a base."
-        },
-        {
-          "kind": "validation",
-          "text": "Execução PostgreSQL/API/FFmpeg/Chromium, revisão dos PNGs/screenshots e CI do commit de implementação ainda pendentes."
-        },
-        {
           "kind": "deployment",
-          "text": "Implantação atual de produção não comprovada para este escopo."
+          "text": "Implantação atual DigitalOcean não comprovada para este escopo; W29 não provisiona nem implanta produção."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite deste escopo permanece pendente."
+          "text": "Aceite final do proprietário ainda pendente; TODO permanece aberto."
         }
       ],
       "evidence": [
         {
           "type": "repo",
-          "ref": "docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md",
-          "scope": "Pacote de execução planejado, ainda em fila; descreve a lacuna de browser autenticado e os critérios da prova.",
-          "role": "planned-not-started"
-        },
-        {
-          "type": "repo",
           "ref": "tests/v2/workspace-lut-library-ui.test.mjs",
           "scope": "Os testes atuais inspecionam o código-fonte; não são a jornada visual autenticada W29.",
           "role": "classification"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md",
+          "scope": "Escopo implementado, prova local supervisionada e limites de entrega W29.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/wave29-20261003/w29-api-final-70779de3/w29/w29-manifest.json",
+          "scope": "Run local real com PostgreSQL/API/FFmpeg/Chromium: A/B sem mutação, none, retirada/reativação da LUT referenciada e histórico imutável; 4/4 suites API/session/OIDC sem skip.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/wave29-20261003/visual-review.json",
+          "scope": "Astra revisou dois PNGs e três capturas desktop/mobile; guard CI falsificado com bytes alterados, captura vazia e browser não terminal. Postflight: 18 identidades próprias encerradas, zero backends, cluster parado, porta livre.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/workspace-lut-browser-proof.mjs",
+          "scope": "Jornada autenticada conectada à suite pública existente e ao job CI, sem mudanças no runtime do produto.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Executar o pacote W29 estimado em até 3h de desenvolvimento; registrar prova técnica, integração, implantação e aceite separadamente.",
-      "notes": "Planejamento apenas. O estado fila descreve a jornada W29 ainda não iniciada; a UI/API existente em F2.026-open continua implementada e pendente de validação. Wave não duplica caixas no total de capabilities."
+      "nextAction": "Conferir CI/artifact do commit efetivo; depois atender gates de produção e obter aceite separado para esta caixa, sem promoção automática do TODO.",
+      "notes": "W29 validada tecnicamente em ambiente local controlado. Nenhum provider live, MP4 novo, deploy ou aceite do proprietário é inferido; 380/1259 caixas auditadas sem alteração."
     }
   ]
 }

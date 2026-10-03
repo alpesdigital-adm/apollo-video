@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { once } from 'node:events'
 import { createRequire } from 'node:module'
 import net from 'node:net'
 import test from 'node:test'
@@ -9,6 +8,7 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -58,6 +58,23 @@ async function waitForServer(baseUrl, child) {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error('Next server did not become ready')
+}
+
+async function waitForChildTerminal(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return true
+  return new Promise((resolve) => {
+    const onExit = () => { clearTimeout(timer); resolve(true) }
+    const timer = setTimeout(() => { child.off('exit', onExit); resolve(false) }, timeoutMs)
+    child.once('exit', onExit)
+  })
+}
+
+async function stopOwnedServer(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  child.kill('SIGTERM')
+  if (await waitForChildTerminal(child, 3000)) return
+  child.kill('SIGKILL')
+  assert.equal(await waitForChildTerminal(child, 3000), true, 'owned Next server did not reach terminal state')
 }
 
 test('authenticated public API manages projects, clients and artifact inspection', async () => {
@@ -152,6 +169,7 @@ test('authenticated public API manages projects, clients and artifact inspection
   const sha = (character) => character.repeat(64)
   let server
   let serverDiagnostics = ''
+  let primaryFailure
 
   const cleanup = async () => {
     await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
@@ -1735,7 +1753,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(lifecycleBefore.data.lifecycle.revision, 1)
     const { lutId: _lutId, ...versionBody } = lutBody
     const createVersion = () => fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/versions`, {
-      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-version-2' }, body: JSON.stringify({ ...versionBody, baseVersion: 1, name: 'CoraÃ§Ã£o ðŸŽžï¸ v2', intensity: 0.8 }),
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-version-2' }, body: JSON.stringify({ ...versionBody, baseVersion: 1, name: 'Coração 🎞️ v2', intensity: 0.8 }),
     })
     const versionResponse = await createVersion(); const versionResult = await versionResponse.json()
     assert.equal(versionResponse.status, 201)
@@ -5570,6 +5588,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       3,
     )
 
+    // W29 runs after every one-LUT and project-selection baseline assertion.
+    // The original form cookie came from POST /v1/session; do not issue another
+    // login here because the earlier auth fixtures deliberately exercise throttle.
+    const w29 = await proveWorkspaceLutBrowser({
+      baseUrl, client, workspaceId, projectId: created.data.project.id,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      authorization, username: uiUsername, originalLut: versionResult.data.lut,
+      projectSelectionId: projectLut.data.selection.id,
+    })
+    assert.equal(w29.outcome, 'passed')
+
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
         id_clientId: {
@@ -5650,15 +5679,19 @@ test('authenticated public API manages projects, clients and artifact inspection
       }),
     })
     assert.equal(reactivateRevokedWorkspaceResponse.status, 422)
+  } catch (error) {
+    primaryFailure = error
+    throw error
   } finally {
-    if (server && server.exitCode === null) {
-      server.kill()
-      await Promise.race([
-        once(server, 'exit'),
-        new Promise((resolve) => setTimeout(resolve, 3000)),
-      ])
+    const postflightErrors = []
+    try { await stopOwnedServer(server) } catch (error) { postflightErrors.push(error) }
+    if (postflightErrors.length === 0) {
+      try { await cleanup() } catch (error) { postflightErrors.push(error) }
     }
-    await cleanup()
-    await client.$disconnect()
+    try { await client.$disconnect() } catch (error) { postflightErrors.push(error) }
+    if (postflightErrors.length) throw new AggregateError(
+      primaryFailure ? [primaryFailure, ...postflightErrors] : postflightErrors,
+      'Public API integration postflight failed',
+    )
   }
 })

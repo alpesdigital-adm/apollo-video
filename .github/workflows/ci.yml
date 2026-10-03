@@ -787,7 +787,64 @@ jobs:
         run: npm run test:integration:webhooks
 
       - name: Run public API integration tests
+        id: public-api-integration
         run: npm run test:integration:api
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-w29-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_W29_EVIDENCE_DIR: ${{ runner.temp }}/w29-lut-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+
+      - name: Verify Wave 29 browser, evidence and PostgreSQL postflight
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        run: |
+          set -euo pipefail
+          mkdir -p "$APOLLO_W29_EVIDENCE_DIR"
+          remaining=unknown
+          trap 'printf "{\"schemaVersion\":\"w29-ci-postflight/v1\",\"remainingBackends\":\"%s\"}\n" "$remaining" > "$APOLLO_W29_EVIDENCE_DIR/w29-ci-postflight.json"' EXIT
+          test -x /usr/bin/google-chrome
+          export PGPASSWORD=apollo-ci
+          for _ in $(seq 1 15); do
+            remaining="$(/usr/lib/postgresql/16/bin/psql -h 127.0.0.1 -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname='apollo_v2' and application_name='apollo-video-e2e-w29-ci'")"
+            test "$remaining" != 0 || break
+            sleep 1
+          done
+          test "$remaining" = 0 || { printf 'Wave 29 PostgreSQL sessions remain after integration.\n' >&2; exit 1; }
+          test -s "$APOLLO_W29_EVIDENCE_DIR/w29-manifest.json"
+          node - "$APOLLO_W29_EVIDENCE_DIR" <<'NODE'
+          const assert = require('node:assert/strict')
+          const { createHash } = require('node:crypto')
+          const { readFileSync, statSync } = require('node:fs')
+          const { join } = require('node:path')
+          const dir = process.argv[2]
+          const manifest = JSON.parse(readFileSync(join(dir, 'w29-manifest.json'), 'utf8'))
+          assert.equal(manifest.schemaVersion, 'w29-lut-browser-proof/v1')
+          assert.equal(manifest.outcome, 'passed')
+          assert.equal(manifest.sourceCommit, process.env.GITHUB_SHA)
+          assert.equal(manifest.ciRunId, process.env.GITHUB_RUN_ID)
+          assert.equal(manifest.postflight?.browserProcessTerminal, true)
+          assert.deepEqual(manifest.postflight?.cleanupErrors, [])
+          assert.deepEqual(manifest.images?.map((image) => image.label), ['A', 'B'])
+          for (const [index, name] of ['lut-a-ffmpeg.png', 'lut-b-ffmpeg.png'].entries()) {
+            const bytes = readFileSync(join(dir, name))
+            assert.ok(bytes.length > 100)
+            assert.match(manifest.images[index].sha256, /^[a-f0-9]{64}$/)
+            assert.equal(createHash('sha256').update(bytes).digest('hex'), manifest.images[index].sha256)
+          }
+          for (const name of ['w29-desktop-a-b.png', 'w29-desktop-b-a.png', 'w29-mobile-b-a.png']) {
+            assert.ok(statSync(join(dir, name)).size > 100)
+          }
+          NODE
+        env:
+          APOLLO_W29_EVIDENCE_DIR: ${{ runner.temp }}/w29-lut-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish Wave 29 authenticated LUT evidence
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: w29-lut-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w29-lut-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
 
   local-infrastructure:
     name: Isolated Compose infrastructure
