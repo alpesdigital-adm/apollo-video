@@ -25,7 +25,7 @@ test('all vendored rules and ESLint configurations retain official upstream byte
 test('packed dependency contains the same vendored package bytes', () => {
   const unpack = mkdtempSync(path.join(tmpdir(), 'apollo-next-plugin-pack-'))
   try {
-    const tarball = new URL('../../tools/vendor/next-eslint-plugin-next-16.3.6-apollo.1.tgz', import.meta.url)
+    const tarball = new URL('../../tools/vendor/next-eslint-plugin-next-16.3.6-apollo.2.tgz', import.meta.url)
     execFileSync('tar', ['-xzf', '-'], {
       cwd: unpack,
       input: readFileSync(tarball),
@@ -51,6 +51,9 @@ test('vendored Next root dirs keep string, array, wildcard and directory-only be
   try {
     mkdirSync(path.join(fixture, 'apps', 'web', 'nested'), { recursive: true })
     mkdirSync(path.join(fixture, 'apps', 'api'), { recursive: true })
+    mkdirSync(path.join(fixture, 'apps', '.hidden'), { recursive: true })
+    mkdirSync(path.join(fixture, 'lib', 'one'), { recursive: true })
+    mkdirSync(path.join(fixture, '@scope', 'child'), { recursive: true })
     writeFileSync(path.join(fixture, 'apps', 'notes.txt'), 'not a directory')
     process.chdir(fixture)
     const roots = (rootDir) => getRootDirs({ cwd: fixture, settings: { next: { rootDir } } })
@@ -58,19 +61,30 @@ test('vendored Next root dirs keep string, array, wildcard and directory-only be
     assert.deepEqual(getRootDirs({ cwd: fixture, settings: {} }), [fixture])
     assert.deepEqual(roots('apps/web'), ['apps/web'])
     assert.deepEqual(new Set(roots('apps/*')), new Set(['apps/api', 'apps/web']))
-    assert.deepEqual(new Set(roots(['apps/web', 'apps/api'])), new Set(['apps/web', 'apps/api']))
+    assert.deepEqual(roots(['apps/web', 'apps/api']), ['apps/web', 'apps/api'])
     assert.deepEqual(roots('apps/missing*'), [])
     assert.deepEqual(roots('apps\\web'), ['apps/web'])
     assert.ok(!roots('apps/*').includes('apps/notes.txt'))
+    assert.ok(!roots('apps/*').includes('apps/.hidden'))
+    assert.deepEqual(roots('apps/.*'), ['apps/.hidden'])
+    assert.deepEqual(new Set(roots('apps/{api,web}')), new Set(['apps/api', 'apps/web']))
+    assert.deepEqual(roots('!apps/web'), [])
     assert.ok(!roots('apps/*').includes('apps/web/nested'))
 
-    try {
-      symlinkSync(path.join(fixture, 'apps', 'web'), path.join(fixture, 'apps', 'web-link'), 'dir')
-      const linked = roots('apps/web-link')
-      assert.deepEqual(linked, ['apps/web-link'])
-    } catch (error) {
-      if (!['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error
-    }
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    symlinkSync(path.join(fixture, 'apps', 'web'), path.join(fixture, 'apps', 'web-link'), linkType)
+    symlinkSync(path.join(fixture, 'apps', 'missing'), path.join(fixture, 'apps', 'dangling'), linkType)
+    assert.deepEqual(roots('apps/web-link'), ['apps/web-link'])
+    assert.ok(roots('apps/*').includes('apps/web-link'))
+    assert.deepEqual(roots('apps/web-link/*'), ['apps/web-link/nested'])
+    assert.deepEqual(roots('apps/dangling'), [])
+    assert.ok(!roots('apps/**').includes('apps'))
+    assert.ok(roots('apps/**').includes('apps/web-link/nested'))
+    assert.deepEqual(new Set(roots('apps/*/**').filter((entry) => ['apps/web', 'apps/api', 'apps/web-link'].includes(entry))), new Set(['apps/web', 'apps/api', 'apps/web-link']))
+    assert.deepEqual(roots('@scope/**'), ['@scope/child'])
+    assert.ok(!roots('{apps,lib}/**').includes('apps'))
+    assert.ok(!roots('{apps,lib}/**').includes('lib'))
+    assert.ok(roots('{apps,lib}/**').includes('lib/one'))
   } finally {
     process.chdir(previous)
     rmSync(fixture, { recursive: true, force: true })

@@ -5,8 +5,8 @@ import test from 'node:test'
 
 const readJson = (relativePath) => JSON.parse(readFileSync(new URL(`../../${relativePath}`, import.meta.url), 'utf8'))
 const patched = '16.3.6'
-const forkVersion = '16.3.6-apollo.1'
-const forkTarball = 'tools/vendor/next-eslint-plugin-next-16.3.6-apollo.1.tgz'
+const forkVersion = '16.3.6-apollo.2'
+const forkTarball = 'tools/vendor/next-eslint-plugin-next-16.3.6-apollo.2.tgz'
 // GHSA-vcvr-r3jv-pc5j: affected >=16.2.0 <16.3.6; this is a pin check, not an exploit test.
 const parts = (version) => version.split('.').map(Number)
 const compare = (left, right) => {

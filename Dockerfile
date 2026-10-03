@@ -9,7 +9,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-COPY tools/vendor/next-eslint-plugin-next-16.3.6-apollo.1.tgz ./tools/vendor/next-eslint-plugin-next-16.3.6-apollo.1.tgz
+COPY tools/vendor/next-eslint-plugin-next-16.3.6-apollo.2.tgz ./tools/vendor/next-eslint-plugin-next-16.3.6-apollo.2.tgz
 COPY prisma ./prisma
 COPY remotion/package.json remotion/package-lock.json ./remotion/
 COPY scripts/generate-prisma-clients.mjs ./scripts/generate-prisma-clients.mjs
