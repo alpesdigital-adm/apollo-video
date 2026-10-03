@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-03T19:32:45.561Z",
+  "updatedAt": "2026-10-03T19:59:32.242Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -8875,9 +8875,15 @@
           "ref": "C:/Users/leand/AppData/Local/apollo-validation/todo-wave-status-audit-20261003-luna.json",
           "scope": "Luna scope inventory; advisory classification, not product acceptance.",
           "role": "implementation"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md",
+          "scope": "W29 planeja a comprovação autenticada desta única caixa aberta, sem mudar seu estado técnico nesta preparação.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Executar e revisar a comparação visual autenticada pendente.",
+      "nextAction": "Executar W29: comparação autenticada em /brand, retirada segura, histórico imutável e revisão dos previews; registrar resultado e aceite separadamente.",
       "notes": "Remaining authenticated /brand visual comparison is explicitly open."
     },
     {
@@ -14393,6 +14399,57 @@
       ],
       "nextAction": "Construir record de decisão versionado com owner/prazo/opções/impacto e regressões que comparem defaults com configuração real.",
       "notes": "Fila de duas microtarefas específicas após conferir código e documentos; não inferida apenas da marcação aberta. Nenhuma caixa do TODO foi promovida."
+    },
+    {
+      "id": "W29",
+      "title": "W29 — jornada autenticada de comparação LUT e preservação do histórico",
+      "kind": "wave",
+      "todoSections": [
+        "F2.026"
+      ],
+      "todoItems": [
+        "d5c7c7de03a2-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "A jornada de browser autenticado e o registro visual deste pacote ainda não foram construídos; UI/API LUT existentes são a base."
+        },
+        {
+          "kind": "validation",
+          "text": "Execução PostgreSQL/API/FFmpeg/Chromium, revisão dos PNGs/screenshots e CI do commit de implementação ainda pendentes."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual de produção não comprovada para este escopo."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite deste escopo permanece pendente."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md",
+          "scope": "Pacote de execução planejado, ainda em fila; descreve a lacuna de browser autenticado e os critérios da prova.",
+          "role": "planned-not-started"
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/workspace-lut-library-ui.test.mjs",
+          "scope": "Os testes atuais inspecionam o código-fonte; não são a jornada visual autenticada W29.",
+          "role": "classification"
+        }
+      ],
+      "nextAction": "Executar o pacote W29 estimado em até 3h de desenvolvimento; registrar prova técnica, integração, implantação e aceite separadamente.",
+      "notes": "Planejamento apenas. O estado fila descreve a jornada W29 ainda não iniciada; a UI/API existente em F2.026-open continua implementada e pendente de validação. Wave não duplica caixas no total de capabilities."
     }
   ]
 }

@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-03T19:32:45.561Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
+Atualizado: 2026-10-03T19:59:32.242Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
 
-Snapshot SHA256: `ca31a5f28a2f8f1fea907bab471cfb75c67693e6517712cf7ec1219b2108d26c`.
+Snapshot SHA256: `3ea05bd08fd1be4b6bf20d92e5524ea0b0b58fbf9f6dd3e2883c055bbf857e39`.
 
 TODO auditado: **380/1259** microtarefas entregues. Este número vem de `TODO.md`; os estados abaixo descrevem somente os escopos declarados, sem somar progresso.
 
@@ -23,7 +23,7 @@ IDs de caixas preservam a identidade ao trocar `[ ]` por `[x]`; mudar ou duplica
 | wave | validado | 5 |
 | wave | pendente-validacao | 0 |
 | wave | em-construcao | 0 |
-| wave | fila | 0 |
+| wave | fila | 1 |
 | capability | validado | 75 |
 | capability | pendente-validacao | 2 |
 | capability | em-construcao | 191 |
@@ -49,6 +49,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | W26 | W26 — API de leitura do relatório crítico | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W27 | W27 — viewer do relatório crítico | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), [integration: PR 60](https://github.com/alpesdigital-adm/apollo-video/pull/60), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W28 | W28 — paridade das leituras UI/API | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), [integration: PR 61](https://github.com/alpesdigital-adm/apollo-video/pull/61), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
+| W29 | W29 — jornada autenticada de comparação LUT e preservação do histórico | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md](../docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md), [classification: tests/v2/workspace-lut-library-ui.test.mjs](../tests/v2/workspace-lut-library-ui.test.mjs) | Executar o pacote W29 estimado em até 3h de desenvolvimento; registrar prova técnica, integração, implantação e aceite separadamente. |
 
 ## Capabilities — validado
 
@@ -135,7 +136,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | ID | Escopo | Caixas | Resultado | Validação | Implantação | Aceite | Bloqueio | Evidências | Próxima ação |
 | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |
 | F0.041-checked | F0.041 — Transferência externa de mídia [FR-247] — escopo auditado | 3 | product | isolated | pending | pending | validation | [classification: TODO.md](../TODO.md), [implementation: src/v2/application/begin-media-upload.ts](../src/v2/application/begin-media-upload.ts) | Localizar o run/artifact histórico do upload de 145 MB e reconciliar a prova específica, sem alterar caixas automaticamente. |
-| F2.026-open | F2.026 — Workspace LUT Library [FR-181] — escopo aberto | 1 | product | isolated | pending | pending | validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON) | Executar e revisar a comparação visual autenticada pendente. |
+| F2.026-open | F2.026 — Workspace LUT Library [FR-181] — escopo aberto | 1 | product | isolated | pending | pending | validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), [classification: docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md](../docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md) | Executar W29: comparação autenticada em /brand, retirada segura, histórico imutável e revisão dos previews; registrar resultado e aceite separadamente. |
 
 ## Capabilities — em-construcao
 
