@@ -34,7 +34,7 @@ const browserTransport: ProjectEventFeedTransport = {
     } catch {
       return { kind: 'error' }
     }
-    if (response.status === 400 && payload.error?.code === 'INVALID_ARGUMENT') {
+    if (!response.ok && payload.error?.code === 'INVALID_ARGUMENT') {
       return { kind: 'cursor-rejected' }
     }
     const data = payload.data

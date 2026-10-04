@@ -62,6 +62,12 @@ function hydrate(row: V2PublicEventOutbox): Readonly<PublicEventFeedEntry> {
  * transaction equals the `createdAt` its rows will receive, so the minimum of
  * the open transactions' start times is a watermark below which no future row
  * can appear.
+ *
+ * Limit: `pg_stat_activity` reveals `xact_start` only for sessions of the
+ * reader's own role (and to superusers / pg_read_all_stats). Every outbox
+ * writer of this application connects through the same `V2_DATABASE_URL` role,
+ * so all of them are observed; a writer using another unprivileged role would
+ * not be, and its late commits could then land behind the cursor.
  */
 export class PrismaPublicEventFeedRepository implements PublicEventFeedRepository {
   private readonly client: PrismaClient
@@ -71,34 +77,25 @@ export class PrismaPublicEventFeedRepository implements PublicEventFeedRepositor
   }
 
   async readCommittedWatermark(): Promise<string> {
-    const rows = await this.client.$queryRaw<{ watermark: Date; opaque: bigint }[]>(
+    const rows = await this.client.$queryRaw<{ watermark: Date }[]>(
       Prisma.sql`
         SELECT
           date_trunc(
             'milliseconds',
             least(clock_timestamp(), coalesce(min(xact_start), clock_timestamp()))
-          ) - make_interval(secs => ${PUBLIC_EVENT_FEED_SAFETY_MARGIN_MS / 1000}::double precision) AS "watermark",
-          count(*) FILTER (WHERE state IS NULL AND pid <> pg_backend_pid()) AS "opaque"
+          ) - make_interval(secs => ${PUBLIC_EVENT_FEED_SAFETY_MARGIN_MS / 1000}::double precision) AS "watermark"
         FROM pg_stat_activity
         WHERE datname = current_database() AND backend_type = 'client backend'
       `,
     )
-    const row = rows[0]
-    if (!row || !(row.watermark instanceof Date) || Number.isNaN(row.watermark.getTime())) {
+    const watermark = rows[0]?.watermark
+    if (!(watermark instanceof Date) || Number.isNaN(watermark.getTime())) {
       throw new DomainError(
         'PERSISTENCE_NOT_CONFIGURED',
         'Event feed watermark could not be established',
       )
     }
-    if (Number(row.opaque) > 0) {
-      // Sessions of another role whose transactions are invisible: the
-      // watermark could be too high, so refuse instead of guessing.
-      throw new DomainError(
-        'PERSISTENCE_NOT_CONFIGURED',
-        'Event feed cannot observe every database transaction',
-      )
-    }
-    return row.watermark.toISOString()
+    return watermark.toISOString()
   }
 
   async listCommitted(input: Parameters<PublicEventFeedRepository['listCommitted']>[0]) {

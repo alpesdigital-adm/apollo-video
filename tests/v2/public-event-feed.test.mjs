@@ -189,12 +189,12 @@ test('F1.001 event feed rejects tampered, malformed, future and combined cursors
   assert.equal(decoded.id, PUBLIC_EVENT_FEED_FLOOR_ID)
 })
 
-test('F1.001 Prisma feed repository fails closed on opaque sessions and queries by (createdAt, id)', async () => {
+test('F1.001 Prisma feed repository derives the watermark from open transactions and queries by (createdAt, id)', async () => {
   const executed = []
   const client = {
     async $queryRaw(query) {
       executed.push(query)
-      return [{ watermark: new Date('2026-10-04T12:00:00.000Z'), opaque: 0n }]
+      return [{ watermark: new Date('2026-10-04T12:00:00.000Z') }]
     },
     v2PublicEventOutbox: {
       async findMany(input) { executed.push(input); return [] },
@@ -220,11 +220,11 @@ test('F1.001 Prisma feed repository fails closed on opaque sessions and queries 
   assert.equal(query.take, 11)
   assert.equal(query.where.OR.length, 2)
 
-  const opaque = new PrismaPublicEventFeedRepository({
-    async $queryRaw() { return [{ watermark: new Date(), opaque: 2n }] },
+  const unavailable = new PrismaPublicEventFeedRepository({
+    async $queryRaw() { return [{ watermark: null }] },
   })
   await assert.rejects(
-    opaque.readCommittedWatermark(),
+    unavailable.readCommittedWatermark(),
     (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED',
   )
 })

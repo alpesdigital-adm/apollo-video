@@ -7,7 +7,7 @@ export interface PublicEventFeedRepository {
   /**
    * ISO instant before which every transaction that wrote outbox rows has
    * already finished (committed or aborted), on the same database clock that
-   * produces `createdAt`. Fails closed when that cannot be established.
+   * produces `createdAt`.
    */
   readCommittedWatermark(): Promise<string>
 
