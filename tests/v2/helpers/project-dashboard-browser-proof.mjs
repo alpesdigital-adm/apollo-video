@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { settleOwnedBrowserProcess } from './browser-pid-teardown.mjs'
+
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 function evidenceDirectory() {
@@ -344,14 +346,20 @@ export async function proveProjectDashboardBrowser({ baseUrl, client, workspaceI
     await boundedClose('page', page && (() => page.close()), cleanupErrors)
     await boundedClose('context', context && (() => context.close()), cleanupErrors)
     await boundedClose('browser', browser && (() => browser.close()), cleanupErrors)
-    await boundedClose('browser-server', browserServer && (() => browserServer.close()), cleanupErrors)
+    // BrowserServer.close() hangs on the Windows harness; recorded, while the owned
+    // browser PID must still be dead (taskkill fallback) or the proof fails below.
+    const serverCloseErrors = []
+    await boundedClose('browser-server', browserServer && (() => browserServer.close()), serverCloseErrors)
+    evidence.postflight.browserServerCloseUnclean = serverCloseErrors.length > 0
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 5000))])
     }
-    evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
+    const settled = await settleOwnedBrowserProcess(browserProcess, cleanupErrors)
+    evidence.postflight.browserPidAliveAtEnd = settled.aliveAtEnd
+    evidence.postflight.browserProcessTerminal = settled.terminal
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
     evidence.postflight.cleanupErrors = cleanupErrors
     if (cleanupErrors.length) evidence.outcome = 'failed'
