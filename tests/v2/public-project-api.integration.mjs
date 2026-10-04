@@ -10,6 +10,7 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.mjs'
 import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
+import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -5609,6 +5610,35 @@ test('authenticated public API manages projects, clients and artifact inspection
       username: uiUsername,
     })
     assert.equal(w30.outcome, 'passed')
+
+    // --- W37 (stream s4) ---
+    // The three clients below are shared by the W37-W39 blocks: a read-only
+    // credential in the journey workspace and a write credential in the other one.
+    const w3739ClientFactory = createApiClientService({
+      repository: new PrismaApiClientRepository(client),
+      credentialCrypto: nodeApiCredentialCrypto,
+      clock: () => new Date(),
+    })
+    const w3739ReadOnly = await w3739ClientFactory({
+      id: 'w3739-readonly-client-v2', credentialId: 'w3739-readonly-credential-v2',
+      workspaceId, name: 'W37-39 read-only client', environment: apiEnvironment,
+      scopes: ['projects:read'],
+    })
+    const w3739OtherWorkspace = await w3739ClientFactory({
+      id: 'w3739-other-workspace-client-v2', credentialId: 'w3739-other-workspace-credential-v2',
+      workspaceId: otherWorkspaceId, name: 'W37-39 other workspace client', environment: apiEnvironment,
+      scopes: ['artifacts:read', 'projects:read', 'projects:write'],
+    })
+    const w3739ReadOnlyAuthorization = `Bearer ${w3739ReadOnly.token}`
+    const w3739OtherWorkspaceAuthorization = `Bearer ${w3739OtherWorkspace.token}`
+    const w37 = await proveW37RenameFromCard({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w37.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
