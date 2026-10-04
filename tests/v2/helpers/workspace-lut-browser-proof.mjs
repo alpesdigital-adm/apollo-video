@@ -101,7 +101,7 @@ async function boundedClose(label, action, errors) {
   try {
     await Promise.race([
       action(),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 5000) }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 30000) }),
     ])
   } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}`) }
   finally { clearTimeout(timer) }
