@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 
 import LogoutButton from '@/components/LogoutButton'
 import AppShellNavigation from '@/components/AppShellNavigation'
+import { useProjectEventFeed } from '@/app/useProjectEventFeed'
 import {
   STRATEGIC_OBJECTIVES,
   type StrategicObjectiveId,
@@ -203,6 +204,9 @@ export default function Dashboard() {
   const idempotencyKey = useRef<string | null>(null)
   const actionIdempotencyKeys = useRef(new Map<string, string>())
   const pageController = useRef<AbortController | null>(null)
+  // Set by the event feed so a refetch triggered by another client's change
+  // keeps the cards on screen instead of flashing the loading skeleton.
+  const backgroundRefresh = useRef(false)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -269,9 +273,13 @@ export default function Dashboard() {
     const controller = new AbortController()
     pageController.current?.abort()
     pageController.current = null
+    const background = backgroundRefresh.current
+    backgroundRefresh.current = false
     setLoadingMore(false)
-    setLoading(true)
-    setNotice(null)
+    if (!background) {
+      setLoading(true)
+      setNotice(null)
+    }
     const timer = window.setTimeout(async () => {
       try {
         const response = await fetch(`/v1/projects?${apiSearch}`, {
@@ -315,6 +323,14 @@ export default function Dashboard() {
       )
     }
   }, [])
+
+  useProjectEventFeed({
+    onProjectsChanged: () => {
+      backgroundRefresh.current = true
+      setRefreshRevision((value) => value + 1)
+    },
+    onUnauthorized: () => router.replace('/login'),
+  })
 
   useEffect(() => () => pageController.current?.abort(), [])
 
