@@ -154,7 +154,7 @@ export async function proveWorkspaceLutBrowser({ baseUrl, client, workspaceId, p
     evidence.counters.beforeCompare = before
 
     const { chromium } = await import('playwright-core')
-    browserServer = await chromium.launchServer({ executablePath: chromePath(), headless: true })
+    browserServer = await chromium.launchServer({ executablePath: chromePath(), headless: true, args: ['--disable-crash-reporter', '--disable-breakpad'] })
     browserProcess = browserServer.process()
     assert.ok(browserProcess?.pid, 'W29 browser must have an owned PID')
     evidence.browser.pid = browserProcess.pid

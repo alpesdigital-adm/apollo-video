@@ -47,7 +47,7 @@ export async function boundedClose(label, action, errors) {
 
 export async function launchBrowser(label) {
   const { chromium } = await import('playwright-core')
-  const browserServer = await chromium.launchServer({ executablePath: chromePath(label), headless: true })
+  const browserServer = await chromium.launchServer({ executablePath: chromePath(label), headless: true, args: ['--disable-crash-reporter', '--disable-breakpad'] })
   const browserProcess = browserServer.process()
   assert.ok(browserProcess?.pid, `${label} browser must have an owned PID`)
   const browser = await chromium.connect(browserServer.wsEndpoint())

@@ -137,7 +137,7 @@ export async function proveProjectDashboardBrowser({ baseUrl, client, workspaceI
     evidence.projectRowsBefore = rows
 
     const { chromium } = await import('playwright-core')
-    browserServer = await chromium.launchServer({ executablePath: chromePath(), headless: true })
+    browserServer = await chromium.launchServer({ executablePath: chromePath(), headless: true, args: ['--disable-crash-reporter', '--disable-breakpad'] })
     browserProcess = browserServer.process()
     assert.ok(browserProcess?.pid, 'W30 browser must have an owned PID')
     evidence.browser.pid = browserProcess.pid
