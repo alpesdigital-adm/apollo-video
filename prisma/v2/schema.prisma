@@ -1865,9 +1865,9 @@ model V2MediaLibraryAttachment {
   requestFingerprint      String   @db.Char(64)
   createdAt               DateTime @db.Timestamptz(3)
 
-  @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([workspaceId, projectId, idempotencyKey], map: "media_library_attachment_request_key")
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
-  @@index([workspaceId, selectionKind, selectionId])
+  @@index([workspaceId, selectionKind, selectionId], map: "media_library_attachment_selection_idx")
   @@map("media_library_attachments")
 }
 
@@ -1897,10 +1897,10 @@ model V2MediaSegmentDerivativeJob {
   createdAt          DateTime  @db.Timestamptz(3)
   updatedAt          DateTime  @db.Timestamptz(3)
 
-  @@unique([workspaceId, clientId, idempotencyKey])
-  @@unique([workspaceId, segmentId, consumerKey])
-  @@index([status, nextAttemptAt, leaseExpiresAt, createdAt])
-  @@index([workspaceId, segmentId, createdAt(sort: Desc)])
+  @@unique([workspaceId, clientId, idempotencyKey], map: "segment_derivative_job_request_key")
+  @@unique([workspaceId, segmentId, consumerKey], map: "segment_derivative_job_consumer_key")
+  @@index([status, nextAttemptAt, leaseExpiresAt, createdAt], map: "segment_derivative_job_claim_idx")
+  @@index([workspaceId, segmentId, createdAt(sort: Desc)], map: "segment_derivative_job_segment_idx")
   @@map("media_segment_derivative_jobs")
 }
 

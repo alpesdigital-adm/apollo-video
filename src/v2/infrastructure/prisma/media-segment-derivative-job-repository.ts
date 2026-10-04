@@ -1,6 +1,11 @@
 import type { PrismaClient, V2MediaSegmentDerivativeJob } from '../../../../generated/prisma-v2/index.js'
 import type { MediaSegmentDerivativeJob, MediaSegmentDerivativeJobRepository, MediaSegmentDerivativeJobStatus } from '../../application/ports/media-segment-derivative-job-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import type { PreparedSegmentDerivative } from '../../application/ports/media-segment-derivative-job-repository.ts'
+import { PrismaMediaArtifactRepository } from './media-artifact-repository.ts'
+import { PrismaMediaSegmentRepository } from './media-segment-repository.ts'
+import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { mediaLibraryRights } from '../../domain/media-library.ts'
 
 function mapped(row: V2MediaSegmentDerivativeJob): Readonly<MediaSegmentDerivativeJob> {
   const statuses = ['queued', 'running', 'retrying', 'succeeded', 'failed', 'canceled']
@@ -11,6 +16,40 @@ function mapped(row: V2MediaSegmentDerivativeJob): Readonly<MediaSegmentDerivati
 export class PrismaMediaSegmentDerivativeJobRepository implements MediaSegmentDerivativeJobRepository {
   private readonly client: PrismaClient
   constructor(client: PrismaClient) { this.client = client }
+
+  async publish(jobId: string, owner: string, attempt: number, prepare: () => Promise<PreparedSegmentDerivative>, signal?: AbortSignal) {
+    return this.client.$transaction(async (tx) => {
+      // Cancellation, lease recovery and publication serialize on the same row.
+      await tx.$queryRaw`SELECT "id" FROM "media_segment_derivative_jobs" WHERE "id" = ${jobId} FOR UPDATE`
+      const job = await tx.v2MediaSegmentDerivativeJob.findUnique({ where: { id: jobId } })
+      const assertLease = () => {
+        const now = new Date()
+        if (signal?.aborted || !job || job.status !== 'running' || job.leaseOwner !== owner || job.attempt !== attempt || !job.leaseExpiresAt || job.leaseExpiresAt <= now || job.deadlineAt <= now) throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative publication requires its current unexpired lease')
+      }
+      assertLease()
+      const segment = await tx.v2MediaSegment.findFirst({ where: { workspaceId: job!.workspaceId, id: job!.segmentId } })
+      if (!segment) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Derivative segment is unavailable')
+      await tx.$queryRaw`SELECT "id" FROM "media_artifacts" WHERE "id" = ${segment.artifactId} AND "workspaceId" = ${job!.workspaceId} FOR UPDATE`
+      const artifact = await tx.v2MediaArtifact.findUnique({ where: { id: segment.artifactId }, include: { currentRightsSnapshot: true } })
+      if (!artifact || artifact.status !== 'available' || artifact.sha256 !== job!.sourceSha256 || artifact.currentRightsSnapshotId !== job!.rightsSnapshotId || segment.segmentHash !== job!.segmentHash) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Derivative source or rights changed before publication')
+      const assertRights = () => {
+        if (mediaLibraryRights(artifact.currentRightsSnapshot ? hydrateAssetRights(artifact.currentRightsSnapshot) : null, { workspaceId: job!.workspaceId, locale: 'pt-BR', now: new Date() }).status !== 'eligible') throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Derivative rights expired before publication')
+      }
+      // Promotion cannot start after an accepted cancel/reclaim/expired deadline.
+      assertLease()
+      assertRights()
+      const prepared = await prepare()
+      assertLease()
+      assertRights()
+      if (prepared.bundle.workspaceId !== job!.workspaceId || prepared.materialization.workspaceId !== job!.workspaceId || prepared.materialization.segmentId !== job!.segmentId || prepared.materialization.consumerKey !== job!.consumerKey || prepared.materialization.sourceArtifactSha256 !== job!.sourceSha256) throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative publication does not match its leased request')
+      const persisted = await new PrismaMediaArtifactRepository(this.client).persistOrReplay(prepared.bundle, tx)
+      const record = await new PrismaMediaSegmentRepository(this.client).recordMaterialization({ ...prepared.materialization, outputArtifactId: persisted.artifactId, outputManifestId: persisted.manifestId }, tx)
+      assertLease()
+      assertRights()
+      await tx.v2MediaSegmentDerivativeJob.update({ where: { id: jobId }, data: { status: 'succeeded', outputArtifactId: record.outputArtifactId, outputManifestId: record.outputManifestId, leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date() } })
+      return record
+    }, { timeout: 10_000, maxWait: 5_000 })
+  }
 
   async enqueue(input: Omit<MediaSegmentDerivativeJob, 'status' | 'attempt' | 'maxAttempts' | 'updatedAt'>) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -74,11 +113,6 @@ export class PrismaMediaSegmentDerivativeJobRepository implements MediaSegmentDe
 
   async heartbeat(jobId: string, owner: string, attempt: number, now: Date, leaseUntil: Date) {
     const updated = await this.client.v2MediaSegmentDerivativeJob.updateMany({ where: { id: jobId, status: 'running', leaseOwner: owner, attempt, leaseExpiresAt: { gt: now }, deadlineAt: { gt: now } }, data: { heartbeatAt: now, leaseExpiresAt: leaseUntil, updatedAt: now } })
-    return updated.count === 1
-  }
-
-  async succeed(jobId: string, owner: string, attempt: number, outputArtifactId: string, outputManifestId: string, now: Date) {
-    const updated = await this.client.v2MediaSegmentDerivativeJob.updateMany({ where: { id: jobId, status: 'running', leaseOwner: owner, attempt, leaseExpiresAt: { gt: now }, deadlineAt: { gt: now } }, data: { status: 'succeeded', outputArtifactId, outputManifestId, leaseOwner: null, leaseExpiresAt: null, updatedAt: now } })
     return updated.count === 1
   }
 

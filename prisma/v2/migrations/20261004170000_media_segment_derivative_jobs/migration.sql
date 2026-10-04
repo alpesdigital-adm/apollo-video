@@ -30,9 +30,9 @@ CREATE TABLE "media_segment_derivative_jobs" (
   CONSTRAINT "media_segment_derivative_jobs_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "media_segment_derivative_jobs_status_check" CHECK ("status" IN ('queued', 'running', 'retrying', 'succeeded', 'failed', 'canceled'))
 );
-CREATE UNIQUE INDEX "media_segment_derivative_jobs_workspaceId_clientId_idempotencyKey_key" ON "media_segment_derivative_jobs"("workspaceId", "clientId", "idempotencyKey");
-CREATE UNIQUE INDEX "media_segment_derivative_jobs_workspaceId_segmentId_consumerKey_key" ON "media_segment_derivative_jobs"("workspaceId", "segmentId", "consumerKey");
-CREATE INDEX "media_segment_derivative_jobs_status_nextAttemptAt_leaseExpiresAt_createdAt_idx" ON "media_segment_derivative_jobs"("status", "nextAttemptAt", "leaseExpiresAt", "createdAt");
-CREATE INDEX "media_segment_derivative_jobs_workspaceId_segmentId_createdAt_idx" ON "media_segment_derivative_jobs"("workspaceId", "segmentId", "createdAt" DESC);
+CREATE UNIQUE INDEX "segment_derivative_job_request_key" ON "media_segment_derivative_jobs"("workspaceId", "clientId", "idempotencyKey");
+CREATE UNIQUE INDEX "segment_derivative_job_consumer_key" ON "media_segment_derivative_jobs"("workspaceId", "segmentId", "consumerKey");
+CREATE INDEX "segment_derivative_job_claim_idx" ON "media_segment_derivative_jobs"("status", "nextAttemptAt", "leaseExpiresAt", "createdAt");
+CREATE INDEX "segment_derivative_job_segment_idx" ON "media_segment_derivative_jobs"("workspaceId", "segmentId", "createdAt" DESC);
 ALTER TABLE "media_segment_derivative_jobs" ADD CONSTRAINT "media_segment_derivative_jobs_segment_fkey" FOREIGN KEY ("segmentId", "workspaceId") REFERENCES "media_segments"("id", "workspaceId") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "media_segment_derivative_jobs" ADD CONSTRAINT "media_segment_derivative_jobs_rights_fkey" FOREIGN KEY ("rightsSnapshotId", "workspaceId") REFERENCES "asset_rights_snapshots"("id", "workspaceId") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -1,4 +1,4 @@
-import type { PrismaClient, V2MediaSegment } from '../../../../generated/prisma-v2/index.js'
+import type { Prisma, PrismaClient, V2MediaSegment } from '../../../../generated/prisma-v2/index.js'
 
 import type { MediaSegmentRepository } from '../../application/ports/media-segment-repository.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
@@ -82,8 +82,8 @@ export class PrismaMediaSegmentRepository implements MediaSegmentRepository {
     return row ? Object.freeze({ segmentId: row.segmentId, consumerKey: row.consumerKey, outputArtifactId: row.outputArtifactId, outputManifestId: row.outputManifestId, replayed: true }) : null
   }
 
-  async recordMaterialization(input: { workspaceId: string; id: string; segmentId: string; consumerKey: string; outputArtifactId: string; outputManifestId: string; sourceArtifactSha256: string; createdAt: string }) {
-    return this.client.$transaction(async (transaction) => {
+  async recordMaterialization(input: { workspaceId: string; id: string; segmentId: string; consumerKey: string; outputArtifactId: string; outputManifestId: string; sourceArtifactSha256: string; createdAt: string }, transactionClient?: Prisma.TransactionClient) {
+    const persist = async (transaction: Prisma.TransactionClient) => {
       let replayed = true
       let row = await transaction.v2MediaSegmentMaterialization.findUnique({ where: { workspaceId_segmentId_consumerKey: { workspaceId: input.workspaceId, segmentId: input.segmentId, consumerKey: input.consumerKey } } })
       if (!row) { row = await transaction.v2MediaSegmentMaterialization.create({ data: { ...input, recipe: 'extract-range/v1', createdAt: new Date(input.createdAt) } }); replayed = false }
@@ -91,6 +91,7 @@ export class PrismaMediaSegmentRepository implements MediaSegmentRepository {
       const actualHash = calculateCanonicalHash({ segmentId: row.segmentId, consumerKey: row.consumerKey, outputArtifactId: row.outputArtifactId, outputManifestId: row.outputManifestId, sourceArtifactSha256: row.sourceArtifactSha256 })
       if (expectedHash !== actualHash || row.recipe !== 'extract-range/v1') throw new DomainError('PERSISTENCE_CONFLICT', 'Segment materialization replay collided')
       return Object.freeze({ segmentId: row.segmentId, consumerKey: row.consumerKey, outputArtifactId: row.outputArtifactId, outputManifestId: row.outputManifestId, replayed })
-    }, { isolationLevel: 'Serializable' })
+    }
+    return transactionClient ? persist(transactionClient) : this.client.$transaction(persist, { isolationLevel: 'Serializable' })
   }
 }

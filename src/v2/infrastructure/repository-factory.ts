@@ -452,7 +452,7 @@ import { PrismaMediaLibraryRepository } from './prisma/media-library-repository.
 import { PrismaAutomaticCatalogRepository } from './prisma/automatic-catalog-repository.ts'
 import { PrismaMediaSegmentRepository } from './prisma/media-segment-repository.ts'
 import { PrismaMediaSegmentDerivativeJobRepository } from './prisma/media-segment-derivative-job-repository.ts'
-import { requestMediaSegmentDerivativeService } from '../application/request-media-segment-derivative.ts'
+import { requestMediaSegmentDerivativeService, readMediaSegmentDerivativeJobService, cancelMediaSegmentDerivativeJobService, retryMediaSegmentDerivativeJobService } from '../application/request-media-segment-derivative.ts'
 import { runNextMediaSegmentDerivativeJobService } from '../application/run-media-segment-derivative-worker.ts'
 import { materializeMediaSegmentDerivativeService } from '../application/materialize-media-segment.ts'
 import { PrismaImageAnalysisRepository } from './prisma/image-analysis-repository.ts'
@@ -1618,6 +1618,11 @@ export function createMediaSegmentRepository(): MediaSegmentRepository {
 
 export function createMediaSegmentDerivativeJobRepository() {
   return new PrismaMediaSegmentDerivativeJobRepository(resolveV2Client())
+}
+
+export function createMediaSegmentDerivativeJobControlServices(clock: () => Date = () => new Date()) {
+  const jobs = createMediaSegmentDerivativeJobRepository()
+  return Object.freeze({ read: readMediaSegmentDerivativeJobService({ jobs }), cancel: cancelMediaSegmentDerivativeJobService({ jobs, clock }), retry: retryMediaSegmentDerivativeJobService({ jobs, clock }) })
 }
 
 export function createMediaSegmentDerivativeRequestService(clock: () => Date = () => new Date()) {

@@ -43,9 +43,9 @@ CREATE TABLE "media_library_attachments" (
 
 CREATE UNIQUE INDEX "media_library_attachments_commandId_key" ON "media_library_attachments"("commandId");
 CREATE UNIQUE INDEX "media_library_attachments_resultVersionId_key" ON "media_library_attachments"("resultVersionId");
-CREATE UNIQUE INDEX "media_library_attachments_workspaceId_projectId_idempotencyKey_key" ON "media_library_attachments"("workspaceId", "projectId", "idempotencyKey");
+CREATE UNIQUE INDEX "media_library_attachment_request_key" ON "media_library_attachments"("workspaceId", "projectId", "idempotencyKey");
 CREATE INDEX "media_library_attachments_workspaceId_projectId_createdAt_idx" ON "media_library_attachments"("workspaceId", "projectId", "createdAt" DESC);
-CREATE INDEX "media_library_attachments_workspaceId_selectionKind_selectionId_idx" ON "media_library_attachments"("workspaceId", "selectionKind", "selectionId");
+CREATE INDEX "media_library_attachment_selection_idx" ON "media_library_attachments"("workspaceId", "selectionKind", "selectionId");
 
 ALTER TABLE "media_library_attachments" ADD CONSTRAINT "media_library_attachments_project_fkey" FOREIGN KEY ("projectId", "workspaceId") REFERENCES "projects"("id", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "media_library_attachments" ADD CONSTRAINT "media_library_attachments_source_fkey" FOREIGN KEY ("parentArtifactId", "workspaceId") REFERENCES "media_artifacts"("id", "workspaceId") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -28,15 +28,15 @@ export function runNextMediaSegmentDerivativeJobService(dependencies: {
     signal?.addEventListener('abort', relay, { once: true })
     const deadlineMs = new Date(job.deadlineAt).getTime() - now.getTime()
     const deadlineTimer = setTimeout(relay, Math.max(0, deadlineMs))
-    let heartbeatInFlight = false
-    const timer = setInterval(async () => {
+    let heartbeatInFlight: Promise<void> | undefined
+    const timer = setInterval(() => {
       if (heartbeatInFlight || abort.signal.aborted) return
-      heartbeatInFlight = true
-      try {
+      heartbeatInFlight = (async () => { try {
         const valid = await dependencies.jobs.heartbeat(job.id, owner, job.attempt, clock(), new Date(clock().getTime() + leaseDuration))
         if (!valid) abort.abort()
       } catch { abort.abort() }
-      finally { heartbeatInFlight = false }
+      finally { heartbeatInFlight = undefined }
+      })()
     }, interval)
     try {
       const [segment, item] = await Promise.all([dependencies.segments.find(job.workspaceId, job.segmentId), dependencies.library.findById(job.workspaceId, job.segmentId, clock())])
@@ -44,16 +44,16 @@ export function runNextMediaSegmentDerivativeJobService(dependencies: {
       const source = await dependencies.segments.readSource(job.workspaceId, segment.parentAssetId)
       if (!source || source.mediaType !== 'video' || source.sha256 !== job.sourceSha256) throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative source hash changed')
       if (abort.signal.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Derivative job stopped before extraction')
-      const result = await dependencies.materialize({ workspaceId: job.workspaceId, segmentId: job.segmentId, consumerKey: job.consumerKey, requiresPhysicalDerivative: true, signal: abort.signal })
+      const result = await dependencies.materialize({ workspaceId: job.workspaceId, segmentId: job.segmentId, consumerKey: job.consumerKey, requiresPhysicalDerivative: true, signal: abort.signal, publish: (prepare) => dependencies.jobs.publish(job.id, owner, job.attempt, prepare, abort.signal) })
       if (!('outputArtifactId' in result) || !('outputManifestId' in result)) throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative worker did not produce an artifact')
-      if (!await dependencies.jobs.succeed(job.id, owner, job.attempt, result.outputArtifactId, result.outputManifestId, clock())) throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative lease was lost before completion')
       return Object.freeze({ jobId: job.id, status: 'succeeded' as const, outputArtifactId: result.outputArtifactId, outputManifestId: result.outputManifestId })
     } catch (error) {
-      const code = error instanceof DomainError ? error.code : 'RENDER_EXECUTION_FAILED'
+      const code = clock().getTime() >= new Date(job.deadlineAt).getTime() ? 'RENDER_DEADLINE_EXCEEDED' : error instanceof DomainError ? error.code : 'RENDER_EXECUTION_FAILED'
       await dependencies.jobs.failOrRetry(job.id, owner, job.attempt, code, !NON_RETRYABLE.has(code) && !abort.signal.aborted, clock())
       return Object.freeze({ jobId: job.id, status: abort.signal.aborted ? 'stopped' as const : 'failed' as const, errorCode: code })
     } finally {
       clearInterval(timer); clearTimeout(deadlineTimer); signal?.removeEventListener('abort', relay)
+      await heartbeatInFlight
     }
   }
 }

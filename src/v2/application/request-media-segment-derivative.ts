@@ -9,6 +9,42 @@ import { materializeSegment } from '../domain/media-segment.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 
+export function readMediaSegmentDerivativeJobService(dependencies: { jobs: MediaSegmentDerivativeJobRepository }) {
+  return async (input: { jobId: string; actor: Readonly<AuthenticatedExternalActor> }) => {
+    requireScope(input.actor, 'artifacts:read')
+    const audit = materializeActorAuditContext(input.actor)
+    const jobId = input.jobId.trim()
+    if (!ID.test(jobId)) throw new DomainError('INVALID_ARGUMENT', 'Derivative job identity is invalid')
+    const job = await dependencies.jobs.read(audit.workspaceId, jobId)
+    if (!job) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Derivative job was not found')
+    return job
+  }
+}
+
+export function cancelMediaSegmentDerivativeJobService(dependencies: { jobs: MediaSegmentDerivativeJobRepository; clock?: () => Date }) {
+  return async (input: { jobId: string; actor: Readonly<AuthenticatedExternalActor> }) => {
+    requireScope(input.actor, 'artifacts:write')
+    const audit = materializeActorAuditContext(input.actor)
+    const jobId = input.jobId.trim()
+    if (!ID.test(jobId)) throw new DomainError('INVALID_ARGUMENT', 'Derivative job identity is invalid')
+    const job = await dependencies.jobs.cancel(audit.workspaceId, jobId, audit.contextHash, dependencies.clock?.() ?? new Date())
+    if (!job) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Derivative job was not found')
+    return job
+  }
+}
+
+export function retryMediaSegmentDerivativeJobService(dependencies: { jobs: MediaSegmentDerivativeJobRepository; clock?: () => Date }) {
+  return async (input: { jobId: string; actor: Readonly<AuthenticatedExternalActor> }) => {
+    requireScope(input.actor, 'artifacts:write')
+    const audit = materializeActorAuditContext(input.actor)
+    const jobId = input.jobId.trim()
+    if (!ID.test(jobId)) throw new DomainError('INVALID_ARGUMENT', 'Derivative job identity is invalid')
+    const job = await dependencies.jobs.retry(audit.workspaceId, jobId, audit.contextHash, dependencies.clock?.() ?? new Date())
+    if (!job) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Derivative job was not found')
+    return job
+  }
+}
+
 export function requestMediaSegmentDerivativeService(dependencies: { segments: MediaSegmentRepository; library: MediaLibraryRepository; jobs: MediaSegmentDerivativeJobRepository; clock?: () => Date; createId?: () => string }) {
   return async (input: { workspaceId: string; segmentId: string; consumerKey: string; requiresPhysicalDerivative: boolean; idempotencyKey?: string; actor: Readonly<AuthenticatedExternalActor> }) => {
     requireScope(input.actor, 'artifacts:write')
