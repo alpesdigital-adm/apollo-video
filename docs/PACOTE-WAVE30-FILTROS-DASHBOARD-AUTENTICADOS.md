@@ -1,6 +1,6 @@
 # Wave 30 — persistência autenticada dos filtros do dashboard
 
-**Implementação integrada e validada tecnicamente em ambiente local controlado; CI final, implantação e aceite são estados separados.** Base de planejamento: `main` em `8bc0c06e7e5c030b14077c6659688a8485b1d098` (confirmar a base atual antes da implementação). Alvo exclusivo: F1.002 / FR-003, caixa aberta de persistência dos filtros entre sessão e URL, ID `acd8f12f509c-1`. A caixa `0b96ddcb537a-1`, de correção das oito facetas, permanece fora deste pacote. Este plano registra W30 na fila, sem alterar caixas do `TODO.md` ou estados de implantação e aceite.
+**Implementação integrada e validada tecnicamente em ambiente local controlado; CI final, implantação e aceite são estados separados.** Base de planejamento: `main` em `8bc0c06e7e5c030b14077c6659688a8485b1d098` (confirmar a base atual antes da implementação). Alvo exclusivo: F1.002 / FR-003, caixa aberta de persistência dos filtros entre sessão e URL, ID `acd8f12f509c-1`. A caixa `0b96ddcb537a-1`, de correção das oito facetas, permanece fora deste pacote. O registro acompanha a evolução da W30; o checkpoint técnico ao final informa o estado comprovado, sem alterar caixas do `TODO.md` ou estados de implantação e aceite.
 
 ## Resultado observável e limite
 
