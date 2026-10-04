@@ -178,7 +178,8 @@ export function createProjectDashboardRecord(input: {
       input.administrationRevision >= 1 &&
       (input.archivedFromStatus === null ||
         (input.project.status === 'archived' &&
-          input.archivedFromStatus !== 'archived' &&
+          // The static type excludes 'archived'; runtime input may not.
+          (input.archivedFromStatus as Project['status']) !== 'archived' &&
           PROJECT_STATUSES.includes(input.archivedFromStatus) &&
           canTransitionProjectStatus(input.archivedFromStatus, 'archived'))) &&
       (input.project.status === 'archived' || input.archivedFromStatus === null),
