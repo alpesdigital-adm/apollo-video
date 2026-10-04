@@ -1,0 +1,11 @@
+# Wave 39 — duplicação copy-on-write pelo dashboard
+
+**Pacote em fila; nenhuma prova W39 executada.** Base `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`, CI `37167702546` verde; depende da W38. F1.003 / FR-004, subescopos das caixas `1349e49bda43-1` e `56a977e125cd-1`. Estimativa **3–4 h de desenvolvimento**, CI/revisão fora.
+
+O card já expõe Duplicar; API/workspace V2 possui capability copy-on-write e regressões de hash/lineage. Falta jornada autenticada a partir do card que demonstre nova identidade e ProjectVersion, conteúdo imutável preservado e artifact compartilhado sem cópia extra do master bruto.
+
+Preparar projeto V2 com snapshot e **master bruto real de fixture controlada, com hash dos bytes conhecido**, no banco/armazenamento isolados após baseline; não usar provider live ou dado de produção. Registrar SHA-256 de bytes, IDs, lineage, quantidade de objetos e refcounts/refs antes da ação. Clicar Duplicar no Chromium e seguir destino; conferir resposta pública, projeto/versão novos, conteúdo editorial equivalente conforme contrato, snapshot de identidade própria e referência compartilhada ao artifact imutável, sem segundo upload/cópia de master. O hash canônico do snapshot da cópia **pode diferir** se vincular identidade de projeto/versão; aplicar a regra contratual existente, não exigir igualdade cega. Mutar a cópia por Command e provar que original e seus hashes/versões não mudam. Cobrir replay, base stale, payload injetado e workspace alheio conforme contrato real.
+
+Executar suite copy-on-write PostgreSQL/API e browser, comparar bytes/hashes e contagens de storage, screenshots da origem/cópia, manifesto sanitizado SHA/run/IDs/lineage e postflight completo. Não inferir “copy-on-write” apenas de igualdade de JSON; verificar objetos e imutabilidade. Fora: transferência entre workspaces, upload novo, re-render, migração legada, produção e aceite. Se mídia/fixture ampliar o prazo de 4 h, registrar parcial sem chamar duplicação segura de comprovada.
+
+Referências e gates comuns: [índice W31–W40](PLANO-WAVES-31-40.md); `src/app/ProjectsPageClient.tsx`, `src/v2/application/duplicate-project.ts`, `tests/v2/create-project.test.mjs`, `tests/v2/prisma-project-duplication.integration.mjs` e `tests/v2/public-project-api.integration.mjs`.

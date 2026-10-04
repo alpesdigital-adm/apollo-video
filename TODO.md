@@ -14,6 +14,8 @@ O estado atual está em [`docs/PROJECT-STATUS.md`](./docs/PROJECT-STATUS.md), ge
 
 O registro cobre todas as caixas deste TODO com IDs estáveis e separa construção, integração, validação, implantação e aceite. “Validado” identifica prova técnica, aceite histórico ou documento que seja o próprio resultado pedido; o tipo de prova fica explícito e não altera `[x]` nem o percentual de entrega. A [auditoria de classificação](./docs/quality/project-status-classification-audit.md) fecha a organização das 250 seções, sem concluir as 879 microtarefas abertas. Nova classificação desconhecida deve ficar explícita, sem inferir fila a partir de caixa aberta. “Em construção” pode representar implementação parcial pausada; não implica um agente trabalhando agora.
 
+Plano progressivo preparado: [W31–W40](./docs/PLANO-WAVES-31-40.md), com dez pacotes de desenvolvimento e comprovação em fila; preparar pacotes não inicia construção nem altera caixas do TODO.
+
 Toda wave deve atualizar o registro, suas provas e bloqueios, executar `npm run project:status -- --write` e passar `npm run project:status:check`. O CI rejeita cobertura incompleta, IDs duplicados, divergência da auditoria e painel desatualizado. Ele verifica consistência das declarações; a revisão da prova e o aceite continuam humanos. Notas históricas abaixo preservam o contexto da execução; para integração atual e bloqueios, consulte o painel.
 
 ## Auditoria de execução — 2026-07-28

@@ -9,6 +9,8 @@
 
 O estado de execução por escopo, com provas e bloqueios separados de implantação e aceite, está em [PROJECT-STATUS.md](./PROJECT-STATUS.md). O percentual auditado continua derivado de [TODO.md](../TODO.md), sem somar waves ou validações técnicas como produto entregue.
 
+O [plano W31–W40](./PLANO-WAVES-31-40.md) divide FR-002, FR-003 e FR-004 em dez escopos progressivos. Trata-se de planejamento; implementação, integração, validação, implantação e aceite continuam separados.
+
 ### Alterações da versão 1.2
 
 - API externa como contrato obrigatório e paritário para todas as capacidades operáveis.

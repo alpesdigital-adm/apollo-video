@@ -18,6 +18,10 @@
 > `awk -F'|' '/^\| FR-/ { if ($4 ~ /S9/) c++ } END { print c }'`, não a olho.
 > O `TODO.md` estava desatualizado e foi corrigido; esta matriz estava certa.
 
+## Planejamento progressivo W31–W40
+
+O [plano e os dez pacotes](./PLANO-WAVES-31-40.md) vinculam FR-002 (dashboard), FR-003 (filtros) e FR-004 (ações rápidas) aos IDs exatos de F1.001–F1.003. IDs compartilhados indicam subescopos cumulativos da mesma caixa, sem contagem duplicada ou conclusão antecipada. Esta referência é planejamento, não evidência de produto.
+
 ## Legenda
 
 - **F0:** Fundação.
