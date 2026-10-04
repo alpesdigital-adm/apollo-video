@@ -133,13 +133,15 @@ export async function proveDashboardAggregate({
       workspaceId, clientId: apiClientId, projectId: complete.project.id,
       sourceArtifactId, sourceManifestId, audit,
     }
-    await seedFinalExportChain(client, {
-      ...chainBase, versionId: complete.version.id, suffix: 'w34-complete-v1',
-      aspectRatio: '9:16', exports: [{ status: 'succeeded' }],
-    })
+    // The product refuses a version change while outputs exist on an empty
+    // timeline, so the real version advance comes before any export is seeded.
     const completeV2 = await advanceVersionThroughApi({
       baseUrl, authorization, projectId: complete.project.id, version: complete.version,
       key: 'w34-complete-lut-none',
+    })
+    await seedFinalExportChain(client, {
+      ...chainBase, versionId: complete.version.id, suffix: 'w34-complete-v1',
+      aspectRatio: '9:16', exports: [{ status: 'succeeded' }],
     })
     const chainV2 = await seedFinalExportChain(client, {
       ...chainBase, versionId: completeV2.id, suffix: 'w34-complete-v2',
