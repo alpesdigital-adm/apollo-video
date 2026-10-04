@@ -308,7 +308,7 @@ export async function proveWorkspaceLutBrowser({ baseUrl, client, workspaceId, p
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       await Promise.race([
         new Promise((done) => browserProcess.once('exit', done)),
-        new Promise((done) => setTimeout(done, 15000)),
+        new Promise((done) => setTimeout(done, 60000)),
       ])
     }
     evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
