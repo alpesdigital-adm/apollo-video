@@ -12,6 +12,7 @@ import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.
 import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
 import { cleanupDashboardFixtures } from './helpers/dashboard-w34-35-fixtures.mjs'
 import { proveDashboardAggregate } from './helpers/dashboard-w34-aggregate.mjs'
+import { proveDashboardStates } from './helpers/dashboard-w35-states.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -5623,6 +5624,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       sourceManifestId: 'public-api-source-manifest-v2',
     })
     assert.equal(w34.outcome, 'passed')
+
+    // --- W35 (stream s2) ---
+    const w35 = await proveDashboardStates({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      credentialId: issued.credential.id,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername, password: uiPassword, uiThrottleKey, sourceArtifactId,
+      sourceManifestId: 'public-api-source-manifest-v2',
+    })
+    assert.equal(w35.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

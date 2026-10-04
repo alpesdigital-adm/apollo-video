@@ -25,6 +25,8 @@ const { createMediaArtifactManifest } = await import('../../../src/v2/domain/med
 export const sha = (character) => character.repeat(64)
 export const hashOf = (text) => createHash('sha256').update(text).digest('hex')
 
+export const W35_EMPTY_WORKSPACE_ID = 'w35-empty-workspace-v2'
+
 export const RENDER_OPERATION_TYPES = new Set([
   'project-proxy-render', 'project-final-export',
 ])
@@ -440,7 +442,7 @@ export async function readAggregateOracle(client, { workspaceId, projectId }) {
  * the projects. Idempotent: a database without these fixtures is a no-op.
  */
 export async function cleanupDashboardFixtures(client, {
-  workspaceId, prefixes = ['w34-', 'w35-'], emptyWorkspaceId,
+  workspaceId, prefixes = ['w34-', 'w35-'], emptyWorkspaceId = W35_EMPTY_WORKSPACE_ID,
 }) {
   const projects = await client.v2Project.findMany({
     where: { workspaceId, OR: prefixes.map((prefix) => ({ name: { startsWith: prefix } })) },
