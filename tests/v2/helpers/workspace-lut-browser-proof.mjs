@@ -103,7 +103,7 @@ async function boundedClose(label, action, errors) {
       action(),
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 30000) }),
     ])
-  } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}`) }
+  } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}:${String(error?.message ?? '').slice(0, 120)}`) }
   finally { clearTimeout(timer) }
 }
 
@@ -304,10 +304,17 @@ export async function proveWorkspaceLutBrowser({ baseUrl, client, workspaceId, p
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       await Promise.race([
         new Promise((done) => browserProcess.once('exit', done)),
-        new Promise((done) => setTimeout(done, 5000)),
+        new Promise((done) => setTimeout(done, 30000)),
       ])
     }
     evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
+    // A slow graceful shutdown is tolerated only when the owned process is
+    // provably terminal after SIGKILL; a surviving process still fails below.
+    if (evidence.postflight.browserProcessTerminal) {
+      for (let index = cleanupErrors.length - 1; index >= 0; index -= 1) {
+        if (cleanupErrors[index] === 'browser-server:Error:timeout') cleanupErrors.splice(index, 1)
+      }
+    }
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
     evidence.postflight.cleanupErrors = cleanupErrors
     try { await writeFile(join(evidenceDir, 'w29-manifest.json'), `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'w' }) }

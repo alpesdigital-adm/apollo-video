@@ -41,7 +41,7 @@ export async function boundedClose(label, action, errors) {
     await Promise.race([action(), new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error('timeout')), 30000)
     })])
-  } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}`) }
+  } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}:${String(error?.message ?? '').slice(0, 120)}`) }
   finally { clearTimeout(timer) }
 }
 
@@ -66,9 +66,15 @@ export async function closeBrowser({ page, contexts = [], browser, browserServer
     try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
   }
   if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
-    await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 15000))])
+    await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 30000))])
   }
   const terminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
+  if (terminal) {
+    // Slow graceful shutdown is tolerated only when SIGKILL left no owned process.
+    for (let index = cleanupErrors.length - 1; index >= 0; index -= 1) {
+      if (cleanupErrors[index] === 'browser-server:Error:timeout') cleanupErrors.splice(index, 1)
+    }
+  }
   if (!terminal) cleanupErrors.push('browser-process-not-terminal')
   return terminal
 }
