@@ -25,6 +25,7 @@ function loadManifest(directory, name, schemaVersion, { sourceCommit, ciRunId, a
   assert.match(manifest.runId, /^[a-f0-9-]{36}$/)
   assert.equal(manifest.browser?.pid > 0, true)
   assert.equal(manifest.postflight?.browserProcessTerminal, true)
+  assert.equal(manifest.postflight?.browserPidAliveAtEnd, false)
   assert.deepEqual(manifest.postflight?.cleanupErrors, [])
   assert.equal(manifest.browser?.mutatingRequests, 0)
   return manifest

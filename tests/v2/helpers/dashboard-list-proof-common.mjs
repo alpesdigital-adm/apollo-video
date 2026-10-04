@@ -4,6 +4,7 @@
 // `next start` against the supervised PostgreSQL and reads expectations from
 // the database, never from the component under test.
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -39,15 +40,24 @@ export function chromePath(wave) {
   return executable
 }
 
-export async function boundedClose(label, action, errors) {
+// Playwright's BrowserServer.close() on Windows can resolve late (it also waits
+// for Chromium helper processes to release their stdio pipes); the owned browser
+// PID must still be terminal afterwards, which is asserted separately.
+const CLOSE_TIMEOUT_MS = 20_000
+
+export async function boundedClose(label, action, errors, timeoutMs = CLOSE_TIMEOUT_MS, steps = []) {
   if (!action) return
   let timer
+  const started = Date.now()
   try {
     await Promise.race([action(), new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('timeout')), 5000)
+      timer = setTimeout(() => reject(new Error('timeout')), timeoutMs)
     })])
-  } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}`) }
-  finally { clearTimeout(timer) }
+    steps.push({ label, outcome: 'ok', ms: Date.now() - started })
+  } catch (error) {
+    errors.push(`${label}:${error?.name ?? 'Error'}`)
+    steps.push({ label, outcome: String(error?.message ?? error).slice(0, 160), ms: Date.now() - started })
+  } finally { clearTimeout(timer) }
 }
 
 export async function databaseCounts(client, workspaceId) {
@@ -312,18 +322,39 @@ export async function runBrowserProof({ wave, schemaVersion, envVar, manifestNam
     throw error
   } finally {
     const cleanupErrors = []
+    const closeSteps = []
     for (const [index, context] of contexts.entries()) {
-      await boundedClose(`context-${index}`, () => context.close(), cleanupErrors)
+      await boundedClose(`context-${index}`, () => context.close(), cleanupErrors, CLOSE_TIMEOUT_MS, closeSteps)
     }
-    await boundedClose('browser', browser && (() => browser.close()), cleanupErrors)
-    await boundedClose('browser-server', browserServer && (() => browserServer.close()), cleanupErrors)
+    await boundedClose('browser', browser && (() => browser.close()), cleanupErrors, CLOSE_TIMEOUT_MS, closeSteps)
+    // BrowserServer.close() was observed to hang on Windows even though the
+    // client side is fully closed. It is recorded, not tolerated blindly: the owned
+    // browser PID must be terminal below (after SIGKILL if needed) or the proof fails.
+    const serverCloseErrors = []
+    await boundedClose('browser-server', browserServer && (() => browserServer.close()), serverCloseErrors, 5000, closeSteps)
+    evidence.postflight.browserServerCloseUnclean = serverCloseErrors.length > 0
+    evidence.postflight.closeSteps = closeSteps
+    evidence.postflight.processAfterClose = browserProcess
+      ? { exitCode: browserProcess.exitCode, signalCode: browserProcess.signalCode, killed: browserProcess.killed } : null
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
-      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 5000))])
+      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 15_000))])
     }
-    evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
+    const exited = () => !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
+    const pidAlive = () => {
+      try { process.kill(browserProcess.pid, 0); return true } catch (error) { return error?.code === 'EPERM' }
+    }
+    if (!exited() && pidAlive() && process.platform === 'win32') {
+      // The 'exit' event of the Playwright wrapper is not always delivered on Windows;
+      // kill the owned tree by PID and judge by the real liveness of the PID.
+      try { spawnSync('taskkill', ['/pid', String(browserProcess.pid), '/T', '/F'], { stdio: 'ignore', timeout: 10_000 }) }
+      catch (error) { cleanupErrors.push(`browser-taskkill:${error?.name ?? 'Error'}`) }
+      for (let attempt = 0; attempt < 50 && pidAlive(); attempt += 1) await new Promise((done) => setTimeout(done, 100))
+    }
+    evidence.postflight.browserPidAliveAtEnd = Boolean(browserProcess) && pidAlive()
+    evidence.postflight.browserProcessTerminal = !browserProcess || exited() || !pidAlive()
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
     evidence.postflight.cleanupErrors = cleanupErrors
     if (cleanupErrors.length) evidence.outcome = 'failed'

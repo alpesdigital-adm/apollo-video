@@ -73,7 +73,7 @@ function w31Manifest(directory) {
     sourceCommit: commit, ciRunId: '1234', runId: '11111111-1111-4111-8111-111111111111',
     database: { applicationName: 'apollo-video-e2e-w29-ci' },
     browser: { pid: 321, mutatingRequests: 0, mobileOverflowPx: 0 },
-    postflight: { browserProcessTerminal: true, cleanupErrors: [] },
+    postflight: { browserProcessTerminal: true, browserPidAliveAtEnd: false, cleanupErrors: [] },
     counts: { before: counts, after: counts }, projectRowsBefore: rows, projectRowsAfter: rows,
     fixtures: Array.from({ length: 11 }, (_, index) => ({ id: `w31-fixture-${index}` })),
     uiCases, persistence,
@@ -129,6 +129,7 @@ test('W31 CI guard accepts bound evidence and rejects any tampered binding, case
     mutate((value) => { value.requests[0].method = 'POST' })
     mutate((value) => { value.fixtures.pop() })
     mutate((value) => { value.postflight.cleanupErrors = ['browser-process-not-terminal'] })
+    mutate((value) => { value.postflight.browserPidAliveAtEnd = true })
     mutate((value) => { value.leak = 'apollo_session=abc' })
     writeFileSync(join(directory, 'w31-mobile-all-eight.png'), Buffer.alloc(160, 8))
     assert.throws(() => verifyDashboardListEvidence('w31', directory, binding))
