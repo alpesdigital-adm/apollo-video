@@ -9,6 +9,7 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.mjs'
+import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -5598,6 +5599,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       projectSelectionId: projectLut.data.selection.id,
     })
     assert.equal(w29.outcome, 'passed')
+
+    // W30 reuses the two projects and the real human session after the complete
+    // public-API and W29 baselines, before terminal credential expiry.
+    const w30 = await proveProjectDashboardBrowser({
+      baseUrl, client, workspaceId,
+      projectIds: [created.data.project.id, uiProjectCreated.data.project.id],
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w30.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

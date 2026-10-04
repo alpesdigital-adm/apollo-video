@@ -833,7 +833,7 @@ export default function Dashboard() {
                       ? OPERATION_PHASE_LABELS[latestOperation.phase] ?? latestOperation.phase
                       : 'Nenhuma operação iniciada'
                     return (
-                      <article className="group overflow-hidden rounded-2xl border border-white/[0.075] bg-[#0b0b0b] transition hover:-translate-y-0.5 hover:border-[#d5a533]/30" key={project.id}>
+                      <article className="group overflow-hidden rounded-2xl border border-white/[0.075] bg-[#0b0b0b] transition hover:-translate-y-0.5 hover:border-[#d5a533]/30" data-project-id={project.id} key={project.id}>
                         <div className="relative h-24 overflow-hidden border-b border-white/[0.06] bg-[linear-gradient(130deg,#15130e_0%,#0e0e0e_48%,#11100d_100%)] px-5 py-4">
                           <div aria-hidden="true" className="absolute -right-10 -top-20 h-40 w-40 rounded-full bg-[#d3a02e]/[0.08] blur-2xl" />
                           <div className="relative flex items-center justify-between">

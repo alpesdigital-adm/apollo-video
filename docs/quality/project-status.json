@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-03T22:44:17.610Z",
+  "updatedAt": "2026-10-04T00:31:43.120Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -14493,17 +14493,13 @@
       "todoItems": [
         "acd8f12f509c-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
-      "integration": "not-integrated",
-      "validation": "none",
+      "state": "pendente-validacao",
+      "construction": "implemented",
+      "integration": "main",
+      "validation": "isolated",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "implementation",
-          "text": "A jornada autenticada W30 e seus guards de evidência ainda não foram escritos; o codec e a UI existentes não comprovam este pacote."
-        },
         {
           "kind": "validation",
           "text": "Falta executar e revisar a prova real de URL/sessão, reload, histórico, limpeza e zero resultados com API/PostgreSQL/Chromium e CI no SHA final."
@@ -14535,10 +14531,22 @@
           "ref": "src/app/ProjectsPageClient.tsx",
           "scope": "Dashboard existente na rota /; persistência e popstate precisam de comprovação autenticada.",
           "role": "classification"
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/project-dashboard-browser-proof.mjs",
+          "role": "integration",
+          "scope": "Jornada escrita e conectada ao teste público; execução PostgreSQL/API/Chromium e revisão visual ainda pendentes."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/project-dashboard-evidence-guard.test.mjs",
+          "role": "classification",
+          "scope": "Guard rejeita screenshots adulteradas, histórico inválido, mutação e application_name divergente; não substitui execução browser."
         }
       ],
-      "nextAction": "Executar o pacote limitado a 3h de desenvolvimento; registrar evidências e bloqueios mesmo se parcial, preservando W29 e sem promoção automática do TODO.",
-      "notes": "Somente especificado e na fila. Mantém os estados da capability F1.002 e a auditoria 380/1259; CI/revisão separados da estimativa de desenvolvimento, sem alegar implantação ou aceite."
+      "nextAction": "Executar jornada local supervisionada, revisar capturas e confirmar CI/artifacts do SHA final, preservando W29 e sem promover TODO.",
+      "notes": "Implementação W30 concluída, integração no main em revisão; testes focados e guard verdes, E2E e CI ainda não comprovados. Nenhum deploy, aceite ou alteração de checkbox."
     }
   ]
 }
