@@ -14535,9 +14535,9 @@
         },
         {
           "type": "private",
-          "ref": "C:/Users/leand/Documents/Apollo/wave30-20261003/w30-api-final-fda85769/w30/w30-manifest.json",
+          "ref": "C:/Users/leand/Documents/Apollo/wave30-20261003/w30-mobile-fix-65aed25a/w30/w30-manifest.json",
           "role": "controlled-e2e",
-          "scope": "Run local em 7b0eaec87cdb50e93b2f97c7bba898e0dd714ceb: texto/status, URL/sessão, reload, histórico nativo, limpar, zero resultados e mobile; 4/4 suítes API/session/OIDC, sem skip."
+          "scope": "Run local no commit 2cd7d874: 4/4 API/session/OIDC, dez transições, mobile sem overflow; reparo do overflow 28 px detectado no CI Linux anterior. Novo CI final pendente."
         },
         {
           "type": "private",
@@ -14547,7 +14547,7 @@
         }
       ],
       "nextAction": "Confirmar CI e artifacts do SHA final; implantação e aceite separados continuam pendentes, sem promoção automática do TODO.",
-      "notes": "Escopo técnico W30 validado em ambiente local controlado: uma caixa de persistência com texto/status como amostra. Não encerra oito facetas, paginação, toda F1.002, deploy ou aceite; 380/1259 sem alteração."
+      "notes": "Escopo técnico W30 validado em ambiente local controlado: uma caixa de persistência com texto/status como amostra. Não encerra oito facetas, paginação, toda F1.002, deploy ou aceite; 380/1259 sem alteração. CI 37165797051 reprovou overflow mobile de 28 px; corrigido em 2cd7d874 e revalidado localmente sem relaxar guard. Novo CI/artifacts finais pendentes."
     },
     {
       "id": "F1.002-persistence-open",
@@ -14602,9 +14602,9 @@
         },
         {
           "type": "private",
-          "ref": "C:/Users/leand/Documents/Apollo/wave30-20261003/w30-api-final-fda85769/w30/w30-manifest.json",
+          "ref": "C:/Users/leand/Documents/Apollo/wave30-20261003/w30-mobile-fix-65aed25a/w30/w30-manifest.json",
           "role": "controlled-e2e",
-          "scope": "Run local em 7b0eaec87cdb50e93b2f97c7bba898e0dd714ceb: texto/status, URL/sessão, reload, histórico nativo, limpar, zero resultados e mobile; 4/4 suítes API/session/OIDC, sem skip."
+          "scope": "Run local no commit 2cd7d874: 4/4 API/session/OIDC, dez transições, mobile sem overflow; reparo do overflow 28 px detectado no CI Linux anterior. Novo CI final pendente."
         },
         {
           "type": "private",
@@ -14614,7 +14614,7 @@
         }
       ],
       "nextAction": "Confirmar CI e artifacts do SHA final; implantação e aceite separados continuam pendentes, sem promoção automática do TODO.",
-      "notes": "Escopo técnico W30 validado em ambiente local controlado: uma caixa de persistência com texto/status como amostra. Não encerra oito facetas, paginação, toda F1.002, deploy ou aceite; 380/1259 sem alteração."
+      "notes": "Escopo técnico W30 validado em ambiente local controlado: uma caixa de persistência com texto/status como amostra. Não encerra oito facetas, paginação, toda F1.002, deploy ou aceite; 380/1259 sem alteração. CI 37165797051 reprovou overflow mobile de 28 px; corrigido em 2cd7d874 e revalidado localmente sem relaxar guard. Novo CI/artifacts finais pendentes."
     }
   ]
 }

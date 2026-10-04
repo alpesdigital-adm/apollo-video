@@ -2,7 +2,7 @@
 
 Atualizado: 2026-10-04T00:39:16.689Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
 
-Snapshot SHA256: `78ffb0f2d4f6687e438ff472b381a9ab67d34367bf397f597b93fb289faa10d3`.
+Snapshot SHA256: `8a16a6beabcb8958126b3985394475a3d9790563b1e9ca85b6faa2c8da41dad3`.
 
 TODO auditado: **380/1259** microtarefas entregues. Este número vem de `TODO.md`; os estados abaixo descrevem somente os escopos declarados, sem somar progresso.
 
