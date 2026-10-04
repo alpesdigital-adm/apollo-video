@@ -307,9 +307,9 @@ export async function proveProjectDashboardBrowser({ baseUrl, client, workspaceI
     await waitForCards(page, delegatedRows)
     evidence.transitions.push({ step: 'mobile-text', cards: await cards(page), search: new URL(page.url()).search })
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
-    assert.ok(overflow <= 1, `W30 mobile overflows by ${overflow}px`)
     evidence.browser.mobileOverflowPx = overflow
     evidence.screenshots.push(await screenshot(page, evidenceDir, 'w30-mobile-filtered.png'))
+    assert.ok(overflow <= 1, `W30 mobile overflows by ${overflow}px`)
 
     evidence.requests = requests.slice(readOnlyStart).filter((request) => request.path === '/v1/projects')
     assert.ok(evidence.requests.length >= 5, 'browser must make real project GETs for the transitions')

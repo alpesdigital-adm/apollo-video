@@ -735,12 +735,12 @@ export default function Dashboard() {
                   <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#6d6962]">Projetos</p>
                   <h2 className="mt-1 text-2xl font-semibold tracking-[-0.025em] text-[#f0ece4]">Produções do workspace</h2>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 py-2 text-[#77736b] sm:hidden">
+                <div className="grid w-full min-w-0 grid-cols-2 items-center gap-2 sm:flex sm:w-auto">
+                  <div className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 py-2 text-[#77736b] sm:hidden">
                     <ApiIcon className="h-4 w-4" path="m20 20-4.4-4.4m2.4-4.1a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
-                    <input aria-label="Buscar projetos" className="min-w-0 bg-transparent text-sm text-[#e6e1d8] outline-hidden placeholder:text-[#5e5b55]" onChange={(event) => setFilter('text', event.target.value)} placeholder="Buscar" value={filters.text} />
+                    <input aria-label="Buscar projetos" className="w-full min-w-0 bg-transparent text-sm text-[#e6e1d8] outline-hidden placeholder:text-[#5e5b55]" onChange={(event) => setFilter('text', event.target.value)} placeholder="Buscar" value={filters.text} />
                   </div>
-                  <select aria-label="Filtrar por status" className="h-10 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs text-[#aaa59c] outline-hidden focus:border-[#d7a936]/50" onChange={(event) => setFilter('status', event.target.value as ProjectDashboardFilters['status'])} value={filters.status}>
+                  <select aria-label="Filtrar por status" className="h-10 w-full min-w-0 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs text-[#aaa59c] outline-hidden focus:border-[#d7a936]/50 sm:w-auto" onChange={(event) => setFilter('status', event.target.value as ProjectDashboardFilters['status'])} value={filters.status}>
                     <option value="">Todos os status</option>
                     <option value="draft">Configuração</option>
                     <option value="ingesting">Ingestão</option>
