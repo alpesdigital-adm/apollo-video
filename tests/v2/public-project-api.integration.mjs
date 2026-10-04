@@ -11,6 +11,7 @@ import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-regi
 import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.mjs'
 import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
 import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
+import { proveW38ArchiveRestore } from './helpers/dashboard-w38-archive-restore.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -5639,6 +5640,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       username: uiUsername,
     })
     assert.equal(w37.outcome, 'passed')
+
+    // --- W38 (stream s4) ---
+    const w38 = await proveW38ArchiveRestore({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w38.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
