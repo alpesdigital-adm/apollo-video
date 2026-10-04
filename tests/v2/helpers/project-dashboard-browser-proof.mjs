@@ -344,12 +344,16 @@ export async function proveProjectDashboardBrowser({ baseUrl, client, workspaceI
     await boundedClose('page', page && (() => page.close()), cleanupErrors)
     await boundedClose('context', context && (() => context.close()), cleanupErrors)
     await boundedClose('browser', browser && (() => browser.close()), cleanupErrors)
-    await boundedClose('browser-server', browserServer && (() => browserServer.close()), cleanupErrors)
+    // Chromium's launchServer().close() takes 10-45 s on a loaded Windows host even though the owned
+    // PID dies within seconds of SIGKILL. A slow server close is recorded, the PID still has to be terminal.
+    const serverCloseErrors = []
+    await boundedClose('browser-server', browserServer && (() => browserServer.close()), serverCloseErrors)
+    evidence.postflight.browserServerCloseUnclean = serverCloseErrors.length > 0
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
-      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 5000))])
+      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 15000))])
     }
     evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')

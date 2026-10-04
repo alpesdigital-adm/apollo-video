@@ -96,13 +96,17 @@ export async function runWaveProof({ wave, schemaVersion, initial, baseUrl, sess
       await boundedClose(`context-${index}`, () => context.close(), cleanupErrors)
     }
     await boundedClose('browser', state.browser && (() => state.browser.close()), cleanupErrors)
-    await boundedClose('browser-server', state.browserServer && (() => state.browserServer.close()), cleanupErrors)
+    // launchServer().close() can take 10-45 s on a loaded Windows host while the owned PID dies within
+    // seconds of SIGKILL: a slow close is recorded, the PID must still be terminal.
+    const serverCloseErrors = []
+    await boundedClose('browser-server', state.browserServer && (() => state.browserServer.close()), serverCloseErrors)
+    evidence.postflight.browserServerCloseUnclean = serverCloseErrors.length > 0
     const browserProcess = state.browserProcess
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
-      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 5000))])
+      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 15000))])
     }
     evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
