@@ -117,6 +117,11 @@ export interface PublicSchemaDefinition {
 const idSchema = PUBLIC_ID_SCHEMA
 const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+const mediaSegmentDerivativeJobSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'workspaceId', 'segmentId', 'consumerKey', 'sourceSha256', 'segmentHash', 'rightsSnapshotId', 'clientId', 'actorContextHash', 'idempotencyKey', 'requestFingerprint', 'status', 'attempt', 'maxAttempts', 'deadlineAt', 'createdAt', 'updatedAt'],
+  properties: { id: idSchema, workspaceId: idSchema, segmentId: idSchema, consumerKey: { type: 'string' }, sourceSha256: sha256Schema, segmentHash: sha256Schema, rightsSnapshotId: idSchema, clientId: idSchema, actorContextHash: sha256Schema, idempotencyKey: { type: 'string' }, requestFingerprint: sha256Schema, status: { type: 'string', enum: ['queued', 'running', 'retrying', 'succeeded', 'failed', 'canceled'] }, attempt: { type: 'integer', minimum: 0 }, maxAttempts: { type: 'integer', minimum: 1 }, deadlineAt: dateTimeSchema, outputArtifactId: idSchema, outputManifestId: idSchema, errorCode: { type: 'string' }, createdAt: dateTimeSchema, updatedAt: dateTimeSchema },
+} as const
 const LOCALIZATION_ERROR_CODES = new Set(['LOCALIZATION_CANONICAL_NOT_FOUND', 'LOCALIZATION_PROFILE_NOT_FOUND', 'LOCALIZATION_VARIANT_NOT_FOUND'])
 const PUBLIC_ERROR_CODES_V4 = PUBLIC_ERROR_CODES.filter((code) => !LOCALIZATION_ERROR_CODES.has(code))
 const PUBLIC_ERROR_CODES_V3 = PUBLIC_ERROR_CODES_V4.filter((code) =>
@@ -16611,19 +16616,41 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  defineSchema('media-library-attachment-request', 1, 'Media library attachment request', {
-    type: 'object', additionalProperties: false, required: ['artifactId'], properties: { artifactId: idSchema },
+  defineSchema('media-library-attachment-request', 2, 'Media library attachment request', {
+    type: 'object', additionalProperties: false, required: ['selection', 'baseVersionId', 'baseVersionHash'], properties: {
+      selection: { oneOf: [
+        { type: 'object', additionalProperties: false, required: ['kind', 'artifactId'], properties: { kind: { const: 'asset' }, artifactId: idSchema } },
+        { type: 'object', additionalProperties: false, required: ['kind', 'segmentId'], properties: { kind: { const: 'segment' }, segmentId: idSchema } },
+      ] },
+      baseVersionId: idSchema, baseVersionHash: sha256Schema,
+    },
   }),
-  defineSchema('media-library-attachment', 1, 'Media library attachment response',
+  defineSchema('media-library-attachment', 2, 'Media library attachment response',
     successSchema({
       type: 'object', additionalProperties: false,
-      required: ['id', 'projectId', 'workspaceId', 'artifactId', 'role', 'bytesDuplicated', 'replayed', 'createdAt'],
+      required: ['id', 'projectId', 'workspaceId', 'selection', 'parentArtifactId', 'sourceSha256', 'rightsSnapshotId', 'commandId', 'baseVersionId', 'resultVersionId', 'resultVersionHash', 'role', 'bytesDuplicated', 'replayed', 'createdAt'],
       properties: {
-        id: idSchema, projectId: idSchema, workspaceId: idSchema, artifactId: idSchema,
+        id: idSchema, projectId: idSchema, workspaceId: idSchema,
+        selection: { oneOf: [
+          { type: 'object', additionalProperties: false, required: ['kind', 'artifactId'], properties: { kind: { const: 'asset' }, artifactId: idSchema } },
+          { type: 'object', additionalProperties: false, required: ['kind', 'segmentId'], properties: { kind: { const: 'segment' }, segmentId: idSchema } },
+        ] },
+        parentArtifactId: idSchema, sourceSha256: sha256Schema, rightsSnapshotId: idSchema,
+        segmentHash: sha256Schema,
+        semanticRange: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } },
+        sourceTimeMapping: { type: 'object', additionalProperties: false, required: ['sourceStartMs', 'sourceEndMs', 'rate'], properties: { sourceStartMs: { type: 'integer', minimum: 0 }, sourceEndMs: { type: 'integer', minimum: 1 }, rate: { const: 1 } } },
+        commandId: idSchema, baseVersionId: idSchema, resultVersionId: idSchema, resultVersionHash: sha256Schema,
         role: { const: 'selected-insert' }, bytesDuplicated: { const: false }, replayed: { type: 'boolean' }, createdAt: dateTimeSchema,
       },
     }),
   ),
+  defineSchema('media-segment-derivative-request', 1, 'Request virtual or physical segment reference', { type: 'object', additionalProperties: false, required: ['consumerKey', 'requiresPhysicalDerivative'], properties: { consumerKey: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{1,79}$' }, requiresPhysicalDerivative: { type: 'boolean' } } }),
+  defineSchema('media-segment-derivative-response', 1, 'Segment derivative request result', successSchema({ oneOf: [
+    { type: 'object', additionalProperties: false, required: ['kind', 'segmentId', 'parentArtifactId', 'segmentHash', 'semanticRange', 'sourceTimeMapping', 'physicalDerivative', 'bytesDuplicated'], properties: { kind: { const: 'virtual' }, segmentId: idSchema, parentArtifactId: idSchema, segmentHash: sha256Schema, semanticRange: { type: 'object' }, sourceTimeMapping: { type: 'object' }, physicalDerivative: { type: 'null' }, bytesDuplicated: { const: false } } },
+    { type: 'object', additionalProperties: false, required: ['kind', 'segmentId', 'job', 'replayed'], properties: { kind: { const: 'job' }, segmentId: idSchema, job: mediaSegmentDerivativeJobSchema, replayed: { type: 'boolean' } } },
+    { type: 'object', additionalProperties: false, required: ['kind', 'segmentId', 'materialization', 'replayed'], properties: { kind: { const: 'ready' }, segmentId: idSchema, materialization: { type: 'object' }, replayed: { const: true } } },
+  ] })),
+  defineSchema('media-segment-derivative-job', 1, 'Durable segment derivative job', successSchema(mediaSegmentDerivativeJobSchema)),
   defineSchema('health-response', 1, 'Health response',
     successSchema({
       type: 'object',

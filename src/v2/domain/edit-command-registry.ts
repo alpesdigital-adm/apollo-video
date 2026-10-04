@@ -61,6 +61,14 @@ export interface EditCommandPolicy {
 }
 
 export const EDIT_COMMAND_POLICIES = Object.freeze({
+  'attach-media-library-reference': Object.freeze({
+    renderPolicy: 'no-render',
+    impactSchema: null,
+    requiresImpact: false,
+    supportsRenderFreeImpact: true,
+    deferralReason: null,
+    evidence: 'media-library-repository.ts: attach records a selected-insert reference only; EditPlan snapshots are unchanged and no render is enqueued',
+  }),
   'manual-edit': Object.freeze({
     renderPolicy: 'partial-range',
     impactSchema: 'command-impact/v1',

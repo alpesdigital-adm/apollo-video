@@ -404,7 +404,7 @@ const coverage = Object.freeze({
     mode: 'idempotent-create', evidence: 'request fingerprint binds projectVersionId/projectVersionHash and the serializable commit rechecks current version, artifacts and rights snapshots',
   },
   'apollo.projects.media-library.attach': {
-    mode: 'natural-idempotent-create', evidence: 'the unique project/artifact/selected-insert reference is a natural idempotency key and the serializable transaction rechecks project locale, artifact lifecycle and current rights',
+    mode: 'base-version-bound-action', evidence: 'W46 requires baseVersionId/baseVersionHash plus actor-bound Idempotency-Key; serializable transaction rechecks rights, source and current head before Command/version CAS',
   },
   'apollo.projects.images.reuse': {
     mode: 'natural-idempotent-create', evidence: 'purpose, query, immutable analysis, current rights snapshot and project reference form content-addressed lineage; serializable commit rechecks project locale, artifact lifecycle, rights and consent',
@@ -415,6 +415,9 @@ const coverage = Object.freeze({
   'apollo.media.segments.create': {
     mode: 'natural-idempotent-create', evidence: 'content-addressed segment identity and hash converge while the serializable transaction rechecks immutable source duration and optional parent bounds',
   },
+  'apollo.media.segments.derivative.request': { mode: 'idempotent-create', evidence: 'W47 physical request binds actor/key, segment hash, source SHA and current rights; one job per segment/consumer' },
+  'apollo.media.segments.derivative.cancel': { mode: 'state-machine-action', evidence: 'W47 cancellation accepts only queued/running/retrying and fences the running lease' },
+  'apollo.media.segments.derivative.retry': { mode: 'state-machine-action', evidence: 'W47 retry accepts only failed attempts below maxAttempts' },
   'apollo.projects.quality-iterations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds project version, proxy revision/hash, asset selections, rubric evidence, reference dataset and fixed budget; serializable commit rechecks all server evidence',
   },
@@ -587,9 +590,10 @@ function requiresImmutableBase(capability) {
   assert.ok(capability.inputSchemaRef, `${capability.id} must publish an input schema`)
   const schema = getPublicSchema(capability.inputSchemaRef).schema
   assert.ok(schema.required?.includes('baseVersionId'), `${capability.id} must require baseVersionId`)
-  assert.ok(schema.required?.includes('baseHash'), `${capability.id} must require baseHash`)
+  const hashField = capability.id === 'apollo.projects.media-library.attach' ? 'baseVersionHash' : 'baseHash'
+  assert.ok(schema.required?.includes(hashField), `${capability.id} must require ${hashField}`)
   assert.ok(schema.properties?.baseVersionId, `${capability.id} must define baseVersionId`)
-  assert.ok(schema.properties?.baseHash, `${capability.id} must define baseHash`)
+  assert.ok(schema.properties?.[hashField], `${capability.id} must define ${hashField}`)
 }
 
 function requiresProductionBatchRevision(capability, itemRevision) {
@@ -807,13 +811,13 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 71,
+    'idempotent-create': 72,
     'identity-bound-action': 11,
-    'natural-idempotent-create': 11,
-    'state-machine-action': 18,
+    'natural-idempotent-create': 10,
+    'state-machine-action': 20,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 25,
+    'base-version-bound-action': 26,
     'fenced-natural-idempotent-action': 5,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

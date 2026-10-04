@@ -451,6 +451,10 @@ import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repositor
 import { PrismaMediaLibraryRepository } from './prisma/media-library-repository.ts'
 import { PrismaAutomaticCatalogRepository } from './prisma/automatic-catalog-repository.ts'
 import { PrismaMediaSegmentRepository } from './prisma/media-segment-repository.ts'
+import { PrismaMediaSegmentDerivativeJobRepository } from './prisma/media-segment-derivative-job-repository.ts'
+import { requestMediaSegmentDerivativeService } from '../application/request-media-segment-derivative.ts'
+import { runNextMediaSegmentDerivativeJobService } from '../application/run-media-segment-derivative-worker.ts'
+import { materializeMediaSegmentDerivativeService } from '../application/materialize-media-segment.ts'
 import { PrismaImageAnalysisRepository } from './prisma/image-analysis-repository.ts'
 import { PrismaPerceptionTimelineRepository } from './prisma/perception-timeline-repository.ts'
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
@@ -1612,6 +1616,14 @@ export function createMediaSegmentRepository(): MediaSegmentRepository {
   return new PrismaMediaSegmentRepository(resolveV2Client())
 }
 
+export function createMediaSegmentDerivativeJobRepository() {
+  return new PrismaMediaSegmentDerivativeJobRepository(resolveV2Client())
+}
+
+export function createMediaSegmentDerivativeRequestService(clock: () => Date = () => new Date()) {
+  return requestMediaSegmentDerivativeService({ segments: createMediaSegmentRepository(), library: createMediaLibraryRepository(), jobs: createMediaSegmentDerivativeJobRepository(), clock })
+}
+
 export function createImageAnalysisRepository(): ImageAnalysisRepository {
   return new PrismaImageAnalysisRepository(resolveV2Client())
 }
@@ -1932,6 +1944,16 @@ export function createMediaSegmentMaterializationDependencies(environment: NodeJ
     extractor: new FfmpegMediaSegmentExtractor(join(resolve(workRoot), 'media-segments')),
     integrity: { sha256: calculateFileSha256 },
   }
+}
+
+export function createMediaSegmentDerivativeWorker(environment: NodeJS.ProcessEnv = process.env, clock: () => Date = () => new Date()) {
+  return runNextMediaSegmentDerivativeJobService({
+    jobs: createMediaSegmentDerivativeJobRepository(),
+    segments: createMediaSegmentRepository(),
+    library: createMediaLibraryRepository(),
+    materialize: materializeMediaSegmentDerivativeService(createMediaSegmentMaterializationDependencies(environment)),
+    clock,
+  })
 }
 
 export function createProjectProxyRenderRepository(): ProjectProxyRenderRepository {

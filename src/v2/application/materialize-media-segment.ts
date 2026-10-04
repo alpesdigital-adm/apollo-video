@@ -27,17 +27,20 @@ export function materializeMediaSegmentDerivativeService(dependencies: {
     const identity = segmentDerivativeIdentity({ workspaceId, segmentId, consumerKey, sourceSha256: source.sha256 })
     const operationId = `extract-${createHash('sha256').update(`${workspaceId}:${segmentId}:${consumerKey}`).digest('hex').slice(0, 32)}`
     try {
-      const materialized = await dependencies.sources.materialize({ operationId, artifactKey: source.artifactKey, sha256: source.sha256, byteSize: source.byteSize })
+      const materialized = await dependencies.sources.materialize({ operationId, artifactKey: source.artifactKey, sha256: source.sha256, byteSize: source.byteSize, signal: input.signal })
+      if (input.signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Segment extraction was cancelled')
       const before = await dependencies.integrity.sha256(materialized.path)
       const extracted = await dependencies.extractor.extract({ operationId, sourcePath: materialized.path, startMs: segment.semanticRange.startMs, endMs: segment.semanticRange.endMs, signal: input.signal })
       const after = await dependencies.integrity.sha256(materialized.path)
       if (before !== source.sha256 || after !== source.sha256) throw new DomainError('PERSISTENCE_CONFLICT', 'Segment extraction mutated its immutable source')
+      if (input.signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Segment extraction was cancelled')
       const stored = await dependencies.storage.promoteDerived({ workspaceId, sourcePath: extracted.outputPath, sha256: extracted.sha256, extension: 'mp4', prefix: 'segments' })
+      if (input.signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Segment extraction was cancelled')
       const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-extract-range/1.0.0').digest('hex')
       const manifest = createMediaArtifactManifestV2({ artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4', recipe: { id: 'extract-range', version: '1.0.0', parameters: { segmentId, segmentHash: segment.segmentHash, consumerKey, sourceRangeMs: recipe.sourceRangeMs, sourceImmutable: true } }, sources: [{ artifactKey: source.artifactKey, sha256: source.sha256, role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } } }], probe: extracted.probe })
-      await dependencies.artifacts.persistOrReplay({ workspaceId, artifactId: identity.artifactId, manifestId: identity.manifestId, lineageIds: [`lineage-${createHash('sha256').update(`${workspaceId}:${identity.manifestId}:${source.artifactId}`).digest('hex')}`], manifest, createdAt: (dependencies.clock?.() ?? new Date()).toISOString() })
-      const record = await dependencies.repository.recordMaterialization({ workspaceId, id: identity.materializationId, segmentId, consumerKey, outputArtifactId: identity.artifactId, outputManifestId: identity.manifestId, sourceArtifactSha256: source.sha256, createdAt: (dependencies.clock?.() ?? new Date()).toISOString() })
+      const persisted = await dependencies.artifacts.persistOrReplay({ workspaceId, artifactId: identity.artifactId, manifestId: identity.manifestId, lineageIds: [`lineage-${createHash('sha256').update(`${workspaceId}:${identity.manifestId}:${source.artifactId}`).digest('hex')}`], manifest, createdAt: (dependencies.clock?.() ?? new Date()).toISOString() })
+      const record = await dependencies.repository.recordMaterialization({ workspaceId, id: identity.materializationId, segmentId, consumerKey, outputArtifactId: persisted.artifactId, outputManifestId: persisted.manifestId, sourceArtifactSha256: source.sha256, createdAt: (dependencies.clock?.() ?? new Date()).toISOString() })
       return Object.freeze({ ...record, sourceImmutable: true as const })
-    } finally { await Promise.allSettled([dependencies.extractor.cleanup(operationId), dependencies.sources.cleanup(operationId)]) }
+    } finally { await Promise.all([dependencies.extractor.cleanup(operationId), dependencies.sources.cleanup(operationId)]) }
   }
 }

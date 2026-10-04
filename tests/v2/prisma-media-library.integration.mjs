@@ -4,9 +4,10 @@ import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { attachMediaLibraryItemService } from '../../src/v2/application/media-library.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createMediaSegmentService } from '../../src/v2/application/media-segments.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
-import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { mediaLibrarySearchField } from '../../src/v2/domain/media-library.ts'
 import { PrismaMediaLibraryRepository } from '../../src/v2/infrastructure/prisma/media-library-repository.ts'
 import { PrismaImageAnalysisRepository } from '../../src/v2/infrastructure/prisma/image-analysis-repository.ts'
@@ -39,6 +40,8 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     await prisma.v2ImageReuseReference.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2ImageAnalysis.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaSegmentMaterialization.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
+    await prisma.v2MediaSegmentDerivativeJob.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
+    await prisma.v2MediaLibraryAttachment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaSegment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaArtifact.updateMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } }, data: { currentRightsSnapshotId: null } })
@@ -58,6 +61,11 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     await prisma.v2Project.create({ data: {
       id: projectId, workspaceId, name: 'Target project', locale: 'pt-BR', createdByType: 'user', createdById: 'integration-test',
     } })
+    const baseVersionId = `library-version-${suffix}`
+    const snapshotIds = ['brief', 'edit-plan', 'policies'].map((kind) => `library-${kind}-${suffix}`)
+    for (const [index, kind] of ['brief', 'edit-plan', 'policies'].entries()) await prisma.v2ProjectSnapshot.create({ data: { id: snapshotIds[index], workspaceId, projectId, kind, schemaVersion: 1, contentJson: '{}', contentHash: calculateCanonicalHash({ kind }), createdAt: new Date('2026-08-08T12:00:00.000Z') } })
+    await prisma.v2ProjectVersion.create({ data: { id: baseVersionId, workspaceId, projectId, sequence: 1, briefSnapshotId: snapshotIds[0], editPlanSnapshotId: snapshotIds[1], policiesSnapshotId: snapshotIds[2], baseHash: 'a'.repeat(64), createdBy: 'integration-test', createdAt: new Date('2026-08-08T12:00:00.000Z') } })
+    await prisma.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
     const artifacts = [
       { id: artifactIds[0], workspaceId, mediaType: 'video', container: 'mp4', status: 'available', byteSize: 1111n },
       { id: artifactIds[1], workspaceId, mediaType: 'audio', container: 'wav', status: 'available', byteSize: 2222n },
@@ -103,26 +111,31 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     assert.equal((await repository.list({ workspaceId }, new Date('2026-08-08T13:00:00.000Z'))).items.some((item) => item.id === artifactIds[3]), false)
 
     const attach = attachMediaLibraryItemService({ repository, clock: () => new Date('2026-08-08T13:00:00.000Z') })
-    const created = await attach({ workspaceId, projectId, artifactId: artifactIds[0] })
-    const replay = await attach({ workspaceId, projectId, artifactId: artifactIds[0] })
+    const actor = { clientId: 'integration-client', credentialId: 'integration-credential', workspaceId, environment: 'production', authenticationKind: 'bearer', scopes: new Set(['projects:write']), auditContext: createExternalAuditContext({ clientId: 'integration-client', credentialId: 'integration-credential', workspaceId, environment: 'production' }) }
+    const attachRequest = { workspaceId, projectId, selection: { kind: 'asset', artifactId: artifactIds[0] }, baseVersionId, baseVersionHash: 'a'.repeat(64), idempotencyKey: `library-insert-${suffix}`, actor }
+    const created = await attach(attachRequest)
+    const replay = await attach(attachRequest)
     assert.equal(created.bytesDuplicated, false)
     assert.equal(created.replayed, false)
     assert.equal(replay.replayed, true)
     assert.equal(replay.id, created.id)
-    assert.equal(await prisma.v2ProjectMediaAsset.count({ where: { projectId, artifactId: artifactIds[0], role: 'selected-insert' } }), 1)
+    assert.equal(await prisma.v2MediaLibraryAttachment.count({ where: { projectId, parentArtifactId: artifactIds[0], selectionKind: 'asset' } }), 1)
+    assert.equal((await prisma.v2Project.findUnique({ where: { id: projectId } })).currentVersionId, created.resultVersionId)
+    assert.equal(await prisma.v2EditCommand.count({ where: { id: created.commandId } }), 1)
     assert.equal((await prisma.v2MediaArtifact.findUnique({ where: { id: artifactIds[0] } })).byteSize, 1111n)
-    await assert.rejects(() => attach({ workspaceId, projectId, artifactId: artifactIds[2] }), /rights/i)
-    await assert.rejects(() => attach({ workspaceId, projectId, artifactId: artifactIds[3] }), /not found/i)
+    await assert.rejects(() => attach({ ...attachRequest, selection: { kind: 'asset', artifactId: artifactIds[1] }, idempotencyKey: `library-stale-${suffix}` }), /version/i)
+    await assert.rejects(() => attach({ ...attachRequest, selection: { kind: 'asset', artifactId: artifactIds[2] }, baseVersionId: created.resultVersionId, baseVersionHash: created.resultVersionHash, idempotencyKey: `library-restricted-${suffix}` }), /rights/i)
+    await assert.rejects(() => attach({ ...attachRequest, selection: { kind: 'asset', artifactId: artifactIds[3] }, baseVersionId: created.resultVersionId, baseVersionHash: created.resultVersionHash, idempotencyKey: `library-other-${suffix}` }), /not found/i)
 
     const imageId = artifactIds[2]
-    const thumbnailId = `library-image-thumb-${suffix}`
+    const imageThumbnailId = `library-image-thumb-${suffix}`
     const previewId = `library-image-preview-${suffix}`
-    for (const [id, sha] of [[thumbnailId, '7'.repeat(64)], [previewId, '8'.repeat(64)]]) await prisma.v2MediaArtifact.create({ data: { id, workspaceId, artifactKey: `${workspaceId}/${id}`, sha256: sha, byteSize: 321n, mediaType: 'image', container: 'webp', status: 'available' } })
+    for (const [id, sha] of [[imageThumbnailId, '7'.repeat(64)], [previewId, '8'.repeat(64)]]) await prisma.v2MediaArtifact.create({ data: { id, workspaceId, artifactKey: `${workspaceId}/${id}`, sha256: sha, byteSize: 321n, mediaType: 'image', container: 'webp', status: 'available' } })
     const manifestId = `manifest-${imageId}`
     await prisma.v2MediaArtifactManifest.create({ data: { id: manifestId, workspaceId, artifactId: imageId, schemaVersion: 'media-artifact-manifest/v1', manifestHash: '9'.repeat(64), recipeId: 'upload', recipeVersion: '1.0.0', parametersHash: 'a'.repeat(64), manifestJson: stableSerialize({ schemaVersion: 'media-artifact-manifest/v1', artifact: { artifactKey: `${workspaceId}/${imageId}`, sha256: '3'.repeat(64), byteSize: 3333, mediaType: 'image', container: 'png' }, recipe: { id: 'upload', version: '1.0.0', parametersHash: 'a'.repeat(64) }, sources: [], manifestHash: '9'.repeat(64) }) } })
-    const analysis = createImageAnalysis({ id: `analysis-${imageId}`, workspaceId, artifactId: imageId, manifestId, sourceSha256: '3'.repeat(64), dimensions: { width: 1080, height: 1350 }, dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'Oferta premium', language: 'pt-BR', box: [0.1, 0.2, 0.8, 0.4], confidence: 0.97, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'available', values: [], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, objects: { state: 'available', values: [{ label: 'produto', box: [0.1, 0.1, 0.5, 0.5], confidence: 0.94 }], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, observedDescription: 'Imagem de produto com oferta premium.', inferredTags: [{ value: 'produto', confidence: 0.94, provenance: 'vision@v1:object' }], derivatives: { thumbnailArtifactId: thumbnailId, previewArtifactId: previewId, immutableOriginal: true }, createdAt: '2026-08-08T12:30:00.000Z' })
+    const analysis = createImageAnalysis({ id: `analysis-${imageId}`, workspaceId, artifactId: imageId, manifestId, sourceSha256: '3'.repeat(64), dimensions: { width: 1080, height: 1350 }, dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'Oferta premium', language: 'pt-BR', box: [0.1, 0.2, 0.8, 0.4], confidence: 0.97, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'available', values: [], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, objects: { state: 'available', values: [{ label: 'produto', box: [0.1, 0.1, 0.5, 0.5], confidence: 0.94 }], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, observedDescription: 'Imagem de produto com oferta premium.', inferredTags: [{ value: 'produto', confidence: 0.94, provenance: 'vision@v1:object' }], derivatives: { thumbnailArtifactId: imageThumbnailId, previewArtifactId: previewId, immutableOriginal: true }, createdAt: '2026-08-08T12:30:00.000Z' })
     await imageRepository.persist(analysis)
-    await assert.rejects(() => imageRepository.reuse({ workspaceId, projectId, artifactId: imageId, usage: 'card', text: 'oferta premium', createdAt: '2026-08-08T13:00:00.000Z' }), /rights/i)
+    await assert.rejects(() => imageRepository.reuse({ workspaceId, projectId, artifactId: imageId, usage: 'card', text: 'oferta premium', createdAt: '2026-08-08T13:00:00.000Z' }), /eligible|rights/i)
     const approved = createAssetRightsSnapshot({ id: `library-image-rights-approved-${suffix}`, workspaceId, artifactId: imageId, sequence: 2, draft: { status: 'approved', allowedUses: ['editorial-reuse'], prohibitedUses: [], consent: { status: 'approved', allowedUses: ['editorial-reuse'] } }, createdBy: { type: 'user', id: 'integration-test' }, createdAt: '2026-08-08T12:45:00.000Z' })
     await prisma.v2AssetRightsSnapshot.create({ data: rightsRow(approved) })
     await prisma.v2MediaArtifact.update({ where: { id: imageId }, data: { currentRightsSnapshotId: approved.id, rightsRevision: 2 } })
@@ -140,6 +153,12 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
 
     const createSegment = createMediaSegmentService({ repository: segmentRepository, clock: () => new Date('2026-08-08T13:00:00.000Z') })
     const firstSegment = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Promessa', startMs: 0, endMs: 5000 })
+    const attachedSegment = await attach({ ...attachRequest, selection: { kind: 'segment', segmentId: firstSegment.segment.id }, baseVersionId: created.resultVersionId, baseVersionHash: created.resultVersionHash, idempotencyKey: `library-segment-${suffix}` })
+    assert.equal(attachedSegment.selection.kind, 'segment')
+    assert.equal(attachedSegment.parentArtifactId, artifactIds[0])
+    assert.equal(attachedSegment.segmentHash, firstSegment.segment.segmentHash)
+    assert.deepEqual(attachedSegment.semanticRange, firstSegment.segment.semanticRange)
+    assert.equal(attachedSegment.bytesDuplicated, false)
     const overlap = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Prova', startMs: 4000, endMs: 8000 })
     const nested = await createSegment({ workspaceId, artifactId: artifactIds[0], parentSegmentId: firstSegment.segment.id, label: 'Frase', startMs: 1000, endMs: 5000 })
     const edge = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Tudo', startMs: 0, endMs: 10000 })

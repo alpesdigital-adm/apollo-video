@@ -131,11 +131,23 @@ export function mediaLibraryRights(
   })
 }
 
+export type MediaLibrarySelection = Readonly<{ kind: 'asset'; artifactId: string }> | Readonly<{ kind: 'segment'; segmentId: string }>
+
 export interface ProjectAssetReference {
   id: string
   projectId: string
   workspaceId: string
-  artifactId: string
+  selection: MediaLibrarySelection
+  parentArtifactId: string
+  sourceSha256: string
+  rightsSnapshotId: string
+  segmentHash?: string
+  semanticRange?: Readonly<{ startMs: number; endMs: number }>
+  sourceTimeMapping?: Readonly<{ sourceStartMs: number; sourceEndMs: number; rate: 1 }>
+  commandId: string
+  baseVersionId: string
+  resultVersionId: string
+  resultVersionHash: string
   role: 'selected-insert'
   bytesDuplicated: false
   replayed: boolean

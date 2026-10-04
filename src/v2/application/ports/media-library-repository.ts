@@ -1,4 +1,5 @@
-import type { MediaLibraryItem, MediaLibraryPage, MediaLibraryQuery, ProjectAssetReference } from '../../domain/media-library.ts'
+import type { MediaLibraryItem, MediaLibraryPage, MediaLibraryQuery, MediaLibrarySelection, ProjectAssetReference } from '../../domain/media-library.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface MediaLibraryRepository {
   list(query: MediaLibraryQuery, now: Date): Promise<Readonly<MediaLibraryPage>>
@@ -6,7 +7,11 @@ export interface MediaLibraryRepository {
   attach(input: {
     workspaceId: string
     projectId: string
-    artifactId: string
+    selection: MediaLibrarySelection
+    baseVersionId: string
+    baseVersionHash: string
+    idempotencyKey: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     createdAt: string
   }): Promise<Readonly<ProjectAssetReference>>
 }

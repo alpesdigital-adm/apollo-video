@@ -5,13 +5,26 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { MediaSegment } from '../../domain/media-segment.ts'
 
-function durationFromManifest(manifestJson: string): number {
+function durationFromManifest(manifestJson: string): number | null {
   let parsed: unknown
   try { parsed = JSON.parse(manifestJson) } catch { throw new DomainError('PERSISTENCE_CONFLICT', 'Stored source manifest JSON is invalid') }
   const probe = typeof parsed === 'object' && parsed !== null ? (parsed as { probe?: unknown }).probe : undefined
   const duration = typeof probe === 'object' && probe !== null ? (probe as { duration?: unknown }).duration : undefined
   const durationMs = typeof duration === 'number' ? Math.round(duration * 1000) : 0
-  if (!Number.isSafeInteger(durationMs) || durationMs < 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Segment source requires trusted duration metadata')
+  return Number.isSafeInteger(durationMs) && durationMs > 0 ? durationMs : null
+}
+
+async function sourceDuration(client: PrismaClient, row: { workspaceId: string; id: string; sha256: string; manifests: { manifestJson: string }[] }): Promise<number> {
+  const manifest = row.manifests[0]
+  if (!manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Segment source manifest is unavailable')
+  const manifestDuration = durationFromManifest(manifest.manifestJson)
+  if (manifestDuration !== null) return manifestDuration
+  const linked = await client.v2ProjectMediaAsset.findFirst({ where: { workspaceId: row.workspaceId, artifactId: row.id, uploadId: { not: null }, upload: { status: 'verified', inspectionStatus: 'usable', actualSha256: row.sha256, probeJson: { not: null } } }, select: { upload: { select: { probeJson: true } } } })
+  let probe: unknown
+  try { probe = JSON.parse(linked?.upload?.probeJson ?? 'null') } catch { probe = null }
+  const duration = typeof probe === 'object' && probe !== null ? (probe as { duration?: unknown }).duration : null
+  const durationMs = typeof duration === 'number' ? Math.round(duration * 1000) : 0
+  if (!Number.isSafeInteger(durationMs) || durationMs < 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Segment source requires trusted measured duration metadata')
   return durationMs
 }
 
@@ -31,7 +44,7 @@ export class PrismaMediaSegmentRepository implements MediaSegmentRepository {
     const row = await this.client.v2MediaArtifact.findFirst({ where: { workspaceId, id: artifactId, status: 'available', mediaType: { in: ['video', 'audio'] } }, include: { manifests: { orderBy: { createdAt: 'desc' }, take: 1 } } })
     const manifest = row?.manifests[0]
     if (!row || !manifest) return null
-    return Object.freeze({ artifactId: row.id, artifactKey: row.artifactKey, sha256: row.sha256, byteSize: Number(row.byteSize), mediaType: row.mediaType as 'video' | 'audio', container: row.container, durationMs: durationFromManifest(manifest.manifestJson) })
+    return Object.freeze({ artifactId: row.id, artifactKey: row.artifactKey, sha256: row.sha256, byteSize: Number(row.byteSize), mediaType: row.mediaType as 'video' | 'audio', container: row.container, durationMs: await sourceDuration(this.client, row) })
   }
 
   async find(workspaceId: string, segmentId: string) {
@@ -52,7 +65,7 @@ export class PrismaMediaSegmentRepository implements MediaSegmentRepository {
   async create(segment: Readonly<MediaSegment>) {
     return this.client.$transaction(async (transaction) => {
       const artifact = await transaction.v2MediaArtifact.findFirst({ where: { workspaceId: segment.workspaceId, id: segment.parentAssetId, status: 'available', mediaType: { in: ['video', 'audio'] } }, include: { manifests: { orderBy: { createdAt: 'desc' }, take: 1 } } })
-      if (!artifact?.manifests[0] || durationFromManifest(artifact.manifests[0].manifestJson) !== segment.sourceDurationMs) throw new DomainError('PERSISTENCE_CONFLICT', 'Segment source changed or is unavailable')
+      if (!artifact?.manifests[0] || await sourceDuration(transaction as PrismaClient, artifact) !== segment.sourceDurationMs) throw new DomainError('PERSISTENCE_CONFLICT', 'Segment source changed or is unavailable')
       if (segment.parentSegmentId) {
         const parent = await transaction.v2MediaSegment.findFirst({ where: { workspaceId: segment.workspaceId, id: segment.parentSegmentId } })
         if (!parent || parent.artifactId !== segment.parentAssetId || segment.semanticRange.startMs < parent.startMs || segment.semanticRange.endMs > parent.endMs) throw new DomainError('PERSISTENCE_CONFLICT', 'Nested segment no longer fits its parent')

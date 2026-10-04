@@ -400,7 +400,7 @@ const coverage = Object.freeze({
     mode: 'durable-covered', evidence: 'F1-049 serializable exact-version and exact-rights commit, immutable audit, idempotent replay and public API E2E',
   },
   'apollo.projects.media-library.attach': {
-    mode: 'durable-covered', evidence: 'F1.012 serializable project-locale rights recheck, unique artifact-role reference and bounded serialization retry',
+    mode: 'durable-covered', evidence: 'W46 typed asset/segment attachment binds actor/key, exact ProjectVersion CAS, rights/source/segment hash and immutable Command/version in one serializable transaction',
   },
   'apollo.projects.images.reuse': {
     mode: 'durable-covered', evidence: 'F1.014 serializable image/analysis/current-rights recheck, immutable purpose lineage, reference-only attachment and bounded serialization retry',
@@ -411,6 +411,9 @@ const coverage = Object.freeze({
   'apollo.media.segments.create': {
     mode: 'durable-covered', evidence: 'F1.013 serializable source/parent recheck, immutable content hash, database range constraints and natural replay identity',
   },
+  'apollo.media.segments.derivative.request': { mode: 'durable-covered', evidence: 'W47 actor/key and segment/consumer unique indexes, immutable source hash and rights check, durable job with fenced lease and bounded retry' },
+  'apollo.media.segments.derivative.cancel': { mode: 'durable-covered', evidence: 'W47 actor-bound state transition fences running lease; heartbeat aborts FFmpeg and worker cleanup runs in finally' },
+  'apollo.media.segments.derivative.retry': { mode: 'durable-covered', evidence: 'W47 actor-bound failed-only transition under bounded attempt limit' },
   'apollo.projects.quality-iterations.create': {
     mode: 'durable-covered', evidence: 'F1-050 serializable exact-version, proxy-review and asset-selection commit with immutable hash, sequence and public API E2E',
   },
@@ -594,7 +597,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    178,
+    181,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

@@ -17,12 +17,20 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     requireScope(actor, 'projects:write')
     assertExternalMutationOrigin(request, actor)
     const body: unknown = await request.json().catch(() => { throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON') })
-    if (typeof body !== 'object' || body === null || Array.isArray(body) || Object.keys(body).length !== 1 || !('artifactId' in body) || typeof body.artifactId !== 'string') {
-      throw new DomainError('INVALID_ARGUMENT', 'Request body must contain only artifactId')
+    if (typeof body !== 'object' || body === null || Array.isArray(body) || Object.keys(body).sort().join(',') !== 'baseVersionHash,baseVersionId,selection' || !('selection' in body) || !('baseVersionId' in body) || !('baseVersionHash' in body) || typeof body.baseVersionId !== 'string' || typeof body.baseVersionHash !== 'string' || typeof body.selection !== 'object' || body.selection === null || Array.isArray(body.selection)) {
+      throw new DomainError('INVALID_ARGUMENT', 'Request must contain selection and the base project version')
     }
+    const selection = body.selection as Record<string, unknown>
+    if (selection.kind !== 'asset' && selection.kind !== 'segment') throw new DomainError('INVALID_ARGUMENT', 'Selection kind is invalid')
+    if (Object.keys(selection).sort().join(',') !== [selection.kind === 'asset' ? 'artifactId' : 'segmentId', 'kind'].sort().join(',')) throw new DomainError('INVALID_ARGUMENT', 'Selection shape is invalid')
+    const selectedId = selection.kind === 'asset' ? selection.artifactId : selection.segmentId
+    if (typeof selectedId !== 'string') throw new DomainError('INVALID_ARGUMENT', 'Selection ID is invalid')
     const { projectId } = await context.params
     const reference = await attachMediaLibraryItemService({ repository: createMediaLibraryRepository() })({
-      workspaceId: actor.workspaceId, projectId, artifactId: body.artifactId,
+      workspaceId: actor.workspaceId, projectId,
+      selection: selection.kind === 'asset' ? { kind: 'asset', artifactId: selectedId } : { kind: 'segment', segmentId: selectedId },
+      baseVersionId: body.baseVersionId, baseVersionHash: body.baseVersionHash,
+      idempotencyKey: request.headers.get('idempotency-key') ?? '', actor,
     })
     return NextResponse.json(presentSuccess(reference), { status: reference.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
   } catch (error) {
