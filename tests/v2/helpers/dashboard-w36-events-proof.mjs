@@ -160,7 +160,7 @@ export async function proveDashboardEventFeedBrowser({
       ],
     },
   }
-  let browserServer, browser, context, page, faultPage, browserProcess, primaryError
+  let browserServer, browser, context, faultContext, page, faultPage, browserProcess, primaryError
   let faultRun
   try {
     const { createApiClientService } = await import('../../../src/v2/application/create-api-client.ts')
@@ -268,7 +268,13 @@ export async function proveDashboardEventFeedBrowser({
 
     // Labelled controlled interference #2: a PAGE that only ever receives 503 from the feed.
     async function runFaultScenario() {
-      faultPage = await context.newPage()
+      // Own context: a second page in the main context could take foreground
+      // visibility away from the dashboard under measurement.
+      faultContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+      faultContext.setDefaultTimeout(25_000)
+      faultContext.setDefaultNavigationTimeout(30_000)
+      await faultContext.addCookies([{ name: sessionCookieName, value: sessionCookieValue, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
+      faultPage = await faultContext.newPage()
       const sink = recordPage(faultPage, baseUrl)
       await faultPage.route((url) => url.pathname === FEED_PATH, (route) => route.fulfill({
         status: 503, contentType: 'application/json',
@@ -607,6 +613,7 @@ export async function proveDashboardEventFeedBrowser({
     const cleanupErrors = []
     if (faultRun) await faultRun.catch(() => undefined)
     await boundedClose('fault-page', faultPage && (() => faultPage.close()), cleanupErrors)
+    await boundedClose('fault-context', faultContext && (() => faultContext.close()), cleanupErrors)
     await boundedClose('page', page && (() => page.close()), cleanupErrors)
     await boundedClose('context', context && (() => context.close()), cleanupErrors)
     await boundedClose('browser', browser && (() => browser.close()), cleanupErrors)
