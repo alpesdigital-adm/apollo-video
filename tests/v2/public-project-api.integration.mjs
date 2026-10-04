@@ -10,6 +10,7 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.mjs'
 import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
+import { proveDashboardEventFeedBrowser } from './helpers/dashboard-w36-events-proof.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -5609,6 +5610,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       username: uiUsername,
     })
     assert.equal(w30.outcome, 'passed')
+
+    // --- W36 (stream s3) ---
+    // The dashboard follows persisted project events written by OTHER clients
+    // (API clients B and C), with the same real human session as W30.
+    const w36 = await proveDashboardEventFeedBrowser({
+      baseUrl, client, workspaceId, otherWorkspaceId,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w36.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
