@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-04T12:06:32.048Z",
+  "updatedAt": "2026-10-04T12:32:13.017Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "1b05a65654fc53c1ee13ffa3ab6deb36c6026455",
+  "evidenceBaseCommit": "dd2fb2b920afec6871221382597965d3caeb9e49",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -14683,8 +14683,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W31 após a base W30 comprovada.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W31 após a base W30 comprovada.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W32",
@@ -14729,8 +14729,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W32 depois da entrega técnica da W31.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W32 depois da entrega técnica da W31.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W33",
@@ -14774,8 +14774,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W33 depois da entrega técnica da W32.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W33 depois da entrega técnica da W32.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W34",
@@ -14819,8 +14819,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W34 depois da entrega técnica da W33.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W34 depois da entrega técnica da W33.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W35",
@@ -14866,8 +14866,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W35 depois da entrega técnica da W34.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W35 depois da entrega técnica da W34.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W36",
@@ -14911,8 +14911,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W36 depois da entrega técnica da W35.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W36 depois da entrega técnica da W35.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W37",
@@ -14958,8 +14958,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W37 depois da entrega técnica da W36.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W37 depois da entrega técnica da W36.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W38",
@@ -15005,8 +15005,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W38 depois da entrega técnica da W37.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W38 depois da entrega técnica da W37.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W39",
@@ -15051,8 +15051,8 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W39 depois da entrega técnica da W38.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W39 depois da entrega técnica da W38.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
     },
     {
       "id": "W40",
@@ -15100,8 +15100,482 @@
           "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
         }
       ],
-      "nextAction": "Executar W40 depois da entrega técnica da W39.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Claude Code: Executar W40 depois da entrega técnica da W39.",
+      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato. Desenvolvimento atribuído pelo proprietário ao Claude Code em 04/10/2026; início/execução não verificados, sem promoção de estado por inferência."
+    },
+    {
+      "id": "W41",
+      "title": "W41 — Paginação unificada da biblioteca",
+      "kind": "wave",
+      "todoSections": [
+        "F1.012"
+      ],
+      "todoItems": [
+        "5fed046a5719-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de conferir a base W30 e integração do planejamento. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE41-PAGINACAO-BIBLIOTECA.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W41 a partir da base conferida. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W42",
+      "title": "W42 — Filtros, direitos e isolamento",
+      "kind": "wave",
+      "todoSections": [
+        "F1.012"
+      ],
+      "todoItems": [
+        "db882ddc544b-1",
+        "ac7e0a1c125b-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W41. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE42-FILTROS-DIREITOS-BIBLIOTECA.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W42 após W41. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W43",
+      "title": "W43 — Leituras seguras da biblioteca",
+      "kind": "wave",
+      "todoSections": [
+        "F1.012"
+      ],
+      "todoItems": [
+        "5fed046a5719-1",
+        "ac7e0a1c125b-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W42. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE43-LEITURAS-SEGURAS-BIBLIOTECA.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W43 após W42. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W44",
+      "title": "W44 — Detalhes e previews reais",
+      "kind": "wave",
+      "todoSections": [
+        "F1.012"
+      ],
+      "todoItems": [
+        "fdd725d7664f-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W43. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE44-PREVIEWS-BIBLIOTECA.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W44 após W43. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W45",
+      "title": "W45 — Segmentos virtuais",
+      "kind": "wave",
+      "todoSections": [
+        "F1.013"
+      ],
+      "todoItems": [
+        "4b34d180f96e-1",
+        "685f984e3c9d-1",
+        "82ccf53db39a-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W44. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE45-SEGMENTOS-VIRTUAIS.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W45 após W44. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W46",
+      "title": "W46 — Reuso por referência",
+      "kind": "wave",
+      "todoSections": [
+        "F1.012",
+        "F1.013"
+      ],
+      "todoItems": [
+        "a83e64ca44b4-1",
+        "ac7e0a1c125b-1",
+        "685f984e3c9d-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W45. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE46-REUSO-POR-REFERENCIA.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W46 após W45. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W47",
+      "title": "W47 — Derivatives duráveis sob demanda",
+      "kind": "wave",
+      "todoSections": [
+        "F1.013"
+      ],
+      "todoItems": [
+        "75a8db3a5d75-1",
+        "82ccf53db39a-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W46. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE47-DERIVATIVES-SOB-DEMANDA.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W47 após W46. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W48",
+      "title": "W48 — Imagens, OCR e derivados",
+      "kind": "wave",
+      "todoSections": [
+        "F1.014"
+      ],
+      "todoItems": [
+        "9a30a9b79c59-1",
+        "92393ad62131-1",
+        "184065af0667-1",
+        "22ad5715eb6c-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W47. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE48-IMAGENS-OCR-DERIVATIVES.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W48 após W47. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W49",
+      "title": "W49 — Catalogação de outputs aprovados",
+      "kind": "wave",
+      "todoSections": [
+        "F1.015"
+      ],
+      "todoItems": [
+        "955ab8fc99df-1",
+        "d579da1d7f50-1",
+        "0780b4a83bea-1",
+        "1d6d2df95dcf-1",
+        "ca7b74c93a9c-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W48. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE49-CATALOGACAO-APROVADA.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W49 após W48. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+    },
+    {
+      "id": "W50",
+      "title": "W50 — Jornada consolidada da biblioteca",
+      "kind": "wave",
+      "todoSections": [
+        "F1.012",
+        "F1.013",
+        "F1.014",
+        "F1.015"
+      ],
+      "todoItems": [
+        "5fed046a5719-1",
+        "fdd725d7664f-1",
+        "a83e64ca44b4-1",
+        "ac7e0a1c125b-1",
+        "82ccf53db39a-1",
+        "184065af0667-1",
+        "ca7b74c93a9c-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Executar o novo subescopo Codex depois de W49. Código parcial existente não equivale à execução desta wave."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PACOTE-WAVE50-JORNADA-CONSOLIDADA-BIBLIOTECA.md",
+          "role": "planned-not-started",
+          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        }
+      ],
+      "nextAction": "Codex: executar W50 após W49. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
+      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
     }
   ]
 }

@@ -16,6 +16,8 @@ O registro cobre todas as caixas deste TODO com IDs estáveis e separa construç
 
 Plano progressivo preparado: [W31–W40](./docs/PLANO-WAVES-31-40.md), com dez pacotes de desenvolvimento e comprovação em fila; preparar pacotes não inicia construção nem altera caixas do TODO.
 
+Trilhas distribuídas: [W31–W40](./docs/PLANO-WAVES-31-40.md) ao Claude Code; [W41–W50](./docs/PLANO-WAVES-41-50.md) ao Codex, com arquivos e integração compartilhada coordenados. Atribuição não comprova início nem entrega.
+
 Toda wave deve atualizar o registro, suas provas e bloqueios, executar `npm run project:status -- --write` e passar `npm run project:status:check`. O CI rejeita cobertura incompleta, IDs duplicados, divergência da auditoria e painel desatualizado. Ele verifica consistência das declarações; a revisão da prova e o aceite continuam humanos. Notas históricas abaixo preservam o contexto da execução; para integração atual e bloqueios, consulte o painel.
 
 ## Auditoria de execução — 2026-07-28

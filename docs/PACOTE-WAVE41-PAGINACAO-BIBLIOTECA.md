@@ -1,0 +1,9 @@
+# W41 — paginação unificada de assets e segments
+
+**Plano, sem execução W41.** Base documental `dd2fb2b920afec6871221382597965d3caeb9e49`; runtime `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`. CI runtime `37167702546` verde; CI do planejamento `37201179515` pendente neste checkpoint. F1.012 / FR-040, caixa `5fed046a5719-1`. Depende da base W30; **3–4 h de desenvolvimento**, CI/revisão fora.
+
+O repositório `src/v2/infrastructure/prisma/media-library-repository.ts` já une assets e `V2MediaSegment` por cursor de `createdAt`/chave e fingerprint de filtros; `src/components/MediaLibraryWorkspace.tsx` pede 24 e “Carregar mais”. A frase histórica do TODO de que segmentos não entram na união precisa ser reavaliada pela prova, **não** reimplementada por suposição.
+
+Criar em suíte própria 25+ registros de assets/segmentos do mesmo workspace, com empates deliberados de `createdAt` e direitos conhecidos. Oráculo independente lê IDs, tipo, timestamp e ordem esperada do PostgreSQL. Comparar GET `/v1/media/library` página 1/2 e cards da UI, cursor opaco, ausência de repetição/lacuna e fim correto; testar cursor sob outro fingerprint e página vazia. Controlar timestamp apenas na fixture PG e rotular isso como seed, sem dizer que worker produziu mídia. Não mudar contrato de ordenação para fazer teste passar.
+
+Fontes/testes: `src/v2/domain/media-library.ts`, `src/v2/application/media-library.ts`, `src/v2/infrastructure/prisma/media-library-repository.ts`, `src/components/MediaLibraryWorkspace.tsx`, `tests/v2/media-library.test.mjs`, `tests/v2/prisma-media-library.integration.mjs`. Evidência: manifest de IDs/ordem/cursor, requests/responses, capturas desktop/mobile e SHA, source commit/run, browser/Next/PG terminais. Usar gates do [índice W41–W50](PLANO-WAVES-41-50.md). Fora: filtros/direitos profundos W42, preview W44, novo algoritmo de lista, deploy e aceite. Se 4 h não bastarem, manter a caixa aberta com casos faltantes identificados.

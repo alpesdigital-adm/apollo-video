@@ -11,6 +11,8 @@ O estado de execução por escopo, com provas e bloqueios separados de implanta�
 
 O [plano W31–W40](./PLANO-WAVES-31-40.md) divide FR-002, FR-003 e FR-004 em dez escopos progressivos. Trata-se de planejamento; implementação, integração, validação, implantação e aceite continuam separados.
 
+O [plano W41–W50](./PLANO-WAVES-41-50.md), atribuído ao Codex, desenvolve/comprova FR-040, FR-042, FR-047 e FR-049 na biblioteca de mídia, em trilha separada do dashboard W31–W40 delegado ao Claude Code. Nenhum pacote de planejamento é contabilizado como produto entregue.
+
 ### Alterações da versão 1.2
 
 - API externa como contrato obrigatório e paritário para todas as capacidades operáveis.

@@ -1,0 +1,9 @@
+# W47 — derivative físico só quando um consumer exige
+
+**Plano, sem execução W47.** Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W46. F1.013 / FR-042, partes das caixas `75a8db3a5d75-1` e `82ccf53db39a-1`. **6–8 h de desenvolvimento**, CI/revisão fora.
+
+`materializeMediaSegmentDerivativeService` e `ffmpeg-media-segment-extractor.ts` já formam receita `extract-range/v1`, mas a chamada demonstrada está em teste/adapters; isso não prova consumer operável do produto. Descobrir composição atual antes de afirmar ausência. Escopo inicial **vídeo**: não alegar materialização de áudio.
+
+Conectar consumer V2 real a API-first e operação/job durável com owner, CAS/idempotência, observabilidade e cancelamento proporcional. Para `requiresPhysicalDerivative=false`, devolver a referência virtual sem FFmpeg nem objeto novo. Para `true`, usar master MP4 controlado com SHA conhecido, extrair somente range solicitado, promover artifact/manifest com lineage e FFprobe/duração/hash verificáveis. Comparar source SHA antes/depois, replay sem segundo objeto, concorrência, timeout, cancelamento, erro do FFmpeg e cleanup de scratch/processos em `finally`. Não realizar trabalho pesado em rota síncrona nem criar job fire-and-forget.
+
+Fontes/testes: `src/v2/application/materialize-media-segment.ts`, `src/v2/application/media-segments.ts`, `src/v2/infrastructure/media/ffmpeg-media-segment-extractor.ts`, `src/v2/infrastructure/prisma/media-segment-repository.ts`, `tests/v2/media-segment-materialization.integration.mjs`, `tests/v2/media-segment.test.mjs`. Artifact inclui source/output MP4 hashes, FFprobe, IDs/lineage, status do job, zero objetos no caminho virtual e postflight do processo/PG. Fora: áudio, renderer final, provider remoto, produção/aceite. Se durabilidade/cancelamento exceder 8 h, bloquear a wave com o subfluxo comprovado, sem chamar teste fake de runtime.

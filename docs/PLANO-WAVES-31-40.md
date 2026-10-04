@@ -1,6 +1,8 @@
 # Plano de execução progressiva — Waves 31 a 40
 
-**Planejamento, sem execução W31–W40.** Base de referência: `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`; CI `37167702546` verde nessa base. Confirmar ambos novamente antes de iniciar cada wave. As dez waves estão na **fila de validação/implementação incremental**, embora haja runtime parcial em F1.001–F1.003. Nenhuma caixa do `TODO.md` é remarcada por este plano; implantação na DigitalOcean, produção e aceite do proprietário não são alegados.
+**Responsável pelo desenvolvimento: Claude Code**, conforme encaminhamento do proprietário em 04/10/2026. O encaminhamento atribui o trabalho; início, resultados e integração não foram verificados.
+
+**Planejamento, sem execução W31–W40 comprovada neste registro.** Base de referência: `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`; CI `37167702546` verde nessa base. Confirmar ambos novamente antes de iniciar cada wave. As dez waves estão na **fila de validação/implementação incremental**, embora haja runtime parcial em F1.001–F1.003. Nenhuma caixa do `TODO.md` é remarcada por este plano; implantação na DigitalOcean, produção e aceite do proprietário não são alegados.
 
 | Ordem | Foco e pacote | Dependência | Estimativa de desenvolvimento |
 | --- | --- | --- | --- |
@@ -19,4 +21,6 @@ As horas são **estimativas de desenvolvimento, não SLA**; CI e revisão indepe
 
 Cada execução deverá usar PostgreSQL/HTTP/Chromium isolados e sessão humana real onde houver UI, com owner, prazo, `application_name` conferido, zero backends/processos próprios no postflight e artifact sanitizado vinculado ao SHA efetivo. O harness público atual pode ser ampliado após os asserts baseline; fixtures que alterem contagens antigas ficam depois do baseline ou em suíte isolada. Um browser ou banco indisponível falha a prova, sem skip. O guard preserva as provas W29/W30. Não usar DigitalOcean de produção para desenvolvimento/E2E, não usar dados de produção, provider fake como integração real nem evento sintético como E2E.
 
-Ao terminar uma wave, Astra registra implementação, integração, E2E controlado, CI, implantação e aceite como estados distintos; Luna revisa leitura/provas, Sol escreve o slice autorizado, Astra testa/integra/entrega. Se escopo ou orçamento crescer, fechar um resultado parcial documentado e manter a caixa aberta. W36 possui lacuna arquitetural real e pode terminar bloqueada sem abrir uma décima primeira wave automaticamente.
+Claude Code desenvolve W31–W40. Astra coordena a revisão e integração; o registro separa implementação, integração, E2E controlado, CI, implantação e aceite. Se escopo ou orçamento crescer, fechar um resultado parcial documentado e manter a caixa aberta. W36 possui lacuna arquitetural real e pode terminar bloqueada sem abrir uma décima primeira wave automaticamente.
+
+A trilha independente [W41–W50](PLANO-WAVES-41-50.md) pertence ao Codex e trata da biblioteca de mídia. Arquivos compartilhados de contratos, migrations, CI e status precisam de integração serializada; não sobrescrever mudanças da outra trilha nem compartilhar banco, porta, storage ou processos efêmeros.
