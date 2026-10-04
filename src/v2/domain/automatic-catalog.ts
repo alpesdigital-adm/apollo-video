@@ -78,6 +78,12 @@ export function createInheritedCatalogRights(input: {
     'ASSET_RIGHTS_BLOCKED',
     'Catalog output source rights or consent is not approved',
   )
+  const at = new Date(input.createdAt).getTime()
+  assertDomain(Number.isFinite(at) && sourceSnapshots.every((snapshot) =>
+    snapshot.allowedWorkspaceIds.includes(candidate.workspaceId) &&
+    (!snapshot.expiresAt || new Date(snapshot.expiresAt).getTime() > at) &&
+    (!snapshot.consent.expiresAt || new Date(snapshot.consent.expiresAt).getTime() > at),
+  ), 'ASSET_RIGHTS_BLOCKED', 'Catalog output source rights or consent expired or excluded this workspace')
   const allowedUses = intersection(sourceSnapshots.map((snapshot) => snapshot.allowedUses)) ?? []
   const prohibitedUses = Object.freeze([...new Set(sourceSnapshots.flatMap((snapshot) => snapshot.prohibitedUses))].sort())
   assertDomain(allowedUses.includes('editorial-reuse') && !prohibitedUses.includes('editorial-reuse'), 'ASSET_RIGHTS_BLOCKED', 'Catalog output is not eligible for editorial reuse')

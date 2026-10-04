@@ -12,21 +12,33 @@ export function catalogApprovedOutputService(dependencies: {
   const clock = dependencies.clock ?? (() => new Date())
   return async (target: { workspaceId: string; artifactId: string; manifestId: string }) => {
     const candidate = await dependencies.repository.inspect(target)
-    if (!candidate) return Object.freeze({ status: 'ignored' as const, record: null })
+    if (!candidate) return Object.freeze({ status: 'ignored' as const, reason: 'not-approved' as const, record: null })
     assertAutomaticCatalogCandidate(candidate)
     const sourceIds = [...new Set(candidate.lineage.map((edge) => edge.sourceArtifactId))]
     const sourceRights = await dependencies.rights.findCurrentForArtifacts(candidate.workspaceId, sourceIds)
     const snapshots = sourceIds.map((id) => sourceRights.get(id) ?? null)
-    if (snapshots.some((snapshot) => snapshot === null)) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Catalog output source rights evidence is incomplete')
+    // Catalog eligibility is optional for an otherwise valid render. Missing or
+    // restricted source rights must leave no searchable row, without failing
+    // the render operation after its output has already been promoted.
+    if (snapshots.some((snapshot) => snapshot === null)) return Object.freeze({ status: 'ignored' as const, reason: 'source-rights-missing' as const, record: null })
     const current = await dependencies.rights.findCurrent(candidate.workspaceId, candidate.artifactId)
     if (!current) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Catalog output artifact was not found')
+    if (current.snapshot && (current.snapshot.createdBy.type !== 'system' || current.snapshot.createdBy.id !== 'automatic-catalog')) {
+      return Object.freeze({ status: 'ignored' as const, reason: 'output-rights-managed' as const, record: null })
+    }
     const createdAt = clock().toISOString()
-    const inherited = createInheritedCatalogRights({
-      candidate,
-      sourceSnapshots: snapshots as NonNullable<(typeof snapshots)[number]>[],
-      sequence: (current.snapshot?.sequence ?? 0) + 1,
-      createdAt,
-    })
+    let inherited
+    try {
+      inherited = createInheritedCatalogRights({
+        candidate,
+        sourceSnapshots: snapshots as NonNullable<(typeof snapshots)[number]>[],
+        sequence: (current.snapshot?.sequence ?? 0) + 1,
+        createdAt,
+      })
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'ASSET_RIGHTS_BLOCKED') return Object.freeze({ status: 'ignored' as const, reason: 'source-rights-blocked' as const, record: null })
+      throw error
+    }
     let rightsSnapshot = current.snapshot
     if (rightsSnapshot?.snapshotHash !== inherited.snapshotHash) {
       const change = createAssetRightsChangeIntent({
