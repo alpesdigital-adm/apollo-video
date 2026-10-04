@@ -137,7 +137,7 @@ export function verifyW31Evidence(directory, context) {
   assert.ok(Array.isArray(manifest.responses) && manifest.responses.length >= 14)
   assert.ok(manifest.responses.every((response) => response.status === 200))
   assertScreenshots(directory, manifest, ['w31-desktop-all-eight.png', 'w31-mobile-all-eight.png'])
-  return { sourceCommit: context.sourceCommit, ciRunId: context.ciRunId, runId: manifest.runId }
+  return { sourceCommit: context.sourceCommit, ciRunId: context.ciRunId, applicationName: context.applicationName, runId: manifest.runId }
 }
 
 const VERIFIERS = { w31: verifyW31Evidence }
