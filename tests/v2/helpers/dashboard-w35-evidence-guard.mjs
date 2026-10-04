@@ -47,6 +47,7 @@ export function verifyW35Evidence(directory, { sourceCommit, ciRunId, applicatio
   assert.ok(Array.isArray(manifest.gaps) && manifest.gaps.length >= 1, 'the manifest must keep its documented gaps')
   assert.deepEqual(manifest.states?.map((item) => item.name).sort(), Object.keys(PINNED).sort())
   assert.deepEqual(manifest.tiles?.map((tile) => tile.value), [1, 4, 1, 1])
+  assert.deepEqual(manifest.tiles.map((tile) => tile.label), ['Em configuração', 'Em produção', 'Aguardando revisão', 'Concluídos'])
   assert.deepEqual(manifest.expectedOrder?.slice().sort(), manifest.states.map((item) => item.projectId).sort())
 
   const realStates = new Set()

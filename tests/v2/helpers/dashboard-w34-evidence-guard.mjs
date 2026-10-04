@@ -38,6 +38,7 @@ export function verifyW34Evidence(directory, { sourceCommit, ciRunId, applicatio
   }
   assert.deepEqual(manifest.fixtures?.map((item) => item.name).sort(), [...FIXTURES].sort())
   assert.deepEqual(manifest.tiles?.map((tile) => tile.value), [1, 2, 0, 1])
+  assert.deepEqual(manifest.tiles.map((tile) => tile.label), ['Em configuração', 'Em produção', 'Aguardando revisão', 'Concluídos'])
   assert.deepEqual(manifest.expectedOrder?.slice().sort(), manifest.fixtures.map((item) => item.projectId).sort())
   const byName = Object.fromEntries(manifest.fixtures.map((item) => [item.name, item]))
   for (const fixture of manifest.fixtures) {

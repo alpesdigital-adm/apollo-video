@@ -394,7 +394,8 @@ export async function proveDashboardStates({
       }
       evidence.requests[viewportName] = {
         projectGets: tracker.projectGets().length, mutating: tracker.mutating().length,
-        paths: [...new Set(tracker.entries.map((entry) => `${entry.method} ${entry.path}`))],
+        methods: [...new Set(tracker.entries.map((entry) => entry.method))],
+        requestCount: tracker.entries.length,
       }
       allMutating.push(...tracker.mutating())
       assert.equal(tracker.mutating().length, 0, `${viewportName}: state proof must not mutate`)

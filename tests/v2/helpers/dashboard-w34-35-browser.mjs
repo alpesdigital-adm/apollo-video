@@ -160,7 +160,7 @@ export async function readCards(page) {
 
 export async function readTiles(page) {
   return page.locator('section[aria-label="Resumo dos projetos"] > article').evaluateAll((tiles) => tiles.map((tile) => ({
-    label: tile.querySelector('p:last-of-type')?.textContent?.trim() ?? '',
+    label: [...tile.querySelectorAll('p')].at(-1)?.textContent?.trim() ?? '',
     value: Number(tile.querySelector('p')?.textContent?.trim()),
   })))
 }

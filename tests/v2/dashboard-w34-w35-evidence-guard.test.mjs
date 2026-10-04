@@ -12,6 +12,8 @@ const commit = 'a'.repeat(40)
 const context = { sourceCommit: commit, ciRunId: '1234', applicationName: 'apollo-video-e2e-w29-ci' }
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const clone = (value) => structuredClone(value)
+const TILE_LABELS = ['Em configuração', 'Em produção', 'Aguardando revisão', 'Concluídos']
+const tiles = (values) => values.map((value, index) => ({ label: TILE_LABELS[index], value }))
 
 function counts() {
   return {
@@ -109,7 +111,7 @@ function w34Manifest(directory) {
     postflight: { browserProcessTerminal: true, cleanupErrors: [] },
     counts: { before: counts(), after: counts() },
     requests: { desktop: { projectGets: 1, mutating: 0 }, mobile: { projectGets: 1, mutating: 0 } },
-    tiles: [{ value: 1 }, { value: 2 }, { value: 0 }, { value: 1 }],
+    tiles: tiles([1, 2, 0, 1]),
     expectedOrder: fixtures.map((item) => item.projectId).reverse(),
     fixtures,
     screenshots: writeShots(directory, ['w34-desktop-aggregate.png', 'w34-mobile-aggregate.png']),
@@ -229,7 +231,7 @@ function w35Manifest(directory) {
     postflight: { browserProcessTerminal: true, cleanupErrors: [] },
     counts: { before: counts(), after: counts() },
     requests: { desktop: { projectGets: 12, mutating: 0 }, mobile: { projectGets: 1, mutating: 0 } },
-    tiles: [{ value: 1 }, { value: 4 }, { value: 1 }, { value: 1 }],
+    tiles: tiles([1, 4, 1, 1]),
     expectedOrder: states.map((item) => item.projectId).reverse(),
     states,
     empty: {

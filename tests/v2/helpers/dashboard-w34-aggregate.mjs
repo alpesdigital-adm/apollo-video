@@ -358,7 +358,8 @@ export async function proveDashboardAggregate({
       observed[viewportName] = { cards, tiles, layout }
       evidence.requests[viewportName] = {
         projectGets: tracker.projectGets().length, mutating: tracker.mutating().length,
-        paths: [...new Set(tracker.entries.map((entry) => `${entry.method} ${entry.path}`))],
+        methods: [...new Set(tracker.entries.map((entry) => entry.method))],
+        requestCount: tracker.entries.length,
       }
       assert.equal(tracker.mutating().length, 0, `${viewportName}: the read-only dashboard must not mutate`)
       assert.ok(tracker.projectGets().length >= 1)
