@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-04T00:31:43.120Z",
+  "updatedAt": "2026-10-04T00:39:16.689Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -4837,7 +4837,7 @@
     },
     {
       "id": "F1.002-open",
-      "title": "F1.002 — Busca e filtros [FR-003] — escopo aberto",
+      "title": "F1.002 — facetas, paginação e isolamento — demais caixas abertas",
       "kind": "capability",
       "todoSections": [
         "F1.002"
@@ -4845,7 +4845,6 @@
       "todoItems": [
         "0b96ddcb537a-1",
         "7e132977731d-1",
-        "acd8f12f509c-1",
         "3543edbc5940-1"
       ],
       "state": "em-construcao",
@@ -4891,7 +4890,7 @@
         }
       ],
       "nextAction": "Concluir lacunas nomeadas e validar o grupo integrado antes de alegar entrega.",
-      "notes": "TODO documents V2 code plus controlled/local/remote E2E evidence, but also explicit remaining gaps or states no production deployment/owner acceptance; this is partial implementation, not accepted whole group. Escopo: documented partial implementation; caixas abertas permanecem abertas."
+      "notes": "TODO documents V2 code plus controlled/local/remote E2E evidence, but also explicit remaining gaps or states no production deployment/owner acceptance; this is partial implementation, not accepted whole group. Escopo: documented partial implementation; caixas abertas permanecem abertas. A caixa de persistência acd8f12f509c-1 foi separada em F1.002-persistence-open com prova W30 restrita a texto/status; as três caixas restantes não foram promovidas."
     },
     {
       "id": "F1.003-open",
@@ -14493,17 +14492,13 @@
       "todoItems": [
         "acd8f12f509c-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
       "integration": "main",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Falta executar e revisar a prova real de URL/sessão, reload, histórico, limpeza e zero resultados com API/PostgreSQL/Chromium e CI no SHA final."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -14514,12 +14509,6 @@
         }
       ],
       "evidence": [
-        {
-          "type": "repo",
-          "ref": "docs/PACOTE-WAVE30-FILTROS-DASHBOARD-AUTENTICADOS.md",
-          "scope": "Plano de até 3h de desenvolvimento para uma caixa de persistência, com texto/status como amostra; não comprova oito facetas, paginação ou toda F1.002.",
-          "role": "planned-not-started"
-        },
         {
           "type": "repo",
           "ref": "src/v2/ui/project-dashboard-filters.ts",
@@ -14536,17 +14525,96 @@
           "type": "repo",
           "ref": "tests/v2/helpers/project-dashboard-browser-proof.mjs",
           "role": "integration",
-          "scope": "Jornada escrita e conectada ao teste público; execução PostgreSQL/API/Chromium e revisão visual ainda pendentes."
+          "scope": "Jornada autenticada ligada ao harness público existente e ao CI; dez transições com IDs/API/PG e leitura sem mutação."
         },
         {
           "type": "repo",
           "ref": "tests/v2/project-dashboard-evidence-guard.test.mjs",
           "role": "classification",
           "scope": "Guard rejeita screenshots adulteradas, histórico inválido, mutação e application_name divergente; não substitui execução browser."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/wave30-20261003/w30-api-final-fda85769/w30/w30-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Run local em 7b0eaec87cdb50e93b2f97c7bba898e0dd714ceb: texto/status, URL/sessão, reload, histórico nativo, limpar, zero resultados e mobile; 4/4 suítes API/session/OIDC, sem skip."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/wave30-20261003/visual-review.json",
+          "role": "controlled-e2e",
+          "scope": "Astra revisou desktop/mobile, zero overflow e nenhum write; dois runs isolados verdes, 26 identidades próprias encerradas, zero backends e cluster parado. Primeira corrida reprovada no cleanup W29 preservada."
         }
       ],
-      "nextAction": "Executar jornada local supervisionada, revisar capturas e confirmar CI/artifacts do SHA final, preservando W29 e sem promover TODO.",
-      "notes": "Implementação W30 concluída, integração no main em revisão; testes focados e guard verdes, E2E e CI ainda não comprovados. Nenhum deploy, aceite ou alteração de checkbox."
+      "nextAction": "Confirmar CI e artifacts do SHA final; implantação e aceite separados continuam pendentes, sem promoção automática do TODO.",
+      "notes": "Escopo técnico W30 validado em ambiente local controlado: uma caixa de persistência com texto/status como amostra. Não encerra oito facetas, paginação, toda F1.002, deploy ou aceite; 380/1259 sem alteração."
+    },
+    {
+      "id": "F1.002-persistence-open",
+      "title": "F1.002 — persistência URL/sessão de filtros — prova W30",
+      "kind": "capability",
+      "todoSections": [
+        "F1.002"
+      ],
+      "todoItems": [
+        "acd8f12f509c-1"
+      ],
+      "state": "validado",
+      "construction": "implemented",
+      "integration": "main",
+      "validation": "controlled-e2e",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "deployment",
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite final separado permanece pendente; nenhuma caixa TODO é promovida pelo planejamento."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "src/v2/ui/project-dashboard-filters.ts",
+          "scope": "Codec existente orienta o planejamento; não é prova E2E W30.",
+          "role": "classification"
+        },
+        {
+          "type": "repo",
+          "ref": "src/app/ProjectsPageClient.tsx",
+          "scope": "Dashboard existente na rota /; persistência e popstate precisam de comprovação autenticada.",
+          "role": "classification"
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/project-dashboard-browser-proof.mjs",
+          "role": "integration",
+          "scope": "Jornada autenticada ligada ao harness público existente e ao CI; dez transições com IDs/API/PG e leitura sem mutação."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/project-dashboard-evidence-guard.test.mjs",
+          "role": "classification",
+          "scope": "Guard rejeita screenshots adulteradas, histórico inválido, mutação e application_name divergente; não substitui execução browser."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/wave30-20261003/w30-api-final-fda85769/w30/w30-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Run local em 7b0eaec87cdb50e93b2f97c7bba898e0dd714ceb: texto/status, URL/sessão, reload, histórico nativo, limpar, zero resultados e mobile; 4/4 suítes API/session/OIDC, sem skip."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/wave30-20261003/visual-review.json",
+          "role": "controlled-e2e",
+          "scope": "Astra revisou desktop/mobile, zero overflow e nenhum write; dois runs isolados verdes, 26 identidades próprias encerradas, zero backends e cluster parado. Primeira corrida reprovada no cleanup W29 preservada."
+        }
+      ],
+      "nextAction": "Confirmar CI e artifacts do SHA final; implantação e aceite separados continuam pendentes, sem promoção automática do TODO.",
+      "notes": "Escopo técnico W30 validado em ambiente local controlado: uma caixa de persistência com texto/status como amostra. Não encerra oito facetas, paginação, toda F1.002, deploy ou aceite; 380/1259 sem alteração."
     }
   ]
 }

@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-04T00:31:43.120Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
+Atualizado: 2026-10-04T00:39:16.689Z. Evidência-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
 
-Snapshot SHA256: `1f0487fa6688a5e8926d91246976e4731b8d4bd03ef15b63fa1ad3916438c609`.
+Snapshot SHA256: `78ffb0f2d4f6687e438ff472b381a9ab67d34367bf397f597b93fb289faa10d3`.
 
 TODO auditado: **380/1259** microtarefas entregues. Este número vem de `TODO.md`; os estados abaixo descrevem somente os escopos declarados, sem somar progresso.
 
@@ -20,11 +20,11 @@ IDs de caixas preservam a identidade ao trocar `[ ]` por `[x]`; mudar ou duplica
 
 | Tipo | Estado | Itens |
 | --- | --- | ---: |
-| wave | validado | 6 |
-| wave | pendente-validacao | 1 |
+| wave | validado | 7 |
+| wave | pendente-validacao | 0 |
 | wave | em-construcao | 0 |
 | wave | fila | 0 |
-| capability | validado | 76 |
+| capability | validado | 77 |
 | capability | pendente-validacao | 1 |
 | capability | em-construcao | 191 |
 | capability | fila | 1 |
@@ -33,9 +33,9 @@ Triagem de classificação: 0 linhas capability.
 
 | Estado da capability | Caixas TODO |
 | --- | ---: |
-| validado | 378 |
+| validado | 379 |
 | pendente-validacao | 3 |
-| em-construcao | 876 |
+| em-construcao | 875 |
 | fila | 2 |
 
 Caixas em triagem de classificação: **0**. A soma dos quatro estados e da triagem é **1259**.
@@ -50,7 +50,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | W27 | W27 — viewer do relatório crítico | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), [integration: PR 60](https://github.com/alpesdigital-adm/apollo-video/pull/60), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W28 | W28 — paridade das leituras UI/API | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), [integration: PR 61](https://github.com/alpesdigital-adm/apollo-video/pull/61), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W29 | W29 — jornada autenticada de comparação LUT e preservação do histórico | validado | main | controlled-e2e | pending | pending | não | [classification: tests/v2/workspace-lut-library-ui.test.mjs](../tests/v2/workspace-lut-library-ui.test.mjs), [implementation: docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md](../docs/PACOTE-WAVE29-COMPARACAO-LUT-AUTENTICADA.md), privado (controlled-e2e; referência local no JSON), privado (controlled-e2e; referência local no JSON), [integration: tests/v2/helpers/workspace-lut-browser-proof.mjs](../tests/v2/helpers/workspace-lut-browser-proof.mjs) | Conferir CI/artifact do commit efetivo; depois atender gates de produção e obter aceite separado para esta caixa, sem promoção automática do TODO. |
-| W30 | W30 — persistência autenticada dos filtros do dashboard | pendente-validacao | main | isolated | pending | pending | não | [planned-not-started: docs/PACOTE-WAVE30-FILTROS-DASHBOARD-AUTENTICADOS.md](../docs/PACOTE-WAVE30-FILTROS-DASHBOARD-AUTENTICADOS.md), [classification: src/v2/ui/project-dashboard-filters.ts](../src/v2/ui/project-dashboard-filters.ts), [classification: src/app/ProjectsPageClient.tsx](../src/app/ProjectsPageClient.tsx), [integration: tests/v2/helpers/project-dashboard-browser-proof.mjs](../tests/v2/helpers/project-dashboard-browser-proof.mjs), [classification: tests/v2/project-dashboard-evidence-guard.test.mjs](../tests/v2/project-dashboard-evidence-guard.test.mjs) | Executar jornada local supervisionada, revisar capturas e confirmar CI/artifacts do SHA final, preservando W29 e sem promover TODO. |
+| W30 | W30 — persistência autenticada dos filtros do dashboard | validado | main | controlled-e2e | pending | pending | não | [classification: src/v2/ui/project-dashboard-filters.ts](../src/v2/ui/project-dashboard-filters.ts), [classification: src/app/ProjectsPageClient.tsx](../src/app/ProjectsPageClient.tsx), [integration: tests/v2/helpers/project-dashboard-browser-proof.mjs](../tests/v2/helpers/project-dashboard-browser-proof.mjs), [classification: tests/v2/project-dashboard-evidence-guard.test.mjs](../tests/v2/project-dashboard-evidence-guard.test.mjs), privado (controlled-e2e; referência local no JSON), privado (controlled-e2e; referência local no JSON) | Confirmar CI e artifacts do SHA final; implantação e aceite separados continuam pendentes, sem promoção automática do TODO. |
 
 ## Capabilities — validado
 
@@ -132,6 +132,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | H-aaa2da748ef4-checked | Antes de F3 público — escopo auditado | 2 | document | documented | not-applicable | not-applicable | nenhum | [document-result: docs/PUBLIC-RELEASE-DECISIONS.md](../docs/PUBLIC-RELEASE-DECISIONS.md), [document-result: docs/adr/ADR-140-release-risks-v1-reuse-and-decisions.md](../docs/adr/ADR-140-release-risks-v1-reuse-and-decisions.md) | Preservar o resultado documental auditado e atualizar sua especificação quando a decisão mudar. |
 | H-451418cbdf78-checked | Antes de F5 público — escopo auditado | 2 | document | documented | not-applicable | not-applicable | nenhum | [document-result: docs/PUBLIC-RELEASE-DECISIONS.md](../docs/PUBLIC-RELEASE-DECISIONS.md), [document-result: docs/adr/ADR-140-release-risks-v1-reuse-and-decisions.md](../docs/adr/ADR-140-release-risks-v1-reuse-and-decisions.md) | Preservar o resultado documental auditado e atualizar sua especificação quando a decisão mudar. |
 | H-7c2aa12de394-checked | 15. Linguagem de domínio e documentação viva — escopo auditado | 11 | document | documented | not-applicable | not-applicable | nenhum | [document-result: docs/GLOSSARY.md](../docs/GLOSSARY.md), [document-result: docs/SCHEMA-STATE-MACHINES.md](../docs/SCHEMA-STATE-MACHINES.md), [document-result: docs/API-AUTOMATION-GUIDE.md](../docs/API-AUTOMATION-GUIDE.md), [document-result: docs/USER-WORKFLOWS.md](../docs/USER-WORKFLOWS.md), [document-result: src/v2/public-api/capability-registry.ts](../src/v2/public-api/capability-registry.ts), [document-result: src/v2/public-api/schema-registry.ts](../src/v2/public-api/schema-registry.ts), [document-result: src/v2/domain/media-artifact.ts](../src/v2/domain/media-artifact.ts), [document-result: src/v2/domain/capture-session.ts](../src/v2/domain/capture-session.ts), [document-result: scripts/lint-domain-language.mjs](../scripts/lint-domain-language.mjs) | Preservar o artefato auditado e atualizar a documentação quando a definição mudar. |
+| F1.002-persistence-open | F1.002 — persistência URL/sessão de filtros — prova W30 | 1 | product | controlled-e2e | pending | pending | deployment, owner-acceptance | [classification: src/v2/ui/project-dashboard-filters.ts](../src/v2/ui/project-dashboard-filters.ts), [classification: src/app/ProjectsPageClient.tsx](../src/app/ProjectsPageClient.tsx), [integration: tests/v2/helpers/project-dashboard-browser-proof.mjs](../tests/v2/helpers/project-dashboard-browser-proof.mjs), [classification: tests/v2/project-dashboard-evidence-guard.test.mjs](../tests/v2/project-dashboard-evidence-guard.test.mjs), privado (controlled-e2e; referência local no JSON), privado (controlled-e2e; referência local no JSON) | Confirmar CI e artifacts do SHA final; implantação e aceite separados continuam pendentes, sem promoção automática do TODO. |
 
 ## Capabilities — pendente-validacao
 
@@ -200,7 +201,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | F0.042-open | F0.042 — Preflight e lote externo [FR-248] — escopo aberto | 6 | product | isolated | pending | pending | implementation, validation, deployment, owner-acceptance | [implementation: TODO.md](../TODO.md), [implementation: src/v2/domain/variant-portfolio-preflight.ts](../src/v2/domain/variant-portfolio-preflight.ts), [implementation: src/v2/public-api/variant-portfolio-preflight-contract.ts](../src/v2/public-api/variant-portfolio-preflight-contract.ts) | Close the exact open TODO rows above against the referenced V2 code, then run the corresponding database/API/browser or media journey where required; preserve separate deployment and owner-acceptance gates. |
 | F0.043-open | F0.043 — Governança da API [FR-249] — escopo aberto | 7 | product | isolated | pending | pending | implementation, validation, deployment, owner-acceptance | [implementation: TODO.md](../TODO.md), [implementation: src/v2/domain/governance-admission.ts](../src/v2/domain/governance-admission.ts), [implementation: tests/v2/governance-admission.test.mjs](../tests/v2/governance-admission.test.mjs), [implementation: src/v2/application/governance-policies.ts](../src/v2/application/governance-policies.ts) | Close the exact open TODO rows above against the referenced V2 code, then run the corresponding database/API/browser or media journey where required; preserve separate deployment and owner-acceptance gates. |
 | F1.001-open | F1.001 — Dashboard de projetos [FR-002] — escopo aberto | 5 | product | isolated | pending | pending | implementation, validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), privado (implementation; referência local no JSON), [implementation: TODO.md](../TODO.md) | Concluir lacunas nomeadas e validar o grupo integrado antes de alegar entrega. |
-| F1.002-open | F1.002 — Busca e filtros [FR-003] — escopo aberto | 4 | product | isolated | pending | pending | implementation, validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), privado (implementation; referência local no JSON), [implementation: TODO.md](../TODO.md) | Concluir lacunas nomeadas e validar o grupo integrado antes de alegar entrega. |
+| F1.002-open | F1.002 — facetas, paginação e isolamento — demais caixas abertas | 3 | product | isolated | pending | pending | implementation, validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), privado (implementation; referência local no JSON), [implementation: TODO.md](../TODO.md) | Concluir lacunas nomeadas e validar o grupo integrado antes de alegar entrega. |
 | F1.003-open | F1.003 — Ações rápidas [FR-004] — escopo aberto | 4 | product | isolated | pending | pending | implementation, validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), privado (implementation; referência local no JSON), [implementation: TODO.md](../TODO.md) | Concluir lacunas nomeadas e validar o grupo integrado antes de alegar entrega. |
 | F1.004-open | F1.004 — Objetivo estratégico [FR-010] — escopo aberto | 5 | product | isolated | pending | pending | implementation, validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), privado (implementation; referência local no JSON), [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON) | Concluir lacunas nomeadas e validar o grupo integrado antes de alegar entrega. Validar separadamente o incremento F1.004 conforme TODO. |
 | F1.005-open | F1.005 — Rubricas estratégicas [FR-010] — escopo aberto | 6 | product | isolated | pending | pending | implementation, validation | [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON), privado (implementation; referência local no JSON), [implementation: TODO.md](../TODO.md), privado (implementation; referência local no JSON) | Concluir lacunas nomeadas e validar o grupo integrado antes de alegar entrega. Validar separadamente o incremento F1.005 conforme TODO. |

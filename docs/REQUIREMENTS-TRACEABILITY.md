@@ -190,6 +190,8 @@ isolamento de cursor, URL/sessão/API e zero results. A jornada HTTP/PostgreSQL 
 ampliada, mas não executada; faltam índices de campanha/tags/pessoa/material,
 E2E browser, implantação e aceite.
 
+W30 comprovou a persistência de texto/status no dashboard autenticado `/` com API V2, PostgreSQL descartável e Chromium reais: reload, fallback de sessão, precedência e atualização por URL explícita, Back/Forward same-document com `popstate` nativo, limpeza e zero resultados. IDs e nomes da UI foram confrontados com respostas HTTP e linhas persistidas; nenhum write ocorreu e contadores permaneceram iguais. Desktop/mobile foram revisados, e o postflight confirmou browser/processos terminais, zero backends e cluster parado. O histórico foi preparado com uma entrada `pushState` no harness e percorrido pelo browser; isso não afirma que cada alteração de filtro da UI crie histórico, pois ela usa `replaceState`. A sessão humana veio do POST público real; o formulário de login em browser não faz parte desta prova. Texto/status são amostra de persistência, sem encerrar as oito facetas, paginação, toda F1.002, implantação ou aceite. Veja `docs/PACOTE-WAVE30-FILTROS-DASHBOARD-AUTENTICADOS.md` e o registro canônico de status.
+
 Atualização local parcial de FR-004 — os seis controles do card usam somente
 rotas públicas V2. Rename/archive/restore compartilham um application service e
 um repositório PostgreSQL serializável com revision CAS, idempotência por ator,
