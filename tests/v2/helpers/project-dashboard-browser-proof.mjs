@@ -68,6 +68,8 @@ async function waitForCards(page, expected) {
 }
 
 async function screenshot(page, directory, name) {
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForFunction(() => window.scrollY === 0)
   await page.screenshot({ path: join(directory, name), fullPage: true })
   const bytes = await readFile(join(directory, name))
   assert.ok(bytes.length > 100, `${name} is empty`)
