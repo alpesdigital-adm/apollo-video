@@ -163,7 +163,7 @@ export async function proveW37RenameFromCard({
       assert.equal(command.delegatedUserId, memberId)
       assert.equal(command.workspaceRole, 'administrator')
       assert.equal(command.idempotencyKey, posted.idempotencyKey, 'the key the browser sent is the persisted key')
-      assert.deepEqual(changedKeys(before.project, afterRename.project), ['administrationRevision', 'name'], 'a single change in the project row')
+      assert.deepEqual(changedKeys(before.project, afterRename.project), ['administrationRevision', 'name', 'updatedAt'], 'a single change in the project row (name, its fence, and the updatedAt bookkeeping column)')
       assert.deepEqual(afterRename.versions, before.versions)
       assert.deepEqual(afterRename.snapshots, before.snapshots)
       assert.deepEqual(afterRename.mediaAssets, before.mediaAssets)
@@ -181,7 +181,7 @@ export async function proveW37RenameFromCard({
       assert.equal(workspaceRead.json.data.version.id, before.versions[0].id)
       evidence.rename = {
         request: sanitizedRequest(posted), responseStatus: 200, command: commandSummary(command),
-        projectChangedKeys: ['administrationRevision', 'name'], versionsUnchanged: true, snapshotsUnchanged: true,
+        projectChangedKeys: ['administrationRevision', 'name', 'updatedAt'], versionsUnchanged: true, snapshotsUnchanged: true,
         eventTypes: afterRename.events.map((item) => item.type), pendingCardName: names.original, confirmedCardName: names.renamed,
         refetchObserved: true,
       }

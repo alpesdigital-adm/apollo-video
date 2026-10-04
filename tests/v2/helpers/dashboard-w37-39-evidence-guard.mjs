@@ -71,7 +71,7 @@ export function verifyW37Evidence(directory, context) {
   assert.equal(manifest.rename.command.hasDelegatedUser, true)
   assert.equal(manifest.rename.command.confirmation, 'not-required')
   assert.equal(manifest.rename.command.idempotencyKeySha256, manifest.rename.request.idempotencyKeySha256)
-  assert.deepEqual(manifest.rename.projectChangedKeys, ['administrationRevision', 'name'])
+  assert.deepEqual(manifest.rename.projectChangedKeys, ['administrationRevision', 'name', 'updatedAt'])
   assert.equal(manifest.rename.versionsUnchanged, true)
   assert.equal(manifest.rename.snapshotsUnchanged, true)
   assert.deepEqual(manifest.rename.eventTypes, ['project.name.changed'])
