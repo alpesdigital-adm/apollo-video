@@ -5610,6 +5610,17 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(w30.outcome, 'passed')
 
+    // --- W31 (stream s1) ---
+    // Combined-filter proof. Fixtures (prefix w31-) are created inside the helper,
+    // after every baseline assertion above and before terminal credential expiry.
+    const { proveW31CombinedFilters } = await import('./helpers/dashboard-w31-combined-filters.mjs')
+    const w31 = await proveW31CombinedFilters({
+      baseUrl, client, workspaceId, creatorClientId: apiClientId,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w31.outcome, 'passed')
+
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
         id_clientId: {
