@@ -236,10 +236,15 @@ export async function runDashboardRuntimeJourney(input) {
     }
     activeObserver = null
     const compilation = JSON.parse((await client.v2ColorPipelineCompilation.findFirstOrThrow({ where: { workspaceId, projectId } })).compilationJson)
-    await post(`/v1/projects/${copy.project.id}/color-pipeline-compilations`, {
+    const copyCompilationBody = {
       sourceArtifactId: compilation.sourceArtifactId, sourceManifestId: compilation.sourceManifestId,
-      outputMetadata: compilation.pipeline.outputMetadata, stages: compilation.pipeline.stages,
-    }, `runtime-copy-color-${suffix}`, 201)
+      outputMetadata: compilation.pipeline.outputMetadata,
+      stages: compilation.pipeline.stages.map(({ id, kind, version, enabled, output, implementation, lut }) =>
+        ({ id, kind, version, enabled, output, implementation, ...(lut ? { lut } : {}) })),
+    }
+    const { parseCreateColorPipelineCompilationBody } = await import('../../../src/v2/public-api/color-pipeline-compilation-contract.ts')
+    assert.deepEqual(parseCreateColorPipelineCompilationBody(copyCompilationBody), copyCompilationBody)
+    await post(`/v1/projects/${copy.project.id}/color-pipeline-compilations`, copyCompilationBody, `runtime-copy-color-${suffix}`, 201)
     const selected = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
       baseVersionId: copy.version.id, baseHash: copy.version.baseHash, selection: { mode: 'none' },
       reason: 'Controlled neutral rendering for independent runtime fence proof.',
