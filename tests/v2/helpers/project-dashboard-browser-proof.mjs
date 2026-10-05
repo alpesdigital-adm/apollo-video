@@ -28,12 +28,18 @@ function chromePath() {
   return executable
 }
 
+// Headless Chrome on a loaded Windows workstation sometimes needs 20–33 s to
+// exit (bimodal: 0.2–4 s or 20–33 s, measured N=16 on 2026-10-04). The budget
+// only bounds the wait; a browser still alive after it remains a cleanup
+// error, so the proof still fails on any orphan.
+const BROWSER_CLOSE_BUDGET_MS = 60_000
+
 async function boundedClose(label, action, errors) {
   if (!action) return
   let timer
   try {
     await Promise.race([action(), new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('timeout')), 5000)
+      timer = setTimeout(() => reject(new Error('timeout')), BROWSER_CLOSE_BUDGET_MS)
     })])
   } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}`) }
   finally { clearTimeout(timer) }
@@ -349,7 +355,7 @@ export async function proveProjectDashboardBrowser({ baseUrl, client, workspaceI
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
-      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 5000))])
+      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, BROWSER_CLOSE_BUDGET_MS))])
     }
     evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
