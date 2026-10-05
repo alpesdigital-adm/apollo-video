@@ -25,7 +25,7 @@ const projectStatuses = (...values: ProjectStatus[]): readonly ProjectStatus[] =
 
 export const PROJECT_STATUS_TRANSITIONS: Readonly<Record<ProjectStatus, readonly ProjectStatus[]>> =
   Object.freeze({
-    draft: projectStatuses('ingesting', 'perceiving', 'reviewing-proxy', 'revising', 'canceled', 'archived'),
+    draft: projectStatuses('ingesting', 'perceiving', 'rendering-proxy', 'reviewing-proxy', 'revising', 'canceled', 'archived'),
     ingesting: projectStatuses('draft', 'failed', 'canceled'),
     perceiving: projectStatuses('planning', 'failed', 'canceled'),
     planning: projectStatuses('generating', 'failed', 'canceled'),

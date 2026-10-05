@@ -1985,6 +1985,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         } else if (projectRenderContext || projectReuseContext) {
           const context = projectRenderContext ?? projectReuseContext!
+          const project = await transaction.v2Project.updateMany({
+            where: {
+              id: context.projectId,
+              workspaceId: input.operation.workspaceId,
+              currentVersionId: context.projectVersionId,
+              status: { in: projectStatusTransitionSources('rendering-proxy', { includeSame: true }) },
+            },
+            data: { status: 'rendering-proxy' },
+          })
+          if (project.count !== 1) {
+            throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter proxy rendering from its current version and status')
+          }
           await transaction.v2ProjectProxyRenderOperation.create({
             data: {
               operationId: input.operation.id,
