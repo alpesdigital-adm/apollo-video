@@ -120,8 +120,11 @@ export async function runDashboardRuntimeJourney(input) {
       }
       if (eventTypes.length) await pipeline.observe({ stage, projectId: id, operationId, expectedEventTypes: eventTypes, expectedState: status })
       for (const [layout, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mobile', { width: 390, height: 844 }]]) {
+        const visibilityBefore = await page.evaluate(() => document.visibilityState)
         await page.bringToFront()
         await page.waitForFunction(() => document.visibilityState === 'visible')
+        evidence.foregroundObservations ??= []
+        evidence.foregroundObservations.push({ stage, layout, before: visibilityBefore, after: await page.evaluate(() => document.visibilityState) })
         await page.setViewportSize(viewport); await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
         const card = page.locator(`article[data-project-id="${id}"]`)
         try { await card.waitFor({ state: 'visible' }) } catch (error) {
