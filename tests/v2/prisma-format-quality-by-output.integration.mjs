@@ -66,6 +66,7 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
       await client.v2PublicOperation.deleteMany({ where: { workspaceId: scope } })
       await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: scope } })
       await client.v2MediaArtifact.deleteMany({ where: { workspaceId: scope } })
+      await client.v2Project.updateMany({ where: { workspaceId: scope }, data: { currentVersionId: null } })
       await client.v2ProjectVersion.deleteMany({ where: { workspaceId: scope } })
       await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: scope } })
       await client.v2Project.deleteMany({ where: { workspaceId: scope } })
@@ -74,6 +75,7 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
     }
   }
 
+  let primaryError
   try {
     await cleanup()
     for (const scope of [workspaceId, foreignWorkspaceId]) {
@@ -256,8 +258,15 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
       assert.equal(decision.explanation, stored.formatQuality.explanation)
       assert.equal(decision.exportAllowed, stored.finalAllowed)
     }
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
-    await cleanup()
-    await client.$disconnect()
+    const cleanupErrors = []
+    await cleanup().catch((error) => cleanupErrors.push(error))
+    await client.$disconnect().catch((error) => cleanupErrors.push(error))
+    if (cleanupErrors.length) throw new AggregateError(
+      [...(primaryError ? [primaryError] : []), ...cleanupErrors], 'Format quality fixture failed with cleanup errors',
+    )
   }
 })

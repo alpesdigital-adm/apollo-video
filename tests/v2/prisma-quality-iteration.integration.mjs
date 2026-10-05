@@ -65,9 +65,35 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
   const createdAt = new Date('2026-07-26T23:45:00.000Z')
   let server
   let serverLogs = ''
+  let primaryError
+  const cleanup = async () => {
+    const where = { workspaceId }
+    await client.v2QualityIterationAssetSelection.deleteMany({ where })
+    await client.v2QualityIteration.deleteMany({ where })
+    await client.v2AssetSelection.deleteMany({ where })
+    await client.v2ProxyReviewDecision.deleteMany({ where })
+    await client.v2ProxyReview.deleteMany({ where })
+    await client.v2PublicEventOutbox.deleteMany({ where })
+    await client.v2ProjectProxyRenderOperation.deleteMany({ where })
+    await client.v2PublicOperation.deleteMany({ where })
+    await client.v2AssetUseDecision.deleteMany({ where })
+    await client.v2MediaArtifact.updateMany({ where, data: { currentRightsSnapshotId: null } })
+    await client.v2AssetRightsChange.deleteMany({ where })
+    await client.v2AssetRightsSnapshot.deleteMany({ where })
+    await client.v2MediaArtifactManifest.deleteMany({ where })
+    await client.v2MediaArtifact.deleteMany({ where })
+    await client.v2Project.updateMany({ where, data: { currentVersionId: null } })
+    await client.v2ProjectVersion.deleteMany({ where })
+    await client.v2ProjectSnapshot.deleteMany({ where })
+    await client.v2Project.deleteMany({ where })
+    await client.v2GovernanceAlert.deleteMany({ where })
+    await client.v2GovernanceAdmission.deleteMany({ where })
+    await client.v2ApiClient.deleteMany({ where })
+    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+  }
 
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await cleanup()
     await client.v2Workspace.create({
       data: {
         id: workspaceId,
@@ -681,7 +707,11 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
       where: { id: iteration.id },
       data: { recordHash: stored.recordHash },
     })
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
+    const cleanupErrors = []
     if (server && server.exitCode === null) {
       server.kill()
       await Promise.race([
@@ -689,7 +719,10 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         new Promise((resolve) => setTimeout(resolve, 5_000)),
       ])
     }
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE').catch(() => {})
-    await client.$disconnect()
+    await cleanup().catch((error) => cleanupErrors.push(error))
+    await client.$disconnect().catch((error) => cleanupErrors.push(error))
+    if (cleanupErrors.length) throw new AggregateError(
+      [...(primaryError ? [primaryError] : []), ...cleanupErrors], 'Quality iteration fixture failed with cleanup errors',
+    )
   }
 })
