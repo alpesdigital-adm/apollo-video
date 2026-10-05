@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-05T16:42:28.749Z",
+  "updatedAt": "2026-10-05T17:13:44.736Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "fbcee0dfb1a1486bc75a60aaef8d07ebaede8883",
+  "evidenceBaseCommit": "cd76f84c88756840e2dca85334caf29edfb9c470",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -14898,17 +14898,13 @@
         "0944e64350b1-1",
         "ba0e03c8f7d9-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Jornada local completa e persistência comprovadas; faltam CI do SHA final, merge autorizado e conferência do CI em main."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -14990,9 +14986,27 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w36-public-api-full-built-9ba00076/result.json",
           "role": "controlled-e2e",
           "scope": "fbcee0df: jornada pública API/PostgreSQL/Chromium 1/1, zero skips, 294,8 s; catálogo 16 eventos, schemas V1/V2, W29-W40, credenciais e revogação. Cleanup terminal, zero backends e porta 55576 livre."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37342962724",
+          "role": "controlled-e2e",
+          "scope": "CI verde do SHA final da PR #76, antes do merge; escopo técnico controlado. O readback dos artifacts e CI do main final ficam também no corpo da PR."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37342962755",
+          "role": "controlled-e2e",
+          "scope": "CI verde do SHA final da PR #76, antes do merge; escopo técnico controlado. O readback dos artifacts e CI do main final ficam também no corpo da PR."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37342962848",
+          "role": "controlled-e2e",
+          "scope": "CI verde do SHA final da PR #76, antes do merge; escopo técnico controlado. O readback dos artifacts e CI do main final ficam também no corpo da PR."
         }
       ],
-      "nextAction": "Confirmar CI do SHA final, merge e CI de main; depois atender implantação DigitalOcean e aceite separado.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; a validação técnica não promove TODO.",
       "notes": "Lacuna de estados apenas semeados fechada no escopo runtime controlado: estados de proxy/final, falha e retries vêm de APIs/serviços/workers novos. Mídia e upstream editorial controlados; ramo sem total, vazio e arquivado preservam suas provas históricas. Mesmo input com outra chave dá 409, sem duplicação; guard da mesma versão tem prova PG separada. Não é implantação ou aceite; TODO intacto."
     },
     {
@@ -15005,17 +15019,13 @@
       "todoItems": [
         "d1048dd7b809-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Jornada local completa e persistência comprovadas; faltam CI do SHA final, merge autorizado e conferência do CI em main."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -15091,9 +15101,27 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w36-public-api-full-built-9ba00076/result.json",
           "role": "controlled-e2e",
           "scope": "fbcee0df: jornada pública API/PostgreSQL/Chromium 1/1, zero skips, 294,8 s; catálogo 16 eventos, schemas V1/V2, W29-W40, credenciais e revogação. Cleanup terminal, zero backends e porta 55576 livre."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37342962724",
+          "role": "controlled-e2e",
+          "scope": "CI verde do SHA final da PR #76, antes do merge; escopo técnico controlado. O readback dos artifacts e CI do main final ficam também no corpo da PR."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37342962755",
+          "role": "controlled-e2e",
+          "scope": "CI verde do SHA final da PR #76, antes do merge; escopo técnico controlado. O readback dos artifacts e CI do main final ficam também no corpo da PR."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37342962848",
+          "role": "controlled-e2e",
+          "scope": "CI verde do SHA final da PR #76, antes do merge; escopo técnico controlado. O readback dos artifacts e CI do main final ficam também no corpo da PR."
         }
       ],
-      "nextAction": "Confirmar CI do SHA final, merge e CI de main; depois atender implantação DigitalOcean e aceite separado.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; a validação técnica não promove TODO.",
       "notes": "Lacuna de feed apenas administrativo fechada no escopo runtime controlado: operações, fases/progresso, annotations e duplicação chegam ao dashboard por outbox e HTTP. Polling, isolamento, cursor e papel de DB exigido mantidos. Não é implantação ou aceite; TODO intacto."
     },
     {
