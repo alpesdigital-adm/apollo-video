@@ -994,6 +994,29 @@ export async function persistManyOperationStatusEvents(
   await persistPublicEvents(transaction, events)
 }
 
+async function transitionCurrentProxyProject(
+  transaction: Prisma.TransactionClient,
+  operation: StoredOperation,
+  from: readonly string[],
+  status: string,
+): Promise<boolean> {
+  const context = operation.projectProxyRender
+  if (operation.type !== 'project-proxy-render' || !context) return false
+  const changed = await transaction.v2Project.updateMany({
+    where: {
+      id: context.projectId, workspaceId: operation.workspaceId,
+      currentVersionId: context.projectVersionId, status: { in: [...from] },
+      publicOperations: { none: {
+        type: 'project-proxy-render',
+        projectProxyRender: { is: { projectVersionId: context.projectVersionId } },
+        OR: [{ createdAt: { gt: operation.createdAt } }, { createdAt: operation.createdAt, id: { gt: operation.id } }],
+      } },
+    },
+    data: { status },
+  })
+  return changed.count === 1
+}
+
 export class PrismaPublicOperationRepository implements PublicOperationRepository {
   private readonly client: PrismaClient
   private readonly createEventId: () => string
@@ -1166,6 +1189,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       if (!persisted) return null
       const result = hydratePublicOperationRecord(persisted)
       if (updated.count === 1) {
+        if (stored.type === 'project-proxy-render' && !await transitionCurrentProxyProject(
+          transaction, stored, ['failed', 'rendering-proxy'], 'rendering-proxy',
+        )) throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Proxy retry no longer owns the current project version and operation')
         await transaction.v2PublicOperationControlCommand.create({
           data: {
             id: input.commandId,
@@ -2212,6 +2238,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               },
             })
             if (exhausted.count === 1) {
+              await transitionCurrentProxyProject(transaction, candidate, ['rendering-proxy'], 'failed')
               const failed = await transaction.v2PublicOperation.findUnique({
                 where: { id: candidate.id },
                 include: OPERATION_INCLUDE,
@@ -2385,15 +2412,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       if (next.type === 'project-proxy-render' && next.status === 'failed' && stored.projectProxyRender) {
         // The operation fence and project CAS share one transaction. A task for
         // an older version cannot replace a newer review or terminal state.
-        await transaction.v2Project.updateMany({
-          where: {
-            id: stored.projectProxyRender.projectId,
-            workspaceId: stored.workspaceId,
-            currentVersionId: stored.projectProxyRender.projectVersionId,
-            status: 'rendering-proxy',
-          },
-          data: { status: 'failed' },
-        })
+        await transitionCurrentProxyProject(transaction, stored, ['rendering-proxy'], 'failed')
       }
       const persisted = await transaction.v2PublicOperation.findUnique({
         where: { id: input.operationId },

@@ -32,6 +32,7 @@ export interface ProxyReviewRepository {
     workspaceId: string
     projectId: string
     operationId: string
+    lease?: Readonly<{ owner: string; attempt: number; now: string }>
     review: Readonly<ProxyReview>
     createdAt: string
   }): Promise<Readonly<PersistedProxyReview>>

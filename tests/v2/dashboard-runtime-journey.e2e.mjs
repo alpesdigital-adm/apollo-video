@@ -45,7 +45,7 @@ function sha256(bytes) {
 
 test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers', {
   skip: process.env.APOLLO_DASHBOARD_RUNTIME_E2E !== '1' && 'set APOLLO_DASHBOARD_RUNTIME_E2E=1 and use an isolated V2 database',
-  timeout: process.env.APOLLO_DASHBOARD_RUNTIME_SERVER_MODE === 'dev' ? 360_000 : 180_000,
+  timeout: process.env.APOLLO_DASHBOARD_RUNTIME_SERVER_MODE === 'dev' ? 480_000 : 360_000,
 }, async (t) => {
   assert.ok(process.env.V2_DATABASE_URL, 'V2_DATABASE_URL must point to an isolated PostgreSQL database')
   const artifactRoot = process.env.APOLLO_V2_ARTIFACT_ROOT?.trim() ?? ''

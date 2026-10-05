@@ -227,6 +227,20 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
       }
       const createdAt = new Date(input.createdAt)
       if (Number.isNaN(createdAt.getTime())) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review creation time is invalid')
+      await transaction.$queryRaw`SELECT id FROM public_operations WHERE id = ${input.operationId} FOR UPDATE`
+      const operation = await transaction.v2PublicOperation.findUnique({ where: { id: input.operationId }, include: { projectProxyRender: true } })
+      const now = input.lease ? new Date(input.lease.now) : createdAt
+      const activeLease = operation?.status === 'running' && input.lease &&
+        operation.leaseOwner === input.lease.owner && operation.attempt === input.lease.attempt &&
+        operation.leaseExpiresAt !== null && operation.leaseExpiresAt.getTime() > now.getTime()
+      const inlineReuse = operation?.status === 'succeeded' && input.lease === undefined &&
+        operation.projectProxyRender?.reusedFromOperationId !== null &&
+        operation.projectProxyRender?.reusedFromOperationId !== undefined
+      if (!operation || operation.type !== 'project-proxy-render' || operation.workspaceId !== input.workspaceId ||
+        operation.projectId !== input.projectId || operation.projectProxyRender?.projectVersionId !== input.review.projectVersionId ||
+        (!activeLease && !inlineReuse) || Number.isNaN(now.getTime())) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review cannot publish without the current worker lease or completed inline reuse')
+      }
       const row = await transaction.v2ProxyReview.create({
         data: {
           id: input.id,
@@ -260,6 +274,11 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           id: input.projectId,
           workspaceId: input.workspaceId,
           currentVersionId: input.review.projectVersionId,
+          publicOperations: { none: {
+            type: 'project-proxy-render',
+            projectProxyRender: { is: { projectVersionId: input.review.projectVersionId } },
+            OR: [{ createdAt: { gt: operation.createdAt } }, { createdAt: operation.createdAt, id: { gt: operation.id } }],
+          } },
           status: {
             in: projectStatusTransitionSources(
               input.review.status === 'blocked' ? 'revising' : 'reviewing-proxy',
