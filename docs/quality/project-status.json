@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-05T23:12:00.000Z",
+  "updatedAt": "2026-10-05T23:45:53.892Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "701dd99c68e330701578073af1e963780c14720d",
+  "evidenceBaseCommit": "79d73cf6c94911612f8241e4dffe89f1c4bc2e89",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -27,8 +27,8 @@
         "d8fe6d431e60-1",
         "1d40492407b0-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -36,7 +36,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -55,12 +55,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W51: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W51: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W51 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W52",
@@ -74,8 +74,8 @@
         "3bc3f43c2f08-1",
         "757a4004294a-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -83,7 +83,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -102,12 +102,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W52: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W52: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W52 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W53",
@@ -122,8 +122,8 @@
         "d1048dd7b809-1",
         "ba0e03c8f7d9-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -131,7 +131,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -150,12 +150,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W53: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W53: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W53 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W54",
@@ -171,8 +171,8 @@
         "1349e49bda43-1",
         "56a977e125cd-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -180,7 +180,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -199,12 +199,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W54: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W54: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W54 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W55",
@@ -219,8 +219,8 @@
         "db882ddc544b-1",
         "ac7e0a1c125b-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -228,7 +228,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -247,12 +247,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W55: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W55: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W55 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W56",
@@ -267,8 +267,8 @@
         "75a8db3a5d75-1",
         "82ccf53db39a-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -276,7 +276,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -295,12 +295,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W56: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W56: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W56 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W57",
@@ -314,8 +314,8 @@
         "184065af0667-1",
         "22ad5715eb6c-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -323,7 +323,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -342,12 +342,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W57: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W57: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W57 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W58",
@@ -362,8 +362,8 @@
         "1d6d2df95dcf-1",
         "ca7b74c93a9c-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -371,7 +371,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -390,12 +390,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W58: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W58: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W58 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W59",
@@ -411,8 +411,8 @@
         "fadcc2d775a2-1",
         "80557a535c10-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -420,7 +420,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -439,12 +439,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W59: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W59: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W59 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W60",
@@ -459,8 +459,8 @@
         "186dd251b68f-1",
         "9eeab33b085e-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -468,7 +468,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote planejado, ainda não executado; conferir provas existentes por ID e implementar somente as lacunas do recorte."
+          "text": "Construção/reconciliação em andamento; somente lacunas comprovadas serão implementadas."
         },
         {
           "kind": "validation",
@@ -487,12 +487,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-51-60.md",
-          "scope": "W60: pacote explicitamente planejado e não iniciado, com IDs, dependências e critérios de saída próprios.",
-          "role": "planned-not-started"
+          "scope": "W60: plano e critérios da execução autorizada; não constitui prova técnica.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Revisar o pacote W60 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento.",
-      "notes": "Planejamento de 05/10/2026. Esta fila é de execução do pacote; não afirma que a capacidade correspondente nunca tenha sido implementada. Relações com tarefas são contextuais; não alteram classificação individual, checkbox, implantação ou aceite."
+      "nextAction": "Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios.",
+      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado."
     },
     {
       "id": "W24",

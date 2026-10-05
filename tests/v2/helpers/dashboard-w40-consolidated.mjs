@@ -389,6 +389,13 @@ export async function proveW40ConsolidatedJourney({
             assert.equal(workspace.data.project.id, targetId)
             assert.equal(workspace.data.project.name, targetName)
             await page.getByText(targetName, { exact: true }).first().waitFor()
+            if (expected.search === '?mode=review') {
+              const panel = page.getByTestId('review-entry-panel')
+              await panel.waitFor({ state: 'visible' })
+              await page.waitForFunction(() => document.activeElement?.getAttribute('data-testid') === 'review-entry-panel')
+              assert.equal(await panel.getAttribute('data-entry-mode'), 'review')
+              assert.equal(await panel.getAttribute('aria-label'), 'Mesa de revisão editorial')
+            }
             if (screenshotName) evidence.screenshots.push(await screenshot(page, evidenceDir, screenshotName))
             // Back to the dashboard: the filters survive, the cards equal the oracle again.
             const returned = awaitProjectsResponse(page, facetsApiParams(facets), rows.map((row) => row.id))
@@ -401,6 +408,7 @@ export async function proveW40ConsolidatedJourney({
             evidence.navigation.push({
               id, button: expected.button, projectId: targetId, destination: { pathname: landed.pathname, search: landed.search },
               workspaceStatus: 200, workspaceProjectName: workspace.data.project.name,
+              reviewPanelFocused: expected.search === '?mode=review',
               returned: { search: expectedSearch(facets), controls: facets, ids: rows.map((row) => row.id) },
             })
           }

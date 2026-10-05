@@ -18,6 +18,7 @@ import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
 import { proveW38ArchiveRestore } from './helpers/dashboard-w38-archive-restore.mjs'
 import { createW39ArtifactRoot, proveW39DuplicateCopyOnWrite } from './helpers/dashboard-w39-duplicate.mjs'
 import { proveW40ConsolidatedJourney } from './helpers/dashboard-w40-consolidated.mjs'
+import { proveMediaTransferHttp } from './helpers/media-transfer-http-proof.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -693,6 +694,10 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_RENDERER_DIGEST: sha('8'),
           APOLLO_FFMPEG_PATH: ffmpegPath,
           APOLLO_V2_ARTIFACT_ROOT: w39ArtifactRoot,
+          APOLLO_MEDIA_UPLOAD_BASE_URL: baseUrl,
+          APOLLO_MEDIA_DOWNLOAD_BASE_URL: baseUrl,
+          APOLLO_MEDIA_UPLOAD_SIGNING_SECRET: 'w51-isolated-upload-signing-secret-32-characters',
+          APOLLO_MEDIA_DOWNLOAD_SIGNING_SECRET: 'w51-isolated-download-signing-secret-32-characters',
           // This broad journey generates hundreds of legitimate requests. Keep
           // request/spend spike detection out of this isolated error-rate proof.
           APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '2000000000',
@@ -5798,6 +5803,14 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(w40.outcome, 'passed')
     formUiSession = w40.sessionCookieValue
+
+    {
+      const transfer = await proveMediaTransferHttp({
+        baseUrl, client, authorization, workspaceId, projectId: created.data.project.id,
+        artifactRoot: w39ArtifactRoot, createMediaArtifactManifest,
+      })
+      assert.equal(transfer.outcome, 'passed')
+    }
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

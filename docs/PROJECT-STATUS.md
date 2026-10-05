@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-05T23:12:00.000Z. Evidência-base: `701dd99c68e330701578073af1e963780c14720d`.
+Atualizado: 2026-10-05T23:45:53.892Z. Evidência-base: `79d73cf6c94911612f8241e4dffe89f1c4bc2e89`.
 
-Snapshot JSON SHA256: `27a8f1c528a8180ee5692f378e4d061b98ef3f5a62a80a7fa396b281c1ca9c65` (somente project-status.json; TODO verificado separadamente).
+Snapshot JSON SHA256: `dac3172f44d3a06fdbead2bf21d7c1f676679ab8b1e4979403762ef204597814` (somente project-status.json; TODO verificado separadamente).
 
 TODO auditado: **380/1259** caixas marcadas como concluídas no histórico. Isso não afirma implantação ou aceite atuais.
 
@@ -1359,8 +1359,8 @@ IDs de caixas preservam a identidade ao trocar `[ ]` por `[x]`; mudar ou duplica
 | --- | --- | ---: |
 | wave | validado | 27 |
 | wave | pendente-validacao | 0 |
-| wave | em-construcao | 0 |
-| wave | fila | 10 |
+| wave | em-construcao | 10 |
+| wave | fila | 0 |
 | capability | validado | 77 |
 | capability | pendente-validacao | 1 |
 | capability | em-construcao | 191 |
@@ -1381,16 +1381,16 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 
 | ID | Escopo | Estado | Integração | Validação | Implantação | Aceite | Só aceite do owner? | Evidências | Próxima ação |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W51 | W51 — Upload e reconciliação de evidência histórica | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W51 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W52 | W52 — Sessão humana e troca segura de workspace | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W52 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W53 | W53 — Dashboard: prova individual de estados e eventos | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W53 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W54 | W54 — Filtros e ciclo de vida dos projetos | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W54 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W55 | W55 — Biblioteca: navegação, previews e direitos | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W55 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W56 | W56 — Segmentos e derivadas de áudio/vídeo sob demanda | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W56 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W57 | W57 — Imagens: OCR, thumbnails e provenance | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W57 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W58 | W58 — Catalogação aprovada e idempotência persistida | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W58 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W59 | W59 — Operações duráveis, outbox e entrega de eventos | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W59 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
-| W60 | W60 — Jornada real com o master da Imersão | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Revisar o pacote W60 e seus pré-requisitos; iniciar construção somente quando autorizada, sem promover o TODO por planejamento. |
+| W51 | W51 — Upload e reconciliação de evidência histórica | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W52 | W52 — Sessão humana e troca segura de workspace | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W53 | W53 — Dashboard: prova individual de estados e eventos | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W54 | W54 — Filtros e ciclo de vida dos projetos | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W55 | W55 — Biblioteca: navegação, previews e direitos | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W56 | W56 — Segmentos e derivadas de áudio/vídeo sob demanda | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W57 | W57 — Imagens: OCR, thumbnails e provenance | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W58 | W58 — Catalogação aprovada e idempotência persistida | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W59 | W59 — Operações duráveis, outbox e entrega de eventos | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
+| W60 | W60 — Jornada real com o master da Imersão | em-construcao | not-integrated | none | pending | pending | não | [classification: docs/PLANO-WAVES-51-60.md](../docs/PLANO-WAVES-51-60.md) | Executar o recorte autorizado, validar o resultado e integrar em main; implantação e aceite têm gates próprios. |
 | W24 | W24 — avaliação, persistência e render controlados do gate sintético | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W25 | W25 — histórico de avaliações no editor | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |
 | W26 | W26 — API de leitura do relatório crítico | validado | main | controlled-e2e | pending | pending | não | [controlled-e2e: docs/quality/synthetic-phase-gate-v1.md](../docs/quality/synthetic-phase-gate-v1.md), [controlled-e2e: CI 37124553536](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37124553536), privado (controlled-e2e; referência local no JSON) | Concluir checks live-provider do gate global F3, produção e aceite separadamente. |

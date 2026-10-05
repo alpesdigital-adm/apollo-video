@@ -354,7 +354,6 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
  * `NO_SCRIPT` are debts; the other two are decisions.
  */
 const PAID_PROVIDERS = 'calls paid providers, which the owner’s briefing forbids in CI'
-const NEEDS_TESSERACT = 'needs a Tesseract install the workflow does not provision'
 const PHASE_1_3 = 'Phase 1-3 suite with an npm script and no CI step'
 const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means writing one first'
 
@@ -390,11 +389,6 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/ffmpeg-contiguous-visual-evidence-provider.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/ffmpeg-speaker-diarization-audio-preparer.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/format-quality-critic.integration.mjs', reason: PHASE_1_3 },
-  {
-    file: 'tests/v2/image-analysis-tesseract.integration.mjs',
-    reason: `${NEEDS_TESSERACT}; PRD FR-145 and the F4.015 traceability row cite it as why the OCR engine is present but unrun in CI`,
-    citedBy: ['docs/PLANO-WAVES-51-60.md', 'docs/PRD-APOLLO-V2.md', 'docs/REQUIREMENTS-TRACEABILITY.md'],
-  },
   { file: 'tests/v2/long-form-stage-fencing.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/media-input-runtime.integration.mjs', reason: PHASE_1_3 },
   {

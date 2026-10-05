@@ -1373,7 +1373,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.media.segments.derivative.request', version: '1.0.0', title: 'Request segment derivative',
-    description: 'Returns a virtual reference or queues a durable video MP4 extraction for a consumer.',
+    description: 'Returns a virtual reference or queues a durable video MP4 or audio WAV extraction for a consumer.',
     exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['artifacts:write'],
     inputSchemaRef: 'apollo://schemas/media-segment-derivative-request/v1', outputSchemaRef: 'apollo://schemas/media-segment-derivative-response/v1',
     endpoint: { method: 'POST', path: '/v1/media/segments/{segmentId}/derivative-jobs' }, toolName: 'apollo.media.segments.derivative.request',

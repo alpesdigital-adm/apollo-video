@@ -1,7 +1,7 @@
 'use client'
 
 import { sha256 } from '@noble/hashes/sha256'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import LogoutButton from '@/components/LogoutButton'
@@ -1093,6 +1093,9 @@ export default function ProjectWorkspacePage() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
   const projectId = params.id
+  const reviewEntry = useSearchParams().get('mode') === 'review'
+  const reviewEntryTarget = useRef<HTMLElement | null>(null)
+  const focusedReviewEntry = useRef<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const previewVideo = useRef<HTMLVideoElement>(null)
   const activeRequest = useRef<AbortController | null>(null)
@@ -1136,6 +1139,18 @@ export default function ProjectWorkspacePage() {
   const [previewState, setPreviewState] = useState<'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'error'>('idle')
   const [review, setReview] = useState<ProjectReviewData | null>(null)
   const [reviewMode, setReviewMode] = useState<ReviewMode>('idle')
+  useEffect(() => {
+    if (!reviewEntry) {
+      focusedReviewEntry.current = null
+      return
+    }
+    if (!review || focusedReviewEntry.current === projectId) return
+    const target = reviewEntryTarget.current
+    if (!target) return
+    focusedReviewEntry.current = projectId
+    target.focus({ preventScroll: true })
+    target.scrollIntoView({ block: 'start' })
+  }, [projectId, review, reviewEntry])
   const [reviewScope, setReviewScope] = useState<'point' | 'region' | 'scene'>('point')
   const [reviewApplicationScope, setReviewApplicationScope] = useState<ReviewApplicationScopeKind>('scene')
   const [reviewGlobal, setReviewGlobal] = useState(false)
@@ -4094,7 +4109,7 @@ export default function ProjectWorkspacePage() {
           ) : null}
 
           {review ? (
-            <section className="mt-5 border-y border-white/[0.08] bg-[#090909] py-5" aria-label="Mesa de revisão editorial">
+            <section ref={reviewEntryTarget} tabIndex={-1} data-testid="review-entry-panel" data-entry-mode={reviewEntry ? 'review' : 'editor'} className="mt-5 scroll-mt-6 border-y border-white/[0.08] bg-[#090909] py-5" aria-label="Mesa de revisão editorial">
               <div className="flex flex-wrap items-start justify-between gap-4 px-1">
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-[#b58d31]">Mesa de revisão</p>
