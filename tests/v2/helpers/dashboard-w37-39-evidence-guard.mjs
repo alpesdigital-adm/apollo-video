@@ -202,7 +202,10 @@ export function verifyW39Evidence(directory, context) {
   assert.ok(dup.snapshots.length >= 3)
   for (const pair of dup.snapshots) {
     assert.notEqual(pair.copyId, pair.sourceId)
-    assert.equal(pair.equalContent, true)
+    assert.equal(pair.rebound, pair.kind === 'edit-plan', 'only the EditPlan is version-bound')
+    assert.equal(pair.equalContent, !pair.rebound)
+    if (pair.rebound) assert.notEqual(pair.copyContentHash, pair.contentHash)
+    else assert.equal(pair.copyContentHash, pair.contentHash)
     assert.ok(before.source.snapshots.some((item) => item.id === pair.sourceId && item.contentHash === pair.contentHash))
   }
   assert.deepEqual(dup.sharedArtifactIds, [before.master.artifactId])
@@ -218,21 +221,18 @@ export function verifyW39Evidence(directory, context) {
   assert.equal(dup.destination.urlPath, `/projects/${dup.copy.projectId}`)
   assert.equal(dup.destination.workspaceStatus, 200)
   assert.deepEqual(dup.destination.mediaArtifactIds, [before.master.artifactId])
-  assert.equal(manifest.command.type, 'set-project-policy-overrides')
-  assert.equal(manifest.command.copyEditCommands >= 1, true)
+  assert.equal(manifest.command.type, 'set-project-lut-selection')
+  assert.equal(manifest.command.copyEditCommands, 1)
+  assert.equal(manifest.command.copyVersionSequenceAfter, 2)
   assert.equal(manifest.command.sourceEditCommands, 0)
   assert.equal(manifest.command.sourceVersionId, before.source.versionId)
   assert.equal(manifest.command.sourceVersionBaseHashBefore, manifest.command.sourceVersionBaseHashAfter)
   assert.equal(manifest.command.sourceSnapshotHashesUnchanged, true)
   assert.equal(manifest.command.cards.source, 'v1')
   assert.equal(manifest.command.cards.copy, `v${manifest.command.copyVersionSequenceAfter}`)
-  assert.ok(Array.isArray(manifest.knownDefects))
-  for (const defect of manifest.knownDefects) {
-    assert.equal(typeof defect.id, 'string')
-    assert.equal(defect.wroteNothing, true, `${defect.id} must write nothing even when it is refused`)
-  }
+  assert.equal('knownDefects' in manifest, false, 'W39 must not carry known defects')
   verifyCases(manifest, [
-    'idempotent-replay', 'idempotency-payload-mismatch', 'stale-version-hash', 'stale-version-after-command-on-copy',
+    'idempotent-replay', 'idempotent-replay-after-copy-command', 'idempotency-payload-mismatch', 'stale-version-hash', 'stale-version-after-command-on-copy',
     'injected-payload', 'foreign-workspace', 'insufficient-scope-read-only', 'anonymous', 'session-without-origin',
     'foreign-workspace-cannot-read-shared-master',
   ])
