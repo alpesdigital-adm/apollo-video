@@ -132173,6 +132173,29 @@
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
                       },
+                      "placementPlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "reframePlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
+                      },
                       "evidenceRange": {
                         "type": "object",
                         "additionalProperties": false,
@@ -132282,6 +132305,29 @@
                       "outputPresetHash": {
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "placementPlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "reframePlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
                       },
                       "evidenceRange": {
                         "type": "object",
@@ -133061,6 +133107,29 @@
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
                       },
+                      "placementPlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "reframePlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
+                      },
                       "evidenceRange": {
                         "type": "object",
                         "additionalProperties": false,
@@ -133170,6 +133239,29 @@
                       "outputPresetHash": {
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "placementPlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "reframePlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
                       },
                       "evidenceRange": {
                         "type": "object",

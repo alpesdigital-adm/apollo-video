@@ -6512,6 +6512,9 @@ const proxyQualityIssueSchema = {
     targetId: idSchema,
     outputSpecId: idSchema,
     outputPresetHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    placementPlanHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+    reframePlanHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+    format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
     evidenceRange: {
       type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'],
       properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
@@ -6593,7 +6596,7 @@ const proxyReviewSchema = {
 const proxyQualityIssueSchemaV1 = {
   ...proxyQualityIssueSchema,
   properties: Object.fromEntries(Object.entries(proxyQualityIssueSchema.properties).filter(([key]) =>
-    !['outputSpecId', 'outputPresetHash', 'evidenceRange', 'elementIds', 'evidenceIds'].includes(key))),
+    !['outputSpecId', 'outputPresetHash', 'placementPlanHash', 'reframePlanHash', 'format', 'evidenceRange', 'elementIds', 'evidenceIds'].includes(key))),
 }
 const proxyReviewSchemaV1 = {
   ...proxyReviewSchema,

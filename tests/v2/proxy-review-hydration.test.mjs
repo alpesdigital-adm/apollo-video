@@ -1,7 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import Ajv2020 from 'ajv/dist/2020.js'
+import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import { evaluateRenderedProxy } from '../../src/v2/application/render-workflow.ts'
 import { hydrateProxyReview } from '../../src/v2/infrastructure/prisma/proxy-review-repository.ts'
+
+test('current public issue contract accepts real critic identity and rejects corrupt identity while V1 stays frozen', () => {
+  const issueSchema = (version) => getPublicSchema(`apollo://schemas/project-proxy-review-response/v${version}`)
+    .schema.properties.data.properties.review.properties.criticIssues.items
+  const validate = new Ajv2020({ strict: false, allErrors: true }).compile(issueSchema(2))
+  const issues = JSON.parse(JSON.stringify(verdict({ placementPlanHash: 'b'.repeat(64), reframePlanHash: 'c'.repeat(64) }).criticIssues))
+  assert.ok(issues.length)
+  for (const issue of issues) {
+    assert.equal(validate(issue), true, JSON.stringify(validate.errors))
+    for (const field of ['placementPlanHash', 'reframePlanHash']) {
+      assert.equal(validate({ ...issue, [field]: null }), true)
+      assert.equal(validate({ ...issue, [field]: 'invalid' }), false)
+    }
+    assert.equal(validate({ ...issue, format: '3:7' }), false)
+  }
+  for (const field of ['outputSpecId', 'outputPresetHash', 'placementPlanHash', 'reframePlanHash', 'format', 'evidenceRange', 'elementIds', 'evidenceIds']) {
+    assert.equal(Object.hasOwn(issueSchema(1).properties, field), false)
+  }
+})
 
 function verdict(geometry = {}) {
   const hash = 'a'.repeat(64)
