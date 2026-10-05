@@ -2167,6 +2167,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           requestFingerprint: input.requestFingerprint,
         })
         if (replay) return replay
+        const proxyContext = projectRenderContext ?? projectReuseContext
+        if (proxyContext) {
+          const admitted = await this.client.v2ProjectProxyRenderOperation.findFirst({
+            where: { workspaceId: input.operation.workspaceId, projectId: proxyContext.projectId,
+              projectVersionId: proxyContext.projectVersionId, inputHash: proxyContext.inputHash },
+            select: { operationId: true },
+          })
+          if (admitted) throw new DomainError('PERSISTENCE_CONFLICT', 'This immutable proxy input is already admitted; use its original idempotency key or retry the existing operation')
+        }
       }
       throw error
     }

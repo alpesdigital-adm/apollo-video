@@ -70,6 +70,26 @@ const colorPipelineBindings = Object.freeze([Object.freeze({
   pipelineHash: colorCompilation.pipeline.pipelineHash,
 })])
 
+test('duplicate immutable proxy input returns a scoped conflict after a concurrent uniqueness race', async () => {
+  const operations = createOperations()
+  const record = { operation: operations.operation, context: { kind: 'project-proxy-render', projectId: 'project-proxy-test',
+    projectVersionId: 'project-version-proxy-test', editPlanSnapshotId: 'snapshot-edit-plan-proxy-test',
+    sourceArtifactId: 'artifact-project-proxy-source', sourceManifestId: 'manifest-project-proxy-source', colorPipelineBindings,
+    inputHash: projectProxyRenderInputHash({ source: source(), colorPipelineBindings }),
+    outputArtifactId: 'artifact-project-proxy-output', outputManifestId: 'manifest-project-proxy-output', originalFileName: 'source-editorial.mp4' } }
+  let scopedLookup
+  const repository = new PrismaPublicOperationRepository({
+    async $transaction() { throw Object.assign(new Error('concurrent immutable input admission'), { code: 'P2002' }) },
+    v2PublicOperation: { async findUnique() { return null } },
+    v2ProjectProxyRenderOperation: { async findFirst(query) { scopedLookup = query; return { operationId: 'private-existing-operation' } } },
+  })
+  await assert.rejects(repository.createOrReplay({ operation: record.operation, context: record.context,
+    authenticationAudit: materializeActorAuditContext(proxyActor()), idempotencyKey: 'different-admission-key', requestFingerprint: 'a'.repeat(64) }),
+  (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT' && !error.message.includes('private-existing-operation'))
+  assert.deepEqual(scopedLookup.where, { workspaceId: record.operation.workspaceId, projectId: record.context.projectId,
+    projectVersionId: record.context.projectVersionId, inputHash: record.context.inputHash })
+})
+
 function proxyActor(credentialId = 'credential-project-proxy-test') {
   const auditContext = createExternalAuditContext({
     clientId: 'client-project-proxy-test', credentialId,
