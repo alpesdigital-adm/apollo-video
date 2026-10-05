@@ -60,6 +60,20 @@ export async function createDashboardPipelineObserver({ page, client, baseUrl, w
         evidence.projects.findLast((entry) => entry.status === 200 && entry.at >= feedAt && entry.projects.some((project) => project.id === projectId)))
       const projected = refetch.projects.find((project) => project.id === projectId)
       if (expectedState) assert.equal(projected.visibleState.label, expectedState)
+      if (operationId && !annotationId) {
+        const persisted = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId } })
+        const projection = projected.dashboard.latestOperation
+        assert.equal(persisted.workspaceId, workspaceId)
+        assert.equal(persisted.projectId, projectId)
+        assert.equal(projection.id, operationId, `${stage}: API identifies the actual worker operation`)
+        assert.equal(projection.status, persisted.status)
+        assert.equal(projection.phase, persisted.phase)
+        assert.deepEqual(projection.progress ?? null, persisted.progressCompleted === null ? null : {
+          completed: persisted.progressCompleted,
+          ...(persisted.progressTotal === null ? {} : { total: persisted.progressTotal }),
+          ...(persisted.progressUnit === null ? {} : { unit: persisted.progressUnit }),
+        }, `${stage}: API progress equals committed worker state`)
+      }
       await until(`${stage}: card matches API`, async () => {
         const card = page.locator(`article[data-project-id="${projectId}"]`)
         return await card.count() === 1 && await card.locator('[data-state]').getAttribute('data-state') === projected.visibleState.label
