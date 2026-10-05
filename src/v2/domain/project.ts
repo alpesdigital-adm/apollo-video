@@ -32,7 +32,7 @@ export const PROJECT_STATUS_TRANSITIONS: Readonly<Record<ProjectStatus, readonly
     generating: projectStatuses('reviewing-assets', 'rendering-proxy', 'failed', 'canceled'),
     'reviewing-assets': projectStatuses('generating', 'rendering-proxy', 'failed', 'canceled'),
     'rendering-proxy': projectStatuses('reviewing-proxy', 'revising', 'failed', 'canceled'),
-    'reviewing-proxy': projectStatuses('revising', 'rendering-final', 'failed', 'canceled'),
+    'reviewing-proxy': projectStatuses('revising', 'rendering-proxy', 'rendering-final', 'failed', 'canceled'),
     revising: projectStatuses('rendering-proxy', 'reviewing-proxy', 'failed', 'canceled'),
     'rendering-final': projectStatuses('completed', 'failed', 'canceled'),
     completed: projectStatuses('archived'),
