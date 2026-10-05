@@ -327,12 +327,7 @@ export async function runBrowserProof({ wave, schemaVersion, envVar, manifestNam
       await boundedClose(`context-${index}`, () => context.close(), cleanupErrors, CLOSE_TIMEOUT_MS, closeSteps)
     }
     await boundedClose('browser', browser && (() => browser.close()), cleanupErrors, CLOSE_TIMEOUT_MS, closeSteps)
-    // BrowserServer.close() was observed to hang on Windows even though the
-    // client side is fully closed. It is recorded, not tolerated blindly: the owned
-    // browser PID must be terminal below (after SIGKILL if needed) or the proof fails.
-    const serverCloseErrors = []
-    await boundedClose('browser-server', browserServer && (() => browserServer.close()), serverCloseErrors, 5000, closeSteps)
-    evidence.postflight.browserServerCloseUnclean = serverCloseErrors.length > 0
+    await boundedClose('browser-server', browserServer && (() => browserServer.close()), cleanupErrors, CLOSE_TIMEOUT_MS, closeSteps)
     evidence.postflight.closeSteps = closeSteps
     evidence.postflight.processAfterClose = browserProcess
       ? { exitCode: browserProcess.exitCode, signalCode: browserProcess.signalCode, killed: browserProcess.killed } : null
