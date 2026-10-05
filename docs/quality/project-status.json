@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-05T12:01:14.225Z",
+  "updatedAt": "2026-10-05T13:35:36.813Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -14651,17 +14651,13 @@
         "0b96ddcb537a-1",
         "acd8f12f509c-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -14695,9 +14691,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W31 comprovado em ambiente controlado. Lacunas: Objective desconhecido bem-formado responde 200 vazio na API enquanto o codec da UI o descarta; campanha, tags e pessoa do PRD fora do recorte; datas só em dias UTC inteiros. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -14711,17 +14713,13 @@
         "7e132977731d-1",
         "3543edbc5940-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -14755,9 +14753,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W32 comprovado em ambiente controlado. Lacunas: As corridas de filtro durante request lenta usam transporte controlado (page.route), não concorrência natural. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -14770,17 +14774,13 @@
       "todoItems": [
         "3543edbc5940-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -14814,9 +14814,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W33 comprovado em ambiente controlado. Lacunas: A sessão de B é emitida pelas primitivas de sessão da aplicação porque o throttle de login já está consumido na jornada. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -14829,17 +14835,13 @@
       "todoItems": [
         "b37d988da372-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -14873,9 +14875,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W34 comprovado em ambiente controlado. Lacunas: Operações, annotations e outputs vêm de seed PG controlado com FKs reais; nenhuma relação produzida por worker/operação real. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -14892,15 +14900,11 @@
       ],
       "state": "pendente-validacao",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "validation",
           "text": "A maioria dos estados vem de seed PG controlado; nenhuma transição executada por worker real, portanto a caixa não está validada integralmente."
@@ -14938,9 +14942,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W35 comprovado em ambiente controlado. Lacunas: A maioria dos estados vem de seed PG controlado; nenhuma transição executada por worker real, portanto a caixa não está validada integralmente. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -14955,15 +14965,11 @@
       ],
       "state": "pendente-validacao",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "validation",
           "text": "Primeiro recorte só cobre eventos de administração de projeto; operações, annotations, progresso e duplicação não emitem atualização. A marca d’água depende de todos os gravadores do outbox usarem o papel de banco da aplicação."
@@ -15001,9 +15007,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W36 comprovado em ambiente controlado. Lacunas: Primeiro recorte só cobre eventos de administração de projeto; operações, annotations, progresso e duplicação não emitem atualização. A marca d’água depende de todos os gravadores do outbox usarem o papel de banco da aplicação. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -15018,17 +15030,13 @@
         "288af260f3e0-1",
         "70e3b8d2cdb3-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -15062,9 +15070,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W37 comprovado em ambiente controlado. Lacunas: Mensagem de conflito exibida é o texto em inglês do catálogo público; casos stale usam retenção controlada do próximo poll do feed (timingAid declarado). Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -15079,17 +15093,13 @@
         "288af260f3e0-1",
         "70e3b8d2cdb3-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -15123,9 +15133,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W38 comprovado em ambiente controlado. Lacunas: Os status anteriores não triviais vêm de UPDATE de fixture no PG, não de render real. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -15139,17 +15155,13 @@
         "1349e49bda43-1",
         "56a977e125cd-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -15183,9 +15195,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W39 comprovado em ambiente controlado. Lacunas: Manual-edit/editorial em cópia não executados no PG (só auditoria e unitários); apenas driver local de storage; um master pequeno sem transcript/proxy/output. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -15202,17 +15220,13 @@
         "ba0e03c8f7d9-1",
         "288af260f3e0-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
-        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -15246,9 +15260,15 @@
           "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
           "role": "controlled-e2e",
           "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
+          "role": "controlled-e2e",
+          "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
       "notes": "Recorte técnico W40 comprovado em ambiente controlado. Lacunas: O editor /projects/[id] não lê mode, então só o destino ?mode=review está provado; 403 via Bearer somente leitura; estados reviewing-proxy/completed por seed PG; 404 por troca de workspace em outra aba. Nenhuma caixa do TODO foi remarcada."
     },
     {
