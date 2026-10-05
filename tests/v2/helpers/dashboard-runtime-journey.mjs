@@ -71,6 +71,13 @@ export async function runDashboardRuntimeJourney(input) {
     return `data:image/png;base64,${bytes.toString('base64')}`
   }
   try {
+    const workspacePreflight = await fetch(`${baseUrl}/v1/projects/${projectId}/workspace`, {
+      headers: { authorization }, signal: AbortSignal.timeout(30000),
+    })
+    const workspacePayload = await workspacePreflight.json()
+    assert.equal(workspacePreflight.status, 200, `Controlled upstream must hydrate through the public workspace API: ${JSON.stringify(workspacePayload)}`)
+    evidence.workspacePreflight = { status: workspacePreflight.status, projectId,
+      currentVersionId: workspacePayload.data.project.currentVersionId }
     const login = await fetch(`${baseUrl}/v1/session`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: uiUsername, password: uiPassword }), signal: AbortSignal.timeout(30000) })
     assert.equal(login.status, 200, await login.text())
