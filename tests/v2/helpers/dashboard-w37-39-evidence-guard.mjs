@@ -169,8 +169,90 @@ export function verifyW38Evidence(directory, context) {
   return { runId: manifest.runId }
 }
 
+export function verifyW39Evidence(directory, context) {
+  const manifest = readManifest(directory, 39, 'w39-duplicate-copy-on-write/v1', context)
+  assert.match(manifest.prefix, /^w39-[a-f0-9]{8}$/)
+  assert.equal(manifest.browser.mutatingRequests, 1)
+  assert.equal(manifest.browser.requests.length, 1)
+  assert.equal(manifest.browser.mobileOverflowPx <= 1, true)
+  const before = manifest.before
+  assert.match(before.master.sha256, /^[a-f0-9]{64}$/)
+  assert.equal(before.master.servedSha256, before.master.sha256)
+  assert.ok(before.master.bytes > 1000)
+  assert.equal(before.objectCounts.projectReferences, 1)
+  assert.equal(before.objectCounts.storageObjects, 1)
+  assert.deepEqual(before.storage, [{ key: before.master.artifactKey, bytes: before.master.bytes, sha256: before.master.sha256 }])
+  const dup = manifest.duplicate
+  assert.equal(dup.responseStatus, 201)
+  assert.equal(dup.request.method, 'POST')
+  assert.match(dup.request.path, /^\/v1\/projects\/[^/]+\/duplicates$/)
+  assert.deepEqual(Object.keys(dup.request.body).toSorted(), ['expectedVersionHash', 'expectedVersionId', 'name'])
+  assert.equal(dup.request.body.expectedVersionHash, before.source.versionBaseHash)
+  assert.equal(dup.request.body.expectedVersionId, before.source.versionId)
+  assert.notEqual(dup.copy.projectId, before.source.project.id)
+  assert.notEqual(dup.copy.versionId, before.source.versionId)
+  assert.equal(dup.copy.project.duplicatedFromProjectId, before.source.project.id)
+  assert.equal(dup.lineage.forkedFromProjectId, before.source.project.id)
+  assert.equal(dup.lineage.forkedFromVersionId, before.source.versionId)
+  assert.equal(dup.lineage.parentVersionId, null)
+  assert.equal(dup.versionHash.differs, true)
+  assert.equal(dup.versionHash.followsContractFormula, true)
+  assert.notEqual(dup.versionHash.copy, dup.versionHash.source)
+  assert.equal(dup.versionHash.source, before.source.versionBaseHash)
+  assert.ok(dup.snapshots.length >= 3)
+  for (const pair of dup.snapshots) {
+    assert.notEqual(pair.copyId, pair.sourceId)
+    assert.equal(pair.equalContent, true)
+    assert.ok(before.source.snapshots.some((item) => item.id === pair.sourceId && item.contentHash === pair.contentHash))
+  }
+  assert.deepEqual(dup.sharedArtifactIds, [before.master.artifactId])
+  assert.equal(dup.copiedBytes, 0)
+  assert.equal(dup.objectCounts.projectReferences, 2)
+  assert.equal(dup.objectCounts.storageObjects, before.objectCounts.storageObjects)
+  assert.equal(dup.objectCounts.workspaceMediaArtifacts, before.objectCounts.workspaceMediaArtifacts)
+  assert.equal(dup.objectCounts.manifests, before.objectCounts.manifests)
+  assert.deepEqual(dup.storage, before.storage, 'the stored master is byte-for-byte the same single object')
+  assert.equal(dup.servedSha256After, before.master.sha256)
+  assert.equal(dup.artifactRowUnchanged, true)
+  assert.equal(dup.sourceUnchanged, true)
+  assert.equal(dup.destination.urlPath, `/projects/${dup.copy.projectId}`)
+  assert.equal(dup.destination.workspaceStatus, 200)
+  assert.deepEqual(dup.destination.mediaArtifactIds, [before.master.artifactId])
+  assert.equal(manifest.command.type, 'set-project-policy-overrides')
+  assert.equal(manifest.command.copyEditCommands >= 1, true)
+  assert.equal(manifest.command.sourceEditCommands, 0)
+  assert.equal(manifest.command.sourceVersionId, before.source.versionId)
+  assert.equal(manifest.command.sourceVersionBaseHashBefore, manifest.command.sourceVersionBaseHashAfter)
+  assert.equal(manifest.command.sourceSnapshotHashesUnchanged, true)
+  assert.equal(manifest.command.cards.source, 'v1')
+  assert.equal(manifest.command.cards.copy, `v${manifest.command.copyVersionSequenceAfter}`)
+  assert.ok(Array.isArray(manifest.knownDefects))
+  for (const defect of manifest.knownDefects) {
+    assert.equal(typeof defect.id, 'string')
+    assert.equal(defect.wroteNothing, true, `${defect.id} must write nothing even when it is refused`)
+  }
+  verifyCases(manifest, [
+    'idempotent-replay', 'idempotency-payload-mismatch', 'stale-version-hash', 'stale-version-after-command-on-copy',
+    'injected-payload', 'foreign-workspace', 'insufficient-scope-read-only', 'anonymous', 'session-without-origin',
+    'foreign-workspace-cannot-read-shared-master',
+  ])
+  for (const item of manifest.cases) {
+    if (item.request) assert.equal(item.persistedUnchanged, true, `${item.id} must change nothing`)
+  }
+  assert.equal(manifest.final.projects, 1)
+  assert.equal(manifest.final.references, 2)
+  assert.equal(manifest.final.storageObjects, 1)
+  assert.equal(manifest.final.masterSha256Unchanged, true)
+  assert.match(manifest.postflight.storageCleanup, /^(artifact-root-removed|fixture-directory-removed)$/)
+  verifyScreenshots(directory, manifest, [
+    'w39-desktop-source-before.png', 'w39-desktop-destination-copy.png', 'w39-mobile-destination-copy.png',
+    'w39-desktop-source-and-copy.png', 'w39-desktop-after-command.png', 'w39-mobile-source-and-copy.png',
+  ])
+  return { runId: manifest.runId }
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const verifiers = { w37: verifyW37Evidence, w38: verifyW38Evidence }
+  const verifiers = { w37: verifyW37Evidence, w38: verifyW38Evidence, w39: verifyW39Evidence }
   try {
     const verify = verifiers[process.argv[2]]
     assert.ok(verify, 'usage: dashboard-w37-39-evidence-guard.mjs w37|w38|w39 <evidence-dir>')
