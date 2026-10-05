@@ -208,7 +208,7 @@ export default function MediaLibraryWorkspace() {
             <div><dt>Origem</dt><dd>{detail.origin.type} {detail.origin.parentArtifactId}</dd></div>
             {detail.source.semanticRange ? <div><dt>Intervalo no original</dt><dd>{detail.source.semanticRange.startMs}–{detail.source.semanticRange.endMs} ms · virtual · sem duplicar bytes</dd><dd className="break-all font-mono text-xs">{detail.source.segmentHash}</dd></div> : null}
           </dl>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">{(['thumbnail', 'waveform'] as const).map((kind) => <div key={kind}><p>{kind === 'thumbnail' ? 'Miniatura' : 'Forma de onda'}</p>{detail.preview[kind].status === 'available' && detail.rights.status === 'eligible' ? <LibraryPreview itemId={detail.id} kind={kind} /> : <p className="text-sm text-[#938d83]">Preview indisponível.</p>}</div>)}</div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">{(['thumbnail', 'waveform'] as const).map((kind) => <div key={kind}><p>{kind === 'thumbnail' ? 'Miniatura' : 'Forma de onda'}</p>{detail.preview[kind].status === 'available' && detail.rights.status === 'eligible' ? <LibraryPreview itemId={detail.id} kind={kind} onAuthorizationLost={clearPrivateState} /> : <p className="text-sm text-[#938d83]">Preview indisponível.</p>}</div>)}</div>
           {detail.technical.mediaType === 'video' || detail.technical.mediaType === 'audio' ? <form className="mt-6 grid gap-3 sm:grid-cols-2" onSubmit={(event) => void createSegment(event)}>
             <h3 className="sm:col-span-2">{detail.source.type === 'segment' ? 'Criar segmento dentro deste intervalo' : 'Criar segmento virtual'}</h3>
             <label>Nome<input className="block w-full bg-black p-2" value={range.label} onChange={(event) => setRange({ ...range, label: event.target.value })} required maxLength={200} /></label>
@@ -242,20 +242,22 @@ export default function MediaLibraryWorkspace() {
   </main>
 }
 
-function LibraryPreview({ itemId, kind }: { itemId: string; kind: 'thumbnail' | 'waveform' }) {
+function LibraryPreview({ itemId, kind, onAuthorizationLost }: { itemId: string; kind: 'thumbnail' | 'waveform'; onAuthorizationLost: () => void }) {
   const [url, setUrl] = useState('')
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     const controller = new AbortController(); let objectUrl = ''
     setUrl(''); setFailed(false)
     void fetch(`/v1/media/library/${encodeURIComponent(itemId)}/previews/${kind}`, { signal: controller.signal, cache: 'no-store' }).then(async (response) => {
+      if (controller.signal.aborted) return
+      if (response.status === 401 || response.status === 403) { onAuthorizationLost(); return }
       if (!response.ok) throw new Error('Preview unavailable')
       const blob = await response.blob()
       if (controller.signal.aborted) return
       objectUrl = URL.createObjectURL(blob); setUrl(objectUrl)
     }).catch(() => { if (!controller.signal.aborted) setFailed(true) })
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [itemId, kind])
+  }, [itemId, kind, onAuthorizationLost])
   if (failed) return <p role="status">Preview indisponível.</p>
   if (!url) return <p role="status">Carregando preview…</p>
   // The object URL contains authenticated bytes; it is revoked on selection change/unmount.
