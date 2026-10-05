@@ -141,7 +141,177 @@ export function verifyW31Evidence(directory, context) {
   return { sourceCommit: context.sourceCommit, ciRunId: context.ciRunId, applicationName: context.applicationName, runId: manifest.runId }
 }
 
-const VERIFIERS = { w31: verifyW31Evidence }
+const W32_UI = [
+  'first-page-24-with-next-cursor', 'load-more-completes-27', 'reload-resets-to-first-page',
+  'exactly-24-has-no-next-cursor', 'zero-results-without-progress',
+  'controlled-filter-change-during-slow-first-page', 'controlled-filter-change-during-slow-load-more',
+  'controlled-foreign-cursor-rejected-then-recovery', 'mobile-after-load-more',
+]
+const W32_HTTP = [
+  'first-page', 'second-page-from-cursor', 'walk-limit-24', 'walk-limit-5', 'walk-limit-1',
+  'owner-a-exactly-24', 'owner-b-three', 'zero-results', 'cursor-other-filter-owner',
+  'cursor-other-filter-removed-locale', 'cursor-other-filter-text', 'cursor-same-filter-accepted', 'cursor-malformed',
+]
+
+export function verifyW32Evidence(directory, context) {
+  const manifest = loadManifest(directory, 'w32-manifest.json', 'w32-dashboard-pagination/v1', context)
+  assert.equal(manifest.browser?.mobileOverflowPx <= 1, true)
+  assertCounters(manifest)
+  const sequence = manifest.expectedSequence
+  assert.equal(sequence?.length, 27)
+  assert.equal(new Set(sequence).size, 27)
+  assert.deepEqual([...sequence].sort(), Array.from({ length: 27 }, (_, index) => `w32-p${String(index).padStart(2, '0')}`))
+  assert.equal(manifest.fixtures?.length, 27)
+  // Real createdAt ties, one of them across the 24/25 page boundary.
+  assert.ok(manifest.ties?.groups?.length >= 2 && manifest.ties.groups.every((group) => group.ids.length >= 2))
+  assert.deepEqual(manifest.ties.boundary.positions, [24, 25])
+  assert.deepEqual(manifest.ties.boundary.ids, [sequence[23], sequence[24]])
+  const first = sequence.slice(0, 24)
+  const rest = sequence.slice(24)
+  assert.deepEqual(manifest.httpCases?.map((item) => item.id), W32_HTTP)
+  const http = Object.fromEntries(manifest.httpCases.map((item) => [item.id, item]))
+  assert.deepEqual(http['first-page'].ids, first)
+  assert.equal(http['first-page'].hasNextCursor, true)
+  assert.deepEqual(http['second-page-from-cursor'].ids, rest)
+  assert.equal(http['second-page-from-cursor'].hasNextCursor, false)
+  for (const id of ['walk-limit-24', 'walk-limit-5', 'walk-limit-1']) assert.deepEqual(http[id].ids, sequence, id)
+  assert.equal(http['walk-limit-5'].pages, 6)
+  assert.equal(http['owner-a-exactly-24'].ids.length, 24)
+  assert.equal(http['owner-a-exactly-24'].hasNextCursor, false)
+  assert.equal(http['owner-b-three'].ids.length, 3)
+  assert.deepEqual(http['zero-results'].ids, [])
+  assert.deepEqual(http['cursor-same-filter-accepted'].ids, rest)
+  for (const id of ['cursor-other-filter-owner', 'cursor-other-filter-removed-locale', 'cursor-other-filter-text', 'cursor-malformed']) {
+    assert.equal(http[id].status, 422, id)
+    assert.equal(http[id].errorCode, 'INVALID_ARGUMENT', id)
+    assert.equal(http[id].ids, null, id)
+  }
+  assert.deepEqual(manifest.uiCases?.map((item) => item.id), W32_UI)
+  const ui = Object.fromEntries(manifest.uiCases.map((item) => [item.id, item]))
+  for (const entry of manifest.uiCases) {
+    assert.equal(entry.status, 200, `${entry.id}: status`)
+    assert.deepEqual(entry.responseIds, entry.expectedIds, `${entry.id}: response vs oracle`)
+    assert.equal(entry.request.limit, '24')
+  }
+  const firstPage = ui['first-page-24-with-next-cursor']
+  assert.deepEqual(firstPage.cardIds, first)
+  assert.equal(firstPage.hasNextCursor, true)
+  assert.equal(firstPage.loadMoreVisible, true)
+  assert.equal(firstPage.nextCursorMatchesHttp, true)
+  assert.deepEqual(firstPage.request, { limit: '24', locale: 'qaa-w32' })
+  const more = ui['load-more-completes-27']
+  assert.deepEqual(more.cardIds, sequence)
+  assert.deepEqual(more.responseIds, rest)
+  assert.match(more.request.after, /^sha256:[a-f0-9]{16}$/)
+  assert.equal(more.loadMoreVisible, false)
+  assert.deepEqual(ui['reload-resets-to-first-page'].cardIds, first)
+  assert.equal(ui['exactly-24-has-no-next-cursor'].cardIds.length, 24)
+  assert.equal(ui['exactly-24-has-no-next-cursor'].hasNextCursor, false)
+  assert.equal(ui['exactly-24-has-no-next-cursor'].loadMoreVisible, false)
+  assert.deepEqual(ui['zero-results-without-progress'].cardIds, [])
+  assert.equal(ui['zero-results-without-progress'].loadMoreVisible, false)
+  for (const id of ['controlled-filter-change-during-slow-first-page', 'controlled-filter-change-during-slow-load-more']) {
+    const entry = ui[id]
+    assert.equal(entry.controlled, true, `${id}: must be labelled controlled`)
+    assert.equal(entry.staleAnswerReleased, true)
+    assert.deepEqual(entry.cardIds, entry.expectedIds, `${id}: the newer filter owns the cards`)
+    assert.ok(entry.stableSamples >= 10, `${id}: cards sampled while the stale answer was released`)
+    assert.ok(entry.staleExpectedIds.length > 0 && entry.staleExpectedIds.every((stale) => !entry.cardIds.includes(stale)), `${id}: stale rows rendered`)
+    assert.ok(entry.staleRequest && entry.staleRequest.limit === '24')
+  }
+  const foreign = ui['controlled-foreign-cursor-rejected-then-recovery']
+  assert.equal(foreign.controlled, true)
+  assert.equal(foreign.rejectedStatus, 422)
+  assert.equal(foreign.rejectedCode, 'INVALID_ARGUMENT')
+  assert.deepEqual(foreign.cardsKeptDuringRejection, first)
+  assert.deepEqual(foreign.responseIds, rest)
+  assert.deepEqual(ui['mobile-after-load-more'].responseIds, rest)
+  assert.ok(manifest.requests.length >= 10 && manifest.requests.every((request) => request.method === 'GET' && request.path === '/v1/projects'))
+  assert.ok(manifest.responses.some((response) => response.status === 422 && response.errorCode === 'INVALID_ARGUMENT'))
+  assertScreenshots(directory, manifest, ['w32-desktop-first-page.png', 'w32-desktop-after-load-more.png', 'w32-mobile-after-load-more.png'])
+  return { sourceCommit: context.sourceCommit, ciRunId: context.ciRunId, applicationName: context.applicationName, runId: manifest.runId }
+}
+
+const W33_HTTP = [
+  'a-session-scope', 'a-bearer-scope', 'b-session-scope', 'b-bearer-scope', 'a-shared-name', 'b-shared-name',
+  'a-zero-owner-only-in-b', 'a-zero-text-only-in-b', 'b-zero-text-only-in-a', 'a-cursor-under-a',
+  'a-cursor-under-b-session', 'a-cursor-under-b-bearer', 'b-cursor-under-a-session', 'a-cursor-other-filter-under-a',
+  'a-cursor-other-text-under-a', 'forged-cursor-with-b-pointer-under-a', 'project-own-a-session',
+  'project-b-under-a-session', 'project-own-b-session', 'project-a-under-b-session',
+]
+const W33_UI = [
+  'workspace-a-cards', 'workspace-b-cards', 'workspace-a-zero-by-isolation', 'workspace-b-zero-by-isolation',
+  'workspace-a-shared-name', 'workspace-b-shared-name', 'session-revoked-during-use-redirects-to-login', 'mobile-workspace-b',
+]
+
+export function verifyW33Evidence(directory, context) {
+  const manifest = loadManifest(directory, 'w33-manifest.json', 'w33-dashboard-workspace-isolation/v1', context)
+  assert.equal(manifest.browser?.mobileOverflowPx <= 1, true)
+  for (const workspace of ['a', 'b']) {
+    assert.deepEqual(manifest.counts?.after?.[workspace], manifest.counts?.before?.[workspace], `workspace ${workspace} counters`)
+    assert.deepEqual(manifest.projectRowsBefore?.[workspace], manifest.projectRowsAfter?.[workspace])
+  }
+  assert.notEqual(manifest.workspaces.a, manifest.workspaces.b)
+  const idsA = ['w33-a-4', 'w33-a-3', 'w33-a-2', 'w33-a-1']
+  const idsB = ['w33-b-5', 'w33-b-4', 'w33-b-3', 'w33-b-2', 'w33-b-1']
+  assert.equal(manifest.fixtures?.a?.length, 4)
+  assert.equal(manifest.fixtures?.b?.length, 5)
+  assert.deepEqual(manifest.httpCases?.map((item) => item.id), W33_HTTP)
+  const http = Object.fromEntries(manifest.httpCases.map((item) => [item.id, item]))
+  for (const [id, expected] of [
+    ['a-session-scope', idsA], ['a-bearer-scope', idsA], ['b-session-scope', idsB], ['b-bearer-scope', idsB],
+    ['a-shared-name', ['w33-a-3']], ['b-shared-name', ['w33-b-3']],
+    ['a-zero-owner-only-in-b', []], ['a-zero-text-only-in-b', []], ['b-zero-text-only-in-a', []],
+    ['a-cursor-under-a', ['w33-a-2', 'w33-a-1']],
+  ]) {
+    assert.equal(http[id].status, 200, id)
+    assert.deepEqual(http[id].ids, expected, id)
+  }
+  assert.ok(http['a-session-scope'].ids.every((id) => !idsB.includes(id)))
+  assert.ok(http['forged-cursor-with-b-pointer-under-a'].ids.every((id) => idsA.includes(id)), 'forged cursor must not surface B')
+  for (const id of ['a-cursor-under-b-session', 'a-cursor-under-b-bearer', 'b-cursor-under-a-session', 'a-cursor-other-filter-under-a', 'a-cursor-other-text-under-a']) {
+    assert.equal(http[id].status, 422, `${id}: a mismatched cursor must be a contract error, never a 200`)
+    assert.equal(http[id].errorCode, 'INVALID_ARGUMENT', id)
+    assert.equal(http[id].ids, null, id)
+  }
+  assert.equal(http['a-cursor-under-b-session'].actor, 'b-session')
+  assert.equal(http['a-cursor-under-b-bearer'].actor, 'b-bearer')
+  for (const id of ['project-b-under-a-session', 'project-a-under-b-session']) {
+    assert.equal(http[id].status, 404, id)
+    assert.equal(http[id].errorCode, 'PROJECT_NOT_FOUND', id)
+  }
+  assert.equal(http['project-own-a-session'].status, 200)
+  assert.equal(http['project-own-b-session'].status, 200)
+  assert.deepEqual(manifest.authCases?.map((item) => [item.id, item.status, item.code]), [
+    ['anonymous', 401, 'AUTH_INVALID'], ['expired-session', 401, 'AUTH_INVALID'], ['revoked-session', 401, 'AUTH_INVALID'],
+    ['unknown-session-token', 401, 'AUTH_INVALID'], ['malformed-bearer', 401, 'AUTH_INVALID'],
+    ['bearer-without-projects-read', 403, 'AUTH_SCOPE_REQUIRED'],
+  ])
+  assert.deepEqual(manifest.pageCases?.map((item) => item.id).sort(), ['anonymous-page', 'expired-session-page', 'revoked-session-page'])
+  assert.ok(manifest.pageCases.every((item) => item.landedPath === '/login' && item.next === '/'))
+  assert.deepEqual(manifest.uiCases?.map((item) => item.id), W33_UI)
+  const ui = Object.fromEntries(manifest.uiCases.map((item) => [item.id, item]))
+  for (const id of W33_UI.filter((item) => item !== 'session-revoked-during-use-redirects-to-login')) {
+    const entry = ui[id]
+    assert.equal(entry.status, 200, id)
+    assert.deepEqual(entry.responseIds, entry.expectedIds, `${id}: response vs PostgreSQL oracle`)
+    assert.deepEqual(entry.cardIds, entry.expectedIds, `${id}: cards vs PostgreSQL oracle`)
+  }
+  assert.deepEqual(ui['workspace-a-cards'].cardIds, idsA)
+  assert.deepEqual(ui['workspace-b-cards'].cardIds, idsB)
+  assert.deepEqual(ui['mobile-workspace-b'].cardIds, idsB)
+  assert.ok(ui['workspace-a-zero-by-isolation'].existsInOtherWorkspace > 0 && ui['workspace-b-zero-by-isolation'].existsInOtherWorkspace > 0)
+  assert.deepEqual(ui['workspace-a-shared-name'].cardIds, ['w33-a-3'])
+  assert.deepEqual(ui['workspace-b-shared-name'].cardIds, ['w33-b-3'])
+  assert.equal(ui['session-revoked-during-use-redirects-to-login'].status, 401)
+  assert.equal(ui['session-revoked-during-use-redirects-to-login'].landedPath, '/login')
+  assert.ok(manifest.requests.length >= 8 && manifest.requests.every((request) => request.method === 'GET' && request.path === '/v1/projects'))
+  assert.ok(manifest.responses.some((response) => response.status === 401))
+  assertScreenshots(directory, manifest, ['w33-desktop-workspace-a.png', 'w33-desktop-workspace-b.png', 'w33-mobile-workspace-b.png'])
+  return { sourceCommit: context.sourceCommit, ciRunId: context.ciRunId, applicationName: context.applicationName, runId: manifest.runId }
+}
+
+const VERIFIERS = { w31: verifyW31Evidence, w32: verifyW32Evidence, w33: verifyW33Evidence }
 
 export function verifyDashboardListEvidence(wave, directory, context) {
   const verify = VERIFIERS[wave]

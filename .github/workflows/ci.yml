@@ -794,6 +794,7 @@ jobs:
           APOLLO_W29_EVIDENCE_DIR: ${{ runner.temp }}/w29-lut-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_W30_EVIDENCE_DIR: ${{ runner.temp }}/w30-dashboard-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_W31_EVIDENCE_DIR: ${{ runner.temp }}/w31-filters-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_W32_EVIDENCE_DIR: ${{ runner.temp }}/w32-pagination-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
 
       - name: Verify Wave 29 browser, evidence and PostgreSQL postflight
@@ -903,6 +904,35 @@ jobs:
         with:
           name: w31-filters-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/w31-filters-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify Wave 32 pagination evidence and PostgreSQL postflight
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        run: |
+          set -euo pipefail
+          mkdir -p "$APOLLO_W32_EVIDENCE_DIR"
+          remaining=unknown
+          trap 'printf "{\"schemaVersion\":\"w32-ci-postflight/v1\",\"applicationName\":\"%s\",\"remainingBackends\":\"%s\"}\n" "$APOLLO_PUBLIC_API_APP_NAME" "$remaining" > "$APOLLO_W32_EVIDENCE_DIR/w32-ci-postflight.json"' EXIT
+          test -x /usr/bin/google-chrome
+          export PGPASSWORD=apollo-ci
+          for _ in $(seq 1 15); do
+            remaining="$(/usr/lib/postgresql/16/bin/psql -h 127.0.0.1 -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname='apollo_v2' and application_name='$APOLLO_PUBLIC_API_APP_NAME'")"
+            test "$remaining" != 0 || break
+            sleep 1
+          done
+          test "$remaining" = 0 || { printf 'Wave 32 PostgreSQL sessions remain after integration.\n' >&2; exit 1; }
+          node tests/v2/helpers/dashboard-list-evidence-guard.mjs w32 "$APOLLO_W32_EVIDENCE_DIR"
+        env:
+          APOLLO_PUBLIC_API_APP_NAME: apollo-video-e2e-w29-ci
+          APOLLO_W32_EVIDENCE_DIR: ${{ runner.temp }}/w32-pagination-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish Wave 32 pagination evidence
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: w32-pagination-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w32-pagination-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 14
 

@@ -5621,6 +5621,16 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(w31.outcome, 'passed')
 
+    // --- W32 (stream s1) ---
+    // 27 fixtures (prefix w32-, dedicated locale qaa-w32, real createdAt ties), created in the helper.
+    const { proveW32Pagination } = await import('./helpers/dashboard-w32-pagination.mjs')
+    const w32 = await proveW32Pagination({
+      baseUrl, client, workspaceId, creatorClientId: apiClientId,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w32.outcome, 'passed')
+
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
         id_clientId: {
