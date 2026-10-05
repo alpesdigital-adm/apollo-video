@@ -215,7 +215,7 @@ function w35Manifest(directory) {
       visibleState: { schemaVersion: 'visible-state/v1', label: status, tone, primaryAction: action },
       expectedCard: { badgeText: badge, primaryButton: button },
       destination: {
-        primary: { button, pathname: `/projects/${projectId}`, search: '' },
+        primary: { button, pathname: `/projects/${projectId}`, search: name === 'w35-review' ? '?mode=review' : '' },
         ...(name === 'w35-review' ? { review: { button: 'Revisar', pathname: `/projects/${projectId}`, search: '?mode=review' } } : {}),
       },
       card: { desktop: clone(observed), mobile: clone(observed) },
@@ -268,6 +268,8 @@ test('W35 guard rejects wrong label, tone, action, destination, progress, proven
     'card badge drift': (m) => { state(m, 'w35-archived').card.mobile.badgeText = 'Concluído' },
     'primary destination drift': (m) => { state(m, 'w35-draft').destination.primary.pathname = '/projects/other' },
     'review destination lost': (m) => { delete state(m, 'w35-review').destination.review },
+    'W40 primary review action without review mode': (m) => { state(m, 'w35-review').destination.primary.search = '' },
+    'W40 non-review primary action with review mode': (m) => { state(m, 'w35-draft').destination.primary.search = '?mode=review' },
     'unmeasured shows a bar': (m) => { state(m, 'w35-unmeasured').card.desktop.bar = { now: '10', width: 'width: 10%;' } },
     'unmeasured shows a percentage': (m) => { state(m, 'w35-unmeasured').card.mobile.percentTexts = ['10%'] },
     'measured shows the wrong number': (m) => { state(m, 'w35-processing-25').card.desktop.bar.now = '40' },

@@ -16,6 +16,10 @@ import {
   type OutputAspectRatio,
 } from '@/v2/domain/output-spec'
 import { createProductionBrief } from '@/v2/domain/production-brief'
+import {
+  projectDashboardDestination,
+  projectPrimaryActionDestination,
+} from '@/v2/domain/project-dashboard'
 import type {
   VisibleState,
   VisibleStateAction,
@@ -923,11 +927,11 @@ export default function Dashboard() {
                           <div className="mt-5 border-t border-white/[0.06] pt-4">
                             <div className="flex items-center justify-between gap-3">
                               <p className="text-[11px] text-[#625f59]">Atividade em {new Date(project.dashboard.lastActivityAt).toLocaleDateString('pt-BR')}</p>
-                              <button className="text-xs font-semibold text-[#d6ac49] transition hover:text-[#f0ca6d]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">{actionLabel} →</button>
+                              <button className="text-xs font-semibold text-[#d6ac49] transition hover:text-[#f0ca6d]" onClick={() => router.push(projectPrimaryActionDestination(project.id, project.visibleState.primaryAction))} type="button">{actionLabel} →</button>
                             </div>
                             <div className="mt-3 grid grid-cols-3 gap-1.5 text-[10px]">
-                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">Abrir</button>
-                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}?mode=review`)} type="button">Revisar</button>
+                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c]" onClick={() => router.push(projectDashboardDestination(project.id, 'open'))} type="button">Abrir</button>
+                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c]" onClick={() => router.push(projectDashboardDestination(project.id, 'review'))} type="button">Revisar</button>
                               <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c] disabled:cursor-not-allowed disabled:opacity-35" disabled={actionBusyProjectId !== null || !project.currentVersionId} onClick={() => void duplicateProject(project)} type="button">Duplicar</button>
                               <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c] disabled:cursor-not-allowed disabled:opacity-35" disabled={actionBusyProjectId !== null} onClick={() => openQuickAction('rename', project)} type="button">Renomear</button>
                               <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#c76c6c]/35 hover:text-[#df8c8c] disabled:cursor-not-allowed disabled:opacity-35" disabled={actionBusyProjectId !== null || !ARCHIVABLE_PROJECT_STATUSES.has(project.status)} onClick={() => openQuickAction('archive', project)} title={ARCHIVABLE_PROJECT_STATUSES.has(project.status) ? 'Arquivar projeto' : 'Conclua ou cancele o processamento antes de arquivar'} type="button">Arquivar</button>

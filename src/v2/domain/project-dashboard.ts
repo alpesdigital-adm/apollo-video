@@ -211,3 +211,28 @@ export function createProjectDashboardRecord(input: {
     }),
   })
 }
+
+export type ProjectDashboardDestinationIntent = 'open' | 'review'
+
+/**
+ * Where a dashboard card navigates. Review mode is the `mode=review` query the
+ * Revisar button has always used; the primary action of a project awaiting
+ * review must reach the same place instead of the plain workspace.
+ */
+export function projectDashboardDestination(
+  projectId: string,
+  intent: ProjectDashboardDestinationIntent,
+): string {
+  const path = `/projects/${encodeURIComponent(projectId)}`
+  return intent === 'review' ? `${path}?mode=review` : path
+}
+
+export function projectPrimaryActionDestination(
+  projectId: string,
+  primaryAction: string,
+): string {
+  return projectDashboardDestination(
+    projectId,
+    primaryAction === 'review-output' ? 'review' : 'open',
+  )
+}

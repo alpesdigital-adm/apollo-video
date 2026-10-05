@@ -380,7 +380,9 @@ export async function proveDashboardStates({
           await page.waitForTimeout(500)
           const landed = new URL(page.url())
           assert.equal(landed.pathname, `/projects/${id}`, `${name}: primary destination`)
-          assert.equal(landed.search, '', `${name}: primary destination carries no mode`)
+          // W40: the primary action of the awaiting-review state now opens review mode; every other state opens the plain workspace.
+          const expectedSearch = name === 'w35-review' ? '?mode=review' : ''
+          assert.equal(landed.search, expectedSearch, `${name}: primary destination ${expectedSearch ? 'opens review mode' : 'carries no mode'}`)
           destinations[name] = { primary: { button: want.primaryButton, pathname: landed.pathname, search: landed.search } }
           if (name === 'w35-review') {
             await load()

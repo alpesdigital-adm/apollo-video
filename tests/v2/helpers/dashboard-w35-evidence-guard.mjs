@@ -88,7 +88,8 @@ export function verifyW35Evidence(directory, { sourceCommit, ciRunId, applicatio
       }
     }
     assert.equal(state.destination?.primary?.pathname, `/projects/${state.projectId}`)
-    assert.equal(state.destination.primary.search, '')
+    // W40: only the awaiting-review primary action opens review mode.
+    assert.equal(state.destination.primary.search, state.name === 'w35-review' ? '?mode=review' : '')
     assert.equal(state.destination.primary.button, pinned.button)
   }
   assert.deepEqual([...realStates].sort(), ['w35-archived', 'w35-draft'])

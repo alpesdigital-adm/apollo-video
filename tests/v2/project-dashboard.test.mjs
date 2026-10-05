@@ -4,7 +4,12 @@ import test from 'node:test'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 
-import { createProjectDashboardRecord } from '../../src/v2/domain/project-dashboard.ts'
+import {
+  createProjectDashboardRecord,
+  projectDashboardDestination,
+  projectPrimaryActionDestination,
+} from '../../src/v2/domain/project-dashboard.ts'
+import { VISIBLE_STATE_ACTIONS } from '../../src/v2/domain/visible-state.ts'
 import { createProject } from '../../src/v2/domain/project.ts'
 import { PrismaProjectQueryRepository } from '../../src/v2/infrastructure/prisma/project-query-repository.ts'
 import { presentProjectDashboard } from '../../src/v2/public-api/presenters.ts'
@@ -447,4 +452,22 @@ test('F1.003 a refused project administration keeps its error in the open dialog
   assert.match(dashboardSource, /setQuickActionError\(error instanceof Error[\s\S]{0,200}setRefreshRevision\(\(value\) => value \+ 1\)/)
   // The dialog reads the live card row, so the retry carries the refreshed revision.
   assert.match(dashboardSource, /projects\.find\(\(item\) => item\.id === quickActionDialog\.project\.id\)/)
+})
+
+test('W40 the primary "Revisar agora" action opens the project in review mode, the same destination as the Revisar button', () => {
+  // Before W40 the primary action of the awaiting-review card navigated to
+  // /projects/{id} with no mode, so only the secondary button reached review mode.
+  assert.equal(projectDashboardDestination('project-1', 'open'), '/projects/project-1')
+  assert.equal(projectDashboardDestination('project-1', 'review'), '/projects/project-1?mode=review')
+  assert.equal(projectDashboardDestination('a/b c', 'review'), '/projects/a%2Fb%20c?mode=review')
+  assert.equal(projectPrimaryActionDestination('project-1', 'review-output'), '/projects/project-1?mode=review')
+  for (const action of VISIBLE_STATE_ACTIONS.filter((item) => item !== 'review-output')) {
+    assert.equal(projectPrimaryActionDestination('project-1', action), '/projects/project-1', `${action} opens the plain workspace`)
+  }
+  // The card routes every navigation through the domain destination, never a hand-built URL.
+  assert.match(dashboardSource, /projectPrimaryActionDestination\(project\.id, project\.visibleState\.primaryAction\)/)
+  assert.match(dashboardSource, /projectDashboardDestination\(project\.id, 'review'\)/)
+  assert.match(dashboardSource, /projectDashboardDestination\(project\.id, 'open'\)/)
+  assert.equal(/router\.push\(`\/projects\/\$\{encodeURIComponent\(project\.id\)\}(\?mode=review)?`\)/.test(dashboardSource), false,
+    'no card button builds its own /projects/{id} URL')
 })

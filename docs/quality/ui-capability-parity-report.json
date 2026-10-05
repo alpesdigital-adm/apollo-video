@@ -2293,7 +2293,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:286",
+      "uiAction": "src/app/ProjectsPageClient.tsx:290",
       "capabilityId": "apollo.projects.list",
       "capabilityVersion": "4.0.0",
       "endpoint": "GET /v1/projects",
@@ -2313,7 +2313,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:373",
+      "uiAction": "src/app/ProjectsPageClient.tsx:377",
       "capabilityId": "apollo.projects.list",
       "capabilityVersion": "4.0.0",
       "endpoint": "GET /v1/projects",
@@ -2333,7 +2333,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:443",
+      "uiAction": "src/app/ProjectsPageClient.tsx:447",
       "capabilityId": "apollo.projects.create",
       "capabilityVersion": "5.0.0",
       "endpoint": "POST /v1/projects",
@@ -2353,7 +2353,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:533",
+      "uiAction": "src/app/ProjectsPageClient.tsx:537",
       "capabilityId": "apollo.projects.rename",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/rename",
@@ -2372,7 +2372,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:537",
+      "uiAction": "src/app/ProjectsPageClient.tsx:541",
       "capabilityId": "apollo.projects.archive",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/archive",
@@ -2391,7 +2391,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:540",
+      "uiAction": "src/app/ProjectsPageClient.tsx:544",
       "capabilityId": "apollo.projects.restore",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/restore",
@@ -2410,7 +2410,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:590",
+      "uiAction": "src/app/ProjectsPageClient.tsx:594",
       "capabilityId": "apollo.projects.workspace.current.read",
       "capabilityVersion": "10.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
@@ -2430,7 +2430,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:610",
+      "uiAction": "src/app/ProjectsPageClient.tsx:614",
       "capabilityId": "apollo.projects.duplicates.create",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/projects/{projectId}/duplicates",
