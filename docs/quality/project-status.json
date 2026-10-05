@@ -14898,8 +14898,8 @@
         "0944e64350b1-1",
         "ba0e03c8f7d9-1"
       ],
-      "state": "pendente-validacao",
-      "construction": "implemented",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
@@ -14950,7 +14950,7 @@
           "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
+      "nextAction": "Comprovar transições de estado por serviços e workers reais, incluindo progresso, revisão, falha e conclusão; depois integrar e validar CI. Implantação e aceite permanecem separados.",
       "notes": "Recorte técnico W35 comprovado em ambiente controlado. Lacunas: A maioria dos estados vem de seed PG controlado; nenhuma transição executada por worker real, portanto a caixa não está validada integralmente. Nenhuma caixa do TODO foi remarcada."
     },
     {
@@ -14963,8 +14963,8 @@
       "todoItems": [
         "d1048dd7b809-1"
       ],
-      "state": "pendente-validacao",
-      "construction": "implemented",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
@@ -15015,7 +15015,7 @@
           "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
         }
       ],
-      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
+      "nextAction": "Ampliar e comprovar eventos transacionais de operação, annotation e progresso até o dashboard, com isolamento e ordenação; depois integrar e validar CI. Implantação e aceite permanecem separados.",
       "notes": "Recorte técnico W36 comprovado em ambiente controlado. Lacunas: Primeiro recorte só cobre eventos de administração de projeto; operações, annotations, progresso e duplicação não emitem atualização. A marca d’água depende de todos os gravadores do outbox usarem o papel de banco da aplicação. Nenhuma caixa do TODO foi remarcada."
     },
     {
