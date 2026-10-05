@@ -52,7 +52,14 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   const cleanup = async () => {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2ArtifactRenderOperation.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
+    await client.v2PublicOperationControlCommand.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
+    await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
+    await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2AssetUseDecision.deleteMany({ where: { workspaceId } })
     await client.v2MaterializationAuthorization.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
@@ -1066,6 +1073,63 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       repository.findById(workspaceId, operationId),
       (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
     )
+    // Controlled repository equivalent: distinct immutable inputs of one version.
+    // This proves transaction fencing, not a public API physical-render journey.
+    const projectId = 'operation-cas-project'
+    const versionId = 'operation-cas-version'
+    const editPlanId = 'operation-cas-edit-plan'
+    await client.v2Project.create({ data: { id: projectId, workspaceId, name: 'CAS project',
+      status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR',
+      createdByType: 'api-client', createdById: clientId, createdAt: now, updatedAt: now } })
+    for (const [kind, id] of [['brief', 'operation-cas-brief'], ['policies', 'operation-cas-policies'], ['edit-plan', editPlanId]]) {
+      await client.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind,
+        schemaVersion: 1, contentJson: '{}', contentHash: sha('a'), createdAt: now } })
+    }
+    await client.v2ProjectVersion.create({ data: { id: versionId, workspaceId, projectId, sequence: 1,
+      briefSnapshotId: 'operation-cas-brief', policiesSnapshotId: 'operation-cas-policies', editPlanSnapshotId: editPlanId,
+      baseHash: sha('a'), createdBy: clientId, createdAt: now } })
+    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
+    await client.v2ProjectMediaAsset.create({ data: { id: 'ba45b6ce-d839-4db1-aa91-3e51a2582631', workspaceId,
+      projectId, artifactId, role: 'source-master', originalFileName: 'source.mp4', createdAt: now } })
+    const admitProxy = async (label, hash, createdAt) => repository.createOrReplay({
+      operation: createQueuedPublicOperation({ id: `operation-cas-${label}`, workspaceId, clientId, projectId,
+        type: 'project-proxy-render', target: { type: 'media-artifact', id: `operation-cas-output-${label}`, manifestId: `operation-cas-manifest-${label}` },
+        maxAttempts: 1, createdAt }), authenticationAudit,
+      context: { kind: 'project-proxy-render', projectId, projectVersionId: versionId, editPlanSnapshotId: editPlanId,
+        sourceArtifactId: artifactId, sourceManifestId: manifestId, colorPipelineBindings: [], inputHash: sha(hash),
+        outputArtifactId: `operation-cas-output-${label}`, outputManifestId: `operation-cas-manifest-${label}`, originalFileName: `${label}.mp4` },
+      idempotencyKey: `operation-cas-${label}`, requestFingerprint: sha(hash),
+    })
+    const old = await admitProxy('old', '1', '2026-01-01T16:00:00.000Z')
+    const oldClaim = await repository.claimNext({ operationId: old.operation.id,
+      leaseOwner: 'cas-old-worker', now: '2026-01-01T16:00:01.000Z', leaseUntil: '2026-01-01T16:00:31.000Z' })
+    const latest = await admitProxy('latest', '2', '2026-01-01T16:00:02.000Z')
+    assert.equal(latest.operation.status, 'queued')
+    const projectStatus = async () => (await client.v2Project.findUnique({ where: { id: projectId } })).status
+    assert.equal(await projectStatus(), 'rendering-proxy')
+    const failedOld = await repository.failOrRetry({ operationId: old.operation.id,
+      leaseOwner: oldClaim.lease.owner, attempt: oldClaim.lease.attempt, now: '2026-01-01T16:00:03.000Z',
+      error: { code: 'RENDER_FAILED', message: 'Controlled renderer failure', retryable: false } })
+    assert.equal(failedOld.operation.status, 'failed')
+    assert.equal(await projectStatus(), 'rendering-proxy', 'old valid lease cannot fail project owned by newer queued operation')
+    const outboxBefore = await client.v2PublicEventOutbox.count({ where: { workspaceId, resourceId: old.operation.id } })
+    await assert.rejects(retryOperation({ workspaceId, operationId: old.operation.id,
+      requestedAt: '2026-01-01T16:00:04.000Z', nextAttemptAt: '2026-01-01T16:00:04.001Z' }),
+    (error) => error instanceof DomainError && error.code === 'PROJECT_TRANSITION_REJECTED')
+    assert.equal((await repository.findById(workspaceId, old.operation.id)).operation.status, 'failed')
+    assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId, resourceId: old.operation.id } }), outboxBefore)
+    assert.equal(await projectStatus(), 'rendering-proxy')
+    const latestClaim = await repository.claimNext({ operationId: latest.operation.id,
+      leaseOwner: 'cas-latest-worker', now: '2026-01-01T16:00:05.000Z', leaseUntil: '2026-01-01T16:00:06.000Z' })
+    assert.equal(latestClaim.lease.attempt, 1)
+    assert.equal(await repository.claimNext({ operationId: latest.operation.id, leaseOwner: 'cas-recovery-worker',
+      now: '2026-01-01T16:00:07.000Z', leaseUntil: '2026-01-01T16:00:37.000Z' }), null)
+    assert.equal((await repository.findById(workspaceId, latest.operation.id)).operation.status, 'failed')
+    assert.equal(await projectStatus(), 'failed', 'latest expired exhausted lease fails current project')
+    const retriedLatest = await retryOperation({ workspaceId, operationId: latest.operation.id,
+      requestedAt: '2026-01-01T16:00:08.000Z', nextAttemptAt: '2026-01-01T16:00:08.001Z' })
+    assert.equal(retriedLatest.operation.status, 'retrying')
+    assert.equal(await projectStatus(), 'rendering-proxy')
   } finally {
     await cleanup()
     await client.$disconnect()
