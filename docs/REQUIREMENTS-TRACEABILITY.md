@@ -22,6 +22,18 @@
 
 O [plano e os dez pacotes](./PLANO-WAVES-31-40.md) vinculam FR-002 (dashboard), FR-003 (filtros) e FR-004 (ações rápidas) aos IDs exatos de F1.001–F1.003. IDs compartilhados indicam subescopos cumulativos da mesma caixa, sem contagem duplicada ou conclusão antecipada. Esta referência é planejamento, não evidência de produto.
 
+## Planejamento progressivo W41–W50
+
+O [plano Codex e seus dez pacotes](./PLANO-WAVES-41-50.md) mapeia subescopos de F1.012–F1.015 (FR-040/042/047/049) e explicita código existente, lacunas e evidência necessária. Faces/objects sem provider, uso completo de imagem em B-roll/insert/card, produção e aceite ficam fora da alegação destas provas. IDs repetidos são cobertura cumulativa, sem duplicar caixas. W31–W40 foi atribuído ao Claude Code; integração de arquivos compartilhados permanece serializada.
+
+Incremento W41–W50: `library-ci.yml` exige PostgreSQL real, bytes FFmpeg/Sharp,
+OCR Tesseract eng/por, HTTP e Chromium próprios, exportação real e postflight
+sem clientes órfãos. As capacidades de preview, seleção tipada com CAS e
+jobs de derivada têm contratos públicos. O
+[relatório W41–W50](./quality/media-library-w41-50.md) identifica os transportes
+e seeds controlados; os IDs e bloqueios estão no registro de status. Nenhuma
+caixa é remarcada por este incremento técnico.
+
 ## Legenda
 
 - **F0:** Fundação.

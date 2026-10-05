@@ -63,12 +63,48 @@ test('T-FR-049 fails closed for missing, revoked or incompatible consent evidenc
   assert.throws(() => createInheritedCatalogRights({ candidate: candidate(), sourceSnapshots: [], sequence: 1, createdAt: '2026-08-12T13:00:00Z' }), /no source rights evidence/)
   assert.throws(() => createInheritedCatalogRights({ candidate: candidate(), sourceSnapshots: [rights('artifact-source-a', { status: 'revoked', allowedUses: [], consent: { status: 'not-required', allowedUses: [] } })], sequence: 1, createdAt: '2026-08-12T13:00:00Z' }), /not approved/)
   assert.throws(() => createInheritedCatalogRights({ candidate: candidate(), sourceSnapshots: [rights('artifact-source-a', { consent: { status: 'approved', allowedUses: ['social-publish'] } })], sequence: 1, createdAt: '2026-08-12T13:00:00Z' }), /does not allow editorial reuse/)
+  assert.throws(() => createInheritedCatalogRights({ candidate: candidate(), sourceSnapshots: [rights('artifact-source-a', { expiresAt: '2026-08-12T12:30:00Z' })], sequence: 1, createdAt: '2026-08-12T13:00:00Z' }), /expired/)
+  assert.throws(() => createInheritedCatalogRights({ candidate: candidate(), sourceSnapshots: [rights('artifact-source-a', { consent: { status: 'approved', allowedUses: ['editorial-reuse'], expiresAt: '2026-08-12T12:30:00Z' } })], sequence: 1, createdAt: '2026-08-12T13:00:00Z' }), /expired/)
+})
+
+test('T-FR-049 skips cataloging when output source rights are incomplete or restricted', async () => {
+  for (const source of [null, rights('artifact-source-a', { allowedUses: ['rendering'] }), rights('artifact-source-a', { expiresAt: '2026-08-12T12:30:00Z' })]) {
+    let writes = 0
+    const service = catalogApprovedOutputService({
+      repository: {
+        async inspect() { return candidate() },
+        async persist() { writes++; throw new Error('must not persist') },
+      },
+      rights: {
+        async findCurrentForArtifacts() { return new Map(source ? [['artifact-source-a', source]] : []) },
+        async findCurrent() { return { artifactId: 'artifact-output', revision: assetRightsRevision('artifact-output', 0), snapshot: null } },
+        async setCurrent() { writes++; throw new Error('must not mutate rights') },
+      },
+      clock: () => new Date('2026-08-12T13:00:00.000Z'),
+    })
+    assert.deepEqual(await service(candidate()), { status: 'ignored', reason: source ? 'source-rights-blocked' : 'source-rights-missing', record: null })
+    assert.equal(writes, 0)
+  }
+})
+
+test('T-FR-049 never replaces an explicit output rights decision on worker replay', async () => {
+  const service = catalogApprovedOutputService({
+    repository: { async inspect() { return candidate() }, async persist() { throw new Error('must not persist') } },
+    rights: {
+      async findCurrentForArtifacts() { return new Map([['artifact-source-a', rights('artifact-source-a')]]) },
+      async findCurrent() { return { artifactId: 'artifact-output', revision: assetRightsRevision('artifact-output', 1), snapshot: rights('artifact-output', { status: 'revoked', allowedUses: [] }) } },
+      async setCurrent() { throw new Error('manual revocation must remain current') },
+    },
+    clock: () => new Date('2026-08-12T13:00:00.000Z'),
+  })
+  assert.deepEqual(await service(candidate()), { status: 'ignored', reason: 'output-rights-managed', record: null })
 })
 
 test('T-FR-049 catalogs an eligible output idempotently by workspace artifact and manifest', async () => {
   const source = rights('artifact-source-a')
   let current = { artifactId: 'artifact-output', revision: assetRightsRevision('artifact-output', 0), snapshot: null }
   let saved
+  let rightsWrites = 0
   const service = catalogApprovedOutputService({
     repository: {
       async find() { return saved ?? null },
@@ -82,19 +118,20 @@ test('T-FR-049 catalogs an eligible output idempotently by workspace artifact an
     rights: {
       async findCurrent() { return current },
       async findCurrentForArtifacts() { return new Map([['artifact-source-a', source]]) },
-      async setCurrent(snapshot) { current = { artifactId: snapshot.artifactId, revision: assetRightsRevision(snapshot.artifactId, 1), snapshot }; return { ...current, replayed: false } },
+      async setCurrent(snapshot) { rightsWrites++; current = { artifactId: snapshot.artifactId, revision: assetRightsRevision(snapshot.artifactId, 1), snapshot }; return { ...current, replayed: false } },
     },
     clock: () => new Date('2026-08-12T13:00:00.000Z'),
   })
   assert.equal((await service(candidate())).status, 'cataloged')
   assert.equal((await service(candidate())).status, 'already-cataloged')
+  assert.equal(rightsWrites, 1)
   assert.equal(saved.lineage[0].provider, 'openai')
   assert.equal(saved.lineage[0].model, 'video-model')
 })
 
 test('T-FR-049 ignores ineligible persisted output and requires provider/model for deepfake segments', async () => {
   const service = catalogApprovedOutputService({ repository: { async find() { return null }, async inspect() { return null }, async persist() { throw new Error('must not persist') } }, rights: {} })
-  assert.equal((await service(candidate())).status, 'ignored')
+  assert.deepEqual(await service(candidate()), { status: 'ignored', reason: 'not-approved', record: null })
   assert.throws(() => assertAutomaticCatalogCandidate(candidate({ outputKind: 'deepfake-raw', searchableKind: 'segment', sourceDurationMs: 1000, lineage: [{ sourceArtifactId: 'artifact-source-a', role: 'generated-from', ordinal: 0 }] })), /requires provider and model/)
   assert.doesNotThrow(() => assertAutomaticCatalogCandidate(candidate({ outputKind: 'deepfake-raw', searchableKind: 'segment', sourceDurationMs: 1000 })))
 })

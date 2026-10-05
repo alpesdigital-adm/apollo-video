@@ -108,7 +108,17 @@ export const BASE_SCENARIO = {
 
 export async function createWorld(t, overrides = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'apollo-deploy-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
+  const cleanupOwners = []
+  let cleanupPromise
+  const cleanup = () => cleanupPromise ??= (async () => {
+    const failures = []
+    for (const stop of cleanupOwners) {
+      try { await stop() } catch (error) { failures.push(error) }
+    }
+    try { await rm(directory, { recursive: true, force: true }) } catch (error) { failures.push(error) }
+    if (failures.length) throw new AggregateError(failures, 'Fake Docker world cleanup failed')
+  })()
+  t.after(cleanup)
   const stateDir = join(directory, 'ops-state')
   const appRoot = join(directory, 'app-root')
   await mkdir(stateDir, { recursive: true })
@@ -129,6 +139,8 @@ export async function createWorld(t, overrides = {}) {
   await writeFile(scenarioPath, JSON.stringify({ ...BASE_SCENARIO, ...(overrides.scenario ?? {}) }), 'utf8')
   return {
     directory,
+    cleanup,
+    registerCleanup: (stop) => cleanupOwners.push(stop),
     stateDir,
     appRoot,
     envFile,
@@ -320,18 +332,21 @@ export async function startOpsSimulator(t, world, options = {}) {
     // The real monitor is stopped by the deploy once the postflight is established, so
     // the simulator stops publishing at the same moment. Without this it would rewrite
     // the gate.json the deploy had just removed and the run would look unfinished.
-    const operationJournal = await readFile(join(world.stateDir, 'journal', `${world.runId}.ndjson`), 'utf8').catch(() => '')
+    const operationJournal = await readFile(join(world.stateDir, 'journal', `${world.runId}.ndjson`), 'utf8').catch((error) => { if (error.code === 'ENOENT') return ''; throw error })
     if (operationJournal.includes('"event":"postflight-verdict"')) {
       simulator.stopped = true
       return
     }
     const now = hostMonotonicNowMs()
     while (lastMonotonicMs + interval <= now) {
+      if (simulator.stopped) return
       lastMonotonicMs += interval
       simulator.seq += 1
       await journal.append('host-sample', healthySample(simulator.seq, lastMonotonicMs, options.backends ?? {}))
     }
+    if (simulator.stopped) return
     if (!simulator.closed && options.closeWhen && (await options.closeWhen(world))) simulator.closed = true
+    if (simulator.stopped) return
     simulator.gateSeq += 1
     await writeGateFile({
       stateDir: world.stateDir,
@@ -345,17 +360,30 @@ export async function startOpsSimulator(t, world, options = {}) {
     })
   }
 
-  // Prime a complete window so the deploy's preflight does not have to wait for it.
-  await tick()
-  const timer = setInterval(() => {
-    if (simulator.stopped) return
-    void tick().catch(() => {})
-  }, interval)
-  const stop = () => {
+  let timer, inFlight, tickError
+  const runTick = () => {
+    if (simulator.stopped) return Promise.resolve()
+    if (inFlight) return inFlight
+    inFlight = tick().finally(() => { inFlight = undefined; if (simulator.stopped) clearInterval(timer) })
+    return inFlight
+  }
+  const stop = async () => {
     simulator.stopped = true
     clearInterval(timer)
+    try { await inFlight } catch (error) { tickError ??= error }
+    if (tickError) throw tickError
   }
-  t.after(stop)
+  // The world owns cleanup order: stop and drain every publisher BEFORE rm.
+  world.registerCleanup(stop)
+  // Prime a complete window so the deploy's preflight does not have to wait for it.
+  await runTick()
+  if (!simulator.stopped) timer = setInterval(() => {
+    void runTick().catch((error) => {
+      tickError ??= error
+      simulator.stopped = true
+      clearInterval(timer)
+    })
+  }, interval)
   return { simulator, stop }
 }
 

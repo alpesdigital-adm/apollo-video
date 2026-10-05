@@ -741,6 +741,9 @@ export function createFoundationAgentToolSafety(
     'apollo.projects.music-analyses.request': { impact: 'bounded', confirmation: 'none', reason: 'Queues local deterministic FFmpeg analysis only after current project, byte identity and music rights authority are bound.' },
     'apollo.projects.music-analyses.cancel': { impact: 'bounded', confirmation: 'none', reason: 'Stops one bounded analysis request and invalidates its worker lease without modifying source media.' },
     'apollo.projects.music-analyses.retry': { impact: 'bounded', confirmation: 'none', reason: 'Requeues one failed local analysis under a fixed three-attempt ceiling and preserves its source fingerprint.' },
+    'apollo.media.segments.derivative.request': { impact: 'bounded', confirmation: 'none', reason: 'Queues a bounded local range extraction only after workspace, source hash and persisted rights authority are bound; virtual consumers create no bytes.' },
+    'apollo.media.segments.derivative.cancel': { impact: 'bounded', confirmation: 'none', reason: 'Cancels one actor-bound local derivative job and invalidates its worker lease without modifying source media.' },
+    'apollo.media.segments.derivative.retry': { impact: 'bounded', confirmation: 'none', reason: 'Requeues one actor-bound failed local derivative within a fixed three-attempt ceiling and rechecks rights before extraction.' },
   })
 }
 

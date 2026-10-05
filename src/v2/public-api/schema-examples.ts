@@ -7970,16 +7970,29 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
-    'apollo://schemas/media-library-attachment-request/v1': [{ artifactId }],
-    'apollo://schemas/media-library-attachment/v1': [
+    'apollo://schemas/media-library-attachment-request/v2': [{ selection: { kind: 'asset', artifactId }, baseVersionId: 'version-example-1', baseVersionHash: 'a'.repeat(64) }],
+    'apollo://schemas/media-library-attachment/v2': [
       {
         data: {
-          id: '123e4567-e89b-42d3-a456-426614174077', projectId, workspaceId, artifactId,
+          id: '123e4567-e89b-42d3-a456-426614174077', projectId, workspaceId, selection: { kind: 'asset', artifactId }, parentArtifactId: artifactId,
+          sourceSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-example-1', commandId: 'command-example-1', baseVersionId: 'version-example-1', resultVersionId: 'version-example-2', resultVersionHash: 'b'.repeat(64),
+          role: 'selected-insert', bytesDuplicated: false, replayed: false, createdAt,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          id: '123e4567-e89b-42d3-a456-426614174078', projectId, workspaceId, selection: { kind: 'segment', segmentId: 'segment-example-1' }, parentArtifactId: artifactId,
+          sourceSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-example-1', commandId: 'command-example-2', baseVersionId: 'version-example-2', resultVersionId: 'version-example-3', resultVersionHash: 'c'.repeat(64),
+          segmentHash: 'b'.repeat(64), semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 },
           role: 'selected-insert', bytesDuplicated: false, replayed: false, createdAt,
         },
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/media-segment-derivative-request/v1': [{ consumerKey: 'editor-preview', requiresPhysicalDerivative: true }],
+    'apollo://schemas/media-segment-derivative-response/v1': [{ data: { kind: 'virtual', segmentId: 'segment-example-1', parentArtifactId: artifactId, segmentHash: 'a'.repeat(64), semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalDerivative: null, bytesDuplicated: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/media-segment-derivative-job/v1': [{ data: { id: 'segment-job-example-1', workspaceId, segmentId: 'segment-example-1', consumerKey: 'editor-preview', sourceSha256: 'a'.repeat(64), segmentHash: 'b'.repeat(64), rightsSnapshotId: 'rights-example-1', clientId: 'client-example-1', actorContextHash: 'c'.repeat(64), idempotencyKey: 'segment-job-key-1', requestFingerprint: 'd'.repeat(64), status: 'queued', attempt: 0, maxAttempts: 3, deadlineAt: createdAt, createdAt, updatedAt: createdAt }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/health-response/v1': [
       {
         data: { service: 'apollo-video', status: 'ok' },

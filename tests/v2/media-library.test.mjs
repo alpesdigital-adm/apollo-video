@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { attachMediaLibraryItemService, listMediaLibraryService, readMediaLibraryItemService } from '../../src/v2/application/media-library.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import {
   assertLibraryAttachmentEligible,
   listMediaLibrary,
@@ -63,11 +64,16 @@ test('T-FR-040 attachment service delegates one normalized reference-only transa
     async attach(input) { writes.push(input); return { id: 'ref_1', ...input, role: 'selected-insert', bytesDuplicated: false, replayed: false } },
   }
   const attach = attachMediaLibraryItemService({ repository, clock: () => now })
-  const result = await attach({ workspaceId: ' ws_1 ', projectId: ' project_1 ', artifactId: ' artifact_ok ' })
+  const actor = { clientId: 'client_1', credentialId: 'credential_1', workspaceId: 'ws_1', environment: 'production', authenticationKind: 'bearer', scopes: new Set(['projects:write']), auditContext: createExternalAuditContext({ clientId: 'client_1', credentialId: 'credential_1', workspaceId: 'ws_1', environment: 'production' }) }
+  const base = { workspaceId: ' ws_1 ', projectId: ' project_1 ', selection: { kind: 'asset', artifactId: 'artifact_ok' }, baseVersionId: 'version_1', baseVersionHash: 'a'.repeat(64), idempotencyKey: 'attachment-key-1', actor }
+  const result = await attach(base)
   assert.equal(result.bytesDuplicated, false)
   assert.equal(writes.length, 1)
-  assert.deepEqual(writes[0], { workspaceId: 'ws_1', projectId: 'project_1', artifactId: 'artifact_ok', createdAt: now.toISOString() })
-  await assert.rejects(() => attach({ workspaceId: 'ws_1', projectId: 'x', artifactId: 'artifact_ok' }), /identifiers/i)
+  assert.equal(writes[0].selection.kind, 'asset')
+  assert.equal(writes[0].baseVersionId, 'version_1')
+  assert.equal(writes[0].createdAt, now.toISOString())
+  await assert.rejects(() => attach({ ...base, projectId: 'x' }), /invalid/i)
+  await assert.rejects(() => attach({ ...base, selection: { kind: 'segment', artifactId: 'artifact_ok' } }), /shape/i)
   assert.throws(() => assertLibraryAttachmentEligible(item('a', { status: 'processing' }), 'ws_1'), /usable/i)
   assert.throws(() => assertLibraryAttachmentEligible(item('a', { rights: { status: 'restricted', reasonCodes: ['RIGHTS_USE_NOT_ALLOWED'] } }), 'ws_1'), /rights/i)
 })

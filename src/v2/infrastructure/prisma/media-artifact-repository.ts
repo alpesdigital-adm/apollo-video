@@ -582,6 +582,7 @@ export class PrismaMediaArtifactRepository
 
   async persistOrReplay(
     bundle: MediaArtifactPersistenceBundle,
+    transactionClient?: Prisma.TransactionClient,
   ): Promise<MediaArtifactPersistenceResult> {
     assertMediaArtifactManifest(bundle.manifest)
     if (
@@ -656,7 +657,7 @@ export class PrismaMediaArtifactRepository
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
+        const persist = async (transaction: Prisma.TransactionClient) => {
         const workspace = await transaction.v2Workspace.findUnique({
           where: { id: bundle.workspaceId },
           select: { id: true, status: true },
@@ -900,8 +901,10 @@ export class PrismaMediaArtifactRepository
         }
 
         return { artifactId: artifact.id, manifestId: storedManifest.id, replayed: false }
-        })
+        }
+        return transactionClient ? await persist(transactionClient) : await this.client.$transaction(persist)
       } catch (error) {
+        if (transactionClient) throw error
         if (isUniqueConstraintError(error)) {
           const replay = await findReplay(
             this.client,

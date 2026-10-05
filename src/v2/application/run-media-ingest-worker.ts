@@ -23,6 +23,7 @@ import { calculatePublicOperationRetryDelayMs } from './run-public-operation-wor
 import { compileInitialSourceEditPlan } from './apply-editorial-cut-command.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { analyzeImageArtifactService } from './analyze-image-artifact.ts'
+import { createMediaLibraryPreviewsService, type MediaLibraryPreviewProcessor, type MediaLibraryPreviewRepository } from './create-media-library-previews.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import {
   immediateNextAttemptAt,
@@ -69,6 +70,7 @@ export function runNextMediaIngestOperationService(dependencies: {
   providers: Pick<ProviderRuntimeRouter, 'resolveTranscription'>
   rights: AssetRightsRepository
   imageAnalysis?: { processor: ImageAnalysisProcessor; repository: ImageAnalysisRepository; integrity: import('./ports/media-ingest.ts').ArtifactFileIntegrity }
+  libraryPreviews?: { processor: MediaLibraryPreviewProcessor; repository: MediaLibraryPreviewRepository; integrity: import('./ports/media-ingest.ts').ArtifactFileIntegrity }
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -193,6 +195,7 @@ export function runNextMediaIngestOperationService(dependencies: {
         artifactKey: master.key, artifactSha256: master.sha256, byteSize: master.byteSize,
         mediaType: upload.kind, container: inspection.media.extension || containerFromKey(master.key),
         recipe: { id: 'direct-upload', version: '1.0.0', parameters: { mimeType: upload.mimeType } },
+        ...(sourceProbe ? { probe: { width: sourceProbe.width, height: sourceProbe.height, duration: sourceProbe.duration, fps: sourceProbe.fps } } : {}),
       })
       const sourcePersisted = await dependencies.artifacts.persistOrReplay({
         workspaceId: operation.workspaceId, artifactId: context.sourceArtifactId,
@@ -218,6 +221,10 @@ export function runNextMediaIngestOperationService(dependencies: {
         })
       }
       await writeRights(context.sourceArtifactId)
+      const createPreviews = async () => {
+        if (!dependencies.libraryPreviews || upload.kind === 'image') return
+        await createMediaLibraryPreviewsService({ ...dependencies.libraryPreviews, artifacts: dependencies.artifacts, storage: dependencies.storage, clock })({ operationId: operation.id, leaseOwner, attempt, assertActive: async () => { if (abortController.signal.aborted || !(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Ingest preview lease was lost') }, workspaceId: operation.workspaceId, artifactId: context.sourceArtifactId, artifactKey: master.key, sourcePath: master.path, sourceSha256: master.sha256, mediaType: upload.kind, label: context.originalFileName, signal: abortController.signal })
+      }
 
       if (upload.kind === 'audio' || upload.kind === 'image') {
         await enter('verifying')
@@ -231,6 +238,7 @@ export function runNextMediaIngestOperationService(dependencies: {
           if (!dependencies.imageAnalysis) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Image analysis runtime is not configured')
           await analyzeImageArtifactService({ processor: dependencies.imageAnalysis.processor, repository: dependencies.imageAnalysis.repository, artifacts: dependencies.artifacts, storage: dependencies.storage, integrity: dependencies.imageAnalysis.integrity, clock })({ operationId: operation.id, workspaceId: operation.workspaceId, artifactId: context.sourceArtifactId, manifestId: context.sourceManifestId, artifactKey: master.key, sourcePath: master.path, sourceSha256: master.sha256, signal: abortController.signal })
         }
+        await createPreviews()
         stopHeartbeat()
         const succeeded = await dependencies.operations.succeed(command(clock()))
         if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
@@ -394,6 +402,7 @@ export function runNextMediaIngestOperationService(dependencies: {
       }
 
       await enter('persisting')
+      await createPreviews()
       await dependencies.projectMedia.persistCompletedIngest({
         workspaceId: operation.workspaceId, projectId: context.projectId, uploadId: context.uploadId,
         originalFileName: context.originalFileName, sourceArtifactId: context.sourceArtifactId,

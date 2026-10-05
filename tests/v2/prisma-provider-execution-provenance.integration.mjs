@@ -91,7 +91,43 @@ test('W24.2 PostgreSQL fences provider transport evidence by job attempt, hash a
     const authorization = Object.freeze({ ...authorizationBody, authorizationHash: calculateCanonicalHash(authorizationBody) })
     const canonicalJob = createProviderJob({ id: jobId, workspaceId, projectId: created.project.id, originProjectVersionId: created.version.id, operation: 'tts', adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0', providerInput: { text: 'server-owned' }, idempotencyKey: `provider-provenance-${suffix}`, authorization, createdAt: at(1).toISOString() })
     const providerJobs = new PrismaProviderJobRepository(client)
-    await providerJobs.create({ job: canonicalJob, requestFingerprint: calculateCanonicalHash({ jobId }), authenticationAudit: materializeActorAuditContext(actor), transitionId: `provider-transition-create-${suffix}` })
+    // Force real PostgreSQL serialization conflicts across four fresh attempts:
+    // each transaction has read project authority, then a competing connection
+    // commits a change to that same project before our transaction writes it.
+    let createAttempts = 0, serializationConflicts = 0
+    const contendedClient = new Proxy(client, { get(target, key) {
+      if (key !== '$transaction') return Reflect.get(target, key)
+      return async (callback, options) => {
+        createAttempts += 1
+        try {
+          return await target.$transaction(async (transaction) => callback(new Proxy(transaction, { get(tx, txKey) {
+            if (txKey !== 'v2ProviderJob') return Reflect.get(tx, txKey)
+            return new Proxy(tx.v2ProviderJob, { get(model, method) {
+              if (method !== 'create') return Reflect.get(model, method)
+              return async (args) => {
+                if (createAttempts <= 4) {
+                  await client.v2Project.update({ where: { id: created.project.id }, data: { name: `committed contention ${createAttempts}` } })
+                  await tx.v2Project.update({ where: { id: created.project.id }, data: { name: 'transaction must roll back' } })
+                }
+                return model.create(args)
+              }
+            } })
+          } })), options)
+        } catch (error) {
+          if (error.code === 'P2034') serializationConflicts += 1
+          throw error
+        }
+      }
+    } })
+    const createInput = { job: canonicalJob, requestFingerprint: calculateCanonicalHash({ jobId }), authenticationAudit: materializeActorAuditContext(actor), transitionId: `provider-transition-create-${suffix}` }
+    await new PrismaProviderJobRepository(contendedClient).create(createInput)
+    assert.equal(serializationConflicts, 4, 'prove actual PostgreSQL conflicts beyond the former retry cap')
+    assert.equal(createAttempts, 5)
+    assert.equal(await client.v2ProviderJob.count({ where: { workspaceId } }), 1)
+    assert.equal(await client.v2ProviderJobTransition.count({ where: { jobId } }), 1)
+    assert.equal((await providerJobs.create(createInput)).replayed, true)
+    assert.equal(await client.v2ProviderJobTransition.count({ where: { jobId } }), 1)
+
     const plannedClaim = await providerJobs.claimNext({ workerId: 'provider-provenance-worker', leaseToken: `provider-plan-lease-${suffix}`, now: at(2), leaseExpiresAt: at(30) })
     assert.ok(plannedClaim)
     await providerJobs.advance({ current: plannedClaim, next: transitionProviderJob(plannedClaim.job, { status: 'estimated', occurredAt: at(2).toISOString(), estimate: { currency: 'USD', costMinorUnits: 1, estimatedLatencyMs: 1 } }), transitionId: `provider-transition-estimate-${suffix}`, occurredAt: at(2) })

@@ -26,6 +26,7 @@ export const EDIT_COMMAND_RENDER_POLICIES = [
 export type EditCommandRenderPolicy = (typeof EDIT_COMMAND_RENDER_POLICIES)[number]
 
 export const EDIT_COMMAND_IMPACT_SCHEMAS = [
+  'media-library-attachment-impact/v1',
   'command-impact/v1',
   'editorial-cut-impact/v1',
   'director-run-impact/v1',
@@ -61,6 +62,14 @@ export interface EditCommandPolicy {
 }
 
 export const EDIT_COMMAND_POLICIES = Object.freeze({
+  'attach-media-library-reference': Object.freeze({
+    renderPolicy: 'no-render',
+    impactSchema: 'media-library-attachment-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: true,
+    deferralReason: null,
+    evidence: 'media-library-attachment-impact.ts:44 preserves the EditPlan snapshot, declares renderSemanticsChanged false and every render invalidation list empty',
+  }),
   'manual-edit': Object.freeze({
     renderPolicy: 'partial-range',
     impactSchema: 'command-impact/v1',

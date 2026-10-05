@@ -16,6 +16,7 @@ const {
   createProjectDirectorWorker,
   createPublicOperationWorker,
   createSyntheticProductionRenderWorker,
+  createMediaSegmentDerivativeWorker,
 } = repositoryFactory
 const lifecycle = importedLifecycle.createWorkerShutdown
   ? importedLifecycle
@@ -52,6 +53,7 @@ const workerId = `worker:${hostname().slice(0, 40)}:${process.pid}:${randomUUID(
 const runNextProjectProxy = createProjectProxyRenderWorker()
 const runNextProjectFinal = createProjectFinalExportWorker()
 const runNextSourceCleanup = createSourceCleanupWorker()
+const runNextSegmentDerivative = createMediaSegmentDerivativeWorker()
 const runNextProjectDirector = createProjectDirectorWorker()
 const runNext = process.env.APOLLO_V2_RENDER_OUTPUT_ROOT?.trim()
   ? createPublicOperationWorker()
@@ -94,6 +96,7 @@ const branches = [
   { name: 'project-final-export', run: (signal) => runNextProjectFinal(workerId, signal) },
   { name: 'project-proxy-render', run: (signal) => runNextProjectProxy(workerId, { signal }) },
   { name: 'source-cleanup', run: (signal) => runNextSourceCleanup(workerId, signal) },
+  { name: 'media-segment-derivative', run: (signal) => runNextSegmentDerivative(workerId, signal) },
   { name: 'synthetic-production-render', run: (signal) => runNextSyntheticProduction(workerId, signal) },
   { name: 'artifact-render', run: (signal) => runNext(workerId, signal) },
 ]

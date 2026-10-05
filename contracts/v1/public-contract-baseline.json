@@ -2491,6 +2491,29 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.media.library.preview.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/binary-media-content/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/media/library/{artifactId}/previews/{kind}"
+      },
+      "toolName": "apollo.media.library.preview.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/octet-stream"
+    },
     "apollo.media.library.read": {
       "version": "2.0.0",
       "exposure": "public",
@@ -2538,6 +2561,101 @@
       ],
       "idempotency": "natural",
       "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.media.segments.derivative.cancel": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:write"
+      ],
+      "outputSchemaRef": "apollo://schemas/media-segment-derivative-job/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/media/segment-derivative-jobs/{jobId}/cancel"
+      },
+      "toolName": "apollo.media.segments.derivative.cancel",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
+    "apollo.media.segments.derivative.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/media-segment-derivative-job/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/media/segment-derivative-jobs/{jobId}"
+      },
+      "toolName": "apollo.media.segments.derivative.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.media.segments.derivative.request": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/media-segment-derivative-request/v1",
+      "outputSchemaRef": "apollo://schemas/media-segment-derivative-response/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/media/segments/{segmentId}/derivative-jobs"
+      },
+      "toolName": "apollo.media.segments.derivative.request",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        202
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.media.segments.derivative.retry": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:write"
+      ],
+      "outputSchemaRef": "apollo://schemas/media-segment-derivative-job/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/media/segment-derivative-jobs/{jobId}/retry"
+      },
+      "toolName": "apollo.media.segments.derivative.retry",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
       "responseMediaType": "application/json"
     },
     "apollo.media.segments.list": {
@@ -6287,15 +6405,15 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.media-library.attach": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "projects:write"
       ],
-      "inputSchemaRef": "apollo://schemas/media-library-attachment-request/v1",
-      "outputSchemaRef": "apollo://schemas/media-library-attachment/v1",
+      "inputSchemaRef": "apollo://schemas/media-library-attachment-request/v2",
+      "outputSchemaRef": "apollo://schemas/media-library-attachment/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects/{projectId}/media-library-attachments"
@@ -6308,7 +6426,7 @@
         201,
         200
       ],
-      "idempotency": "natural",
+      "idempotency": "required",
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
@@ -77608,21 +77726,67 @@
         }
       }
     },
-    "apollo://schemas/media-library-attachment-request/v1": {
+    "apollo://schemas/media-library-attachment-request/v2": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "artifactId"
+        "selection",
+        "baseVersionId",
+        "baseVersionHash"
       ],
       "properties": {
-        "artifactId": {
+        "selection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "artifactId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "asset"
+                },
+                "artifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "segmentId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "segment"
+                },
+                "segmentId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            }
+          ]
+        },
+        "baseVersionId": {
           "type": "string",
           "minLength": 3,
           "maxLength": 128
+        },
+        "baseVersionHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
         }
       }
     },
-    "apollo://schemas/media-library-attachment/v1": {
+    "apollo://schemas/media-library-attachment/v2": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -77637,11 +77801,55 @@
             "id",
             "projectId",
             "workspaceId",
-            "artifactId",
+            "selection",
+            "parentArtifactId",
+            "sourceSha256",
+            "rightsSnapshotId",
+            "commandId",
+            "baseVersionId",
+            "resultVersionId",
+            "resultVersionHash",
             "role",
             "bytesDuplicated",
             "replayed",
             "createdAt"
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "selection": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "asset"
+                    }
+                  }
+                },
+                "segmentHash": false,
+                "semanticRange": false,
+                "sourceTimeMapping": false
+              }
+            },
+            {
+              "required": [
+                "segmentHash",
+                "semanticRange",
+                "sourceTimeMapping"
+              ],
+              "properties": {
+                "selection": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "segment"
+                    }
+                  }
+                },
+                "segmentHash": {},
+                "semanticRange": {},
+                "sourceTimeMapping": {}
+              }
+            }
           ],
           "properties": {
             "id": {
@@ -77659,10 +77867,122 @@
               "minLength": 3,
               "maxLength": 128
             },
-            "artifactId": {
+            "selection": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "artifactId"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "asset"
+                    },
+                    "artifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "segmentId"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "segment"
+                    },
+                    "segmentId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                }
+              ]
+            },
+            "parentArtifactId": {
               "type": "string",
               "minLength": 3,
               "maxLength": 128
+            },
+            "sourceSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "rightsSnapshotId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "segmentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "semanticRange": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "startMs",
+                "endMs"
+              ],
+              "properties": {
+                "startMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "endMs": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "sourceTimeMapping": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourceStartMs",
+                "sourceEndMs",
+                "rate"
+              ],
+              "properties": {
+                "sourceStartMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sourceEndMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "rate": {
+                  "const": 1
+                }
+              }
+            },
+            "commandId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "baseVersionId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "resultVersionId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "resultVersionHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
             },
             "role": {
               "const": "selected-insert"
@@ -78921,6 +79241,397 @@
         "endMs": {
           "type": "integer",
           "minimum": 1
+        }
+      }
+    },
+    "apollo://schemas/media-segment-derivative-job/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "workspaceId",
+            "segmentId",
+            "consumerKey",
+            "sourceSha256",
+            "segmentHash",
+            "rightsSnapshotId",
+            "clientId",
+            "actorContextHash",
+            "idempotencyKey",
+            "requestFingerprint",
+            "status",
+            "attempt",
+            "maxAttempts",
+            "deadlineAt",
+            "createdAt",
+            "updatedAt"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "workspaceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "segmentId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "consumerKey": {
+              "type": "string"
+            },
+            "sourceSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "segmentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "rightsSnapshotId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "clientId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "actorContextHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "requestFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "running",
+                "retrying",
+                "succeeded",
+                "failed",
+                "canceled"
+              ]
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "deadlineAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "outputArtifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "outputManifestId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "errorCode": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "updatedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/media-segment-derivative-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consumerKey",
+        "requiresPhysicalDerivative"
+      ],
+      "properties": {
+        "consumerKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{1,79}$"
+        },
+        "requiresPhysicalDerivative": {
+          "type": "boolean"
+        }
+      }
+    },
+    "apollo://schemas/media-segment-derivative-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "segmentId",
+                "parentArtifactId",
+                "segmentHash",
+                "semanticRange",
+                "sourceTimeMapping",
+                "physicalDerivative",
+                "bytesDuplicated"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "virtual"
+                },
+                "segmentId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "parentArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "segmentHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "semanticRange": {
+                  "type": "object"
+                },
+                "sourceTimeMapping": {
+                  "type": "object"
+                },
+                "physicalDerivative": {
+                  "type": "null"
+                },
+                "bytesDuplicated": {
+                  "const": false
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "segmentId",
+                "job",
+                "replayed"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "job"
+                },
+                "segmentId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "job": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "workspaceId",
+                    "segmentId",
+                    "consumerKey",
+                    "sourceSha256",
+                    "segmentHash",
+                    "rightsSnapshotId",
+                    "clientId",
+                    "actorContextHash",
+                    "idempotencyKey",
+                    "requestFingerprint",
+                    "status",
+                    "attempt",
+                    "maxAttempts",
+                    "deadlineAt",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "segmentId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "consumerKey": {
+                      "type": "string"
+                    },
+                    "sourceSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "segmentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "rightsSnapshotId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "clientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "actorContextHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "idempotencyKey": {
+                      "type": "string"
+                    },
+                    "requestFingerprint": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "running",
+                        "retrying",
+                        "succeeded",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxAttempts": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "deadlineAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "outputArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "outputManifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "replayed": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "segmentId",
+                "materialization",
+                "replayed"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "ready"
+                },
+                "segmentId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "materialization": {
+                  "type": "object"
+                },
+                "replayed": {
+                  "const": true
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

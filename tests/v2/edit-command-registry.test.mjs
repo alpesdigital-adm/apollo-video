@@ -1,3 +1,4 @@
+import { createMediaLibraryAttachmentImpact, parseMediaLibraryAttachmentImpact } from '../../src/v2/domain/media-library-attachment-impact.ts'
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -296,6 +297,7 @@ function subtitleSegmentOverrideImpact() {
 
 /** Real impact document plus its real parser, per registered Command type. */
 const IMPACT_FIXTURES = {
+  'attach-media-library-reference': { build: () => createMediaLibraryAttachmentImpact({ commandId: 'command-library', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', selectionKind: 'asset', selectionId: 'asset-source', parentArtifactId: 'asset-source', sourceSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-source' }), parse: parseMediaLibraryAttachmentImpact },
   'apply-subtitle-segment-override': { build: () => subtitleSegmentOverrideImpact(), parse: parseCommandImpact },
   'compare-action': { build: () => compareActionImpact(), parse: parseCompareActionImpact },
   'direct-multicam-session': { build: () => multicamDirectionImpact(), parse: parseMulticamDirectionImpact },
@@ -330,7 +332,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 13)
+  assert.equal(EDIT_COMMAND_TYPES.length, 14)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -414,7 +416,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(type)
     }
   }
-  assert.equal(callSites, 13, 'expected one createEditCommand call site per Command type')
+  assert.equal(callSites, 14, 'expected one createEditCommand call site per Command type')
   assert.deepEqual([...discovered].toSorted(), [...EDIT_COMMAND_TYPES])
 })
 
@@ -540,7 +542,7 @@ test('T-F0-027 deferred types enqueue no render before their unblocking event', 
 })
 
 test('T-F0-027 no-render types carry an explicit zero impact and preserve their version', () => {
-  assert.deepEqual([...editCommandTypesByRenderPolicy('no-render')], ['compare-action'])
+  assert.deepEqual([...editCommandTypesByRenderPolicy('no-render')], ['attach-media-library-reference', 'compare-action'])
   const policy = editCommandPolicy('compare-action')
   assert.equal(policy.impactSchema, 'compare-action-impact/v1')
   assert.equal(policy.requiresImpact, true)
@@ -649,4 +651,17 @@ test('T-F0-027 proxy range reuse derives its allowlist from the registry', async
     /\['manual-edit', 'apply-review-patch', 'apply-review-patch-batch'\]/,
     'the hardcoded partial-range allowlist must not reappear next to the registry',
   )
+})
+
+ test('library attachment impact preserves snapshot and rejects render invalidation or hash tampering', () => {
+  const impact = IMPACT_FIXTURES['attach-media-library-reference'].build()
+  assert.notEqual(impact.baseVersionId, impact.resultVersionId)
+  assert.equal(impact.preservedEditPlanSnapshotId, 'snapshot-edit')
+  assert.equal(impact.renderSemanticsChanged, false)
+  for (const field of ['dependencyTypes', 'affectedRanges', 'affectedVariantIds', 'affectedArtifacts', 'minimalRenders']) {
+    assert.deepEqual(impact[field], [])
+    assert.throws(() => parseMediaLibraryAttachmentImpact({ ...impact, [field]: ['unexpected'] }))
+  }
+  assert.throws(() => parseMediaLibraryAttachmentImpact({ ...impact, preservedEditPlanSnapshotId: 'snapshot-other' }))
+  assert.throws(() => parseMediaLibraryAttachmentImpact({ ...impact, renderSemanticsChanged: true }))
 })

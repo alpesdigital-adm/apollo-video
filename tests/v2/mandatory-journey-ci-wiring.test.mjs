@@ -384,7 +384,6 @@ const KNOWN_UNRUN_SUITES = [
   },
   { file: 'tests/v2/long-form-stage-fencing.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/media-input-runtime.integration.mjs', reason: PHASE_1_3 },
-  { file: 'tests/v2/media-segment-materialization.integration.mjs', reason: PHASE_1_3 },
   {
     file: 'tests/v2/mvp-core-full-journey.e2e.mjs',
     reason: `${PHASE_1_3}; docs/quality/mvp-core-gate-v1.md calls it "a prova principal" of the MVP core gate`,
@@ -400,7 +399,6 @@ const KNOWN_UNRUN_SUITES = [
     reason: `${NO_SCRIPT}; docs/REQUIREMENTS-TRACEABILITY.md cites it for FR-233 and says in the same paragraph that it was never executed`,
     citedBy: ['docs/REQUIREMENTS-TRACEABILITY.md'],
   },
-  { file: 'tests/v2/prisma-media-library.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-montage-alternative.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/prisma-mvp-core-gate.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-production-batch.integration.mjs', reason: PHASE_1_3 },
@@ -495,14 +493,23 @@ const suiteFilesRunByCi = (steps, scripts) => {
   return { runByCi, files }
 }
 
+async function inventoryCiSteps() {
+  const [central, library] = await Promise.all([read('.github/workflows/ci.yml'), read('.github/workflows/library-ci.yml')])
+  assert.match(library, /push:\s*\n\s+branches: \[main\]/)
+  assert.match(library, /\n  pull_request:/)
+  // Only generic coverage aggregates workflows. Six mandatory journeys above
+  // still require their original ci.yml jobs, database and admission switches.
+  return [...parseWorkflow(central).steps, ...parseWorkflow(library).steps]
+}
+
 test('T-F4.016 no integration or e2e suite file goes unrun by CI without being declared', async () => {
   const [rawPackage, workflow, present] = await Promise.all([
     read('package.json'),
-    read('.github/workflows/ci.yml'),
+    inventoryCiSteps(),
     listSuiteFiles(),
   ])
   const { scripts } = JSON.parse(rawPackage)
-  const { steps } = parseWorkflow(workflow)
+  const steps = workflow
   const { files: filesRunByCi } = suiteFilesRunByCi(steps, scripts)
 
   assert.ok(present.length > 0, 'found no integration or e2e suite files under tests/; the glob and the tree have diverged')
@@ -536,9 +543,8 @@ test('T-F4.016 no integration or e2e suite file goes unrun by CI without being d
 })
 
 test('T-F4.016 every npm integration or e2e script either runs in CI or runs a declared suite', async () => {
-  const [rawPackage, workflow] = await Promise.all([read('package.json'), read('.github/workflows/ci.yml')])
+  const [rawPackage, steps] = await Promise.all([read('package.json'), inventoryCiSteps()])
   const { scripts } = JSON.parse(rawPackage)
-  const { steps } = parseWorkflow(workflow)
   const { runByCi, files: filesRunByCi } = suiteFilesRunByCi(steps, scripts)
 
   const declared = new Set(KNOWN_UNRUN_SUITES.map((entry) => entry.file))

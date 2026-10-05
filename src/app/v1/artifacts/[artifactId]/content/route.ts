@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { readArtifactContentService } from '@/v2/application/read-artifact-content'
-import { createArtifactContentStorage, createMediaArtifactQueryRepository } from '@/v2/infrastructure/repository-factory'
+import { createArtifactContentStorage, createMediaArtifactQueryRepository, createMediaLibraryRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 
@@ -17,6 +17,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ art
     const content = await readArtifactContentService({
       artifacts: createMediaArtifactQueryRepository(),
       storage: createArtifactContentStorage(),
+      library: createMediaLibraryRepository(),
     })({ workspaceId: actor.workspaceId, artifactId, rangeHeader: request.headers.get('range') })
     return new Response(content.body, {
       status: content.partial ? 206 : 200,
