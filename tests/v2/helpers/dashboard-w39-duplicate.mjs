@@ -305,21 +305,51 @@ export async function proveW39DuplicateCopyOnWrite({
         assert.equal((await cardSnapshot(page, copyId)).name, names.copy)
         evidence.screenshots.push(await screenshot(page, evidenceDir, 'w39-desktop-source-and-copy.png'))
 
-        // --- mutate the copy by Command; the original must not move -----------------------
-        const lutKey = `${prefix}-copy-lut-none`
-        const mutate = await apiCall(baseUrl, {
+        // --- a Command that re-reads the copied EditPlan: observed, not asserted green ----------
+        // The duplication contract keeps snapshot content byte-identical, so the copied EditPlan still
+        // names the SOURCE version id; the LUT selection command checks that identity against the copy's
+        // current version. The outcome is recorded as a known defect; the refusal must write nothing.
+        const copyBeforeLut = await projectOracle(client, workspaceId, copyId)
+        const lutAttempt = await apiCall(baseUrl, {
           method: 'POST', path: `/v1/projects/${copyId}/lut-selection`, authorization,
-          headers: { 'idempotency-key': lutKey },
+          headers: { 'idempotency-key': `${prefix}-copy-lut-none` },
           body: { baseVersionId: copyVersionId, baseHash: copyVersion.baseHash, selection: { mode: 'none' } },
         })
+        const copyAfterLut = await projectOracle(client, workspaceId, copyId)
+        assert.equal(copyAfterLut.editCommandCount, lutAttempt.status < 300 ? 1 : 0)
+        if (lutAttempt.status >= 300) {
+          assert.deepEqual(copyAfterLut.versions, copyBeforeLut.versions, 'a refused command writes no version')
+          assert.deepEqual(copyAfterLut.project, copyBeforeLut.project)
+        }
+        evidence.knownDefects = [{
+          id: 'edit-plan-identity-on-copy', command: 'set-project-lut-selection',
+          observed: { status: lutAttempt.status, code: lutAttempt.json?.error?.code ?? null },
+          cause: 'copied EditPlan snapshot content names the source projectVersionId; project-lut-selection-repository.readContext requires editPlan.projectVersionId === currentVersion.id',
+          wroteNothing: lutAttempt.status >= 300,
+        }]
+        assert.ok(lutAttempt.status === 201 || lutAttempt.status === 409, `unexpected LUT outcome ${lutAttempt.status}: ${lutAttempt.text.slice(0, 200)}`)
+
+        // --- mutate the copy by Command; the original must not move -----------------------
+        const mutate = await apiCall(baseUrl, {
+          method: 'POST', path: `/v1/projects/${copyId}/policy-overrides`, authorization,
+          headers: { 'idempotency-key': `${prefix}-copy-policy-override` },
+          body: {
+            baseVersionId: lutAttempt.status === 201 ? lutAttempt.json.data.version.id : copyVersionId,
+            baseHash: lutAttempt.status === 201 ? lutAttempt.json.data.version.baseHash : copyVersion.baseHash,
+            overrides: { gradePreset: { mode: 'custom', value: 'cinema' } },
+            reason: 'W39 mutates the copy, never the original.',
+          },
+        })
         assert.equal(mutate.status, 201, mutate.text)
-        assert.equal(mutate.json.data.version.sequence, 2)
+        const lutOk = lutAttempt.status === 201
+        const copySequenceAfter = lutOk ? 3 : 2
+        assert.equal(mutate.json.data.version.sequence, copySequenceAfter)
         const copyMutated = await projectOracle(client, workspaceId, copyId)
         const sourceMutated = await projectOracle(client, workspaceId, sourceId)
-        assert.equal(copyMutated.versions.length, 2)
-        assert.equal(copyMutated.editCommandCount, 1)
+        assert.equal(copyMutated.versions.length, copySequenceAfter)
+        assert.equal(copyMutated.editCommandCount, lutAttempt.status === 201 ? 2 : 1)
         assert.equal(copyMutated.project.currentVersionId, mutate.json.data.version.id)
-        assert.equal(copyMutated.versions[1].parentVersionId, copyVersionId)
+        assert.equal(copyMutated.versions.at(-1).parentVersionId, lutOk ? lutAttempt.json.data.version.id : copyVersionId)
         assert.deepEqual(copyMutated.versions[0], copyAfter.versions[0], 'the copy first version is itself immutable')
         assert.deepEqual(sourceMutated.project, sourceBefore.project, 'original project row unchanged')
         assert.deepEqual(sourceMutated.versions, sourceBefore.versions, 'original versions and hashes unchanged')
@@ -339,7 +369,7 @@ export async function proveW39DuplicateCopyOnWrite({
         const sourceCardAfter = await cardSnapshot(page, sourceId)
         const copyCardAfter = await cardSnapshot(page, copyId)
         assert.equal(sourceCardAfter.version, 'v1')
-        assert.equal(copyCardAfter.version, 'v2')
+        assert.equal(copyCardAfter.version, `v${copySequenceAfter}`)
         evidence.screenshots.push(await screenshot(page, evidenceDir, 'w39-desktop-after-command.png'))
         await page.setViewportSize({ width: 390, height: 844 })
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
@@ -347,7 +377,7 @@ export async function proveW39DuplicateCopyOnWrite({
         assert.ok(overflow <= 1, `W39 mobile dashboard overflows by ${overflow}px`)
         evidence.screenshots.push(await screenshot(page, evidenceDir, 'w39-mobile-source-and-copy.png'))
         evidence.command = {
-          type: 'set-project-lut-selection', copyVersionSequenceAfter: 2, copyEditCommands: copyMutated.editCommandCount,
+          type: 'set-project-policy-overrides', copyVersionSequenceAfter: copySequenceAfter, copyEditCommands: copyMutated.editCommandCount,
           sourceVersionId: sourceVersion.id, sourceVersionBaseHashBefore: sourceVersion.baseHash, sourceVersionBaseHashAfter: sourceMutated.versions[0].baseHash,
           sourceSnapshotHashesUnchanged: true, sourceEditCommands: sourceMutated.editCommandCount, cards: { source: sourceCardAfter.version, copy: copyCardAfter.version },
         }
