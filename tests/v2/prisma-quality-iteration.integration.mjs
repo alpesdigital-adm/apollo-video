@@ -82,6 +82,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
     await client.v2AssetRightsChange.deleteMany({ where })
     await client.v2AssetRightsSnapshot.deleteMany({ where })
     await client.v2MediaArtifactManifest.deleteMany({ where })
+    await client.v2ProjectMediaAsset.deleteMany({ where })
     await client.v2MediaArtifact.deleteMany({ where })
     await client.v2Project.updateMany({ where, data: { currentVersionId: null } })
     await client.v2ProjectVersion.deleteMany({ where })
