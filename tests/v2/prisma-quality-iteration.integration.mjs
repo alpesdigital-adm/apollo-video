@@ -302,6 +302,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
           editPlanSnapshotId: snapshots[1].id,
           sourceArtifactId: `quality-source-${suffix}`,
           sourceManifestId: `quality-source-manifest-${suffix}`,
+          colorPipelineBindingsJson: stableSerialize([]),
           inputHash,
           outputArtifactId: artifactId,
           outputManifestId: manifestId,
