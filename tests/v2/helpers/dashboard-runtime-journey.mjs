@@ -61,6 +61,15 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal(response.status, expected, `${path}: ${JSON.stringify(payload)}`)
     return payload.data
   }
+  const annotationScreenshot = async (artifact, name) => {
+    const path = join(artifactRoot, ...artifact.artifactKey.split('/'))
+    const framePath = join(directory, `${name}.png`)
+    const ffmpeg = createRequire(import.meta.url)('ffmpeg-static')
+    await exec(ffmpeg, ['-v', 'error', '-y', '-i', path, '-frames:v', '1', framePath], { windowsHide: true, timeout: 30000 })
+    const bytes = await readFile(framePath)
+    evidence.screenshots.push({ name: `${name}.png`, origin: 'real-proxy-ffmpeg-frame-0', artifactId: artifact.id, sha256: sha256(bytes) })
+    return `data:image/png;base64,${bytes.toString('base64')}`
+  }
   try {
     const login = await fetch(`${baseUrl}/v1/session`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: uiUsername, password: uiPassword }), signal: AbortSignal.timeout(30000) })
@@ -176,7 +185,7 @@ export async function runDashboardRuntimeJourney(input) {
     const proxyArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: review.proxyArtifactId } })
     const annotation = await post(`/v1/projects/${projectId}/annotations`, { projectVersionId, proxyArtifactId: proxyArtifact.id,
       proxyHash: proxyArtifact.sha256, frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
-      screenshotRef: 'w35-review-desktop.png', text: 'Controlled runtime inspection; preserve framing.' }, `runtime-annotation-${suffix}`, 201)
+      screenshotRef: await annotationScreenshot(proxyArtifact, 'annotation-main-frame-0'), text: 'Controlled runtime inspection; preserve framing.' }, `runtime-annotation-${suffix}`, 201)
     await pipeline.observe({ stage: 'annotation', projectId, annotationId: annotation.annotation.id, expectedEventTypes: ['annotation.created'], expectedState: 'reviewing-proxy' })
     const copy = await post(`/v1/projects/${projectId}/duplicates`, { expectedVersionId: projectVersionId,
       expectedVersionHash: projectVersionHash, name: 'Runtime isolated failure' }, `runtime-copy-${suffix}`, 201)
@@ -238,7 +247,7 @@ export async function runDashboardRuntimeJourney(input) {
     const copyAnnotation = await post(`/v1/projects/${copy.project.id}/annotations`, {
       projectVersionId: selected.version.id, proxyArtifactId: copyArtifact.id, proxyHash: copyArtifact.sha256,
       frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
-      screenshotRef: 'w35-copy-review-desktop.png', text: 'Ajustar enquadramento central.',
+      screenshotRef: await annotationScreenshot(copyArtifact, 'annotation-copy-frame-0'), text: 'Ajustar enquadramento central.',
     }, `runtime-copy-annotation-${suffix}`, 201)
     await pipeline.observe({ stage: 'copy-annotation', projectId: copy.project.id, annotationId: copyAnnotation.annotation.id,
       expectedEventTypes: ['annotation.created'], expectedState: 'reviewing-proxy' })
