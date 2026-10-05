@@ -221,6 +221,13 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
     })
 
     const proxyRepository = new PrismaProxyReviewRepository(client)
+    const sourceManifestId = `quality-source-manifest-${suffix}`
+    await client.v2MediaArtifactManifest.create({ data: {
+      id: sourceManifestId, workspaceId, artifactId: selectedArtifactId,
+      schemaVersion: 'media-artifact-manifest/v2', manifestHash: calculateVersionHash({ sourceManifestId }),
+      recipeId: 'quality-source', recipeVersion: '1.0.0', parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
+      manifestJson: stableSerialize({ artifact: { artifactKey: `quality/${selectedArtifactId}.mp4` } }), createdAt,
+    } })
     let proxySequence = 0
     async function seedProxy(label, criticIssues) {
       const operationCreatedAt = new Date(createdAt.getTime() + proxySequence++)
@@ -300,8 +307,8 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
           projectId,
           projectVersionId,
           editPlanSnapshotId: snapshots[1].id,
-          sourceArtifactId: `quality-source-${suffix}`,
-          sourceManifestId: `quality-source-manifest-${suffix}`,
+          sourceArtifactId: selectedArtifactId,
+          sourceManifestId,
           colorPipelineBindingsJson: stableSerialize([]),
           inputHash,
           outputArtifactId: artifactId,
@@ -317,7 +324,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         proxySha256,
         inputHash,
         format: '9:16',
-        sourceSha256: calculateVersionHash({ source: suffix }),
+        sourceSha256: '1'.repeat(64),
         editPlanHash: snapshots[1].contentHash ?? calculateVersionHash(snapshots[1].content),
         expectedDurationMs: 10_000,
         uploadReceivedAt: createdAt.toISOString(),
