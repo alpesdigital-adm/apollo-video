@@ -115,7 +115,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const projectId = created.project.id
     evidence.projectId = projectId
     evidence.initialVersionId = created.version.id
-    evidence.brief = { inputMode: 'media-only', objective: 'discovery', format: '16:9', editorialInstructionOrigin: 'AGENTS owner recovery requirements, persisted in annotation and removal Command before final direction', textualOwnerBrief: 'absent at media-only creation' }
+    evidence.brief = { inputMode: 'media-only', objective: 'discovery', format: '16:9', editorialInstructionOrigin: 'AGENTS owner recovery requirements, persisted in first Director Command, annotation and removal Command before final direction', textualOwnerBrief: 'absent at media-only creation' }
     const begun = await api('/v1/media/uploads', { projectId, fileName: 'imersao-master.mp4', rightsConfirmed: true, kind: 'video', size: String(bytes.length), mimeType: 'video/mp4', checksum: hash(bytes) })
     const { session } = await api(`/v1/media/uploads/${begun.upload.id}/session`, {})
     assert.equal(session.mode, 'multipart')
@@ -149,7 +149,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(editorial.transcriptHash, transcript.transcriptHash)
     assert.ok(Array.isArray(editorial.exclusionOverrides) && editorial.exclusionOverrides.length >= 2)
     const workspace = await api(`/v1/projects/${projectId}`)
-    const initialDirection = await api(`/v1/projects/${projectId}/commands`, { type: 'run-director', baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash, reason: 'Build the reviewable source version using the newly aligned live transcript; no automatic zoom.' })
+    const initialDirection = await api(`/v1/projects/${projectId}/commands`, { type: 'run-director', baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash, reason: editorial.instruction })
     const renderProxy = factory.createProjectProxyRenderWorker(environment)
     const initialProxy = await renderProxy(`recovery-initial-proxy-${suffix}`, AbortSignal.timeout(180_000))
     assert.equal(initialProxy?.status, 'succeeded')
