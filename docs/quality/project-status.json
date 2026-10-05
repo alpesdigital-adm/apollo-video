@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-05T15:25:09.785Z",
+  "updatedAt": "2026-10-05T16:42:28.749Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "407784bdcbd1c958eb66c3e0ad925077abe9dac0",
+  "evidenceBaseCommit": "fbcee0dfb1a1486bc75a60aaef8d07ebaede8883",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -14984,6 +14984,12 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w35-quality-cleanup-final-built-09b54528/result.json",
           "role": "controlled-e2e",
           "scope": "PostgreSQL 2/2 sem skip: qualidade por output e iteração; fixtures canônicas respeitam lease; cleanup com zero backends, processos encerrados e porta 55576 livre."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w36-public-api-full-built-9ba00076/result.json",
+          "role": "controlled-e2e",
+          "scope": "fbcee0df: jornada pública API/PostgreSQL/Chromium 1/1, zero skips, 294,8 s; catálogo 16 eventos, schemas V1/V2, W29-W40, credenciais e revogação. Cleanup terminal, zero backends e porta 55576 livre."
         }
       ],
       "nextAction": "Confirmar CI do SHA final, merge e CI de main; depois atender implantação DigitalOcean e aceite separado.",
@@ -15079,6 +15085,12 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w36-pipeline-pg-final-6c3070f7/result.json",
           "role": "controlled-e2e",
           "scope": "PostgreSQL/HTTP 10/10: auth, escopos, workspace, cursor, ordenação, late writes e filtragem de operação sem projeto; cleanup confirmado."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w36-public-api-full-built-9ba00076/result.json",
+          "role": "controlled-e2e",
+          "scope": "fbcee0df: jornada pública API/PostgreSQL/Chromium 1/1, zero skips, 294,8 s; catálogo 16 eventos, schemas V1/V2, W29-W40, credenciais e revogação. Cleanup terminal, zero backends e porta 55576 livre."
         }
       ],
       "nextAction": "Confirmar CI do SHA final, merge e CI de main; depois atender implantação DigitalOcean e aceite separado.",
