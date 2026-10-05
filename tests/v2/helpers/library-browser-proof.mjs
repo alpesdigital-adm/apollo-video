@@ -150,7 +150,7 @@ export async function proveLibraryBrowser({ baseUrl, cookie, prisma, workspaceId
     await prisma.v2MediaArtifact.update({ where: { id: sourceArtifactId }, data: { currentRightsSnapshotId: null } })
     for (const path of [`/v1/media/library/${sourceArtifactId}/previews/thumbnail`, `/v1/artifacts/${source.preview.thumbnail.artifactId}/content`]) {
       const denied = await context.request.get(`${baseUrl}${path}`)
-      assert.equal(denied.status(), 403); assert.equal((await denied.json()).error.code, 'ASSET_RIGHTS_BLOCKED')
+      assert.equal(denied.status(), 422); assert.equal((await denied.json()).error.code, 'ASSET_RIGHTS_BLOCKED')
     }
     evidence.checks.push({ strength: 'controlled-pg-revocation+http-real', name: 'preview-and-direct-content-revalidate-source-rights' })
     // Revocation is real PostgreSQL; the response comes from the real server.
