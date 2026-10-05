@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 
 import {
-  apiCall, assertRefusal, cardIds, cardSnapshot, commandSummary, createProjectViaApi,
-  dashboardUrl, holdRequest, listPathMatches, oracleDigest, projectOracle,
+  FEED_TIMING_AID, apiCall, assertRefusal, cardIds, cardSnapshot, commandSummary, createProjectViaApi,
+  dashboardUrl, holdFeedPoll, holdRequest, listPathMatches, oracleDigest, projectOracle,
   projectRowSummary, pushCase, recordApplicationName, runWaveProof, sanitizedRequest,
   screenshot, trackBrowserTraffic, waitForCardName,
 } from './dashboard-w37-39-shared.mjs'
@@ -211,6 +211,8 @@ export async function proveW37RenameFromCard({
       await page.setViewportSize({ width: 1440, height: 1000 })
 
       // --- stale baseRevision from another client -----------------------------------
+      const feedHold = await holdFeedPoll(page)
+      await feedHold.held
       await card.getByRole('button', { name: 'Renomear', exact: true }).click()
       await dialog.waitFor()
       assert.match(await dialog.innerText(), /revisão administrativa 2\b/)
@@ -224,6 +226,8 @@ export async function proveW37RenameFromCard({
       const staleResponse = page.waitForResponse((response) => response.url().endsWith(posted.path) && response.request().method() === 'POST')
       await dialog.getByRole('button', { name: 'Salvar nome' }).click()
       const stale = await staleResponse
+      feedHold.release()
+      await feedHold.dispose()
       assert.equal(stale.status(), 409)
       const staleBody = await stale.json()
       assert.equal(staleBody.error.code, 'VERSION_CONFLICT')
@@ -243,7 +247,7 @@ export async function proveW37RenameFromCard({
       await waitForCardName(page, projectId, names.other)
       evidence.screenshots.push(await screenshot(page, evidenceDir, 'w37-desktop-conflict-error.png'))
       pushCase(evidence, {
-        id: 'stale-base-revision-other-client',
+        id: 'stale-base-revision-other-client', timingAid: FEED_TIMING_AID,
         expected: { status: 409, code: 'VERSION_CONFLICT', persistedName: names.other, extraCommands: 0, errorVisibleInDialog: true },
         observed: { status: stale.status(), code: staleBody.error.code, category: staleBody.error.category, persistedName: afterStale.project.name, extraCommands: 0, errorVisibleInDialog: true, dialogRevisionAfterRefetch: 3 },
       })

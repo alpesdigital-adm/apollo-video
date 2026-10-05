@@ -15,8 +15,8 @@ import {
 } from './dashboard-list-proof-common.mjs'
 import { seedAnnotations, seedOperation, setProjectStatus } from './dashboard-w34-35-fixtures.mjs'
 import {
-  apiCall, assertRefusal, cardIds, cardSnapshot, commandSummary, createProjectViaApi,
-  holdRequest, listPathMatches, plain, projectOracle, projectRowSummary, pushCase, recordApplicationName,
+  FEED_TIMING_AID, apiCall, assertRefusal, cardIds, cardSnapshot, commandSummary, createProjectViaApi,
+  holdFeedPoll, holdRequest, listPathMatches, plain, projectOracle, projectRowSummary, pushCase, recordApplicationName,
   runWaveProof, sanitizedRequest, screenshot, sha256, summaryCounters, trackBrowserTraffic,
   waitForCardName, waitForCardSet, waitForCardState, waitForSettled,
 } from './dashboard-w37-39-shared.mjs'
@@ -74,23 +74,6 @@ async function storageInventory(root, keyPrefix) {
   }
   await walk(root)
   return files.filter((file) => file.key.startsWith(keyPrefix)).toSorted((left, right) => left.key.localeCompare(right.key))
-}
-
-/**
- * Timing aid for the stale-revision cases (not an error injection): holds the dashboard's next feed poll so the
- * live revision the open dialog reads cannot be refreshed by the other client's event before the browser submits.
- * The 409 itself still comes from the server's real revision. The poll that was already in flight when the route
- * was installed has completed by the time the held one is observed.
- */
-async function holdFeedPoll(page) {
-  let release
-  const gate = new Promise((done) => { release = done })
-  let markHeld
-  const held = new Promise((done) => { markHeld = done })
-  const matches = (url) => url.pathname === FEED_PATH
-  const handler = async (route) => { markHeld(true); await gate; await route.continue().catch(() => undefined) }
-  await page.route(matches, handler)
-  return { held, release, dispose: () => page.unroute(matches, handler) }
 }
 
 /** Records the feed answers one page receives (event ids only; no cursor value leaves memory). */
@@ -565,7 +548,7 @@ export async function proveW40ConsolidatedJourney({
           // stale: the dialog is open at revision 2, client B renames (revision 3), the browser is refused with 409.
           const staleMark = mutatingMark()
           const feedHold = await holdFeedPoll(page)
-          await within('the next feed poll to be held', feedHold.held, 15_000)
+          await feedHold.held
           await cardOf(target).getByRole('button', { name: 'Renomear', exact: true }).click()
           await dialog.waitFor()
           assert.match(await dialog.innerText(), /revisão administrativa 2\b/)
@@ -599,7 +582,7 @@ export async function proveW40ConsolidatedJourney({
             expected: { status: 409, code: 'VERSION_CONFLICT', persistedName: names.renameOther, browserCommandsWritten: 0, errorVisibleInDialog: true },
             observed: { status: 409, code: staleBody.error.code, category: staleBody.error.category, persistedName: afterStale.project.name, persistedRevision: 3, browserCommandsWritten: 0, errorVisibleInDialog: true, dialogRevisionAfterRefetch: 3, cardName: names.renameOther },
             realState: 'another client changed the revision before the browser submitted',
-            timingAid: 'the dashboard feed poll was held until the refused request returned, so the live revision could not be refreshed early',
+            timingAid: FEED_TIMING_AID,
             persistedUnchanged: true, card: { name: names.renameOther, persistedName: afterStale.project.name, persistedRevision: 3 },
           })
           feedHold.release()
@@ -638,7 +621,7 @@ export async function proveW40ConsolidatedJourney({
           assert.deepEqual((await projectOracle(client, workspaceId, target)).administrationCommands, [])
           // stale: client B renames while the dialog is open at revision 1.
           const feedHold = await holdFeedPoll(page)
-          await within('the next feed poll to be held', feedHold.held, 15_000)
+          await feedHold.held
           await cardOf(target).getByRole('button', { name: 'Arquivar', exact: true }).click()
           await dialog.waitFor()
           assert.match(await dialog.innerText(), /revisão administrativa 1\b/)
@@ -665,7 +648,7 @@ export async function proveW40ConsolidatedJourney({
             expected: { status: 409, code: 'VERSION_CONFLICT', persistedStatus: 'completed', browserCommandsWritten: 0, errorVisibleInDialog: true },
             observed: { status: 409, code: staleBody.error.code, category: staleBody.error.category, persistedStatus: 'completed', browserCommandsWritten: 0, errorVisibleInDialog: true, dialogRevisionAfterRefetch: 2, cardState: 'completed' },
             realState: 'another client renamed the project before the browser confirmed',
-            timingAid: 'the dashboard feed poll was held until the refused request returned, so the live revision could not be refreshed early',
+            timingAid: FEED_TIMING_AID,
             persistedUnchanged: true, card: { state: 'completed', persistedStatus: afterStale.project.status, persistedRevision: afterStale.project.administrationRevision },
           })
           feedHold.release()

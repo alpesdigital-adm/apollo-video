@@ -82,6 +82,7 @@ export function verifyW37Evidence(directory, context) {
     'unchanged-name', 'unknown-project',
   ])
   const byId = Object.fromEntries(manifest.cases.map((item) => [item.id, item]))
+  assert.match(byId['stale-base-revision-other-client'].timingAid, /feed poll was held/, 'the stale case must disclose its timing aid')
   assert.equal(byId['stale-base-revision-other-client'].observed.errorVisibleInDialog, true)
   assert.equal(byId['stale-base-revision-other-client'].observed.extraCommands, 0)
   assert.equal(byId['idempotent-replay'].observed.commands, 1)
@@ -148,6 +149,7 @@ export function verifyW38Evidence(directory, context) {
     'archive-stale-base-revision', 'restore-not-archived',
   ])
   const byId = Object.fromEntries(manifest.cases.map((item) => [item.id, item]))
+  assert.match(byId['stale-base-revision-archive'].timingAid, /feed poll was held/, 'the stale case must disclose its timing aid')
   assert.equal(byId['stale-base-revision-archive'].observed.errorVisibleInDialog, true)
   assert.equal(byId['stale-base-revision-archive'].observed.statusAfter, 'completed')
   assert.deepEqual(byId['recovery-second-cycle'].observed.revisions, [2, 3, 4, 5, 6])

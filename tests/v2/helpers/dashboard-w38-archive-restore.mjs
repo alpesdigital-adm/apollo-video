@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 
 import {
-  apiCall, assertRefusal, cardIds, cardSnapshot, commandSummary, createProjectViaApi,
-  dashboardUrl, listPathMatches, oracleDigest, plain, projectOracle, projectRowSummary,
+  FEED_TIMING_AID, apiCall, assertRefusal, cardIds, cardSnapshot, commandSummary, createProjectViaApi,
+  dashboardUrl, holdFeedPoll, listPathMatches, oracleDigest, plain, projectOracle, projectRowSummary,
   pushCase, recordApplicationName, runWaveProof, sanitizedRequest, screenshot,
   summaryCounters, trackBrowserTraffic, waitForCardName, waitForCardSet, waitForCardState,
   waitForSettled,
@@ -278,6 +278,8 @@ export async function proveW38ArchiveRestore({
         const before = await projectOracle(client, workspaceId, item.id)
         const revision = before.project.administrationRevision
         assert.equal(revision, 3)
+        const feedHold = await holdFeedPoll(page)
+        await feedHold.held
         await cardOf(item).getByRole('button', { name: 'Arquivar', exact: true }).click()
         await dialog.waitFor()
         assert.match(await dialog.innerText(), /revisão administrativa 3/)
@@ -291,6 +293,8 @@ export async function proveW38ArchiveRestore({
         const mutationsBefore = traffic.mutating().length
         await dialog.getByRole('button', { name: 'Confirmar arquivamento' }).click()
         const stale = await staleResponse
+        feedHold.release()
+        await feedHold.dispose()
         assert.equal(stale.status(), 409)
         const staleBody = await stale.json()
         assert.equal(staleBody.error.code, 'VERSION_CONFLICT')
@@ -306,7 +310,7 @@ export async function proveW38ArchiveRestore({
         evidence.screenshots.push(await screenshot(page, evidenceDir, 'w38-desktop-conflict-error.png'))
         assert.equal(traffic.mutating().length, mutationsBefore + 1)
         pushCase(evidence, {
-          id: 'stale-base-revision-archive', expected: { status: 409, code: 'VERSION_CONFLICT', statusAfter: 'completed' },
+          id: 'stale-base-revision-archive', timingAid: FEED_TIMING_AID, expected: { status: 409, code: 'VERSION_CONFLICT', statusAfter: 'completed' },
           observed: { status: stale.status(), code: staleBody.error.code, statusAfter: afterStale.project.status, errorVisibleInDialog: true, dialogRevisionAfterRefetch: 4, extraBrowserCommands: 0 },
         })
         // Recovery: confirm again on the live revision, then restore again (revisions keep growing).

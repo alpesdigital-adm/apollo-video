@@ -329,6 +329,27 @@ export async function holdRequest(page, pattern) {
   return { held, release, dispose: () => page.unroute(pattern, handler) }
 }
 
+/**
+ * Timing aid for deliberately stale dialogs (not an error injection): holds the dashboard's next
+ * GET /v1/events/feed poll so the other client's event cannot refresh the live revision the open
+ * dialog reads before the browser submits. The 409 still comes from the server's real revision.
+ * A poll already in flight when the route is installed has completed once the held one is observed.
+ * Resolve `held` before the other client's mutation; `release` + `dispose` after the refused response.
+ */
+export async function holdFeedPoll(page) {
+  let release
+  const gate = new Promise((done) => { release = done })
+  let markHeld
+  const held = new Promise((done) => { markHeld = done })
+  const matches = (url) => url.pathname === '/v1/events/feed'
+  const handler = async (route) => { markHeld(true); await gate; await route.continue().catch(() => undefined) }
+  await page.route(matches, handler)
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timed out waiting for the next feed poll to be held')), 15_000).unref?.())
+  return { held: Promise.race([held, timeout]), release, dispose: () => page.unroute(matches, handler) }
+}
+
+export const FEED_TIMING_AID = 'the dashboard feed poll was held until the refused request returned, so the live revision could not be refreshed early'
+
 export function sanitizedRequest(request) {
   let body = null
   try { body = request.postData === null ? null : JSON.parse(request.postData) } catch { body = '[unparseable]' }
