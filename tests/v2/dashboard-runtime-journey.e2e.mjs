@@ -236,8 +236,9 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
       issues: [],
       evaluatedAt: createdAt.toISOString(),
     }
+    const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
     const snapshots = [
-      [snapshotIds.brief, 'brief', 1, { schemaVersion: 1, productionBrief: { ownerInput: { text: 'Final aprovado.' } } }],
+      [snapshotIds.brief, 'brief', 1, { schemaVersion: 1, productionBrief: createProductionBrief({ ownerText: 'Final aprovado.' }) }],
       [snapshotIds.policies, 'policies', 1, { schemaVersion: 1, state: 'configured' }],
       [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
