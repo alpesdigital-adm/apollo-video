@@ -100,8 +100,77 @@ export function verifyW37Evidence(directory, context) {
   return { runId: manifest.runId }
 }
 
+export function verifyW38Evidence(directory, context) {
+  const manifest = readManifest(directory, 38, 'w38-archive-restore/v1', context)
+  assert.match(manifest.prefix, /^w38-[a-f0-9]{8}$/)
+  assert.deepEqual(manifest.fixtures.map((item) => [item.key, item.previousStatus]), [
+    ['completed', 'completed'], ['failed', 'failed'], ['canceled', 'canceled'], ['legacy', 'archived'],
+  ])
+  assert.equal(manifest.browser.mutatingRequests, 9)
+  assert.equal(manifest.browser.requests.length, 9)
+  assert.ok(manifest.browser.requests.every((item) => item.method === 'POST' && /\/(archive|restore)$/.test(item.path)))
+  assert.equal(manifest.browser.requests.filter((item) => item.path.endsWith('/archive') && item.body.confirmed === true).length, manifest.browser.requests.filter((item) => item.path.endsWith('/archive')).length)
+  assert.equal(new Set(manifest.browser.requests.map((item) => item.idempotencyKeySha256)).size, 9)
+  assert.equal(manifest.browser.mobileOverflowPx <= 1, true)
+  assert.deepEqual(manifest.cycles.map((item) => item.previousStatus), ['completed', 'failed', 'canceled'])
+  for (const cycle of manifest.cycles) {
+    assert.deepEqual(cycle.cancelledSteps, { mutatingRequests: 0, commands: 0, revisions: 0 })
+    assert.equal(cycle.archive.command.action, 'archive')
+    assert.equal(cycle.archive.command.beforeStatus, cycle.previousStatus)
+    assert.equal(cycle.archive.command.afterStatus, 'archived')
+    assert.equal(cycle.archive.command.afterArchivedFromStatus, cycle.previousStatus)
+    assert.equal(cycle.archive.command.confirmation, 'explicit')
+    assert.equal(cycle.archive.command.actorAuthenticationKind, 'ui-session')
+    assert.equal(cycle.archive.cardState, 'archived')
+    assert.equal(cycle.restore.command.action, 'restore')
+    assert.equal(cycle.restore.command.beforeStatus, 'archived')
+    assert.equal(cycle.restore.command.beforeArchivedFromStatus, cycle.previousStatus)
+    assert.equal(cycle.restore.command.afterStatus, cycle.previousStatus)
+    assert.equal(cycle.restore.command.afterArchivedFromStatus, null)
+    assert.equal(cycle.restore.command.resultRevision, cycle.archive.command.resultRevision + 1)
+    assert.equal(cycle.restore.cardState === 'archived', false)
+    assert.equal(cycle.versionsIdentical, true)
+    assert.equal(cycle.snapshotsIdentical, true)
+    assert.equal(cycle.finalProject.status, cycle.previousStatus)
+    assert.equal(cycle.finalProject.archivedFromStatus, null)
+  }
+  assert.equal(manifest.legacy.uiRestoreEnabled, false)
+  assert.equal(manifest.legacy.uiClickSentRequests, 0)
+  assert.equal(manifest.legacy.project.status, 'archived')
+  assert.equal(manifest.legacy.project.archivedFromStatus, null)
+  assert.equal(manifest.legacy.commands, 0)
+  assert.equal(manifest.legacy.projectsBefore, manifest.legacy.projectsAfter)
+  verifyCases(manifest, [
+    'stale-base-revision-archive', 'recovery-second-cycle', 'legacy-restore-fails-closed', 'legacy-archive-refused',
+    'idempotent-replay-archive-and-restore', 'idempotency-payload-mismatch', 'archive-insufficient-scope',
+    'restore-insufficient-scope', 'archive-other-workspace', 'restore-other-workspace', 'archive-anonymous',
+    'archive-session-without-origin', 'archive-unconfirmed', 'archive-confirmation-missing',
+    'archive-stale-base-revision', 'restore-not-archived',
+  ])
+  const byId = Object.fromEntries(manifest.cases.map((item) => [item.id, item]))
+  assert.equal(byId['stale-base-revision-archive'].observed.errorVisibleInDialog, true)
+  assert.equal(byId['stale-base-revision-archive'].observed.statusAfter, 'completed')
+  assert.deepEqual(byId['recovery-second-cycle'].observed.revisions, [2, 3, 4, 5, 6])
+  assert.equal(byId['idempotent-replay-archive-and-restore'].observed.commands, 5)
+  for (const item of manifest.cases) {
+    if (item.request) assert.equal(item.persistedUnchanged, true, `${item.id} must leave the project untouched`)
+  }
+  const completed = manifest.final.projects.find((item) => item.key === 'completed')
+  assert.deepEqual(completed.commands.map((item) => [item.action, item.baseRevision, item.resultRevision]), [
+    ['archive', 1, 2], ['restore', 2, 3], ['rename', 3, 4], ['archive', 4, 5], ['restore', 5, 6],
+  ])
+  const legacy = manifest.final.projects.find((item) => item.key === 'legacy')
+  assert.equal(legacy.project.status, 'archived')
+  assert.equal(legacy.commands.length, 0)
+  verifyScreenshots(directory, manifest, [
+    'w38-desktop-before.png', 'w38-desktop-archive-dialog.png', 'w38-desktop-after-cancel.png', 'w38-desktop-archived.png',
+    'w38-desktop-archived-filter.png', 'w38-desktop-restored.png', 'w38-desktop-conflict-error.png', 'w38-mobile-restored.png',
+  ])
+  return { runId: manifest.runId }
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const verifiers = { w37: verifyW37Evidence }
+  const verifiers = { w37: verifyW37Evidence, w38: verifyW38Evidence }
   try {
     const verify = verifiers[process.argv[2]]
     assert.ok(verify, 'usage: dashboard-w37-39-evidence-guard.mjs w37|w38|w39 <evidence-dir>')
