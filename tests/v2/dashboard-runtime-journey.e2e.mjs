@@ -158,6 +158,9 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
         NODE_ENV: process.env.APOLLO_DASHBOARD_RUNTIME_SERVER_MODE === 'dev' ? 'development' : 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        // This controlled two-page browser proof opens every card destination
+        // and samples every phase; it uses the existing journey test policy.
+        APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '400',
         APOLLO_AUTH_MODE: 'bootstrap', APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true', APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
         APOLLO_UI_USERNAME: uiUsername, APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `catalog-salt-${suffix}`),
         APOLLO_UI_SESSION_SECRET: `catalog-${suffix}-session-secret-with-32-bytes`, APOLLO_UI_API_CLIENT_ID: issued.client.id,

@@ -31,6 +31,7 @@ export async function runDashboardRuntimeJourney(input) {
   const evidence = { schemaVersion: 'dashboard-real-runtime/v1', runId: suffix, ownerPid: process.pid,
     sourceCommit: process.env.GITHUB_SHA ?? null, states: [], outputs: [], screenshots: [],
     controlledInputs: ['Director snapshots', 'FFmpeg synthetic source bytes', 'source color probe'],
+    governancePolicy: { anomalyRequestMinimum: 400, scope: 'owned E2E server only', productionDefaultChanged: false },
     unmeasuredProgress: { runtimeReachable: false, reason: 'All public operations use a known canonical phase count; historical no-total proof is controlled.' },
     deployed: false, ownerAccepted: false, postflight: {} }
   const { PrismaPublicOperationRepository } = await import('../../../src/v2/infrastructure/prisma/public-operation-repository.ts')
