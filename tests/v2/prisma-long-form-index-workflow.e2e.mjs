@@ -991,10 +991,35 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
     assert.deepEqual(operationEvents.map((event) => event.type), [
       'operation.status.changed',
       'operation.status.changed',
+      'operation.progress.changed',
+      'operation.progress.changed',
+      'operation.progress.changed',
+      'operation.progress.changed',
       'operation.status.changed',
       'operation.status.changed',
+      'operation.progress.changed',
+      'operation.progress.changed',
+      'operation.progress.changed',
+      'operation.progress.changed',
       'operation.status.changed',
       'operation.succeeded',
+    ])
+    const progressPayloads = operationEvents.filter((event) => event.type === 'operation.progress.changed').map((event) => {
+      assert.equal(event.workspaceId, workspaceId)
+      assert.equal(event.resourceType, 'operation')
+      assert.equal(event.resourceId, operationId)
+      assert.equal(event.version, '1.0.0')
+      return JSON.parse(event.dataJson)
+    })
+    assert.deepEqual(progressPayloads, [
+      { operationType: 'long-form-index', status: 'running', previousPhase: 'probing', phase: 'transcribing', attempt: 1, projectId, progress: { completed: 1, total: 6, unit: 'stage' } },
+      { operationType: 'long-form-index', status: 'running', previousPhase: 'transcribing', phase: 'diarizing', attempt: 1, projectId, progress: { completed: 2, total: 6, unit: 'stage' } },
+      { operationType: 'long-form-index', status: 'running', previousPhase: 'diarizing', phase: 'chunking', attempt: 1, projectId, progress: { completed: 3, total: 6, unit: 'stage' } },
+      { operationType: 'long-form-index', status: 'retrying', previousPhase: 'chunking', phase: 'retrying', attempt: 1, projectId, progress: { completed: 3, total: 6, unit: 'stage' } },
+      { operationType: 'long-form-index', status: 'running', previousPhase: 'probing', phase: 'chunking', attempt: 2, projectId, progress: { completed: 3, total: 6, unit: 'stage' } },
+      { operationType: 'long-form-index', status: 'running', previousPhase: 'chunking', phase: 'indexing', attempt: 2, projectId, progress: { completed: 4, total: 6, unit: 'stage' } },
+      { operationType: 'long-form-index', status: 'running', previousPhase: 'indexing', phase: 'persisting', attempt: 2, projectId, progress: { completed: 5, total: 6, unit: 'stage' } },
+      { operationType: 'long-form-index', status: 'succeeded', previousPhase: 'persisting', phase: 'completed', attempt: 2, projectId, progress: { completed: 6, total: 6, unit: 'stage' } },
     ])
     assert.equal(stored.workflow.sourceTranscriptId, undefined)
     assert.equal(stored.workflow.durationMs, 7_200_000)
