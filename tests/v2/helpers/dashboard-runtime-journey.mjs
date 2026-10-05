@@ -196,7 +196,7 @@ export async function runDashboardRuntimeJourney(input) {
     activeObserver = async (operation, kind) => observe({ stage: `final-${operation.phase}`, operationId: operation.id,
       status: 'rendering-final', phase: operation.phase, completed: operation.progress.completed,
       eventTypes: [kind === 'claimed' ? 'operation.status.changed' : 'operation.progress.changed'] })
-    assert.deepEqual(await runObservedWorker(() => createProjectFinalExportWorker(environment)(`runtime-final-worker-${suffix}`, { workspaceId, operationId: final.operation.id, signal })), { operationId: final.operation.id, status: 'succeeded' })
+    assert.deepEqual(await runObservedWorker(() => createProjectFinalExportWorker(environment)(`runtime-final-worker-${suffix}`, signal)), { operationId: final.operation.id, status: 'succeeded' })
     await observe({ stage: 'completed', status: 'completed', operationId: final.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     const finalReplay = await post(`/v1/projects/${projectId}/exports`, exportBody, `runtime-final-${suffix}`, 202)
     assert.equal(finalReplay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'completed')
