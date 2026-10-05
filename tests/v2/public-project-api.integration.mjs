@@ -14,6 +14,9 @@ import { cleanupDashboardFixtures } from './helpers/dashboard-w34-35-fixtures.mj
 import { proveDashboardAggregate } from './helpers/dashboard-w34-aggregate.mjs'
 import { proveDashboardStates } from './helpers/dashboard-w35-states.mjs'
 import { proveDashboardEventFeedBrowser } from './helpers/dashboard-w36-events-proof.mjs'
+import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
+import { proveW38ArchiveRestore } from './helpers/dashboard-w38-archive-restore.mjs'
+import { createW39ArtifactRoot, proveW39DuplicateCopyOnWrite } from './helpers/dashboard-w39-duplicate.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -172,6 +175,8 @@ test('authenticated public API manages projects, clients and artifact inspection
   const webhookReplayDeliveryId = '00000000-0000-4000-8000-000000000907'
   const webhookReplayAttemptId = '00000000-0000-4000-8000-000000000908'
   const sha = (character) => character.repeat(64)
+  // W39: the journey server is started with this isolated local artifact root so the raw-master fixture is served by the product.
+  const w39ArtifactRoot = await createW39ArtifactRoot()
   let server
   let serverDiagnostics = ''
   let primaryFailure
@@ -274,6 +279,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2ProjectCreationCommand.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    // W39: a duplicated project's first version forks from its source (restrictive FK), so duplicates go first.
+    await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds }, duplicatedFromProjectId: { not: null } } })
     await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
@@ -683,6 +690,7 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
           APOLLO_RENDERER_DIGEST: sha('8'),
           APOLLO_FFMPEG_PATH: ffmpegPath,
+          APOLLO_V2_ARTIFACT_ROOT: w39ArtifactRoot,
           // This broad journey generates hundreds of legitimate requests. Keep
           // request/spend spike detection out of this isolated error-rate proof.
           APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '2000000000',
@@ -5708,6 +5716,56 @@ test('authenticated public API manages projects, clients and artifact inspection
       username: uiUsername,
     })
     assert.equal(w36.outcome, 'passed')
+
+    // --- W37 (stream s4) ---
+    // The three clients below are shared by the W37-W39 blocks: a read-only
+    // credential in the journey workspace and a write credential in the other one.
+    const w3739ClientFactory = createApiClientService({
+      repository: new PrismaApiClientRepository(client),
+      credentialCrypto: nodeApiCredentialCrypto,
+      clock: () => new Date(),
+    })
+    const w3739ReadOnly = await w3739ClientFactory({
+      id: 'w3739-readonly-client-v2', credentialId: 'w3739-readonly-credential-v2',
+      workspaceId, name: 'W37-39 read-only client', environment: apiEnvironment,
+      scopes: ['projects:read'],
+    })
+    const w3739OtherWorkspace = await w3739ClientFactory({
+      id: 'w3739-other-workspace-client-v2', credentialId: 'w3739-other-workspace-credential-v2',
+      workspaceId: otherWorkspaceId, name: 'W37-39 other workspace client', environment: apiEnvironment,
+      scopes: ['artifacts:read', 'projects:read', 'projects:write'],
+    })
+    const w3739ReadOnlyAuthorization = `Bearer ${w3739ReadOnly.token}`
+    const w3739OtherWorkspaceAuthorization = `Bearer ${w3739OtherWorkspace.token}`
+    const w37 = await proveW37RenameFromCard({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w37.outcome, 'passed')
+
+    // --- W38 (stream s4) ---
+    const w38 = await proveW38ArchiveRestore({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w38.outcome, 'passed')
+
+    // --- W39 (stream s4) ---
+    const w39 = await proveW39DuplicateCopyOnWrite({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername, artifactRoot: w39ArtifactRoot, ffmpegPath,
+      artifacts, createMediaArtifactManifest,
+    })
+    assert.equal(w39.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

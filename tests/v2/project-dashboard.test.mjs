@@ -436,3 +436,15 @@ test('W34 public project-list v6 accepts real absence and rejects invented aggre
   assert.equal(invented((dashboard) => { delete dashboard.latestOperation }), false)
   assert.equal(invented((dashboard) => { delete dashboard.currentVersion }), false)
 })
+
+test('F1.003 a refused project administration keeps its error in the open dialog and recovers on the live revision', () => {
+  assert.match(dashboardSource, /const \[quickActionError, setQuickActionError\] = useState<string \| null>\(null\)/)
+  // The refusal is rendered as an alert inside the dialog, not only behind its backdrop.
+  assert.match(dashboardSource, /role="alert"[^>]*data-testid="quick-action-error"|data-testid="quick-action-error"[^>]*role="alert"/)
+  assert.match(dashboardSource, /\{quickActionError\}/)
+  // A refusal (e.g. VERSION_CONFLICT from another client) triggers a refetch so
+  // the next attempt is fenced by the revision the server holds now.
+  assert.match(dashboardSource, /setQuickActionError\(error instanceof Error[\s\S]{0,200}setRefreshRevision\(\(value\) => value \+ 1\)/)
+  // The dialog reads the live card row, so the retry carries the refreshed revision.
+  assert.match(dashboardSource, /projects\.find\(\(item\) => item\.id === quickActionDialog\.project\.id\)/)
+})

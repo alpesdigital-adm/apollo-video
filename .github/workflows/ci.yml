@@ -424,6 +424,29 @@ jobs:
           orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-contamination-ci'")"
           test "$orphans" = 0
 
+      - name: Provision and migrate isolated project duplication E2E database
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_project_duplication?schema=public&application_name=apollo-video-e2e-project-duplication-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" createdb -U apollo apollo_v2_e2e_project_duplication
+          npm run db:v2:migrate:deploy
+
+      - name: Run copy-on-write project duplication PostgreSQL and API suite
+        run: npm run test:integration:project-duplication
+        env:
+          APOLLO_PROJECT_DUPLICATION_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_project_duplication?schema=public&application_name=apollo-video-e2e-project-duplication-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan project duplication E2E backends
+        if: always()
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-project-duplication-ci'")"
+          test "$orphans" = 0
+
       - name: Publish public API documentation artifact
         uses: actions/upload-artifact@v4
         with:
@@ -799,6 +822,9 @@ jobs:
           APOLLO_W34_EVIDENCE_DIR: ${{ runner.temp }}/w34-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_W35_EVIDENCE_DIR: ${{ runner.temp }}/w35-states-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_W36_EVIDENCE_DIR: ${{ runner.temp }}/w36-dashboard-events-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_W37_EVIDENCE_DIR: ${{ runner.temp }}/w37-rename-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_W38_EVIDENCE_DIR: ${{ runner.temp }}/w38-archive-restore-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_W39_EVIDENCE_DIR: ${{ runner.temp }}/w39-duplicate-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
 
       - name: Verify Wave 29 browser, evidence and PostgreSQL postflight
@@ -1053,6 +1079,93 @@ jobs:
         with:
           name: w36-dashboard-events-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/w36-dashboard-events-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify Wave 37 rename evidence and PostgreSQL postflight
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        run: |
+          set -euo pipefail
+          mkdir -p "$APOLLO_W37_EVIDENCE_DIR"
+          remaining=unknown
+          trap 'printf "{\"schemaVersion\":\"w37-ci-postflight/v1\",\"applicationName\":\"%s\",\"remainingBackends\":\"%s\"}\n" "$APOLLO_PUBLIC_API_APP_NAME" "$remaining" > "$APOLLO_W37_EVIDENCE_DIR/w37-ci-postflight.json"' EXIT
+          test -x /usr/bin/google-chrome
+          export PGPASSWORD=apollo-ci
+          for _ in $(seq 1 15); do
+            remaining="$(/usr/lib/postgresql/16/bin/psql -h 127.0.0.1 -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname='apollo_v2' and application_name='$APOLLO_PUBLIC_API_APP_NAME'")"
+            test "$remaining" != 0 || break
+            sleep 1
+          done
+          test "$remaining" = 0 || { printf 'Wave 37 PostgreSQL sessions remain after integration.\n' >&2; exit 1; }
+          node tests/v2/helpers/dashboard-w37-39-evidence-guard.mjs w37 "$APOLLO_W37_EVIDENCE_DIR"
+        env:
+          APOLLO_PUBLIC_API_APP_NAME: apollo-video-e2e-w29-ci
+          APOLLO_W37_EVIDENCE_DIR: ${{ runner.temp }}/w37-rename-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish Wave 37 rename evidence
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: w37-rename-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w37-rename-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify Wave 38 archive/restore evidence and PostgreSQL postflight
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        run: |
+          set -euo pipefail
+          mkdir -p "$APOLLO_W38_EVIDENCE_DIR"
+          remaining=unknown
+          trap 'printf "{\"schemaVersion\":\"w38-ci-postflight/v1\",\"applicationName\":\"%s\",\"remainingBackends\":\"%s\"}\n" "$APOLLO_PUBLIC_API_APP_NAME" "$remaining" > "$APOLLO_W38_EVIDENCE_DIR/w38-ci-postflight.json"' EXIT
+          test -x /usr/bin/google-chrome
+          export PGPASSWORD=apollo-ci
+          for _ in $(seq 1 15); do
+            remaining="$(/usr/lib/postgresql/16/bin/psql -h 127.0.0.1 -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname='apollo_v2' and application_name='$APOLLO_PUBLIC_API_APP_NAME'")"
+            test "$remaining" != 0 || break
+            sleep 1
+          done
+          test "$remaining" = 0 || { printf 'Wave 38 PostgreSQL sessions remain after integration.\n' >&2; exit 1; }
+          node tests/v2/helpers/dashboard-w37-39-evidence-guard.mjs w38 "$APOLLO_W38_EVIDENCE_DIR"
+        env:
+          APOLLO_PUBLIC_API_APP_NAME: apollo-video-e2e-w29-ci
+          APOLLO_W38_EVIDENCE_DIR: ${{ runner.temp }}/w38-archive-restore-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish Wave 38 archive/restore evidence
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: w38-archive-restore-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w38-archive-restore-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify Wave 39 duplicate evidence and PostgreSQL postflight
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        run: |
+          set -euo pipefail
+          mkdir -p "$APOLLO_W39_EVIDENCE_DIR"
+          remaining=unknown
+          trap 'printf "{\"schemaVersion\":\"w39-ci-postflight/v1\",\"applicationName\":\"%s\",\"remainingBackends\":\"%s\"}\n" "$APOLLO_PUBLIC_API_APP_NAME" "$remaining" > "$APOLLO_W39_EVIDENCE_DIR/w39-ci-postflight.json"' EXIT
+          test -x /usr/bin/google-chrome
+          export PGPASSWORD=apollo-ci
+          for _ in $(seq 1 15); do
+            remaining="$(/usr/lib/postgresql/16/bin/psql -h 127.0.0.1 -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname='apollo_v2' and application_name='$APOLLO_PUBLIC_API_APP_NAME'")"
+            test "$remaining" != 0 || break
+            sleep 1
+          done
+          test "$remaining" = 0 || { printf 'Wave 39 PostgreSQL sessions remain after integration.\n' >&2; exit 1; }
+          node tests/v2/helpers/dashboard-w37-39-evidence-guard.mjs w39 "$APOLLO_W39_EVIDENCE_DIR"
+        env:
+          APOLLO_PUBLIC_API_APP_NAME: apollo-video-e2e-w29-ci
+          APOLLO_W39_EVIDENCE_DIR: ${{ runner.temp }}/w39-duplicate-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish Wave 39 duplicate evidence
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: w39-duplicate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w39-duplicate-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 14
 

@@ -18,6 +18,7 @@ import { DomainError } from '../../domain/errors.ts'
 import { createProject, type ProjectStatus } from '../../domain/project.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
 import { createProjectSnapshot } from '../../domain/project-snapshot.ts'
+import { rebindSnapshotContentForDuplicate } from '../../domain/project-snapshot-rebind.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
   assertProjectCreationCommand,
@@ -63,18 +64,21 @@ function parseStoredResponse(
   return { projectId: value.projectId, versionId: value.versionId }
 }
 
-function hydrateProject(row: V2Project) {
+function hydrateProject(
+  row: V2Project,
+  recorded?: Readonly<{ name: string; status: ProjectStatus; currentVersionId: string }>,
+) {
   return createProject({
     id: row.id,
     workspaceId: row.workspaceId,
-    name: row.name,
-    status: row.status as ProjectStatus,
+    name: recorded?.name ?? row.name,
+    status: recorded?.status ?? row.status as ProjectStatus,
     ...(row.objective ? { objective: row.objective } : {}),
     ...(row.format ? { format: row.format } : {}),
     ...(row.locale ? { locale: row.locale } : {}),
     ...(row.ownerId ? { ownerId: row.ownerId } : {}),
-    ...(row.currentVersionId
-      ? { currentVersionId: row.currentVersionId }
+    ...((recorded?.currentVersionId ?? row.currentVersionId)
+      ? { currentVersionId: recorded?.currentVersionId ?? row.currentVersionId! }
       : {}),
     ...(row.duplicatedFromProjectId
       ? { duplicatedFromProjectId: row.duplicatedFromProjectId }
@@ -125,7 +129,7 @@ async function hydrateResult(
   audit: Readonly<ApiAccessAuditContext>,
   requestFingerprint: string,
 ): Promise<Readonly<ProjectDuplicationResult>> {
-  const [project, version, media, command] = await Promise.all([
+  const [project, version, media, command, firstAdministration] = await Promise.all([
     client.v2Project.findUnique({ where: { id: ids.projectId } }),
     client.v2ProjectVersion.findUnique({ where: { id: ids.versionId } }),
     client.v2ProjectMediaAsset.findMany({
@@ -139,11 +143,22 @@ async function hydrateResult(
         workspaceId: audit.workspaceId,
       } },
     }),
+    client.v2ProjectAdministrationCommand.findFirst({
+      where: { projectId: ids.projectId },
+      orderBy: { resultRevision: 'asc' },
+      select: { beforeName: true },
+    }),
   ])
+  // The recorded result is the duplication as it was answered the first time: the copy's own
+  // first version (immutable, sequence 1, forked from the source) and the project as it was
+  // created. Later Commands on the copy move currentVersionId and may rename or archive it;
+  // none of that changes what this idempotency key recorded.
   if (
     !project ||
     !version ||
-    project.currentVersionId !== version.id ||
+    version.projectId !== project.id ||
+    version.sequence !== 1 ||
+    version.parentVersionId !== null ||
     project.duplicatedFromProjectId === null ||
     version.forkedFromProjectId !== project.duplicatedFromProjectId ||
     version.forkedFromVersionId === null
@@ -164,7 +179,11 @@ async function hydrateResult(
     requestFingerprint,
   })
   return Object.freeze({
-    project: hydrateProject(project),
+    project: hydrateProject(project, {
+      name: firstAdministration?.beforeName ?? project.name,
+      status: 'draft' as ProjectStatus,
+      currentVersionId: version.id,
+    }),
     version: hydrateVersion(version),
     sharedArtifactIds: Object.freeze(
       [...new Set(media.map((item) => item.artifactId))],
@@ -375,12 +394,23 @@ implements ProjectDuplicationRepository {
             sourceVersion.policiesSnapshotId,
           ].filter((id): id is string => Boolean(id)) } },
         })
-        const sourceIdentity = sourceSnapshots.map((snapshot) => ({
-          kind: snapshot.kind,
-          schemaVersion: snapshot.schemaVersion,
-          contentHash: snapshot.contentHash,
-          contentJson: snapshot.contentJson,
-        })).sort((left, right) => left.kind.localeCompare(right.kind))
+        // The copy preserves the source's content except for the owner-binding fields, which
+        // the domain rule rebinds to the copy; its hash is recomputed by the same rule.
+        const sourceIdentity = sourceSnapshots.map((snapshot) => {
+          const expected = rebindSnapshotContentForDuplicate({
+            kind: snapshot.kind as Parameters<typeof createProjectSnapshot>[0]['kind'],
+            contentJson: snapshot.contentJson,
+            contentHash: snapshot.contentHash,
+            source: { projectId: sourceProject.id, versionId: sourceVersion.id },
+            copy: { projectId: bundle.project.id, versionId: bundle.version.id },
+          })
+          return {
+            kind: snapshot.kind,
+            schemaVersion: snapshot.schemaVersion,
+            contentHash: expected.contentHash,
+            contentJson: expected.contentJson,
+          }
+        }).sort((left, right) => left.kind.localeCompare(right.kind))
         const duplicateIdentity = bundle.snapshots.map((snapshot) => ({
           kind: snapshot.kind,
           schemaVersion: snapshot.contentSchemaVersion,
@@ -390,7 +420,7 @@ implements ProjectDuplicationRepository {
         if (stableSerialize(duplicateIdentity) !== stableSerialize(sourceIdentity)) {
           throw new DomainError(
             'PERSISTENCE_CONFLICT',
-            'Project duplication snapshots must preserve immutable source content',
+            'Project duplication snapshots must preserve source content and bind it to the copy',
           )
         }
         const duplicateSnapshotRefs = new Set(Object.values(bundle.version.snapshotRefs))

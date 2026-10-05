@@ -219,6 +219,7 @@ export default function Dashboard() {
   const [quickActionName, setQuickActionName] = useState('')
   const [actionBusyProjectId, setActionBusyProjectId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [quickActionError, setQuickActionError] = useState<string | null>(null)
   const [filters, setFilters] = useState<ProjectDashboardFilters>({
     ...EMPTY_PROJECT_DASHBOARD_FILTERS,
   })
@@ -492,6 +493,7 @@ export default function Dashboard() {
   function openQuickAction(kind: QuickActionDialog['kind'], project: ProjectSummary) {
     setQuickActionName(kind === 'rename' ? project.name : '')
     setQuickActionDialog({ kind, project })
+    setQuickActionError(null)
     setNotice(null)
   }
 
@@ -511,6 +513,7 @@ export default function Dashboard() {
     if (actionBusyProjectId) return
     setActionBusyProjectId(project.id)
     setNotice(null)
+    setQuickActionError(null)
     const intent = [
       'project-administration', project.id, action,
       project.dashboard.administrationRevision, nextName ?? '',
@@ -569,7 +572,11 @@ export default function Dashboard() {
       setQuickActionDialog(null)
       setRefreshRevision((value) => value + 1)
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'A ação do projeto falhou.')
+      // A refusal (for example VERSION_CONFLICT from another client) keeps the
+      // card as the server last confirmed it, shows the reason where the person
+      // is looking, and refetches so the next attempt uses the live revision.
+      setQuickActionError(error instanceof Error ? error.message : 'A ação do projeto falhou.')
+      setRefreshRevision((value) => value + 1)
     } finally {
       setActionBusyProjectId(null)
     }
@@ -642,6 +649,9 @@ export default function Dashboard() {
     () => createProductionBrief({ ownerText: briefing }),
     [briefing],
   )
+  const quickActionProject = quickActionDialog
+    ? projects.find((item) => item.id === quickActionDialog.project.id) ?? quickActionDialog.project
+    : null
   const hasProjects = projects.length > 0
   const hasActiveFilters = hasProjectDashboardFilters(
     normalizeProjectDashboardFilters(filters),
@@ -722,6 +732,12 @@ export default function Dashboard() {
               <div className="mt-5 flex items-start justify-between gap-4 rounded-xl border border-[#d6a638]/20 bg-[#d6a638]/[0.07] px-4 py-3 text-sm leading-5 text-[#d8c590]" role="status">
                 <span>{notice}</span>
                 <button aria-label="Fechar aviso" className="text-[#8f8059] hover:text-[#e4c878]" onClick={() => setNotice(null)} type="button">×</button>
+              </div>
+            ) : null}
+            {quickActionError && !quickActionDialog ? (
+              <div className="mt-5 flex items-start justify-between gap-4 rounded-xl border border-[#c76c6c]/25 bg-[#c76c6c]/[0.07] px-4 py-3 text-sm leading-5 text-[#e0a0a0]" data-testid="quick-action-error" role="alert">
+                <span>{quickActionError}</span>
+                <button aria-label="Fechar erro da ação" className="text-[#9b6a6a] hover:text-[#e4a0a0]" onClick={() => setQuickActionError(null)} type="button">×</button>
               </div>
             ) : null}
 
@@ -1083,15 +1099,15 @@ export default function Dashboard() {
           </form>
         </div>
       ) : null}
-      {quickActionDialog ? (
+      {quickActionDialog && quickActionProject ? (
         <div aria-labelledby="quick-action-title" aria-modal="true" className="fixed inset-0 z-[60] grid place-items-center bg-black/80 p-4 backdrop-blur-sm" role="dialog">
-          <button aria-label="Fechar ação" className="absolute inset-0 cursor-default" disabled={actionBusyProjectId !== null} onClick={() => setQuickActionDialog(null)} type="button" />
+          <button aria-label="Fechar ação" className="absolute inset-0 cursor-default" disabled={actionBusyProjectId !== null} onClick={() => { setQuickActionDialog(null); setQuickActionError(null) }} type="button" />
           <form
             className="relative w-full max-w-md rounded-2xl border border-white/[0.1] bg-[#0d0d0d] p-6 shadow-[0_24px_90px_rgba(0,0,0,.75)]"
             onSubmit={(event) => {
               event.preventDefault()
               void administerProject(
-                quickActionDialog.project,
+                quickActionProject,
                 quickActionDialog.kind,
                 quickActionDialog.kind === 'rename' ? quickActionName.trim() : undefined,
               )
@@ -1108,12 +1124,15 @@ export default function Dashboard() {
               </label>
             ) : (
               <p className="mt-4 text-sm leading-6 text-[#918c83]">
-                O projeto <strong className="font-semibold text-[#d5d0c7]">{quickActionDialog.project.name}</strong> sairá das filas ativas. O status atual será preservado exatamente para permitir restauração posterior.
+                O projeto <strong className="font-semibold text-[#d5d0c7]">{quickActionProject.name}</strong> sairá das filas ativas. O status atual será preservado exatamente para permitir restauração posterior.
               </p>
             )}
-            <p className="mt-4 text-[11px] leading-5 text-[#66625b]">A ação usa a revisão administrativa {quickActionDialog.project.dashboard.administrationRevision} e falha com segurança se o projeto mudar em outra sessão.</p>
+            <p className="mt-4 text-[11px] leading-5 text-[#66625b]">A ação usa a revisão administrativa {quickActionProject.dashboard.administrationRevision} e falha com segurança se o projeto mudar em outra sessão.</p>
+            {quickActionError ? (
+              <p className="mt-3 rounded-lg border border-[#c76c6c]/25 bg-[#c76c6c]/[0.07] px-3 py-2 text-xs leading-5 text-[#e0a0a0]" data-testid="quick-action-error" role="alert">{quickActionError}</p>
+            ) : null}
             <div className="mt-6 flex justify-end gap-2">
-              <button className="h-10 rounded-xl px-4 text-sm text-[#8b877f] hover:bg-white/[0.04] disabled:opacity-40" disabled={actionBusyProjectId !== null} onClick={() => setQuickActionDialog(null)} type="button">Cancelar</button>
+              <button className="h-10 rounded-xl px-4 text-sm text-[#8b877f] hover:bg-white/[0.04] disabled:opacity-40" disabled={actionBusyProjectId !== null} onClick={() => { setQuickActionDialog(null); setQuickActionError(null) }} type="button">Cancelar</button>
               <button className={`h-10 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${quickActionDialog.kind === 'archive' ? 'bg-[#a64f4f] text-white hover:bg-[#ba5b5b]' : 'bg-[#e0af37] text-[#171207] hover:bg-[#edc34f]'}`} disabled={actionBusyProjectId !== null || (quickActionDialog.kind === 'rename' && quickActionName.trim().length < 1)} type="submit">
                 {actionBusyProjectId ? 'Aplicando…' : quickActionDialog.kind === 'rename' ? 'Salvar nome' : 'Confirmar arquivamento'}
               </button>
