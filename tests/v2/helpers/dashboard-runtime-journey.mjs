@@ -250,7 +250,15 @@ export async function runDashboardRuntimeJourney(input) {
       reason: 'Controlled neutral rendering for independent runtime fence proof.',
     }, `runtime-copy-lut-${suffix}`, 201)
     const failedProxy = selected
-    const newerProxy = await post(`/v1/projects/${copy.project.id}/proxy-renders`, undefined, `runtime-newer-proxy-${suffix}`, 202)
+    assert.equal(failedProxy.operation.status, 'queued', 'LUT selection admits a physical render for the new version')
+    const duplicateProxy = await fetch(`${baseUrl}/v1/projects/${copy.project.id}/proxy-renders`, { method: 'POST',
+      headers: { authorization, 'idempotency-key': `runtime-duplicate-input-${suffix}` }, signal: AbortSignal.timeout(30000) })
+    const duplicateBody = await duplicateProxy.json()
+    assert.equal(duplicateProxy.status, 409); assert.equal(duplicateBody.error.code, 'PERSISTENCE_CONFLICT')
+    assert.equal(await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId, projectVersionId: selected.version.id } }), 1)
+    assert.equal((await client.v2PublicOperation.findUniqueOrThrow({ where: { id: selected.operation.id } })).status, 'queued')
+    evidence.duplicateAdmission = { status: duplicateProxy.status, errorCode: duplicateBody.error.code,
+      projectVersionId: selected.version.id, unchangedOperationId: selected.operation.id }
     const hidden = `${sourcePath}.owned-unavailable`
     await rename(sourcePath, hidden)
     try {
@@ -262,14 +270,14 @@ export async function runDashboardRuntimeJourney(input) {
     } finally { await rename(hidden, sourcePath) }
     const failedRow = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: failedProxy.operation.id } })
     assert.equal(failedRow.status, 'failed')
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'rendering-proxy', 'older failure cannot replace newer same-version admission')
-    const rejectedRetry = await fetch(`${baseUrl}/v1/operations/${failedRow.id}/retry`, { method: 'POST', headers: { authorization }, signal: AbortSignal.timeout(30000) })
-    const rejectedRetryBody = await rejectedRetry.json()
-    assert.equal(rejectedRetryBody.error?.code, 'PROJECT_TRANSITION_REJECTED')
-    assert.equal((await client.v2PublicOperation.findUniqueOrThrow({ where: { id: failedRow.id } })).status, 'failed', 'rejected retry rolls back its operation transition')
-    assert.deepEqual(await proxyWorker(`runtime-newer-worker-${suffix}`, { workspaceId, operationId: newerProxy.operation.id, signal }), { operationId: newerProxy.operation.id, status: 'succeeded' })
-    await observe({ stage: 'copy-review', id: copy.project.id, status: 'reviewing-proxy', operationId: newerProxy.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
-    const copyReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: newerProxy.operation.id } })
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'failed')
+    await observe({ stage: 'worker-failed', id: copy.project.id, status: 'failed', operationId: failedRow.id, phase: 'failed', completed: failedRow.progressCompleted, eventTypes: ['operation.status.changed'] })
+    await post(`/v1/operations/${failedRow.id}/retry`, undefined, `runtime-worker-retry-${suffix}`, 200)
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'rendering-proxy')
+    await delay(1100)
+    assert.deepEqual(await proxyWorker(`runtime-recovered-worker-${suffix}`, { workspaceId, operationId: failedRow.id, signal }), { operationId: failedRow.id, status: 'succeeded' })
+    await observe({ stage: 'copy-review', id: copy.project.id, status: 'reviewing-proxy', operationId: failedRow.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    const copyReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: failedRow.id } })
     const copyArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: copyReview.proxyArtifactId } })
     const copyAnnotation = await post(`/v1/projects/${copy.project.id}/annotations`, {
       projectVersionId: selected.version.id, proxyArtifactId: copyArtifact.id, proxyHash: copyArtifact.sha256,
@@ -288,7 +296,12 @@ export async function runDashboardRuntimeJourney(input) {
     await observe({ stage: 'patched-review', id: copy.project.id, status: 'reviewing-proxy', operationId: applied.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     // Exhaust actual durable claims without any status seed or mutation. Each
     // abandoned claim owns a short lease; the next runtime claim settles it.
-    const abandoned = await post(`/v1/projects/${copy.project.id}/proxy-renders`, undefined, `runtime-abandoned-${suffix}`, 202)
+    const abandoned = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
+      baseVersionId: applied.version.id, baseHash: applied.version.baseHash, selection: { mode: 'none' },
+      reason: 'Admit a new immutable version for expired lease recovery proof.',
+    }, `runtime-abandoned-${suffix}`, 201)
+    assert.equal(abandoned.operation.status, 'queued')
+    assert.notEqual(abandoned.version.id, applied.version.id)
     const repository = new PrismaPublicOperationRepository(client)
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const now = new Date()
@@ -309,14 +322,19 @@ export async function runDashboardRuntimeJourney(input) {
     await observe({ stage: 'retried-review', id: copy.project.id, status: 'reviewing-proxy', operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     // Advance the version through the real Command service while an older
     // admitted task still owns a lease. No newer admission masks this CAS test.
-    const staleVersionJob = await post(`/v1/projects/${copy.project.id}/proxy-renders`, undefined, `runtime-stale-version-${suffix}`, 202)
+    const staleVersionJob = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
+      baseVersionId: abandoned.version.id, baseHash: abandoned.version.baseHash, selection: { mode: 'none' },
+      reason: 'Admit a physical render before an independently committed newer Command.',
+    }, `runtime-stale-version-${suffix}`, 201)
+    assert.equal(staleVersionJob.operation.status, 'queued')
+    assert.notEqual(staleVersionJob.version.id, abandoned.version.id)
     const claimAt = new Date()
     const staleClaim = await repository.claimNext({ type: 'project-proxy-render', workspaceId, operationId: staleVersionJob.operation.id,
       leaseOwner: `version-fence-worker-${suffix}`, now: claimAt.toISOString(), leaseUntil: new Date(claimAt.getTime() + 120000).toISOString() })
     const { setProjectLutSelectionService } = await import('../../../src/v2/application/project-lut-selections.ts')
     const { PrismaProjectLutSelectionRepository } = await import('../../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
     const { randomUUID } = await import('node:crypto')
-    const versionBeforeEdit = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: applied.version.id } })
+    const versionBeforeEdit = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: staleVersionJob.version.id } })
     const changed = await setProjectLutSelectionService({ repository: new PrismaProjectLutSelectionRepository(client),
       createId: (kind) => `runtime-version-${kind}-${randomUUID()}`, createEventId: randomUUID })({
       workspaceId, projectId: copy.project.id, baseVersionId: versionBeforeEdit.id, baseHash: versionBeforeEdit.baseHash,
