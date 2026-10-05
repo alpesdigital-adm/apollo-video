@@ -179,6 +179,13 @@ test('W47 durable PostgreSQL jobs extract real MP4, replay, cancel, retry and bl
     // database write, otherwise the live timer can undo our forced expiry.
     await reclaimed.heartbeatEntered
     await prisma.v2MediaSegmentDerivativeJob.update({ where: { id: reclaimed.queued.job.id }, data: { leaseExpiresAt: new Date(0) } })
+    assert.equal(await jobs.heartbeat(reclaimed.queued.job.id, 'old-worker', 1, new Date(), new Date(Date.now() + 15000)), false, 'matching owner and attempt cannot renew an already expired lease')
+    const expiredBeforeReclaim = await prisma.v2MediaSegmentDerivativeJob.findUniqueOrThrow({ where: { id: reclaimed.queued.job.id } })
+    assert.equal(expiredBeforeReclaim.leaseExpiresAt.getTime(), 0)
+    assert.equal(expiredBeforeReclaim.leaseOwner, 'old-worker')
+    assert.equal(expiredBeforeReclaim.attempt, 1)
+    assert.equal(expiredBeforeReclaim.status, 'running')
+
     const replacements = await Promise.all([jobs.claim('new-worker', new Date(), new Date(Date.now() + 15000)), jobs.claim('other-worker', new Date(), new Date(Date.now() + 15000))])
     assert.equal(replacements.filter(Boolean).length, 1)
     const replacement = replacements.find(Boolean)

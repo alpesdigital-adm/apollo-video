@@ -48,7 +48,7 @@ export async function proveLibraryBrowser({ baseUrl, cookie, prisma, workspaceId
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     const page = await context.newPage()
     const ids = () => page.locator('article[data-library-id]').evaluateAll((cards) => cards.map((card) => card.getAttribute('data-library-id')))
-    const api = async (query = '') => { const response = await context.request.get(`${baseUrl}/v1/media/library?limit=24${query}`); assert.equal(response.status(), 200); return (await response.json()).data }
+    const api = async (query = '') => { const response = await context.request.get(`${baseUrl}/v1/media/library?limit=24${query}`); const payload = await response.json(); assert.equal(response.status(), 200, `Library oracle: ${JSON.stringify(payload.error ?? {})}`); return payload.data }
     const waitIds = async (expected) => {
       await page.waitForFunction((expectedIds) => JSON.stringify([...document.querySelectorAll('article[data-library-id]')].map((card) => card.getAttribute('data-library-id'))) === JSON.stringify(expectedIds), expected)
       assert.deepEqual(await ids(), expected)
@@ -131,6 +131,11 @@ export async function proveLibraryBrowser({ baseUrl, cookie, prisma, workspaceId
     await page.getByRole('button', { name: 'Tentar novamente', exact: true }).click()
     const audio = await api('&kind=audio'); await waitIds(audio.items.map((item) => item.id)); await page.unroute('**/v1/media/library?*')
     evidence.checks.push({ strength: 'controlled-transport', name: '429-and-retry' })
+    // This expanded journey sends an artificial burst. Let its real 60-second
+    // governance window drain before the independent authorization cases.
+    const cooldownStarted = Date.now()
+    await new Promise((done) => setTimeout(done, 61_000))
+    evidence.governanceCooldownMs = Date.now() - cooldownStarted
     await page.route('**/v1/media/library/*/previews/*', (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Preview sem autorização controlada' } }) }))
     await page.getByLabel('Tipo', { exact: true }).selectOption('video'); await page.getByRole('button', { name: 'Filtrar', exact: true }).click()
     await waitIds(videos.items.map((item) => item.id))
