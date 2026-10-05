@@ -6,6 +6,9 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// Headless Chrome on the loaded workstation exits bimodally (0.2-4 s or 20-33 s); same 60 s budget as W29/W30.
+const BROWSER_CLOSE_BUDGET_MS = 60_000
+
 export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 /** Stable JSON used only to compare two reads of the same persisted rows. */
@@ -39,7 +42,7 @@ export async function boundedClose(label, action, errors) {
   let timer
   try {
     await Promise.race([action(), new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('timeout')), 5000)
+      timer = setTimeout(() => reject(new Error('timeout')), BROWSER_CLOSE_BUDGET_MS)
     })])
   } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}`) }
   finally { clearTimeout(timer) }
@@ -96,20 +99,15 @@ export async function runWaveProof({ wave, schemaVersion, initial, baseUrl, sess
       await boundedClose(`context-${index}`, () => context.close(), cleanupErrors)
     }
     await boundedClose('browser', state.browser && (() => state.browser.close()), cleanupErrors)
-    // Terminate the owned PID first (measured here: exit within 0.4-3.2 s of SIGKILL, whereas a
-    // launchServer().close() that is still pending can leave it alive for 13-45 s), then let the
-    // server object finish; the PID must be terminal and the server close must succeed.
+    // Terminate the owned PID, wait for it within the budget, then let the server object finish.
+    // A browser still alive afterwards, or a server close that fails, remains a cleanup error.
     const browserProcess = state.browserProcess
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       const exited = new Promise((done) => browserProcess.once('exit', done))
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
-      await Promise.race([exited, new Promise((done) => setTimeout(done, 30000))])
+      await Promise.race([exited, new Promise((done) => setTimeout(done, BROWSER_CLOSE_BUDGET_MS))])
     }
-    // Even with the PID gone, launchServer().close() can take 13-45 s on this host. It is bounded and
-    // recorded; the proof's requirement is the terminal PID below, plus every other cleanup error.
-    const serverCloseErrors = []
-    await boundedClose('browser-server', state.browserServer && (() => state.browserServer.close()), serverCloseErrors)
-    evidence.postflight.browserServerCloseUnclean = serverCloseErrors.length > 0
+    await boundedClose('browser-server', state.browserServer && (() => state.browserServer.close()), cleanupErrors)
     evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
     evidence.postflight.cleanupErrors = cleanupErrors
