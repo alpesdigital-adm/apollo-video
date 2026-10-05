@@ -12,6 +12,7 @@ import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.
 import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
 import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
 import { proveW38ArchiveRestore } from './helpers/dashboard-w38-archive-restore.mjs'
+import { createW39ArtifactRoot, proveW39DuplicateCopyOnWrite } from './helpers/dashboard-w39-duplicate.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -170,6 +171,8 @@ test('authenticated public API manages projects, clients and artifact inspection
   const webhookReplayDeliveryId = '00000000-0000-4000-8000-000000000907'
   const webhookReplayAttemptId = '00000000-0000-4000-8000-000000000908'
   const sha = (character) => character.repeat(64)
+  // W39: the journey server is started with this isolated local artifact root so the raw-master fixture is served by the product.
+  const w39ArtifactRoot = await createW39ArtifactRoot()
   let server
   let serverDiagnostics = ''
   let primaryFailure
@@ -679,6 +682,7 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
           APOLLO_RENDERER_DIGEST: sha('8'),
           APOLLO_FFMPEG_PATH: ffmpegPath,
+          APOLLO_V2_ARTIFACT_ROOT: w39ArtifactRoot,
           // This broad journey generates hundreds of legitimate requests. Keep
           // request/spend spike detection out of this isolated error-rate proof.
           APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '2000000000',
@@ -5650,6 +5654,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       username: uiUsername,
     })
     assert.equal(w38.outcome, 'passed')
+
+    // --- W39 (stream s4) ---
+    const w39 = await proveW39DuplicateCopyOnWrite({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername, artifactRoot: w39ArtifactRoot, ffmpegPath,
+      artifacts, createMediaArtifactManifest,
+    })
+    assert.equal(w39.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
