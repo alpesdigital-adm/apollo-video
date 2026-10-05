@@ -233,7 +233,7 @@ export function trackBrowserTraffic(page, baseUrl) {
     const url = new URL(response.url())
     if (url.origin !== baseUrl) return
     const method = response.request().method()
-    const wantsBody = method !== 'GET' || url.pathname === '/v1/projects'
+    const wantsBody = method !== 'GET' || url.pathname === '/v1/projects' || /^\/v1\/projects\/[^/]+\/workspace$/.test(url.pathname)
     responses.push({
       method, path: url.pathname, search: url.search, status: response.status(),
       body: wantsBody ? response.json().catch(() => null) : Promise.resolve(null),
