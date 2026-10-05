@@ -197,6 +197,8 @@ de ordem. Testes de domínio, repositório, contrato e apresentação passaram; 
 jornada HTTP/PostgreSQL foi ampliada, mas não executada neste ambiente. Faltam
 E2E visual/browser, lotes, qualidade, armazenamento/fila, implantação e aceite.
 
+Retomada W35–W36 de FR-002/F1.001: os IDs `bff460a9298a-1`, `0944e64350b1-1`, `ba0e03c8f7d9-1` e `d1048dd7b809-1` vinculam estado/progresso e atualização por eventos à mesma jornada pública de worker. O novo workflow exige PostgreSQL limpo, build de produção, FFmpeg e Chromium; o observer compara a operação persistida, API e barra do card. Resultados e limites da comprovação ficam nos pacotes W35/W36 e em `project-status.json`; integração técnica não encerra FR-002, implantação ou aceite e não promove caixas.
+
 Atualização local parcial de FR-003 — o dashboard envia texto, status, objetivo,
 formato, locale, intervalo de criação e owner ao mesmo `GET /v1/projects`, pagina
 por cursor opaco e deduplica itens. Um codec puro/versionado dá precedência à

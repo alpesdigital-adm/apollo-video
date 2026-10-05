@@ -335,7 +335,7 @@ versão atual, operação pública durável mais recente, pendências abertas de
 review e outputs concluídos da versão corrente. Ausência é representada como
 `null`, zero ou lista vazia; nunca como registro sintético. `completed` sem
 `total` apresenta fase e estado indeterminado, sem percentual ou progressbar.
-Eventos invalidam a consulta, que roda sem cache e cancela requests superados.
+Eventos de projeto, operação, progresso e annotation invalidam a consulta, que roda sem cache e cancela requests superados. O workspace vem da sessão autenticada e o cliente confere a identidade do evento antes de invalidar. Mudanças de fase/contagem são publicadas na transação do worker protegido por lease; heartbeat sem mudança não gera avanço. O feed com projects:read exclui operações sem projeto.
 Esta implementação permanece parcial até E2E visual/browser, transporte de
 eventos integrado, implantação e aceite.
 

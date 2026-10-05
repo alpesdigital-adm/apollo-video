@@ -34,3 +34,13 @@ Estado vazio real: um segundo `POST /v1/session` humano (a linha de throttle do 
 Guard `tests/v2/helpers/dashboard-w35-evidence-guard.mjs` (23 mutações rejeitadas, entre elas barra em progresso não medido, número errado, ação, tom ou destino trocados, worker alegado, arquivado sem origem API, lacunas escondidas; aceita os manifestos reais) e passos de CI após "Publish Wave 34". O manifesto mantém `gaps` e a origem de cada estado (`real-api`, `controlled-pg-seed`, `absent`); `worker` é `absent` em todos.
 
 Observações para decisão, sem alterar produto: o botão principal "Revisar agora" do estado em revisão navega a `/projects/{id}` sem `?mode=review` (só o botão secundário usa o modo), e a prova fixa o comportamento atual; todas as ações primárias têm o mesmo destino. A transição real de estado (operação ou worker) exige mídia, EditPlan compilado e render, e não coube no orçamento. Gates como no checkpoint da W34 (`npm test` 2612/2613 com a falha herdada de citação W39/W40; demais gates com saída 0).
+
+## Retomada runtime W35–W36
+
+A retomada produz projetos por API pública e executa workers da factory de produção com PostgreSQL, armazenamento local e FFmpeg reais. Os únicos inputs controlados são snapshots upstream do Diretor, mídia sintética e color probe; não se semeiam operações, reviews ou outputs para afirmar transições. A jornada dedicada é `tests/v2/dashboard-runtime-journey.e2e.mjs`, ligada ao workflow `dashboard-runtime-ci.yml` e ao guard que impede CI verde por skip silencioso.
+
+Enqueue altera o projeto e cria a operação na mesma transação com CAS de workspace, versão corrente e origem permitida. Proxy novo entra em rendering-proxy; reuso concluído entra em reviewing-proxy. Repetir a mesma chave devolve o resultado idempotente sem regredir o projeto. A transição draft → rendering-proxy exige contexto compilado e fonte validados; reviewing-proxy → rendering-proxy permite nova renderização após patch. Estados fechados continuam bloqueados. Promoção do review, falha, lease esgotado e retry precisam preservar a versão e a admissão mais recente.
+
+A prova runtime compara PostgreSQL, API, estado, fase, passos, tom, ação, destino e barra do card em desktop/mobile, além de hashes e decode integral dos MP4. O ramo sem total permanece uma prova defensiva controlada: operações públicas possuem denominador canônico de fases e não produzem esse ramo no runtime. Estado vazio e arquivado por API continuam no recorte histórico.
+
+Estado desta retomada: implementação em revisão e validação conjunta pendente. O registro canônico será atualizado somente com os resultados efetivamente observados; implantação DigitalOcean e aceite permanecem separados, sem marcar TODO.

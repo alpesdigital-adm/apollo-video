@@ -19,6 +19,8 @@ direitos atuais; a catalogação exige promoção aprovada. O
 [relatório de comprovação](./quality/media-library-w41-50.md) e o registro de
 status distinguem integração/testes controlados de implantação e aceite.
 
+A retomada W35–W36 conecta estados do dashboard às operações admitidas e aos workers reais de proxy/export, com eventos transacionais de fase/progresso e annotations. O servidor publica a projeção autoritativa após cada sinal; o browser não estima avanço por tempo. O escopo, as provas e os bloqueios ficam nos [pacotes W35](./PACOTE-WAVE35-ESTADOS-DASHBOARD.md) e [W36](./PACOTE-WAVE36-EVENTOS-DASHBOARD.md) e no registro de status, sem antecipar implantação ou aceite.
+
 ### Alterações da versão 1.2
 
 - API externa como contrato obrigatório e paritário para todas as capacidades operáveis.
