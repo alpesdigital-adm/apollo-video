@@ -53,6 +53,8 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2ArtifactRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
+    await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
+    await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperationControlCommand.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
@@ -1091,12 +1093,34 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
     await client.v2ProjectMediaAsset.create({ data: { id: 'ba45b6ce-d839-4db1-aa91-3e51a2582631', workspaceId,
       projectId, artifactId, role: 'source-master', originalFileName: 'source.mp4', createdAt: now } })
+    const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
+    const { createColorPipelineCompilation } = await import('../../src/v2/domain/color-pipeline-compilation.ts')
+    const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
+    const { stableSerialize, calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+    const colorMetadata = { colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8 }
+    const probe = createMediaColorProbe({ id: 'operation-cas-color-probe', workspaceId, artifactId, manifestId,
+      detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+      producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha('b') }, createdAt: now.toISOString() })
+    await client.v2MediaColorProbe.create({ data: { id: probe.id, workspaceId, artifactId, manifestId,
+      schemaVersion: probe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata), pixelFormat: 'yuv420p',
+      hdrMode: 'sdr', reasonsJson: '[]', producerProvider: 'ffprobe', producerVersion: probe.producer.version,
+      producerBinaryDigest: probe.producer.binaryDigest, createdAt: now, probeHash: probe.probeHash } })
+    const compilation = createColorPipelineCompilation({ id: 'operation-cas-color-compilation', workspaceId, projectId,
+      sourceArtifactId: artifactId, sourceManifestId: manifestId, probe, outputMetadata: colorMetadata,
+      stages: ['technical', 'match', 'creative-lut', 'output'].map((kind) => ({ id: `cas-${kind}`, kind, version: 'v1',
+        enabled: ['technical', 'output'].includes(kind), input: colorMetadata, output: colorMetadata,
+        implementation: { provider: 'ffmpeg-zscale', version: 'v1', parameters: { mode: 'identity' }, parametersHash: calculateCanonicalHash({ mode: 'identity' }) } })),
+      createdByClientId: clientId, createdAt: now.toISOString() })
+    await new PrismaColorPipelineCompilationRepository(client).persist({ compilation,
+      idempotencyKey: 'cas-color', requestFingerprint: calculateCanonicalHash(compilation) }, authenticationAudit)
+    const colorPipelineBindings = [{ sourceArtifactId: artifactId, sourceManifestId: manifestId, compilationId: compilation.id,
+      compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }]
     const admitProxy = async (label, hash, createdAt) => repository.createOrReplay({
       operation: createQueuedPublicOperation({ id: `operation-cas-${label}`, workspaceId, clientId, projectId,
         type: 'project-proxy-render', target: { type: 'media-artifact', id: `operation-cas-output-${label}`, manifestId: `operation-cas-manifest-${label}` },
         maxAttempts: 1, createdAt }), authenticationAudit,
       context: { kind: 'project-proxy-render', projectId, projectVersionId: versionId, editPlanSnapshotId: editPlanId,
-        sourceArtifactId: artifactId, sourceManifestId: manifestId, colorPipelineBindings: [], inputHash: sha(hash),
+        sourceArtifactId: artifactId, sourceManifestId: manifestId, colorPipelineBindings, inputHash: sha(hash),
         outputArtifactId: `operation-cas-output-${label}`, outputManifestId: `operation-cas-manifest-${label}`, originalFileName: `${label}.mp4` },
       idempotencyKey: `operation-cas-${label}`, requestFingerprint: sha(hash),
     })
