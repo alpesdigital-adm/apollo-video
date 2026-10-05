@@ -87,7 +87,12 @@ export async function runDashboardRuntimeJourney(input) {
     context.on('page', (opened) => {
       opened.on('pageerror', (error) => evidence.browserErrors.push(String(error)))
       opened.on('console', (message) => { if (message.type() === 'error') evidence.browserErrors.push(message.text()) })
-      opened.on('response', (response) => { if (response.status() >= 400) evidence.browserErrors.push(`${response.status()} ${response.url()}`) })
+      opened.on('response', (response) => {
+        if (response.status() < 400) return
+        evidence.browserErrors.push(`${response.status()} ${response.url()}`)
+        void response.json().then((body) => evidence.browserErrors.push({ status: response.status(), url: response.url(), body }))
+          .catch(() => {})
+      })
     })
     context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(30000)
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
@@ -115,8 +120,15 @@ export async function runDashboardRuntimeJourney(input) {
       }
       if (eventTypes.length) await pipeline.observe({ stage, projectId: id, operationId, expectedEventTypes: eventTypes, expectedState: status })
       for (const [layout, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mobile', { width: 390, height: 844 }]]) {
+        await page.bringToFront()
+        await page.waitForFunction(() => document.visibilityState === 'visible')
         await page.setViewportSize(viewport); await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
-        const card = page.locator(`article[data-project-id="${id}"]`); await card.waitFor({ state: 'visible' })
+        const card = page.locator(`article[data-project-id="${id}"]`)
+        try { await card.waitFor({ state: 'visible' }) } catch (error) {
+          evidence.domFailure = { stage, layout, url: page.url(), visibility: await page.evaluate(() => document.visibilityState), text: await page.locator('body').innerText() }
+          await page.screenshot({ path: join(directory, 'w35-dom-failure.png'), fullPage: true })
+          throw error
+        }
         assert.equal(await card.locator('[data-state]').getAttribute('data-state'), status)
         assert.equal(await card.locator('[data-state]').innerText(), expected.badge)
         assert.ok((await card.locator('[data-state]').getAttribute('class')).split(' ').includes(expected.color))
