@@ -269,7 +269,7 @@ export async function runDashboardRuntimeJourney(input) {
     const failedRow = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: failedProxy.operation.id } })
     assert.equal(failedRow.status, 'failed')
     assert.equal(failedRow.attempt, 1)
-    assert.equal(failedRow.errorCode, 'invalid_render_input')
+    assert.equal(failedRow.errorCode, 'persistence_conflict')
     assert.equal(failedRow.errorRetryable, false)
     evidence.workerFailure = { operationId: failedRow.id, attempt: failedRow.attempt, code: failedRow.errorCode,
       retryable: failedRow.errorRetryable, origin: 'production-source-materializer' }
