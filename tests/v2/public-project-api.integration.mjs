@@ -1339,7 +1339,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       eventCatalog.data.envelopeSchemaRef,
       'apollo://schemas/public-event/v2',
     )
-    assert.equal(eventCatalog.data.events.length, 15)
+    assert.equal(eventCatalog.data.events.length, 16)
     assert.deepEqual(
       eventCatalog.data.events.map((event) => event.type),
       [
@@ -1348,6 +1348,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'project.name.changed',
         'project.status.changed',
         'operation.status.changed',
+        'operation.progress.changed',
         'operation.succeeded',
         'operation.failed',
         'annotation.created',
@@ -1361,6 +1362,18 @@ test('authenticated public API manages projects, clients and artifact inspection
       ],
     )
     assert.equal(JSON.stringify(eventCatalog).includes(workspaceId), false)
+    assert.deepEqual(eventCatalog.data.events.find((event) => event.type === 'operation.progress.changed'), {
+      type: 'operation.progress.changed', version: '1.0.0', resourceType: 'operation',
+      description: 'A leased public operation advanced its persisted phase or progress.',
+    })
+    assert.equal(JSON.stringify(eventCatalog).includes(apiClientId), false)
+    const currentEventEnvelopeResponse = await fetch(`${baseUrl}/v1/schemas/public-event/v2`)
+    assert.equal(currentEventEnvelopeResponse.status, 200)
+    const currentEventEnvelope = await currentEventEnvelopeResponse.json()
+    assert.equal(currentEventEnvelope.$id, 'apollo://schemas/public-event/v2')
+    assert.deepEqual(currentEventEnvelope.properties.type.enum, eventCatalog.data.events.map((event) => event.type))
+    assert.equal(eventEnvelopeSchema.properties.type.enum.includes('project.name.changed'), false)
+    assert.equal(currentEventEnvelope.properties.type.enum.includes('project.name.changed'), true)
 
     const unauthorized = await fetch(`${baseUrl}/v1/projects`, {
       method: 'POST',
