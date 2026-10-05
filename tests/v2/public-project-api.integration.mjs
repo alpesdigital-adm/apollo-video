@@ -13,6 +13,7 @@ import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browse
 import { cleanupDashboardFixtures } from './helpers/dashboard-w34-35-fixtures.mjs'
 import { proveDashboardAggregate } from './helpers/dashboard-w34-aggregate.mjs'
 import { proveDashboardStates } from './helpers/dashboard-w35-states.mjs'
+import { proveDashboardEventFeedBrowser } from './helpers/dashboard-w36-events-proof.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -5697,6 +5698,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       sourceManifestId: 'public-api-source-manifest-v2',
     })
     assert.equal(w35.outcome, 'passed')
+
+    // --- W36 (stream s3) ---
+    // The dashboard follows persisted project events written by OTHER clients
+    // (API clients B and C), with the same real human session as W30.
+    const w36 = await proveDashboardEventFeedBrowser({
+      baseUrl, client, workspaceId, otherWorkspaceId,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w36.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

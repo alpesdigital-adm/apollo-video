@@ -1,12 +1,12 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 171,
-    "capabilities": 152,
-    "endpoints": 152,
-    "registeredCapabilities": 374,
-    "operableCapabilities": 374,
-    "publicContractCapabilities": 374,
+    "uiActions": 172,
+    "capabilities": 153,
+    "endpoints": 153,
+    "registeredCapabilities": 375,
+    "operableCapabilities": 375,
+    "publicContractCapabilities": 375,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -2293,7 +2293,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:277",
+      "uiAction": "src/app/ProjectsPageClient.tsx:285",
       "capabilityId": "apollo.projects.list",
       "capabilityVersion": "4.0.0",
       "endpoint": "GET /v1/projects",
@@ -2313,7 +2313,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:356",
+      "uiAction": "src/app/ProjectsPageClient.tsx:372",
       "capabilityId": "apollo.projects.list",
       "capabilityVersion": "4.0.0",
       "endpoint": "GET /v1/projects",
@@ -2333,7 +2333,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:426",
+      "uiAction": "src/app/ProjectsPageClient.tsx:442",
       "capabilityId": "apollo.projects.create",
       "capabilityVersion": "5.0.0",
       "endpoint": "POST /v1/projects",
@@ -2353,7 +2353,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:514",
+      "uiAction": "src/app/ProjectsPageClient.tsx:530",
       "capabilityId": "apollo.projects.rename",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/rename",
@@ -2372,7 +2372,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:518",
+      "uiAction": "src/app/ProjectsPageClient.tsx:534",
       "capabilityId": "apollo.projects.archive",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/archive",
@@ -2391,7 +2391,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:521",
+      "uiAction": "src/app/ProjectsPageClient.tsx:537",
       "capabilityId": "apollo.projects.restore",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/restore",
@@ -2410,7 +2410,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:567",
+      "uiAction": "src/app/ProjectsPageClient.tsx:583",
       "capabilityId": "apollo.projects.workspace.current.read",
       "capabilityVersion": "10.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
@@ -2430,7 +2430,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:587",
+      "uiAction": "src/app/ProjectsPageClient.tsx:603",
       "capabilityId": "apollo.projects.duplicates.create",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/projects/{projectId}/duplicates",
@@ -2501,6 +2501,26 @@
         "editSyncAnchorService",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/useProjectEventFeed.ts:25",
+      "capabilityId": "apollo.events.feed.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/events/feed",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readPublicEventFeedService",
         "requireScope"
       ],
       "tests": [
@@ -3548,6 +3568,17 @@
       "endpoint": "GET /v1/events/catalog",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/event-catalog/v2",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.events.feed.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/events/feed",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/event-feed/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
