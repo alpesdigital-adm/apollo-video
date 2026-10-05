@@ -14,7 +14,9 @@ import {
   calculateProxyReviewHash,
   type ProxyQualityIssue,
   type ProxyReview,
+  type ProxyOutputFormat,
 } from '../../application/render-workflow.ts'
+import { OUTPUT_ASPECT_RATIOS } from '../../domain/output-spec.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { projectStatusTransitionSources } from '../../domain/project.ts'
@@ -46,6 +48,14 @@ function parseIssueArray(value: string, field: string): readonly Readonly<ProxyQ
     ) throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
     const range = candidate.rangeMs
     const evidenceRange = candidate.evidenceRange
+    if ((candidate.outputPresetHash !== undefined &&
+        (typeof candidate.outputPresetHash !== 'string' || !/^[a-f0-9]{64}$/.test(candidate.outputPresetHash))) ||
+        !geometryHash(candidate.placementPlanHash) || !geometryHash(candidate.reframePlanHash)) {
+      throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} geometry hashes are invalid`)
+    }
+    if (candidate.format !== undefined && !OUTPUT_ASPECT_RATIOS.includes(candidate.format as ProxyOutputFormat)) {
+      throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} output format is invalid`)
+    }
     if (
       range !== undefined &&
       (!Array.isArray(range) || range.length !== 2 || range.some((item) => !Number.isSafeInteger(item) || item < 0))
@@ -69,6 +79,10 @@ function parseIssueArray(value: string, field: string): readonly Readonly<ProxyQ
       ...(range ? { rangeMs: Object.freeze([range[0], range[1]] as [number, number]) } : {}),
       ...(typeof candidate.targetId === 'string' ? { targetId: candidate.targetId } : {}),
       ...(typeof candidate.outputSpecId === 'string' ? { outputSpecId: candidate.outputSpecId } : {}),
+      ...(candidate.outputPresetHash !== undefined ? { outputPresetHash: candidate.outputPresetHash as string } : {}),
+      ...(candidate.placementPlanHash !== undefined ? { placementPlanHash: candidate.placementPlanHash as string | null } : {}),
+      ...(candidate.reframePlanHash !== undefined ? { reframePlanHash: candidate.reframePlanHash as string | null } : {}),
+      ...(candidate.format !== undefined ? { format: candidate.format as ProxyOutputFormat } : {}),
       ...(evidenceRange
         ? { evidenceRange: Object.freeze({ startFrame: Number((evidenceRange as Record<string, unknown>).startFrame), endFrame: Number((evidenceRange as Record<string, unknown>).endFrame) }) }
         : {}),

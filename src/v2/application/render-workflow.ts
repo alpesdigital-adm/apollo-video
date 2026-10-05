@@ -42,6 +42,8 @@ export interface ProxyQualityIssue {
   targetId?: string
   outputSpecId?: string
   outputPresetHash?: string
+  /** Output format carried by the per-output format critic. */
+  format?: ProxyOutputFormat
   /** Geometry the issue was observed against; carried verbatim from the format critic. */
   placementPlanHash?: string | null
   reframePlanHash?: string | null
