@@ -39,8 +39,20 @@ e frame revisados. Postflight: zero backends, cluster parado, porta 55574 livre,
 postmaster encerrado e nenhum processo próprio vivo. O MP4 controlado tem
 SHA-256 `05d14f8a16b0f5c2a6ec07f067ad22bd5fabf33ec99463a31d64613781251d4b`.
 
-Em andamento: repetição W50 após corrigir a auditoria humana do attach; CI e
-artifacts precisam comprovar o commit final antes de merge. Estes runs locais
-antecedem o commit consolidado, e não são alegados como prova do SHA final.
+W50 `w50-library-controlled-proof-e181b3fa` passou no código `e8b4e306`:
+uploads HTTP vídeo/áudio/imagem, ingestão e recorte real, listagem mista,
+conjunção de filtros, direitos bloqueados, previews medidos e inspecionados,
+criação/attach de segmento em Chromium com Command/Version, retry e respostas
+atrasadas após 401. Revogação no PG impediu leitura por preview e por artifact
+direto; sessão revogada limpou todos os dados. Quatro screenshots e o MP4 da
+derivada foram preservados. Browser/app terminal, zero backends, cluster parado
+e porta 55574 livre. OCR local ficou explicitamente indisponível; CI exige OCR
+real eng/por. O erro jurídico canônico é HTTP 422, não falha de autenticação.
+
+CI e artifacts precisam comprovar o commit final antes de merge. A primeira
+configuração do workflow usou um contexto `runner` indisponível no env de job,
+corrigido para caminhos isolados por run. O CI também encontrou um CR isolado
+num teste trazido da frente paralela; o arquivo foi normalizado, sem relaxar o
+gate de whitespace. Estes erros de workflow/formatação não são falhas de mídia.
 
 Falhas encontradas e corrigidas durante a construção: testes antigos com variável em zona temporal morta e expectativa textual de rights; identidade de artifact ignorada após deduplicação; constraint que impedia dois consumidores de compartilhar os mesmos bytes; ausência de fence na publicação após cancelamento ativo; Command de attach sem impacto explícito; ator humano gravado contra o contrato de auditoria externa. Erros de invocação/preflight dos supervisores foram registrados separadamente de falhas do produto. Os testes de shell locais exigem Git Bash no PATH, pois o bash padrão da máquina aponta para WSL indisponível. O cleanup de Chromium no Windows consulta identidade/estado do processo no SO; warnings de close não são tratados como prova de encerramento. Todos os clusters locais pertencem ao próprio run; nenhuma infraestrutura de produção foi utilizada.

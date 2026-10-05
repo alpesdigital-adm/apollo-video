@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-05T00:24:13.6462138Z",
+  "updatedAt": "2026-10-05T00:45:09.0337978Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -15116,13 +15116,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15145,6 +15145,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15164,13 +15170,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15193,6 +15199,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15212,13 +15224,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15241,6 +15253,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15259,13 +15277,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15288,6 +15306,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15308,13 +15332,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15337,6 +15361,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15358,13 +15388,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15387,6 +15417,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15406,13 +15442,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15435,6 +15471,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15456,13 +15498,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15485,6 +15527,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15507,13 +15555,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15536,6 +15584,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
@@ -15563,13 +15617,13 @@
       "state": "pendente-validacao",
       "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "isolated",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Aguardando jornada consolidada, CI do commit e integração em main."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
@@ -15592,6 +15646,12 @@
           "role": "implementation",
           "ref": "docs/quality/media-library-w41-50.md",
           "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
       "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
