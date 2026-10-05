@@ -174,7 +174,7 @@ export async function proveW39DuplicateCopyOnWrite({
           destinationWorkspace = await workspaceProof()
           if (!destinationWorkspace) await page.waitForTimeout(100)
         }
-        assert.ok(destinationWorkspace, 'the destination page read the copy workspace over HTTP')
+        assert.ok(destinationWorkspace, `the destination page read the copy workspace over HTTP; saw ${JSON.stringify(traffic.responses.filter((item) => item.path.includes('/workspace')).map((item) => [item.method, item.path, item.status]))}; url ${page.url()}`)
         assert.equal(destinationWorkspace.data.project.id, copyId)
         assert.equal(destinationWorkspace.data.project.name, names.copy)
         assert.equal(destinationWorkspace.data.version.id, copyVersionId)
