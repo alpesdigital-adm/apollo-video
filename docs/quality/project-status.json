@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-05T00:45:09.0337978Z",
+  "updatedAt": "2026-10-05T11:03:20.205Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "dd2fb2b920afec6871221382597965d3caeb9e49",
+  "evidenceBaseCommit": "0ac380d7df20634be4024dac9157f6c61e2771f3",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -15113,17 +15113,13 @@
       "todoItems": [
         "5fed046a5719-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15137,8 +15133,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE41-PAGINACAO-BIBLIOTECA.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15151,9 +15147,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15167,17 +15187,13 @@
         "db882ddc544b-1",
         "ac7e0a1c125b-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15191,8 +15207,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE42-FILTROS-DIREITOS-BIBLIOTECA.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15205,9 +15221,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15221,17 +15261,13 @@
         "5fed046a5719-1",
         "ac7e0a1c125b-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15245,8 +15281,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE43-LEITURAS-SEGURAS-BIBLIOTECA.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15259,9 +15295,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15274,17 +15334,13 @@
       "todoItems": [
         "fdd725d7664f-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15298,8 +15354,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE44-PREVIEWS-BIBLIOTECA.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15312,9 +15368,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15329,17 +15409,13 @@
         "685f984e3c9d-1",
         "82ccf53db39a-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15353,8 +15429,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE45-SEGMENTOS-VIRTUAIS.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15367,9 +15443,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15385,17 +15485,13 @@
         "ac7e0a1c125b-1",
         "685f984e3c9d-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15409,8 +15505,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE46-REUSO-POR-REFERENCIA.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15423,9 +15519,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15439,17 +15559,13 @@
         "75a8db3a5d75-1",
         "82ccf53db39a-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15463,8 +15579,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE47-DERIVATIVES-SOB-DEMANDA.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15477,9 +15593,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15495,17 +15635,13 @@
         "184065af0667-1",
         "22ad5715eb6c-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15519,8 +15655,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE48-IMAGENS-OCR-DERIVATIVES.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15533,9 +15669,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15552,17 +15712,13 @@
         "1d6d2df95dcf-1",
         "ca7b74c93a9c-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15576,8 +15732,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE49-CATALOGACAO-APROVADA.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15590,9 +15746,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
@@ -15614,17 +15794,13 @@
         "184065af0667-1",
         "ca7b74c93a9c-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
-      "integration": "not-integrated",
+      "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
-        },
         {
           "kind": "deployment",
           "text": "Implantação de produção não comprovada neste escopo."
@@ -15638,8 +15814,8 @@
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE50-JORNADA-CONSOLIDADA-BIBLIOTECA.md",
-          "role": "planned-not-started",
-          "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+          "role": "classification",
+          "scope": "Plano original anterior à execução, preservado como histórico; implementação e comprovação registradas abaixo."
         },
         {
           "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
@@ -15652,9 +15828,33 @@
           "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
           "role": "controlled-e2e",
           "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/74",
+          "role": "integration",
+          "scope": "W41–W50 integradas em main pelo merge 0ac380d7df20634be4024dac9157f6c61e2771f3; implantação e aceite separados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009503",
+          "role": "controlled-e2e",
+          "scope": "CI de integração do PR: PostgreSQL/storage/FFmpeg/Sharp/HTTP/Chromium e OCR eng/por reais; 13 casos de navegador, MP4/hash/capturas e cleanup terminal/zero clientes. Transcrição e inputs upstream controlados."
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37297009518",
+          "role": "controlled-e2e",
+          "scope": "CI central do PR: qualidade, segurança, contratos, arquitetura e jornadas isoladas; CI pós-merge deve permanecer verde e é registrado no PR."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-governance-paced-final-64eb497d",
+          "role": "controlled-e2e",
+          "scope": "W50 final local a769296e: 13 casos de navegador, hashes conferidos, previews revisados, app/browser terminal, PG zero e porta livre; janela real de governança respeitada."
         }
       ],
-      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "nextAction": "Preparar comprovação de implantação DigitalOcean e aceite do proprietário, respeitando os gates; o subescopo técnico controlado está integrado e validado.",
       "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     }
   ]
