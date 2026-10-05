@@ -81,7 +81,9 @@ export class PrismaProjectQueryRepository implements ProjectQueryRepository {
           },
         },
         publicOperations: {
-          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+          // Admission order is stable; an older task's heartbeat or retry does
+          // not make it the dashboard's latest operation again.
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 1,
           select: {
             id: true,
