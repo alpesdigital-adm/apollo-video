@@ -134,7 +134,7 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
       workspaceId,
       name: 'Final export E2E',
       environment: 'production',
-      scopes: ['projects:read', 'projects:write', 'operations:read', 'artifacts:read', 'events:read'],
+      scopes: ['projects:read', 'projects:write', 'operations:read', 'artifacts:read'],
     })
     const authenticationAudit = createApiAccessAuditContext({
       clientId: issued.client.id,
