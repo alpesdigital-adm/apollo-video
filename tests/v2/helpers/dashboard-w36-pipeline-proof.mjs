@@ -64,6 +64,16 @@ export async function createDashboardPipelineObserver({ page, client, baseUrl, w
         const card = page.locator(`article[data-project-id="${projectId}"]`)
         return await card.count() === 1 && await card.locator('[data-state]').getAttribute('data-state') === projected.visibleState.label
       })
+      const card = page.locator(`article[data-project-id="${projectId}"]`)
+      const progress = projected.dashboard.latestOperation?.progress
+      if (progress?.total) {
+        const percentage = Math.min(100, Math.floor(progress.completed * 100 / progress.total))
+        await until(`${stage}: measured progress matches API`, async () =>
+          await card.getByRole('progressbar').getAttribute('aria-valuenow') === String(percentage))
+        assert.equal(await card.getByRole('progressbar').getAttribute('aria-valuemax'), '100')
+      } else {
+        assert.equal(await card.getByRole('progressbar').count(), 0, 'no percentage without a persisted total')
+      }
       const name = `w36-${String(evidence.cases.length + 1).padStart(2, '0')}.png`
       await page.screenshot({ path: join(evidenceDir, name), fullPage: true })
       const bytes = await readFile(join(evidenceDir, name))

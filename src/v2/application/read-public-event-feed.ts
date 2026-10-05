@@ -141,7 +141,12 @@ export function readPublicEventFeedService(dependencies: {
       ? after
       : reached
     return Object.freeze({
-      events: Object.freeze(page.map((entry) => entry.event)),
+      // Non-project artifact operations are outside this projects:read feed.
+      // Keep cursor/hasMore on the complete scanned page so filtered rows can
+      // never trap pagination or cause a later project event to be skipped.
+      events: Object.freeze(page.map((entry) => entry.event).filter((event) =>
+        !event.type.startsWith('operation.') ||
+        (typeof event.data.projectId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(event.data.projectId)))),
       nextCursor: encodeCursor(position, queryHash),
       hasMore: truncated,
       watermark,
