@@ -34,7 +34,7 @@ export async function createDashboardPipelineObserver({ page, client, baseUrl, w
   }
   page.on('response', onResponse)
   page.on('framenavigated', onNavigation)
-  await page.goto(baseUrl)
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
   await until('dashboard cursor bootstrap', () => evidence.feed.some((entry) => entry.status === 200))
   marked = true
   await mkdir(evidenceDir, { recursive: true })
