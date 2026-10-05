@@ -494,12 +494,18 @@ const suiteFilesRunByCi = (steps, scripts) => {
 }
 
 async function inventoryCiSteps() {
-  const [central, library] = await Promise.all([read('.github/workflows/ci.yml'), read('.github/workflows/library-ci.yml')])
+  const [central, library, dashboard] = await Promise.all([
+    read('.github/workflows/ci.yml'),
+    read('.github/workflows/library-ci.yml'),
+    read('.github/workflows/dashboard-runtime-ci.yml'),
+  ])
   assert.match(library, /push:\s*\n\s+branches: \[main\]/)
   assert.match(library, /\n  pull_request:/)
+  assert.match(dashboard, /push:\s*\n\s+branches: \[main\]/)
+  assert.match(dashboard, /\n  pull_request:/)
   // Only generic coverage aggregates workflows. Six mandatory journeys above
   // still require their original ci.yml jobs, database and admission switches.
-  return [...parseWorkflow(central).steps, ...parseWorkflow(library).steps]
+  return [...parseWorkflow(central).steps, ...parseWorkflow(library).steps, ...parseWorkflow(dashboard).steps]
 }
 
 test('T-F4.016 no integration or e2e suite file goes unrun by CI without being declared', async () => {

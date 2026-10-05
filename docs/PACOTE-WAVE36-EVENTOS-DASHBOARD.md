@@ -1,6 +1,6 @@
 # Wave 36 — atualização por eventos reais do dashboard
 
-**Pacote em fila; nenhuma prova W36 executada.** Base `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`, CI `37167702546` verde; depende da W35. F1.001 / FR-002, subescopo da caixa `d1048dd7b809-1`. Estimativa **4–6 h de desenvolvimento**, CI/revisão fora; risco arquitetural maior que nas waves anteriores.
+**Planejamento original, preservado como histórico.** Base `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`, CI `37167702546` verde; depende da W35. F1.001 / FR-002, subescopo da caixa `d1048dd7b809-1`. Estimativa original **4–6 h de desenvolvimento**, CI/revisão fora; risco arquitetural maior que nas waves anteriores. Estado atual: [PROJECT-STATUS.md](PROJECT-STATUS.md).
 
 Hoje `ProjectsPageClient.tsx` escuta `apollo:project-updated` e refaz `GET /v1/projects`, mas não há emissor real comprovado para mutações de outro cliente. `V2PublicEventOutbox` e `src/v2/infrastructure/prisma/public-event-outbox.ts` persistem eventos V2; `GET /v1/events/catalog` é **catálogo**, não feed de leitura do dashboard. Não chamar `dispatchEvent` no teste e nomeá-lo E2E.
 

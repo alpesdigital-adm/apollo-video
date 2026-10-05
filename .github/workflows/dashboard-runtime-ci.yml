@@ -1,0 +1,74 @@
+name: Dashboard runtime validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard-runtime:
+    name: Real dashboard worker and event journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: '1'
+      APOLLO_API_ENVIRONMENT: production
+      V2_DATABASE_URL: postgresql://apollo:dashboard-ci@127.0.0.1:5432/apollo_v2_e2e_dashboard?schema=public&application_name=apollo-video-e2e-dashboard-${{ github.run_id }}&connection_limit=1&pool_timeout=10&connect_timeout=10
+      APOLLO_DASHBOARD_RUNTIME_E2E: '1'
+      APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT: /tmp/apollo-dashboard-${{ github.run_id }}/evidence
+      APOLLO_V2_ARTIFACT_ROOT: /tmp/apollo-dashboard-${{ github.run_id }}/artifacts
+      APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+      APOLLO_PROTECTED_PAYLOAD_KEY_ID: dashboard-ci-test
+      APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.5-pg16-trixie
+        env:
+          POSTGRES_DB: apollo_v2_e2e_dashboard
+          POSTGRES_USER: apollo_admin
+          POSTGRES_PASSWORD: dashboard-ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U apollo_admin -d apollo_v2_e2e_dashboard"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          cache: npm
+      - name: Provision an isolated bounded database role
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+          mkdir -p "$APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT" "$APOLLO_V2_ARTIFACT_ROOT"
+          PGPASSWORD=dashboard-ci psql -h 127.0.0.1 -U apollo_admin -d apollo_v2_e2e_dashboard -v ON_ERROR_STOP=1 -c "CREATE ROLE apollo LOGIN PASSWORD 'dashboard-ci' CONNECTION LIMIT 5; ALTER DATABASE apollo_v2_e2e_dashboard OWNER TO apollo; CREATE EXTENSION IF NOT EXISTS vector; ALTER ROLE apollo SET idle_in_transaction_session_timeout='30s'; ALTER ROLE apollo SET statement_timeout='120s';"
+      - run: npm ci
+      - run: npm ci --prefix remotion
+      - name: Bootstrap clean V2 PostgreSQL
+        run: npx prisma migrate deploy --schema prisma/v2/schema.prisma
+      - run: npm run build
+      - name: Worker transitions and pipeline events through HTTP and Chromium
+        run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/dashboard-runtime-journey.e2e.mjs
+      - name: Verify zero orphan database clients
+        if: always()
+        run: |
+          count=$(PGPASSWORD=dashboard-ci psql -h 127.0.0.1 -U apollo -d apollo_v2_e2e_dashboard -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()")
+          test "$count" = 0
+      - name: Publish version-bound dashboard runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-runtime-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT }}
+          if-no-files-found: error
+          retention-days: 14

@@ -1,6 +1,6 @@
 # Wave 35 — estados, ação recomendada e progresso medido
 
-**Pacote em fila; nenhuma prova W35 executada.** Base `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`, CI `37167702546` verde; depende da W34. F1.001 / FR-002, subescopos das caixas `bff460a9298a-1`, `0944e64350b1-1` e `ba0e03c8f7d9-1`. Estimativa **3–4 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original, preservado como histórico.** Base `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`, CI `37167702546` verde; depende da W34. F1.001 / FR-002, subescopos das caixas `bff460a9298a-1`, `0944e64350b1-1` e `ba0e03c8f7d9-1`. Estimativa original **3–4 h de desenvolvimento**, CI/revisão fora. Estado atual: [PROJECT-STATUS.md](PROJECT-STATUS.md).
 
 Os cards já recebem projeção pública de estados e ações; barra/percentual só aparecem quando a operação fornece `completed` e `total`. Falta E2E visual/browser dos estados vazio, processando, aguardando revisão, falho, concluído e arquivado e da ação recomendada correta em cada um.
 
@@ -11,6 +11,8 @@ Executar regressões de projeção e jornada API/PG/browser; registrar IDs, fase
 Referências e gates comuns: [índice W31–W40](PLANO-WAVES-31-40.md); `src/v2/domain/project-dashboard.ts`, `src/app/ProjectsPageClient.tsx`, `tests/v2/project-dashboard.test.mjs` e `tests/v2/public-project-api.integration.mjs`.
 
 ## Checkpoint técnico executado
+
+Esta seção descreve o primeiro recorte controlado das W31–W40. A retomada para fechar as lacunas de runtime é registrada separadamente abaixo.
 
 Stream s2, executor Sonnet; sem revisão independente ainda. Estados separados: **implementado** (somente teste; nenhuma mudança de produto na W35); **integrado na branch** `claude/w34-35-dashboard-cards` (`b2bf9ec0` primeira versão, `1622251b` estado final de código); **E2E controlado local** três jornadas completas verdes em `1622251b` (`s2-w34-l` 64 s, `-o` 102 s, `-n` 125 s; W34 e W35 no mesmo teste; zero skip; postflight zero backends, cluster parado, porta livre); **CI pendente** (passos "Verify/Publish Wave 35 dashboard states evidence" criados, nunca executados); **implantação pendente**; **aceite pendente**. A caixa **não deve ser classificada como validada integralmente**: nenhum estado passou por worker ou operação real, então as transições executáveis não foram provadas.
 
