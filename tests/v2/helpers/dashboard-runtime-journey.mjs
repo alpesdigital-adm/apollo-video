@@ -12,6 +12,14 @@ import { createDashboardPipelineObserver } from './dashboard-w36-pipeline-proof.
 const exec = promisify(execFile)
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const CARD_EXPECTATIONS = {
+  draft: { tone: 'neutral', color: 'text-[#aaa49a]', badge: 'Configuração', action: 'open-result', button: 'Abrir workspace →' },
+  'rendering-proxy': { tone: 'info', color: 'text-[#79a5da]', badge: 'Renderizando proxy', action: 'view-progress', button: 'Acompanhar →' },
+  'reviewing-proxy': { tone: 'warning', color: 'text-[#ca92d4]', badge: 'Revisar proxy', action: 'review-output', button: 'Revisar agora →' },
+  'rendering-final': { tone: 'info', color: 'text-[#79a5da]', badge: 'Exportando final', action: 'view-progress', button: 'Acompanhar →' },
+  completed: { tone: 'success', color: 'text-[#7ec397]', badge: 'Concluído', action: 'open-result', button: 'Abrir workspace →' },
+  failed: { tone: 'danger', color: 'text-[#e08b8b]', badge: 'Requer atenção', action: 'inspect-error', button: 'Ver erro →' },
+}
 
 /** Timing-only observation: every mutation still executes the production factory worker. */
 export async function runDashboardRuntimeJourney(input) {
@@ -66,6 +74,7 @@ export async function runDashboardRuntimeJourney(input) {
     context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(30000)
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     const page = await context.newPage()
+    const navigatedStates = new Set()
     pipeline = await createDashboardPipelineObserver({ page: await context.newPage(), client, baseUrl, workspaceId, evidenceDir: directory })
     const observe = async ({ stage, id = projectId, operationId, status, phase, completed, eventTypes = [] }) => {
       const row = await client.v2Project.findUniqueOrThrow({ where: { id } })
@@ -74,6 +83,10 @@ export async function runDashboardRuntimeJourney(input) {
       assert.equal(response.status, 200)
       const payload = await response.json(); const projected = payload.data.projects.find((candidate) => candidate.id === id)
       assert.ok(projected); assert.equal(projected.status, status); assert.equal(projected.visibleState.label, status)
+      const expected = CARD_EXPECTATIONS[status]
+      assert.ok(expected, `${stage}: independent card expectation exists`)
+      assert.equal(projected.visibleState.tone, expected.tone)
+      assert.equal(projected.visibleState.primaryAction, expected.action)
       const operation = operationId ? await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId } }) : null
       if (operation) {
         assert.equal(operation.phase, phase); assert.equal(operation.progressCompleted, completed)
@@ -87,15 +100,26 @@ export async function runDashboardRuntimeJourney(input) {
         await page.setViewportSize(viewport); await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
         const card = page.locator(`article[data-project-id="${id}"]`); await card.waitFor({ state: 'visible' })
         assert.equal(await card.locator('[data-state]').getAttribute('data-state'), status)
+        assert.equal(await card.locator('[data-state]').innerText(), expected.badge)
+        assert.ok((await card.locator('[data-state]').getAttribute('class')).split(' ').includes(expected.color))
+        const action = card.getByRole('button', { name: expected.button, exact: true })
+        assert.equal(await action.isEnabled(), true)
         const bar = card.getByRole('progressbar')
         if (operation) assert.equal(await bar.getAttribute('aria-valuenow'), String(completed * 25))
         else assert.equal(await bar.count(), 0)
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
         const name = `w35-${stage}-${layout}.png`; await page.screenshot({ path: join(directory, name), fullPage: true })
         evidence.screenshots.push({ name, sha256: sha256(await readFile(join(directory, name))) })
+        if (layout === 'desktop' && !navigatedStates.has(status)) {
+          const destination = `/projects/${id}${status === 'reviewing-proxy' ? '?mode=review' : ''}`
+          await action.click()
+          await page.waitForURL(`${baseUrl}${destination}`)
+          navigatedStates.add(status)
+        }
       }
       evidence.states.push({ stage, projectId: id, status, operationId, phase, completed,
-        total: operation ? 4 : undefined, origin: 'public-api+postgres+factory-worker', visibleState: projected.visibleState })
+        total: operation ? 4 : undefined, origin: 'public-api+postgres+factory-worker', visibleState: projected.visibleState,
+        presentation: expected, actionDestination: `/projects/${id}${status === 'reviewing-proxy' ? '?mode=review' : ''}` })
     }
     await observe({ stage: 'draft', status: 'draft' })
     const created = await post('/v1/projects', { name: 'Runtime event creation', objective: 'discovery', format: '9:16' }, `runtime-event-create-${suffix}`, 201)
