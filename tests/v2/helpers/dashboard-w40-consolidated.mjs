@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { appendFileSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm, rmdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, relative, resolve, sep } from 'node:path'
@@ -42,6 +43,12 @@ export function expectedTiles(statuses) {
   return tiles
 }
 
+/** A promise that may never settle (a held request nobody sent) must fail the proof instead of hanging it. */
+function within(label, promise, timeoutMs = 30_000) {
+  let timer
+  return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), timeoutMs) })]).finally(() => clearTimeout(timer))
+}
+
 async function waitFor(label, predicate, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -67,6 +74,23 @@ async function storageInventory(root, keyPrefix) {
   }
   await walk(root)
   return files.filter((file) => file.key.startsWith(keyPrefix)).toSorted((left, right) => left.key.localeCompare(right.key))
+}
+
+/**
+ * Timing aid for the stale-revision cases (not an error injection): holds the dashboard's next feed poll so the
+ * live revision the open dialog reads cannot be refreshed by the other client's event before the browser submits.
+ * The 409 itself still comes from the server's real revision. The poll that was already in flight when the route
+ * was installed has completed by the time the held one is observed.
+ */
+async function holdFeedPoll(page) {
+  let release
+  const gate = new Promise((done) => { release = done })
+  let markHeld
+  const held = new Promise((done) => { markHeld = done })
+  const matches = (url) => url.pathname === FEED_PATH
+  const handler = async (route) => { markHeld(true); await gate; await route.continue().catch(() => undefined) }
+  await page.route(matches, handler)
+  return { held, release, dispose: () => page.unroute(matches, handler) }
 }
 
 /** Records the feed answers one page receives (event ids only; no cursor value leaves memory). */
@@ -135,9 +159,13 @@ export async function proveW40ConsolidatedJourney({
     initial: { prefix, session, timing: {}, filters: [], navigation: [], actions: {}, fixtures: {} },
     async execute({ evidence, evidenceDir, launch, newSessionPage }) {
       const timing = evidence.timing
+      // Plain-text trace next to the manifest (not part of it): shows where a stuck run stopped.
+      const step = (label) => { try { appendFileSync(join(evidenceDir, 'w40-progress.log'), `${new Date().toISOString()} ${label}
+`) } catch { /* the trace is best effort */ } }
       const phase = async (name, action) => {
         const phaseStart = Date.now()
-        try { return await action() } finally { timing[name] = Date.now() - phaseStart }
+        step(`phase ${name} start`)
+        try { return await action() } finally { timing[name] = Date.now() - phaseStart; step(`phase ${name} end ${timing[name]} ms`) }
       }
       let contextA
       const currentCookie = async () => {
@@ -260,6 +288,15 @@ export async function proveW40ConsolidatedJourney({
         ;({ context: contextA, page } = await newSessionPage())
         const traffic = trackBrowserTraffic(page, baseUrl)
         const feed = recordFeed(page, baseUrl)
+        page.on('request', (request) => {
+          const url = new URL(request.url())
+          if (url.origin === baseUrl && url.pathname.startsWith('/v1/') && url.pathname !== FEED_PATH) step(`request ${request.method()} ${url.pathname}`)
+        })
+        page.on('response', (response) => {
+          const url = new URL(response.url())
+          if (url.origin === baseUrl && url.pathname.startsWith('/v1/') && url.pathname !== FEED_PATH) step(`response ${response.status()} ${url.pathname}`)
+        })
+        page.on('requestfailed', (request) => step(`requestfailed ${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? ''}`))
         const dialog = page.getByRole('dialog')
         const cardOf = (id) => page.locator(`article[data-project-id="${id}"]`)
         const mutatingMark = () => traffic.mutating().length
@@ -478,7 +515,7 @@ export async function proveW40ConsolidatedJourney({
           assert.match(await dialog.innerText(), /revisão administrativa 1\b/)
           await dialog.getByLabel('Nome').fill(names.renameUi)
           await dialog.getByRole('button', { name: 'Salvar nome' }).click()
-          assert.equal(await hold.held, 'POST')
+          assert.equal(await within('the held rename request', hold.held), 'POST')
           const during = await projectOracle(client, workspaceId, target)
           assert.equal(during.project.name, names.rename, 'nothing is persisted while the request is held')
           assert.equal(during.administrationCommands.length, 0)
@@ -527,6 +564,8 @@ export async function proveW40ConsolidatedJourney({
 
           // stale: the dialog is open at revision 2, client B renames (revision 3), the browser is refused with 409.
           const staleMark = mutatingMark()
+          const feedHold = await holdFeedPoll(page)
+          await within('the next feed poll to be held', feedHold.held, 15_000)
           await cardOf(target).getByRole('button', { name: 'Renomear', exact: true }).click()
           await dialog.waitFor()
           assert.match(await dialog.innerText(), /revisão administrativa 2\b/)
@@ -560,7 +599,11 @@ export async function proveW40ConsolidatedJourney({
             expected: { status: 409, code: 'VERSION_CONFLICT', persistedName: names.renameOther, browserCommandsWritten: 0, errorVisibleInDialog: true },
             observed: { status: 409, code: staleBody.error.code, category: staleBody.error.category, persistedName: afterStale.project.name, persistedRevision: 3, browserCommandsWritten: 0, errorVisibleInDialog: true, dialogRevisionAfterRefetch: 3, cardName: names.renameOther },
             realState: 'another client changed the revision before the browser submitted',
+            timingAid: 'the dashboard feed poll was held until the refused request returned, so the live revision could not be refreshed early',
+            persistedUnchanged: true, card: { name: names.renameOther, persistedName: afterStale.project.name, persistedRevision: 3 },
           })
+          feedHold.release()
+          await feedHold.dispose()
           // safe retry: the dialog now carries the live revision and a new key.
           await dialog.getByLabel('Nome').fill(names.renameRecovered)
           await dialog.getByRole('button', { name: 'Salvar nome' }).click()
@@ -594,6 +637,8 @@ export async function proveW40ConsolidatedJourney({
           assert.equal(mutatingSince(mark).length, 0)
           assert.deepEqual((await projectOracle(client, workspaceId, target)).administrationCommands, [])
           // stale: client B renames while the dialog is open at revision 1.
+          const feedHold = await holdFeedPoll(page)
+          await within('the next feed poll to be held', feedHold.held, 15_000)
           await cardOf(target).getByRole('button', { name: 'Arquivar', exact: true }).click()
           await dialog.waitFor()
           assert.match(await dialog.innerText(), /revisão administrativa 1\b/)
@@ -620,7 +665,11 @@ export async function proveW40ConsolidatedJourney({
             expected: { status: 409, code: 'VERSION_CONFLICT', persistedStatus: 'completed', browserCommandsWritten: 0, errorVisibleInDialog: true },
             observed: { status: 409, code: staleBody.error.code, category: staleBody.error.category, persistedStatus: 'completed', browserCommandsWritten: 0, errorVisibleInDialog: true, dialogRevisionAfterRefetch: 2, cardState: 'completed' },
             realState: 'another client renamed the project before the browser confirmed',
+            timingAid: 'the dashboard feed poll was held until the refused request returned, so the live revision could not be refreshed early',
+            persistedUnchanged: true, card: { state: 'completed', persistedStatus: afterStale.project.status, persistedRevision: afterStale.project.administrationRevision },
           })
+          feedHold.release()
+          await feedHold.dispose()
           // confirm on the live revision.
           const refetchArchived = page.waitForResponse(async (response) => listPathMatches(response, prefix) && (await response.json()).data.projects.some((item) => item.id === target && item.status === 'archived'))
           await dialog.getByRole('button', { name: 'Confirmar arquivamento' }).click()
@@ -807,7 +856,7 @@ export async function proveW40ConsolidatedJourney({
           const staleObserved = assertRefusal(staleDuplicate, { status: 409, code: 'VERSION_CONFLICT', category: 'conflict' })
           assert.equal(staleDuplicate.json.error.details?.currentVersionId, copyMoved.versions[1].id)
           assert.equal(await client.v2Project.count({ where: { workspaceId } }), projectsBefore + 1, 'the refused duplication created nothing')
-          pushCase(evidence, { id: 'stale-duplicate-409', request: { method: 'POST', path: '/v1/projects/{copyId}/duplicates', auth: 'bearer projects:write' }, expected: { status: 409, code: 'VERSION_CONFLICT' }, observed: { ...staleObserved, currentVersionCarried: true }, persistedUnchanged: true, realState: 'the copy really is at version 2' })
+          pushCase(evidence, { id: 'stale-duplicate-409', request: { method: 'POST', path: '/v1/projects/{copyId}/duplicates', auth: 'bearer projects:write' }, expected: { status: 409, code: 'VERSION_CONFLICT' }, observed: { ...staleObserved, currentVersionCarried: true }, persistedUnchanged: true, card: { name: names.copy, version: (await cardSnapshot(page, copyId)).version }, realState: 'the copy really is at version 2' })
           const replay = await apiCall(baseUrl, { method: 'POST', path: `/v1/projects/${sourceId}/duplicates`, cookie: await currentCookie(), origin: true, headers: { 'idempotency-key': posted.idempotencyKey }, body: JSON.parse(posted.postData) })
           assert.equal(replay.status, 200, replay.text)
           assert.equal(replay.json.data.replayed, true)
@@ -869,6 +918,7 @@ export async function proveW40ConsolidatedJourney({
             const request = routed.request()
             if (consumed) { await routed.continue(); return }
             consumed = true
+            step(`transport: route handler, mode ${mode}`)
             const attempt = { mode, idempotencyKey: request.headers()['idempotency-key'] ?? null, postData: request.postData() }
             attempts.push(attempt)
             if (mode === 'commit-then-lose-response') {
@@ -895,9 +945,13 @@ export async function proveW40ConsolidatedJourney({
             assert.equal((await cardSnapshot(page, target)).name, names.renameRecovered, 'no false optimistic state')
             evidence.screenshots.push(await screenshot(page, evidenceDir, 'w40-mobile-error-transport.png'))
             // Safe retry: same intent, same revision, same key; the second request goes through.
+            step('transport: retry click')
             await dialog.getByRole('button', { name: 'Salvar nome' }).click()
+            step('transport: waiting for the dialog to close')
             await dialog.waitFor({ state: 'hidden' })
+            step('transport: dialog closed')
             await waitForCardName(page, target, names.renameRetry)
+            step('transport: card renamed after the retry')
             const afterRetry = await projectOracle(client, workspaceId, target)
             expectCommands(afterRetry, [['rename', 1, 2, 'ui-session', 'journey-client'], ['rename', 2, 3, 'bearer', clientB.id], ['rename', 3, 4, 'ui-session', 'journey-client'], ['rename', 4, 5, 'ui-session', 'journey-client']], 'rename after the safe retry')
             const retryPosts = mutatingSince(mark)
@@ -911,6 +965,7 @@ export async function proveW40ConsolidatedJourney({
               persistedUnchanged: true,
             })
             // T2: the server commits but the response is lost.
+            step('transport: T2 start')
             mode = 'commit-then-lose-response'
             consumed = false
             const mark2 = mutatingMark()
@@ -970,8 +1025,10 @@ export async function proveW40ConsolidatedJourney({
             const { context: contextB, page: pageB } = await newSessionPage({ cookieValue: liveSession })
             const trafficB = trackBrowserTraffic(pageB, baseUrl)
             try {
+              step('401: second session opens the dashboard')
               await pageB.goto(`${baseUrl}/${facetsUrlSearch(textFacets)}`, { waitUntil: 'domcontentloaded' })
               await waitForCardName(pageB, fixtureOf.open, names.openByClientB)
+              step('401: second session sees the card')
               const cardBefore = await cardSnapshot(pageB, fixtureOf.open)
               const openBefore = await projectOracle(client, workspaceId, fixtureOf.open)
               const holdB = await holdRequest(pageB, /\/v1\/projects\/[^/]+\/rename$/)
@@ -979,14 +1036,24 @@ export async function proveW40ConsolidatedJourney({
               const dialogB = pageB.getByRole('dialog')
               await dialogB.waitFor()
               await dialogB.getByLabel('Nome').fill(names.attempt)
+              step('401: saving the rename')
               await dialogB.getByRole('button', { name: 'Salvar nome' }).click()
-              assert.equal(await holdB.held, 'POST')
+              assert.equal(await within('the held rename request of the second session', holdB.held), 'POST')
+              step('401: request held, revoking the session')
               await client.v2UiSession.update({ where: { nonceHash: uiSessionNonceHash(liveSession) }, data: { revokedAt: new Date() } })
               const answered = pageB.waitForResponse((item) => item.url().endsWith(`/v1/projects/${fixtureOf.open}/rename`) && item.request().method() === 'POST')
               holdB.release()
               const answer = await answered
               assert.equal(answer.status(), 401)
-              const answerBody = await answer.json()
+              // The page navigates to /login on a 401, after which the browser no longer serves this body; the
+              // server's answer for the very same session state is read again below, outside the browser.
+              const browserBody = await within('the 401 body', answer.json().catch(() => null), 5_000).catch(() => null)
+              const sameState = await apiCall(baseUrl, {
+                method: 'POST', path: `/v1/projects/${fixtureOf.open}/rename`, cookie: `${sessionCookieName}=${liveSession}`, origin: true,
+                headers: { 'idempotency-key': `${prefix}-revoked-probe` }, body: { baseRevision: openBefore.project.administrationRevision, name: names.attempt },
+              })
+              const answerBody = browserBody ?? sameState.json
+              assertRefusal(sameState, { status: 401, code: 'AUTH_INVALID', category: 'auth' })
               assert.equal(answerBody.error.code, 'AUTH_INVALID')
               assert.equal(answerBody.error.category, 'auth')
               await pageB.waitForURL((url) => url.pathname === '/login')
@@ -1000,7 +1067,7 @@ export async function proveW40ConsolidatedJourney({
               pushCase(evidence, {
                 id: 'revoked-session-in-use-401', request: { method: 'POST', path: '/v1/projects/{id}/rename', auth: 'human session revoked while the dialog was pending', realState: 'v2UiSession.revokedAt set while the request was held' },
                 expected: { status: 401, code: 'AUTH_INVALID', landing: '/login' },
-                observed: { status: 401, code: answerBody.error.code, category: answerBody.error.category, landing: new URL(pageB.url()).pathname, browserMutatingRequests: 1 },
+                observed: { status: 401, code: answerBody.error.code, category: answerBody.error.category, landing: new URL(pageB.url()).pathname, browserMutatingRequests: 1, bodyReadInBrowser: browserBody !== null },
                 persistedUnchanged: true, card: { beforeRequest: cardBefore.name, stillOnAnotherSession: cardAfterOnA.name, persistedName: openAfter.project.name },
               })
             } finally {

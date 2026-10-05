@@ -150,6 +150,8 @@ export async function apiCall(baseUrl, { method = 'GET', path, authorization, co
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     ...(rawBody !== undefined ? { body: rawBody } : {}),
+    // A server that never answers must fail the proof instead of hanging it (W40).
+    signal: AbortSignal.timeout(90_000),
   })
   const text = await response.text()
   let json = null
