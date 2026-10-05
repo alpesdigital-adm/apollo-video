@@ -47282,6 +47282,7 @@
               "project.version.created",
               "project.status.changed",
               "operation.status.changed",
+              "operation.progress.changed",
               "operation.succeeded",
               "operation.failed",
               "annotation.created",
@@ -47334,6 +47335,7 @@
               "project.name.changed",
               "project.status.changed",
               "operation.status.changed",
+              "operation.progress.changed",
               "operation.succeeded",
               "operation.failed",
               "annotation.created",
@@ -58574,6 +58576,7 @@
                       "project.version.created",
                       "project.status.changed",
                       "operation.status.changed",
+                      "operation.progress.changed",
                       "operation.succeeded",
                       "operation.failed",
                       "annotation.created",
@@ -58668,6 +58671,7 @@
                       "project.name.changed",
                       "project.status.changed",
                       "operation.status.changed",
+                      "operation.progress.changed",
                       "operation.succeeded",
                       "operation.failed",
                       "annotation.created",
@@ -58764,7 +58768,13 @@
                     "enum": [
                       "project.created",
                       "project.name.changed",
-                      "project.status.changed"
+                      "project.status.changed",
+                      "operation.status.changed",
+                      "operation.progress.changed",
+                      "operation.succeeded",
+                      "operation.failed",
+                      "annotation.created",
+                      "annotation.resolved"
                     ]
                   },
                   "version": {
@@ -164337,6 +164347,7 @@
             "project.version.created",
             "project.status.changed",
             "operation.status.changed",
+            "operation.progress.changed",
             "operation.succeeded",
             "operation.failed",
             "annotation.created",
@@ -164443,6 +164454,7 @@
             "project.name.changed",
             "project.status.changed",
             "operation.status.changed",
+            "operation.progress.changed",
             "operation.succeeded",
             "operation.failed",
             "annotation.created",
