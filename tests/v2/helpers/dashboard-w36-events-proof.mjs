@@ -42,12 +42,15 @@ function chromePath() {
   return executable
 }
 
-async function boundedClose(label, action, errors) {
+// Chromium's process exit is measured at 0.3 s to more than 20 s on this class of
+// machine, so the browser-server/process budget is 30 s here; it still FAILS
+// the proof when the process is not terminal after it.
+async function boundedClose(label, action, errors, budgetMs = 5000) {
   if (!action) return
   let timer
   try {
     await Promise.race([action(), new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('timeout')), 5000)
+      timer = setTimeout(() => reject(new Error('timeout')), budgetMs)
     })])
   } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}`) }
   finally { clearTimeout(timer) }
@@ -642,12 +645,12 @@ export async function proveDashboardEventFeedBrowser({
     await boundedClose('page', page && (() => page.close()), cleanupErrors)
     await boundedClose('context', context && (() => context.close()), cleanupErrors)
     await boundedClose('browser', browser && (() => browser.close()), cleanupErrors)
-    await boundedClose('browser-server', browserServer && (() => browserServer.close()), cleanupErrors)
+    await boundedClose('browser-server', browserServer && (() => browserServer.close()), cleanupErrors, 30_000)
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
-      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 5000))])
+      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 30_000))])
     }
     evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
