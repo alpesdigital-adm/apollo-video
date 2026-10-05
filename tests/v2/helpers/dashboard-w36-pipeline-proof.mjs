@@ -23,8 +23,8 @@ export async function createDashboardPipelineObserver({ page, client, baseUrl, w
   const onResponse = (response) => {
     const url = new URL(response.url())
     if (url.origin !== baseUrl || !['/v1/events/feed', '/v1/projects'].includes(url.pathname)) return
+    const at = Date.now()
     void response.json().then((body) => {
-      const at = Date.now()
       if (url.pathname === '/v1/events/feed') evidence.feed.push({ at, status: response.status(),
         hadCursor: url.searchParams.has('after'), hasMore: body.data?.hasMore,
         events: (body.data?.events ?? []).map((event) => ({ id: event.id, type: event.type, workspaceId: event.workspaceId,
