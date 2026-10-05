@@ -109,7 +109,7 @@ test('W47 durable PostgreSQL jobs extract real MP4, replay, cancel, retry and bl
     const countedStorage = new LocalMediaUploadStorage(storageRoot)
     const originalPromote = countedStorage.promoteDerived.bind(countedStorage)
     countedStorage.promoteDerived = async (value) => { promotions += 1; return originalPromote(value) }
-    async function heldWorker(consumerKey) {
+    async function heldWorker(consumerKey, holdHeartbeat = false) {
       let extractedResolve, releaseResolve
       const extracted = new Promise((resolve) => { extractedResolve = resolve })
       const release = new Promise((resolve) => { releaseResolve = resolve })
@@ -124,8 +124,19 @@ test('W47 durable PostgreSQL jobs extract real MP4, replay, cancel, retry and bl
         }, cleanup: (id) => actual.cleanup(id),
       }, integrity: { sha256: calculateFileSha256 } })
       const queued = await request({ ...input, consumerKey, idempotencyKey: `${workspaceId}-${consumerKey}` })
-      const worker = runNextMediaSegmentDerivativeJobService({ jobs, segments, library, materialize: heldMaterialize, heartbeatIntervalMs: 100, leaseDurationMs: 5000 })
-      return { queued, extracted, release: releaseResolve, worker: (owner) => { const task = worker(owner); activeRuns.push(task); return task } }
+      let heartbeatEnteredResolve, heartbeatReleaseResolve, heartbeatResult
+      const heartbeatEntered = new Promise((resolve) => { heartbeatEnteredResolve = resolve })
+      const heartbeatRelease = new Promise((resolve) => { heartbeatReleaseResolve = resolve })
+      releases.push(() => heartbeatReleaseResolve())
+      const workerJobs = Object.create(jobs)
+      if (holdHeartbeat) workerJobs.heartbeat = async (...args) => {
+        heartbeatEnteredResolve()
+        await heartbeatRelease
+        heartbeatResult = await jobs.heartbeat(...args)
+        return heartbeatResult
+      }
+      const worker = runNextMediaSegmentDerivativeJobService({ jobs: workerJobs, segments, library, materialize: heldMaterialize, heartbeatIntervalMs: 100, leaseDurationMs: 5000 })
+      return { queued, extracted, release: releaseResolve, heartbeatEntered, releaseHeartbeat: heartbeatReleaseResolve, heartbeatResult: () => heartbeatResult, worker: (owner) => { const task = worker(owner); activeRuns.push(task); return task } }
     }
     const activeCancel = await heldWorker('active-cancel')
     const activeCancelRun = activeCancel.worker('cancel-worker')
@@ -161,18 +172,25 @@ test('W47 durable PostgreSQL jobs extract real MP4, replay, cancel, retry and bl
     assert.equal(promotions, 0)
     await prisma.v2MediaArtifact.update({ where: { id: artifactId }, data: { currentRightsSnapshotId: rights.id, rightsRevision: 3 } })
     assert.equal(await segments.findMaterialization(workspaceId, segment.id, 'deadline'), null)
-    const reclaimed = await heldWorker('reclaimed')
+    const reclaimed = await heldWorker('reclaimed', true)
     const oldRun = reclaimed.worker('old-worker')
     const oldOperationId = await reclaimed.extracted
+    // A reclaim models an owner unable to renew. Block its heartbeat before the
+    // database write, otherwise the live timer can undo our forced expiry.
+    await reclaimed.heartbeatEntered
     await prisma.v2MediaSegmentDerivativeJob.update({ where: { id: reclaimed.queued.job.id }, data: { leaseExpiresAt: new Date(0) } })
     const replacements = await Promise.all([jobs.claim('new-worker', new Date(), new Date(Date.now() + 15000)), jobs.claim('other-worker', new Date(), new Date(Date.now() + 15000))])
     assert.equal(replacements.filter(Boolean).length, 1)
     const replacement = replacements.find(Boolean)
     const replacementOwner = replacements[0] ? 'new-worker' : 'other-worker'
+    assert.equal(replacement.id, reclaimed.queued.job.id)
+    assert.equal(replacement.attempt, 2)
+    reclaimed.releaseHeartbeat()
     const outputReplacement = await materialize({ workspaceId, segmentId: segment.id, consumerKey: 'reclaimed', requiresPhysicalDerivative: true, publish: (prepare) => jobs.publish(replacement.id, replacementOwner, replacement.attempt, prepare) })
     assert.equal(outputReplacement.outputArtifactId, result.outputArtifactId)
     reclaimed.release()
     assert.equal((await oldRun).status, 'stopped')
+    assert.equal(reclaimed.heartbeatResult(), false, 'stale owner heartbeat must not renew the replacement lease')
     assert.equal((await jobs.read(workspaceId, replacement.id)).status, 'succeeded')
     assert.equal((await stat(join(root, 'held-work', oldOperationId)).catch(() => null)), null)
     assert.equal(promotions, 0)
