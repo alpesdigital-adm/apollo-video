@@ -1078,6 +1078,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     // Controlled repository equivalent: distinct immutable inputs of one version.
     // This proves transaction fencing, not a public API physical-render journey.
     const projectId = 'operation-cas-project'
+    const { stableSerialize, calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
     const versionId = 'operation-cas-version'
     const editPlanId = 'operation-cas-edit-plan'
     await client.v2Project.create({ data: { id: projectId, workspaceId, name: 'CAS project',
@@ -1085,7 +1086,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       createdByType: 'api-client', createdById: clientId, createdAt: now, updatedAt: now } })
     for (const [kind, id] of [['brief', 'operation-cas-brief'], ['policies', 'operation-cas-policies'], ['edit-plan', editPlanId]]) {
       await client.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind,
-        schemaVersion: 1, contentJson: '{}', contentHash: sha('a'), createdAt: now } })
+        schemaVersion: 1, contentJson: '{}', contentHash: calculateCanonicalHash({}), createdAt: now } })
     }
     await client.v2ProjectVersion.create({ data: { id: versionId, workspaceId, projectId, sequence: 1,
       briefSnapshotId: 'operation-cas-brief', policiesSnapshotId: 'operation-cas-policies', editPlanSnapshotId: editPlanId,
@@ -1096,7 +1097,6 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
     const { createColorPipelineCompilation } = await import('../../src/v2/domain/color-pipeline-compilation.ts')
     const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
-    const { stableSerialize, calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
     const colorMetadata = { colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8 }
     const probe = createMediaColorProbe({ id: 'operation-cas-color-probe', workspaceId, artifactId, manifestId,
       detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
@@ -1118,7 +1118,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     const admitProxy = async (label, hash, createdAt) => repository.createOrReplay({
       operation: createQueuedPublicOperation({ id: `operation-cas-${label}`, workspaceId, clientId, projectId,
         type: 'project-proxy-render', target: { type: 'media-artifact', id: `operation-cas-output-${label}`, manifestId: `operation-cas-manifest-${label}` },
-        maxAttempts: 1, createdAt }), authenticationAudit,
+        maxAttempts: 3, createdAt }), authenticationAudit,
       context: { kind: 'project-proxy-render', projectId, projectVersionId: versionId, editPlanSnapshotId: editPlanId,
         sourceArtifactId: artifactId, sourceManifestId: manifestId, colorPipelineBindings, inputHash: sha(hash),
         outputArtifactId: `operation-cas-output-${label}`, outputManifestId: `operation-cas-manifest-${label}`, originalFileName: `${label}.mp4` },
@@ -1146,12 +1146,18 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     const latestClaim = await repository.claimNext({ operationId: latest.operation.id,
       leaseOwner: 'cas-latest-worker', now: '2026-01-01T16:00:05.000Z', leaseUntil: '2026-01-01T16:00:06.000Z' })
     assert.equal(latestClaim.lease.attempt, 1)
+    for (const [attempt, second] of [[2, 7], [3, 9]]) {
+      const reclaimed = await repository.claimNext({ operationId: latest.operation.id, leaseOwner: `cas-recovery-${attempt}`,
+        now: `2026-01-01T16:00:0${second}.000Z`, leaseUntil: `2026-01-01T16:00:${String(second + 1).padStart(2, '0')}.000Z` })
+      assert.equal(reclaimed.lease.attempt, attempt)
+      assert.equal(await projectStatus(), 'rendering-proxy')
+    }
     assert.equal(await repository.claimNext({ operationId: latest.operation.id, leaseOwner: 'cas-recovery-worker',
-      now: '2026-01-01T16:00:07.000Z', leaseUntil: '2026-01-01T16:00:37.000Z' }), null)
+      now: '2026-01-01T16:00:11.000Z', leaseUntil: '2026-01-01T16:00:41.000Z' }), null)
     assert.equal((await repository.findById(workspaceId, latest.operation.id)).operation.status, 'failed')
     assert.equal(await projectStatus(), 'failed', 'latest expired exhausted lease fails current project')
     const retriedLatest = await retryOperation({ workspaceId, operationId: latest.operation.id,
-      requestedAt: '2026-01-01T16:00:08.000Z', nextAttemptAt: '2026-01-01T16:00:08.001Z' })
+      requestedAt: '2026-01-01T16:00:12.000Z', nextAttemptAt: '2026-01-01T16:00:12.001Z' })
     assert.equal(retriedLatest.operation.status, 'retrying')
     assert.equal(await projectStatus(), 'rendering-proxy')
   } finally {
