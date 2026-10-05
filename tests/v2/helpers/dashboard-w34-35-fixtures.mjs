@@ -373,7 +373,7 @@ export async function readAggregateOracle(client, { workspaceId, projectId }) {
     : null
   const operation = await client.v2PublicOperation.findFirst({
     where: { workspaceId, projectId },
-    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
   })
   const openReviewIssueCount = version
     ? await client.v2ReviewAnnotation.count({

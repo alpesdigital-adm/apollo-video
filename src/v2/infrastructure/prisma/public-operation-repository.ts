@@ -27,7 +27,7 @@ import {
   type LongFormIndexWorkflow,
 } from '../../domain/long-form-index-workflow.ts'
 import { parseCommandImpact } from '../../domain/command-impact.ts'
-import { createPublicOperationStatusEvents } from '../../domain/public-operation-event.ts'
+import { createPublicOperationStatusEvents, createPublicOperationProgressEvents } from '../../domain/public-operation-event.ts'
 import type { RenderColorPipelineBinding } from '../../application/resolve-render-color-pipelines.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import {
@@ -994,6 +994,33 @@ export async function persistManyOperationStatusEvents(
   await persistPublicEvents(transaction, events)
 }
 
+async function transitionCurrentProxyProject(
+  transaction: Prisma.TransactionClient,
+  operation: StoredOperation,
+  from: readonly string[],
+  status: string,
+): Promise<boolean> {
+  const context = operation.projectProxyRender
+  if (operation.type !== 'project-proxy-render' || !context) return false
+  // Acquire the project lock before the next statement takes its read snapshot.
+  // A concurrent admission either finishes first and is visible to `none`, or
+  // waits and must revalidate the status after this transition commits.
+  await transaction.$queryRaw`SELECT id FROM projects WHERE id = ${context.projectId} FOR UPDATE`
+  const changed = await transaction.v2Project.updateMany({
+    where: {
+      id: context.projectId, workspaceId: operation.workspaceId,
+      currentVersionId: context.projectVersionId, status: { in: [...from] },
+      publicOperations: { none: {
+        type: 'project-proxy-render',
+        projectProxyRender: { is: { projectVersionId: context.projectVersionId } },
+        OR: [{ createdAt: { gt: operation.createdAt } }, { createdAt: operation.createdAt, id: { gt: operation.id } }],
+      } },
+    },
+    data: { status },
+  })
+  return changed.count === 1
+}
+
 export class PrismaPublicOperationRepository implements PublicOperationRepository {
   private readonly client: PrismaClient
   private readonly createEventId: () => string
@@ -1166,6 +1193,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       if (!persisted) return null
       const result = hydratePublicOperationRecord(persisted)
       if (updated.count === 1) {
+        if (stored.type === 'project-proxy-render' && !await transitionCurrentProxyProject(
+          transaction, stored, ['failed', 'rendering-proxy'], 'rendering-proxy',
+        )) throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Proxy retry no longer owns the current project version and operation')
         await transaction.v2PublicOperationControlCommand.create({
           data: {
             id: input.commandId,
@@ -1985,6 +2015,19 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         } else if (projectRenderContext || projectReuseContext) {
           const context = projectRenderContext ?? projectReuseContext!
+          const nextProjectStatus = projectReuseContext ? 'reviewing-proxy' : 'rendering-proxy'
+          const project = await transaction.v2Project.updateMany({
+            where: {
+              id: context.projectId,
+              workspaceId: input.operation.workspaceId,
+              currentVersionId: context.projectVersionId,
+              status: { in: projectStatusTransitionSources(nextProjectStatus, { includeSame: true }) },
+            },
+            data: { status: nextProjectStatus },
+          })
+          if (project.count !== 1) {
+            throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter proxy rendering from its current version and status')
+          }
           await transaction.v2ProjectProxyRenderOperation.create({
             data: {
               operationId: input.operation.id,
@@ -2124,6 +2167,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           requestFingerprint: input.requestFingerprint,
         })
         if (replay) return replay
+        const proxyContext = projectRenderContext ?? projectReuseContext
+        if (proxyContext) {
+          const admitted = await this.client.v2ProjectProxyRenderOperation.findFirst({
+            where: { workspaceId: input.operation.workspaceId, projectId: proxyContext.projectId,
+              projectVersionId: proxyContext.projectVersionId, inputHash: proxyContext.inputHash },
+            select: { operationId: true },
+          })
+          if (admitted) throw new DomainError('PERSISTENCE_CONFLICT', 'This immutable proxy input is already admitted; use its original idempotency key or retry the existing operation')
+        }
       }
       throw error
     }
@@ -2199,6 +2251,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               },
             })
             if (exhausted.count === 1) {
+              await transitionCurrentProxyProject(transaction, candidate, ['rendering-proxy'], 'failed')
               const failed = await transaction.v2PublicOperation.findUnique({
                 where: { id: candidate.id },
                 include: OPERATION_INCLUDE,
@@ -2369,12 +2422,22 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         },
       })
       if (updated.count !== 1) return null
+      if (next.type === 'project-proxy-render' && next.status === 'failed' && stored.projectProxyRender) {
+        // The operation fence and project CAS share one transaction. A task for
+        // an older version cannot replace a newer review or terminal state.
+        await transitionCurrentProxyProject(transaction, stored, ['rendering-proxy'], 'failed')
+      }
       const persisted = await transaction.v2PublicOperation.findUnique({
         where: { id: input.operationId },
         include: OPERATION_INCLUDE,
       })
       if (!persisted) return null
       const result = hydratePublicOperationRecord(persisted)
+      await persistPublicEvents(transaction, createPublicOperationProgressEvents({
+        previous: record.operation,
+        operation: result.operation,
+        createEventId: this.createEventId,
+      }))
       await persistOperationStatusEvents(
         transaction,
         record.operation.status,

@@ -6,7 +6,7 @@ import addFormats from 'ajv-formats'
 
 import { readPublicEventFeedService } from '../../src/v2/application/read-public-event-feed.ts'
 import {
-  PROJECT_ADMINISTRATION_EVENT_TYPES,
+  PROJECT_DASHBOARD_EVENT_TYPES,
   PUBLIC_EVENT_FEED_FLOOR_ID,
   PUBLIC_EVENT_FEED_SAFETY_MARGIN_MS,
 } from '../../src/v2/domain/public-event-feed.ts'
@@ -19,6 +19,25 @@ import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const WORKSPACE = 'w36-unit-workspace'
 const OTHER_WORKSPACE = 'w36-unit-other-workspace'
+
+test('W36 non-project operations are omitted without trapping the cursor on a filtered full page', async () => {
+  const entries = [1, 2].map((index) => ({ event: createPublicEvent({
+    id: uuid(index), type: 'operation.status.changed', version: '1.0.0', workspaceId: WORKSPACE,
+    occurredAt: '2026-10-05T12:00:00.000Z', resource: { type: 'operation', id: `w36-operation-${index}` },
+    data: { status: 'running', ...(index === 2 ? { projectId: 'w36-project' } : {}) },
+  }), position: { id: uuid(index), createdAt: `2026-10-05T12:00:0${index}.000Z` } }))
+  const read = readPublicEventFeedService({ feed: {
+    async readCommittedWatermark() { return '2026-10-05T12:00:10.000Z' },
+    async listCommitted({ after }) { return after ? entries.filter((entry) => entry.position.id > after.id) : entries },
+  } })
+  const first = await read({ workspaceId: WORKSPACE, limit: 1 })
+  assert.deepEqual(first.events, [])
+  assert.equal(first.hasMore, true)
+  const second = await read({ workspaceId: WORKSPACE, limit: 1, after: first.nextCursor })
+  assert.equal(second.events[0].id, uuid(2))
+  assert.equal(second.hasMore, false)
+  assert.notEqual(first.nextCursor, second.nextCursor)
+})
 
 function uuid(index) {
   return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
@@ -148,7 +167,7 @@ test('F1.001 event feed: workspace isolation, type allowlist and cursor binding'
   const page = await read({ workspaceId: WORKSPACE, after: head.nextCursor })
   assert.deepEqual(page.events.map((event) => event.workspaceId), [WORKSPACE])
   assert.equal(model.repository.calls.at(-1).workspaceId, WORKSPACE)
-  assert.deepEqual(model.repository.calls.at(-1).types, [...PROJECT_ADMINISTRATION_EVENT_TYPES])
+  assert.deepEqual(model.repository.calls.at(-1).types, [...PROJECT_DASHBOARD_EVENT_TYPES])
   await assert.rejects(
     read({ workspaceId: OTHER_WORKSPACE, after: head.nextCursor }),
     (error) => error.code === 'INVALID_ARGUMENT' && /does not match/.test(error.message),
@@ -260,8 +279,8 @@ test('F1.001 capability, schema and presenter agree and expose only a refetch si
   }))
   assert.equal(validate(body), true, JSON.stringify(validate.errors))
   const foreign = structuredClone(body)
-  foreign.data.events[0].type = 'operation.succeeded'
-  assert.equal(validate(foreign), false, 'only project administration events are served')
+  foreign.data.events[0].type = 'budget.threshold.reached'
+  assert.equal(validate(foreign), false, 'only dashboard invalidation events are served')
   const extra = structuredClone(body)
   extra.data.unexpected = true
   assert.equal(validate(extra), false)

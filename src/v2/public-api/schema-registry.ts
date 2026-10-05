@@ -17,7 +17,7 @@ import { MARKER_KINDS, MARKER_POSITIONS } from '../domain/sync-marker.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
-import { PROJECT_ADMINISTRATION_EVENT_TYPES } from '../domain/public-event-feed.ts'
+import { PROJECT_DASHBOARD_EVENT_TYPES } from '../domain/public-event-feed.ts'
 import { PUBLIC_ERROR_CODES } from './public-error-catalog.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
@@ -6512,6 +6512,9 @@ const proxyQualityIssueSchema = {
     targetId: idSchema,
     outputSpecId: idSchema,
     outputPresetHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    placementPlanHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+    reframePlanHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+    format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
     evidenceRange: {
       type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'],
       properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
@@ -6593,7 +6596,7 @@ const proxyReviewSchema = {
 const proxyQualityIssueSchemaV1 = {
   ...proxyQualityIssueSchema,
   properties: Object.fromEntries(Object.entries(proxyQualityIssueSchema.properties).filter(([key]) =>
-    !['outputSpecId', 'outputPresetHash', 'evidenceRange', 'elementIds', 'evidenceIds'].includes(key))),
+    !['outputSpecId', 'outputPresetHash', 'placementPlanHash', 'reframePlanHash', 'format', 'evidenceRange', 'elementIds', 'evidenceIds'].includes(key))),
 }
 const proxyReviewSchemaV1 = {
   ...proxyReviewSchema,
@@ -16868,7 +16871,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         events: {
           type: 'array',
           maxItems: 100,
-          items: publicEventSchemaFor([...PROJECT_ADMINISTRATION_EVENT_TYPES]),
+          items: publicEventSchemaFor([...PROJECT_DASHBOARD_EVENT_TYPES]),
         },
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
         hasMore: { type: 'boolean' },

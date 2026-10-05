@@ -47282,6 +47282,7 @@
               "project.version.created",
               "project.status.changed",
               "operation.status.changed",
+              "operation.progress.changed",
               "operation.succeeded",
               "operation.failed",
               "annotation.created",
@@ -47334,6 +47335,7 @@
               "project.name.changed",
               "project.status.changed",
               "operation.status.changed",
+              "operation.progress.changed",
               "operation.succeeded",
               "operation.failed",
               "annotation.created",
@@ -58574,6 +58576,7 @@
                       "project.version.created",
                       "project.status.changed",
                       "operation.status.changed",
+                      "operation.progress.changed",
                       "operation.succeeded",
                       "operation.failed",
                       "annotation.created",
@@ -58668,6 +58671,7 @@
                       "project.name.changed",
                       "project.status.changed",
                       "operation.status.changed",
+                      "operation.progress.changed",
                       "operation.succeeded",
                       "operation.failed",
                       "annotation.created",
@@ -58764,7 +58768,13 @@
                     "enum": [
                       "project.created",
                       "project.name.changed",
-                      "project.status.changed"
+                      "project.status.changed",
+                      "operation.status.changed",
+                      "operation.progress.changed",
+                      "operation.succeeded",
+                      "operation.failed",
+                      "annotation.created",
+                      "annotation.resolved"
                     ]
                   },
                   "version": {
@@ -132163,6 +132173,29 @@
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
                       },
+                      "placementPlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "reframePlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
+                      },
                       "evidenceRange": {
                         "type": "object",
                         "additionalProperties": false,
@@ -132272,6 +132305,29 @@
                       "outputPresetHash": {
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "placementPlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "reframePlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
                       },
                       "evidenceRange": {
                         "type": "object",
@@ -133051,6 +133107,29 @@
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
                       },
+                      "placementPlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "reframePlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
+                      },
                       "evidenceRange": {
                         "type": "object",
                         "additionalProperties": false,
@@ -133160,6 +133239,29 @@
                       "outputPresetHash": {
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "placementPlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "reframePlanHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
                       },
                       "evidenceRange": {
                         "type": "object",
@@ -164337,6 +164439,7 @@
             "project.version.created",
             "project.status.changed",
             "operation.status.changed",
+            "operation.progress.changed",
             "operation.succeeded",
             "operation.failed",
             "annotation.created",
@@ -164443,6 +164546,7 @@
             "project.name.changed",
             "project.status.changed",
             "operation.status.changed",
+            "operation.progress.changed",
             "operation.succeeded",
             "operation.failed",
             "annotation.created",

@@ -1,6 +1,6 @@
 # Wave 35 — estados, ação recomendada e progresso medido
 
-**Pacote em fila; nenhuma prova W35 executada.** Base `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`, CI `37167702546` verde; depende da W34. F1.001 / FR-002, subescopos das caixas `bff460a9298a-1`, `0944e64350b1-1` e `ba0e03c8f7d9-1`. Estimativa **3–4 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original, preservado como histórico.** Base `main` `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`, CI `37167702546` verde; depende da W34. F1.001 / FR-002, subescopos das caixas `bff460a9298a-1`, `0944e64350b1-1` e `ba0e03c8f7d9-1`. Estimativa original **3–4 h de desenvolvimento**, CI/revisão fora. Estado atual: [PROJECT-STATUS.md](PROJECT-STATUS.md).
 
 Os cards já recebem projeção pública de estados e ações; barra/percentual só aparecem quando a operação fornece `completed` e `total`. Falta E2E visual/browser dos estados vazio, processando, aguardando revisão, falho, concluído e arquivado e da ação recomendada correta em cada um.
 
@@ -11,6 +11,8 @@ Executar regressões de projeção e jornada API/PG/browser; registrar IDs, fase
 Referências e gates comuns: [índice W31–W40](PLANO-WAVES-31-40.md); `src/v2/domain/project-dashboard.ts`, `src/app/ProjectsPageClient.tsx`, `tests/v2/project-dashboard.test.mjs` e `tests/v2/public-project-api.integration.mjs`.
 
 ## Checkpoint técnico executado
+
+Esta seção descreve o primeiro recorte controlado das W31–W40. A retomada para fechar as lacunas de runtime é registrada separadamente abaixo.
 
 Stream s2, executor Sonnet; sem revisão independente ainda. Estados separados: **implementado** (somente teste; nenhuma mudança de produto na W35); **integrado na branch** `claude/w34-35-dashboard-cards` (`b2bf9ec0` primeira versão, `1622251b` estado final de código); **E2E controlado local** três jornadas completas verdes em `1622251b` (`s2-w34-l` 64 s, `-o` 102 s, `-n` 125 s; W34 e W35 no mesmo teste; zero skip; postflight zero backends, cluster parado, porta livre); **CI pendente** (passos "Verify/Publish Wave 35 dashboard states evidence" criados, nunca executados); **implantação pendente**; **aceite pendente**. A caixa **não deve ser classificada como validada integralmente**: nenhum estado passou por worker ou operação real, então as transições executáveis não foram provadas.
 
@@ -32,3 +34,21 @@ Estado vazio real: um segundo `POST /v1/session` humano (a linha de throttle do 
 Guard `tests/v2/helpers/dashboard-w35-evidence-guard.mjs` (23 mutações rejeitadas, entre elas barra em progresso não medido, número errado, ação, tom ou destino trocados, worker alegado, arquivado sem origem API, lacunas escondidas; aceita os manifestos reais) e passos de CI após "Publish Wave 34". O manifesto mantém `gaps` e a origem de cada estado (`real-api`, `controlled-pg-seed`, `absent`); `worker` é `absent` em todos.
 
 Observações para decisão, sem alterar produto: o botão principal "Revisar agora" do estado em revisão navega a `/projects/{id}` sem `?mode=review` (só o botão secundário usa o modo), e a prova fixa o comportamento atual; todas as ações primárias têm o mesmo destino. A transição real de estado (operação ou worker) exige mídia, EditPlan compilado e render, e não coube no orçamento. Gates como no checkpoint da W34 (`npm test` 2612/2613 com a falha herdada de citação W39/W40; demais gates com saída 0).
+
+## Retomada runtime W35–W36
+
+A retomada produz projetos por API pública e executa workers da factory de produção com PostgreSQL, armazenamento local e FFmpeg reais. Os únicos inputs controlados são snapshots upstream do Diretor, mídia sintética e color probe; não se semeiam operações, reviews ou outputs para afirmar transições. A jornada dedicada é `tests/v2/dashboard-runtime-journey.e2e.mjs`, ligada ao workflow `dashboard-runtime-ci.yml` e ao guard que impede CI verde por skip silencioso.
+
+Enqueue altera o projeto e cria a operação na mesma transação com CAS de workspace, versão corrente e origem permitida. Proxy novo entra em rendering-proxy; reuso concluído entra em reviewing-proxy. Repetir a mesma chave devolve o resultado idempotente sem regredir o projeto. A transição draft → rendering-proxy exige contexto compilado e fonte validados; reviewing-proxy → rendering-proxy permite nova renderização após patch. Estados fechados continuam bloqueados. Promoção do review, falha, lease esgotado e retry precisam preservar a versão e a admissão mais recente.
+
+A prova runtime compara PostgreSQL, API, estado, fase, passos, tom, ação, destino e barra do card em desktop/mobile, além de hashes e decode integral dos MP4. O ramo sem total permanece uma prova defensiva controlada: operações públicas possuem denominador canônico de fases e não produzem esse ramo no runtime. Estado vazio e arquivado por API continuam no recorte histórico.
+
+Checkpoint local de 05/10/2026: a jornada `w35-36-runtime-terminal-04ba2fd1`, em `407784bd`, passou sem skips (157,7 s). O manifesto contém 21 registros: estados e fases de proxy/final, falha física por fonte indisponível, retry público com recuperação, patch confirmado e nova renderização, três leases expiradas e recuperação, rejeição de owner/lease inválidos e proteção da versão corrente. São 36 capturas de cards em desktop/mobile e dois frames de annotations; o workspace respondeu 200 antes da jornada e o browser terminou sem erros.
+
+Os MP4 reais de quatro segundos passaram hash, ffprobe e decode integral: proxy 540×960, H.264/AAC, 415.258 bytes (`241040069098362546e347fdceecb5235cbcdb5f2a642a2b479bbdf6b15da58f`); final 1080×1920, H.264/AAC, 1.577.008 bytes (`05d14f8a16b0f5c2a6ec07f067ad22bd5fabf33ec99463a31d64613781251d4b`). Frames dos dois outputs e cards foram inspecionados. É mídia sintética e upstream editorial controlado, não o master de recuperação nem aceite de resultado editorial.
+
+Admissão do mesmo input imutável com outra chave retorna 409 `PERSISTENCE_CONFLICT`, sem nova operação ou regressão; a mesma chave mantém replay. A identidade única do banco permanece. A seleção da operação mais recente usa `(createdAt, id)`, sem promoção por heartbeat ou retry. A prova separada `w35-proxy-cas-three-built-b504f970` passou em PostgreSQL: inputs distintos controlados admitidos pelo repositório, falha antiga e retry rejeitado sem efeitos, esgotamento da operação mais recente e retry válido. É equivalente controlado de persistência, não outra jornada pública de render.
+
+As duas suítes de qualidade passaram sem skips em `w35-quality-cleanup-final-built-09b54528`; o critic preserva formato e hashes ao reler o relatório, com contrato atual atualizado e versão antiga da API congelada. Suíte unitária: 2.699/2.699; build, contratos e invariantes verdes. Os runs terminaram com zero backends, browser/processos encerrados, cluster parado, porta livre e scratch removido.
+
+Evidências locais: `C:/Users/leand/Documents/Apollo/w41-50-20261004/`, nas pastas dos três runs acima. O harness usa limiar de anomalia de requests 400 para a sessão isolada, backoff reduzido e leases controladas de 50 ms para o caso de abandono; os padrões do produto não mudam. Falhas de invocação, fixtures incompletas e expectativas incorretas durante a construção ficam registradas no PR #76; não são contadas como execuções verdes. Estado e evidência de integração/CI ficam no registro canônico. Implantação DigitalOcean e aceite permanecem separados, sem marcar TODO.

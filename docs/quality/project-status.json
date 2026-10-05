@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-05T13:35:36.813Z",
+  "updatedAt": "2026-10-05T16:42:28.749Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "0ac380d7df20634be4024dac9157f6c61e2771f3",
+  "evidenceBaseCommit": "fbcee0dfb1a1486bc75a60aaef8d07ebaede8883",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -14900,14 +14900,14 @@
       ],
       "state": "pendente-validacao",
       "construction": "implemented",
-      "integration": "main",
+      "integration": "not-integrated",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "A maioria dos estados vem de seed PG controlado; nenhuma transição executada por worker real, portanto a caixa não está validada integralmente."
+          "text": "Jornada local completa e persistência comprovadas; faltam CI do SHA final, merge autorizado e conferência do CI em main."
         },
         {
           "kind": "deployment",
@@ -14948,10 +14948,52 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
           "role": "controlled-e2e",
           "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/dashboard-runtime-journey.e2e.mjs",
+          "role": "implementation",
+          "scope": "Jornada PostgreSQL/API/Next de produção/Chromium/FFmpeg; upstream editorial e mídia controlados, sem seed de operação/review/output/status para afirmar transições."
+        },
+        {
+          "type": "repo",
+          "ref": ".github/workflows/dashboard-runtime-ci.yml",
+          "role": "integration",
+          "scope": "Gate E2E obrigatório, build de produção, banco isolado e artifact vinculado ao SHA; zero backends no postflight."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w35-36-runtime-terminal-04ba2fd1/w35-runtime.json",
+          "role": "controlled-e2e",
+          "scope": "407784bd: 21 registros, 36 capturas de cards e 2 frames de annotations, workspace 200, browser sem erros; proxy/final de 4 s com hash/probe/decode e frames revisados; falha física/retry/patch/leases/CAS."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w35-36-runtime-terminal-04ba2fd1/result.json",
+          "role": "controlled-e2e",
+          "scope": "Success true, browser/processos encerrados, zero backends, cluster parado, porta 55574 livre, postmaster encerrado, scratch removido e zero erros de cleanup."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w35-proxy-cas-three-built-b504f970/result.json",
+          "role": "controlled-e2e",
+          "scope": "PostgreSQL 1/1 sem skip: inputs distintos controlados admitidos pelo repositório; CAS da mesma versão, falha/retry antigo sem efeitos, três claims expiradas e recuperação da mais recente. Não é uma segunda jornada API/worker."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w35-quality-cleanup-final-built-09b54528/result.json",
+          "role": "controlled-e2e",
+          "scope": "PostgreSQL 2/2 sem skip: qualidade por output e iteração; fixtures canônicas respeitam lease; cleanup com zero backends, processos encerrados e porta 55576 livre."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w36-public-api-full-built-9ba00076/result.json",
+          "role": "controlled-e2e",
+          "scope": "fbcee0df: jornada pública API/PostgreSQL/Chromium 1/1, zero skips, 294,8 s; catálogo 16 eventos, schemas V1/V2, W29-W40, credenciais e revogação. Cleanup terminal, zero backends e porta 55576 livre."
         }
       ],
-      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
-      "notes": "Recorte técnico W35 comprovado em ambiente controlado. Lacunas: A maioria dos estados vem de seed PG controlado; nenhuma transição executada por worker real, portanto a caixa não está validada integralmente. Nenhuma caixa do TODO foi remarcada."
+      "nextAction": "Confirmar CI do SHA final, merge e CI de main; depois atender implantação DigitalOcean e aceite separado.",
+      "notes": "Lacuna de estados apenas semeados fechada no escopo runtime controlado: estados de proxy/final, falha e retries vêm de APIs/serviços/workers novos. Mídia e upstream editorial controlados; ramo sem total, vazio e arquivado preservam suas provas históricas. Mesmo input com outra chave dá 409, sem duplicação; guard da mesma versão tem prova PG separada. Não é implantação ou aceite; TODO intacto."
     },
     {
       "id": "W36",
@@ -14965,14 +15007,14 @@
       ],
       "state": "pendente-validacao",
       "construction": "implemented",
-      "integration": "main",
+      "integration": "not-integrated",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "validation",
-          "text": "Primeiro recorte só cobre eventos de administração de projeto; operações, annotations, progresso e duplicação não emitem atualização. A marca d’água depende de todos os gravadores do outbox usarem o papel de banco da aplicação."
+          "text": "Jornada local completa e persistência comprovadas; faltam CI do SHA final, merge autorizado e conferência do CI em main."
         },
         {
           "kind": "deployment",
@@ -15013,10 +15055,46 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
           "role": "controlled-e2e",
           "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/dashboard-runtime-journey.e2e.mjs",
+          "role": "implementation",
+          "scope": "Jornada PostgreSQL/API/Next de produção/Chromium/FFmpeg; upstream editorial e mídia controlados, sem seed de operação/review/output/status para afirmar transições."
+        },
+        {
+          "type": "repo",
+          "ref": ".github/workflows/dashboard-runtime-ci.yml",
+          "role": "integration",
+          "scope": "Gate E2E obrigatório, build de produção, banco isolado e artifact vinculado ao SHA; zero backends no postflight."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w35-36-runtime-terminal-04ba2fd1/w36-pipeline-feed.json",
+          "role": "controlled-e2e",
+          "scope": "407784bd: 22 casos outbox → HTTP → refetch → estado/barra, sete tipos adicionais no transporte real, zero navegações; latência observada 2444–6018 ms."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w35-36-runtime-terminal-04ba2fd1/result.json",
+          "role": "controlled-e2e",
+          "scope": "Success true, browser/processos encerrados, zero backends, cluster parado, porta 55574 livre, postmaster encerrado, scratch removido e zero erros de cleanup."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w36-pipeline-pg-final-6c3070f7/result.json",
+          "role": "controlled-e2e",
+          "scope": "PostgreSQL/HTTP 10/10: auth, escopos, workspace, cursor, ordenação, late writes e filtragem de operação sem projeto; cleanup confirmado."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w36-public-api-full-built-9ba00076/result.json",
+          "role": "controlled-e2e",
+          "scope": "fbcee0df: jornada pública API/PostgreSQL/Chromium 1/1, zero skips, 294,8 s; catálogo 16 eventos, schemas V1/V2, W29-W40, credenciais e revogação. Cleanup terminal, zero backends e porta 55576 livre."
         }
       ],
-      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
-      "notes": "Recorte técnico W36 comprovado em ambiente controlado. Lacunas: Primeiro recorte só cobre eventos de administração de projeto; operações, annotations, progresso e duplicação não emitem atualização. A marca d’água depende de todos os gravadores do outbox usarem o papel de banco da aplicação. Nenhuma caixa do TODO foi remarcada."
+      "nextAction": "Confirmar CI do SHA final, merge e CI de main; depois atender implantação DigitalOcean e aceite separado.",
+      "notes": "Lacuna de feed apenas administrativo fechada no escopo runtime controlado: operações, fases/progresso, annotations e duplicação chegam ao dashboard por outbox e HTTP. Polling, isolamento, cursor e papel de DB exigido mantidos. Não é implantação ou aceite; TODO intacto."
     },
     {
       "id": "W37",

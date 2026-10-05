@@ -1,5 +1,5 @@
 /**
- * Bounded poller for the persisted project administration event feed.
+ * Bounded poller for the persisted dashboard event feed.
  *
  * It has no DOM or React dependency so its timing, backoff and shutdown rules
  * can be proven with a fake clock. The event payload is only a signal that the
@@ -24,7 +24,32 @@ export const PROJECT_EVENT_FEED_RELEVANT_TYPES: ReadonlySet<string> = new Set([
   'project.created',
   'project.name.changed',
   'project.status.changed',
+  'operation.status.changed',
+  'operation.progress.changed',
+  'operation.succeeded',
+  'operation.failed',
+  'annotation.created',
+  'annotation.resolved',
 ])
+
+/** Reject mismatched identities before using a payload as an invalidation signal. */
+export function dashboardFeedEventType(value: unknown, workspaceId: string): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const event = value as Record<string, unknown>
+  const resource = event.resource as Record<string, unknown> | undefined
+  const data = event.data as Record<string, unknown> | undefined
+  const safeId = (id: unknown) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(id)
+  if (typeof event.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(event.id) ||
+      event.workspaceId !== workspaceId || event.version !== '1.0.0' ||
+      typeof event.type !== 'string' || !PROJECT_EVENT_FEED_RELEVANT_TYPES.has(event.type) ||
+      !resource || !safeId(resource.id) || !data || typeof data !== 'object' || Array.isArray(data)) return null
+  const expectedResource = event.type.startsWith('project.') ? 'project' :
+    event.type.startsWith('operation.') ? 'operation' : 'annotation'
+  if (resource.type !== expectedResource) return null
+  if (expectedResource !== 'project' && !safeId(data.projectId)) return null
+  if (expectedResource === 'project' && data.projectId !== undefined && data.projectId !== resource.id) return null
+  return event.type
+}
 
 export type ProjectEventFeedResult =
   | { kind: 'page'; eventTypes: readonly string[]; nextCursor: string; hasMore: boolean }

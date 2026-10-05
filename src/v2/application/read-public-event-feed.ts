@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import type { PublicEvent } from '../domain/public-event.ts'
 import {
-  PROJECT_ADMINISTRATION_EVENT_TYPES,
+  PROJECT_DASHBOARD_EVENT_TYPES,
   PUBLIC_EVENT_FEED_DEFAULT_LIMIT,
   PUBLIC_EVENT_FEED_CURSOR_SLACK_MS,
   PUBLIC_EVENT_FEED_FLOOR_ID,
@@ -62,7 +62,7 @@ export interface PublicEventFeedPage {
 }
 
 /**
- * Typed, workspace-scoped read of persisted project administration events.
+ * Typed, workspace-scoped read of persisted dashboard invalidation events.
  *
  * Contract: every event whose transaction committed is delivered exactly once
  * per cursor lineage, in `(createdAt, id)` order, and never behind the cursor
@@ -96,7 +96,7 @@ export function readPublicEventFeedService(dependencies: {
       'INVALID_ARGUMENT',
       'after and startAt cannot be combined',
     )
-    const types = [...PROJECT_ADMINISTRATION_EVENT_TYPES]
+    const types = [...PROJECT_DASHBOARD_EVENT_TYPES]
     const queryHash = createHash('sha256')
       .update(JSON.stringify({ workspaceId: input.workspaceId, types }))
       .digest('hex')
@@ -141,7 +141,12 @@ export function readPublicEventFeedService(dependencies: {
       ? after
       : reached
     return Object.freeze({
-      events: Object.freeze(page.map((entry) => entry.event)),
+      // Non-project artifact operations are outside this projects:read feed.
+      // Keep cursor/hasMore on the complete scanned page so filtered rows can
+      // never trap pagination or cause a later project event to be skipped.
+      events: Object.freeze(page.map((entry) => entry.event).filter((event) =>
+        !event.type.startsWith('operation.') ||
+        (typeof event.data.projectId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(event.data.projectId)))),
       nextCursor: encodeCursor(position, queryHash),
       hasMore: truncated,
       watermark,

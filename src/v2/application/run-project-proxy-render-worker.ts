@@ -525,6 +525,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         operationId: operation.id,
         review,
         createdAt: reviewedAt,
+        lease: { owner: leaseOwner, attempt, now: clock().toISOString() },
       })
       await dependencies.catalogOutput({ workspaceId: operation.workspaceId, artifactId: persisted.artifactId, manifestId: persisted.manifestId })
       stopHeartbeat()

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import net from 'node:net'
 import test from 'node:test'
+import { createMediaArtifactManifest } from '../../src/v2/domain/media-artifact.ts'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
@@ -65,9 +66,36 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
   const createdAt = new Date('2026-07-26T23:45:00.000Z')
   let server
   let serverLogs = ''
+  let primaryError
+  const cleanup = async () => {
+    const where = { workspaceId }
+    await client.v2QualityIterationAssetSelection.deleteMany({ where })
+    await client.v2QualityIteration.deleteMany({ where })
+    await client.v2AssetSelection.deleteMany({ where })
+    await client.v2ProxyReviewDecision.deleteMany({ where })
+    await client.v2ProxyReview.deleteMany({ where })
+    await client.v2PublicEventOutbox.deleteMany({ where })
+    await client.v2ProjectProxyRenderOperation.deleteMany({ where })
+    await client.v2PublicOperation.deleteMany({ where })
+    await client.v2AssetUseDecision.deleteMany({ where })
+    await client.v2MediaArtifact.updateMany({ where, data: { currentRightsSnapshotId: null } })
+    await client.v2AssetRightsChange.deleteMany({ where })
+    await client.v2AssetRightsSnapshot.deleteMany({ where })
+    await client.v2MediaArtifactManifest.deleteMany({ where })
+    await client.v2ProjectMediaAsset.deleteMany({ where })
+    await client.v2MediaArtifact.deleteMany({ where })
+    await client.v2Project.updateMany({ where, data: { currentVersionId: null } })
+    await client.v2ProjectVersion.deleteMany({ where })
+    await client.v2ProjectSnapshot.deleteMany({ where })
+    await client.v2Project.deleteMany({ where })
+    await client.v2GovernanceAlert.deleteMany({ where })
+    await client.v2GovernanceAdmission.deleteMany({ where })
+    await client.v2ApiClient.deleteMany({ where })
+    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+  }
 
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await cleanup()
     await client.v2Workspace.create({
       data: {
         id: workspaceId,
@@ -195,7 +223,23 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
     })
 
     const proxyRepository = new PrismaProxyReviewRepository(client)
+    const sourceManifestId = `quality-source-manifest-${suffix}`
+    const sourceManifest = createMediaArtifactManifest({ artifactKey: `quality/${selectedArtifactId}.mp4`,
+      artifactSha256: '1'.repeat(64), byteSize: 2_000, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'quality-source', version: '1.0.0', parameters: {} }, sources: [],
+      probe: { width: 540, height: 960, duration: 10, fps: 30 },
+    })
+    await client.v2MediaArtifactManifest.create({ data: {
+      id: sourceManifestId, workspaceId, artifactId: selectedArtifactId,
+      schemaVersion: sourceManifest.schemaVersion, manifestHash: sourceManifest.manifestHash,
+      recipeId: sourceManifest.recipe.id, recipeVersion: sourceManifest.recipe.version, parametersHash: sourceManifest.recipe.parametersHash,
+      manifestJson: stableSerialize(sourceManifest), createdAt,
+    } })
+    let proxySequence = 0
     async function seedProxy(label, criticIssues) {
+      const operationCreatedAt = new Date(createdAt.getTime() + proxySequence++)
+      const completedAt = new Date(createdAt.getTime() + 1_000)
+      const lease = { owner: `quality-worker-${suffix}`, attempt: 1, now: completedAt.toISOString() }
       const artifactId = `quality-proxy-${label}-${suffix}`
       const manifestId = `quality-proxy-manifest-${label}-${suffix}`
       const operationId = `quality-proxy-operation-${label}-${suffix}`
@@ -246,23 +290,21 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
           projectId,
           clientId: issued.client.id,
           type: 'project-proxy-render',
-          status: 'succeeded',
-          phase: 'completed',
+          status: 'running',
+          phase: 'persisting',
           targetType: 'media-artifact',
           targetId: artifactId,
-          cancelable: false,
+          cancelable: true,
           retryable: false,
           attempt: 1,
           maxAttempts: 3,
-          resultJson: stableSerialize({
-            resource: { type: 'media-artifact', id: artifactId, manifestId },
-          }),
+          progressCompleted: 3, progressTotal: 4, progressUnit: 'render',
+          leaseOwner: lease.owner, leaseExpiresAt: new Date(completedAt.getTime() + 60_000), heartbeatAt: completedAt,
           idempotencyKey: `quality-proxy-render-${label}-${suffix}`,
           requestFingerprint: inputHash,
-          createdAt,
-          updatedAt: createdAt,
-          startedAt: createdAt,
-          completedAt: new Date(createdAt.getTime() + 1_000),
+          createdAt: operationCreatedAt,
+          updatedAt: operationCreatedAt,
+          startedAt: operationCreatedAt,
         },
       })
       await client.v2ProjectProxyRenderOperation.create({
@@ -272,8 +314,9 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
           projectId,
           projectVersionId,
           editPlanSnapshotId: snapshots[1].id,
-          sourceArtifactId: `quality-source-${suffix}`,
-          sourceManifestId: `quality-source-manifest-${suffix}`,
+          sourceArtifactId: selectedArtifactId,
+          sourceManifestId,
+          colorPipelineBindingsJson: stableSerialize([]),
           inputHash,
           outputArtifactId: artifactId,
           outputManifestId: manifestId,
@@ -288,7 +331,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         proxySha256,
         inputHash,
         format: '9:16',
-        sourceSha256: calculateVersionHash({ source: suffix }),
+        sourceSha256: '1'.repeat(64),
         editPlanHash: snapshots[1].contentHash ?? calculateVersionHash(snapshots[1].content),
         expectedDurationMs: 10_000,
         uploadReceivedAt: createdAt.toISOString(),
@@ -312,14 +355,22 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         },
         criticIssues,
       })
-      return proxyRepository.persistGenerated({
+      const persisted = await proxyRepository.persistGenerated({
         id: reviewId,
         workspaceId,
         projectId,
         operationId,
         review,
         createdAt: new Date(createdAt.getTime() + 1_000).toISOString(),
+        lease,
       })
+      // Controlled persistence fixture: terminal state follows the leased review commit.
+      await client.v2PublicOperation.update({ where: { id: operationId }, data: {
+        status: 'succeeded', phase: 'completed', cancelable: false, progressCompleted: 4,
+        leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, completedAt,
+        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: artifactId, manifestId } }),
+      } })
+      return persisted
     }
 
     const readyProxy = await seedProxy('ready', [])
@@ -671,7 +722,11 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
       where: { id: iteration.id },
       data: { recordHash: stored.recordHash },
     })
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
+    const cleanupErrors = []
     if (server && server.exitCode === null) {
       server.kill()
       await Promise.race([
@@ -679,7 +734,10 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         new Promise((resolve) => setTimeout(resolve, 5_000)),
       ])
     }
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE').catch(() => {})
-    await client.$disconnect()
+    await cleanup().catch((error) => cleanupErrors.push(error))
+    await client.$disconnect().catch((error) => cleanupErrors.push(error))
+    if (cleanupErrors.length) throw new AggregateError(
+      [...(primaryError ? [primaryError] : []), ...cleanupErrors], 'Quality iteration fixture failed with cleanup errors',
+    )
   }
 })

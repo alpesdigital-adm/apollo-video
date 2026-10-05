@@ -70,6 +70,26 @@ const colorPipelineBindings = Object.freeze([Object.freeze({
   pipelineHash: colorCompilation.pipeline.pipelineHash,
 })])
 
+test('duplicate immutable proxy input returns a scoped conflict after a concurrent uniqueness race', async () => {
+  const operations = createOperations()
+  const record = { operation: operations.operation, context: { kind: 'project-proxy-render', projectId: 'project-proxy-test',
+    projectVersionId: 'project-version-proxy-test', editPlanSnapshotId: 'snapshot-edit-plan-proxy-test',
+    sourceArtifactId: 'artifact-project-proxy-source', sourceManifestId: 'manifest-project-proxy-source', colorPipelineBindings,
+    inputHash: projectProxyRenderInputHash({ source: source(), colorPipelineBindings }),
+    outputArtifactId: 'artifact-project-proxy-output', outputManifestId: 'manifest-project-proxy-output', originalFileName: 'source-editorial.mp4' } }
+  let scopedLookup
+  const repository = new PrismaPublicOperationRepository({
+    async $transaction() { throw Object.assign(new Error('concurrent immutable input admission'), { code: 'P2002' }) },
+    v2PublicOperation: { async findUnique() { return null } },
+    v2ProjectProxyRenderOperation: { async findFirst(query) { scopedLookup = query; return { operationId: 'private-existing-operation' } } },
+  })
+  await assert.rejects(repository.createOrReplay({ operation: record.operation, context: record.context,
+    authenticationAudit: materializeActorAuditContext(proxyActor()), idempotencyKey: 'different-admission-key', requestFingerprint: 'a'.repeat(64) }),
+  (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT' && !error.message.includes('private-existing-operation'))
+  assert.deepEqual(scopedLookup.where, { workspaceId: record.operation.workspaceId, projectId: record.context.projectId,
+    projectVersionId: record.context.projectVersionId, inputHash: record.context.inputHash })
+})
+
 function proxyActor(credentialId = 'credential-project-proxy-test') {
   const auditContext = createExternalAuditContext({
     clientId: 'client-project-proxy-test', credentialId,
@@ -632,6 +652,8 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   let publicReadCount = 0
   let operationData
   let detailData
+  let projectCasCount = 0
+  let projectCasAccepted = true
   const bindingsJson = stableSerialize(colorPipelineBindings)
   const repository = new PrismaPublicOperationRepository({
     async $transaction(callback) {
@@ -655,6 +677,14 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           async create({ data }) { operationData = data },
         },
         v2PublicEventOutbox: { async createMany() { return { count: 2 } } },
+        v2Project: { async updateMany({ where, data }) {
+          projectCasCount += 1
+          assert.equal(where.currentVersionId, resultVersionId)
+          assert.equal(data.status, 'reviewing-proxy')
+          assert.equal(where.status.in.includes('completed'), false)
+          assert.equal(where.status.in.includes('archived'), false)
+          return { count: projectCasAccepted ? 1 : 0 }
+        } },
         v2ProjectVersion: { async findFirst() { return {
           id: resultVersionId,
           parentVersionId: baseVersionId,
@@ -690,6 +720,19 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   assert.equal(detailData.reuseImpactHash, impact.impactHash)
   assert.equal(detailData.reuseBaseVersionId, baseVersionId)
   assert.equal(operationData.resultJson, stableSerialize(operation.result))
+
+  projectCasAccepted = false
+  const replay = await repository.createOrReplay({ operation,
+    authenticationAudit: materializeActorAuditContext(proxyActor()), context,
+    idempotencyKey: 'selection-proxy-persistence-test', requestFingerprint: '7'.repeat(64) })
+  assert.equal(replay.replayed, true)
+  assert.equal(projectCasCount, 1, 'replay cannot rewrite a project that advanced after the inline cache hit')
+  publicReadCount = 0
+  await assert.rejects(repository.createOrReplay({ operation,
+    authenticationAudit: materializeActorAuditContext(proxyActor()), context,
+    idempotencyKey: 'selection-proxy-stale-project', requestFingerprint: '7'.repeat(64) }),
+  (error) => error.code === 'PROJECT_TRANSITION_REJECTED')
+  projectCasAccepted = true
 
   publicReadCount = 0
   operationData = undefined

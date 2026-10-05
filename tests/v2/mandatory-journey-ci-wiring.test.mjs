@@ -172,6 +172,19 @@ const singleTestFileOf = (command) => {
   return files.length === 1 ? files[0] : null
 }
 
+test('dashboard runtime journey cannot silently skip or stop gating CI', async () => {
+  const suite = 'tests/v2/dashboard-runtime-journey.e2e.mjs'
+  const [workflow, source] = await Promise.all([
+    read('.github/workflows/dashboard-runtime-ci.yml'), read(suite),
+  ])
+  const gate = /process\.env\.(APOLLO_[A-Z_]+_E2E)\s*!==\s*'1'/.exec(source)?.[1]
+  assert.ok(gate, 'derive the opt-in gate from the runtime journey')
+  const step = parseWorkflow(workflow).steps.find((entry) => entry.suiteFiles.includes(suite))
+  assert.ok(step && gatesTheBuild(step), 'the real worker journey must fail CI when it fails')
+  assert.match(workflow, new RegExp(`^ {6}${gate}: ['\"]?1['\"]?\\s*$`, 'm'))
+  assert.match(workflow, /^ {6}V2_DATABASE_URL: .*apollo_v2_e2e_dashboard.*connection_limit=1/m)
+})
+
 test('T-F4.016 every mandatory product journey has a CI step, its own gate and a database', async () => {
   const [rawPackage, workflow] = await Promise.all([read('package.json'), read('.github/workflows/ci.yml')])
   const { scripts } = JSON.parse(rawPackage)
@@ -494,12 +507,18 @@ const suiteFilesRunByCi = (steps, scripts) => {
 }
 
 async function inventoryCiSteps() {
-  const [central, library] = await Promise.all([read('.github/workflows/ci.yml'), read('.github/workflows/library-ci.yml')])
+  const [central, library, dashboard] = await Promise.all([
+    read('.github/workflows/ci.yml'),
+    read('.github/workflows/library-ci.yml'),
+    read('.github/workflows/dashboard-runtime-ci.yml'),
+  ])
   assert.match(library, /push:\s*\n\s+branches: \[main\]/)
   assert.match(library, /\n  pull_request:/)
+  assert.match(dashboard, /push:\s*\n\s+branches: \[main\]/)
+  assert.match(dashboard, /\n  pull_request:/)
   // Only generic coverage aggregates workflows. Six mandatory journeys above
   // still require their original ci.yml jobs, database and admission switches.
-  return [...parseWorkflow(central).steps, ...parseWorkflow(library).steps]
+  return [...parseWorkflow(central).steps, ...parseWorkflow(library).steps, ...parseWorkflow(dashboard).steps]
 }
 
 test('T-F4.016 no integration or e2e suite file goes unrun by CI without being declared', async () => {

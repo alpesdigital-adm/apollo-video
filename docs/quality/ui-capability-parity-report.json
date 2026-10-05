@@ -2313,7 +2313,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:377",
+      "uiAction": "src/app/ProjectsPageClient.tsx:378",
       "capabilityId": "apollo.projects.list",
       "capabilityVersion": "4.0.0",
       "endpoint": "GET /v1/projects",
@@ -2333,7 +2333,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:447",
+      "uiAction": "src/app/ProjectsPageClient.tsx:448",
       "capabilityId": "apollo.projects.create",
       "capabilityVersion": "5.0.0",
       "endpoint": "POST /v1/projects",
@@ -2353,7 +2353,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:537",
+      "uiAction": "src/app/ProjectsPageClient.tsx:538",
       "capabilityId": "apollo.projects.rename",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/rename",
@@ -2372,7 +2372,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:541",
+      "uiAction": "src/app/ProjectsPageClient.tsx:542",
       "capabilityId": "apollo.projects.archive",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/archive",
@@ -2391,7 +2391,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:544",
+      "uiAction": "src/app/ProjectsPageClient.tsx:545",
       "capabilityId": "apollo.projects.restore",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/restore",
@@ -2410,7 +2410,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:594",
+      "uiAction": "src/app/ProjectsPageClient.tsx:595",
       "capabilityId": "apollo.projects.workspace.current.read",
       "capabilityVersion": "10.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
@@ -2430,7 +2430,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:614",
+      "uiAction": "src/app/ProjectsPageClient.tsx:615",
       "capabilityId": "apollo.projects.duplicates.create",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/projects/{projectId}/duplicates",
@@ -2510,7 +2510,7 @@
       ]
     },
     {
-      "uiAction": "src/app/useProjectEventFeed.ts:25",
+      "uiAction": "src/app/useProjectEventFeed.ts:26",
       "capabilityId": "apollo.events.feed.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/events/feed",

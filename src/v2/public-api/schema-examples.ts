@@ -1152,6 +1152,9 @@ const proxyReviewExample = {
     targetId: 'subtitle-example-1',
     outputSpecId: 'preset-9x16',
     outputPresetHash: 'c'.repeat(64),
+    placementPlanHash: null,
+    reframePlanHash: 'd'.repeat(64),
+    format: '9:16',
     evidenceRange: { startFrame: 60, endFrame: 126 },
     elementIds: ['subtitle-example-1'],
     evidenceIds: ['render-map:' + '8'.repeat(64)],
@@ -1181,7 +1184,7 @@ const {
 } = proxyReviewExample
 const proxyReviewExampleV1 = {
   ...proxyReviewExampleWithoutOutput,
-  criticIssues: proxyReviewExample.criticIssues.map(({ outputSpecId: _o, outputPresetHash: _p, evidenceRange: _r, elementIds: _e, evidenceIds: _v, ...issue }) => issue),
+  criticIssues: proxyReviewExample.criticIssues.map(({ outputSpecId: _o, outputPresetHash: _p, placementPlanHash: _l, reframePlanHash: _f, format: _a, evidenceRange: _r, elementIds: _e, evidenceIds: _v, ...issue }) => issue),
 }
 const assetBriefExample = {
   intention: 'Reforçar visualmente o ganho de clareza sem interromper a fala.',

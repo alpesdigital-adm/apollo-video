@@ -83,6 +83,7 @@ export const PUBLIC_EVENT_CATALOG = defineEventCatalog([
   { type: 'project.name.changed', version: '1.0.0', resourceType: 'project', description: 'A project name changed.' },
   { type: 'project.status.changed', version: '1.0.0', resourceType: 'project', description: 'A project status changed.' },
   { type: 'operation.status.changed', version: '1.0.0', resourceType: 'operation', description: 'A public operation changed status.' },
+  { type: 'operation.progress.changed', version: '1.0.0', resourceType: 'operation', description: 'A leased public operation advanced its persisted phase or progress.' },
   { type: 'operation.succeeded', version: '1.0.0', resourceType: 'operation', description: 'A public operation completed successfully.' },
   { type: 'operation.failed', version: '1.0.0', resourceType: 'operation', description: 'A public operation reached a failed terminal state.' },
   { type: 'annotation.created', version: '1.0.0', resourceType: 'annotation', description: 'A review annotation was created.' },

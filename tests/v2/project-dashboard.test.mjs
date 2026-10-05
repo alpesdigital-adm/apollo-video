@@ -163,7 +163,7 @@ test('F1.001 Prisma query aggregates the current version, latest real job, issue
     { createdAt: 'desc' }, { id: 'desc' },
   ])
   assert.deepEqual(query.include.publicOperations.orderBy, [
-    { updatedAt: 'desc' }, { id: 'desc' },
+    { createdAt: 'desc' }, { id: 'desc' },
   ])
   assert.deepEqual(
     query.include.currentVersion.select._count.select.reviewAnnotations,
@@ -276,6 +276,29 @@ function w34Repository(rows) {
     v2Project: { async findMany() { return rows } },
   })
 }
+
+test('latest admitted operation survives an older task heartbeat and equal-time admission ties', async () => {
+  const operations = [
+    w34Operation({ id: 'operation-old', createdAt: new Date('2026-08-06T12:01:00Z'), updatedAt: new Date('2026-08-06T12:09:00Z') }),
+    w34Operation({ id: 'operation-new-a', createdAt: new Date('2026-08-06T12:02:00Z'), updatedAt: new Date('2026-08-06T12:03:00Z') }),
+    w34Operation({ id: 'operation-new-z', createdAt: new Date('2026-08-06T12:02:00Z'), updatedAt: new Date('2026-08-06T12:02:00Z') }),
+  ]
+  const repository = new PrismaProjectQueryRepository({ v2Project: { async findMany(query) {
+    const order = query.include.publicOperations.orderBy
+    const ordered = [...operations].sort((left, right) => {
+      for (const item of order) {
+        const [key, direction] = Object.entries(item)[0]
+        const comparison = left[key] instanceof Date ? left[key].getTime() - right[key].getTime() : left[key].localeCompare(right[key])
+        if (comparison) return direction === 'desc' ? -comparison : comparison
+      }
+      return 0
+    })
+    return [w34Row({ publicOperations: ordered.slice(0, query.include.publicOperations.take) })]
+  } } })
+  const [record] = await repository.listByWorkspace({ workspaceId: W34_WORKSPACE, limit: 20 })
+  assert.equal(record.dashboard.latestOperation.id, 'operation-new-z')
+  assert.equal(record.dashboard.currentVersion.id, 'project-version-dashboard-1')
+})
 
 const w34List = (rows) => w34Repository(rows).listByWorkspace({
   workspaceId: W34_WORKSPACE, limit: 20,

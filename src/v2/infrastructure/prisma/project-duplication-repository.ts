@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   Prisma,
   type PrismaClient,
@@ -12,6 +13,8 @@ import type {
   ProjectDuplicationResult,
 } from '../../application/ports/project-duplication-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { createPublicEvent } from '../../domain/public-event.ts'
+import { persistPublicEvents } from './public-event-outbox.ts'
 import type { CommandActorType } from '../../domain/edit-command.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -528,6 +531,22 @@ implements ProjectDuplicationRepository {
         await transaction.v2ProjectCreationCommand.create({
           data: projectCreationCommandData(bundle.auditCommand),
         })
+        await persistPublicEvents(transaction, [createPublicEvent({
+          id: randomUUID(), type: 'project.created', version: '1.0.0',
+          workspaceId: bundle.project.workspaceId,
+          occurredAt: bundle.project.createdAt,
+          actor: { clientId: bundle.auditCommand.audit.clientId },
+          resource: { type: 'project', id: bundle.project.id },
+          data: { action: 'duplicate', sourceProjectId: bundle.sourceProjectId,
+            projectVersionId: bundle.version.id },
+        }), createPublicEvent({
+          id: randomUUID(), type: 'project.version.created', version: '1.0.0',
+          workspaceId: bundle.project.workspaceId,
+          occurredAt: bundle.version.createdAt,
+          actor: { clientId: bundle.auditCommand.audit.clientId },
+          resource: { type: 'project-version', id: bundle.version.id },
+          data: { projectId: bundle.project.id, sourceVersionId: bundle.sourceVersionId },
+        })])
         const response = {
           projectId: bundle.project.id,
           versionId: bundle.version.id,

@@ -68,3 +68,34 @@ export function createPublicOperationStatusEvents(input: {
   }
   return Object.freeze(events)
 }
+
+/** A refetch signal from persisted worker state, never an inferred percentage. */
+export function createPublicOperationProgressEvents(input: {
+  previous: Readonly<PublicOperation>
+  operation: Readonly<PublicOperation>
+  createEventId: () => string
+}): readonly Readonly<PublicEvent>[] {
+  const { previous, operation } = input
+  if (previous.phase === operation.phase &&
+      previous.progress?.completed === operation.progress?.completed &&
+      previous.progress?.total === operation.progress?.total &&
+      previous.progress?.unit === operation.progress?.unit) return Object.freeze([])
+  return Object.freeze([createPublicEvent({
+    id: input.createEventId(),
+    type: 'operation.progress.changed',
+    version: '1.0.0',
+    workspaceId: operation.workspaceId,
+    occurredAt: operation.updatedAt,
+    actor: { clientId: operation.clientId },
+    resource: { type: 'operation', id: operation.id },
+    data: {
+      operationType: operation.type,
+      status: operation.status,
+      phase: operation.phase,
+      previousPhase: previous.phase,
+      attempt: operation.attempt,
+      ...(operation.projectId ? { projectId: operation.projectId } : {}),
+      ...(operation.progress ? { progress: { ...operation.progress } } : {}),
+    },
+  })])
+}

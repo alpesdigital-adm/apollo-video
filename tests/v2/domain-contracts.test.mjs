@@ -144,6 +144,7 @@ test('public event envelope is versioned, bounded and tied to the initial catalo
       'project.name.changed',
       'project.status.changed',
       'operation.status.changed',
+      'operation.progress.changed',
       'operation.succeeded',
       'operation.failed',
       'annotation.created',
