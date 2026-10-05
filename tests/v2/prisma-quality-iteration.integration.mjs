@@ -226,7 +226,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
     const sourceManifest = createMediaArtifactManifest({ artifactKey: `quality/${selectedArtifactId}.mp4`,
       artifactSha256: '1'.repeat(64), byteSize: 2_000, mediaType: 'video', container: 'mp4',
       recipe: { id: 'quality-source', version: '1.0.0', parameters: {} }, sources: [],
-      probe: { width: 540, height: 960, duration: 10, fps: 30, codec: 'h264', container: 'mp4' },
+      probe: { width: 540, height: 960, duration: 10, fps: 30 },
     })
     await client.v2MediaArtifactManifest.create({ data: {
       id: sourceManifestId, workspaceId, artifactId: selectedArtifactId,
