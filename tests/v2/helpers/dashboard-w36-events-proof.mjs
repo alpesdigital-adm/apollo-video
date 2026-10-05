@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { appendFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -52,7 +53,21 @@ async function boundedClose(label, action, errors) {
   finally { clearTimeout(timer) }
 }
 
+let progressFile
+function progress(label) {
+  if (progressFile) appendFileSync(progressFile, `${new Date().toISOString()} ${label}
+`)
+}
+
+function withTimeout(label, promise, timeoutMs) {
+  let timer
+  return Promise.race([promise, new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`W36 timed out waiting for ${label}`)), timeoutMs)
+  })]).finally(() => clearTimeout(timer))
+}
+
 async function waitFor(label, predicate, timeoutMs = 30_000) {
+  progress(`wait ${label}`)
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const value = await predicate()
@@ -143,6 +158,8 @@ export async function proveDashboardEventFeedBrowser({
 }) {
   const evidenceDir = evidenceDirectory()
   await mkdir(evidenceDir, { recursive: true })
+  progressFile = join(evidenceDir, 'w36-progress.log')
+  progress('start')
   const evidence = {
     schemaVersion: 'w36-dashboard-events/v1', runId: randomUUID(),
     sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null,
@@ -306,6 +323,7 @@ export async function proveDashboardEventFeedBrowser({
     await waitFor('initial cards', async () => JSON.stringify((await cards(page)).map((card) => card.id)) === JSON.stringify(expectedInitial))
     await waitFor('bootstrap feed response', () => sink.feed.length >= 1)
 
+    progress('case 1')
     // --- Case 1: bootstrap at the head, history never refetches -----------------
     const firstFeedRequest = sink.requests.find((request) => request.path === FEED_PATH)
     assert.equal(firstFeedRequest.query.startAt, 'latest', 'first feed request must start at the head')
@@ -314,6 +332,7 @@ export async function proveDashboardEventFeedBrowser({
     assert.deepEqual(sink.feed[0].events, [], 'bootstrap delivers no history')
     assert.equal(sink.feed[0].status, 200)
 
+    progress('case 2')
     // --- Case 2: idle poll frequency, no refetch without events ----------------
     const idleStart = sink.requests.filter((request) => request.path === FEED_PATH).length
     await waitFor('four idle polls', () => sink.requests.filter((request) => request.path === FEED_PATH).length >= idleStart + 4, 60_000)
@@ -354,6 +373,7 @@ export async function proveDashboardEventFeedBrowser({
     const documentIdentity = await page.evaluate(() => window.__w36Doc)
     const navigationEntries = await page.evaluate(() => performance.getEntriesByType('navigation').length)
 
+    progress('case 3')
     // --- Case 3: external rename by API client B -> card updates, no reload ----
     const before1 = await projectRow(project1.id)
     const renamedName = nameOf('alvo um renomeado externamente')
@@ -399,6 +419,7 @@ export async function proveDashboardEventFeedBrowser({
       cardsAfter: await cards(page),
     }
 
+    progress('case 4')
     // --- Case 4: external archive (status event) --------------------------------
     const before2 = await projectRow(project2.id)
     const mutation2 = await archive(clientB, project2.id, before2.administrationRevision, `w36-archive-${suffix}`)
@@ -445,6 +466,7 @@ export async function proveDashboardEventFeedBrowser({
     assert.ok(overflow <= 1, `W36 mobile overflows by ${overflow}px`)
     await page.setViewportSize({ width: 1440, height: 1000 })
 
+    progress('case 5')
     // --- Case 5: mutation in ANOTHER workspace -> no invalidation, no data -----
     const otherBefore = await projectRow(otherProject.id)
     assert.equal(otherBefore.workspaceId, otherWorkspaceId)
@@ -497,6 +519,7 @@ export async function proveDashboardEventFeedBrowser({
       clientBReadFromBeginning: { events: everyEventB.length, foreignEvents: 0 },
     }
 
+    progress('case 6')
     // --- Case 6: delayed (controlled) response never replaces a newer one ------
     let armed = null
     const projectsMatcher = (url) => url.pathname === '/v1/projects'
@@ -523,7 +546,7 @@ export async function proveDashboardEventFeedBrowser({
     const olderName = nameOf('resposta atrasada antiga')
     const newerName = nameOf('resposta nova vence')
     const staleMutation1 = await rename(clientB, project1.id, before3.administrationRevision, olderName, `w36-stale-${suffix}-1`)
-    const delayedCapture = await staleDeferred.captured
+    const delayedCapture = await withTimeout('the delayed projects request to be intercepted', staleDeferred.captured, 30_000)
     const delayedBody = JSON.parse(delayedCapture.body)
     const delayedRow = delayedBody.data.projects.find((row) => row.id === project1.id)
     assert.equal(delayedRow.name, olderName, 'the delayed response carries the OLDER state')
@@ -555,6 +578,7 @@ export async function proveDashboardEventFeedBrowser({
     }
     await page.unroute(projectsMatcher).catch(() => undefined)
 
+    progress('case 7')
     // --- Case 7: leaving the dashboard stops polling (unmount) ------------------
     const feedCountBeforeLeave = sink.requests.filter((request) => request.path === FEED_PATH).length
     await page.getByTestId('app-shell-navigation').getByRole('link', { name: 'Lotes' }).click()
@@ -575,6 +599,7 @@ export async function proveDashboardEventFeedBrowser({
       request.path === FEED_PATH && request.at > leftAt && request.query.startAt === 'latest'), 20_000)
     evidence.cases.unmount.remountRestartsAtHead = true
 
+    progress('case 8')
     // --- Case 8: bounded errors / retries (second page, injected 503) ----------
     evidence.cases.boundedRetries = await faultRun
     const retry = evidence.cases.boundedRetries
