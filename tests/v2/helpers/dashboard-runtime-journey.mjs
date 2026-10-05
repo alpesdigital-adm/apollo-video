@@ -1,0 +1,194 @@
+import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { isAbsolute, join } from 'node:path'
+import { promisify } from 'node:util'
+import { closeOwnedBrowser } from './library-browser-proof.mjs'
+import { createDashboardPipelineObserver } from './dashboard-w36-pipeline-proof.mjs'
+
+const exec = promisify(execFile)
+const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Timing-only observation: every mutation still executes the production factory worker. */
+export async function runDashboardRuntimeJourney(input) {
+  const { client, baseUrl, authorization, workspaceId, projectId, projectVersionId,
+    projectVersionHash, sourcePath, artifactRoot, uiUsername, uiPassword, suffix, signal } = input
+  const directory = process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT
+  assert.ok(directory && isAbsolute(directory), 'Runtime evidence requires an absolute external directory')
+  await mkdir(directory, { recursive: true })
+  const evidence = { schemaVersion: 'dashboard-real-runtime/v1', runId: suffix, ownerPid: process.pid,
+    sourceCommit: process.env.GITHUB_SHA ?? null, states: [], outputs: [], screenshots: [],
+    controlledInputs: ['Director snapshots', 'FFmpeg synthetic source bytes', 'source color probe'],
+    unmeasuredProgress: { runtimeReachable: false, reason: 'All public operations use a known canonical phase count; historical no-total proof is controlled.' },
+    deployed: false, ownerAccepted: false, postflight: {} }
+  const { PrismaPublicOperationRepository } = await import('../../../src/v2/infrastructure/prisma/public-operation-repository.ts')
+  const { createProjectProxyRenderWorker, createProjectFinalExportWorker } = await import('../../../src/v2/infrastructure/repository-factory.ts')
+  const { probeVideo } = await import('../../../src/v2/infrastructure/media/video-probe.ts')
+  const prototype = PrismaPublicOperationRepository.prototype
+  const originals = { claimNext: prototype.claimNext, advancePhase: prototype.advancePhase }
+  let server, browser, context, child, primaryError, pipeline, activeObserver
+  const environment = { ...process.env, APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
+    APOLLO_V2_RENDER_LEASE_MS: '120000', APOLLO_V2_RENDER_HEARTBEAT_MS: '5000',
+    APOLLO_V2_WORKER_RETRY_BASE_MS: '1', APOLLO_V2_WORKER_RETRY_MAX_MS: '1',
+    APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'dashboard-runtime-e2e',
+    APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url') }
+  const post = async (path, body, key, expected) => {
+    const response = await fetch(`${baseUrl}${path}`, { method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30000) })
+    const payload = await response.json()
+    assert.equal(response.status, expected, `${path}: ${JSON.stringify(payload)}`)
+    return payload.data
+  }
+  try {
+    const login = await fetch(`${baseUrl}/v1/session`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: uiUsername, password: uiPassword }), signal: AbortSignal.timeout(30000) })
+    assert.equal(login.status, 200, await login.text())
+    const cookie = /apollo_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')?.[1]
+    assert.ok(cookie)
+    const { chromium } = await import('playwright-core')
+    const executablePath = [process.env.PLAYWRIGHT_CHROME_EXECUTABLE, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].find((path) => path && existsSync(path))
+    assert.ok(executablePath)
+    server = await chromium.launchServer({ executablePath, headless: true, timeout: 20000 })
+    child = server.process(); evidence.browserPid = child.pid
+    browser = await chromium.connect(server.wsEndpoint(), { timeout: 20000 })
+    context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+    evidence.browserErrors = []
+    context.on('page', (opened) => {
+      opened.on('pageerror', (error) => evidence.browserErrors.push(String(error)))
+      opened.on('console', (message) => { if (message.type() === 'error') evidence.browserErrors.push(message.text()) })
+      opened.on('response', (response) => { if (response.status() >= 400) evidence.browserErrors.push(`${response.status()} ${response.url()}`) })
+    })
+    context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(30000)
+    await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
+    const page = await context.newPage()
+    pipeline = await createDashboardPipelineObserver({ page: await context.newPage(), client, baseUrl, workspaceId, evidenceDir: directory })
+    const observe = async ({ stage, id = projectId, operationId, status, phase, completed, eventTypes = [] }) => {
+      const row = await client.v2Project.findUniqueOrThrow({ where: { id } })
+      assert.equal(row.status, status, `${stage}: authoritative project status`)
+      const response = await fetch(`${baseUrl}/v1/projects?limit=24`, { headers: { authorization }, signal: AbortSignal.timeout(30000) })
+      assert.equal(response.status, 200)
+      const payload = await response.json(); const projected = payload.data.projects.find((candidate) => candidate.id === id)
+      assert.ok(projected); assert.equal(projected.status, status); assert.equal(projected.visibleState.label, status)
+      const operation = operationId ? await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId } }) : null
+      if (operation) {
+        assert.equal(operation.phase, phase); assert.equal(operation.progressCompleted, completed)
+        assert.equal(operation.progressTotal, 4); assert.equal(operation.progressUnit, 'render')
+        assert.equal(projected.dashboard.latestOperation.id, operationId)
+        assert.equal(projected.dashboard.latestOperation.phase, phase)
+        assert.deepEqual(projected.dashboard.latestOperation.progress, { completed, total: 4, unit: 'render' })
+      }
+      if (eventTypes.length) await pipeline.observe({ stage, projectId: id, operationId, expectedEventTypes: eventTypes, expectedState: status })
+      for (const [layout, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mobile', { width: 390, height: 844 }]]) {
+        await page.setViewportSize(viewport); await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+        const card = page.locator(`article[data-project-id="${id}"]`); await card.waitFor({ state: 'visible' })
+        assert.equal(await card.locator('[data-state]').getAttribute('data-state'), status)
+        const bar = card.getByRole('progressbar')
+        if (operation) assert.equal(await bar.getAttribute('aria-valuenow'), String(completed * 25))
+        else assert.equal(await bar.count(), 0)
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+        const name = `w35-${stage}-${layout}.png`; await page.screenshot({ path: join(directory, name), fullPage: true })
+        evidence.screenshots.push({ name, sha256: sha256(await readFile(join(directory, name))) })
+      }
+      evidence.states.push({ stage, projectId: id, status, operationId, phase, completed,
+        total: operation ? 4 : undefined, origin: 'public-api+postgres+factory-worker', visibleState: projected.visibleState })
+    }
+    await observe({ stage: 'draft', status: 'draft' })
+    const created = await post('/v1/projects', { name: 'Runtime event creation', objective: 'discovery', format: '9:16' }, `runtime-event-create-${suffix}`, 201)
+    await pipeline.observe({ stage: 'created', projectId: created.project.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
+    prototype.claimNext = async function (...args) {
+      const result = await originals.claimNext.apply(this, args)
+      if (result && activeObserver) {
+        const before = await client.v2Project.findUniqueOrThrow({ where: { id: result.operation.projectId } })
+        const stale = await this.failOrRetry({ operationId: result.operation.id, leaseOwner: 'stale-runtime-worker',
+          attempt: result.lease.attempt, now: new Date().toISOString(),
+          error: { code: 'controlled_stale_failure', message: 'Rejected stale owner', retryable: false } })
+        assert.equal(stale, null)
+        const expiredAt = new Date(new Date(result.lease.expiresAt).getTime() + 1)
+        assert.equal(await this.heartbeat({ operationId: result.operation.id, leaseOwner: result.lease.owner,
+          attempt: result.lease.attempt, now: expiredAt.toISOString(), leaseUntil: new Date(expiredAt.getTime() + 60000).toISOString() }), false)
+        const after = await client.v2Project.findUniqueOrThrow({ where: { id: result.operation.projectId } })
+        assert.equal(after.status, before.status); assert.equal(after.currentVersionId, before.currentVersionId)
+        evidence.states.push({ stage: 'stale-owner-and-expired-lease-rejected', projectId: before.id, operationId: result.operation.id,
+          origin: 'real-fenced-repository', status: after.status })
+        await activeObserver(result.operation, 'claimed')
+      }
+      return result
+    }
+    prototype.advancePhase = async function (command) {
+      const result = await originals.advancePhase.call(this, command)
+      if (result && activeObserver) {
+        const row = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: command.operationId } })
+        await activeObserver({ id: row.id, projectId: row.projectId, phase: row.phase, progress: { completed: row.progressCompleted } }, 'advanced')
+      }
+      return result
+    }
+    activeObserver = async (operation, kind) => observe({ stage: `proxy-${operation.phase}`, operationId: operation.id,
+      status: 'rendering-proxy', phase: operation.phase, completed: operation.progress.completed,
+      eventTypes: [kind === 'claimed' ? 'operation.status.changed' : 'operation.progress.changed'] })
+    const proxy = await post(`/v1/projects/${projectId}/proxy-renders`, undefined, `runtime-proxy-${suffix}`, 202)
+    const proxyId = proxy.operation.id
+    await observe({ stage: 'proxy-queued', status: 'rendering-proxy', operationId: proxyId, phase: 'queued', completed: 0, eventTypes: ['operation.status.changed'] })
+    const proxyWorker = createProjectProxyRenderWorker(environment)
+    assert.deepEqual(await proxyWorker(`runtime-proxy-worker-${suffix}`, { workspaceId, operationId: proxyId, signal }), { operationId: proxyId, status: 'succeeded' })
+    await observe({ stage: 'review', status: 'reviewing-proxy', operationId: proxyId, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    const replay = await post(`/v1/projects/${projectId}/proxy-renders`, undefined, `runtime-proxy-${suffix}`, 202)
+    assert.equal(replay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'reviewing-proxy')
+    const review = await client.v2ProxyReview.findFirstOrThrow({ where: { workspaceId, projectId, operationId: proxyId } })
+    assert.equal(review.status, 'ready-for-final')
+    const proxyArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: review.proxyArtifactId } })
+    const annotation = await post(`/v1/projects/${projectId}/annotations`, { projectVersionId, proxyArtifactId: proxyArtifact.id,
+      proxyHash: proxyArtifact.sha256, frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
+      screenshotRef: 'w35-review-desktop.png', text: 'Controlled runtime inspection; preserve framing.' }, `runtime-annotation-${suffix}`, 201)
+    await pipeline.observe({ stage: 'annotation', projectId, annotationId: annotation.annotation.id, expectedEventTypes: ['annotation.created'], expectedState: 'reviewing-proxy' })
+    const copy = await post(`/v1/projects/${projectId}/duplicates`, { expectedVersionId: projectVersionId,
+      expectedVersionHash: projectVersionHash, name: 'Runtime isolated failure' }, `runtime-copy-${suffix}`, 201)
+    await pipeline.observe({ stage: 'copy', projectId: copy.project.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
+    const exportBody = { projectVersionId, projectVersionHash, format: '9:16', approval: { approved: true, note: 'Controlled W35 runtime inspection.' } }
+    const final = await post(`/v1/projects/${projectId}/exports`, exportBody, `runtime-final-${suffix}`, 202)
+    await observe({ stage: 'final-queued', status: 'rendering-final', operationId: final.operation.id, phase: 'queued', completed: 0, eventTypes: ['operation.status.changed'] })
+    activeObserver = async (operation, kind) => observe({ stage: `final-${operation.phase}`, operationId: operation.id,
+      status: 'rendering-final', phase: operation.phase, completed: operation.progress.completed,
+      eventTypes: [kind === 'claimed' ? 'operation.status.changed' : 'operation.progress.changed'] })
+    assert.deepEqual(await createProjectFinalExportWorker(environment)(`runtime-final-worker-${suffix}`, { workspaceId, operationId: final.operation.id, signal }), { operationId: final.operation.id, status: 'succeeded' })
+    await observe({ stage: 'completed', status: 'completed', operationId: final.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    const finalReplay = await post(`/v1/projects/${projectId}/exports`, exportBody, `runtime-final-${suffix}`, 202)
+    assert.equal(finalReplay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'completed')
+    const ffmpeg = createRequire(import.meta.url)('ffmpeg-static')
+    for (const operationId of [proxyId, final.operation.id]) {
+      const operation = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId } })
+      const outputId = JSON.parse(operation.resultJson).resource.id
+      const artifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: outputId } })
+      const path = join(artifactRoot, ...artifact.artifactKey.split('/')); const bytes = await readFile(path)
+      assert.equal(sha256(bytes), artifact.sha256); assert.equal(BigInt(bytes.length), artifact.byteSize)
+      await exec(ffmpeg, ['-v', 'error', '-i', path, '-f', 'null', '-'], { windowsHide: true, timeout: 60000 })
+      const probe = await probeVideo(path); const name = `${operation.type}.mp4`; await copyFile(path, join(directory, name))
+      await exec(ffmpeg, ['-v', 'error', '-y', '-ss', '1', '-i', path, '-frames:v', '1', join(directory, `${operation.type}-frame.png`)], { windowsHide: true, timeout: 30000 })
+      evidence.outputs.push({ operationId, artifactId: artifact.id, sha256: artifact.sha256, byteSize: bytes.length, name, probe, fullDecode: true })
+    }
+    activeObserver = null
+    const failedProxy = await post(`/v1/projects/${copy.project.id}/proxy-renders`, undefined, `runtime-failure-${suffix}`, 202)
+    const hidden = `${sourcePath}.owned-unavailable`
+    await rename(sourcePath, hidden)
+    try {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const outcome = await proxyWorker(`runtime-failure-worker-${suffix}`, { workspaceId, operationId: failedProxy.operation.id, signal })
+        assert.equal(outcome.operationId, failedProxy.operation.id)
+        assert.equal(outcome.status, attempt === 3 ? 'failed' : 'retrying'); await delay(10)
+      }
+    } finally { await rename(hidden, sourcePath) }
+    const failedRow = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: failedProxy.operation.id } })
+    await observe({ stage: 'failed', id: copy.project.id, status: 'failed', operationId: failedRow.id, phase: 'failed', completed: failedRow.progressCompleted, eventTypes: ['operation.status.changed'] })
+    evidence.pipeline = await pipeline.finish(); evidence.outcome = 'passed'
+  } catch (error) { primaryError = error; evidence.outcome = 'failed'; evidence.failure = { name: error.name, message: error.message }; throw error }
+  finally {
+    prototype.claimNext = originals.claimNext; prototype.advancePhase = originals.advancePhase
+    try { evidence.postflight = await closeOwnedBrowser({ context, browser, server, child }); assert.equal(evidence.postflight.browserTerminal, true) }
+    catch (error) { if (!primaryError) throw error; evidence.postflight.cleanupError = String(error) }
+    finally { await writeFile(join(directory, 'w35-runtime.json'), JSON.stringify(evidence, (_, value) => typeof value === 'bigint' ? value.toString() : value, 2)) }
+  }
+}

@@ -632,6 +632,8 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   let publicReadCount = 0
   let operationData
   let detailData
+  let projectCasCount = 0
+  let projectCasAccepted = true
   const bindingsJson = stableSerialize(colorPipelineBindings)
   const repository = new PrismaPublicOperationRepository({
     async $transaction(callback) {
@@ -655,6 +657,14 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           async create({ data }) { operationData = data },
         },
         v2PublicEventOutbox: { async createMany() { return { count: 2 } } },
+        v2Project: { async updateMany({ where, data }) {
+          projectCasCount += 1
+          assert.equal(where.currentVersionId, resultVersionId)
+          assert.equal(data.status, 'reviewing-proxy')
+          assert.equal(where.status.in.includes('completed'), false)
+          assert.equal(where.status.in.includes('archived'), false)
+          return { count: projectCasAccepted ? 1 : 0 }
+        } },
         v2ProjectVersion: { async findFirst() { return {
           id: resultVersionId,
           parentVersionId: baseVersionId,
@@ -690,6 +700,19 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   assert.equal(detailData.reuseImpactHash, impact.impactHash)
   assert.equal(detailData.reuseBaseVersionId, baseVersionId)
   assert.equal(operationData.resultJson, stableSerialize(operation.result))
+
+  projectCasAccepted = false
+  const replay = await repository.createOrReplay({ operation,
+    authenticationAudit: materializeActorAuditContext(proxyActor()), context,
+    idempotencyKey: 'selection-proxy-persistence-test', requestFingerprint: '7'.repeat(64) })
+  assert.equal(replay.replayed, true)
+  assert.equal(projectCasCount, 1, 'replay cannot rewrite a project that advanced after the inline cache hit')
+  publicReadCount = 0
+  await assert.rejects(repository.createOrReplay({ operation,
+    authenticationAudit: materializeActorAuditContext(proxyActor()), context,
+    idempotencyKey: 'selection-proxy-stale-project', requestFingerprint: '7'.repeat(64) }),
+  (error) => error.code === 'PROJECT_TRANSITION_REJECTED')
+  projectCasAccepted = true
 
   publicReadCount = 0
   operationData = undefined

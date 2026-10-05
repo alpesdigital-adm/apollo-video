@@ -1985,14 +1985,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         } else if (projectRenderContext || projectReuseContext) {
           const context = projectRenderContext ?? projectReuseContext!
+          const nextProjectStatus = projectReuseContext ? 'reviewing-proxy' : 'rendering-proxy'
           const project = await transaction.v2Project.updateMany({
             where: {
               id: context.projectId,
               workspaceId: input.operation.workspaceId,
               currentVersionId: context.projectVersionId,
-              status: { in: projectStatusTransitionSources('rendering-proxy', { includeSame: true }) },
+              status: { in: projectStatusTransitionSources(nextProjectStatus, { includeSame: true }) },
             },
-            data: { status: 'rendering-proxy' },
+            data: { status: nextProjectStatus },
           })
           if (project.count !== 1) {
             throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter proxy rendering from its current version and status')
@@ -2381,6 +2382,19 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         },
       })
       if (updated.count !== 1) return null
+      if (next.type === 'project-proxy-render' && next.status === 'failed' && stored.projectProxyRender) {
+        // The operation fence and project CAS share one transaction. A task for
+        // an older version cannot replace a newer review or terminal state.
+        await transaction.v2Project.updateMany({
+          where: {
+            id: stored.projectProxyRender.projectId,
+            workspaceId: stored.workspaceId,
+            currentVersionId: stored.projectProxyRender.projectVersionId,
+            status: 'rendering-proxy',
+          },
+          data: { status: 'failed' },
+        })
+      }
       const persisted = await transaction.v2PublicOperation.findUnique({
         where: { id: input.operationId },
         include: OPERATION_INCLUDE,
