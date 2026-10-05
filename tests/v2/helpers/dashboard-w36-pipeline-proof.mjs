@@ -155,7 +155,11 @@ export async function createDashboardPipelineObserver({ page, client, baseUrl, w
       assert.ok(evidence.cases.some((entry) => entry.eventTypes.includes('operation.status.changed')))
       assert.ok(evidence.cases.some((entry) => entry.eventTypes.includes('operation.progress.changed')))
       assert.ok(evidence.cases.some((entry) => entry.eventTypes.includes('annotation.created')))
+      assert.ok(evidence.cases.some((entry) => entry.eventTypes.includes('annotation.resolved')))
       assert.ok(evidence.cases.some((entry) => entry.eventTypes.includes('project.created')))
+      const deliveredTypes = new Set(evidence.feed.flatMap((entry) => entry.events.map((event) => event.type)))
+      for (const type of ['operation.status.changed', 'operation.progress.changed', 'operation.succeeded', 'operation.failed', 'annotation.created', 'annotation.resolved', 'project.created'])
+        assert.ok(deliveredTypes.has(type), `${type} must arrive from the runtime outbox over HTTP`)
       assert.ok(evidence.feed.every((entry) => entry.events.every((event) => event.workspaceId === workspaceId)))
       evidence.outcome = 'passed'
       await writeFile(join(evidenceDir, 'w36-pipeline-feed.json'), JSON.stringify(evidence, null, 2))
