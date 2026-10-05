@@ -47,7 +47,7 @@ export async function boundedClose(label, action, errors) {
 
 export async function launchBrowser(label) {
   const { chromium } = await import('playwright-core')
-  const browserServer = await chromium.launchServer({ executablePath: chromePath(label), headless: true, args: ['--disable-crash-reporter', '--disable-breakpad'] })
+  const browserServer = await chromium.launchServer({ executablePath: chromePath(label), headless: true })
   const browserProcess = browserServer.process()
   assert.ok(browserProcess?.pid, `${label} browser must have an owned PID`)
   const browser = await chromium.connect(browserServer.wsEndpoint())
@@ -69,12 +69,6 @@ export async function closeBrowser({ page, contexts = [], browser, browserServer
     await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 30000))])
   }
   const terminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
-  if (terminal) {
-    // Slow graceful shutdown is tolerated only when SIGKILL left no owned process.
-    for (let index = cleanupErrors.length - 1; index >= 0; index -= 1) {
-      if (cleanupErrors[index] === 'browser-server:Error:timeout') cleanupErrors.splice(index, 1)
-    }
-  }
   if (!terminal) cleanupErrors.push('browser-process-not-terminal')
   return terminal
 }

@@ -33,9 +33,9 @@ async function boundedClose(label, action, errors) {
   let timer
   try {
     await Promise.race([action(), new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('timeout')), 30000)
+      timer = setTimeout(() => reject(new Error('timeout')), 5000)
     })])
-  } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}:${String(error?.message ?? '').slice(0, 120)}`) }
+  } catch (error) { errors.push(`${label}:${error?.name ?? 'Error'}`) }
   finally { clearTimeout(timer) }
 }
 
@@ -137,7 +137,7 @@ export async function proveProjectDashboardBrowser({ baseUrl, client, workspaceI
     evidence.projectRowsBefore = rows
 
     const { chromium } = await import('playwright-core')
-    browserServer = await chromium.launchServer({ executablePath: chromePath(), headless: true, args: ['--disable-crash-reporter', '--disable-breakpad'] })
+    browserServer = await chromium.launchServer({ executablePath: chromePath(), headless: true })
     browserProcess = browserServer.process()
     assert.ok(browserProcess?.pid, 'W30 browser must have an owned PID')
     evidence.browser.pid = browserProcess.pid
@@ -349,16 +349,9 @@ export async function proveProjectDashboardBrowser({ baseUrl, client, workspaceI
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
-      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 30000))])
+      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 5000))])
     }
     evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
-    // A slow graceful shutdown is tolerated only when the owned process is
-    // provably terminal after SIGKILL; a surviving process still fails below.
-    if (evidence.postflight.browserProcessTerminal) {
-      for (let index = cleanupErrors.length - 1; index >= 0; index -= 1) {
-        if (cleanupErrors[index] === 'browser-server:Error:timeout') cleanupErrors.splice(index, 1)
-      }
-    }
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
     evidence.postflight.cleanupErrors = cleanupErrors
     if (cleanupErrors.length) evidence.outcome = 'failed'
