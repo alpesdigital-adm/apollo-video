@@ -22,8 +22,8 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
       APOLLO_API_ENVIRONMENT: production
       V2_DATABASE_URL: postgresql://apollo:library-ci@127.0.0.1:5432/apollo_v2_e2e_library?schema=public&application_name=apollo-video-e2e-library-${{ github.run_id }}&connection_limit=1&pool_timeout=10&connect_timeout=10
-      APOLLO_LIBRARY_EVIDENCE_ROOT: ${{ runner.temp }}/library-evidence
-      APOLLO_V2_ARTIFACT_ROOT: ${{ runner.temp }}/library-artifacts
+      APOLLO_LIBRARY_EVIDENCE_ROOT: /tmp/apollo-library-${{ github.run_id }}/evidence
+      APOLLO_V2_ARTIFACT_ROOT: /tmp/apollo-library-${{ github.run_id }}/artifacts
       APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
       APOLLO_LIBRARY_JOURNEY_E2E: '1'
       APOLLO_FINAL_EXPORT_E2E: '1'
@@ -76,6 +76,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: media-library-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/library-evidence
+          path: ${{ env.APOLLO_LIBRARY_EVIDENCE_ROOT }}
           if-no-files-found: error
           retention-days: 14
