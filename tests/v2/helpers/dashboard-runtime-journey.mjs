@@ -271,6 +271,32 @@ export async function runDashboardRuntimeJourney(input) {
     await delay(1100)
     assert.deepEqual(await proxyWorker(`runtime-retry-worker-${suffix}`, { workspaceId, operationId: exhausted.id, signal }), { operationId: exhausted.id, status: 'succeeded' })
     await observe({ stage: 'retried-review', id: copy.project.id, status: 'reviewing-proxy', operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    // Advance the version through the real Command service while an older
+    // admitted task still owns a lease. No newer admission masks this CAS test.
+    const staleVersionJob = await post(`/v1/projects/${copy.project.id}/proxy-renders`, undefined, `runtime-stale-version-${suffix}`, 202)
+    const claimAt = new Date()
+    const staleClaim = await repository.claimNext({ type: 'project-proxy-render', workspaceId, operationId: staleVersionJob.operation.id,
+      leaseOwner: `version-fence-worker-${suffix}`, now: claimAt.toISOString(), leaseUntil: new Date(claimAt.getTime() + 120000).toISOString() })
+    const { setProjectLutSelectionService } = await import('../../../src/v2/application/project-lut-selections.ts')
+    const { PrismaProjectLutSelectionRepository } = await import('../../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
+    const { randomUUID } = await import('node:crypto')
+    const versionBeforeEdit = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: applied.version.id } })
+    const changed = await setProjectLutSelectionService({ repository: new PrismaProjectLutSelectionRepository(client),
+      createId: (kind) => `runtime-version-${kind}-${randomUUID()}`, createEventId: randomUUID })({
+      workspaceId, projectId: copy.project.id, baseVersionId: versionBeforeEdit.id, baseHash: versionBeforeEdit.baseHash,
+      selection: { mode: 'none' }, actor: { type: 'system', id: 'controlled-version-fence-command' },
+      idempotencyKey: `runtime-version-edit-${suffix}`, reason: 'Verify an older task cannot change the current version status.' })
+    assert.notEqual(changed.version.id, staleClaim.context.projectVersionId)
+    await repository.failOrRetry({ operationId: staleClaim.operation.id, leaseOwner: staleClaim.lease.owner, attempt: staleClaim.lease.attempt,
+      now: new Date().toISOString(), error: { code: 'controlled_version_changed', message: 'Original version superseded by a real Command', retryable: false } })
+    const afterVersionFailure = await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })
+    assert.equal(afterVersionFailure.currentVersionId, changed.version.id)
+    assert.equal(afterVersionFailure.status, 'rendering-proxy', 'older version failure does not change current project status')
+    const versionRetryResponse = await fetch(`${baseUrl}/v1/operations/${staleClaim.operation.id}/retry`, { method: 'POST', headers: { authorization }, signal: AbortSignal.timeout(30000) })
+    assert.equal(versionRetryResponse.status, 409)
+    evidence.states.push({ stage: 'current-version-cas-rejected', projectId: copy.project.id, operationId: staleClaim.operation.id,
+      currentVersionId: changed.version.id, operationVersionId: staleClaim.context.projectVersionId,
+      status: afterVersionFailure.status, origin: 'real-command-service+fenced-repository' })
     evidence.pipeline = await pipeline.finish(); evidence.outcome = 'passed'
   } catch (error) { primaryError = error; evidence.outcome = 'failed'; evidence.failure = { name: error.name, message: error.message }; throw error }
   finally {
