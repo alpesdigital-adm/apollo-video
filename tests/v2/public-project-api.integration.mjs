@@ -17,6 +17,7 @@ import { proveDashboardEventFeedBrowser } from './helpers/dashboard-w36-events-p
 import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
 import { proveW38ArchiveRestore } from './helpers/dashboard-w38-archive-restore.mjs'
 import { createW39ArtifactRoot, proveW39DuplicateCopyOnWrite } from './helpers/dashboard-w39-duplicate.mjs'
+import { proveW40ConsolidatedJourney } from './helpers/dashboard-w40-consolidated.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -183,7 +184,8 @@ test('authenticated public API manages projects, clients and artifact inspection
 
   const cleanup = async () => {
     // W34/W35 fixtures hold RESTRICT foreign keys; they leave first.
-    await cleanupDashboardFixtures(client, { workspaceId })
+    // W40 seeds an awaiting-review project (operation + annotation) that also holds RESTRICT foreign keys.
+    await cleanupDashboardFixtures(client, { workspaceId, prefixes: ['w34-', 'w35-', 'w40-'] })
     await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: uiThrottleKey } })
     await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiThrottleKey } })
@@ -753,7 +755,8 @@ test('authenticated public API manages projects, clients and artifact inspection
       formLoginResponse.headers.get('set-cookie') ?? '',
       new RegExp(`^${APOLLO_SESSION_COOKIE}=`),
     )
-    const formUiSession = formLoginResponse.headers
+    // `let`: W40 may hand back the successor token if the product's own session rotation ran during the journey.
+    let formUiSession = formLoginResponse.headers
       .get('set-cookie')
       ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
     assert.ok(formUiSession)
@@ -5766,6 +5769,22 @@ test('authenticated public API manages projects, clients and artifact inspection
       artifacts, createMediaArtifactManifest,
     })
     assert.equal(w39.outcome, 'passed')
+
+    // --- W40 (consolidation) ---
+    // One browser journey over the composition of W31-W39, with 401/403/404/409 produced from real state.
+    // The human session may have crossed the product's 10-minute rotation point by now; the helper measures
+    // its age and keeps using the product's own GET /v1/session rotation (never a forged extension).
+    const w40 = await proveW40ConsolidatedJourney({
+      baseUrl, client, workspaceId, otherWorkspaceId, apiClientId, otherApiClientId, otherMemberId,
+      authorization, credentialId: issued.credential.id, sourceArtifactId,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession, username: uiUsername,
+      issueSession: w33IssueSession, createBearer: w33CreateBearer, uiSessionNonceHash,
+      artifactRoot: w39ArtifactRoot, ffmpegPath, artifacts, createMediaArtifactManifest,
+    })
+    assert.equal(w40.outcome, 'passed')
+    formUiSession = w40.sessionCookieValue
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

@@ -72,14 +72,15 @@ export async function runWaveProof({ wave, schemaVersion, initial, baseUrl, sess
     state.browser = await chromium.connect(state.browserServer.wsEndpoint())
     return state.browser
   }
-  async function newSessionPage({ viewport = { width: 1440, height: 1000 }, authenticated = true } = {}) {
+  // `cookieValue` (W40) opens a context on another real session of the same app; the default is the journey's human session.
+  async function newSessionPage({ viewport = { width: 1440, height: 1000 }, authenticated = true, cookieValue = sessionCookieValue } = {}) {
     assert.ok(state.browser, 'launch the browser first')
     const context = await state.browser.newContext({ viewport })
     context.setDefaultTimeout(25_000)
     context.setDefaultNavigationTimeout(30_000)
     state.contexts.push(context)
     if (authenticated) {
-      await context.addCookies([{ name: sessionCookieName, value: sessionCookieValue, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
+      await context.addCookies([{ name: sessionCookieName, value: cookieValue, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     }
     const page = await context.newPage()
     return { context, page }
