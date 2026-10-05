@@ -86,7 +86,7 @@ export async function proveW37RenameFromCard({
       evidence.screenshots.push(await screenshot(page, evidenceDir, 'w37-desktop-before.png'))
       const card = page.locator(`article[data-project-id="${projectId}"]`)
       const dialog = page.getByRole('dialog')
-    
+
       // Abandoning the dialog is not a command.
       await card.getByRole('button', { name: 'Renomear', exact: true }).click()
       await dialog.waitFor()
