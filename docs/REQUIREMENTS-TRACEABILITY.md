@@ -4,6 +4,8 @@
 
 > Correção de controle em 05/10/2026: o painel inclui inventário individual por ID das 1.259 tarefas. Cada tarefa mantém a linha/texto do TODO e o escopo das provas, com waves associadas sem contagem dupla. Aceite histórico não comprova implantação atual; implementação parcial de uma seção não comprova início ou conclusão de todas as suas tarefas. Lacunas de evidência individual permanecem explícitas e impedem usar o percentual histórico como prontidão atual.
 
+Planejamento W51–W60: [dez pacotes progressivos](./PLANO-WAVES-51-60.md) selecionam IDs existentes de F0.031/F0.037/F0.038/F0.041, F1.001–F1.003/F1.012–F1.015 e J.001. As linhas `wave/fila` no registro representam pacote ainda não iniciado, sem mudar o estado das capabilities associadas. A revisão de provas existentes precede qualquer nova implementação ou repetição de E2E.
+
 > **Fonte:** PRD v1.2  
 > **Objetivo:** garantir que cada requisito tenha fase, spec, dependência, evidência de aceite e teste.
 

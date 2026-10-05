@@ -393,7 +393,7 @@ const KNOWN_UNRUN_SUITES = [
   {
     file: 'tests/v2/image-analysis-tesseract.integration.mjs',
     reason: `${NEEDS_TESSERACT}; PRD FR-145 and the F4.015 traceability row cite it as why the OCR engine is present but unrun in CI`,
-    citedBy: ['docs/PRD-APOLLO-V2.md', 'docs/REQUIREMENTS-TRACEABILITY.md'],
+    citedBy: ['docs/PLANO-WAVES-51-60.md', 'docs/PRD-APOLLO-V2.md', 'docs/REQUIREMENTS-TRACEABILITY.md'],
   },
   { file: 'tests/v2/long-form-stage-fencing.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/media-input-runtime.integration.mjs', reason: PHASE_1_3 },
@@ -429,12 +429,12 @@ const KNOWN_UNRUN_SUITES = [
   {
     file: 'tests/v2/prisma-review-patch-batch.integration.mjs',
     reason: `${NO_SCRIPT}; TODO.md cites it as the evidence closing F1-044/T-FR-215`,
-    citedBy: ['TODO.md'],
+    citedBy: ['TODO.md', 'docs/PROJECT-STATUS.md'],
   },
   {
     file: 'tests/v2/prisma-review-patch.integration.mjs',
     reason: `${NO_SCRIPT}; TODO.md cites it as the evidence closing F1-043/T-FR-214`,
-    citedBy: ['TODO.md'],
+    citedBy: ['TODO.md', 'docs/PROJECT-STATUS.md'],
   },
   { file: 'tests/v2/prisma-script-alignment.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-source-deconstruction.integration.mjs', reason: PHASE_1_3 },

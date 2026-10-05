@@ -18,7 +18,9 @@ O registro cobre todas as caixas deste TODO com IDs estáveis e separa construç
 
 Consulta individual: `npm run project:status -- --task-state falta-implantacao` lista as tarefas com prova técnica do escopo e implantação pendente; `-- --task-state falta-validacao` lista as que aguardam comprovação técnica; `-- --task-state situacao-individual-nao-comprovada` expõe as tarefas de grupos parciais que exigem revisão individual. `-- --json` inclui o inventário e as contagens únicas. Os filtros `--state` acima são de grupos, não de tarefas individuais. Aceites históricos cuja única referência é o próprio TODO são sinalizados separadamente para reconciliação de artefatos.
 
-Plano progressivo preparado: [W31–W40](./docs/PLANO-WAVES-31-40.md), com dez pacotes de desenvolvimento e comprovação em fila; preparar pacotes não inicia construção nem altera caixas do TODO.
+Planos anteriores: [W31–W40](./docs/PLANO-WAVES-31-40.md) e [W41–W50](./docs/PLANO-WAVES-41-50.md). Esses documentos preservam os pacotes originais; execução e evidências atuais estão no painel.
+
+Próxima fila preparada: [W51–W60](./docs/PLANO-WAVES-51-60.md), dez pacotes progressivos de reconciliação, integração e fechamento de lacunas, com IDs explícitos do TODO. Planejar não inicia construção, não altera caixas e não concede implantação ou aceite.
 
 Trilhas distribuídas: [W31–W40](./docs/PLANO-WAVES-31-40.md) ao Claude Code; [W41–W50](./docs/PLANO-WAVES-41-50.md) ao Codex, com arquivos e integração compartilhada coordenados. Atribuição não comprova início nem entrega.
 

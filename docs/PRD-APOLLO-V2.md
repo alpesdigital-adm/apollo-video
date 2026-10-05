@@ -9,6 +9,8 @@
 
 O estado de execução por tarefa e por escopo, com provas e bloqueios separados de implantação e aceite, está em [PROJECT-STATUS.md](./PROJECT-STATUS.md). As caixas marcadas no [TODO.md](../TODO.md) preservam o registro histórico; seu percentual não mede a implantação e o aceite da versão atual. O inventário individual distingue situação comprovada de evidência parcial de grupo. Waves e validações técnicas não são somadas como produto entregue.
 
+O [plano W51–W60](./PLANO-WAVES-51-60.md) prepara a próxima fila: reconciliação individual de upload/sessão/dashboard/biblioteca, fechamento de derivadas e operações, e jornada com o master real da Imersão. São pacotes planejados; os gates de implantação e aceite permanecem separados, e essa sequência não pretende concluir todo o PRD.
+
 O [plano W31–W40](./PLANO-WAVES-31-40.md) divide FR-002, FR-003 e FR-004 em dez escopos progressivos. Trata-se de planejamento; implementação, integração, validação, implantação e aceite continuam separados.
 
 O [plano W41–W50](./PLANO-WAVES-41-50.md), atribuído ao Codex, desenvolve/comprova FR-040, FR-042, FR-047 e FR-049 na biblioteca de mídia, em trilha separada do dashboard W31–W40 delegado ao Claude Code. Nenhum pacote de planejamento é contabilizado como produto entregue.
