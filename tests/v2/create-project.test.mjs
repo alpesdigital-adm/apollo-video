@@ -7,6 +7,7 @@ import { applyEditorialCutCommandService } from '../../src/v2/application/apply-
 import { duplicateProjectService } from '../../src/v2/application/duplicate-project.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
+import { rebindSnapshotContentForDuplicate } from '../../src/v2/domain/project-snapshot-rebind.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProjectCreationCommand } from '../../src/v2/domain/project-creation-command.ts'
 import { createWorkspace } from '../../src/v2/domain/workspace.ts'
@@ -560,4 +561,33 @@ test('a copy is a first-class version for the editorial Command and the original
   assert.equal(committed.length, 1)
   assert.equal(JSON.parse(committed[0].snapshot.contentJson).projectVersionId, result.version.id)
   assert.deepEqual({ version: source.version, snapshots: repository.source.snapshots }, sourceBefore)
+})
+
+test('snapshot rebinding changes only owner-binding fields and recomputes the canonical hash', () => {
+  const source = { projectId: 'project-a', versionId: 'version-a' }
+  const copy = { projectId: 'project-b', versionId: 'version-b' }
+  const rebind = (kind, content, hash = 'f'.repeat(64)) => rebindSnapshotContentForDuplicate({
+    kind, contentJson: stableSerialize(content), contentHash: hash, source, copy,
+  })
+
+  const brief = rebind('brief', { schemaVersion: 1, objective: 'discovery' })
+  assert.deepEqual([brief.rebound, brief.contentHash], [false, 'f'.repeat(64)])
+
+  const plan = rebind('edit-plan', { id: 'edit-plan-version-a', projectVersionId: 'version-a', fps: 30 })
+  assert.equal(plan.rebound, true)
+  assert.deepEqual(JSON.parse(plan.contentJson), { id: 'edit-plan-version-b', projectVersionId: 'version-b', fps: 30 })
+  assert.equal(plan.contentHash, calculateCanonicalHash(JSON.parse(plan.contentJson)))
+
+  // A plan produced by a Command keeps the base plan's id: only the version binding moves.
+  const carried = rebind('edit-plan', { id: 'edit-plan-version-0', projectVersionId: 'version-a', fps: 30 })
+  assert.deepEqual(JSON.parse(carried.contentJson), { id: 'edit-plan-version-0', projectVersionId: 'version-b', fps: 30 })
+
+  // A policy snapshot created at an earlier version still names the copy's only version.
+  const policy = rebind('policies', { schemaVersion: 2, workspaceId: 'workspace-1', projectId: 'project-a', projectVersionId: 'version-older', commandId: 'command-1' })
+  assert.deepEqual(JSON.parse(policy.contentJson), { schemaVersion: 2, workspaceId: 'workspace-1', projectId: 'project-b', projectVersionId: 'version-b', commandId: 'command-1' })
+
+  assert.throws(
+    () => rebindSnapshotContentForDuplicate({ kind: 'brief', contentJson: '{', contentHash: 'f'.repeat(64), source, copy }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
 })
