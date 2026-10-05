@@ -53,13 +53,15 @@ Não incluído:
 ### 3.1 Slice integrado F1.012
 
 A Media Library v1 usa `V2MediaLibraryEntry` como metadata pesquisável ligada
-por FK ao `V2MediaArtifact` imutável. O cursor inclui `createdAt`, artifact ID e
+por FK ao `V2MediaArtifact` imutável. O cursor inclui `createdAt`, identidade tipada do item e
 fingerprint do workspace/filtros; não pode ser reaproveitado em outra consulta.
 Pessoa e tema são filtrados server-side. A condição jurídica é calculada pelo
 snapshot atual com `evaluateAssetUse(..., use: 'editorial-reuse')`; ausência de
 rights é revisão, nunca autorização. O attach revalida artifact, estado, rights
-e locale do projeto numa transação serializável e cria somente um
-`V2ProjectMediaAsset(role='selected-insert')`. Segmentos são entidades virtuais
+e locale do projeto numa transação serializável. A seleção tipada de asset ou
+segmento preserva o range e cria um `Command` e uma nova `ProjectVersion`, com
+CAS sobre a versão/hash esperados e replay por chave de idempotência. Não copia
+bytes. Segmentos são entidades virtuais
 próprias de F1.013 e não são simulados por artifact ou arquivo recortado.
 
 ### 3.2 Slice integrado F1.013
@@ -71,7 +73,24 @@ serializável relê duração do manifest e limites do parent. A API pública po
 asset cria e lista os ranges. `materializeMediaSegmentDerivativeService` não
 faz trabalho para consumer virtual; para consumer físico, materializa o source,
 verifica seu hash antes/depois, extrai por FFmpeg e persiste novo artifact,
-manifest `extract-range/v1`, lineage e registro convergente por consumer.
+manifest `extract-range/v1`, lineage e registro convergente por consumer. O
+runtime usa jobs persistidos com lease, tentativa, deadline, cancelamento e
+retry. A publicação relê estado/lease, hash e direitos atuais sob lock; cancelamento
+ou perda da tentativa impede promoção. Duas seleções podem compartilhar bytes
+deduplicados, mantendo identidade e lineage próprios.
+
+### 3.3 Provas W41–W50 e previews
+
+A listagem combina assets e segmentos sob uma ordenação única com desempate e
+cursor ligado à consulta. Previews de vídeo/áudio são gerados por FFmpeg;
+imagens usam Sharp e OCR Tesseract quando disponível. Thumbnail e waveform
+são artifacts V2 ligados ao master por lineage e hash. A leitura autenticada
+revalida direitos atuais também pelo endpoint genérico de conteúdo, evitando
+que o ID de uma derivada permita contornar revogação. Faces e objetos seguem
+explicitamente indisponíveis. Outputs só entram no catálogo após promoção
+aprovada com direitos de reuso. O relatório
+`docs/quality/media-library-w41-50.md` separa provas reais e transportes/seeds
+controlados; integração técnica não concede implantação ou aceite.
 
 ## 4. Modelo de entidades
 

@@ -1,8 +1,10 @@
+import { editCommandExternalActorAuditData } from './edit-command-actor-audit.ts'
 import { randomUUID } from 'node:crypto'
-import type { Prisma, PrismaClient, V2MediaLibraryEntry, V2MediaSegment } from '../../../../generated/prisma-v2/index.js'
+import type { Prisma, PrismaClient, V2MediaLibraryAttachment, V2MediaLibraryEntry, V2MediaSegment } from '../../../../generated/prisma-v2/index.js'
 
 import type { MediaLibraryRepository } from '../../application/ports/media-library-repository.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
+import { parseMediaLibraryAttachmentImpact } from '../../domain/media-library-attachment-impact.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   assertLibraryAttachmentEligible,
@@ -12,7 +14,9 @@ import {
   type LibraryKind,
   type MediaLibraryItem,
   type MediaLibraryQuery,
+  type MediaLibrarySelection,
 } from '../../domain/media-library.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { MediaArtifactLifecycleStatus, MediaArtifactType } from '../../domain/media-artifact.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 
@@ -260,28 +264,53 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
     return row ? mapItem(row, now, locale) : segment ? mapSegmentItem(segment, now, locale) : null
   }
 
-  async attach(input: { workspaceId: string; projectId: string; artifactId: string; createdAt: string }) {
+  async attach(input: Parameters<MediaLibraryRepository['attach']>[0]) {
+    const selectionId = input.selection.kind === 'asset' ? input.selection.artifactId : input.selection.segmentId
+    const requestFingerprint = calculateCanonicalHash({ schemaVersion: 'media-library-attachment-request/v2', workspaceId: input.workspaceId, projectId: input.projectId, selection: input.selection, baseVersionId: input.baseVersionId, baseVersionHash: input.baseVersionHash, actorContextHash: input.authenticationAudit.contextHash })
+    const resultOf = (row: V2MediaLibraryAttachment, replayed: boolean) => Object.freeze({
+      id: row.id, workspaceId: row.workspaceId, projectId: row.projectId,
+      selection: row.selectionKind === 'asset' ? Object.freeze({ kind: 'asset' as const, artifactId: row.selectionId }) : Object.freeze({ kind: 'segment' as const, segmentId: row.selectionId }),
+      parentArtifactId: row.parentArtifactId, sourceSha256: row.sourceSha256, rightsSnapshotId: row.rightsSnapshotId,
+      ...(row.segmentHash ? { segmentHash: row.segmentHash } : {}),
+      ...(row.semanticRangeJson ? { semanticRange: JSON.parse(row.semanticRangeJson) as { startMs: number; endMs: number } } : {}),
+      ...(row.sourceTimeMappingJson ? { sourceTimeMapping: JSON.parse(row.sourceTimeMappingJson) as { sourceStartMs: number; sourceEndMs: number; rate: 1 } } : {}),
+      commandId: row.commandId, baseVersionId: row.baseVersionId, resultVersionId: row.resultVersionId, resultVersionHash: row.resultVersionHash,
+      role: 'selected-insert' as const, bytesDuplicated: false as const, replayed, createdAt: row.createdAt.toISOString(),
+    })
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         return await this.client.$transaction(async (transaction) => {
-      const [project, row, existing] = await Promise.all([
-        transaction.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true, locale: true } }),
-        transaction.v2MediaLibraryEntry.findFirst({ where: { workspaceId: input.workspaceId, artifactId: input.artifactId }, include }) as Promise<EntryWithArtifact | null>,
-        transaction.v2ProjectMediaAsset.findUnique({ where: { projectId_artifactId_role: { projectId: input.projectId, artifactId: input.artifactId, role: 'selected-insert' } } }),
-      ])
-      if (!project) throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
-      if (!row) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media library item was not found')
-      assertLibraryAttachmentEligible(mapItem(row, new Date(input.createdAt), project.locale ?? 'pt-BR'), input.workspaceId)
-      const reference = existing ?? await transaction.v2ProjectMediaAsset.create({ data: {
-        id: randomUUID(), workspaceId: input.workspaceId, projectId: input.projectId,
-        artifactId: input.artifactId, role: 'selected-insert', originalFileName: row.label,
-        createdAt: new Date(input.createdAt),
-      } })
-      return Object.freeze({
-        id: reference.id, workspaceId: reference.workspaceId, projectId: reference.projectId,
-        artifactId: reference.artifactId, role: 'selected-insert' as const, bytesDuplicated: false as const,
-        replayed: existing !== null, createdAt: reference.createdAt.toISOString(),
-      })
+          const existing = await transaction.v2MediaLibraryAttachment.findUnique({ where: { workspaceId_projectId_idempotencyKey: { workspaceId: input.workspaceId, projectId: input.projectId, idempotencyKey: input.idempotencyKey } } })
+          if (existing) {
+            if (existing.requestFingerprint !== requestFingerprint || existing.actorContextHash !== input.authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different library attachment')
+            return resultOf(existing, true)
+          }
+          const project = await transaction.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { locale: true, currentVersion: true } })
+          if (!project?.currentVersion) throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
+          const base = project.currentVersion
+          if (base.id !== input.baseVersionId || base.baseHash !== input.baseVersionHash) throw new DomainError('VERSION_CONFLICT', 'Project version changed before library attachment')
+          const row = input.selection.kind === 'asset'
+            ? await transaction.v2MediaLibraryEntry.findFirst({ where: { workspaceId: input.workspaceId, artifactId: selectionId }, include }) as EntryWithArtifact | null
+            : await transaction.v2MediaSegment.findFirst({ where: { workspaceId: input.workspaceId, id: selectionId, artifact: { libraryEntry: { isNot: null } } }, include: segmentInclude }) as SegmentWithArtifact | null
+          if (!row) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media library selection was not found')
+          const item = input.selection.kind === 'asset' ? mapItem(row as EntryWithArtifact, new Date(input.createdAt), project.locale ?? 'pt-BR') : mapSegmentItem(row as SegmentWithArtifact, new Date(input.createdAt), project.locale ?? 'pt-BR')
+          assertLibraryAttachmentEligible(item, input.workspaceId)
+          const parentArtifactId = item.source.artifactId
+          const source = await transaction.v2MediaArtifact.findFirst({ where: { workspaceId: input.workspaceId, id: parentArtifactId, status: 'available' }, select: { sha256: true, currentRightsSnapshotId: true } })
+          if (!source || source.currentRightsSnapshotId !== item.rights.snapshotId) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Library source or rights changed before attachment')
+          const commandId = `command-library-${randomUUID()}`
+          const resultVersionId = `version-library-${randomUUID()}`
+          const resultVersionHash = calculateCanonicalHash({ schemaVersion: 'media-library-attachment-version/v1', projectId: input.projectId, sequence: base.sequence + 1, parentVersionId: base.id, previousBaseHash: base.baseHash, commandId, selection: input.selection, sourceSha256: source.sha256, rightsSnapshotId: item.rights.snapshotId, segmentHash: item.source.type === 'segment' ? item.source.segmentHash : null })
+          const command = input.createCommand({ commandId, resultVersionId, editPlanSnapshotId: base.editPlanSnapshotId, parentArtifactId, sourceSha256: source.sha256, rightsSnapshotId: item.rights.snapshotId!, ...(item.source.type === 'segment' ? { segmentHash: item.source.segmentHash, semanticRange: item.source.semanticRange, sourceTimeMapping: item.source.sourceTimeMapping } : {}) })
+          const actorAuditData = editCommandExternalActorAuditData(input.authenticationAudit, input.workspaceId, command.author)
+          const impact = parseMediaLibraryAttachmentImpact((command.payload as { impact: unknown }).impact)
+          if (command.id !== commandId || command.workspaceId !== input.workspaceId || command.projectId !== input.projectId || command.baseVersionId !== base.id || command.baseHash !== base.baseHash || command.type !== 'attach-media-library-reference' || command.author.id !== input.authenticationAudit.clientId || impact.commandId !== commandId || impact.resultVersionId !== resultVersionId || impact.baseVersionId !== base.id || impact.preservedEditPlanSnapshotId !== base.editPlanSnapshotId || impact.selectionId !== selectionId || impact.selectionKind !== input.selection.kind || impact.parentArtifactId !== parentArtifactId || impact.sourceSha256 !== source.sha256 || impact.rightsSnapshotId !== item.rights.snapshotId) throw new DomainError('PERSISTENCE_CONFLICT', 'Application Command does not match locked library attachment facts')
+          await transaction.v2EditCommand.create({ data: { id: commandId, workspaceId: input.workspaceId, projectId: input.projectId, baseVersionId: base.id, baseHash: base.baseHash, type: 'attach-media-library-reference', scopeJson: stableSerialize(command.scope), payloadJson: stableSerialize(command.payload), actorType: command.author.type, actorId: command.author.id, delegatedUserId: command.author.delegatedUserId, ...actorAuditData, idempotencyKey: input.idempotencyKey, requestFingerprint, createdAt: new Date(input.createdAt) } })
+          await transaction.v2ProjectVersion.create({ data: { id: resultVersionId, workspaceId: input.workspaceId, projectId: input.projectId, sequence: base.sequence + 1, parentVersionId: base.id, briefSnapshotId: base.briefSnapshotId, treatmentSnapshotId: base.treatmentSnapshotId, storySnapshotId: base.storySnapshotId, editPlanSnapshotId: base.editPlanSnapshotId, policiesSnapshotId: base.policiesSnapshotId, baseHash: resultVersionHash, createdBy: input.authenticationAudit.clientId, commandId, createdAt: new Date(input.createdAt) } })
+          const reference = await transaction.v2MediaLibraryAttachment.create({ data: { id: randomUUID(), workspaceId: input.workspaceId, projectId: input.projectId, selectionKind: input.selection.kind, selectionId, parentArtifactId, sourceSha256: source.sha256, rightsSnapshotId: item.rights.snapshotId!, segmentHash: item.source.type === 'segment' ? item.source.segmentHash : null, semanticRangeJson: item.source.type === 'segment' ? stableSerialize(item.source.semanticRange) : null, sourceTimeMappingJson: item.source.type === 'segment' ? stableSerialize(item.source.sourceTimeMapping) : null, commandId, baseVersionId: base.id, resultVersionId, resultVersionHash, actorContextHash: input.authenticationAudit.contextHash, idempotencyKey: input.idempotencyKey, requestFingerprint, createdAt: new Date(input.createdAt) } })
+          const updated = await transaction.v2Project.updateMany({ where: { id: input.projectId, workspaceId: input.workspaceId, currentVersionId: base.id }, data: { currentVersionId: resultVersionId } })
+          if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during library attachment')
+          return resultOf(reference, false)
         }, { isolationLevel: 'Serializable' as Prisma.TransactionIsolationLevel })
       } catch (error) {
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdir, readFile, rm, stat } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import net from 'node:net'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -10,6 +10,7 @@ import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { proveCatalogOutputBrowser } from './helpers/catalog-output-browser-proof.mjs'
 
 // The Director result, reviewed proxy, and Rec.709 color probe (including its
 // producer identity) are controlled upstream seeds. The final-export API,
@@ -44,7 +45,7 @@ function sha256(bytes) {
 
 test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs one immutable final', {
   skip: process.env.APOLLO_FINAL_EXPORT_E2E !== '1' && 'set APOLLO_FINAL_EXPORT_E2E=1 and use an isolated V2 database',
-  timeout: 180_000,
+  timeout: process.env.APOLLO_FINAL_EXPORT_SERVER_MODE === 'dev' ? 360_000 : 180_000,
 }, async () => {
   assert.ok(process.env.V2_DATABASE_URL, 'V2_DATABASE_URL must point to an isolated PostgreSQL database')
   const artifactRoot = process.env.APOLLO_V2_ARTIFACT_ROOT?.trim() ?? ''
@@ -58,12 +59,17 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
   const { reconstructFinal } = await import('../../src/v2/application/render-workflow.ts')
   const { setProjectLutSelectionService } = await import('../../src/v2/application/project-lut-selections.ts')
+  const { catalogApprovedOutputService } = await import('../../src/v2/application/catalog-approved-output.ts')
+  const { PrismaAutomaticCatalogRepository } = await import('../../src/v2/infrastructure/prisma/automatic-catalog-repository.ts')
+  const { listMediaLibraryService } = await import('../../src/v2/application/media-library.ts')
+  const { PrismaMediaLibraryRepository } = await import('../../src/v2/infrastructure/prisma/media-library-repository.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
   const { createProjectFinalExportWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+  const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
 
   const client = new PrismaClient()
@@ -86,6 +92,8 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const createdAt = new Date('2026-07-26T20:00:00.000Z')
   const sourceArtifactKey = `workspaces/final-export-e2e-${suffix}/masters/source.mp4`
   const sourcePath = join(artifactRoot, ...sourceArtifactKey.split('/'))
+  const uiUsername = `catalog-${suffix}`
+  const uiPassword = `Catalog-${suffix}-controlled-password`
   let server
   let serverLogs = ''
 
@@ -425,7 +433,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         allowedUses: ['rendering', 'editorial-reuse'],
         prohibitedUses: [],
         allowedLocales: ['pt-BR'],
-        consent: { status: 'not-required', allowedUses: [] },
+        consent: { status: 'approved', allowedUses: ['rendering', 'editorial-reuse'], allowedLocales: ['pt-BR'] },
       },
       actor: { type: 'api-client', id: issued.client.id },
     })
@@ -565,13 +573,16 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
 
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
-    server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-p', String(port)], {
+    server = spawn(process.execPath, ['node_modules/next/dist/bin/next', ...(process.env.APOLLO_FINAL_EXPORT_SERVER_MODE === 'dev' ? ['dev', '--webpack'] : ['start']), '-p', String(port)], {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        NODE_ENV: 'production',
+        NODE_ENV: process.env.APOLLO_FINAL_EXPORT_SERVER_MODE === 'dev' ? 'development' : 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        APOLLO_AUTH_MODE: 'bootstrap', APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true', APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
+        APOLLO_UI_USERNAME: uiUsername, APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `catalog-salt-${suffix}`),
+        APOLLO_UI_SESSION_SECRET: `catalog-${suffix}-session-secret-with-32-bytes`, APOLLO_UI_API_CLIENT_ID: issued.client.id,
         APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
         APOLLO_MEDIA_DOWNLOAD_BASE_URL: `${baseUrl}/`,
         APOLLO_MEDIA_DOWNLOAD_SIGNING_SECRET: `final-export-download-${suffix}`.padEnd(48, 'x'),
@@ -580,7 +591,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     })
     server.stdout.on('data', (chunk) => { serverLogs += String(chunk) })
     server.stderr.on('data', (chunk) => { serverLogs += String(chunk) })
-    await waitForServer(baseUrl, server)
+    try { await waitForServer(baseUrl, server) } catch (error) { throw new Error(`${error.message}\n${serverLogs}`, { cause: error }) }
     const authorization = `Bearer ${issued.token}`
     const stage = (id, kind, enabled, output, provider, parameters) => ({
       id, kind, version: 'v1', enabled, output,
@@ -691,6 +702,8 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       where: { operationId_attempt: { operationId, attempt: 1 } },
     })
     assert.equal(failedAttempt?.status, 'failed')
+    assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
+    assert.equal(await client.v2MediaLibraryEntry.count({ where: { workspaceId, originType: 'generated' } }), 0)
     await new Promise((resolve) => setTimeout(resolve, 25))
     const worker = createProjectFinalExportWorker(workerEnvironment)
     const completedOutcome = await worker(`final-export-worker-promoted-${suffix}`)
@@ -717,6 +730,47 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(attemptsPayload.data.attempts[1].validators.every((validator) => validator.passed), true)
     const output = attemptsPayload.data.attempts[1].output
     assert.match(output.sha256, /^[a-f0-9]{64}$/)
+    // The factory's real worker must perform the first catalog write itself.
+    // These are independent PostgreSQL reads, not a catalog callback fake.
+    const catalogRepository = new PrismaAutomaticCatalogRepository(client)
+    const catalogRecord = await catalogRepository.find(workspaceId, output.artifactId)
+    assert.ok(catalogRecord, 'promoted real worker output must be automatically cataloged')
+    assert.equal(catalogRecord.outputKind, 'final')
+    assert.equal(catalogRecord.manifestId, output.manifestId)
+    assert.match(catalogRecord.recordHash, /^[a-f0-9]{64}$/)
+    assert.match(catalogRecord.eligibilityEvidenceHash, /^[a-f0-9]{64}$/)
+    assert.deepEqual(catalogRecord.lineage.map((edge) => edge.sourceArtifactId), [sourceArtifactId])
+    const inheritedRights = await new PrismaAssetRightsRepository(client).findCurrent(workspaceId, output.artifactId)
+    assert.equal(inheritedRights.snapshot.id, catalogRecord.rightsSnapshotId)
+    assert.equal(inheritedRights.snapshot.snapshotHash, catalogRecord.rightsSnapshotHash)
+    assert.deepEqual(inheritedRights.snapshot.allowedUses, ['editorial-reuse', 'rendering'])
+    assert.deepEqual(inheritedRights.snapshot.allowedLocales, ['pt-BR'])
+    assert.deepEqual(inheritedRights.snapshot.consent.allowedLocales, ['pt-BR'])
+    assert.equal(inheritedRights.snapshot.consent.status, 'approved')
+    const libraryResult = await listMediaLibraryService({ repository: new PrismaMediaLibraryRepository(client) })({ workspaceId })
+    assert.ok(libraryResult.items.some((item) => item.source.artifactId === output.artifactId))
+    const catalog = catalogApprovedOutputService({ repository: catalogRepository, rights: new PrismaAssetRightsRepository(client) })
+    const target = { workspaceId, artifactId: output.artifactId, manifestId: output.manifestId }
+    const replays = await Promise.all([catalog(target), catalog(target), catalog(target)])
+    assert.ok(replays.every((result) => result.status === 'already-cataloged'))
+    assert.ok(replays.every((result) => result.record.recordHash === catalogRecord.recordHash))
+    assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId, artifactId: output.artifactId } }), 1)
+    assert.equal(await client.v2MediaLibraryEntry.count({ where: { workspaceId, artifactId: output.artifactId } }), 1)
+    assert.equal((await new PrismaAssetRightsRepository(client).findCurrent(workspaceId, output.artifactId)).snapshot.id, inheritedRights.snapshot.id)
+    // Raw source has no approved output recipe; cataloging it must not
+    // create a searchable row even though it has explicit reuse rights.
+    assert.deepEqual(await catalog({ workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId }), { status: 'ignored', reason: 'not-approved', record: null })
+    assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId, artifactId: sourceArtifactId } }), 0)
+    // Negative output eligibility uses real persisted review/artifact states.
+    await client.v2ProxyReview.update({ where: { id: proxyReviewId }, data: { status: 'blocked', finalAllowed: false } })
+    assert.deepEqual(await catalog({ workspaceId, artifactId: proxyArtifactId, manifestId: proxyManifestId }), { status: 'ignored', reason: 'not-approved', record: null })
+    assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId, artifactId: proxyArtifactId } }), 0)
+    await client.v2ProxyReview.update({ where: { id: proxyReviewId }, data: { status: 'ready-for-final', finalAllowed: true } })
+    await client.v2MediaArtifact.update({ where: { id: proxyArtifactId }, data: { status: 'quarantined' } })
+    assert.deepEqual(await catalog({ workspaceId, artifactId: proxyArtifactId, manifestId: proxyManifestId }), { status: 'ignored', reason: 'not-approved', record: null })
+    assert.equal(await client.v2MediaLibraryEntry.count({ where: { workspaceId, artifactId: proxyArtifactId } }), 0)
+    await client.v2MediaArtifact.update({ where: { id: proxyArtifactId }, data: { status: 'available' } })
+
 
     const operationResponse = await fetch(`${baseUrl}/v1/operations/${operationId}`, {
       headers: { authorization },
@@ -785,6 +839,25 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(finalProbe.codec, 'h264')
     assert.equal(finalProbe.audioCodec, 'aac')
     assert.match(finalProbe.container, /mp4/)
+    const catalogBrowser = await proveCatalogOutputBrowser({ baseUrl, authorization, username: uiUsername, password: uiPassword, prisma: client, workspaceId, output, catalogRecord, evidenceDir: process.env.APOLLO_LIBRARY_EVIDENCE_ROOT ?? join(artifactRoot, 'catalog-browser-evidence') })
+    await execFileAsync(ffmpegStatic, ['-v', 'error', '-i', finalPath, '-f', 'null', '-'], { windowsHide: true, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 })
+    console.log(JSON.stringify({ event: 'automatic-catalog-real-final-proof', artifactId: output.artifactId, sha256: output.sha256, byteSize: downloadedBytes.byteLength, catalogRecordId: catalogRecord.id, recordHash: catalogRecord.recordHash, rightsSnapshotId: catalogRecord.rightsSnapshotId, lineageSourceIds: catalogRecord.lineage.map((edge) => edge.sourceArtifactId), fullDecode: 'passed' }))
+    if (process.env.APOLLO_LIBRARY_EVIDENCE_ROOT) {
+      const evidenceRoot = process.env.APOLLO_LIBRARY_EVIDENCE_ROOT
+      assert.equal(isAbsolute(evidenceRoot), true)
+      await mkdir(evidenceRoot, { recursive: true })
+      await copyFile(finalPath, join(evidenceRoot, 'w49-catalog-approved-final.mp4'))
+      await writeFile(join(evidenceRoot, 'w49-catalog-approved-final.json'), JSON.stringify({
+        schemaVersion: 'automatic-catalog-proof/v1', controlledUpstream: ['Director snapshots', 'proxy approval', 'color probe'],
+        sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null, ownerPid: process.pid, serverPid: server.pid,
+        runtime: ['public export API', 'factory worker', 'FFmpeg renderer', 'PostgreSQL', 'local artifact storage'],
+        artifact: { id: output.artifactId, manifestId: output.manifestId, sha256: output.sha256, byteSize: downloadedBytes.byteLength },
+        catalogRecord, catalogBrowser, inheritedRights: inheritedRights.snapshot, fullDecode: 'passed',
+        replayConcurrency: 3, catalogRows: 1, libraryRows: 1, failedAttemptCatalogRows: 0, rejectedOutputCatalogRows: 0, quarantinedOutputLibraryRows: 0,
+        deployed: false, ownerAccepted: false,
+      }, null, 2))
+    }
+
 
     const tamperedUrl = new URL(grantPayload.data.downloadUrl)
     const token = tamperedUrl.searchParams.get('token')
@@ -811,7 +884,14 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     if (server && server.exitCode === null) {
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+      if (server.exitCode === null && server.signalCode === null) {
+        server.kill('SIGKILL')
+        await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+      }
     }
+    assert.ok(!server || server.exitCode !== null || server.signalCode !== null, 'Owned export Next server must terminate')
+    const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
+    await disconnectV2PostgresClient()
     await client.$disconnect()
     await rm(join(artifactRoot, `workspaces/final-export-e2e-${suffix}`), { recursive: true, force: true })
   }

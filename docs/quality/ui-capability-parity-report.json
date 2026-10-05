@@ -1,12 +1,12 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 171,
-    "capabilities": 152,
-    "endpoints": 152,
-    "registeredCapabilities": 374,
-    "operableCapabilities": 374,
-    "publicContractCapabilities": 374,
+    "uiActions": 175,
+    "capabilities": 155,
+    "endpoints": 155,
+    "registeredCapabilities": 379,
+    "operableCapabilities": 379,
+    "publicContractCapabilities": 379,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -2524,7 +2524,107 @@
       ]
     },
     {
-      "uiAction": "src/components/MediaLibraryWorkspace.tsx:49",
+      "uiAction": "src/components/MediaLibraryWorkspace.tsx:114",
+      "capabilityId": "apollo.media.library.read",
+      "capabilityVersion": "2.0.0",
+      "endpoint": "GET /v1/media/library/{artifactId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readMediaLibraryItemService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/MediaLibraryWorkspace.tsx:132",
+      "capabilityId": "apollo.media.segments.create",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/media/library/{artifactId}/segments",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createMediaSegmentService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/MediaLibraryWorkspace.tsx:152",
+      "capabilityId": "apollo.projects.workspace.read",
+      "capabilityVersion": "10.0.0",
+      "endpoint": "GET /v1/projects/{projectId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readProjectWorkspaceService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/MediaLibraryWorkspace.tsx:159",
+      "capabilityId": "apollo.projects.media-library.attach",
+      "capabilityVersion": "2.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/media-library-attachments",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "attachMediaLibraryItemService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/MediaLibraryWorkspace.tsx:251",
+      "capabilityId": "apollo.media.library.preview.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/media/library/{artifactId}/previews/{kind}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readMediaLibraryPreviewService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/MediaLibraryWorkspace.tsx:73",
       "capabilityId": "apollo.media.library.list",
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/media/library",
@@ -2544,7 +2644,7 @@
       ]
     },
     {
-      "uiAction": "src/components/MediaLibraryWorkspace.tsx:64",
+      "uiAction": "src/components/MediaLibraryWorkspace.tsx:97",
       "capabilityId": "apollo.projects.list",
       "capabilityVersion": "4.0.0",
       "endpoint": "GET /v1/projects",
@@ -2555,26 +2655,6 @@
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment",
         "listProjectsService",
-        "requireScope"
-      ],
-      "tests": [
-        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
-        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
-        "tests/v2/public-contracts.test.mjs:public-contract-registry"
-      ]
-    },
-    {
-      "uiAction": "src/components/MediaLibraryWorkspace.tsx:77",
-      "capabilityId": "apollo.projects.media-library.attach",
-      "capabilityVersion": "1.0.0",
-      "endpoint": "POST /v1/projects/{projectId}/media-library-attachments",
-      "applicationServices": [
-        "admitGovernedCapabilityService",
-        "attachMediaLibraryItemService",
-        "authenticateApiClientService",
-        "authenticateUiSessionService",
-        "governanceAnomalyPolicyFromEnvironment",
-        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -3807,6 +3887,50 @@
       ]
     },
     {
+      "capabilityId": "apollo.media.segments.derivative.request",
+      "exposure": "public",
+      "endpoint": "POST /v1/media/segments/{segmentId}/derivative-jobs",
+      "inputSchemaRef": "apollo://schemas/media-segment-derivative-request/v1",
+      "outputSchemaRef": "apollo://schemas/media-segment-derivative-response/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.media.segments.derivative.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/media/segment-derivative-jobs/{jobId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/media-segment-derivative-job/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.media.segments.derivative.cancel",
+      "exposure": "public",
+      "endpoint": "POST /v1/media/segment-derivative-jobs/{jobId}/cancel",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/media-segment-derivative-job/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.media.segments.derivative.retry",
+      "exposure": "public",
+      "endpoint": "POST /v1/media/segment-derivative-jobs/{jobId}/retry",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/media-segment-derivative-job/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.media.library.read",
       "exposure": "public",
       "endpoint": "GET /v1/media/library/{artifactId}",
@@ -3821,8 +3945,8 @@
       "capabilityId": "apollo.projects.media-library.attach",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/media-library-attachments",
-      "inputSchemaRef": "apollo://schemas/media-library-attachment-request/v1",
-      "outputSchemaRef": "apollo://schemas/media-library-attachment/v1",
+      "inputSchemaRef": "apollo://schemas/media-library-attachment-request/v2",
+      "outputSchemaRef": "apollo://schemas/media-library-attachment/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3878,6 +4002,17 @@
       "endpoint": "POST /v1/artifacts/{artifactId}/lifecycle-transitions",
       "inputSchemaRef": "apollo://schemas/media-artifact-lifecycle-transition-request/v1",
       "outputSchemaRef": "apollo://schemas/media-artifact-lifecycle-transition-result/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.media.library.preview.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/media/library/{artifactId}/previews/{kind}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/binary-media-content/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

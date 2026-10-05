@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 
 import AppShellNavigation from './AppShellNavigation'
@@ -13,6 +13,7 @@ interface LibraryItem {
   origin: { type: 'upload' | 'generated' | 'derived'; parentArtifactId?: string }
   preview: { thumbnail: { status: string; artifactId?: string }; waveform: { status: string; artifactId?: string } }
   technical: { mediaType: string; container: string; byteSize: string }; createdAt: string
+  source: { type: 'artifact' | 'segment'; artifactId: string; parentSegmentId?: string; description?: string; semanticRange?: { startMs: number; endMs: number }; sourceDurationMs?: number; segmentHash?: string }
 }
 
 interface ProjectSummary { id: string; name: string }
@@ -39,46 +40,131 @@ export default function MediaLibraryWorkspace() {
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const [attaching, setAttaching] = useState<string | null>(null)
+  const [detail, setDetail] = useState<LibraryItem | null>(null)
+  const [detailState, setDetailState] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [range, setRange] = useState({ label: '', description: '', startMs: '', endMs: '' })
+  const [creatingSegment, setCreatingSegment] = useState(false)
+  const reads = useRef({ generation: 0, controller: null as AbortController | null })
+  const details = useRef({ generation: 0, controller: null as AbortController | null })
+  const attachmentAttempt = useRef<{ projectId: string; itemId: string; key: string; body: string } | null>(null)
+  const privateEpoch = useRef(0)
+  const projectRead = useRef<AbortController | null>(null)
+
+  const clearPrivateState = useCallback(() => {
+    setItems([]); setNextCursor(null); setProjects([]); setProjectId(''); setDetail(null)
+    attachmentAttempt.current = null
+    privateEpoch.current += 1
+    reads.current.generation += 1; reads.current.controller?.abort(); projectRead.current?.abort()
+    details.current.generation += 1; details.current.controller?.abort()
+    setDetailState('idle'); setState('error'); setMessage('A sessão não autoriza mais esta biblioteca.')
+  }, [])
 
   const load = useCallback(async (after?: string) => {
+    reads.current.controller?.abort()
+    const controller = new AbortController()
+    const generation = ++reads.current.generation
+    reads.current.controller = controller
     setState('loading'); setMessage('')
+    if (!after) { setItems([]); setNextCursor(null); setDetail(null); details.current.generation += 1; details.current.controller?.abort() }
     try {
       const params = new URLSearchParams({ limit: '24' })
       for (const [key, value] of Object.entries(applied)) if (value) params.set(key, value)
       if (after) params.set('after', after)
-      const response = await fetch(`/v1/media/library?${params.toString()}`)
+      const response = await fetch(`/v1/media/library?${params.toString()}`, { signal: controller.signal, cache: 'no-store' })
       const payload = await response.json() as ApiEnvelope<{ items: LibraryItem[]; nextCursor: string | null }>
+      if (controller.signal.aborted || generation !== reads.current.generation) return
+      if (response.status === 401 || response.status === 403) clearPrivateState()
       if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? 'Não foi possível carregar a biblioteca.')
-      setItems((current) => after ? [...current, ...payload.data!.items] : payload.data!.items)
+      setItems((current) => [...new Map((after ? [...current, ...payload.data!.items] : payload.data!.items).map((item) => [item.id, item])).values()])
       setNextCursor(payload.data.nextCursor)
       setState('ready')
     } catch (error) {
+      if (controller.signal.aborted || generation !== reads.current.generation) return
       setMessage(error instanceof Error ? error.message : 'Não foi possível carregar a biblioteca.')
       setState('error')
     }
-  }, [applied])
+  }, [applied, clearPrivateState])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const listReads = reads.current; const detailReads = details.current
+    void load()
+    return () => { listReads.generation += 1; listReads.controller?.abort(); detailReads.generation += 1; detailReads.controller?.abort() }
+  }, [load])
   useEffect(() => {
     const controller = new AbortController()
+    projectRead.current = controller
+    const epoch = privateEpoch.current
     void fetch('/v1/projects?limit=100', { signal: controller.signal }).then(async (response) => {
       const payload = await response.json() as ApiEnvelope<{ projects: ProjectSummary[] }>
-      if (response.ok && payload.data) setProjects(payload.data.projects)
+      if (controller.signal.aborted || epoch !== privateEpoch.current) return
+      if (response.status === 401 || response.status === 403) clearPrivateState()
+      else if (response.ok && payload.data) setProjects(payload.data.projects)
     }).catch(() => undefined)
     return () => controller.abort()
-  }, [])
+  }, [clearPrivateState])
 
   function applyFilters(event: FormEvent) { event.preventDefault(); setApplied({ ...filters }) }
+
+  async function openDetails(item: LibraryItem) {
+    details.current.controller?.abort()
+    const controller = new AbortController(); details.current.controller = controller
+    const generation = ++details.current.generation
+    setDetail(null); setDetailState('loading'); setMessage('')
+    try {
+      const response = await fetch(`/v1/media/library/${encodeURIComponent(item.id)}`, { signal: controller.signal, cache: 'no-store' })
+      const payload = await response.json() as ApiEnvelope<LibraryItem>
+      if (controller.signal.aborted || generation !== details.current.generation) return
+      if (response.status === 401 || response.status === 403) clearPrivateState()
+      if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? 'Não foi possível abrir os detalhes.')
+      setDetail(payload.data); setDetailState('idle'); setRange({ label: '', description: '', startMs: String(payload.data.source.semanticRange?.startMs ?? 0), endMs: String(payload.data.source.semanticRange?.endMs ?? '') })
+    } catch (error) {
+      if (controller.signal.aborted || generation !== details.current.generation) return
+      setDetailState('error'); setMessage(error instanceof Error ? error.message : 'Não foi possível abrir os detalhes.')
+    }
+  }
+
+  async function createSegment(event: FormEvent) {
+    event.preventDefault()
+    if (!detail) return
+    const epoch = privateEpoch.current
+    setCreatingSegment(true); setMessage('')
+    try {
+      const response = await fetch(`/v1/media/library/${encodeURIComponent(detail.source.artifactId)}/segments`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label: range.label, description: range.description, startMs: Number(range.startMs), endMs: Number(range.endMs), ...(detail.source.type === 'segment' ? { parentSegmentId: detail.id } : {}) }),
+      })
+      const payload = await response.json() as ApiEnvelope<{ id: string }>
+      if (epoch !== privateEpoch.current) return
+      if (response.status === 401 || response.status === 403) clearPrivateState()
+      if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? 'Não foi possível criar o segmento.')
+      await load(); setMessage('Segmento virtual criado. O arquivo original permanece intacto.')
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível criar o segmento.') }
+    finally { setCreatingSegment(false) }
+  }
 
   async function attach(item: LibraryItem) {
     if (!projectId) { setMessage('Escolha um projeto antes de inserir a mídia.'); return }
     setAttaching(item.id); setMessage('')
+    const epoch = privateEpoch.current
     try {
-      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/media-library-attachments`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ artifactId: item.id }),
+      const target = projectId
+      if (attachmentAttempt.current?.projectId !== target || attachmentAttempt.current?.itemId !== item.id) {
+        const projectResponse = await fetch(`/v1/projects/${encodeURIComponent(target)}`, { cache: 'no-store' })
+        const workspace = await projectResponse.json() as ApiEnvelope<{ version: { id: string; baseHash: string } | null }>
+        if (epoch !== privateEpoch.current) return
+        if (projectResponse.status === 401 || projectResponse.status === 403) clearPrivateState()
+        if (!projectResponse.ok || !workspace.data?.version) throw new Error('O projeto precisa de uma versão atual antes da seleção.')
+        attachmentAttempt.current = { projectId: target, itemId: item.id, key: crypto.randomUUID(), body: JSON.stringify({ selection: item.source.type === 'segment' ? { kind: 'segment', segmentId: item.id } : { kind: 'asset', artifactId: item.id }, baseVersionId: workspace.data.version.id, baseVersionHash: workspace.data.version.baseHash }) }
+      }
+      const response = await fetch(`/v1/projects/${encodeURIComponent(target)}/media-library-attachments`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'Idempotency-Key': attachmentAttempt.current.key }, body: attachmentAttempt.current.body,
       })
       const payload = await response.json() as ApiEnvelope<{ replayed: boolean }>
+      if (epoch !== privateEpoch.current) return
+      if (response.status === 401 || response.status === 403) clearPrivateState()
+      if (response.status === 409) attachmentAttempt.current = null
       if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? 'A mídia não pôde ser inserida.')
+      attachmentAttempt.current = null
       setMessage(payload.data.replayed ? 'Esta mídia já estava vinculada ao projeto.' : 'Mídia inserida no projeto por referência, sem copiar o arquivo.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'A mídia não pôde ser inserida.')
@@ -111,10 +197,31 @@ export default function MediaLibraryWorkspace() {
         {message ? <p className="mt-5 border-l-2 border-[#c99f3d] bg-[#c99f3d]/[0.06] px-4 py-3 text-sm text-[#cfc5b4]" role="status">{message}</p> : null}
         {state === 'loading' && items.length === 0 ? <p className="py-14 text-sm text-[#777168]" role="status">Organizando a mesa de seleção…</p> : null}
         {state === 'error' && items.length === 0 ? <p className="py-14 text-sm text-[#c67e78]" role="alert">{message}</p> : null}
+        {state === 'error' ? <button type="button" className="mt-4 border border-white/20 px-4 py-2" onClick={() => void load(items.length ? nextCursor ?? undefined : undefined)}>Tentar novamente</button> : null}
+        {detailState === 'loading' ? <p role="status">Abrindo detalhes…</p> : null}
+        {detail ? <section aria-label="Detalhes da mídia" className="mt-6 border border-white/20 bg-[#10100f] p-6">
+          <div className="flex justify-between gap-4"><h2 className="text-xl">{detail.label}</h2><button type="button" onClick={() => { details.current.generation += 1; details.current.controller?.abort(); setDetail(null) }}>Fechar detalhes</button></div>
+          <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div><dt>Original</dt><dd className="break-all font-mono text-xs">{detail.source.artifactId}</dd></div>
+            <div><dt>Direitos</dt><dd>{rightsCopy[detail.rights.status]} {detail.rights.reasonCodes.join(', ')}</dd></div>
+            <div><dt>Técnica</dt><dd>{detail.technical.mediaType} · {detail.technical.container} · {detail.technical.byteSize} bytes · {detail.status}</dd></div>
+            <div><dt>Origem</dt><dd>{detail.origin.type} {detail.origin.parentArtifactId}</dd></div>
+            {detail.source.semanticRange ? <div><dt>Intervalo no original</dt><dd>{detail.source.semanticRange.startMs}–{detail.source.semanticRange.endMs} ms · virtual · sem duplicar bytes</dd><dd className="break-all font-mono text-xs">{detail.source.segmentHash}</dd></div> : null}
+          </dl>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">{(['thumbnail', 'waveform'] as const).map((kind) => <div key={kind}><p>{kind === 'thumbnail' ? 'Miniatura' : 'Forma de onda'}</p>{detail.preview[kind].status === 'available' && detail.rights.status === 'eligible' ? <LibraryPreview itemId={detail.id} kind={kind} onAuthorizationLost={clearPrivateState} /> : <p className="text-sm text-[#938d83]">Preview indisponível.</p>}</div>)}</div>
+          {detail.technical.mediaType === 'video' || detail.technical.mediaType === 'audio' ? <form className="mt-6 grid gap-3 sm:grid-cols-2" onSubmit={(event) => void createSegment(event)}>
+            <h3 className="sm:col-span-2">{detail.source.type === 'segment' ? 'Criar segmento dentro deste intervalo' : 'Criar segmento virtual'}</h3>
+            <label>Nome<input className="block w-full bg-black p-2" value={range.label} onChange={(event) => setRange({ ...range, label: event.target.value })} required maxLength={200} /></label>
+            <label>Descrição<input className="block w-full bg-black p-2" value={range.description} onChange={(event) => setRange({ ...range, description: event.target.value })} maxLength={2000} /></label>
+            <label>Início (ms)<input className="block w-full bg-black p-2" type="number" min={detail.source.semanticRange?.startMs ?? 0} step="1" value={range.startMs} onChange={(event) => setRange({ ...range, startMs: event.target.value })} required /></label>
+            <label>Fim (ms)<input className="block w-full bg-black p-2" type="number" min="1" max={detail.source.semanticRange?.endMs ?? detail.source.sourceDurationMs} step="1" value={range.endMs} onChange={(event) => setRange({ ...range, endMs: event.target.value })} required /></label>
+            <button className="border border-[#cda23f]/50 p-3 sm:col-span-2" disabled={creatingSegment || detail.status !== 'usable'}>{creatingSegment ? 'Criando…' : 'Criar sem recortar o original'}</button>
+          </form> : null}
+        </section> : null}
         {state === 'ready' && items.length === 0 ? <div className="my-10 border border-dashed border-white/[0.12] p-10 text-center"><p className="text-lg text-[#d4cec3]">Nenhuma mídia encontrada.</p><p className="mt-2 text-sm text-[#777168]">Remova um filtro ou faça o ingest de um arquivo no projeto.</p></div> : null}
 
         <div className="mt-7 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {items.map((item) => <article className="group overflow-hidden border border-white/[0.09] bg-[#0b0b0a] transition hover:border-white/[0.18]" key={item.id}>
+          {items.map((item) => <article data-library-id={item.id} className="group overflow-hidden border border-white/[0.09] bg-[#0b0b0a] transition hover:border-white/[0.18]" key={item.id}>
             <div className="relative flex h-28 items-center overflow-hidden border-b border-white/[0.08] bg-[repeating-linear-gradient(90deg,#111_0,#111_31px,#0b0b0b_32px,#0b0b0b_34px)] px-5">
               <span className="font-mono text-4xl font-black tracking-[-0.08em] text-white/[0.14]">{item.kind === 'audio' ? '⌁⌁⌁' : item.kind === 'image' ? '▧' : '▶'}</span>
               <div className="absolute bottom-0 left-0 h-1 bg-[#cda23f]" style={{ width: item.rights.status === 'eligible' ? '100%' : item.rights.status === 'review' ? '55%' : '18%' }} />
@@ -124,6 +231,7 @@ export default function MediaLibraryWorkspace() {
               <div className="flex items-start justify-between gap-4"><div className="min-w-0"><h2 className="truncate text-base font-semibold text-[#eee9df]" title={item.label}>{item.label}</h2><p className="mt-1 font-mono text-[10px] text-[#67635d]">{item.id}</p></div><span className={`shrink-0 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] ${item.rights.status === 'eligible' ? 'bg-[#315f46]/35 text-[#79c394]' : item.rights.status === 'review' ? 'bg-[#8a6a25]/30 text-[#d5b15b]' : 'bg-[#783d3d]/30 text-[#d17b76]'}`}>{rightsCopy[item.rights.status]}</span></div>
               <dl className="mt-5 grid grid-cols-3 gap-2 border-y border-white/[0.07] py-3 text-[10px]"><div><dt className="text-[#625e57]">Tamanho</dt><dd className="mt-1 text-[#b6afa4]">{byteSize(item.technical.byteSize)}</dd></div><div><dt className="text-[#625e57]">Origem</dt><dd className="mt-1 capitalize text-[#b6afa4]">{item.origin.type}</dd></div><div><dt className="text-[#625e57]">Estado</dt><dd className="mt-1 capitalize text-[#b6afa4]">{item.status}</dd></div></dl>
               {(item.people.length || item.topics.length) ? <div className="mt-4 flex flex-wrap gap-1.5">{[...item.people, ...item.topics].slice(0, 6).map((tag) => <span className="border border-white/[0.08] px-2 py-1 text-[9px] text-[#8b857b]" key={tag}>{tag}</span>)}</div> : null}
+              <button className="mt-4 text-xs text-[#d7b55f]" type="button" onClick={() => void openDetails(item)}>Ver detalhes de {item.label}</button>
               <button className="mt-5 w-full border border-[#cda23f]/35 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#d7b55f] transition enabled:hover:bg-[#cda23f]/10 disabled:cursor-not-allowed disabled:border-white/[0.07] disabled:text-[#55514b]" disabled={item.status !== 'usable' || item.rights.status !== 'eligible' || attaching !== null} onClick={() => void attach(item)} type="button">{attaching === item.id ? 'Inserindo…' : item.rights.status === 'eligible' ? 'Inserir no projeto' : 'Uso bloqueado'}</button>
             </div>
           </article>)}
@@ -132,4 +240,27 @@ export default function MediaLibraryWorkspace() {
       </section>
     </div>
   </main>
+}
+
+function LibraryPreview({ itemId, kind, onAuthorizationLost }: { itemId: string; kind: 'thumbnail' | 'waveform'; onAuthorizationLost: () => void }) {
+  const [url, setUrl] = useState('')
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController(); let objectUrl = ''
+    setUrl(''); setFailed(false)
+    void fetch(`/v1/media/library/${encodeURIComponent(itemId)}/previews/${kind}`, { signal: controller.signal, cache: 'no-store' }).then(async (response) => {
+      if (controller.signal.aborted) return
+      if (response.status === 401 || response.status === 403) { onAuthorizationLost(); return }
+      if (!response.ok) throw new Error('Preview unavailable')
+      const blob = await response.blob()
+      if (controller.signal.aborted) return
+      objectUrl = URL.createObjectURL(blob); setUrl(objectUrl)
+    }).catch(() => { if (!controller.signal.aborted) setFailed(true) })
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [itemId, kind, onAuthorizationLost])
+  if (failed) return <p role="status">Preview indisponível.</p>
+  if (!url) return <p role="status">Carregando preview…</p>
+  // The object URL contains authenticated bytes; it is revoked on selection change/unmount.
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={kind === 'thumbnail' ? 'Miniatura da mídia' : 'Forma de onda da mídia'} className="mt-2 max-h-56 max-w-full" onError={() => setFailed(true)} />
 }

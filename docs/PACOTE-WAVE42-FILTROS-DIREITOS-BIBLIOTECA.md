@@ -1,6 +1,6 @@
 # W42 — filtros server-side e direitos da biblioteca
 
-**Plano, sem execução W42.** Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W41. F1.012 / FR-040, partes das caixas `db882ddc544b-1` e `ac7e0a1c125b-1`. **3–4 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original W42.** Execução e evidências atuais em [PROJECT-STATUS.md](PROJECT-STATUS.md) e [relatório W41–W50](quality/media-library-w41-50.md). Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W41. F1.012 / FR-040, partes das caixas `db882ddc544b-1` e `ac7e0a1c125b-1`. **3–4 h de desenvolvimento**, CI/revisão fora.
 
 O domínio normaliza `kind`, `person`, `topic` e `rightsStatus`; a UI aplica filtros no GET. `mediaLibraryRights` deriva elegibilidade do snapshot jurídico com workspace, locale e tempo. Falta prova atual de combinação, isolamento A/B, expiração e locale com decisão real do backend; badge “Liberado” não basta para provar inserção autorizada.
 

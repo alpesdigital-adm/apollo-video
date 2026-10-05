@@ -1,6 +1,6 @@
 # W41 — paginação unificada de assets e segments
 
-**Plano, sem execução W41.** Base documental `dd2fb2b920afec6871221382597965d3caeb9e49`; runtime `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`. CI runtime `37167702546` verde; CI do planejamento `37201179515` pendente neste checkpoint. F1.012 / FR-040, caixa `5fed046a5719-1`. Depende da base W30; **3–4 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original W41.** Execução e evidências atuais em [PROJECT-STATUS.md](PROJECT-STATUS.md) e [relatório W41–W50](quality/media-library-w41-50.md). Base documental `dd2fb2b920afec6871221382597965d3caeb9e49`; runtime `1b05a65654fc53c1ee13ffa3ab6deb36c6026455`. CI runtime `37167702546` verde; CI do planejamento `37201179515` pendente neste checkpoint. F1.012 / FR-040, caixa `5fed046a5719-1`. Depende da base W30; **3–4 h de desenvolvimento**, CI/revisão fora.
 
 O repositório `src/v2/infrastructure/prisma/media-library-repository.ts` já une assets e `V2MediaSegment` por cursor de `createdAt`/chave e fingerprint de filtros; `src/components/MediaLibraryWorkspace.tsx` pede 24 e “Carregar mais”. A frase histórica do TODO de que segmentos não entram na união precisa ser reavaliada pela prova, **não** reimplementada por suposição.
 

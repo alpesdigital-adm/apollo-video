@@ -1838,10 +1838,70 @@ model V2MediaSegmentMaterialization {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, segmentId, consumerKey])
-  @@unique([outputArtifactId, workspaceId])
+  @@index([outputArtifactId, workspaceId])
   @@unique([outputManifestId, workspaceId])
   @@index([workspaceId, segmentId, createdAt(sort: Desc)])
   @@map("media_segment_materializations")
+}
+
+model V2MediaLibraryAttachment {
+  id                      String   @id @db.Uuid
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  selectionKind           String   @db.VarChar(16)
+  selectionId             String   @db.VarChar(128)
+  parentArtifactId        String   @db.VarChar(128)
+  sourceSha256            String   @db.Char(64)
+  rightsSnapshotId        String   @db.VarChar(128)
+  segmentHash             String?  @db.Char(64)
+  semanticRangeJson       String?  @db.Text
+  sourceTimeMappingJson   String?  @db.Text
+  commandId               String   @unique @db.VarChar(128)
+  baseVersionId           String   @db.VarChar(128)
+  resultVersionId         String   @unique @db.VarChar(128)
+  resultVersionHash       String   @db.Char(64)
+  actorContextHash        String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  @@unique([workspaceId, projectId, idempotencyKey], map: "media_library_attachment_request_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, selectionKind, selectionId], map: "media_library_attachment_selection_idx")
+  @@map("media_library_attachments")
+}
+
+model V2MediaSegmentDerivativeJob {
+  id                 String    @id @db.VarChar(128)
+  workspaceId        String    @db.VarChar(128)
+  segmentId          String    @db.VarChar(128)
+  consumerKey        String    @db.VarChar(80)
+  sourceSha256       String    @db.Char(64)
+  segmentHash        String    @db.Char(64)
+  rightsSnapshotId   String    @db.VarChar(128)
+  clientId           String    @db.VarChar(80)
+  actorContextHash   String    @db.Char(64)
+  idempotencyKey     String    @db.VarChar(128)
+  requestFingerprint String    @db.Char(64)
+  status             String    @db.VarChar(16)
+  attempt            Int       @default(0)
+  maxAttempts        Int       @default(3)
+  leaseOwner         String?   @db.VarChar(128)
+  leaseExpiresAt     DateTime? @db.Timestamptz(3)
+  heartbeatAt        DateTime? @db.Timestamptz(3)
+  nextAttemptAt      DateTime? @db.Timestamptz(3)
+  deadlineAt         DateTime  @db.Timestamptz(3)
+  outputArtifactId   String?   @db.VarChar(128)
+  outputManifestId   String?   @db.VarChar(128)
+  errorCode          String?   @db.VarChar(64)
+  createdAt          DateTime  @db.Timestamptz(3)
+  updatedAt          DateTime  @db.Timestamptz(3)
+
+  @@unique([workspaceId, clientId, idempotencyKey], map: "segment_derivative_job_request_key")
+  @@unique([workspaceId, segmentId, consumerKey], map: "segment_derivative_job_consumer_key")
+  @@index([status, nextAttemptAt, leaseExpiresAt, createdAt], map: "segment_derivative_job_claim_idx")
+  @@index([workspaceId, segmentId, createdAt(sort: Desc)], map: "segment_derivative_job_segment_idx")
+  @@map("media_segment_derivative_jobs")
 }
 
 model V2AutomaticCatalogRecord {

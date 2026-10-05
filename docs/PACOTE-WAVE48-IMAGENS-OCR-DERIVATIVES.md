@@ -1,6 +1,6 @@
 # W48 — imagem real, OCR e derivadas imutáveis
 
-**Plano, sem execução W48.** Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W47. F1.014 / FR-047, partes das caixas `9a30a9b79c59-1`, `92393ad62131-1`, `184065af0667-1` e `22ad5715eb6c-1`. **4–6 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original W48.** Execução e evidências atuais em [PROJECT-STATUS.md](PROJECT-STATUS.md) e [relatório W41–W50](quality/media-library-w41-50.md). Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W47. F1.014 / FR-047, partes das caixas `9a30a9b79c59-1`, `92393ad62131-1`, `184065af0667-1` e `22ad5715eb6c-1`. **4–6 h de desenvolvimento**, CI/revisão fora.
 
 `analyze-image-artifact.ts` e `SharpImageAnalysisProcessor` já implementam dimensões, cores, OCR Tesseract `por-eng`, thumbnail e preview com source imutável; há prova histórica Linux. W48 deve revalidar no runtime/CI atual com bytes, pixels, provenance e confidence observáveis. Faces/objects permanecem `unavailable` sem provider configurado: **não** declará-los entregues nem instalar provider pago por inferência.
 

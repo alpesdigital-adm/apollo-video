@@ -28,6 +28,18 @@ e seus ranges pertencem a F1.013.
 
 ## Evidência
 
+### Incremento W41–W50
+
+A ordenação agora inclui identidade tipada de assets e segmentos. O attach
+recebe seleção tipada, versão/hash esperados e chave de idempotência; persiste
+Command e ProjectVersion sem copiar bytes. Previews revalidam o master e
+direitos atuais, inclusive na leitura genérica do artifact. Materialização
+de vídeo usa jobs duráveis com publicação cercada por lease, cancelamento,
+hash e direitos. As provas e limites atuais estão em
+`docs/quality/media-library-w41-50.md` e `project-status.json`.
+
+### Histórico anterior
+
 O run remoto `f1012-20260808-r1` nos commits `093272d` e `80fd193` aplicou 151
 migrations do zero, aprovou integração Prisma e comprovou a UI/API em Chromium:
 filtro por pessoa+rights, bloqueio restrito, attach 201 e replay 200. O banco

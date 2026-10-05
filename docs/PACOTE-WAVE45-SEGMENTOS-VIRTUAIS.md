@@ -1,6 +1,6 @@
 # W45 — segmentos virtuais criados e lidos pela UI
 
-**Plano, sem execução W45.** Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W44. F1.013 / FR-042, subescopos das caixas `4b34d180f96e-1`, `685f984e3c9d-1` e `82ccf53db39a-1`. **3–4 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original W45.** Execução e evidências atuais em [PROJECT-STATUS.md](PROJECT-STATUS.md) e [relatório W41–W50](quality/media-library-w41-50.md). Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W44. F1.013 / FR-042, subescopos das caixas `4b34d180f96e-1`, `685f984e3c9d-1` e `82ccf53db39a-1`. **3–4 h de desenvolvimento**, CI/revisão fora.
 
 Domínio, repository e `GET/POST /v1/media/library/{artifactId}/segments` já modelam range semântico, nesting, source time 1:1, hash e `physicalObjectKey=null`. Falta operar criação/leitura na biblioteca UI e comprovar com master real que escolher um range **não** recorta o arquivo. Não reinterpretar a prova histórica de FFmpeg como UI atual.
 

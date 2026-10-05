@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-04T12:32:13.017Z",
+  "updatedAt": "2026-10-05T00:45:09.0337978Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -15113,28 +15113,24 @@
       "todoItems": [
         "5fed046a5719-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de conferir a base W30 e integração do planejamento. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15143,10 +15139,22 @@
           "ref": "docs/PACOTE-WAVE41-PAGINACAO-BIBLIOTECA.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W41 a partir da base conferida. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W42",
@@ -15159,28 +15167,24 @@
         "db882ddc544b-1",
         "ac7e0a1c125b-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W41. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15189,10 +15193,22 @@
           "ref": "docs/PACOTE-WAVE42-FILTROS-DIREITOS-BIBLIOTECA.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W42 após W41. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W43",
@@ -15205,28 +15221,24 @@
         "5fed046a5719-1",
         "ac7e0a1c125b-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W42. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15235,10 +15247,22 @@
           "ref": "docs/PACOTE-WAVE43-LEITURAS-SEGURAS-BIBLIOTECA.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W43 após W42. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W44",
@@ -15250,28 +15274,24 @@
       "todoItems": [
         "fdd725d7664f-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W43. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15280,10 +15300,22 @@
           "ref": "docs/PACOTE-WAVE44-PREVIEWS-BIBLIOTECA.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W44 após W43. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W45",
@@ -15297,28 +15329,24 @@
         "685f984e3c9d-1",
         "82ccf53db39a-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W44. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15327,10 +15355,22 @@
           "ref": "docs/PACOTE-WAVE45-SEGMENTOS-VIRTUAIS.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W45 após W44. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W46",
@@ -15345,28 +15385,24 @@
         "ac7e0a1c125b-1",
         "685f984e3c9d-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W45. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15375,10 +15411,22 @@
           "ref": "docs/PACOTE-WAVE46-REUSO-POR-REFERENCIA.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W46 após W45. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W47",
@@ -15391,28 +15439,24 @@
         "75a8db3a5d75-1",
         "82ccf53db39a-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W46. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15421,10 +15465,22 @@
           "ref": "docs/PACOTE-WAVE47-DERIVATIVES-SOB-DEMANDA.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W47 após W46. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W48",
@@ -15439,28 +15495,24 @@
         "184065af0667-1",
         "22ad5715eb6c-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W47. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15469,10 +15521,22 @@
           "ref": "docs/PACOTE-WAVE48-IMAGENS-OCR-DERIVATIVES.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W48 após W47. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W49",
@@ -15488,28 +15552,24 @@
         "1d6d2df95dcf-1",
         "ca7b74c93a9c-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W48. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15518,10 +15578,22 @@
           "ref": "docs/PACOTE-WAVE49-CATALOGACAO-APROVADA.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W49 após W48. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     },
     {
       "id": "W50",
@@ -15542,28 +15614,24 @@
         "184065af0667-1",
         "ca7b74c93a9c-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o novo subescopo Codex depois de W49. Código parcial existente não equivale à execução desta wave."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir prova PostgreSQL/API/browser/bytes proporcional, usando suíte isolada de biblioteca; revisar CI/artifacts do SHA integrado."
+          "text": "Aguardando CI do commit consolidado e integração em main; comprovação controlada local concluída."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean exige gates e identidade operacional confirmados; não incluída neste pacote."
+          "text": "Implantação de produção não comprovada neste escopo."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário separado; nenhuma caixa do TODO é promovida pelo planejamento."
+          "text": "Aceite final do proprietário pendente."
         }
       ],
       "evidence": [
@@ -15572,10 +15640,22 @@
           "ref": "docs/PACOTE-WAVE50-JORNADA-CONSOLIDADA-BIBLIOTECA.md",
           "role": "planned-not-started",
           "scope": "Plano Codex preparado, com IDs, dependências e limites. Nenhuma implementação ou prova desta wave foi iniciada."
+        },
+        {
+          "scope": "Implementação V2 e provas independentes da biblioteca; limites e validação consolidada registrados sem antecipar entrega.",
+          "role": "implementation",
+          "ref": "docs/quality/media-library-w41-50.md",
+          "type": "repo"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w41-50-20261004/w50-library-controlled-proof-e181b3fa",
+          "role": "controlled-e2e",
+          "scope": "W50 local no código e8b4e306: HTTP/PG/FFmpeg/Sharp/Chromium reais; transcrição controlada; quatro capturas, hash e postflight terminal/PG zero. W49 tem prova própria no relatório."
         }
       ],
-      "nextAction": "Codex: executar W50 após W49. Integrar contratos/CI/status compartilhados sob owner Astra, sem sobrepor a trilha Claude Code W31–W40.",
-      "notes": "Responsável: Codex; Astra orquestra, Luna lê, Sol escreve, Astra revisa/integra/testa. Estado da nova execução: fila; runtime parcial anterior pode existir. IDs cumulativos não representam caixas novas. Sem dependência automática de executar o dashboard W31–W40 e sem autorização inferida para produção/provider pago."
+      "nextAction": "Concluir comprovação controlada, CI e merge; implantação e aceite continuam separados.",
+      "notes": "Subescopo técnico do pacote, sem remarcação do TODO. Mídia controlada, transcrição/inputs upstream controlados, materialização física vídeo-only e faces/objetos indisponíveis."
     }
   ]
 }

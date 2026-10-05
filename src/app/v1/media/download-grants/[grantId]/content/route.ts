@@ -6,6 +6,7 @@ import { DomainError } from '@/v2/domain/errors'
 import {
   createArtifactContentStorage,
   createMediaArtifactQueryRepository,
+  createMediaLibraryRepository,
   createMediaDownloadGrantRepository,
   createMediaDownloadGrantSignerFromEnvironment,
 } from '@/v2/infrastructure/repository-factory'
@@ -40,6 +41,7 @@ export async function GET(
     }
     const content = await readArtifactContentService({
       artifacts: createMediaArtifactQueryRepository(),
+      library: createMediaLibraryRepository(),
       storage: createArtifactContentStorage(),
     })({
       workspaceId: claims.workspaceId,

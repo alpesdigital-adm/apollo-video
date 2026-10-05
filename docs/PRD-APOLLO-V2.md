@@ -13,6 +13,12 @@ O [plano W31–W40](./PLANO-WAVES-31-40.md) divide FR-002, FR-003 e FR-004 em de
 
 O [plano W41–W50](./PLANO-WAVES-41-50.md), atribuído ao Codex, desenvolve/comprova FR-040, FR-042, FR-047 e FR-049 na biblioteca de mídia, em trilha separada do dashboard W31–W40 delegado ao Claude Code. Nenhum pacote de planejamento é contabilizado como produto entregue.
 
+O incremento W41–W50 passa a usar seleção tipada, Commands/ProjectVersions com
+CAS e jobs duráveis para derivadas de vídeo. Previews autenticados revalidam
+direitos atuais; a catalogação exige promoção aprovada. O
+[relatório de comprovação](./quality/media-library-w41-50.md) e o registro de
+status distinguem integração/testes controlados de implantação e aceite.
+
 ### Alterações da versão 1.2
 
 - API externa como contrato obrigatório e paritário para todas as capacidades operáveis.

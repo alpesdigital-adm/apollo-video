@@ -1,12 +1,14 @@
+import { parseMediaLibraryAttachmentImpact } from '../../src/v2/domain/media-library-attachment-impact.ts'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { attachMediaLibraryItemService } from '../../src/v2/application/media-library.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createMediaSegmentService } from '../../src/v2/application/media-segments.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
-import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { mediaLibrarySearchField } from '../../src/v2/domain/media-library.ts'
 import { PrismaMediaLibraryRepository } from '../../src/v2/infrastructure/prisma/media-library-repository.ts'
 import { PrismaImageAnalysisRepository } from '../../src/v2/infrastructure/prisma/image-analysis-repository.ts'
@@ -39,6 +41,8 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     await prisma.v2ImageReuseReference.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2ImageAnalysis.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaSegmentMaterialization.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
+    await prisma.v2MediaSegmentDerivativeJob.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
+    await prisma.v2MediaLibraryAttachment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaSegment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaArtifact.updateMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } }, data: { currentRightsSnapshotId: null } })
@@ -58,6 +62,11 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     await prisma.v2Project.create({ data: {
       id: projectId, workspaceId, name: 'Target project', locale: 'pt-BR', createdByType: 'user', createdById: 'integration-test',
     } })
+    const baseVersionId = `library-version-${suffix}`
+    const snapshotIds = ['brief', 'edit-plan', 'policies'].map((kind) => `library-${kind}-${suffix}`)
+    for (const [index, kind] of ['brief', 'edit-plan', 'policies'].entries()) await prisma.v2ProjectSnapshot.create({ data: { id: snapshotIds[index], workspaceId, projectId, kind, schemaVersion: 1, contentJson: '{}', contentHash: calculateCanonicalHash({ kind }), createdAt: new Date('2026-08-08T12:00:00.000Z') } })
+    await prisma.v2ProjectVersion.create({ data: { id: baseVersionId, workspaceId, projectId, sequence: 1, briefSnapshotId: snapshotIds[0], editPlanSnapshotId: snapshotIds[1], policiesSnapshotId: snapshotIds[2], baseHash: 'a'.repeat(64), createdBy: 'integration-test', createdAt: new Date('2026-08-08T12:00:00.000Z') } })
+    await prisma.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
     const artifacts = [
       { id: artifactIds[0], workspaceId, mediaType: 'video', container: 'mp4', status: 'available', byteSize: 1111n },
       { id: artifactIds[1], workspaceId, mediaType: 'audio', container: 'wav', status: 'available', byteSize: 2222n },
@@ -103,26 +112,41 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     assert.equal((await repository.list({ workspaceId }, new Date('2026-08-08T13:00:00.000Z'))).items.some((item) => item.id === artifactIds[3]), false)
 
     const attach = attachMediaLibraryItemService({ repository, clock: () => new Date('2026-08-08T13:00:00.000Z') })
-    const created = await attach({ workspaceId, projectId, artifactId: artifactIds[0] })
-    const replay = await attach({ workspaceId, projectId, artifactId: artifactIds[0] })
+    const actor = { clientId: 'integration-client', credentialId: 'integration-credential', workspaceId, environment: 'production', authenticationKind: 'bearer', scopes: new Set(['projects:write']), auditContext: createExternalAuditContext({ clientId: 'integration-client', credentialId: 'integration-credential', workspaceId, environment: 'production' }) }
+    const attachRequest = { workspaceId, projectId, selection: { kind: 'asset', artifactId: artifactIds[0] }, baseVersionId, baseVersionHash: 'a'.repeat(64), idempotencyKey: `library-insert-${suffix}`, actor }
+    const created = await attach(attachRequest)
+    const replay = await attach(attachRequest)
+    const storedCommand = await prisma.v2EditCommand.findUniqueOrThrow({ where: { id: created.commandId } })
+    const persistedImpact = parseMediaLibraryAttachmentImpact(JSON.parse(storedCommand.payloadJson).impact)
+    const storedVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: created.resultVersionId } })
+    assert.equal(persistedImpact.preservedEditPlanSnapshotId, snapshotIds[1])
+    assert.equal(storedVersion.editPlanSnapshotId, persistedImpact.preservedEditPlanSnapshotId)
+    assert.equal(persistedImpact.resultVersionId, storedVersion.id)
+    assert.equal(persistedImpact.baseVersionId, baseVersionId)
+    assert.deepEqual(persistedImpact.minimalRenders, [])
+    assert.equal(storedCommand.actorId, actor.clientId)
+
     assert.equal(created.bytesDuplicated, false)
     assert.equal(created.replayed, false)
     assert.equal(replay.replayed, true)
     assert.equal(replay.id, created.id)
-    assert.equal(await prisma.v2ProjectMediaAsset.count({ where: { projectId, artifactId: artifactIds[0], role: 'selected-insert' } }), 1)
+    assert.equal(await prisma.v2MediaLibraryAttachment.count({ where: { projectId, parentArtifactId: artifactIds[0], selectionKind: 'asset' } }), 1)
+    assert.equal((await prisma.v2Project.findUnique({ where: { id: projectId } })).currentVersionId, created.resultVersionId)
+    assert.equal(await prisma.v2EditCommand.count({ where: { id: created.commandId } }), 1)
     assert.equal((await prisma.v2MediaArtifact.findUnique({ where: { id: artifactIds[0] } })).byteSize, 1111n)
-    await assert.rejects(() => attach({ workspaceId, projectId, artifactId: artifactIds[2] }), /rights/i)
-    await assert.rejects(() => attach({ workspaceId, projectId, artifactId: artifactIds[3] }), /not found/i)
+    await assert.rejects(() => attach({ ...attachRequest, selection: { kind: 'asset', artifactId: artifactIds[1] }, idempotencyKey: `library-stale-${suffix}` }), /version/i)
+    await assert.rejects(() => attach({ ...attachRequest, selection: { kind: 'asset', artifactId: artifactIds[2] }, baseVersionId: created.resultVersionId, baseVersionHash: created.resultVersionHash, idempotencyKey: `library-restricted-${suffix}` }), /rights/i)
+    await assert.rejects(() => attach({ ...attachRequest, selection: { kind: 'asset', artifactId: artifactIds[3] }, baseVersionId: created.resultVersionId, baseVersionHash: created.resultVersionHash, idempotencyKey: `library-other-${suffix}` }), /not found/i)
 
     const imageId = artifactIds[2]
-    const thumbnailId = `library-image-thumb-${suffix}`
+    const imageThumbnailId = `library-image-thumb-${suffix}`
     const previewId = `library-image-preview-${suffix}`
-    for (const [id, sha] of [[thumbnailId, '7'.repeat(64)], [previewId, '8'.repeat(64)]]) await prisma.v2MediaArtifact.create({ data: { id, workspaceId, artifactKey: `${workspaceId}/${id}`, sha256: sha, byteSize: 321n, mediaType: 'image', container: 'webp', status: 'available' } })
+    for (const [id, sha] of [[imageThumbnailId, '7'.repeat(64)], [previewId, '8'.repeat(64)]]) await prisma.v2MediaArtifact.create({ data: { id, workspaceId, artifactKey: `${workspaceId}/${id}`, sha256: sha, byteSize: 321n, mediaType: 'image', container: 'webp', status: 'available' } })
     const manifestId = `manifest-${imageId}`
     await prisma.v2MediaArtifactManifest.create({ data: { id: manifestId, workspaceId, artifactId: imageId, schemaVersion: 'media-artifact-manifest/v1', manifestHash: '9'.repeat(64), recipeId: 'upload', recipeVersion: '1.0.0', parametersHash: 'a'.repeat(64), manifestJson: stableSerialize({ schemaVersion: 'media-artifact-manifest/v1', artifact: { artifactKey: `${workspaceId}/${imageId}`, sha256: '3'.repeat(64), byteSize: 3333, mediaType: 'image', container: 'png' }, recipe: { id: 'upload', version: '1.0.0', parametersHash: 'a'.repeat(64) }, sources: [], manifestHash: '9'.repeat(64) }) } })
-    const analysis = createImageAnalysis({ id: `analysis-${imageId}`, workspaceId, artifactId: imageId, manifestId, sourceSha256: '3'.repeat(64), dimensions: { width: 1080, height: 1350 }, dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'Oferta premium', language: 'pt-BR', box: [0.1, 0.2, 0.8, 0.4], confidence: 0.97, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'available', values: [], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, objects: { state: 'available', values: [{ label: 'produto', box: [0.1, 0.1, 0.5, 0.5], confidence: 0.94 }], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, observedDescription: 'Imagem de produto com oferta premium.', inferredTags: [{ value: 'produto', confidence: 0.94, provenance: 'vision@v1:object' }], derivatives: { thumbnailArtifactId: thumbnailId, previewArtifactId: previewId, immutableOriginal: true }, createdAt: '2026-08-08T12:30:00.000Z' })
+    const analysis = createImageAnalysis({ id: `analysis-${imageId}`, workspaceId, artifactId: imageId, manifestId, sourceSha256: '3'.repeat(64), dimensions: { width: 1080, height: 1350 }, dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'Oferta premium', language: 'pt-BR', box: [0.1, 0.2, 0.8, 0.4], confidence: 0.97, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'available', values: [], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, objects: { state: 'available', values: [{ label: 'produto', box: [0.1, 0.1, 0.5, 0.5], confidence: 0.94 }], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, observedDescription: 'Imagem de produto com oferta premium.', inferredTags: [{ value: 'produto', confidence: 0.94, provenance: 'vision@v1:object' }], derivatives: { thumbnailArtifactId: imageThumbnailId, previewArtifactId: previewId, immutableOriginal: true }, createdAt: '2026-08-08T12:30:00.000Z' })
     await imageRepository.persist(analysis)
-    await assert.rejects(() => imageRepository.reuse({ workspaceId, projectId, artifactId: imageId, usage: 'card', text: 'oferta premium', createdAt: '2026-08-08T13:00:00.000Z' }), /rights/i)
+    await assert.rejects(() => imageRepository.reuse({ workspaceId, projectId, artifactId: imageId, usage: 'card', text: 'oferta premium', createdAt: '2026-08-08T13:00:00.000Z' }), /eligible|rights/i)
     const approved = createAssetRightsSnapshot({ id: `library-image-rights-approved-${suffix}`, workspaceId, artifactId: imageId, sequence: 2, draft: { status: 'approved', allowedUses: ['editorial-reuse'], prohibitedUses: [], consent: { status: 'approved', allowedUses: ['editorial-reuse'] } }, createdBy: { type: 'user', id: 'integration-test' }, createdAt: '2026-08-08T12:45:00.000Z' })
     await prisma.v2AssetRightsSnapshot.create({ data: rightsRow(approved) })
     await prisma.v2MediaArtifact.update({ where: { id: imageId }, data: { currentRightsSnapshotId: approved.id, rightsRevision: 2 } })
@@ -140,6 +164,27 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
 
     const createSegment = createMediaSegmentService({ repository: segmentRepository, clock: () => new Date('2026-08-08T13:00:00.000Z') })
     const firstSegment = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Promessa', startMs: 0, endMs: 5000 })
+    const attachedSegment = await attach({ ...attachRequest, selection: { kind: 'segment', segmentId: firstSegment.segment.id }, baseVersionId: created.resultVersionId, baseVersionHash: created.resultVersionHash, idempotencyKey: `library-segment-${suffix}` })
+    assert.equal(attachedSegment.selection.kind, 'segment')
+    assert.equal(attachedSegment.parentArtifactId, artifactIds[0])
+    assert.equal(attachedSegment.segmentHash, firstSegment.segment.segmentHash)
+    assert.deepEqual(attachedSegment.semanticRange, firstSegment.segment.semanticRange)
+    assert.equal(attachedSegment.bytesDuplicated, false)
+    const uiDelegation = { delegatedUserId: 'user-library-ui', delegatedIdentityId: 'identity-library-ui', workspaceRole: 'operator' }
+    const uiActor = { ...actor, ...uiDelegation, authenticationKind: 'ui-session', auditContext: createExternalAuditContext({ clientId: actor.clientId, credentialId: actor.credentialId, workspaceId, environment: 'production', ...uiDelegation }) }
+    const uiRequest = { ...attachRequest, baseVersionId: attachedSegment.resultVersionId, baseVersionHash: attachedSegment.resultVersionHash, idempotencyKey: `library-ui-${suffix}`, actor: uiActor }
+    const uiAttachment = await attach(uiRequest)
+    assert.equal((await attach(uiRequest)).replayed, true)
+    const uiCommand = await prisma.v2EditCommand.findUniqueOrThrow({ where: { id: uiAttachment.commandId } })
+    assert.equal(uiCommand.actorType, 'api-client')
+    assert.equal(uiCommand.actorId, actor.clientId)
+    assert.equal(uiCommand.actorAuthenticationKind, 'ui-session')
+    assert.equal(uiCommand.delegatedUserId, uiDelegation.delegatedUserId)
+    assert.equal(uiCommand.actorDelegatedIdentityId, uiDelegation.delegatedIdentityId)
+    assert.equal(uiCommand.actorWorkspaceRole, uiDelegation.workspaceRole)
+    assert.equal(uiCommand.actorCredentialId, actor.credentialId)
+    assert.match(uiCommand.actorContextHash, /^[a-f0-9]{64}$/)
+
     const overlap = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Prova', startMs: 4000, endMs: 8000 })
     const nested = await createSegment({ workspaceId, artifactId: artifactIds[0], parentSegmentId: firstSegment.segment.id, label: 'Frase', startMs: 1000, endMs: 5000 })
     const edge = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Tudo', startMs: 0, endMs: 10000 })
@@ -174,6 +219,25 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     await assert.rejects(() => repository.list({ workspaceId, kind: 'video', limit: 1, after: scopedCursor }, new Date('2026-08-08T13:01:00.000Z')), /cursor/i)
     await assert.rejects(() => createSegment({ workspaceId, artifactId: artifactIds[0], parentSegmentId: firstSegment.segment.id, label: 'Fora', startMs: 0, endMs: 6000 }), /inside|parent/i)
     await assert.rejects(() => createSegment({ workspaceId: otherWorkspaceId, artifactId: artifactIds[0], label: 'Cross workspace', startMs: 0, endMs: 1000 }), /not found/i)
+    // W41: mixed entities cross the UI page boundary; tied timestamps must not
+    // skip or repeat a row. Derive the oracle from DB identities, not cursors.
+    const tiedAt = new Date('2026-08-08T13:00:00.000Z')
+    for (let index = 0; index < 25; index += 1) {
+      const id = `library-page-${String(index).padStart(2, '0')}-${suffix}`
+      await prisma.v2MediaArtifact.create({ data: { id, workspaceId, artifactKey: `${workspaceId}/${id}`, sha256: 'b'.repeat(64), byteSize: 123n, mediaType: index % 2 ? 'audio' : 'image', container: index % 2 ? 'wav' : 'png', status: 'available' } })
+      await prisma.v2MediaLibraryEntry.create({ data: { artifactId: id, workspaceId, label: id, peopleJson: '[]', peopleSearch: '\n', topicsJson: '[]', topicsSearch: '\n', originType: 'upload', createdAt: tiedAt } })
+    }
+    const assetRows = await prisma.v2MediaLibraryEntry.findMany({ where: { workspaceId } })
+    const segmentRows = await prisma.v2MediaSegment.findMany({ where: { workspaceId } })
+    const oracle = [...assetRows.map((row) => ({ id: row.artifactId, key: `a:${row.artifactId}`, at: row.createdAt.toISOString() })), ...segmentRows.map((row) => ({ id: row.id, key: `s:${row.id}`, at: row.createdAt.toISOString() }))].sort((a, b) => b.at.localeCompare(a.at) || b.key.localeCompare(a.key)).map((row) => row.id)
+    const page24 = await repository.list({ workspaceId, limit: 24 }, new Date('2026-08-08T14:00:00.000Z'))
+    assert.equal(page24.items.length, 24); assert.ok(page24.nextCursor)
+    const tail = await repository.list({ workspaceId, limit: 24, after: page24.nextCursor }, new Date('2026-08-08T14:00:00.000Z'))
+    assert.equal(tail.nextCursor, null)
+    assert.deepEqual([...page24.items, ...tail.items].map((item) => item.id), oracle)
+    assert.equal(new Set(oracle).size, oracle.length)
+    assert.ok([...page24.items, ...tail.items].some((item) => item.kind === 'segment'))
+    await assert.rejects(() => repository.list({ workspaceId: otherWorkspaceId, limit: 24, after: page24.nextCursor }, new Date()), /cursor/i)
   } finally {
     await cleanup()
     await prisma.$disconnect()
