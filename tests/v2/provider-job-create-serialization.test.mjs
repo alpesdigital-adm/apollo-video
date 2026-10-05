@@ -69,7 +69,7 @@ function controlledClient({ failureCode = 'P2034', releaseAfterTurn = true, revo
   return { client, get attempts() { return attempts }, get authorityReads() { return authorityReads }, get writes() { return writes } }
 }
 
-test('unit: P2034 contention lasting until timer turn permits fresh Serializable create without exceeding four attempts', async () => {
+test('unit: P2034 contention lasting until timer turn permits fresh Serializable create without exceeding eight attempts', async () => {
   const fake = controlledClient()
   const result = await new PrismaProviderJobRepository(fake.client).create(fixture())
   assert.equal(result.replayed, false)
@@ -87,11 +87,11 @@ test('unit: each P2034 retry rechecks authority in a fresh transaction before wr
   assert.equal(fake.writes, 1)
 })
 
-test('unit: exhausted P2034 retains original error and four-attempt cap', async () => {
+test('unit: exhausted P2034 retains original error and eight-attempt cap', async () => {
   const fake = controlledClient({ releaseAfterTurn: false })
   await assert.rejects(new PrismaProviderJobRepository(fake.client).create(fixture()), (error) => error.code === 'P2034' && error.message === 'controlled conflict')
-  assert.equal(fake.attempts, 4)
-  assert.equal(fake.authorityReads, 4)
+  assert.equal(fake.attempts, 8)
+  assert.equal(fake.authorityReads, 8)
 })
 
 test('unit: other Prisma errors are not retried', async () => {
@@ -110,4 +110,19 @@ test('unit: P2002 replay remains scoped to workspace, actor context and idempote
   const missing = controlledClient({ releaseAfterTurn: false, failureCode: 'P2002' })
   await assert.rejects(new PrismaProviderJobRepository(missing.client).create(input), (error) => error.code === 'VERSION_CONFLICT')
   assert.equal(missing.attempts, 1)
+})
+
+test('unit: a backoff waking beyond the admission budget cannot start another transaction', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(performance, 'now')
+  let clockReads = 0
+  Object.defineProperty(performance, 'now', { configurable: true, value: () => ++clockReads >= 3 ? 5001 : 0 })
+  try {
+    const fake = controlledClient({ releaseAfterTurn: false })
+    await assert.rejects(new PrismaProviderJobRepository(fake.client).create(fixture()), (error) => error.code === 'P2034' && error.message === 'controlled conflict')
+    assert.equal(fake.attempts, 1)
+    assert.equal(clockReads, 3)
+  } finally {
+    if (descriptor) Object.defineProperty(performance, 'now', descriptor)
+    else delete performance.now
+  }
 })

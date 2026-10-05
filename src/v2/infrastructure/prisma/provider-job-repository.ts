@@ -31,6 +31,11 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { hydrateSyntheticPresenterProfile } from './synthetic-production-repository.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
+// The former four-attempt schedule allowed only 60 ms of total backoff.
+// Backoff totals at most 1,575 ms; no new retry starts after the 5 s admission budget.
+const CREATE_SERIALIZATION_MAX_ATTEMPTS = 8
+const CREATE_SERIALIZATION_RETRY_BUDGET_MS = 5_000
+
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
@@ -445,6 +450,7 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
   }
 
   async create(input: Parameters<ProviderJobRepository['create']>[0]) {
+    const retryStartedAt = performance.now()
     for (let attempt = 1; ; attempt += 1) {
     try {
       return await this.prisma.$transaction(async (transaction) => {
@@ -511,11 +517,13 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
         return Object.freeze({ persisted: Object.freeze({ ...parseJob(row), transportState }), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      // Yield after a transient serialization conflict so a competing
-      // transaction can finish before the next fresh authority check.
-      if (isPrismaCode(error, 'P2034') && attempt < 4) {
-        await new Promise<void>((resolve) => setTimeout(resolve, attempt * 10))
-        continue
+      // Retry the whole Serializable transaction, including fresh authority and
+      // actor checks. Four immediate retries can all overlap a busy worker.
+      const delayMs = Math.min(400, 25 * 2 ** (attempt - 1))
+      if (isPrismaCode(error, 'P2034') && attempt < CREATE_SERIALIZATION_MAX_ATTEMPTS &&
+          performance.now() - retryStartedAt + delayMs < CREATE_SERIALIZATION_RETRY_BUDGET_MS) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+        if (performance.now() - retryStartedAt < CREATE_SERIALIZATION_RETRY_BUDGET_MS) continue
       }
       if (!isPrismaCode(error, 'P2002')) throw error
       const fallback = input.job.transformation?.fallback
