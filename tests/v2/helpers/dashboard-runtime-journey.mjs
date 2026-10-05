@@ -203,7 +203,17 @@ export async function runDashboardRuntimeJourney(input) {
       evidence.outputs.push({ operationId, artifactId: artifact.id, sha256: artifact.sha256, byteSize: bytes.length, name, probe, fullDecode: true })
     }
     activeObserver = null
-    const failedProxy = await post(`/v1/projects/${copy.project.id}/proxy-renders`, undefined, `runtime-failure-${suffix}`, 202)
+    const compilation = JSON.parse((await client.v2ColorPipelineCompilation.findFirstOrThrow({ where: { workspaceId, projectId } })).compilationJson)
+    await post(`/v1/projects/${copy.project.id}/color-pipeline-compilations`, {
+      sourceArtifactId: compilation.sourceArtifactId, sourceManifestId: compilation.sourceManifestId,
+      outputMetadata: compilation.pipeline.outputMetadata, stages: compilation.pipeline.stages,
+    }, `runtime-copy-color-${suffix}`, 201)
+    const selected = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
+      baseVersionId: copy.version.id, baseHash: copy.version.baseHash, selection: { mode: 'none' },
+      reason: 'Controlled neutral rendering for independent runtime fence proof.',
+    }, `runtime-copy-lut-${suffix}`, 201)
+    const failedProxy = selected
+    const newerProxy = await post(`/v1/projects/${copy.project.id}/proxy-renders`, undefined, `runtime-newer-proxy-${suffix}`, 202)
     const hidden = `${sourcePath}.owned-unavailable`
     await rename(sourcePath, hidden)
     try {
@@ -214,7 +224,52 @@ export async function runDashboardRuntimeJourney(input) {
       }
     } finally { await rename(hidden, sourcePath) }
     const failedRow = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: failedProxy.operation.id } })
-    await observe({ stage: 'failed', id: copy.project.id, status: 'failed', operationId: failedRow.id, phase: 'failed', completed: failedRow.progressCompleted, eventTypes: ['operation.status.changed'] })
+    assert.equal(failedRow.status, 'failed')
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'rendering-proxy', 'older failure cannot replace newer same-version admission')
+    const rejectedRetry = await fetch(`${baseUrl}/v1/operations/${failedRow.id}/retry`, { method: 'POST', headers: { authorization }, signal: AbortSignal.timeout(30000) })
+    const rejectedRetryBody = await rejectedRetry.json()
+    assert.equal(rejectedRetryBody.error?.code, 'PROJECT_TRANSITION_REJECTED')
+    assert.equal((await client.v2PublicOperation.findUniqueOrThrow({ where: { id: failedRow.id } })).status, 'failed', 'rejected retry rolls back its operation transition')
+    assert.deepEqual(await proxyWorker(`runtime-newer-worker-${suffix}`, { workspaceId, operationId: newerProxy.operation.id, signal }), { operationId: newerProxy.operation.id, status: 'succeeded' })
+    await observe({ stage: 'copy-review', id: copy.project.id, status: 'reviewing-proxy', operationId: newerProxy.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    const copyReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: newerProxy.operation.id } })
+    const copyArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: copyReview.proxyArtifactId } })
+    const copyAnnotation = await post(`/v1/projects/${copy.project.id}/annotations`, {
+      projectVersionId: selected.version.id, proxyArtifactId: copyArtifact.id, proxyHash: copyArtifact.sha256,
+      frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
+      screenshotRef: 'w35-copy-review-desktop.png', text: 'Ajustar enquadramento central.',
+    }, `runtime-copy-annotation-${suffix}`, 201)
+    await pipeline.observe({ stage: 'copy-annotation', projectId: copy.project.id, annotationId: copyAnnotation.annotation.id,
+      expectedEventTypes: ['annotation.created'], expectedState: 'reviewing-proxy' })
+    const proposal = await post(`/v1/projects/${copy.project.id}/patch-proposals`, { annotationId: copyAnnotation.annotation.id }, `runtime-proposal-${suffix}`, 201)
+    assert.equal(proposal.proposal.status, 'ready')
+    const applied = await post(`/v1/projects/${copy.project.id}/patch-proposals/${proposal.proposal.id}/apply`, { confirmed: true }, `runtime-patch-${suffix}`, 201)
+    assert.equal((await client.v2ReviewAnnotation.findUniqueOrThrow({ where: { id: copyAnnotation.annotation.id } })).status, 'applied')
+    await pipeline.observe({ stage: 'annotation-resolved', projectId: copy.project.id, annotationId: copyAnnotation.annotation.id,
+      expectedEventTypes: ['annotation.resolved'], expectedState: 'rendering-proxy' })
+    assert.deepEqual(await proxyWorker(`runtime-patch-worker-${suffix}`, { workspaceId, operationId: applied.operation.id, signal }), { operationId: applied.operation.id, status: 'succeeded' })
+    await observe({ stage: 'patched-review', id: copy.project.id, status: 'reviewing-proxy', operationId: applied.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    // Exhaust actual durable claims without any status seed or mutation. Each
+    // abandoned claim owns a short lease; the next runtime claim settles it.
+    const abandoned = await post(`/v1/projects/${copy.project.id}/proxy-renders`, undefined, `runtime-abandoned-${suffix}`, 202)
+    const repository = new PrismaPublicOperationRepository(client)
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const now = new Date()
+      const claim = await repository.claimNext({ type: 'project-proxy-render', workspaceId, operationId: abandoned.operation.id,
+        leaseOwner: `abandoned-owned-${suffix}-${attempt}`, now: now.toISOString(), leaseUntil: new Date(now.getTime() + 50).toISOString() })
+      assert.equal(claim.lease.attempt, attempt); await delay(70)
+    }
+    const afterLease = new Date()
+    assert.equal(await repository.claimNext({ type: 'project-proxy-render', workspaceId, operationId: abandoned.operation.id,
+      leaseOwner: `exhaustion-observer-${suffix}`, now: afterLease.toISOString(), leaseUntil: new Date(afterLease.getTime() + 120000).toISOString() }), null)
+    const exhausted = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: abandoned.operation.id } })
+    assert.equal(exhausted.errorCode, 'worker_lease_expired')
+    await observe({ stage: 'failed', id: copy.project.id, status: 'failed', operationId: exhausted.id, phase: 'failed', completed: exhausted.progressCompleted, eventTypes: ['operation.status.changed'] })
+    await post(`/v1/operations/${exhausted.id}/retry`, undefined, `runtime-retry-${suffix}`, 200)
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'rendering-proxy')
+    await delay(1100)
+    assert.deepEqual(await proxyWorker(`runtime-retry-worker-${suffix}`, { workspaceId, operationId: exhausted.id, signal }), { operationId: exhausted.id, status: 'succeeded' })
+    await observe({ stage: 'retried-review', id: copy.project.id, status: 'reviewing-proxy', operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     evidence.pipeline = await pipeline.finish(); evidence.outcome = 'passed'
   } catch (error) { primaryError = error; evidence.outcome = 'failed'; evidence.failure = { name: error.name, message: error.message }; throw error }
   finally {
