@@ -2,6 +2,8 @@
 
 > Estado atual dos escopos e bloqueios: [PROJECT-STATUS.md](./PROJECT-STATUS.md). Esta matriz liga requisitos a evidências; o registro estruturado separa construção, integração, validação, implantação e aceite e não altera a auditoria do TODO.
 
+> Correção de controle em 05/10/2026: o painel inclui inventário individual por ID das 1.259 tarefas. Cada tarefa mantém a linha/texto do TODO e o escopo das provas, com waves associadas sem contagem dupla. Aceite histórico não comprova implantação atual; implementação parcial de uma seção não comprova início ou conclusão de todas as suas tarefas. Lacunas de evidência individual permanecem explícitas e impedem usar o percentual histórico como prontidão atual.
+
 > **Fonte:** PRD v1.2  
 > **Objetivo:** garantir que cada requisito tenha fase, spec, dependência, evidência de aceite e teste.
 

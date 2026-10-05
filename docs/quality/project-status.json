@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-05T17:13:44.736Z",
+  "updatedAt": "2026-10-05T22:05:00.000Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "cd76f84c88756840e2dca85334caf29edfb9c470",
+  "evidenceBaseCommit": "4cfdcabd466ab8652a8a8b7d076fa342eaac4037",
   "coverage": {
     "unit": "todo-section",
     "total": 250,

@@ -7,7 +7,7 @@
 > **Produto:** Apollo Video  
 > **Natureza do documento:** PRD mestre, cobrindo visão final e entregas incrementais
 
-O estado de execução por escopo, com provas e bloqueios separados de implantação e aceite, está em [PROJECT-STATUS.md](./PROJECT-STATUS.md). O percentual auditado continua derivado de [TODO.md](../TODO.md), sem somar waves ou validações técnicas como produto entregue.
+O estado de execução por tarefa e por escopo, com provas e bloqueios separados de implantação e aceite, está em [PROJECT-STATUS.md](./PROJECT-STATUS.md). As caixas marcadas no [TODO.md](../TODO.md) preservam o registro histórico; seu percentual não mede a implantação e o aceite da versão atual. O inventário individual distingue situação comprovada de evidência parcial de grupo. Waves e validações técnicas não são somadas como produto entregue.
 
 O [plano W31–W40](./PLANO-WAVES-31-40.md) divide FR-002, FR-003 e FR-004 em dez escopos progressivos. Trata-se de planejamento; implementação, integração, validação, implantação e aceite continuam separados.
 

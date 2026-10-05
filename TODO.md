@@ -3,16 +3,20 @@
 > **Fonte principal:** [`docs/PRD-APOLLO-V2.md`](./docs/PRD-APOLLO-V2.md), versão 1.2  
 > **Rastreabilidade:** [`docs/REQUIREMENTS-TRACEABILITY.md`](./docs/REQUIREMENTS-TRACEABILITY.md)  
 > **Especificações:** [`docs/specs`](./docs/specs)  
-> **Estado:** backlog inicial; nenhuma caixa marcada sem evidência verificável  
+> **Estado:** backlog auditado; marcações históricas e comprovação atual separadas no painel  
 > **Unidade:** uma microtarefa deve produzir um artefato revisável e, em geral, caber em até um dia de trabalho
 
 ---
 
 ## Consulta rápida e controle das waves
 
+**Correção do controle em 05/10/2026:** as 380 caixas marcadas abaixo são o registro histórico preservado, não uma medição da implantação e do aceite da versão atual. Consulte o inventário individual em `docs/PROJECT-STATUS.md`: cada uma das 1.259 tarefas aparece uma única vez, com ID, linha de origem, evidências e pendências. Grupos parcialmente implementados não comprovam que todas as suas tarefas começaram. Uma wave validada não encerra automaticamente os IDs relacionados. Enquanto houver situação individual não comprovada, não há percentual confiável de produto pronto; o painel apresenta as contagens e a lacuna explicitamente. Esta correção não marca nem desmarca caixas.
+
 O estado atual está em [`docs/PROJECT-STATUS.md`](./docs/PROJECT-STATUS.md), gerado de [`docs/quality/project-status.json`](./docs/quality/project-status.json). Execute `npm run project:status` para consultar em instantes; use `-- --state validado`, `-- --state pendente-validacao`, `-- --state em-construcao` ou `-- --state fila` para listar os escopos de cada estado. Use `-- --classification` para consultar a triagem ainda sem classificação; esses casos não entram na contagem de validações pendentes identificadas.
 
 O registro cobre todas as caixas deste TODO com IDs estáveis e separa construção, integração, validação, implantação e aceite. “Validado” identifica prova técnica, aceite histórico ou documento que seja o próprio resultado pedido; o tipo de prova fica explícito e não altera `[x]` nem o percentual de entrega. A [auditoria de classificação](./docs/quality/project-status-classification-audit.md) fecha a organização das 250 seções, sem concluir as 879 microtarefas abertas. Nova classificação desconhecida deve ficar explícita, sem inferir fila a partir de caixa aberta. “Em construção” pode representar implementação parcial pausada; não implica um agente trabalhando agora.
+
+Consulta individual: `npm run project:status -- --task-state falta-implantacao` lista as tarefas com prova técnica do escopo e implantação pendente; `-- --task-state falta-validacao` lista as que aguardam comprovação técnica; `-- --task-state situacao-individual-nao-comprovada` expõe as tarefas de grupos parciais que exigem revisão individual. `-- --json` inclui o inventário e as contagens únicas. Os filtros `--state` acima são de grupos, não de tarefas individuais. Aceites históricos cuja única referência é o próprio TODO são sinalizados separadamente para reconciliação de artefatos.
 
 Plano progressivo preparado: [W31–W40](./docs/PLANO-WAVES-31-40.md), com dez pacotes de desenvolvimento e comprovação em fila; preparar pacotes não inicia construção nem altera caixas do TODO.
 
@@ -32,9 +36,9 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.029, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036, ColorPlan F2.027, Export matrix F2.028 e as entregas de cor comprovadas de F2.025/F2.026, com a jornada integral do MVP Core, o gate de reutilização e produção em lote e o control plane de transformação F3.013–F3.016/F3.018 operando sobre PostgreSQL V2, API pública e implantação em produção:
+Registro histórico anterior à reconciliação de 05/10/2026: as marcações abaixo foram acumuladas após os gates e slices F0–F3 descritos nesta seção. As referências a produção e aceite nos parágrafos seguintes descrevem evidências da época, não uma verificação da implantação atual. O inventário individual do painel registra a comprovação e as lacunas atuais separadamente:
 
-- **380 de 1.259 microtarefas verificadas como efetivamente entregues (30,18%)**;
+- **380 de 1.259 caixas marcadas no registro histórico (30,18% das caixas; não é percentual de produto pronto)**;
 - **879 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - os gates do MVP Core F1 e de reutilização/lote F2 foram aprovados; o slice de
@@ -45,7 +49,7 @@ Estado auditado após o gate F2.029, o fechamento estrutural de F0.035, as três
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
 
-Esta porcentagem mede o PRD completo. Workspace, ingestão, Command editorial,
+Esta porcentagem mede apenas as marcações históricas sobre o denominador do PRD completo. Não mede prontidão atual. O registro histórico a seguir descrevia: Workspace, ingestão, Command editorial,
 DirectorRun, critic, proxy legendado, revisão/correção, duplicação e exports
 finais 9:16/16:9 já são executáveis pela API V2 sobre Postgres. O gate
 automático 16/16 foi concluído. O catálogo virtual de SpeechSegments também
@@ -716,6 +720,8 @@ Incremento local F0.102: busca semântica, ingest/transcrição e os stages dur�
 **Gate da fase:** um vídeo ou áudio de 30–120s produz automaticamente um proxy revisável, recebe correções manuais/por annotation e gera finais 9:16 e 16:9 reconstruíveis.
 
 ### F1.001 — Dashboard de projetos [FR-002]
+
+Checkpoint W31–W40, reconciliado em 05/10/2026: os textos “parcial local” das caixas abaixo preservam a descrição inicial. W34 comprovou o agregado; W35/W36 fecharam os escopos técnicos de estados/progresso por worker e atualização via outbox → HTTP → refetch → card, em PostgreSQL, FFmpeg e Chromium reais sobre dados controlados. A evidência atual está no [registro por tarefa e wave](./docs/PROJECT-STATUS.md), em [PR #76](https://github.com/alpesdigital-adm/apollo-video/pull/76) e no [CI do dashboard em main `4cfdcabd`](https://github.com/alpesdigital-adm/apollo-video/actions/runs/37346936496). Assim, “transporte integrado de eventos pendente” descreve a etapa anterior e não o resultado de W36. Isso não comprova toda a capacidade FR-002, providers live, implantação ou aceite; as caixas permanecem abertas e seus IDs/textos são preservados.
 
 - [ ] Criar query agregada de projeto, versão atual, jobs, review issues e outputs. Parcial local F1.001/F1.003: `GET /v1/projects` v4/project-list v6 consulta somente Postgres V2 e agrega a versão atual, operação pública durável mais recente, annotations abertas da versão corrente, outputs concluídos e fence administrativo; ausências permanecem `null`/listas vazias e o domínio falha fechado contra relações inconsistentes. A jornada HTTP/PostgreSQL está preparada, mas não foi executada neste ambiente; implantação e aceite permanecem pendentes.
 - [ ] Implementar cards conforme referência visual, com progresso derivado de steps/items reais. Parcial local F1.001: os cards usam o agregado público para versão, etapa, review e outputs; barra e percentual só existem quando `completed` e `total` foram medidos. E2E visual/browser, implantação e aceite permanecem pendentes.

@@ -20,6 +20,7 @@ const enums = {
 const blockerKinds = ['implementation', 'validation', 'live-provider', 'deployment', 'owner-acceptance', 'classification'];
 const evidenceTypes = ['repo', 'ci', 'pr', 'private'];
 const evidenceRoles = ['classification', 'implementation', 'integration', 'planned-not-started', 'controlled-e2e', 'real-e2e', 'deployment', 'owner-acceptance', 'historical-acceptance', 'document-result'];
+const historicalSectionOnlyWaves = new Set(['W24', 'W25', 'W26', 'W27', 'W28']);
 const verifiedValidation = ['controlled-e2e', 'real-e2e', 'accepted', 'documented'];
 const shaPattern = /^[a-f0-9]{40}$/i;
 
@@ -107,7 +108,7 @@ export function validateStatus(data, todoText, evidenceRoot = root) {
     const open = parsedTodo.items.length - done;
     assert(done === data.audit.delivered && done + open === data.audit.total,
       `TODO audit drift: JSON ${data.audit.delivered}/${data.audit.total}, TODO ${done}/${done + open}`);
-    const header = todoText.match(/\*\*([\d.]+) de ([\d.]+) microtarefas verificadas/);
+    const header = todoText.match(/\*\*([\d.]+) de ([\d.]+) (?:microtarefas verificadas|caixas marcadas no registro histórico)/);
     assert(header && Number(header[1].replaceAll('.', '')) === done
       && Number(header[2].replaceAll('.', '')) === done + open, 'TODO audit header drift');
     for (const match of todoText.matchAll(/^\|\s*Microtarefas\/checks abertos\s*\|\s*([\d.]+)\s*\|/gm)) {
@@ -161,6 +162,10 @@ export function validateStatus(data, todoText, evidenceRoot = root) {
       if (item.blockers.some((blocker) => blocker.kind === 'classification')) {
         for (const section of item.todoSections) unclassifiedSections.add(section);
       }
+    }
+    if (data.coverage !== undefined && item.kind === 'wave') {
+      assert((item.todoItems?.length ?? 0) > 0 || historicalSectionOnlyWaves.has(item.id),
+        `${label}: wave requires explicit TODO task IDs (only W24-W28 retain historical section-only links)`);
     }
     assert(Array.isArray(item.evidence), `${label}.evidence must be an array`);
     for (const evidence of item.evidence) {
@@ -234,6 +239,12 @@ export function validateStatus(data, todoText, evidenceRoot = root) {
           const task = parsed.items.find((entry) => entry.id === id);
           assert(item.todoSections.includes(task.sectionKey), `TODO task ${id} assigned outside declared section`);
         }
+      } else if (item.todoItems !== undefined) {
+        for (const id of item.todoItems) {
+          const task = parsed.items.find((entry) => entry.id === id);
+          assert(task, `Wave ${item.id} references unknown TODO task ${id}`);
+          assert(item.todoSections.includes(task.sectionKey), `Wave ${item.id} TODO task ${id} assigned outside declared section`);
+        }
       }
     }
     assert(data.coverage.total === sections.size, 'coverage.total differs from parsed TODO sections');
@@ -244,7 +255,108 @@ export function validateStatus(data, todoText, evidenceRoot = root) {
   return data;
 }
 
-export function snapshot(data, state, classification = false) {
+const ledgerBuckets = [
+  'documentado', 'aceito-historico', 'implantado-e-aceito', 'falta-aceite',
+  'falta-implantacao', 'falta-validacao', 'nao-iniciado',
+  'situacao-individual-nao-comprovada', 'tecnico-com-bloqueios',
+];
+const bucketLabels = {
+  documentado: 'Documentos concluídos',
+  'aceito-historico': 'Aceite histórico registrado',
+  'implantado-e-aceito': 'Implantado e aceito na versão atual',
+  'falta-aceite': 'Implantado; falta aceite do proprietário',
+  'falta-implantacao': 'Testado tecnicamente; faltam implantação e aceite',
+  'falta-validacao': 'Implementado; falta comprovação técnica',
+  'nao-iniciado': 'Na fila; não iniciadas conforme registro',
+  'situacao-individual-nao-comprovada': 'Implementação parcial no grupo; situação individual não comprovada',
+  'tecnico-com-bloqueios': 'Testado tecnicamente; outros bloqueios permanecem',
+};
+
+function individualBucket(item) {
+  if (item.state === 'validado' && item.validation === 'documented') return 'documentado';
+  if (item.state === 'validado' && item.deployment === 'historical' && item.acceptance === 'accepted') return 'aceito-historico';
+  if (item.state === 'validado' && item.deployment === 'current' && item.acceptance === 'accepted'
+    && item.evidence.some((proof) => proof.role === 'deployment')
+    && item.evidence.some((proof) => proof.role === 'owner-acceptance')) return 'implantado-e-aceito';
+  if (ownerOnly(item)) return 'falta-aceite';
+  if (item.state === 'validado' && item.construction === 'implemented' && item.integration === 'main'
+    && item.deployment === 'pending' && item.blockers.every((blocker) => ['deployment', 'owner-acceptance'].includes(blocker.kind)))
+    return 'falta-implantacao';
+  if (item.state === 'validado') return 'tecnico-com-bloqueios';
+  if (item.state === 'pendente-validacao' && item.construction === 'implemented' && item.integration === 'main'
+    && item.blockers.some((blocker) => blocker.kind === 'validation')) return 'falta-validacao';
+  if (item.state === 'fila' && item.construction === 'not-started'
+    && item.evidence.some((proof) => proof.role === 'planned-not-started')) return 'nao-iniciado';
+  // A partial capability describes its scope collectively. It does not prove which task started.
+  return 'situacao-individual-nao-comprovada';
+}
+function scopeAnchor(item) { return `scope-${item.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`; }
+
+export function buildTodoLedger(data, todoText) {
+  const parsed = parseTodo(todoText);
+  const capabilities = new Map();
+  for (const item of data.items.filter((entry) => entry.kind === 'capability')) {
+    for (const id of item.todoItems ?? []) {
+      assert(!capabilities.has(id), `Duplicate capability mapping for TODO task ${id}`);
+      capabilities.set(id, item);
+    }
+  }
+  const waves = data.items.filter((entry) => entry.kind === 'wave');
+  const items = parsed.items.map((task) => {
+    const capability = capabilities.get(task.id);
+    assert(capability, `Missing capability mapping for TODO task ${task.id}`);
+    const contextWaves = waves.filter((wave) => wave.todoItems?.includes(task.id)
+      || (!wave.todoItems?.length && wave.todoSections.includes(task.sectionKey)));
+    return {
+      ...task,
+      capabilityId: capability.id,
+      bucket: individualBucket(capability),
+      evidence: capability.evidence,
+      blockers: capability.blockers,
+      waves: contextWaves.map((wave) => wave.id),
+      evidenceScope: 'escopo da capability; vínculo individual não reavaliado',
+    };
+  });
+  const counts = Object.fromEntries(ledgerBuckets.map((bucket) => [bucket, items.filter((item) => item.bucket === bucket).length]));
+  const checkedCounts = Object.fromEntries(ledgerBuckets.map((bucket) => [bucket, items.filter((item) => item.bucket === bucket && item.checked).length]));
+  assert(items.length === data.audit.total, `Ledger total ${items.length} differs from audit ${data.audit.total}`);
+  assert(new Set(items.map((item) => item.id)).size === items.length, 'Duplicate TODO IDs in ledger');
+  assert(Object.values(counts).reduce((sum, count) => sum + count, 0) === data.audit.total, 'Ledger buckets do not sum to audit total');
+  const waveSummary = waves.map((wave) => ({
+    id: wave.id,
+    title: wave.title,
+    linkedTodoCount: new Set(items.filter((task) => task.waves.includes(wave.id)).map((task) => task.id)).size,
+    association: wave.todoItems?.length ? 'IDs explícitos contextuais' : 'apenas seção contextual',
+  }));
+  const explicitWaveTodoIds = new Set(waves.flatMap((wave) => wave.todoItems ?? []));
+  const historicalTodoOnly = items.filter((task) => {
+    const item = capabilities.get(task.id);
+    const proofs = item.evidence.filter((entry) => entry.role === 'historical-acceptance');
+    return task.bucket === 'aceito-historico' && proofs.length > 0
+      && proofs.every((entry) => entry.type === 'repo' && entry.ref.split('#', 1)[0] === 'TODO.md');
+  }).length;
+  const pendingStageCount = items.filter((task) => {
+    const item = capabilities.get(task.id);
+    return item.deployment === 'pending' && item.acceptance === 'pending';
+  }).length;
+  return {
+    total: items.length,
+    checked: items.filter((item) => item.checked).length,
+    counts,
+    checkedCounts,
+    checkedAwaitingDeploymentOrAcceptance: items.filter((item) => item.checked && ['falta-implantacao', 'falta-aceite'].includes(item.bucket)).length,
+    checkedProductWithoutCurrentAcceptance: items.filter((item) => item.checked && !['documentado', 'implantado-e-aceito'].includes(item.bucket)).length,
+    historicalTodoOnly,
+    pendingStageCount,
+    unknownIndividualCount: counts['situacao-individual-nao-comprovada'],
+    items,
+    waveSummary,
+    explicitWaveTodoIdCount: explicitWaveTodoIds.size,
+    sectionOnlyWaveCount: waves.filter((wave) => !wave.todoItems?.length).length,
+  };
+}
+
+export function snapshot(data, state, classification = false, todoText) {
   const classified = data.items.filter((item) => !needsClassification(item));
   const triage = data.items.filter(needsClassification);
   const counts = Object.fromEntries(enums.kind.map((kind) => [kind,
@@ -258,6 +370,7 @@ export function snapshot(data, state, classification = false) {
     evidenceBaseCommit: data.evidenceBaseCommit, ...(data.coverage ? { coverage: data.coverage } : {}),
     counts, taskCounts, classificationCount: triage.length, classificationTaskCount,
     ownerOnlyCount: classified.filter(ownerOnly).length,
+    ...(todoText === undefined ? {} : { todoLedger: buildTodoLedger(data, todoText) }),
     items: data.items.filter((item) => classification ? needsClassification(item) : !state || (!needsClassification(item) && item.state === state))
       .map((item) => ({ ...item, ownerOnly: ownerOnly(item) })),
   };
@@ -272,8 +385,9 @@ function evidenceLinks(item) {
     return `[${label.replaceAll('[', '').replaceAll(']', '')}](${target})`;
   }).join(', ');
 }
-export function renderDashboard(data) {
-  const view = snapshot(data);
+export function renderDashboard(data, todoText) {
+  const view = snapshot(data, undefined, false, todoText);
+  const ledger = view.todoLedger;
   const dataHash = createHash('sha256').update(JSON.stringify(data)).digest('hex');
   const waveItems = view.items.filter((item) => item.kind === 'wave');
   const capabilityItems = view.items.filter((item) => item.kind === 'capability');
@@ -282,8 +396,35 @@ export function renderDashboard(data) {
   const lines = [
     '# Apollo — status por escopo', '',
     `Atualizado: ${data.updatedAt}. Evidência-base: \`${data.evidenceBaseCommit}\`.`, '',
-    `Snapshot SHA256: \`${dataHash}\`.`, '',
-    `TODO auditado: **${data.audit.delivered}/${data.audit.total}** microtarefas entregues. Este número vem de \`TODO.md\`; os estados abaixo descrevem somente os escopos declarados, sem somar progresso.`, '',
+    `Snapshot JSON SHA256: \`${dataHash}\` (somente project-status.json; TODO verificado separadamente).`, '',
+    `TODO auditado: **${data.audit.delivered}/${data.audit.total}** caixas marcadas como concluídas no histórico. Isso não afirma implantação ou aceite atuais.`, '',
+    ...(ledger ? [
+      '## Resumo por microtarefa', '',
+      `Inventário: **${ledger.total} IDs únicos**; **${ledger.checked}** caixas marcadas no TODO; **${ledger.checkedAwaitingDeploymentOrAcceptance}** caixas marcadas com validação técnica, ainda em falta de implantação ou aceite. Entre as caixas de produto marcadas, **${ledger.checkedProductWithoutCurrentAcceptance}** não têm prova de implantação e aceite atuais; documentos não entram nessa comparação.`, '',
+      `Etapas de implantação e aceite registradas como pendentes: **${ledger.pendingStageCount}** caixas. Dessas, **${ledger.counts['falta-implantacao']}** têm validação técnica do escopo declarado; as demais têm pré-requisitos ou situação individual não comprovada. Isto não é uma lista pronta para deploy.`, '',
+      `Aceite histórico declarado: **${ledger.counts['aceito-historico']}** caixas; em **${ledger.historicalTodoOnly}**, a única prova rotulada como aceite histórico aponta para o próprio TODO. Essas caixas requerem vínculo com artefatos independentes antes de revalidar o aceite.`, '',
+      `Situação individual não comprovada: **${ledger.unknownIndividualCount}**. Enquanto houver IDs nesta categoria, nenhum percentual de produto pronto pode ser calculado destes buckets.`, '',
+      '| Situação individual | Caixas | Marcadas no TODO |', '| --- | ---: | ---: |',
+      ...ledgerBuckets.map((bucket) => `| ${bucketLabels[bucket]} | ${ledger.counts[bucket]} | ${ledger.checkedCounts[bucket]} |`),
+      `| **Total** | **${ledger.total}** | **${ledger.checked}** |`, '',
+      '`aceito-historico` significa aceite histórico declarado de implantação anterior, não revalidado nesta revisão. `falta-implantacao` identifica validação técnica do escopo declarado; ainda exige os gates globais de produção.', '',
+      'As evidências e bloqueios de grupos são referências do escopo coletivo; não comprovam isoladamente cada caixa. Waves indicam associação contextual e não promovem estado.', '',
+      '## Associação contextual das waves', '',
+      `Waves com vínculos por ID: **${ledger.explicitWaveTodoIdCount} IDs TODO únicos**; waves vinculadas somente por seção: **${ledger.sectionOnlyWaveCount}**. Sobreposições entre waves não somam progresso.`, '',
+      '| Wave | Escopo | IDs TODO associados | Critério |', '| --- | --- | ---: | --- |',
+      ...ledger.waveSummary.map((wave) => `| ${[wave.id, wave.title, wave.linkedTodoCount, wave.association].map(escapeCell).join(' | ')} |`), '',
+      '## Inventário completo do TODO', '',
+      '| ID | Linha | Caixa | Seção | Texto | Situação individual | Capability | Evidências | Bloqueios | Waves contextuais |',
+      '| --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |',
+      ...ledger.items.map((task) => `| ${[
+        task.id, task.line, task.checked ? '[x]' : '[ ]', task.sectionKey, task.text,
+        task.bucket, `[${task.capabilityId}](#${scopeAnchor({ id: task.capabilityId })})`,
+        task.evidence.length ? `${task.evidence.length} registro(s) do escopo; [ver evidências](#${scopeAnchor({ id: task.capabilityId })})` : 'nenhuma',
+        task.blockers.length ? `${task.blockers.map((blocker) => blocker.kind).join(', ')}; [ver bloqueios](#${scopeAnchor({ id: task.capabilityId })})` : 'nenhum',
+        task.waves.join(', ') || 'nenhuma',
+      ].map(escapeCell).join(' | ')} |`), '',
+      '## Classificação por grupo (referência secundária)', '',
+    ] : []),
     ...(data.coverage ? [`Organização do registro: **${data.coverage.classified}/${data.coverage.total}** seções completas; **${data.coverage.unclassified}** pendentes de classificação. Isto não altera as **${data.audit.delivered}/${data.audit.total}** caixas auditadas como entrega.`, ''] : []),
     `Só aceite do owner: **${view.ownerOnlyCount}** linhas. Triagem de classificação: **${view.classificationCount} linhas / ${view.classificationTaskCount} caixas**.`, '',
     `Validação pendente identificada: **${view.counts.capability['pendente-validacao']} linha(s) / ${view.taskCounts['pendente-validacao']} caixa(s)**. As ${view.classificationTaskCount} caixas em triagem não entram nessa contagem.`, '',
@@ -305,32 +446,35 @@ export function renderDashboard(data) {
     ...states.flatMap((state) => [
       `## Capabilities — ${state}`, '',
       '| ID | Escopo | Caixas | Resultado | Validação | Implantação | Aceite | Bloqueio | Evidências | Próxima ação |', '| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |',
-      ...classifiedItems.filter((item) => item.state === state).map((item) => `| ${[item.id, item.title, item.todoItems?.length ?? 0, item.resultKind ?? 'product', item.validation, item.deployment, item.acceptance, item.blockers.map((blocker) => blocker.kind).join(', ') || 'nenhum', evidenceLinks(item), item.nextAction].map(escapeCell).join(' | ')} |`), '',
+      ...classifiedItems.filter((item) => item.state === state).map((item) => `| ${[`<a id="${scopeAnchor(item)}"></a>${item.id}`, item.title, item.todoItems?.length ?? 0, item.resultKind ?? 'product', item.validation, item.deployment, item.acceptance, item.blockers.map((blocker) => `${blocker.kind}: ${blocker.text}`).join('; ') || 'nenhum', evidenceLinks(item), item.nextAction].map(escapeCell).join(' | ')} |`), '',
     ]),
     '## Classificação pendente', '',
     `**${view.classificationTaskCount} caixas** em ${unclassifiedItems.length} linhas sem evidência suficiente para um dos quatro estados. Cada linha exige revisão semântica da evidência; o status do checkbox sozinho não prova validação nem início.`, '',
-    ...(unclassifiedItems.length ? unclassifiedItems.map((item) => `- ${item.id}: ${item.title} (${item.todoItems?.length ?? 0} caixas) — ${item.nextAction}`) : ['Nenhuma linha com bloqueio de classificação.']), '',
+    ...(unclassifiedItems.length ? unclassifiedItems.map((item) => `- <a id="${scopeAnchor(item)}"></a>${item.id}: ${item.title} (${item.todoItems?.length ?? 0} caixas) — ${item.nextAction}; bloqueios: ${item.blockers.map((blocker) => `${blocker.kind}: ${blocker.text}`).join('; ')}; evidências: ${evidenceLinks(item)}`) : ['Nenhuma linha com bloqueio de classificação.']), '',
     '“Validado” identifica o escopo da linha: `documented` prova um documento como resultado; `accepted` preserva um aceite histórico ou atual declarado; `controlled-e2e`/`real-e2e` indicam validação técnica. Nenhuma dessas etiquetas transforma automaticamente outro escopo em produto implantado e aceito.', '',
   ];
   return lines.join('\n');
 }
 
-export function assertDashboardCurrent(data, existing) {
-  assert(existing.replaceAll('\r\n', '\n') === renderDashboard(data), 'Dashboard drift; run npm run project:status -- --write');
+export function assertDashboardCurrent(data, existing, todoText) {
+  assert(existing.replaceAll('\r\n', '\n') === renderDashboard(data, todoText), 'Dashboard drift; run npm run project:status -- --write');
 }
 
 function parseArgs(argv) {
-  const opts = { check: false, write: false, json: false, all: false, classification: false, state: undefined };
+  const opts = { check: false, write: false, json: false, all: false, classification: false, state: undefined, taskState: undefined };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--check' || arg === '--write' || arg === '--json' || arg === '--all' || arg === '--classification') opts[arg.slice(2)] = true;
     else if (arg === '--state' && i + 1 < argv.length) opts.state = argv[++i];
+    else if (arg === '--task-state' && i + 1 < argv.length) opts.taskState = argv[++i];
     else throw new Error(`Unknown argument: ${arg}`);
   }
   if (opts.state) validEnum(opts.state, states, '--state');
-  assert(!(opts.state && opts.classification) && !(opts.all && (opts.state || opts.classification)), '--state, --classification and --all are exclusive');
+  if (opts.taskState) validEnum(opts.taskState, ledgerBuckets, '--task-state');
+  assert(!(opts.state && opts.classification) && !(opts.all && (opts.state || opts.classification || opts.taskState))
+    && !(opts.taskState && (opts.state || opts.classification)), '--state, --task-state, --classification and --all are exclusive');
   assert(!(opts.check && opts.write), '--check and --write cannot be combined');
-  assert(!(opts.write && (opts.state || opts.json || opts.all || opts.classification)), '--write generates the full dashboard only');
+  assert(!(opts.write && (opts.state || opts.taskState || opts.json || opts.all || opts.classification)), '--write generates the full dashboard only');
   return opts;
 }
 
@@ -338,21 +482,33 @@ export async function main(argv = process.argv.slice(2)) {
   const opts = parseArgs(argv);
   const [raw, todoText] = await Promise.all([readFile(dataPath, 'utf8'), readFile(todoPath, 'utf8')]);
   const data = validateStatus(JSON.parse(raw), todoText);
-  const dashboard = renderDashboard(data);
+  const dashboard = renderDashboard(data, todoText);
   if (opts.check) {
     const existing = await readFile(dashboardPath, 'utf8');
-    assertDashboardCurrent(data, existing);
+    assertDashboardCurrent(data, existing, todoText);
   }
   if (opts.write) await writeFile(dashboardPath, dashboard, 'utf8');
-  if (opts.json) console.log(JSON.stringify(snapshot(data, opts.state, opts.classification), null, 2));
+  if (opts.json) {
+    const view = snapshot(data, opts.state, opts.classification, todoText);
+    if (opts.taskState) {
+      view.todoLedger.items = view.todoLedger.items.filter((item) => item.bucket === opts.taskState);
+      view.todoLedger.filter = { bucket: opts.taskState, returnedItems: view.todoLedger.items.length, countsScope: 'all-todo-items' };
+    }
+    console.log(JSON.stringify(view, null, 2));
+  }
   else if (opts.write) console.log(`Updated ${path.relative(root, dashboardPath)}`);
   else if (opts.check) console.log('Project status consistent');
   else {
-    const view = snapshot(data, opts.state, opts.classification);
-    console.log(`TODO auditado: ${data.audit.delivered}/${data.audit.total}; linhas: ${enums.kind.map((kind) => `${kind}[${states.map((state) => `${state}=${view.counts[kind][state]}`).join(', ')}]`).join('; ')}`);
+    const view = snapshot(data, opts.state, opts.classification, todoText);
+    console.log(`TODO auditado: ${data.audit.delivered}/${data.audit.total} caixas marcadas no histórico; inventário individual: ${view.todoLedger.total} IDs; situação individual não comprovada: ${view.todoLedger.unknownIndividualCount}.`);
+    console.log(`Por microtarefa: ${ledgerBuckets.map((bucket) => `${bucket}=${view.todoLedger.counts[bucket]}`).join(', ')}.`);
+    console.log(`Implantação/aceite pendentes: ${view.todoLedger.pendingStageCount}; aceite histórico apenas com TODO: ${view.todoLedger.historicalTodoOnly}.`);
+    console.log(`Grupos: ${enums.kind.map((kind) => `${kind}[${states.map((state) => `${state}=${view.counts[kind][state]}`).join(', ')}]`).join('; ')}`);
     console.log(`Caixas por estado capability: ${states.map((state) => `${state}=${view.taskCounts[state]}`).join(', ')}; triagem=${view.classificationTaskCount} caixas/${view.classificationCount} linhas; só aceite do owner=${view.ownerOnlyCount}`);
     if (data.coverage) console.log(`Organização do registro: ${data.coverage.classified}/${data.coverage.total} seções completas; ${data.coverage.unclassified} pendentes. Fila confirmada: ${view.counts.capability.fila} linha(s), ${view.taskCounts.fila} caixa(s).`);
     if (opts.state || opts.classification || opts.all) for (const item of view.items) console.log(`${item.id}\t${needsClassification(item) ? 'triagem' : item.state}\t${item.title}${item.ownerOnly ? '\towner acceptance only' : ''}`);
+    if (opts.taskState) for (const item of view.todoLedger.items.filter((entry) => entry.bucket === opts.taskState))
+      console.log(`${item.id}\tTODO:${item.line}\t${item.bucket}\t${item.text}`);
   }
 }
 

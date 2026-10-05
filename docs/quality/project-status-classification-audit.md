@@ -1,5 +1,15 @@
 # Auditoria de classificação do status do projeto
 
+## Correção de interpretação — 05/10/2026
+
+A classificação organizacional descrita abaixo é histórica. Cobrir 250/250 seções não equivale a comprovar individualmente as 1.259 tarefas. O estado `em-construcao` de uma capability parcial não permite contar todas as suas caixas como desenvolvimento iniciado. Da mesma forma, caixa marcada não prova implantação e aceite atuais, e uma wave pode comprovar apenas parte do texto de uma tarefa.
+
+O gerador `scripts/project-status.mjs` passa a produzir no mesmo `docs/PROJECT-STATUS.md` um inventário por ID único do TODO, com texto, origem, capability, evidência, vínculos de waves e pendências. A contagem individual distingue documento, aceite histórico declarado, implantação/aceite atuais, prova técnica e situação individual não comprovada. Vínculo por seção é contextual, sem equivaler a prova individual; vínculos de waves não promovem estados nem são somados à contagem de tarefas. `project:status:check` verifica cobertura, partição e sincronismo do painel. Essa verificação mecânica não substitui revisão semântica nem executa novamente as jornadas citadas.
+
+Nenhuma caixa foi remarcada e nenhum aceite novo é inferido. Este checkpoint corrige o instrumento de acompanhamento; não afirma ter revalidado o produto inteiro em 30 minutos.
+
+Para a próxima atualização, uma wave nova deve listar IDs explícitos de tarefas; só W24–W28 preservam a associação histórica por seção. Se a prova cobre apenas parte de uma capability, separar os IDs comprovados em um escopo próprio e manter os demais como parciais, preservando cobertura única. Atualizar prova, implantação e aceite separadamente; não promover todo um grupo por um teste de subfluxo. Aceites históricos apoiados somente no checkbox precisam de artefato independente antes de uma alegação de aceite atual.
+
 Data: 2026-10-03T19:32:45.561Z. Commit-base: `4dcc7c613bfddc17f4f1f6192ff09128c0e5eca8`.
 
 Este documento registra a revisão **organizacional** das 159 linhas antes em triagem. O `TODO.md` mantém 380/1.259 caixas auditadas; classificar o registro não conclui as 879 caixas abertas. O papel de evidência declarado no JSON exige revisão semântica do conteúdo; existência de arquivo/teste não prova execução.

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateStatus, snapshot, ownerOnly, renderDashboard, assertDashboardCurrent, parseTodo } from '../scripts/project-status.mjs';
+import { validateStatus, snapshot, ownerOnly, renderDashboard, assertDashboardCurrent, parseTodo, buildTodoLedger } from '../scripts/project-status.mjs';
 
 const todo = '# TODO\n**1 de 2 microtarefas verificadas como efetivamente entregues**\n## F1.001 — Escopo\n- [x] A\n- [ ] B\n';
 function fixture() {
@@ -63,6 +63,9 @@ test('rejects inflated or stale TODO counts, including its audit header', () => 
   assert.throws(() => validateStatus(data, todo), /TODO audit drift/);
   data.audit.delivered = 1;
   assert.throws(() => validateStatus(data, todo.replace('1 de 2', '2 de 2')), /TODO audit header drift/);
+  const historicalHeader = todo.replace('microtarefas verificadas como efetivamente entregues', 'caixas marcadas no registro histórico');
+  assert.doesNotThrow(() => validateStatus(data, historicalHeader));
+  assert.throws(() => validateStatus(data, historicalHeader.replace('1 de 2', '2 de 2')), /TODO audit header drift/);
   assert.throws(() => validateStatus(data, `${todo}| Microtarefas/checks abertos | 1204 |\n`), /open-checks table drift/);
   assert.throws(() => validateStatus(data, `${todo}**1204 microtarefas abertas**\n`), /open-task statement drift/);
 });
@@ -123,6 +126,96 @@ test('TODO IDs survive checkbox changes and distinguish repeated text', () => {
   assert.deepEqual(before.items.map((item) => item.id), after.items.map((item) => item.id));
   assert.notEqual(before.items[0].id, before.items[1].id);
   assert.equal(after.items[0].checked, true);
+});
+
+test('ledger inventories every ID once and keeps checked separate from current acceptance', () => {
+  const data = fixture();
+  const ledger = buildTodoLedger(data, todo);
+  assert.equal(ledger.total, 2);
+  assert.equal(ledger.checked, 1);
+  assert.deepEqual(ledger.counts['falta-implantacao'], 2);
+  assert.equal(ledger.checkedAwaitingDeploymentOrAcceptance, 1);
+  assert.equal(ledger.checkedProductWithoutCurrentAcceptance, 1);
+  assert.equal(ledger.pendingStageCount, 2);
+  assert.equal(ledger.historicalTodoOnly, 0);
+  assert.deepEqual(ledger.items.map(({ text, line, checked }) => ({ text, line, checked })), [
+    { text: 'A', line: 4, checked: true }, { text: 'B', line: 5, checked: false },
+  ]);
+  assert.equal(Object.values(ledger.counts).reduce((sum, count) => sum + count, 0), 2);
+  assert.equal(snapshot(data, undefined, false, todo).todoLedger.total, 2);
+  const dashboard = renderDashboard(data, todo);
+  assert.match(dashboard, /## Inventário completo do TODO/);
+  assert.match(dashboard, /\| \*\*Total\*\* \| \*\*2\*\* \| \*\*1\*\* \|/);
+  assert.doesNotThrow(() => assertDashboardCurrent(data, dashboard, todo));
+});
+
+test('partial construction remains individually unproved even with checked boxes or controlled evidence', () => {
+  const data = fixture();
+  const item = data.items[0];
+  item.state = 'em-construcao';
+  item.construction = 'in-progress';
+  item.validation = 'controlled-e2e';
+  item.blockers = [{ kind: 'implementation', text: 'Escopo parcial' }, { kind: 'validation', text: 'Falta validação individual' }];
+  const ledger = buildTodoLedger(data, todo);
+  assert.equal(ledger.counts['situacao-individual-nao-comprovada'], 2);
+  assert.equal(ledger.checkedCounts['situacao-individual-nao-comprovada'], 1);
+  assert.equal(ledger.counts['falta-validacao'], 0);
+});
+
+test('wave task links are contextual, deduplicated, and cannot promote a capability', () => {
+  const data = fixture();
+  const wave = structuredClone(data.items[0]);
+  wave.id = 'W1';
+  wave.kind = 'wave';
+  wave.title = 'Wave associada';
+  wave.deployment = 'current';
+  wave.acceptance = 'accepted';
+  wave.evidence.push({ type: 'private', ref: 'deployed', scope: 'Wave', role: 'deployment' });
+  wave.evidence.push({ type: 'private', ref: 'accepted', scope: 'Wave', role: 'owner-acceptance' });
+  data.items.push(wave);
+  validateStatus(data, todo);
+  const ledger = buildTodoLedger(data, todo);
+  assert.equal(ledger.counts['implantado-e-aceito'], 0);
+  assert.equal(ledger.counts['falta-implantacao'], 2);
+  assert.deepEqual(ledger.items.map((item) => item.waves), [['W1'], ['W1']]);
+  assert.equal(ledger.waveSummary[0].linkedTodoCount, 2);
+  assert.equal(ledger.explicitWaveTodoIdCount, 2);
+  assert.equal(ledger.sectionOnlyWaveCount, 0);
+  wave.todoItems = ['invented-1'];
+  assert.throws(() => validateStatus(data, todo), /references unknown TODO task/);
+  delete wave.todoItems;
+  assert.throws(() => validateStatus(data, todo), /wave requires explicit TODO task IDs/);
+  wave.id = 'W24';
+  assert.doesNotThrow(() => validateStatus(data, todo));
+  wave.id = 'W1';
+  wave.todoItems = [parseTodo(todo).items[0].id];
+  wave.todoSections = ['H-invented'];
+  assert.throws(() => validateStatus(data, todo), /Unknown TODO section/);
+  const splitTodo = todo.replace('- [ ] B', '## F1.002 — Outro escopo\n- [ ] B');
+  data.coverage.total = 2;
+  data.coverage.classified = 2;
+  data.items[0].todoSections.push('F1.002');
+  wave.todoSections = ['F1.002'];
+  assert.throws(() => validateStatus(data, splitTodo), /assigned outside declared section/);
+});
+
+test('document, historical acceptance, owner-only and technical blockers are distinct ledger buckets', () => {
+  const data = fixture();
+  const item = data.items[0];
+  item.validation = 'accepted';
+  item.deployment = 'historical';
+  item.acceptance = 'accepted';
+  item.evidence.push({ type: 'private', ref: 'historical', scope: 'Historical only', role: 'historical-acceptance' });
+  assert.equal(buildTodoLedger(data, todo).counts['aceito-historico'], 2);
+  item.validation = 'controlled-e2e';
+  item.deployment = 'current';
+  item.acceptance = 'pending';
+  item.blockers = [{ kind: 'owner-acceptance', text: 'Pendente' }];
+  item.evidence.push({ type: 'private', ref: 'deployment', scope: 'Current deployment', role: 'deployment' });
+  assert.equal(buildTodoLedger(data, todo).counts['falta-aceite'], 2);
+  item.deployment = 'pending';
+  item.blockers.push({ kind: 'live-provider', text: 'Provider pendente' });
+  assert.equal(buildTodoLedger(data, todo).counts['tecnico-com-bloqueios'], 2);
 });
 
 test('coverage rejects missing, duplicated and invented TODO task IDs', () => {
@@ -207,6 +300,15 @@ test('CLI writes and checks an isolated dashboard, filters JSON, and fails close
     const result = run('--json', '--state', 'validado');
     assert.equal(result.status, 0);
     assert.equal(JSON.parse(result.stdout).items.length, 1);
+    const taskResult = run('--json', '--task-state', 'falta-implantacao');
+    assert.equal(taskResult.status, 0);
+    assert.equal(JSON.parse(taskResult.stdout).todoLedger.items.length, 2);
+    assert.equal(JSON.parse(taskResult.stdout).todoLedger.total, 2);
+    assert.deepEqual(JSON.parse(taskResult.stdout).todoLedger.filter,
+      { bucket: 'falta-implantacao', returnedItems: 2, countsScope: 'all-todo-items' });
+    assert.match(run('--task-state', 'falta-implantacao').stdout, /TODO:4\tfalta-implantacao\tA/);
+    assert.equal(run('--task-state', 'inventado').status, 1);
+    assert.equal(run('--state', 'validado', '--task-state', 'falta-implantacao').status, 1);
     assert.equal(run('--json', '--state', 'made-up').status, 1);
     const dashboard = await readFile(path.join(dir, 'docs/PROJECT-STATUS.md'), 'utf8');
     await writeFile(path.join(dir, 'TODO.md'), todo.replace('1 de 2', '2 de 2'));
