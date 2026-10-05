@@ -10,6 +10,9 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.mjs'
 import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
+import { cleanupDashboardFixtures } from './helpers/dashboard-w34-35-fixtures.mjs'
+import { proveDashboardAggregate } from './helpers/dashboard-w34-aggregate.mjs'
+import { proveDashboardStates } from './helpers/dashboard-w35-states.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -173,6 +176,8 @@ test('authenticated public API manages projects, clients and artifact inspection
   let primaryFailure
 
   const cleanup = async () => {
+    // W34/W35 fixtures hold RESTRICT foreign keys; they leave first.
+    await cleanupDashboardFixtures(client, { workspaceId })
     await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: uiThrottleKey } })
     await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiThrottleKey } })
@@ -5672,6 +5677,26 @@ test('authenticated public API manages projects, clients and artifact inspection
       issueSession: w33IssueSession, createBearer: w33CreateBearer, usernameA: uiUsername,
     })
     assert.equal(w33.outcome, 'passed')
+
+    // --- W34 (stream s2) ---
+    const w34 = await proveDashboardAggregate({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      credentialId: issued.credential.id,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername, sourceArtifactId,
+      sourceManifestId: 'public-api-source-manifest-v2',
+    })
+    assert.equal(w34.outcome, 'passed')
+
+    // --- W35 (stream s2) ---
+    const w35 = await proveDashboardStates({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      credentialId: issued.credential.id,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername, password: uiPassword, uiThrottleKey, sourceArtifactId,
+      sourceManifestId: 'public-api-source-manifest-v2',
+    })
+    assert.equal(w35.outcome, 'passed')
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

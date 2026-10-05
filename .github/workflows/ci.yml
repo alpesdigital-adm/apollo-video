@@ -796,6 +796,8 @@ jobs:
           APOLLO_W31_EVIDENCE_DIR: ${{ runner.temp }}/w31-filters-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_W32_EVIDENCE_DIR: ${{ runner.temp }}/w32-pagination-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_W33_EVIDENCE_DIR: ${{ runner.temp }}/w33-isolation-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_W34_EVIDENCE_DIR: ${{ runner.temp }}/w34-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_W35_EVIDENCE_DIR: ${{ runner.temp }}/w35-states-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
 
       - name: Verify Wave 29 browser, evidence and PostgreSQL postflight
@@ -963,6 +965,64 @@ jobs:
         with:
           name: w33-isolation-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/w33-isolation-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify Wave 34 dashboard aggregate evidence and PostgreSQL postflight
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        run: |
+          set -euo pipefail
+          mkdir -p "$APOLLO_W34_EVIDENCE_DIR"
+          remaining=unknown
+          trap 'printf "{\"schemaVersion\":\"w34-ci-postflight/v1\",\"applicationName\":\"%s\",\"remainingBackends\":\"%s\"}\n" "$APOLLO_PUBLIC_API_APP_NAME" "$remaining" > "$APOLLO_W34_EVIDENCE_DIR/w34-ci-postflight.json"' EXIT
+          test -x /usr/bin/google-chrome
+          export PGPASSWORD=apollo-ci
+          for _ in $(seq 1 15); do
+            remaining="$(/usr/lib/postgresql/16/bin/psql -h 127.0.0.1 -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname='apollo_v2' and application_name='$APOLLO_PUBLIC_API_APP_NAME'")"
+            test "$remaining" != 0 || break
+            sleep 1
+          done
+          test "$remaining" = 0 || { printf 'Wave 34 PostgreSQL sessions remain after integration.\n' >&2; exit 1; }
+          node tests/v2/helpers/dashboard-w34-evidence-guard.mjs "$APOLLO_W34_EVIDENCE_DIR"
+        env:
+          APOLLO_PUBLIC_API_APP_NAME: apollo-video-e2e-w29-ci
+          APOLLO_W34_EVIDENCE_DIR: ${{ runner.temp }}/w34-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish Wave 34 dashboard aggregate evidence
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: w34-aggregate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w34-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify Wave 35 dashboard states evidence and PostgreSQL postflight
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        run: |
+          set -euo pipefail
+          mkdir -p "$APOLLO_W35_EVIDENCE_DIR"
+          remaining=unknown
+          trap 'printf "{\"schemaVersion\":\"w35-ci-postflight/v1\",\"applicationName\":\"%s\",\"remainingBackends\":\"%s\"}\n" "$APOLLO_PUBLIC_API_APP_NAME" "$remaining" > "$APOLLO_W35_EVIDENCE_DIR/w35-ci-postflight.json"' EXIT
+          test -x /usr/bin/google-chrome
+          export PGPASSWORD=apollo-ci
+          for _ in $(seq 1 15); do
+            remaining="$(/usr/lib/postgresql/16/bin/psql -h 127.0.0.1 -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where datname='apollo_v2' and application_name='$APOLLO_PUBLIC_API_APP_NAME'")"
+            test "$remaining" != 0 || break
+            sleep 1
+          done
+          test "$remaining" = 0 || { printf 'Wave 35 PostgreSQL sessions remain after integration.\n' >&2; exit 1; }
+          node tests/v2/helpers/dashboard-w35-evidence-guard.mjs "$APOLLO_W35_EVIDENCE_DIR"
+        env:
+          APOLLO_PUBLIC_API_APP_NAME: apollo-video-e2e-w29-ci
+          APOLLO_W35_EVIDENCE_DIR: ${{ runner.temp }}/w35-states-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish Wave 35 dashboard states evidence
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: w35-states-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w35-states-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 14
 
