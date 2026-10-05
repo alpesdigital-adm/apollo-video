@@ -1148,6 +1148,29 @@ export async function proveW40ConsolidatedJourney({
               })
             } finally { await contextC.close().catch(() => undefined) }
           }
+          // --- the product's own session rotation, on a dedicated real session aged past the threshold
+          {
+            const rotating = await issueSession({ workspaceId, clientId: apiClientId, memberId, state: 'active' })
+            const rotatingNonce = uiSessionNonceHash(rotating)
+            await client.v2UiSession.update({ where: { nonceHash: rotatingNonce }, data: { issuedAt: new Date(Date.now() - SESSION_ROTATE_AFTER_MS - 60_000) } })
+            const withCookie = (value) => ({ cookie: `${sessionCookieName}=${value}` })
+            const rotation = await apiCall(baseUrl, { path: '/v1/session', ...withCookie(rotating) })
+            assert.equal(rotation.status, 200)
+            const successor = sessionCookieOf(rotation.headers)
+            assert.ok(successor && successor !== rotating, 'GET /v1/session hands out a successor token once the identifier is past the rotation threshold')
+            const successorRead = await apiCall(baseUrl, { path: '/v1/projects?limit=1', ...withCookie(successor) })
+            const previousRead = await apiCall(baseUrl, { path: '/v1/projects?limit=1', ...withCookie(rotating) })
+            const previousRow = await client.v2UiSession.findUnique({ where: { nonceHash: rotatingNonce } })
+            assert.equal(successorRead.status, 200)
+            assertRefusal(previousRead, { status: 401, code: 'AUTH_INVALID', category: 'auth' })
+            assert.ok(previousRow.revokedAt && previousRow.rotatedAt, 'the previous identifier is revoked by the rotation')
+            pushCase(evidence, {
+              id: 'session-rotation-real-path', request: { method: 'GET', path: '/v1/session', auth: 'dedicated human session aged past the rotation threshold', realState: 'v2UiSession.issuedAt eleven minutes in the past' },
+              expected: { rotated: true, successorStatus: 200, previousTokenStatus: 401 },
+              observed: { rotated: true, successorStatus: successorRead.status, previousTokenStatus: previousRead.status, previousTokenCode: previousRead.json.error.code, previousRowRevoked: true },
+              persistedUnchanged: true,
+            })
+          }
           // --- 409 for the other two routes, from real revisions
           await refusal('stale-rename-api-409', { method: 'POST', path: '/v1/projects/{id}/rename', auth: 'bearer projects:write', baseRevision: 1 }, { status: 409, code: 'VERSION_CONFLICT', category: 'conflict' }, { authorization, headers: idem('stale-rename'), body: { baseRevision: 1, name: names.attempt } })
           await refusal('stale-archive-api-409', { method: 'POST', path: '/v1/projects/{id}/archive', auth: 'bearer projects:write', baseRevision: 1 }, { status: 409, code: 'VERSION_CONFLICT', category: 'conflict' }, { path: `/v1/projects/${target}/archive`, authorization, headers: idem('stale-archive'), body: { baseRevision: 1, confirmed: true } })

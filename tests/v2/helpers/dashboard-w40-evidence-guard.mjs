@@ -249,6 +249,7 @@ export function verifyW40Evidence(directory, context, { siblings, source = readF
   assert.equal(byId['stale-archive-409'].observed.errorVisibleInDialog, true)
   assert.equal(byId['stale-archive-409'].observed.persistedStatus, 'completed')
   assert.equal(byId['workspace-switched-in-another-tab-404'].observed.errorVisibleInDialog, true)
+  assert.deepEqual(byId['session-rotation-real-path']?.observed, { rotated: true, successorStatus: 200, previousTokenStatus: 401, previousTokenCode: 'AUTH_INVALID', previousRowRevoked: true }, 'the product rotation path must have been exercised')
   const controlled = manifest.cases.filter((item) => item.controlled === true).map((item) => item.id).toSorted()
   assert.deepEqual(controlled, [...CONTROLLED].toSorted(), 'only the two transport interferences may be controlled, and they are labelled')
   const lost = byId['transport-response-lost-after-commit']
