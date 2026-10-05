@@ -262,14 +262,17 @@ export async function runDashboardRuntimeJourney(input) {
     const hidden = `${sourcePath}.owned-unavailable`
     await rename(sourcePath, hidden)
     try {
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        const outcome = await proxyWorker(`runtime-failure-worker-${suffix}`, { workspaceId, operationId: failedProxy.operation.id, signal })
-        assert.equal(outcome.operationId, failedProxy.operation.id)
-        assert.equal(outcome.status, attempt === 3 ? 'failed' : 'retrying'); await delay(10)
-      }
+      const outcome = await proxyWorker(`runtime-failure-worker-${suffix}`, { workspaceId, operationId: failedProxy.operation.id, signal })
+      assert.equal(outcome.operationId, failedProxy.operation.id)
+      assert.equal(outcome.status, 'failed')
     } finally { await rename(hidden, sourcePath) }
     const failedRow = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: failedProxy.operation.id } })
     assert.equal(failedRow.status, 'failed')
+    assert.equal(failedRow.attempt, 1)
+    assert.equal(failedRow.errorCode, 'invalid_render_input')
+    assert.equal(failedRow.errorRetryable, false)
+    evidence.workerFailure = { operationId: failedRow.id, attempt: failedRow.attempt, code: failedRow.errorCode,
+      retryable: failedRow.errorRetryable, origin: 'production-source-materializer' }
     assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'failed')
     await observe({ stage: 'worker-failed', id: copy.project.id, status: 'failed', operationId: failedRow.id, phase: 'failed', completed: failedRow.progressCompleted, eventTypes: ['operation.status.changed'] })
     await post(`/v1/operations/${failedRow.id}/retry`, undefined, `runtime-worker-retry-${suffix}`, 200)
