@@ -3,7 +3,10 @@ import test from 'node:test'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createProjectService } from '../../src/v2/application/create-project.ts'
+import { applyEditorialCutCommandService } from '../../src/v2/application/apply-editorial-cut-command.ts'
 import { duplicateProjectService } from '../../src/v2/application/duplicate-project.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProjectCreationCommand } from '../../src/v2/domain/project-creation-command.ts'
 import { createWorkspace } from '../../src/v2/domain/workspace.ts'
@@ -410,10 +413,12 @@ test('project duplication persists actor-bound copy-on-write lineage without cop
   assert.equal(result.version.forkedFromVersionId, source.version.id)
   assert.notDeepEqual(result.version.snapshotRefs, source.version.snapshotRefs)
   assert.equal(repository.lastBundle.snapshots.length, 3)
-  assert.deepEqual(
-    repository.lastBundle.snapshots.map(({ kind, contentHash }) => ({ kind, contentHash })),
-    repository.source.snapshots.map(({ kind, contentHash }) => ({ kind, contentHash })),
-  )
+  // Content-addressed kinds keep their hash; the EditPlan is rebound to the copy version
+  // (see the dedicated rebinding test), so only its hash may differ.
+  for (const copy of repository.lastBundle.snapshots) {
+    const original = repository.source.snapshots.find((item) => item.kind === copy.kind)
+    assert.equal(copy.contentHash === original.contentHash, copy.kind !== 'edit-plan', copy.kind)
+  }
   assert.equal(repository.lastBundle.snapshots.every((snapshot) =>
     snapshot.projectId === result.project.id), true)
   assert.deepEqual(result.sharedArtifactIds, ['artifact-source-1'])
@@ -468,4 +473,91 @@ test('unknown workspace is rejected before a project is persisted', async () => 
     })),
     (error) => error instanceof DomainError && error.code === 'WORKSPACE_NOT_FOUND',
   )
+})
+
+
+function parsedByKind(snapshots) {
+  return Object.fromEntries(snapshots.map((snapshot) => [snapshot.kind, JSON.parse(snapshot.contentJson)]))
+}
+
+test('duplicated EditPlan names the copy version with its canonical hash recomputed and leaves the source untouched', async () => {
+  const { repository, service, source, duplicateRequest } = await createDuplicationFixture()
+  const sourceBefore = structuredClone(repository.source.snapshots)
+  const result = await service(duplicateRequest())
+  const copies = repository.lastBundle.snapshots
+  const originals = repository.source.snapshots
+  const originalPlan = parsedByKind(originals)['edit-plan']
+  const copyPlan = parsedByKind(copies)['edit-plan']
+
+  assert.equal(originalPlan.projectVersionId, source.version.id)
+  assert.equal(copyPlan.projectVersionId, result.version.id)
+  assert.equal(copyPlan.id, `edit-plan-${result.version.id}`)
+  const { projectVersionId: _a, id: _b, ...copyRest } = copyPlan
+  const { projectVersionId: _c, id: _d, ...originalRest } = originalPlan
+  assert.deepEqual(copyRest, originalRest, 'only the version binding changes')
+  const copyRow = copies.find((item) => item.kind === 'edit-plan')
+  const originalRow = originals.find((item) => item.kind === 'edit-plan')
+  assert.equal(copyRow.contentJson, stableSerialize(copyPlan))
+  assert.equal(copyRow.contentHash, calculateCanonicalHash(copyPlan))
+  assert.notEqual(copyRow.contentHash, originalRow.contentHash)
+  for (const kind of ['brief', 'policies']) {
+    const copy = copies.find((item) => item.kind === kind)
+    const original = originals.find((item) => item.kind === kind)
+    assert.equal(copy.contentJson, original.contentJson)
+    assert.equal(copy.contentHash, original.contentHash)
+  }
+  assert.deepEqual(originals, sourceBefore, 'duplication never rewrites the source snapshots')
+})
+
+test('a copy is a first-class version for the editorial Command and the original stays unchanged', async () => {
+  const { repository, service, source, duplicateRequest } = await createDuplicationFixture()
+  const sourceBefore = structuredClone({ version: source.version, snapshots: repository.source.snapshots })
+  const copy = await service(duplicateRequest())
+  const transcript = createMediaTranscript({
+    language: 'pt-BR', text: 'abertura conteudo cortar isto final', provider: 'controlled', model: 'test/v1',
+    words: [
+      { word: 'abertura', start: 0, end: 0.6 }, { word: 'conteudo', start: 1, end: 1.6 },
+      { word: 'cortar', start: 2, end: 2.4 }, { word: 'isto', start: 2.4, end: 2.8 }, { word: 'final', start: 4, end: 4.5 },
+    ],
+    segments: [{ id: 0, start: 0, end: 4.6, text: 'abertura conteudo cortar isto final' }],
+  })
+  const committed = []
+  const editorial = applyEditorialCutCommandService({
+    repository: {
+      async findIdempotentResult() { return null },
+      async readContext({ projectId, transcriptId }) {
+        return projectId === copy.project.id ? {
+          projectId, workspaceId: 'workspace-1', currentVersion: copy.version, transcriptId, transcript,
+          sourceArtifactId: 'artifact-source-1', sourceDurationSeconds: 5, sourceFps: 30,
+          currentDurationFrames: 0, proxyVariantId: '9:16', outputReferences: [],
+        } : null
+      },
+      async commitOrReplay(bundle) {
+        committed.push(bundle)
+        const editPlan = JSON.parse(bundle.snapshot.contentJson)
+        return {
+          command: bundle.command, version: bundle.version, editPlan,
+          exclusions: editPlan.editorial.exclusions, retainedSourceRanges: editPlan.editorial.retainedSourceRanges,
+          impact: bundle.command.payload.impact, invalidations: [], replayed: false,
+        }
+      },
+    },
+    clock: () => new Date('2026-07-12T13:05:00.000Z'),
+    createId: (kind) => `${kind}-editorial-1`,
+    createEventId: () => '00000000-0000-4000-8000-0000000000e1',
+  })
+  const result = await editorial({
+    workspaceId: 'workspace-1', projectId: copy.project.id,
+    baseVersionId: copy.version.id, baseHash: copy.version.baseHash,
+    sourceTranscriptId: 'transcript-copy-1',
+    rules: [{ id: 'cut-this', label: 'cortar isto', alternatives: ['cortar isto'] }],
+    reason: 'Editorial Command on a duplicated project.',
+    actor: actor(), idempotency: { clientId: 'client-1', key: 'editorial-on-copy-1' },
+  })
+
+  assert.equal(result.version.parentVersionId, copy.version.id)
+  assert.equal(result.version.sequence, 2)
+  assert.equal(committed.length, 1)
+  assert.equal(JSON.parse(committed[0].snapshot.contentJson).projectVersionId, result.version.id)
+  assert.deepEqual({ version: source.version, snapshots: repository.source.snapshots }, sourceBefore)
 })

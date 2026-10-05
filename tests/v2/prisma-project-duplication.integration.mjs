@@ -296,12 +296,25 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
       }),
     ])
     assert.equal(copySnapshots.length, sourceSnapshots.length)
+    const { calculateCanonicalHash, stableSerialize } = await import(
+      '../../src/v2/domain/canonical-hash.ts'
+    )
     copySnapshots.forEach((snapshot, index) => {
       assert.equal(snapshot.projectId, duplicateProjectId)
       assert.equal(sourceSnapshots[index].projectId, sourceProject.id)
       assert.equal(snapshot.kind, sourceSnapshots[index].kind)
-      assert.equal(snapshot.contentHash, sourceSnapshots[index].contentHash)
-      assert.equal(snapshot.contentJson, sourceSnapshots[index].contentJson)
+      if (snapshot.kind === 'edit-plan') {
+        // Version-bound: the copy's EditPlan names the copy version; its hash is recomputed.
+        const plan = JSON.parse(snapshot.contentJson)
+        assert.equal(plan.projectVersionId, duplicateVersionId)
+        assert.equal(JSON.parse(sourceSnapshots[index].contentJson).projectVersionId, sourceVersion.id)
+        assert.equal(snapshot.contentJson, stableSerialize(plan))
+        assert.equal(snapshot.contentHash, calculateCanonicalHash(plan))
+        assert.notEqual(snapshot.contentHash, sourceSnapshots[index].contentHash)
+      } else {
+        assert.equal(snapshot.contentHash, sourceSnapshots[index].contentHash)
+        assert.equal(snapshot.contentJson, sourceSnapshots[index].contentJson)
+      }
     })
 
     const replayResponse = await fetch(
@@ -411,13 +424,115 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
       JSON.stringify(await crossWorkspaceResponse.json()),
     )
 
+    // The copy is a first-class version: Commands run on it, the original does not move,
+    // and the recorded duplication result stays replayable afterwards.
+    const plain = (value) => JSON.parse(JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item))
+    const readSourceRows = async () => plain({
+      project: await client.v2Project.findUnique({ where: { id: sourceProject.id } }),
+      versions: await client.v2ProjectVersion.findMany({ where: { projectId: sourceProject.id }, orderBy: { sequence: 'asc' } }),
+      snapshots: await client.v2ProjectSnapshot.findMany({ where: { projectId: sourceProject.id }, orderBy: { id: 'asc' } }),
+      editCommands: await client.v2EditCommand.count({ where: { projectId: sourceProject.id } }),
+    })
+    const post = (path, key, body) => fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
+      body: JSON.stringify(body),
+    })
+    const sourceRowsBefore = await readSourceRows()
+    const lutOnCopy = await post(
+      `/v1/projects/${duplicateProjectId}/lut-selection`,
+      `duplicate-copy-lut-${suffix}`,
+      {
+        baseVersionId: duplicateVersionId,
+        baseHash: duplicatePayload.data.version.baseHash,
+        selection: { mode: 'none' },
+      },
+    )
+    const lutOnCopyPayload = await lutOnCopy.json()
+    assert.equal(
+      lutOnCopy.status,
+      201,
+      `${JSON.stringify(lutOnCopyPayload)}\n${serverLogs.slice(-4_000)}`,
+    )
+    assert.equal(lutOnCopyPayload.data.version.sequence, 2)
+    const policyOnCopy = await post(
+      `/v1/projects/${duplicateProjectId}/policy-overrides`,
+      `duplicate-copy-policy-${suffix}`,
+      {
+        baseVersionId: lutOnCopyPayload.data.version.id,
+        baseHash: lutOnCopyPayload.data.version.baseHash,
+        overrides: { gradePreset: { mode: 'custom', value: 'cinema' } },
+        reason: 'Second Command on the copy.',
+      },
+    )
+    const policyOnCopyPayload = await policyOnCopy.json()
+    assert.equal(policyOnCopy.status, 201, JSON.stringify(policyOnCopyPayload))
+    assert.deepEqual(
+      await readSourceRows(),
+      sourceRowsBefore,
+      'Commands on the copy never touch the original',
+    )
+    assert.equal(
+      await client.v2EditCommand.count({ where: { projectId: duplicateProjectId } }),
+      2,
+    )
+
+    const replayAfterCommands = await post(
+      `/v1/projects/${sourceProject.id}/duplicates`,
+      duplicationKey,
+      duplicateBody,
+    )
+    const replayAfterCommandsPayload = await replayAfterCommands.json()
+    assert.equal(replayAfterCommands.status, 200, JSON.stringify(replayAfterCommandsPayload))
+    assert.equal(replayAfterCommandsPayload.data.replayed, true)
+    assert.equal(replayAfterCommandsPayload.data.project.id, duplicateProjectId)
+    assert.equal(replayAfterCommandsPayload.data.version.id, duplicateVersionId)
+    assert.equal(replayAfterCommandsPayload.data.version.sequence, 1)
+    assert.equal(replayAfterCommandsPayload.data.project.name, 'Cópia independente')
+    assert.deepEqual(replayAfterCommandsPayload.data.sharedArtifactIds, [artifactId])
+    assert.equal(replayAfterCommandsPayload.data.copiedBytes, 0)
+    const mismatchAfterCommands = await post(
+      `/v1/projects/${sourceProject.id}/duplicates`,
+      duplicationKey,
+      { ...duplicateBody, name: 'Outra carga depois' },
+    )
+    assert.equal(mismatchAfterCommands.status, 409)
+
+    // A copy of an already-commanded version: its EditPlan keeps the base plan name while
+    // projectVersionId names the version. The second-generation copy is rebound and commandable.
+    const copyProject = await client.v2Project.findUniqueOrThrow({ where: { id: duplicateProjectId } })
+    const copyCurrentVersion = await client.v2ProjectVersion.findUniqueOrThrow({
+      where: { id: copyProject.currentVersionId },
+    })
+    const secondResponse = await post(
+      `/v1/projects/${duplicateProjectId}/duplicates`,
+      `duplicate-second-generation-${suffix}`,
+      {
+        expectedVersionId: copyCurrentVersion.id,
+        expectedVersionHash: copyCurrentVersion.baseHash,
+        name: 'Cópia da cópia',
+      },
+    )
+    const secondPayload = await secondResponse.json()
+    assert.equal(secondResponse.status, 201, JSON.stringify(secondPayload))
+    const secondLut = await post(
+      `/v1/projects/${secondPayload.data.project.id}/lut-selection`,
+      `duplicate-second-lut-${suffix}`,
+      {
+        baseVersionId: secondPayload.data.version.id,
+        baseHash: secondPayload.data.version.baseHash,
+        selection: { mode: 'none' },
+      },
+    )
+    assert.equal(secondLut.status, 201, JSON.stringify(await secondLut.json()))
+
     const creationCommands = await client.v2ProjectCreationCommand.findMany({
       where: { workspaceId },
       orderBy: { createdAt: 'asc' },
     })
-    assert.equal(creationCommands.length, 2)
+    assert.equal(creationCommands.length, 3, 'source create, first copy, second-generation copy')
     const sourceCommand = creationCommands.find((command) => command.action === 'create')
-    const duplicateCommand = creationCommands.find((command) => command.action === 'duplicate')
+    const duplicateCommand = creationCommands.find((command) => command.action === 'duplicate' && command.projectId === duplicateProjectId)
     assert.equal(sourceCommand?.projectId, sourceProject.id)
     assert.equal(sourceCommand?.sourceProjectId, null)
     assert.equal(duplicateCommand?.projectId, duplicateProjectId)
