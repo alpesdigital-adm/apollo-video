@@ -58,8 +58,8 @@ function browserTransport(workspaceId: string): ProjectEventFeedTransport { retu
 } }
 
 /**
- * Follows the authenticated workspace's persisted project administration
- * events and calls `onProjectsChanged` when another client changed a project.
+ * Follows the authenticated workspace's persisted dashboard events and calls
+ * `onProjectsChanged` when another client or worker changed a project.
  * The events are only a refetch signal; callers keep deriving every card from
  * `GET /v1/projects`.
  */

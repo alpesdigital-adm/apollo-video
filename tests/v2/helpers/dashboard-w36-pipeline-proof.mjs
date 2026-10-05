@@ -16,7 +16,7 @@ async function until(label, check, budget = 30000) {
 
 /** Observe the real worker journey from a separate, already authenticated dashboard. */
 export async function createDashboardPipelineObserver({ page, client, baseUrl, workspaceId, evidenceDir }) {
-  const evidence = { schemaVersion: 'w36-pipeline-feed/v1', sourceCommit: process.env.GITHUB_SHA ?? null,
+  const evidence = { schemaVersion: 'w36-pipeline-feed/v1', sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null,
     workspaceId, startedAt: new Date().toISOString(), feed: [], projects: [], cases: [], screenshots: [], navigationCount: 0 }
   let marked = false
   const onNavigation = (frame) => { if (marked && frame === page.mainFrame()) evidence.navigationCount += 1 }
@@ -69,6 +69,8 @@ export async function createDashboardPipelineObserver({ page, client, baseUrl, w
       const bytes = await readFile(join(evidenceDir, name))
       evidence.screenshots.push({ name, sha256: createHash('sha256').update(bytes).digest('hex') })
       evidence.cases.push({ stage, projectId, resourceId, eventIds: [...ids], eventTypes: rows.map((row) => row.type),
+        persistedRows: rows.map((row) => ({ id: row.id, type: row.type, workspaceId: row.workspaceId,
+          createdAt: row.createdAt.toISOString(), occurredAt: row.occurredAt.toISOString() })),
         startedAt: start, feedAt, refetchAt: refetch.at, latencyMs: Date.now() - start,
         state: projected.visibleState.label, progress: projected.dashboard.latestOperation?.progress ?? null })
     },

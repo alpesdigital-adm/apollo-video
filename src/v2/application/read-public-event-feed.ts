@@ -62,7 +62,7 @@ export interface PublicEventFeedPage {
 }
 
 /**
- * Typed, workspace-scoped read of persisted project administration events.
+ * Typed, workspace-scoped read of persisted dashboard invalidation events.
  *
  * Contract: every event whose transaction committed is delivered exactly once
  * per cursor lineage, in `(createdAt, id)` order, and never behind the cursor

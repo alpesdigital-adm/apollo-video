@@ -1,5 +1,5 @@
 /**
- * Bounded poller for the persisted project administration event feed.
+ * Bounded poller for the persisted dashboard event feed.
  *
  * It has no DOM or React dependency so its timing, backoff and shutdown rules
  * can be proven with a fake clock. The event payload is only a signal that the
