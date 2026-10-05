@@ -180,20 +180,22 @@ test(
       data: { id: randomUUID(), workspaceId, projectId, artifactId, role: 'editorial-proxy', originalFileName: 'proxy.mp4', createdAt },
     })
 
-    /** One rendered proxy operation and the review that judged it. */
+    // Controlled publication fixture: the review is committed while its
+    // physical render owns a running lease, before terminal settlement.
+    let admissionIndex = 0
+    const lease = { owner: `color-critic-worker-${suffix}`, attempt: 1, now: completedAt.toISOString() }
     const seedOperation = async (name, inputHash) => {
       const operationId = `${projectId}-${name}`
+      const admittedAt = new Date(createdAt.getTime() + admissionIndex++)
       await client.v2PublicOperation.create({
         data: {
           id: operationId, workspaceId, projectId, clientId, type: 'project-proxy-render',
-          status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: artifactId,
-          cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-          // `public_operations_progress_check` ties progress to status, phase
-          // and type: a succeeded proxy render is 4 of 4 render steps.
-          progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-          resultJson: stableSerialize({ resource: { type: 'media-artifact', id: artifactId, manifestId } }),
+          status: 'running', phase: 'persisting', targetType: 'media-artifact', targetId: artifactId,
+          cancelable: true, retryable: false, attempt: 1, maxAttempts: 3,
+          progressCompleted: 3, progressTotal: 4, progressUnit: 'render',
+          leaseOwner: lease.owner, leaseExpiresAt: new Date(completedAt.getTime() + 60_000), heartbeatAt: completedAt,
           idempotencyKey: `${operationId}-key`, requestFingerprint: inputHash,
-          createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt,
+          createdAt: admittedAt, updatedAt: completedAt, startedAt: admittedAt,
         },
       })
       await client.v2ProjectProxyRenderOperation.create({
@@ -203,7 +205,7 @@ test(
           sourceArtifactId, sourceManifestId,
           inputHash, outputArtifactId: artifactId, outputManifestId: manifestId,
           colorPipelineBindingsJson: stableSerialize([]),
-          originalFileName: 'proxy.mp4', createdAt,
+          originalFileName: 'proxy.mp4', createdAt: admittedAt,
         },
       })
       return operationId
@@ -359,7 +361,7 @@ test(
     const blockedRow = await reviews.persistGenerated({
       id: `proxy-review-reject-${suffix}`,
       workspaceId, projectId, operationId: rejectOperation,
-      review: blocked, createdAt: completedAt.toISOString(),
+      review: blocked, createdAt: completedAt.toISOString(), lease,
     })
     assert.equal(blockedRow.finalAllowed, false)
     assert.equal(blockedRow.status, 'blocked')
@@ -420,7 +422,7 @@ test(
     const warnedRow = await reviews.persistGenerated({
       id: `proxy-review-warn-${suffix}`,
       workspaceId, projectId, operationId: warnOperation,
-      review: warned, createdAt: completedAt.toISOString(),
+      review: warned, createdAt: completedAt.toISOString(), lease,
     })
     const cleared = await acknowledge({
       workspaceId, projectId, projectVersionId,
