@@ -203,7 +203,7 @@ function projectBucket(visibleState: VisibleState): ProjectStateBucket {
   }
 }
 
-export default function Dashboard() {
+export default function Dashboard({ workspaceId }: { workspaceId: string }) {
   const router = useRouter()
   const idempotencyKey = useRef<string | null>(null)
   const actionIdempotencyKeys = useRef(new Map<string, string>())
@@ -330,6 +330,7 @@ export default function Dashboard() {
   }, [])
 
   useProjectEventFeed({
+    workspaceId,
     onProjectsChanged: () => {
       backgroundRefresh.current = true
       setRefreshRevision((value) => value + 1)

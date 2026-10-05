@@ -466,7 +466,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       where: { workspaceId, resourceId: operationId },
       orderBy: [{ occurredAt: 'asc' }, { type: 'asc' }],
     })
-    assert.deepEqual(settledEvents.map((event) => event.type), [
+    assert.deepEqual(settledEvents.filter((event) => event.type !== 'operation.progress.changed').map((event) => event.type), [
       'operation.status.changed',
       'operation.status.changed',
       'operation.status.changed',
@@ -474,6 +474,14 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       'operation.status.changed',
       'operation.succeeded',
     ])
+    const progressEvents = settledEvents.filter((event) => event.type === 'operation.progress.changed')
+    assert.ok(progressEvents.length > 0, 'real fenced worker phase transitions publish progress')
+    for (const event of progressEvents) {
+      const payload = JSON.parse(event.dataJson)
+      assert.notEqual(payload.previousPhase, payload.phase)
+      assert.ok(payload.progress.completed <= payload.progress.total)
+      assert.equal('percentage' in payload, false)
+    }
     assert.equal(
       settledEvents.some((event) =>
         event.dataJson.includes('worker-integration') ||

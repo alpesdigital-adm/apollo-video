@@ -27,7 +27,7 @@ import {
   type LongFormIndexWorkflow,
 } from '../../domain/long-form-index-workflow.ts'
 import { parseCommandImpact } from '../../domain/command-impact.ts'
-import { createPublicOperationStatusEvents } from '../../domain/public-operation-event.ts'
+import { createPublicOperationStatusEvents, createPublicOperationProgressEvents } from '../../domain/public-operation-event.ts'
 import type { RenderColorPipelineBinding } from '../../application/resolve-render-color-pipelines.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import {
@@ -2375,6 +2375,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       })
       if (!persisted) return null
       const result = hydratePublicOperationRecord(persisted)
+      await persistPublicEvents(transaction, createPublicOperationProgressEvents({
+        previous: record.operation,
+        operation: result.operation,
+        createEventId: this.createEventId,
+      }))
       await persistOperationStatusEvents(
         transaction,
         record.operation.status,

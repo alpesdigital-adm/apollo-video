@@ -318,17 +318,19 @@ test('W36 persisted project event feed is authenticated, workspace-scoped, commi
       assert.equal(stillWorks.status, 200)
     })
 
-    await t.test('a REAL late-committing transaction is withheld, then delivered in order and never skipped', async () => {
+    await t.test('REAL late worker progress and annotation transactions are withheld, delivered in order and never skipped', async () => {
       const fresh = await feed(bearer(writer), 'startAt=latest')
       const start = fresh.body.data.nextCursor
       const startPosition = decodeCursor(start)
       const slowId = randomUUID()
       const fastId = randomUUID()
       const row = (id, resourceId, sequence) => ({
-        id, workspaceId: workspaceA, type: 'project.name.changed', version: '1.0.0',
+        id, workspaceId: workspaceA, type: id === slowId ? 'operation.progress.changed' : 'annotation.created', version: '1.0.0',
         occurredAt: new Date(), sequence, actorClientId: writerId,
-        resourceType: 'project', resourceId,
-        dataJson: JSON.stringify({ action: 'rename', baseRevision: sequence - 1, resultRevision: sequence }),
+        resourceType: id === slowId ? 'operation' : 'annotation', resourceId,
+        dataJson: JSON.stringify(id === slowId
+          ? { projectId: 'w36-late-project', phase: 'rendering', progress: { completed: 1, total: 4, unit: 'render-phases' } }
+          : { projectId: 'w36-late-project', projectVersionId: 'w36-late-version', status: 'open' }),
       })
       // Separate clients: each pool holds one connection, and the open
       // transaction must not block the committer or the HTTP server.

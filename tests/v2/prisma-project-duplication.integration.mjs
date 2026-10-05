@@ -491,6 +491,12 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
     assert.equal(replayAfterCommandsPayload.data.project.name, 'Cópia independente')
     assert.deepEqual(replayAfterCommandsPayload.data.sharedArtifactIds, [artifactId])
     assert.equal(replayAfterCommandsPayload.data.copiedBytes, 0)
+    const cloneEvents = await client.v2PublicEventOutbox.findMany({
+      where: { workspaceId, OR: [{ resourceId: duplicateProjectId }, { resourceId: duplicateVersionId }] },
+    })
+    assert.equal(cloneEvents.filter((event) => event.type === 'project.created').length, 1,
+      'duplicate replay never republishes its creation event')
+    assert.equal(cloneEvents.filter((event) => event.type === 'project.version.created').length, 1)
     const mismatchAfterCommands = await post(
       `/v1/projects/${sourceProject.id}/duplicates`,
       duplicationKey,

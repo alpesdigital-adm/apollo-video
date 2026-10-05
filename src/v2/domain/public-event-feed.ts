@@ -1,15 +1,19 @@
 import type { PublicEvent } from './public-event.ts'
 
 /**
- * First slice of the persisted event feed: project administration events only.
- * Operation, annotation and progress events have other writers (workers, other
- * transactions) and are deliberately not served until their commit ordering is
- * proven separately.
+ * Dashboard invalidation events. Every producer uses the transactional outbox;
+ * worker writes obey the same database watermark as administration writes.
  */
-export const PROJECT_ADMINISTRATION_EVENT_TYPES = Object.freeze([
+export const PROJECT_DASHBOARD_EVENT_TYPES = Object.freeze([
   'project.created',
   'project.name.changed',
   'project.status.changed',
+  'operation.status.changed',
+  'operation.progress.changed',
+  'operation.succeeded',
+  'operation.failed',
+  'annotation.created',
+  'annotation.resolved',
 ] as const)
 
 export const PUBLIC_EVENT_FEED_DEFAULT_LIMIT = 50

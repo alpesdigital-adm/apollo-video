@@ -6,7 +6,7 @@ import addFormats from 'ajv-formats'
 
 import { readPublicEventFeedService } from '../../src/v2/application/read-public-event-feed.ts'
 import {
-  PROJECT_ADMINISTRATION_EVENT_TYPES,
+  PROJECT_DASHBOARD_EVENT_TYPES,
   PUBLIC_EVENT_FEED_FLOOR_ID,
   PUBLIC_EVENT_FEED_SAFETY_MARGIN_MS,
 } from '../../src/v2/domain/public-event-feed.ts'
@@ -148,7 +148,7 @@ test('F1.001 event feed: workspace isolation, type allowlist and cursor binding'
   const page = await read({ workspaceId: WORKSPACE, after: head.nextCursor })
   assert.deepEqual(page.events.map((event) => event.workspaceId), [WORKSPACE])
   assert.equal(model.repository.calls.at(-1).workspaceId, WORKSPACE)
-  assert.deepEqual(model.repository.calls.at(-1).types, [...PROJECT_ADMINISTRATION_EVENT_TYPES])
+  assert.deepEqual(model.repository.calls.at(-1).types, [...PROJECT_DASHBOARD_EVENT_TYPES])
   await assert.rejects(
     read({ workspaceId: OTHER_WORKSPACE, after: head.nextCursor }),
     (error) => error.code === 'INVALID_ARGUMENT' && /does not match/.test(error.message),
@@ -260,8 +260,8 @@ test('F1.001 capability, schema and presenter agree and expose only a refetch si
   }))
   assert.equal(validate(body), true, JSON.stringify(validate.errors))
   const foreign = structuredClone(body)
-  foreign.data.events[0].type = 'operation.succeeded'
-  assert.equal(validate(foreign), false, 'only project administration events are served')
+  foreign.data.events[0].type = 'budget.threshold.reached'
+  assert.equal(validate(foreign), false, 'only dashboard invalidation events are served')
   const extra = structuredClone(body)
   extra.data.unexpected = true
   assert.equal(validate(extra), false)

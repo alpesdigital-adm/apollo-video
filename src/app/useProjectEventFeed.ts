@@ -6,18 +6,19 @@ import {
   createProjectEventFeedController,
   type ProjectEventFeedResult,
   type ProjectEventFeedTransport,
+  dashboardFeedEventType,
 } from '@/v2/ui/project-event-feed-controller'
 
 interface FeedEnvelope {
   data?: {
-    events?: { type?: unknown }[]
+    events?: unknown[]
     nextCursor?: unknown
     hasMore?: unknown
   }
   error?: { code?: string }
 }
 
-const browserTransport: ProjectEventFeedTransport = {
+function browserTransport(workspaceId: string): ProjectEventFeedTransport { return {
   async read({ after, limit, signal }): Promise<ProjectEventFeedResult> {
     const search = new URLSearchParams({ limit: String(limit) })
     if (after) search.set('after', after)
@@ -46,13 +47,15 @@ const browserTransport: ProjectEventFeedTransport = {
     }
     return {
       kind: 'page',
-      eventTypes: data.events.flatMap((event) =>
-        typeof event.type === 'string' ? [event.type] : []),
+      eventTypes: data.events.flatMap((event) => {
+        const type = dashboardFeedEventType(event, workspaceId)
+        return type ? [type] : []
+      }),
       nextCursor: data.nextCursor,
       hasMore: data.hasMore,
     }
   },
-}
+} }
 
 /**
  * Follows the authenticated workspace's persisted project administration
@@ -61,6 +64,7 @@ const browserTransport: ProjectEventFeedTransport = {
  * `GET /v1/projects`.
  */
 export function useProjectEventFeed(handlers: {
+  workspaceId: string
   onProjectsChanged: () => void
   onUnauthorized: () => void
 }) {
@@ -71,7 +75,7 @@ export function useProjectEventFeed(handlers: {
 
   useEffect(() => {
     const controller = createProjectEventFeedController({
-      transport: browserTransport,
+      transport: browserTransport(handlers.workspaceId),
       onRelevantEvent: () => latest.current.onProjectsChanged(),
       onUnauthorized: () => latest.current.onUnauthorized(),
       setTimer: (callback, delayMs) => window.setTimeout(callback, delayMs),
@@ -84,5 +88,5 @@ export function useProjectEventFeed(handlers: {
     })
     controller.start()
     return () => controller.stop()
-  }, [])
+  }, [handlers.workspaceId])
 }

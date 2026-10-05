@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import type { PublicEvent } from '../domain/public-event.ts'
 import {
-  PROJECT_ADMINISTRATION_EVENT_TYPES,
+  PROJECT_DASHBOARD_EVENT_TYPES,
   PUBLIC_EVENT_FEED_DEFAULT_LIMIT,
   PUBLIC_EVENT_FEED_CURSOR_SLACK_MS,
   PUBLIC_EVENT_FEED_FLOOR_ID,
@@ -96,7 +96,7 @@ export function readPublicEventFeedService(dependencies: {
       'INVALID_ARGUMENT',
       'after and startAt cannot be combined',
     )
-    const types = [...PROJECT_ADMINISTRATION_EVENT_TYPES]
+    const types = [...PROJECT_DASHBOARD_EVENT_TYPES]
     const queryHash = createHash('sha256')
       .update(JSON.stringify({ workspaceId: input.workspaceId, types }))
       .digest('hex')
