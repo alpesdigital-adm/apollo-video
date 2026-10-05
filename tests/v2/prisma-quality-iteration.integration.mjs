@@ -195,7 +195,11 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
     })
 
     const proxyRepository = new PrismaProxyReviewRepository(client)
+    let proxySequence = 0
     async function seedProxy(label, criticIssues) {
+      const operationCreatedAt = new Date(createdAt.getTime() + proxySequence++)
+      const completedAt = new Date(createdAt.getTime() + 1_000)
+      const lease = { owner: `quality-worker-${suffix}`, attempt: 1, now: completedAt.toISOString() }
       const artifactId = `quality-proxy-${label}-${suffix}`
       const manifestId = `quality-proxy-manifest-${label}-${suffix}`
       const operationId = `quality-proxy-operation-${label}-${suffix}`
@@ -246,23 +250,21 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
           projectId,
           clientId: issued.client.id,
           type: 'project-proxy-render',
-          status: 'succeeded',
-          phase: 'completed',
+          status: 'running',
+          phase: 'persisting',
           targetType: 'media-artifact',
           targetId: artifactId,
-          cancelable: false,
+          cancelable: true,
           retryable: false,
           attempt: 1,
           maxAttempts: 3,
-          resultJson: stableSerialize({
-            resource: { type: 'media-artifact', id: artifactId, manifestId },
-          }),
+          progressCompleted: 3, progressTotal: 4, progressUnit: 'render',
+          leaseOwner: lease.owner, leaseExpiresAt: new Date(completedAt.getTime() + 60_000), heartbeatAt: completedAt,
           idempotencyKey: `quality-proxy-render-${label}-${suffix}`,
           requestFingerprint: inputHash,
-          createdAt,
-          updatedAt: createdAt,
-          startedAt: createdAt,
-          completedAt: new Date(createdAt.getTime() + 1_000),
+          createdAt: operationCreatedAt,
+          updatedAt: operationCreatedAt,
+          startedAt: operationCreatedAt,
         },
       })
       await client.v2ProjectProxyRenderOperation.create({
@@ -312,14 +314,22 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         },
         criticIssues,
       })
-      return proxyRepository.persistGenerated({
+      const persisted = await proxyRepository.persistGenerated({
         id: reviewId,
         workspaceId,
         projectId,
         operationId,
         review,
         createdAt: new Date(createdAt.getTime() + 1_000).toISOString(),
+        lease,
       })
+      // Controlled persistence fixture: terminal state follows the leased review commit.
+      await client.v2PublicOperation.update({ where: { id: operationId }, data: {
+        status: 'succeeded', phase: 'completed', cancelable: false, progressCompleted: 4,
+        leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, completedAt,
+        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: artifactId, manifestId } }),
+      } })
+      return persisted
     }
 
     const readyProxy = await seedProxy('ready', [])

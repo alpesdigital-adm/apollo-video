@@ -125,7 +125,9 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
 
     const persisted = []
     const reports = []
-    for (const variant of variants) {
+    for (const [variantIndex, variant] of variants.entries()) {
+      const operationCreatedAt = new Date(createdAt.getTime() + variantIndex)
+      const lease = { owner: `format-quality-worker-${suffix}`, attempt: 1, now: renderCompletedAt.toISOString() }
       await client.v2MediaArtifact.create({
         data: {
           id: variant.artifactId, workspaceId, artifactKey: `format-quality/${variant.artifactId}.mp4`, sha256: variant.proxySha256,
@@ -144,11 +146,12 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
       await client.v2PublicOperation.create({
         data: {
           id: variant.operationId, workspaceId, projectId, clientId: issued.client.id, type: 'project-proxy-render',
-          status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: variant.artifactId,
-          cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-          resultJson: stableSerialize({ resource: { type: 'media-artifact', id: variant.artifactId, manifestId: variant.manifestId } }),
+          status: 'running', phase: 'persisting', targetType: 'media-artifact', targetId: variant.artifactId,
+          cancelable: true, retryable: false, attempt: 1, maxAttempts: 3,
+          progressCompleted: 3, progressTotal: 4, progressUnit: 'render',
+          leaseOwner: lease.owner, leaseExpiresAt: new Date(renderCompletedAt.getTime() + 60_000), heartbeatAt: renderCompletedAt,
           idempotencyKey: `format-quality-render-${variant.key}-${suffix}`, requestFingerprint: variant.inputHash,
-          createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: renderCompletedAt,
+          createdAt: operationCreatedAt, updatedAt: operationCreatedAt, startedAt: operationCreatedAt,
         },
       })
       await client.v2ProjectProxyRenderOperation.create({
@@ -181,8 +184,14 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
       })
       const stored = await repository.persistGenerated({
         id: variant.reviewId, workspaceId, projectId, operationId: variant.operationId,
-        review, createdAt: createdAt.toISOString(),
+        review, createdAt: renderCompletedAt.toISOString(), lease,
       })
+      // Controlled persistence fixture: finish only after the authorized review commit.
+      await client.v2PublicOperation.update({ where: { id: variant.operationId }, data: {
+        status: 'succeeded', phase: 'completed', cancelable: false, progressCompleted: 4,
+        leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, completedAt: renderCompletedAt,
+        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: variant.artifactId, manifestId: variant.manifestId } }),
+      } })
       persisted.push({ variant, review, stored })
     }
 
