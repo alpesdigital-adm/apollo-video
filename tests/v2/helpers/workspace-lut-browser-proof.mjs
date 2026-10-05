@@ -8,8 +8,6 @@ import { fileURLToPath } from 'node:url'
 
 import sharp from 'sharp'
 
-import { settleOwnedBrowserProcess } from './browser-pid-teardown.mjs'
-
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 async function readPng(baseUrl, path, authorization) {
@@ -299,11 +297,7 @@ export async function proveWorkspaceLutBrowser({ baseUrl, client, workspaceId, p
     await boundedClose('page', page && (() => page.close()), cleanupErrors)
     await boundedClose('context', context && (() => context.close()), cleanupErrors)
     await boundedClose('browser', browser && (() => browser.close()), cleanupErrors)
-    // BrowserServer.close() hangs on the Windows harness (5/5 runs); it is recorded, and the
-    // owned browser PID must still be dead (taskkill fallback) or the proof fails below.
-    const serverCloseErrors = []
-    await boundedClose('browser-server', browserServer && (() => browserServer.close()), serverCloseErrors)
-    evidence.postflight.browserServerCloseUnclean = serverCloseErrors.length > 0
+    await boundedClose('browser-server', browserServer && (() => browserServer.close()), cleanupErrors)
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
@@ -313,9 +307,7 @@ export async function proveWorkspaceLutBrowser({ baseUrl, client, workspaceId, p
         new Promise((done) => setTimeout(done, 5000)),
       ])
     }
-    const settled = await settleOwnedBrowserProcess(browserProcess, cleanupErrors)
-    evidence.postflight.browserPidAliveAtEnd = settled.aliveAtEnd
-    evidence.postflight.browserProcessTerminal = settled.terminal
+    evidence.postflight.browserProcessTerminal = !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
     if (!evidence.postflight.browserProcessTerminal) cleanupErrors.push('browser-process-not-terminal')
     evidence.postflight.cleanupErrors = cleanupErrors
     try { await writeFile(join(evidenceDir, 'w29-manifest.json'), `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'w' }) }
