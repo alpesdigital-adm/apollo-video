@@ -2434,6 +2434,29 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.media.library.preview.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/binary-media-content/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/media/library/{artifactId}/previews/{kind}"
+      },
+      "toolName": "apollo.media.library.preview.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/octet-stream"
+    },
     "apollo.media.library.read": {
       "version": "2.0.0",
       "exposure": "public",
@@ -77589,6 +77612,43 @@
             "bytesDuplicated",
             "replayed",
             "createdAt"
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "selection": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "asset"
+                    }
+                  }
+                },
+                "segmentHash": false,
+                "semanticRange": false,
+                "sourceTimeMapping": false
+              }
+            },
+            {
+              "required": [
+                "segmentHash",
+                "semanticRange",
+                "sourceTimeMapping"
+              ],
+              "properties": {
+                "selection": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "segment"
+                    }
+                  }
+                },
+                "segmentHash": {},
+                "semanticRange": {},
+                "sourceTimeMapping": {}
+              }
+            }
           ],
           "properties": {
             "id": {

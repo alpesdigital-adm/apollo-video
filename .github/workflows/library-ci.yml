@@ -1,0 +1,81 @@
+name: Media library validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: library-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  library:
+    name: Real media library journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: '1'
+      APOLLO_API_ENVIRONMENT: production
+      V2_DATABASE_URL: postgresql://apollo:library-ci@127.0.0.1:5432/apollo_v2_e2e_library?schema=public&application_name=apollo-video-e2e-library-${{ github.run_id }}&connection_limit=1&pool_timeout=10&connect_timeout=10
+      APOLLO_LIBRARY_EVIDENCE_ROOT: ${{ runner.temp }}/library-evidence
+      APOLLO_V2_ARTIFACT_ROOT: ${{ runner.temp }}/library-artifacts
+      APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+      APOLLO_LIBRARY_JOURNEY_E2E: '1'
+      APOLLO_FINAL_EXPORT_E2E: '1'
+      APOLLO_TESSERACT_PATH: /usr/bin/tesseract
+      APOLLO_PROTECTED_PAYLOAD_KEY_ID: library-ci-test
+      APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.5-pg16-trixie
+        env:
+          POSTGRES_DB: apollo_v2_e2e_library
+          POSTGRES_USER: apollo_admin
+          POSTGRES_PASSWORD: library-ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U apollo_admin -d apollo_v2_e2e_library"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install real OCR and PostgreSQL tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-por postgresql-client
+          tesseract --list-langs
+          mkdir -p "$APOLLO_LIBRARY_EVIDENCE_ROOT" "$APOLLO_V2_ARTIFACT_ROOT"
+          PGPASSWORD=library-ci psql -h 127.0.0.1 -U apollo_admin -d apollo_v2_e2e_library -v ON_ERROR_STOP=1 -c "CREATE ROLE apollo LOGIN PASSWORD 'library-ci' CONNECTION LIMIT 5; ALTER DATABASE apollo_v2_e2e_library OWNER TO apollo; CREATE EXTENSION IF NOT EXISTS vector; ALTER ROLE apollo SET idle_in_transaction_session_timeout='30s'; ALTER ROLE apollo SET statement_timeout='120s';"
+      - run: npm ci
+      - run: npm ci --prefix remotion
+      - name: Bootstrap isolated V2 PostgreSQL
+        run: npx prisma migrate deploy --schema prisma/v2/schema.prisma
+      - run: npm run build
+      - name: Independent repository, media and image proofs
+        run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-concurrency=1 tests/v2/prisma-media-library.integration.mjs tests/v2/media-segment-materialization.integration.mjs tests/v2/prisma-image-library-proof.integration.mjs tests/v2/library-preview-media.integration.mjs tests/v2/library-preview-process-fence.integration.mjs tests/v2/prisma-library-preview-fence.integration.mjs
+      - name: Consolidated HTTP and Chromium journey
+        run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/library-journey.e2e.mjs
+      - name: Approved output catalog through real export worker
+        run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/prisma-final-export.integration.mjs
+      - name: Verify no orphan database clients
+        if: always()
+        run: |
+          count=$(PGPASSWORD=library-ci psql -h 127.0.0.1 -U apollo -d apollo_v2_e2e_library -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()")
+          test "$count" = 0
+      - name: Publish version-bound media evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-library-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/library-evidence
+          if-no-files-found: error
+          retention-days: 14

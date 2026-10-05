@@ -1,6 +1,6 @@
 # W43 — leituras concorrentes, erro e retry da biblioteca
 
-**Plano, sem execução W43.** Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W42. F1.012 / FR-040, subescopos das caixas `5fed046a5719-1` e `ac7e0a1c125b-1`. **3–5 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original W43.** Execução e evidências atuais em [PROJECT-STATUS.md](PROJECT-STATUS.md) e [relatório W41–W50](quality/media-library-w41-50.md). Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W42. F1.012 / FR-040, subescopos das caixas `5fed046a5719-1` e `ac7e0a1c125b-1`. **3–5 h de desenvolvimento**, CI/revisão fora.
 
 `MediaLibraryWorkspace.tsx` hoje usa fetch de lista e concatena página seguinte; verificar risco de resposta antiga substituir filtro novo, duplicar item, continuar após logout ou deixar usuário sem retry. Implementar só o necessário após RED observável: `AbortController`/geração de leitura, deduplicação de IDs entre páginas, estado de erro e retry explícito, sem mascarar falha com lista velha.
 

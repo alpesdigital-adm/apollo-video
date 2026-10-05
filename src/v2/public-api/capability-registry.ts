@@ -1476,6 +1476,15 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requestBodyRequired: true,
   },
   {
+    id: 'apollo.media.library.preview.read', version: '1.0.0', title: 'Read authorized library preview',
+    description: 'Streams immutable thumbnail or waveform bytes only after checking current source rights, workspace and manifest lineage.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
+    outputSchemaRef: 'apollo://schemas/binary-media-content/v1',
+    endpoint: { method: 'GET', path: '/v1/media/library/{artifactId}/previews/{kind}' },
+    toolName: 'apollo.media.library.preview.read', supportsDryRun: false, costClass: 'free', confirmation: 'none',
+    successStatuses: [200], idempotency: 'not-applicable', responseMediaType: 'application/octet-stream',
+  },
+  {
     id: 'apollo.artifacts.content.read',
     version: '1.0.0',
     title: 'Stream media artifact content',

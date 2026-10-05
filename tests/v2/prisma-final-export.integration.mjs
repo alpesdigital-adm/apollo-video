@@ -10,6 +10,7 @@ import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { proveCatalogOutputBrowser } from './helpers/catalog-output-browser-proof.mjs'
 
 // The Director result, reviewed proxy, and Rec.709 color probe (including its
 // producer identity) are controlled upstream seeds. The final-export API,
@@ -68,6 +69,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+  const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
 
   const client = new PrismaClient()
@@ -90,6 +92,8 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const createdAt = new Date('2026-07-26T20:00:00.000Z')
   const sourceArtifactKey = `workspaces/final-export-e2e-${suffix}/masters/source.mp4`
   const sourcePath = join(artifactRoot, ...sourceArtifactKey.split('/'))
+  const uiUsername = `catalog-${suffix}`
+  const uiPassword = `Catalog-${suffix}-controlled-password`
   let server
   let serverLogs = ''
 
@@ -576,6 +580,9 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         NODE_ENV: process.env.APOLLO_FINAL_EXPORT_SERVER_MODE === 'dev' ? 'development' : 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        APOLLO_AUTH_MODE: 'bootstrap', APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true', APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
+        APOLLO_UI_USERNAME: uiUsername, APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `catalog-salt-${suffix}`),
+        APOLLO_UI_SESSION_SECRET: `catalog-${suffix}-session-secret-with-32-bytes`, APOLLO_UI_API_CLIENT_ID: issued.client.id,
         APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
         APOLLO_MEDIA_DOWNLOAD_BASE_URL: `${baseUrl}/`,
         APOLLO_MEDIA_DOWNLOAD_SIGNING_SECRET: `final-export-download-${suffix}`.padEnd(48, 'x'),
@@ -832,6 +839,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(finalProbe.codec, 'h264')
     assert.equal(finalProbe.audioCodec, 'aac')
     assert.match(finalProbe.container, /mp4/)
+    const catalogBrowser = await proveCatalogOutputBrowser({ baseUrl, authorization, username: uiUsername, password: uiPassword, prisma: client, workspaceId, output, catalogRecord, evidenceDir: process.env.APOLLO_LIBRARY_EVIDENCE_ROOT ?? join(artifactRoot, 'catalog-browser-evidence') })
     await execFileAsync(ffmpegStatic, ['-v', 'error', '-i', finalPath, '-f', 'null', '-'], { windowsHide: true, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 })
     console.log(JSON.stringify({ event: 'automatic-catalog-real-final-proof', artifactId: output.artifactId, sha256: output.sha256, byteSize: downloadedBytes.byteLength, catalogRecordId: catalogRecord.id, recordHash: catalogRecord.recordHash, rightsSnapshotId: catalogRecord.rightsSnapshotId, lineageSourceIds: catalogRecord.lineage.map((edge) => edge.sourceArtifactId), fullDecode: 'passed' }))
     if (process.env.APOLLO_LIBRARY_EVIDENCE_ROOT) {
@@ -841,9 +849,10 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       await copyFile(finalPath, join(evidenceRoot, 'w49-catalog-approved-final.mp4'))
       await writeFile(join(evidenceRoot, 'w49-catalog-approved-final.json'), JSON.stringify({
         schemaVersion: 'automatic-catalog-proof/v1', controlledUpstream: ['Director snapshots', 'proxy approval', 'color probe'],
+        sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null, ownerPid: process.pid, serverPid: server.pid,
         runtime: ['public export API', 'factory worker', 'FFmpeg renderer', 'PostgreSQL', 'local artifact storage'],
         artifact: { id: output.artifactId, manifestId: output.manifestId, sha256: output.sha256, byteSize: downloadedBytes.byteLength },
-        catalogRecord, inheritedRights: inheritedRights.snapshot, fullDecode: 'passed',
+        catalogRecord, catalogBrowser, inheritedRights: inheritedRights.snapshot, fullDecode: 'passed',
         replayConcurrency: 3, catalogRows: 1, libraryRows: 1, failedAttemptCatalogRows: 0, rejectedOutputCatalogRows: 0, quarantinedOutputLibraryRows: 0,
         deployed: false, ownerAccepted: false,
       }, null, 2))
@@ -875,7 +884,14 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     if (server && server.exitCode === null) {
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+      if (server.exitCode === null && server.signalCode === null) {
+        server.kill('SIGKILL')
+        await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+      }
     }
+    assert.ok(!server || server.exitCode !== null || server.signalCode !== null, 'Owned export Next server must terminate')
+    const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
+    await disconnectV2PostgresClient()
     await client.$disconnect()
     await rm(join(artifactRoot, `workspaces/final-export-e2e-${suffix}`), { recursive: true, force: true })
   }

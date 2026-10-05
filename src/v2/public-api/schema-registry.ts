@@ -1,4 +1,4 @@
-﻿import {
+import {
   CAPTURE_SCENARIOS,
   REQUIREMENT_LEVELS,
   REQUIREMENT_VERIFICATIONS,
@@ -16629,6 +16629,10 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     successSchema({
       type: 'object', additionalProperties: false,
       required: ['id', 'projectId', 'workspaceId', 'selection', 'parentArtifactId', 'sourceSha256', 'rightsSnapshotId', 'commandId', 'baseVersionId', 'resultVersionId', 'resultVersionHash', 'role', 'bytesDuplicated', 'replayed', 'createdAt'],
+      oneOf: [
+        { properties: { selection: { type: 'object', properties: { kind: { const: 'asset' } } }, segmentHash: false, semanticRange: false, sourceTimeMapping: false } },
+        { required: ['segmentHash', 'semanticRange', 'sourceTimeMapping'], properties: { selection: { type: 'object', properties: { kind: { const: 'segment' } } }, segmentHash: {}, semanticRange: {}, sourceTimeMapping: {} } },
+      ],
       properties: {
         id: idSchema, projectId: idSchema, workspaceId: idSchema,
         selection: { oneOf: [

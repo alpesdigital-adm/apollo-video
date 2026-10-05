@@ -1,6 +1,6 @@
 # W44 — detalhes e previews reais da biblioteca
 
-**Plano, sem execução W44.** Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W43. F1.012 / FR-040, caixa `fdd725d7664f-1`. **4–6 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original W44.** Execução e evidências atuais em [PROJECT-STATUS.md](PROJECT-STATUS.md) e [relatório W41–W50](quality/media-library-w41-50.md). Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W43. F1.012 / FR-040, caixa `fdd725d7664f-1`. **4–6 h de desenvolvimento**, CI/revisão fora.
 
 O item canônico já contém detalhe técnico, status, origem, rights e referências `preview.thumbnail`/`waveform`; a UI atual desenha apenas faixa/ícone abstrato. Primeiro descobrir se o adapter V2 produz bytes reais de thumbnail/waveform com lineage e contrato de leitura pública. Se faltar, implementar só port/adapter e capability mínimos com autenticação, rights e source hash; nunca apontar um placeholder para parecer preview real.
 

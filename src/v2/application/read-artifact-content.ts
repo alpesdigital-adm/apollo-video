@@ -1,6 +1,7 @@
 import { DomainError } from '../domain/errors.ts'
 import type { ArtifactContentStorage, ArtifactByteRange } from './ports/artifact-content-storage.ts'
 import type { MediaArtifactQueryRepository } from './ports/media-artifact-query-repository.ts'
+import type { MediaLibraryRepository } from './ports/media-library-repository.ts'
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = Object.freeze({
   mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
@@ -34,10 +35,26 @@ function parseRange(value: string | null, total: number): ArtifactByteRange | un
 export function readArtifactContentService(dependencies: {
   artifacts: MediaArtifactQueryRepository
   storage: ArtifactContentStorage
+  library?: MediaLibraryRepository
+  clock?: () => Date
 }) {
   return async function read(input: { workspaceId: string; artifactId: string; rangeHeader: string | null }) {
     const artifact = await dependencies.artifacts.findById(input.workspaceId, input.artifactId.trim())
     if (!artifact || artifact.status !== 'available') throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media artifact content was not found')
+    const previewRecipes = new Set(['media-library-thumbnail', 'media-library-waveform', 'image-thumbnail', 'image-preview'])
+    const previewManifests = artifact.manifests.filter((manifest) => previewRecipes.has(manifest.recipe.id))
+    if (previewManifests.length) {
+      if (!dependencies.library) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Preview source authorization is required')
+      let eligible = false
+      for (const manifest of previewManifests) {
+        for (const source of manifest.sources.filter((source) => source.role === 'source-master')) {
+          const original = await dependencies.artifacts.findById(input.workspaceId, source.artifactId)
+          const item = await dependencies.library.findById(input.workspaceId, source.artifactId, dependencies.clock?.() ?? new Date())
+          if (original?.status === 'available' && original.sha256 === source.sha256 && original.artifactKey === source.artifactKey && item?.status === 'usable' && item.rights.status === 'eligible') eligible = true
+        }
+      }
+      if (!eligible) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Current source rights prohibit this preview')
+    }
     if (artifact.byteSize > BigInt(Number.MAX_SAFE_INTEGER)) throw new DomainError('PERSISTENCE_CONFLICT', 'Media artifact is too large to stream safely')
     const total = Number(artifact.byteSize)
     const range = parseRange(input.rangeHeader, total)

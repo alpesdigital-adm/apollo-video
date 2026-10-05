@@ -1,3 +1,4 @@
+import { parseMediaLibraryAttachmentImpact } from '../../src/v2/domain/media-library-attachment-impact.ts'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
@@ -115,6 +116,16 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     const attachRequest = { workspaceId, projectId, selection: { kind: 'asset', artifactId: artifactIds[0] }, baseVersionId, baseVersionHash: 'a'.repeat(64), idempotencyKey: `library-insert-${suffix}`, actor }
     const created = await attach(attachRequest)
     const replay = await attach(attachRequest)
+    const storedCommand = await prisma.v2EditCommand.findUniqueOrThrow({ where: { id: created.commandId } })
+    const persistedImpact = parseMediaLibraryAttachmentImpact(JSON.parse(storedCommand.payloadJson).impact)
+    const storedVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: created.resultVersionId } })
+    assert.equal(persistedImpact.preservedEditPlanSnapshotId, snapshotIds[1])
+    assert.equal(storedVersion.editPlanSnapshotId, persistedImpact.preservedEditPlanSnapshotId)
+    assert.equal(persistedImpact.resultVersionId, storedVersion.id)
+    assert.equal(persistedImpact.baseVersionId, baseVersionId)
+    assert.deepEqual(persistedImpact.minimalRenders, [])
+    assert.equal(storedCommand.actorId, actor.clientId)
+
     assert.equal(created.bytesDuplicated, false)
     assert.equal(created.replayed, false)
     assert.equal(replay.replayed, true)
@@ -159,6 +170,21 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     assert.equal(attachedSegment.segmentHash, firstSegment.segment.segmentHash)
     assert.deepEqual(attachedSegment.semanticRange, firstSegment.segment.semanticRange)
     assert.equal(attachedSegment.bytesDuplicated, false)
+    const uiDelegation = { delegatedUserId: 'user-library-ui', delegatedIdentityId: 'identity-library-ui', workspaceRole: 'operator' }
+    const uiActor = { ...actor, ...uiDelegation, authenticationKind: 'ui-session', auditContext: createExternalAuditContext({ clientId: actor.clientId, credentialId: actor.credentialId, workspaceId, environment: 'production', ...uiDelegation }) }
+    const uiRequest = { ...attachRequest, baseVersionId: attachedSegment.resultVersionId, baseVersionHash: attachedSegment.resultVersionHash, idempotencyKey: `library-ui-${suffix}`, actor: uiActor }
+    const uiAttachment = await attach(uiRequest)
+    assert.equal((await attach(uiRequest)).replayed, true)
+    const uiCommand = await prisma.v2EditCommand.findUniqueOrThrow({ where: { id: uiAttachment.commandId } })
+    assert.equal(uiCommand.actorType, 'api-client')
+    assert.equal(uiCommand.actorId, actor.clientId)
+    assert.equal(uiCommand.actorAuthenticationKind, 'ui-session')
+    assert.equal(uiCommand.delegatedUserId, uiDelegation.delegatedUserId)
+    assert.equal(uiCommand.actorDelegatedIdentityId, uiDelegation.delegatedIdentityId)
+    assert.equal(uiCommand.actorWorkspaceRole, uiDelegation.workspaceRole)
+    assert.equal(uiCommand.actorCredentialId, actor.credentialId)
+    assert.match(uiCommand.actorContextHash, /^[a-f0-9]{64}$/)
+
     const overlap = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Prova', startMs: 4000, endMs: 8000 })
     const nested = await createSegment({ workspaceId, artifactId: artifactIds[0], parentSegmentId: firstSegment.segment.id, label: 'Frase', startMs: 1000, endMs: 5000 })
     const edge = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Tudo', startMs: 0, endMs: 10000 })
@@ -193,6 +219,25 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     await assert.rejects(() => repository.list({ workspaceId, kind: 'video', limit: 1, after: scopedCursor }, new Date('2026-08-08T13:01:00.000Z')), /cursor/i)
     await assert.rejects(() => createSegment({ workspaceId, artifactId: artifactIds[0], parentSegmentId: firstSegment.segment.id, label: 'Fora', startMs: 0, endMs: 6000 }), /inside|parent/i)
     await assert.rejects(() => createSegment({ workspaceId: otherWorkspaceId, artifactId: artifactIds[0], label: 'Cross workspace', startMs: 0, endMs: 1000 }), /not found/i)
+    // W41: mixed entities cross the UI page boundary; tied timestamps must not
+    // skip or repeat a row. Derive the oracle from DB identities, not cursors.
+    const tiedAt = new Date('2026-08-08T13:00:00.000Z')
+    for (let index = 0; index < 25; index += 1) {
+      const id = `library-page-${String(index).padStart(2, '0')}-${suffix}`
+      await prisma.v2MediaArtifact.create({ data: { id, workspaceId, artifactKey: `${workspaceId}/${id}`, sha256: 'b'.repeat(64), byteSize: 123n, mediaType: index % 2 ? 'audio' : 'image', container: index % 2 ? 'wav' : 'png', status: 'available' } })
+      await prisma.v2MediaLibraryEntry.create({ data: { artifactId: id, workspaceId, label: id, peopleJson: '[]', peopleSearch: '\n', topicsJson: '[]', topicsSearch: '\n', originType: 'upload', createdAt: tiedAt } })
+    }
+    const assetRows = await prisma.v2MediaLibraryEntry.findMany({ where: { workspaceId } })
+    const segmentRows = await prisma.v2MediaSegment.findMany({ where: { workspaceId } })
+    const oracle = [...assetRows.map((row) => ({ id: row.artifactId, key: `a:${row.artifactId}`, at: row.createdAt.toISOString() })), ...segmentRows.map((row) => ({ id: row.id, key: `s:${row.id}`, at: row.createdAt.toISOString() }))].sort((a, b) => b.at.localeCompare(a.at) || b.key.localeCompare(a.key)).map((row) => row.id)
+    const page24 = await repository.list({ workspaceId, limit: 24 }, new Date('2026-08-08T14:00:00.000Z'))
+    assert.equal(page24.items.length, 24); assert.ok(page24.nextCursor)
+    const tail = await repository.list({ workspaceId, limit: 24, after: page24.nextCursor }, new Date('2026-08-08T14:00:00.000Z'))
+    assert.equal(tail.nextCursor, null)
+    assert.deepEqual([...page24.items, ...tail.items].map((item) => item.id), oracle)
+    assert.equal(new Set(oracle).size, oracle.length)
+    assert.ok([...page24.items, ...tail.items].some((item) => item.kind === 'segment'))
+    await assert.rejects(() => repository.list({ workspaceId: otherWorkspaceId, limit: 24, after: page24.nextCursor }, new Date()), /cursor/i)
   } finally {
     await cleanup()
     await prisma.$disconnect()

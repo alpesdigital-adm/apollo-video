@@ -1,6 +1,6 @@
 # W47 — derivative físico só quando um consumer exige
 
-**Plano, sem execução W47.** Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W46. F1.013 / FR-042, partes das caixas `75a8db3a5d75-1` e `82ccf53db39a-1`. **6–8 h de desenvolvimento**, CI/revisão fora.
+**Planejamento original W47.** Execução e evidências atuais em [PROJECT-STATUS.md](PROJECT-STATUS.md) e [relatório W41–W50](quality/media-library-w41-50.md). Bases e gates do [índice W41–W50](PLANO-WAVES-41-50.md); depende de W46. F1.013 / FR-042, partes das caixas `75a8db3a5d75-1` e `82ccf53db39a-1`. **6–8 h de desenvolvimento**, CI/revisão fora.
 
 `materializeMediaSegmentDerivativeService` e `ffmpeg-media-segment-extractor.ts` já formam receita `extract-range/v1`, mas a chamada demonstrada está em teste/adapters; isso não prova consumer operável do produto. Descobrir composição atual antes de afirmar ausência. Escopo inicial **vídeo**: não alegar materialização de áudio.
 

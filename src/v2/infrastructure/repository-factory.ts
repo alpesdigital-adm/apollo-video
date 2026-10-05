@@ -291,6 +291,8 @@ import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
 import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from './media/ffmpeg-binary.ts'
 import { FfmpegColorCriticEvaluator } from './media/ffmpeg-color-critic-evaluator.ts'
+import { FfmpegLibraryPreviewProcessor } from './media/ffmpeg-library-preview-processor.ts'
+import { PrismaMediaLibraryPreviewRepository } from './prisma/media-library-preview-repository.ts'
 import { FfmpegColorMeasurement } from './media/ffmpeg-color-measurement.ts'
 import { FfmpegAudioSyncSignalSource } from './media/ffmpeg-audio-sync-signal-source.ts'
 import { createMarkerMediaAdapter } from './media/marker-media-adapter.ts'
@@ -2489,6 +2491,11 @@ export function createMediaIngestWorker(
     inspector: { inspect: inspectUploadedMedia },
     providers: createProviderRuntimeRouter(environment),
     rights: createAssetRightsRepository(),
+    libraryPreviews: {
+      processor: new FfmpegLibraryPreviewProcessor(join(resolve(environment.APOLLO_V2_RENDER_WORK_ROOT ?? '.apollo/work'), 'library-previews')),
+      repository: new PrismaMediaLibraryPreviewRepository(resolveV2Client()),
+      integrity: { sha256: calculateFileSha256 },
+    },
     imageAnalysis: {
       processor: new SharpImageAnalysisProcessor(
         join(resolve(environment.APOLLO_V2_RENDER_WORK_ROOT ?? '.apollo/work'), 'image-analysis'),

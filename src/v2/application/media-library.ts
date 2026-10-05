@@ -3,6 +3,8 @@ import { DomainError } from '../domain/errors.ts'
 import type { MediaLibraryRepository } from './ports/media-library-repository.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import type { MediaLibrarySelection } from '../domain/media-library.ts'
+import { createEditCommand } from '../domain/edit-command.ts'
+import { createMediaLibraryAttachmentImpact } from '../domain/media-library-attachment-impact.ts'
 
 export function listMediaLibraryService(dependencies: { repository: MediaLibraryRepository; clock?: () => Date }) {
   return async (query: Parameters<typeof normalizeMediaLibraryQuery>[0]) => dependencies.repository.list(normalizeMediaLibraryQuery(query), dependencies.clock?.() ?? new Date())
@@ -35,10 +37,20 @@ export function attachMediaLibraryItemService(dependencies: { repository: MediaL
     requireScope(input.actor, 'projects:write')
     const authenticationAudit = materializeActorAuditContext(input.actor)
     if (authenticationAudit.workspaceId !== workspaceId) throw new DomainError('AUTH_INVALID', 'Actor workspace does not match selection')
+    const createdAt = (dependencies.clock?.() ?? new Date()).toISOString()
     return dependencies.repository.attach({
       workspaceId, projectId, selection, baseVersionId: input.baseVersionId,
       baseVersionHash: input.baseVersionHash, idempotencyKey: input.idempotencyKey,
-      authenticationAudit, createdAt: (dependencies.clock?.() ?? new Date()).toISOString(),
+      authenticationAudit, createdAt,
+      createCommand: (facts) => createEditCommand({
+        id: facts.commandId, workspaceId, projectId, baseVersionId: input.baseVersionId, baseHash: input.baseVersionHash,
+        type: 'attach-media-library-reference', scope: { project: true },
+        author: { type: 'api-client', id: authenticationAudit.clientId, ...(authenticationAudit.delegatedUserId ? { delegatedUserId: authenticationAudit.delegatedUserId } : {}) },
+        payload: { selection, parentArtifactId: facts.parentArtifactId, sourceSha256: facts.sourceSha256, rightsSnapshotId: facts.rightsSnapshotId,
+          ...(facts.segmentHash ? { segmentHash: facts.segmentHash, semanticRange: facts.semanticRange, sourceTimeMapping: facts.sourceTimeMapping } : {}),
+          impact: createMediaLibraryAttachmentImpact({ commandId: facts.commandId, baseVersionId: input.baseVersionId, resultVersionId: facts.resultVersionId, preservedEditPlanSnapshotId: facts.editPlanSnapshotId, selectionKind: selection.kind, selectionId, parentArtifactId: facts.parentArtifactId, sourceSha256: facts.sourceSha256, rightsSnapshotId: facts.rightsSnapshotId }),
+        }, idempotencyKey: input.idempotencyKey, createdAt,
+      }),
     })
   }
 }
