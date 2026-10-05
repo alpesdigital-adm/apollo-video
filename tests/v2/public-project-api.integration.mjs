@@ -5227,6 +5227,14 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.ok(created.data.version.snapshotRefs.brief)
     assert.equal(created.data.version.sequence, 1)
 
+    {
+      const transfer = await proveMediaTransferHttp({
+        baseUrl, client, authorization, workspaceId, projectId: created.data.project.id,
+        artifactRoot: w39ArtifactRoot, createMediaArtifactManifest,
+      })
+      assert.equal(transfer.outcome, 'passed')
+    }
+
     const replayResponse = await createRequest()
     const replay = await replayResponse.json()
     assert.equal(replayResponse.status, 200)
@@ -5803,14 +5811,6 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(w40.outcome, 'passed')
     formUiSession = w40.sessionCookieValue
-
-    {
-      const transfer = await proveMediaTransferHttp({
-        baseUrl, client, authorization, workspaceId, projectId: created.data.project.id,
-        artifactRoot: w39ArtifactRoot, createMediaArtifactManifest,
-      })
-      assert.equal(transfer.outcome, 'passed')
-    }
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

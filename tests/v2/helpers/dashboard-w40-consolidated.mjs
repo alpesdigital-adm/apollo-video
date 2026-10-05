@@ -392,7 +392,7 @@ export async function proveW40ConsolidatedJourney({
             if (expected.search === '?mode=review') {
               const panel = page.getByTestId('review-entry-panel')
               await panel.waitFor({ state: 'visible' })
-              await page.waitForFunction(() => document.activeElement?.getAttribute('data-testid') === 'review-entry-panel')
+              await page.waitForFunction(() => document.activeElement?.getAttribute('data-testid') === 'review-entry-panel', null, { timeout: 30_000 })
               assert.equal(await panel.getAttribute('data-entry-mode'), 'review')
               assert.equal(await panel.getAttribute('aria-label'), 'Mesa de revisão editorial')
             }

@@ -1144,13 +1144,13 @@ export default function ProjectWorkspacePage() {
       focusedReviewEntry.current = null
       return
     }
-    if (!review || focusedReviewEntry.current === projectId) return
+    if (loading || !review || focusedReviewEntry.current === projectId) return
     const target = reviewEntryTarget.current
     if (!target) return
     focusedReviewEntry.current = projectId
     target.focus({ preventScroll: true })
     target.scrollIntoView({ block: 'start' })
-  }, [projectId, review, reviewEntry])
+  }, [loading, projectId, review, reviewEntry])
   const [reviewScope, setReviewScope] = useState<'point' | 'region' | 'scene'>('point')
   const [reviewApplicationScope, setReviewApplicationScope] = useState<ReviewApplicationScopeKind>('scene')
   const [reviewGlobal, setReviewGlobal] = useState(false)
