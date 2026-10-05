@@ -36,7 +36,7 @@ export const PROJECT_STATUS_TRANSITIONS: Readonly<Record<ProjectStatus, readonly
     revising: projectStatuses('rendering-proxy', 'reviewing-proxy', 'failed', 'canceled'),
     'rendering-final': projectStatuses('completed', 'failed', 'canceled'),
     completed: projectStatuses('archived'),
-    failed: projectStatuses('ingesting', 'canceled', 'archived'),
+    failed: projectStatuses('ingesting', 'rendering-proxy', 'canceled', 'archived'),
     canceled: projectStatuses('archived'),
     archived: projectStatuses(),
   })

@@ -1002,6 +1002,10 @@ async function transitionCurrentProxyProject(
 ): Promise<boolean> {
   const context = operation.projectProxyRender
   if (operation.type !== 'project-proxy-render' || !context) return false
+  // Acquire the project lock before the next statement takes its read snapshot.
+  // A concurrent admission either finishes first and is visible to `none`, or
+  // waits and must revalidate the status after this transition commits.
+  await transaction.$queryRaw`SELECT id FROM projects WHERE id = ${context.projectId} FOR UPDATE`
   const changed = await transaction.v2Project.updateMany({
     where: {
       id: context.projectId, workspaceId: operation.workspaceId,
