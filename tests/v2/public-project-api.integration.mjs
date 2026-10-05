@@ -5631,6 +5631,48 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(w32.outcome, 'passed')
 
+    // --- W33 (stream s1) ---
+    // Workspace A (original human login) vs workspace B. The login throttle is exhausted
+    // by the earlier journey, so B's session and the expired/revoked/mid-use sessions are
+    // durable v2UiSession rows issued with the application's own session primitives
+    // (same mechanism as the expired-session fixture above). Cookies/Bearer never leave
+    // this process: the helper records only labels, ids and codes.
+    const { proveW33Isolation } = await import('./helpers/dashboard-w33-isolation.mjs')
+    const w33IssueSession = async ({ workspaceId: sessionWorkspaceId, clientId, memberId, state }) => {
+      const token = issueUiSession()
+      if (state === 'unissued') return token
+      const now = Date.now()
+      const expired = state === 'expired'
+      const issuedAt = new Date(expired ? now - 120_000 : now)
+      const idleExpiresAt = new Date(expired ? now - 60_000 : now + 20 * 60_000)
+      await client.v2UiSession.create({ data: {
+        nonceHash: uiSessionNonceHash(token), workspaceId: sessionWorkspaceId, clientId, memberId,
+        subjectHash: uiSessionSubjectHash(uiUsername, uiEnvironment), issuedAt, lastSeenAt: issuedAt,
+        idleExpiresAt, expiresAt: expired ? idleExpiresAt : new Date(now + 60 * 60_000),
+        ...(state === 'revoked' ? { revokedAt: new Date(now) } : {}),
+      } })
+      return token
+    }
+    const w33CreateBearer = async ({ workspaceId: bearerWorkspaceId, clientId, scopes }) => {
+      const created = await createApiClientService({
+        repository: new PrismaApiClientRepository(client),
+        credentialCrypto: nodeApiCredentialCrypto,
+        clock: () => new Date(),
+      })({
+        id: clientId, credentialId: `${clientId}-credential`, workspaceId: bearerWorkspaceId,
+        name: `W33 ${clientId}`, environment: apiEnvironment, scopes,
+      })
+      return `Bearer ${created.token}`
+    }
+    const w33 = await proveW33Isolation({
+      baseUrl, client, workspaceA: workspaceId, workspaceB: otherWorkspaceId,
+      clientA: apiClientId, clientB: otherApiClientId,
+      memberA: persistedMember.id, memberB: otherMemberId,
+      cookieName: APOLLO_SESSION_COOKIE, sessionA: formUiSession, bearerA: authorization,
+      issueSession: w33IssueSession, createBearer: w33CreateBearer, usernameA: uiUsername,
+    })
+    assert.equal(w33.outcome, 'passed')
+
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
         id_clientId: {
