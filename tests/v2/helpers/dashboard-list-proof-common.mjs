@@ -40,10 +40,12 @@ export function chromePath(wave) {
   return executable
 }
 
-// Playwright's BrowserServer.close() on Windows can resolve late (it also waits
+// Headless Chrome on the Windows harness exits bimodally (0.2-4 s or 20-33 s); same 60 s budget
+// as the W29/W30 helpers. A browser that is still alive after it remains a cleanup error.
+// (Playwright BrowserServer.close() can resolve late: it also waits
 // for Chromium helper processes to release their stdio pipes); the owned browser
 // PID must still be terminal afterwards, which is asserted separately.
-const CLOSE_TIMEOUT_MS = 20_000
+const CLOSE_TIMEOUT_MS = 60_000
 
 export async function boundedClose(label, action, errors, timeoutMs = CLOSE_TIMEOUT_MS, steps = []) {
   if (!action) return
@@ -335,7 +337,7 @@ export async function runBrowserProof({ wave, schemaVersion, envVar, manifestNam
       try { browserProcess.kill('SIGKILL') } catch (error) { cleanupErrors.push(`browser-kill:${error?.name ?? 'Error'}`) }
     }
     if (browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
-      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, 15_000))])
+      await Promise.race([new Promise((done) => browserProcess.once('exit', done)), new Promise((done) => setTimeout(done, CLOSE_TIMEOUT_MS))])
     }
     const exited = () => !browserProcess || browserProcess.exitCode !== null || browserProcess.signalCode !== null
     const pidAlive = () => {
