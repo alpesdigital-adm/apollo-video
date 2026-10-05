@@ -226,10 +226,15 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
       duplicatePayload.data.version.forkedFromVersionId,
       sourceVersion.id,
     )
+    // Snapshot rows are owned by one project through a composite foreign key, so the
+    // copy has its own snapshot ids; the content (and its hash) is what is preserved.
     assert.deepEqual(
-      duplicatePayload.data.version.snapshotRefs,
-      sourceVersion.snapshotRefs,
+      Object.keys(duplicatePayload.data.version.snapshotRefs).toSorted(),
+      Object.keys(sourceVersion.snapshotRefs).toSorted(),
     )
+    for (const [kind, id] of Object.entries(duplicatePayload.data.version.snapshotRefs)) {
+      assert.notEqual(id, sourceVersion.snapshotRefs[kind])
+    }
     assert.deepEqual(duplicatePayload.data.sharedArtifactIds, [artifactId])
     assert.equal(duplicatePayload.data.copiedBytes, 0)
 
@@ -278,8 +283,26 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
         editPlan: storedVersion?.editPlanSnapshotId,
         policies: storedVersion?.policiesSnapshotId,
       },
-      sourceVersion.snapshotRefs,
+      duplicatePayload.data.version.snapshotRefs,
     )
+    const [sourceSnapshots, copySnapshots] = await Promise.all([
+      client.v2ProjectSnapshot.findMany({
+        where: { id: { in: Object.values(sourceVersion.snapshotRefs) } },
+        orderBy: { kind: 'asc' },
+      }),
+      client.v2ProjectSnapshot.findMany({
+        where: { id: { in: Object.values(duplicatePayload.data.version.snapshotRefs) } },
+        orderBy: { kind: 'asc' },
+      }),
+    ])
+    assert.equal(copySnapshots.length, sourceSnapshots.length)
+    copySnapshots.forEach((snapshot, index) => {
+      assert.equal(snapshot.projectId, duplicateProjectId)
+      assert.equal(sourceSnapshots[index].projectId, sourceProject.id)
+      assert.equal(snapshot.kind, sourceSnapshots[index].kind)
+      assert.equal(snapshot.contentHash, sourceSnapshots[index].contentHash)
+      assert.equal(snapshot.contentJson, sourceSnapshots[index].contentJson)
+    })
 
     const replayResponse = await fetch(
       `${baseUrl}/v1/projects/${sourceProject.id}/duplicates`,
