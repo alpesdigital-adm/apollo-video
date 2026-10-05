@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-04T12:06:32.048Z",
+  "updatedAt": "2026-10-05T11:54:38.522Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -14651,40 +14651,54 @@
         "0b96ddcb537a-1",
         "acd8f12f509c-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W30. O código parcial existente não comprova o novo subescopo."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE31-FILTROS-COMBINADOS.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w31-combined-filters.mjs",
+          "role": "implementation",
+          "scope": "Prova browser/HTTP/PG das oito facetas atuais individuais e combinadas (11 fixtures w31-, 14 casos de UI, 10 passos de persistência, 5 bordas UTC e 14 rejeições 422); sem mudança de produto."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W31 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W31 após a base W30 comprovada.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W31 comprovado em ambiente controlado. Lacunas: Objective desconhecido bem-formado responde 200 vazio na API enquanto o codec da UI o descarta; campanha, tags e pessoa do PRD fora do recorte; datas só em dias UTC inteiros. Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W32",
@@ -14697,40 +14711,54 @@
         "7e132977731d-1",
         "3543edbc5940-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W31. O código parcial existente não comprova o novo subescopo."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE32-PAGINACAO-DASHBOARD.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w32-pagination.mjs",
+          "role": "implementation",
+          "scope": "27 fixtures (locale qaa-w32) com empates reais de createdAt, inclusive na fronteira 24/25; páginas de 24 + Carregar mais iguais à ordem PG/API; cursor de outro filtro 422; três corridas stale controladas e rotuladas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W32 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W32 depois da entrega técnica da W31.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W32 comprovado em ambiente controlado. Lacunas: As corridas de filtro durante request lenta usam transporte controlado (page.route), não concorrência natural. Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W33",
@@ -14742,40 +14770,54 @@
       "todoItems": [
         "3543edbc5940-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W32. O código parcial existente não comprova o novo subescopo."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE33-ISOLAMENTO-DASHBOARD.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w33-isolation.mjs",
+          "role": "implementation",
+          "scope": "Workspaces A/B com sessão e Bearer reais: sem vazamento em lista/cards, cursores cruzados 422, projeto alheio 404 PROJECT_NOT_FOUND, sessão anônima/expirada/revogada 401 e Bearer sem projects:read 403."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W33 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W33 depois da entrega técnica da W32.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W33 comprovado em ambiente controlado. Lacunas: A sessão de B é emitida pelas primitivas de sessão da aplicação porque o throttle de login já está consumido na jornada. Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W34",
@@ -14787,40 +14829,54 @@
       "todoItems": [
         "b37d988da372-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W33. O código parcial existente não comprova o novo subescopo."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE34-AGREGADO-DASHBOARD.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w34-aggregate.mjs",
+          "role": "implementation",
+          "scope": "Agregado persistido de GET /v1/projects conferido contra PG e card (seis fixtures w34-), ausências reais nulas/vazias; relação inconsistente falha fechada em teste de domínio com injeção controlada; domínio recusa archivedFromStatus=archived."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W34 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W34 depois da entrega técnica da W33.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W34 comprovado em ambiente controlado. Lacunas: Operações, annotations e outputs vêm de seed PG controlado com FKs reais; nenhuma relação produzida por worker/operação real. Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W35",
@@ -14834,40 +14890,58 @@
         "0944e64350b1-1",
         "ba0e03c8f7d9-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W34. O código parcial existente não comprova o novo subescopo."
+          "kind": "validation",
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "A maioria dos estados vem de seed PG controlado; nenhuma transição executada por worker real, portanto a caixa não está validada integralmente."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE35-ESTADOS-DASHBOARD.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w35-states.mjs",
+          "role": "implementation",
+          "scope": "Nove estados e o vazio real com rótulo, tom, ação e destino conferidos; progresso sem total sem barra e com total no número correto; Revisar agora leva a /projects/{id}?mode=review (corrigido na W40)."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W35 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W35 depois da entrega técnica da W34.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W35 comprovado em ambiente controlado. Lacunas: A maioria dos estados vem de seed PG controlado; nenhuma transição executada por worker real, portanto a caixa não está validada integralmente. Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W36",
@@ -14879,40 +14953,58 @@
       "todoItems": [
         "d1048dd7b809-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W35. O código parcial existente não comprova o novo subescopo."
+          "kind": "validation",
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Primeiro recorte só cobre eventos de administração de projeto; operações, annotations, progresso e duplicação não emitem atualização. A marca d’água depende de todos os gravadores do outbox usarem o papel de banco da aplicação."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE36-EVENTOS-DASHBOARD.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "src/app/v1/events/feed/route.ts",
+          "role": "implementation",
+          "scope": "Feed GET /v1/events/feed (apollo.events.feed.list, projects:read, cursor com marca d’água segura contra late writes) e polling limitado de ~4 s no dashboard; mutação real de outro cliente atualiza o card sem reload; outro workspace não invalida; unmount para o polling."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W36 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W36 depois da entrega técnica da W35.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W36 comprovado em ambiente controlado. Lacunas: Primeiro recorte só cobre eventos de administração de projeto; operações, annotations, progresso e duplicação não emitem atualização. A marca d’água depende de todos os gravadores do outbox usarem o papel de banco da aplicação. Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W37",
@@ -14926,40 +15018,54 @@
         "288af260f3e0-1",
         "70e3b8d2cdb3-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W36. O código parcial existente não comprova o novo subescopo."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE37-RENOMEAR-PROJETO.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w37-rename.mjs",
+          "role": "implementation",
+          "scope": "Renomear pelo card UI→API→PG sem atualização otimista, comando/ator/baseRevision exatos, replay idempotente, 409 de outro cliente recuperável no diálogo (correção de produto) e recusas com códigos da rota."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W37 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W37 depois da entrega técnica da W36.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W37 comprovado em ambiente controlado. Lacunas: Mensagem de conflito exibida é o texto em inglês do catálogo público; casos stale usam retenção controlada do próximo poll do feed (timingAid declarado). Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W38",
@@ -14973,40 +15079,54 @@
         "288af260f3e0-1",
         "70e3b8d2cdb3-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W37. O código parcial existente não comprova o novo subescopo."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE38-ARQUIVAR-RESTAURAR.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w38-archive-restore.mjs",
+          "role": "implementation",
+          "scope": "Cancelar não envia POST; confirmar gera um comando atômico com archivedFromStatus; restaurar volta ao status exato (completed/failed/canceled) com revisões monotônicas; replay, 409, falta de scope e linha histórica sem estado anterior fecham."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W38 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W38 depois da entrega técnica da W37.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W38 comprovado em ambiente controlado. Lacunas: Os status anteriores não triviais vêm de UPDATE de fixture no PG, não de render real. Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W39",
@@ -15019,40 +15139,54 @@
         "1349e49bda43-1",
         "56a977e125cd-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W38. O código parcial existente não comprova o novo subescopo."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE39-DUPLICACAO-COPY-ON-WRITE.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "src/v2/domain/project-snapshot-rebind.ts",
+          "role": "implementation",
+          "scope": "Duplicar pelo card com master MP4 real de hash conhecido: nova identidade, mesmo objeto de storage sem cópia, Command de LUT na cópia sem alterar o original, replay após mutação devolve o resultado original; dois defeitos reais corrigidos (EditPlan religado à versão da cópia e replay reconstruído da versão 1); suíte prisma-project-duplication ligada ao CI."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W39 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W39 depois da entrega técnica da W38.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W39 comprovado em ambiente controlado. Lacunas: Manual-edit/editorial em cópia não executados no PG (só auditoria e unitários); apenas driver local de storage; um master pequeno sem transcript/proxy/output. Nenhuma caixa do TODO foi remarcada."
     },
     {
       "id": "W40",
@@ -15068,40 +15202,54 @@
         "ba0e03c8f7d9-1",
         "288af260f3e0-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "pendente-validacao",
+      "construction": "implemented",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
-          "kind": "implementation",
-          "text": "Executar o pacote após concluir e conferir a dependência W39. O código parcial existente não comprova o novo subescopo."
-        },
-        {
           "kind": "validation",
-          "text": "Produzir evidência proporcional PostgreSQL/API/browser, revisar artifacts e CI do commit integrado."
+          "text": "Integração em main e CI verde no SHA integrado pendentes; prova atual é local controlada na branch claude/waves-31-40-integration."
         },
         {
           "kind": "deployment",
-          "text": "Implantação DigitalOcean separada e condicionada aos gates; não incluída neste pacote."
+          "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
         {
           "kind": "owner-acceptance",
-          "text": "Aceite do proprietário permanece separado; nenhum TODO é promovido pelo planejamento."
+          "text": "Aceite do proprietário permanece separado; nenhuma caixa TODO é promovida."
         }
       ],
       "evidence": [
         {
           "type": "repo",
           "ref": "docs/PACOTE-WAVE40-JORNADA-CONSOLIDADA-DASHBOARD.md",
-          "role": "planned-not-started",
-          "scope": "Pacote de trabalho preparado, com IDs, dependências e critérios. A execução desta wave ainda não começou."
+          "role": "classification",
+          "scope": "Pacote com seção Checkpoint técnico executado: casos provados, origem controlada x runtime e lacunas."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w40-consolidated.mjs",
+          "role": "implementation",
+          "scope": "Jornada única W29–W40: filtros, agregado, abrir/revisar com retorno sem perder filtros, mudança de outro cliente via feed, renomear/arquivar/restaurar/duplicar, 401/403/404/409 de estado real, transporte controlado rotulado à parte e rotação real de sessão; guard exige manifests W29–W39 aprovados no mesmo commit/run."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/public-project-api.integration.mjs",
+          "role": "integration",
+          "scope": "Bloco W40 após W30 na jornada pública real (PostgreSQL, next start, Chromium, sessão humana), com guard de evidência e passos Verify/Publish no CI."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/waves31-40-20261004/w40-f-a55a2bec/w40/w40-manifest.json",
+          "role": "controlled-e2e",
+          "scope": "Jornada integrada W29–W40 verde em runs locais consecutivos no harness supervisionado (PG16 descartável, zero backends, cluster parado, porta livre, browser terminal)."
         }
       ],
-      "nextAction": "Executar W40 depois da entrega técnica da W39.",
-      "notes": "Escopo planejado; runtime parcial anterior pode existir. IDs compartilhados representam subescopos da mesma caixa; não duplicar progresso nem marcar TODO sem resultado exato."
+      "nextAction": "Integrar em main com CI verde no SHA integrado; depois implantação e aceite separados.",
+      "notes": "Recorte técnico W40 comprovado em ambiente controlado. Lacunas: O editor /projects/[id] não lê mode, então só o destino ?mode=review está provado; 403 via Bearer somente leitura; estados reviewing-proxy/completed por seed PG; 404 por troca de workspace em outra aba. Nenhuma caixa do TODO foi remarcada."
     }
   ]
 }
