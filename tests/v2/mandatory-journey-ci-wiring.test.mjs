@@ -402,7 +402,6 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/prisma-montage-alternative.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/prisma-mvp-core-gate.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-production-batch.integration.mjs', reason: PHASE_1_3 },
-  { file: 'tests/v2/prisma-project-duplication.integration.mjs', reason: PHASE_1_3, citedBy: ['docs/PACOTE-WAVE39-DUPLICACAO-COPY-ON-WRITE.md', 'docs/PACOTE-WAVE40-JORNADA-CONSOLIDADA-DASHBOARD.md'] },
   {
     file: 'tests/v2/prisma-proxy-review.integration.mjs',
     reason: NO_SCRIPT,

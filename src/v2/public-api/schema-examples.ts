@@ -8103,6 +8103,34 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: { action: 'rename', baseRevision: 1, resultRevision: 2 },
       },
     ],
+    'apollo://schemas/event-feed/v1': [
+      {
+        data: {
+          events: [],
+          nextCursor: 'eyJ2IjoxLCJjcmVhdGVkQXQiOiIyMDI2LTA4LTA2VDEyOjAwOjAwLjAwMFoifQ',
+          hasMore: false,
+          watermark: createdAt,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          events: [
+            {
+              id: '123e4567-e89b-42d3-a456-426614174001',
+              type: 'project.name.changed', version: '1.0.0', workspaceId,
+              occurredAt: createdAt, sequence: 2, actor: { clientId },
+              resource: { type: 'project', id: projectId },
+              data: { action: 'rename', baseRevision: 1, resultRevision: 2 },
+            },
+          ],
+          nextCursor: 'eyJ2IjoxLCJjcmVhdGVkQXQiOiIyMDI2LTA4LTA2VDEyOjAwOjAwLjAwMFoifQ',
+          hasMore: false,
+          watermark: createdAt,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/event-catalog/v1': [
       {
         data: {

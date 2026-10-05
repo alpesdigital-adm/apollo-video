@@ -17,6 +17,7 @@ import { MARKER_KINDS, MARKER_POSITIONS } from '../domain/sync-marker.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
+import { PROJECT_ADMINISTRATION_EVENT_TYPES } from '../domain/public-event-feed.ts'
 import { PUBLIC_ERROR_CODES } from './public-error-catalog.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
@@ -16855,6 +16856,23 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             },
           },
         },
+      },
+    }),
+  ),
+  defineSchema('event-feed', 1, 'Commit-safe persisted project administration event feed',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['events', 'nextCursor', 'hasMore', 'watermark'],
+      properties: {
+        events: {
+          type: 'array',
+          maxItems: 100,
+          items: publicEventSchemaFor([...PROJECT_ADMINISTRATION_EVENT_TYPES]),
+        },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+        hasMore: { type: 'boolean' },
+        watermark: dateTimeSchema,
       },
     }),
   ),

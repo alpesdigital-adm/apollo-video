@@ -178,6 +178,8 @@ export function createProjectDashboardRecord(input: {
       input.administrationRevision >= 1 &&
       (input.archivedFromStatus === null ||
         (input.project.status === 'archived' &&
+          // The static type excludes 'archived'; runtime input may not.
+          (input.archivedFromStatus as Project['status']) !== 'archived' &&
           PROJECT_STATUSES.includes(input.archivedFromStatus) &&
           canTransitionProjectStatus(input.archivedFromStatus, 'archived'))) &&
       (input.project.status === 'archived' || input.archivedFromStatus === null),
@@ -208,4 +210,29 @@ export function createProjectDashboardRecord(input: {
       archivedFromStatus: input.archivedFromStatus,
     }),
   })
+}
+
+export type ProjectDashboardDestinationIntent = 'open' | 'review'
+
+/**
+ * Where a dashboard card navigates. Review mode is the `mode=review` query the
+ * Revisar button has always used; the primary action of a project awaiting
+ * review must reach the same place instead of the plain workspace.
+ */
+export function projectDashboardDestination(
+  projectId: string,
+  intent: ProjectDashboardDestinationIntent,
+): string {
+  const path = `/projects/${encodeURIComponent(projectId)}`
+  return intent === 'review' ? `${path}?mode=review` : path
+}
+
+export function projectPrimaryActionDestination(
+  projectId: string,
+  primaryAction: string,
+): string {
+  return projectDashboardDestination(
+    projectId,
+    primaryAction === 'review-output' ? 'review' : 'open',
+  )
 }

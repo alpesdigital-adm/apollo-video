@@ -73,6 +73,84 @@ test('project listing rejects invalid ranges and unsupported facets before query
   await assert.rejects(() => list({ workspaceId: 'workspace-projects-1', createdFrom: '2026-08-01', createdTo: '2026-07-01' }), /must not be after/)
 })
 
+const W31_ALL_FACETS = {
+  text: 'Hook validado', status: 'draft', objective: 'lead-generation', format: '9:16',
+  locale: 'pt-BR', ownerId: 'owner-001',
+  createdFrom: '2026-07-01T00:00:00.000Z', createdTo: '2026-07-31T23:59:59.999Z',
+}
+const W31_ALTERNATIVES = {
+  text: 'Outro texto', status: 'completed', objective: 'sale', format: '16:9', locale: 'en-US',
+  ownerId: 'owner-002', createdFrom: '2026-07-02T00:00:00.000Z', createdTo: '2026-07-30T23:59:59.999Z',
+}
+const isCursorMismatch = (error) =>
+  error.code === 'INVALID_ARGUMENT' && error.message === 'after does not match this project query'
+
+test('W31 cursor is bound to each of the eight facets individually and to the workspace', async () => {
+  const records = [project('project-003', '2026-07-16T03:00:00.000Z'), project('project-002', '2026-07-16T02:00:00.000Z')]
+  const list = listProjectsService({ projects: { async listByWorkspace() { return records } } })
+  const first = await list({ workspaceId: 'workspace-projects-1', limit: 1, ...W31_ALL_FACETS })
+  assert.ok(first.nextCursor)
+  const again = await list({ workspaceId: 'workspace-projects-1', limit: 1, ...W31_ALL_FACETS })
+  assert.equal(again.nextCursor, first.nextCursor, 'same query must yield the same opaque cursor')
+  const accepted = await list({ workspaceId: 'workspace-projects-1', limit: 1, ...W31_ALL_FACETS, after: first.nextCursor })
+  assert.equal(accepted.projects.length, 1)
+  for (const facet of Object.keys(W31_ALL_FACETS)) {
+    await assert.rejects(
+      () => list({ workspaceId: 'workspace-projects-1', limit: 1, ...W31_ALL_FACETS, [facet]: W31_ALTERNATIVES[facet], after: first.nextCursor }),
+      isCursorMismatch,
+      `cursor must not survive a change of ${facet}`,
+    )
+    const without = { ...W31_ALL_FACETS }
+    delete without[facet]
+    await assert.rejects(
+      () => list({ workspaceId: 'workspace-projects-1', limit: 1, ...without, after: first.nextCursor }),
+      isCursorMismatch,
+      `cursor must not survive removing ${facet}`,
+    )
+  }
+  await assert.rejects(
+    () => list({ workspaceId: 'workspace-projects-2', limit: 1, ...W31_ALL_FACETS, after: first.nextCursor }),
+    isCursorMismatch,
+  )
+})
+
+test('W31 blank facets are ignored and a same-day UTC range is accepted', async () => {
+  const requests = []
+  const list = listProjectsService({ projects: { async listByWorkspace(input) { requests.push(input); return [] } } })
+  await list({
+    workspaceId: 'workspace-projects-1', text: '   ', status: '', objective: ' ', format: '', locale: '', ownerId: '',
+    createdFrom: '2026-02-10T00:00:00.000Z', createdTo: '2026-02-10T23:59:59.999Z',
+  })
+  assert.deepEqual(requests[0].filters, { createdFrom: '2026-02-10T00:00:00.000Z', createdTo: '2026-02-10T23:59:59.999Z' })
+  await list({ workspaceId: 'workspace-projects-1' })
+  assert.equal('filters' in requests[1], false)
+})
+
+test('W31 every invalid facet is rejected with its own contract message before storage', async () => {
+  const list = listProjectsService({ projects: { async listByWorkspace() { throw new Error('must not query') } } })
+  const cases = [
+    [{ text: 'x'.repeat(121) }, 'text must contain at most 120 characters'],
+    [{ status: 'processing' }, 'status is not supported'],
+    [{ objective: 'Not An Objective!' }, 'objective is not supported'],
+    [{ format: '3:2' }, 'format is not supported'],
+    [{ locale: 'pt_BR' }, 'locale must be a valid language tag'],
+    [{ ownerId: '../owner' }, 'ownerId is invalid'],
+    [{ createdFrom: 'yesterday' }, 'createdFrom must be a valid date-time'],
+    [{ createdTo: '2026-13-45' }, 'createdTo must be a valid date-time'],
+    [{ createdFrom: '2026-08-01T00:00:00.000Z', createdTo: '2026-07-31T23:59:59.999Z' }, 'createdFrom must not be after createdTo'],
+    [{ limit: 0 }, 'limit must be an integer from 1 to 100'],
+    [{ limit: 101 }, 'limit must be an integer from 1 to 100'],
+    [{ after: 'not-a-cursor!' }, 'after must be a valid project cursor'],
+  ]
+  for (const [input, message] of cases) {
+    await assert.rejects(
+      () => list({ workspaceId: 'workspace-projects-1', ...input }),
+      (error) => error.code === 'INVALID_ARGUMENT' && error.message === message,
+      message,
+    )
+  }
+})
+
 test('T-FR-236 projects every persisted project phase into a fail-closed public visible state', () => {
   const states = new Map(PROJECT_STATUSES.map((status) => [
     status,

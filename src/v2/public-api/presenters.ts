@@ -21,6 +21,7 @@ import {
   presentProjectVisibleState,
 } from '../domain/visible-state.ts'
 import type { Project } from '../domain/project.ts'
+import type { PublicEventFeedPage } from '../application/read-public-event-feed.ts'
 import type { ProjectDashboardRecord } from '../domain/project-dashboard.ts'
 import type { ProjectAdministrationResult } from '../application/ports/project-administration-repository.ts'
 import type { ProjectWorkspaceRecord } from '../application/ports/project-workspace-query-repository.ts'
@@ -52,6 +53,25 @@ export function presentSuccess<T>(data: T): PublicSuccess<T> {
   return {
     data,
     meta: { apiVersion: PUBLIC_API_VERSION },
+  }
+}
+
+export function presentPublicEventFeed(page: Readonly<PublicEventFeedPage>) {
+  return {
+    events: page.events.map((event) => ({
+      id: event.id,
+      type: event.type,
+      version: event.version,
+      workspaceId: event.workspaceId,
+      occurredAt: event.occurredAt,
+      ...(event.sequence !== undefined ? { sequence: event.sequence } : {}),
+      ...(event.actor ? { actor: { ...event.actor } } : {}),
+      resource: { type: event.resource.type, id: event.resource.id },
+      data: event.data,
+    })),
+    nextCursor: page.nextCursor,
+    hasMore: page.hasMore,
+    watermark: page.watermark,
   }
 }
 

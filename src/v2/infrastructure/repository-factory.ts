@@ -175,6 +175,7 @@ import type { ProjectCreationRepository } from '../application/ports/project-cre
 import type { ProjectDuplicationRepository } from '../application/ports/project-duplication-repository.ts'
 import type { ProjectAdministrationRepository } from '../application/ports/project-administration-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
+import type { PublicEventFeedRepository } from '../application/ports/public-event-feed-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
 import type { ReviewCleanupMaskRepository } from '../application/ports/review-cleanup-mask-repository.ts'
@@ -466,6 +467,7 @@ import { PrismaProjectCreationRepository } from './prisma/project-creation-repos
 import { PrismaProjectDuplicationRepository } from './prisma/project-duplication-repository.ts'
 import { PrismaProjectAdministrationRepository } from './prisma/project-administration-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
+import { PrismaPublicEventFeedRepository } from './prisma/public-event-feed-repository.ts'
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-repository.ts'
 import { PrismaReviewCleanupMaskRepository } from './prisma/review-cleanup-mask-repository.ts'
@@ -2737,6 +2739,10 @@ export function createProjectDuplicationRepository(): ProjectDuplicationReposito
 
 export function createProjectAdministrationRepository(): ProjectAdministrationRepository {
   return new PrismaProjectAdministrationRepository(resolveV2Client())
+}
+
+export function createPublicEventFeedRepository(): PublicEventFeedRepository {
+  return new PrismaPublicEventFeedRepository(resolveV2Client())
 }
 
 export function createProjectQueryRepository(): ProjectQueryRepository {

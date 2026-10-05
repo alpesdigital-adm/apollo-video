@@ -1849,6 +1849,63 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.events.feed.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/event-feed/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/events/feed"
+      },
+      "toolName": "apollo.events.feed.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum number of events to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          }
+        },
+        {
+          "name": "after",
+          "description": "Opaque cursor returned by the previous feed page; cannot be combined with startAt.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 1024
+          }
+        },
+        {
+          "name": "startAt",
+          "description": "latest returns no events and a cursor at the current committed watermark, so a client can follow only new events.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "latest"
+            ]
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.export-matrices.commit": {
       "version": "1.0.0",
       "exposure": "public",
@@ -58647,6 +58704,150 @@
                   }
                 }
               }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/event-feed/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "events",
+            "nextCursor",
+            "hasMore",
+            "watermark"
+          ],
+          "properties": {
+            "events": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "type",
+                  "version",
+                  "workspaceId",
+                  "occurredAt",
+                  "resource",
+                  "data"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "project.created",
+                      "project.name.changed",
+                      "project.status.changed"
+                    ]
+                  },
+                  "version": {
+                    "const": "1.0.0"
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "occurredAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "sequence": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "actor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "minProperties": 1,
+                    "properties": {
+                      "clientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "userId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "resource": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "id"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "project",
+                          "project-version",
+                          "operation",
+                          "annotation",
+                          "quality-report",
+                          "approval",
+                          "media-artifact",
+                          "workspace",
+                          "api-client"
+                        ]
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "data": {
+                    "type": "object",
+                    "maxProperties": 1024,
+                    "additionalProperties": true
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1024
+            },
+            "hasMore": {
+              "type": "boolean"
+            },
+            "watermark": {
+              "type": "string",
+              "format": "date-time"
             }
           }
         },

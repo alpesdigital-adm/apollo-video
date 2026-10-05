@@ -10,6 +10,14 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { proveWorkspaceLutBrowser } from './helpers/workspace-lut-browser-proof.mjs'
 import { proveProjectDashboardBrowser } from './helpers/project-dashboard-browser-proof.mjs'
+import { cleanupDashboardFixtures } from './helpers/dashboard-w34-35-fixtures.mjs'
+import { proveDashboardAggregate } from './helpers/dashboard-w34-aggregate.mjs'
+import { proveDashboardStates } from './helpers/dashboard-w35-states.mjs'
+import { proveDashboardEventFeedBrowser } from './helpers/dashboard-w36-events-proof.mjs'
+import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
+import { proveW38ArchiveRestore } from './helpers/dashboard-w38-archive-restore.mjs'
+import { createW39ArtifactRoot, proveW39DuplicateCopyOnWrite } from './helpers/dashboard-w39-duplicate.mjs'
+import { proveW40ConsolidatedJourney } from './helpers/dashboard-w40-consolidated.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -168,11 +176,16 @@ test('authenticated public API manages projects, clients and artifact inspection
   const webhookReplayDeliveryId = '00000000-0000-4000-8000-000000000907'
   const webhookReplayAttemptId = '00000000-0000-4000-8000-000000000908'
   const sha = (character) => character.repeat(64)
+  // W39: the journey server is started with this isolated local artifact root so the raw-master fixture is served by the product.
+  const w39ArtifactRoot = await createW39ArtifactRoot()
   let server
   let serverDiagnostics = ''
   let primaryFailure
 
   const cleanup = async () => {
+    // W34/W35 fixtures hold RESTRICT foreign keys; they leave first.
+    // W40 seeds an awaiting-review project (operation + annotation) that also holds RESTRICT foreign keys.
+    await cleanupDashboardFixtures(client, { workspaceId, prefixes: ['w34-', 'w35-', 'w40-'] })
     await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: uiThrottleKey } })
     await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiThrottleKey } })
@@ -268,6 +281,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2ProjectCreationCommand.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    // W39: a duplicated project's first version forks from its source (restrictive FK), so duplicates go first.
+    await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds }, duplicatedFromProjectId: { not: null } } })
     await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
@@ -677,6 +692,7 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
           APOLLO_RENDERER_DIGEST: sha('8'),
           APOLLO_FFMPEG_PATH: ffmpegPath,
+          APOLLO_V2_ARTIFACT_ROOT: w39ArtifactRoot,
           // This broad journey generates hundreds of legitimate requests. Keep
           // request/spend spike detection out of this isolated error-rate proof.
           APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '2000000000',
@@ -739,7 +755,8 @@ test('authenticated public API manages projects, clients and artifact inspection
       formLoginResponse.headers.get('set-cookie') ?? '',
       new RegExp(`^${APOLLO_SESSION_COOKIE}=`),
     )
-    const formUiSession = formLoginResponse.headers
+    // `let`: W40 may hand back the successor token if the product's own session rotation ran during the journey.
+    let formUiSession = formLoginResponse.headers
       .get('set-cookie')
       ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
     assert.ok(formUiSession)
@@ -5609,6 +5626,165 @@ test('authenticated public API manages projects, clients and artifact inspection
       username: uiUsername,
     })
     assert.equal(w30.outcome, 'passed')
+
+    // --- W31 (stream s1) ---
+    // Combined-filter proof. Fixtures (prefix w31-) are created inside the helper,
+    // after every baseline assertion above and before terminal credential expiry.
+    const { proveW31CombinedFilters } = await import('./helpers/dashboard-w31-combined-filters.mjs')
+    const w31 = await proveW31CombinedFilters({
+      baseUrl, client, workspaceId, creatorClientId: apiClientId,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w31.outcome, 'passed')
+
+    // --- W32 (stream s1) ---
+    // 27 fixtures (prefix w32-, dedicated locale qaa-w32, real createdAt ties), created in the helper.
+    const { proveW32Pagination } = await import('./helpers/dashboard-w32-pagination.mjs')
+    const w32 = await proveW32Pagination({
+      baseUrl, client, workspaceId, creatorClientId: apiClientId,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w32.outcome, 'passed')
+
+    // --- W33 (stream s1) ---
+    // Workspace A (original human login) vs workspace B. The login throttle is exhausted
+    // by the earlier journey, so B's session and the expired/revoked/mid-use sessions are
+    // durable v2UiSession rows issued with the application's own session primitives
+    // (same mechanism as the expired-session fixture above). Cookies/Bearer never leave
+    // this process: the helper records only labels, ids and codes.
+    const { proveW33Isolation } = await import('./helpers/dashboard-w33-isolation.mjs')
+    const w33IssueSession = async ({ workspaceId: sessionWorkspaceId, clientId, memberId, state }) => {
+      const token = issueUiSession()
+      if (state === 'unissued') return token
+      const now = Date.now()
+      const expired = state === 'expired'
+      const issuedAt = new Date(expired ? now - 120_000 : now)
+      const idleExpiresAt = new Date(expired ? now - 60_000 : now + 20 * 60_000)
+      await client.v2UiSession.create({ data: {
+        nonceHash: uiSessionNonceHash(token), workspaceId: sessionWorkspaceId, clientId, memberId,
+        subjectHash: uiSessionSubjectHash(uiUsername, uiEnvironment), issuedAt, lastSeenAt: issuedAt,
+        idleExpiresAt, expiresAt: expired ? idleExpiresAt : new Date(now + 60 * 60_000),
+        ...(state === 'revoked' ? { revokedAt: new Date(now) } : {}),
+      } })
+      return token
+    }
+    const w33CreateBearer = async ({ workspaceId: bearerWorkspaceId, clientId, scopes }) => {
+      const created = await createApiClientService({
+        repository: new PrismaApiClientRepository(client),
+        credentialCrypto: nodeApiCredentialCrypto,
+        clock: () => new Date(),
+      })({
+        id: clientId, credentialId: `${clientId}-credential`, workspaceId: bearerWorkspaceId,
+        name: `W33 ${clientId}`, environment: apiEnvironment, scopes,
+      })
+      return `Bearer ${created.token}`
+    }
+    const w33 = await proveW33Isolation({
+      baseUrl, client, workspaceA: workspaceId, workspaceB: otherWorkspaceId,
+      clientA: apiClientId, clientB: otherApiClientId,
+      memberA: persistedMember.id, memberB: otherMemberId,
+      cookieName: APOLLO_SESSION_COOKIE, sessionA: formUiSession, bearerA: authorization,
+      issueSession: w33IssueSession, createBearer: w33CreateBearer, usernameA: uiUsername,
+    })
+    assert.equal(w33.outcome, 'passed')
+
+    // --- W34 (stream s2) ---
+    const w34 = await proveDashboardAggregate({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      credentialId: issued.credential.id,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername, sourceArtifactId,
+      sourceManifestId: 'public-api-source-manifest-v2',
+    })
+    assert.equal(w34.outcome, 'passed')
+
+    // --- W35 (stream s2) ---
+    const w35 = await proveDashboardStates({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      credentialId: issued.credential.id,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername, password: uiPassword, uiThrottleKey, sourceArtifactId,
+      sourceManifestId: 'public-api-source-manifest-v2',
+    })
+    assert.equal(w35.outcome, 'passed')
+
+    // --- W36 (stream s3) ---
+    // The dashboard follows persisted project events written by OTHER clients
+    // (API clients B and C), with the same real human session as W30.
+    const w36 = await proveDashboardEventFeedBrowser({
+      baseUrl, client, workspaceId, otherWorkspaceId,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w36.outcome, 'passed')
+
+    // --- W37 (stream s4) ---
+    // The three clients below are shared by the W37-W39 blocks: a read-only
+    // credential in the journey workspace and a write credential in the other one.
+    const w3739ClientFactory = createApiClientService({
+      repository: new PrismaApiClientRepository(client),
+      credentialCrypto: nodeApiCredentialCrypto,
+      clock: () => new Date(),
+    })
+    const w3739ReadOnly = await w3739ClientFactory({
+      id: 'w3739-readonly-client-v2', credentialId: 'w3739-readonly-credential-v2',
+      workspaceId, name: 'W37-39 read-only client', environment: apiEnvironment,
+      scopes: ['projects:read'],
+    })
+    const w3739OtherWorkspace = await w3739ClientFactory({
+      id: 'w3739-other-workspace-client-v2', credentialId: 'w3739-other-workspace-credential-v2',
+      workspaceId: otherWorkspaceId, name: 'W37-39 other workspace client', environment: apiEnvironment,
+      scopes: ['artifacts:read', 'projects:read', 'projects:write'],
+    })
+    const w3739ReadOnlyAuthorization = `Bearer ${w3739ReadOnly.token}`
+    const w3739OtherWorkspaceAuthorization = `Bearer ${w3739OtherWorkspace.token}`
+    const w37 = await proveW37RenameFromCard({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w37.outcome, 'passed')
+
+    // --- W38 (stream s4) ---
+    const w38 = await proveW38ArchiveRestore({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername,
+    })
+    assert.equal(w38.outcome, 'passed')
+
+    // --- W39 (stream s4) ---
+    const w39 = await proveW39DuplicateCopyOnWrite({
+      baseUrl, client, workspaceId, apiClientId, authorization,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession,
+      username: uiUsername, artifactRoot: w39ArtifactRoot, ffmpegPath,
+      artifacts, createMediaArtifactManifest,
+    })
+    assert.equal(w39.outcome, 'passed')
+
+    // --- W40 (consolidation) ---
+    // One browser journey over the composition of W31-W39, with 401/403/404/409 produced from real state.
+    // The human session may have crossed the product's 10-minute rotation point by now; the helper measures
+    // its age and keeps using the product's own GET /v1/session rotation (never a forged extension).
+    const w40 = await proveW40ConsolidatedJourney({
+      baseUrl, client, workspaceId, otherWorkspaceId, apiClientId, otherApiClientId, otherMemberId,
+      authorization, credentialId: issued.credential.id, sourceArtifactId,
+      readOnlyAuthorization: w3739ReadOnlyAuthorization,
+      otherWorkspaceAuthorization: w3739OtherWorkspaceAuthorization,
+      sessionCookieName: APOLLO_SESSION_COOKIE, sessionCookieValue: formUiSession, username: uiUsername,
+      issueSession: w33IssueSession, createBearer: w33CreateBearer, uiSessionNonceHash,
+      artifactRoot: w39ArtifactRoot, ffmpegPath, artifacts, createMediaArtifactManifest,
+    })
+    assert.equal(w40.outcome, 'passed')
+    formUiSession = w40.sessionCookieValue
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

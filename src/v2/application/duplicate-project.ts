@@ -4,6 +4,7 @@ import { createProjectCreationCommand } from '../domain/project-creation-command
 import { createProject, normalizeProjectName } from '../domain/project.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
+import { rebindSnapshotContentForDuplicate } from '../domain/project-snapshot-rebind.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -126,16 +127,25 @@ export function duplicateProjectService(dependencies: {
     const createdAt = createdAtDate.toISOString()
     const duplicateProjectId = dependencies.createId('project')
     const duplicateVersionId = dependencies.createId('project-version')
-    const snapshots = source.snapshots.map((snapshot) => createProjectSnapshot({
-      id: dependencies.createId('project-snapshot'),
-      workspaceId,
-      projectId: duplicateProjectId,
-      kind: snapshot.kind,
-      contentSchemaVersion: snapshot.contentSchemaVersion,
-      contentJson: snapshot.contentJson,
-      contentHash: snapshot.contentHash,
-      createdAt,
-    }))
+    const snapshots = source.snapshots.map((snapshot) => {
+      const rebound = rebindSnapshotContentForDuplicate({
+        kind: snapshot.kind,
+        contentJson: snapshot.contentJson,
+        contentHash: snapshot.contentHash,
+        source: { projectId: source.project.id, versionId: source.version.id },
+        copy: { projectId: duplicateProjectId, versionId: duplicateVersionId },
+      })
+      return createProjectSnapshot({
+        id: dependencies.createId('project-snapshot'),
+        workspaceId,
+        projectId: duplicateProjectId,
+        kind: snapshot.kind,
+        contentSchemaVersion: snapshot.contentSchemaVersion,
+        contentJson: rebound.contentJson,
+        contentHash: rebound.contentHash,
+        createdAt,
+      })
+    })
     const snapshotIdByKind = new Map(snapshots.map((snapshot) => [snapshot.kind, snapshot.id]))
     const requiredSnapshotId = (kind: 'brief' | 'edit-plan' | 'policies') => {
       const id = snapshotIdByKind.get(kind)

@@ -168,3 +168,96 @@ test('F1.003 legacy archived rows fail closed and workspace/scope isolation prec
   )
   assert.equal(legacy.committed.length, 0)
 })
+
+test('F1.003 archive then restore returns each archivable workflow status exactly, never a default', async () => {
+  for (const status of ['draft', 'completed', 'failed', 'canceled']) {
+    const setup = fixture({ status })
+    const archived = await setup.service({
+      actor: actor(), projectId: 'project-1', action: 'archive',
+      baseRevision: 1, idempotencyKey: `archive-key-${status}`, confirmed: true,
+    })
+    assert.equal(archived.state.archivedFromStatus, status)
+    const restored = await setup.service({
+      actor: actor(), projectId: 'project-1', action: 'restore',
+      baseRevision: 2, idempotencyKey: `restore-key-${status}`,
+    })
+    assert.equal(restored.state.status, status)
+    assert.equal(restored.project.status, status)
+    assert.equal(restored.state.archivedFromStatus, undefined)
+    assert.deepEqual(
+      setup.committed.map((entry) => [entry.command.action, entry.command.before.revision, entry.command.after.revision]),
+      [['archive', 1, 2], ['restore', 2, 3]],
+    )
+  }
+})
+
+test('F1.003 a stale base revision is refused with both revisions and writes nothing, for every action', async () => {
+  const setup = fixture({ status: 'completed' })
+  await setup.service({
+    actor: actor(), projectId: 'project-1', action: 'rename',
+    baseRevision: 1, idempotencyKey: 'rename-key-fresh', name: 'Outro cliente venceu',
+  })
+  const stale = (action, extra = {}) => setup.service({
+    actor: actor(), projectId: 'project-1', action, baseRevision: 1,
+    idempotencyKey: `stale-${action}-key`, ...extra,
+  })
+  for (const [action, extra] of [
+    ['rename', { name: 'Nome obsoleto' }],
+    ['archive', { confirmed: true }],
+    ['restore', {}],
+  ]) {
+    await assert.rejects(() => stale(action, extra), (error) => {
+      assert.equal(error.code, 'VERSION_CONFLICT')
+      assert.equal(error.details.expectedRevision, 1)
+      assert.equal(error.details.currentRevision, 2)
+      return true
+    })
+  }
+  assert.equal(setup.committed.length, 1)
+  assert.equal(setup.current().project.name, 'Outro cliente venceu')
+  assert.equal(setup.current().state.status, 'completed')
+})
+
+test('F1.003 renaming an archived project keeps the exact status that restore will return', async () => {
+  const setup = fixture({ status: 'failed' })
+  await setup.service({
+    actor: actor(), projectId: 'project-1', action: 'archive',
+    baseRevision: 1, idempotencyKey: 'archive-key-rename', confirmed: true,
+  })
+  const renamed = await setup.service({
+    actor: actor(), projectId: 'project-1', action: 'rename',
+    baseRevision: 2, idempotencyKey: 'rename-key-archived', name: 'Arquivado e renomeado',
+  })
+  assert.equal(renamed.state.status, 'archived')
+  assert.equal(renamed.state.archivedFromStatus, 'failed')
+  const restored = await setup.service({
+    actor: actor(), projectId: 'project-1', action: 'restore',
+    baseRevision: 3, idempotencyKey: 'restore-key-renamed',
+  })
+  assert.equal(restored.state.status, 'failed')
+  assert.equal(restored.project.name, 'Arquivado e renomeado')
+})
+
+test('F1.003 a rename that normalizes to the current name and a replayed key with another action write nothing', async () => {
+  const setup = fixture()
+  await assert.rejects(
+    () => setup.service({
+      actor: actor(), projectId: 'project-1', action: 'rename',
+      baseRevision: 1, idempotencyKey: 'rename-key-same', name: '  Original  ',
+    }),
+    (error) => error.code === 'INVALID_PROJECT',
+  )
+  assert.equal(setup.committed.length, 0)
+  await setup.service({
+    actor: actor(), projectId: 'project-1', action: 'rename',
+    baseRevision: 1, idempotencyKey: 'shared-key-1', name: 'Novo nome',
+  })
+  await assert.rejects(
+    () => setup.service({
+      actor: actor(), projectId: 'project-1', action: 'archive',
+      baseRevision: 1, idempotencyKey: 'shared-key-1', confirmed: true,
+    }),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+  assert.equal(setup.committed.length, 1)
+})
