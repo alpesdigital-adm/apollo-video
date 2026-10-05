@@ -21,6 +21,8 @@ status distinguem integração/testes controlados de implantação e aceite.
 
 A retomada W35–W36 conecta estados do dashboard às operações admitidas e aos workers reais de proxy/export, com eventos transacionais de fase/progresso e annotations. O servidor publica a projeção autoritativa após cada sinal; o browser não estima avanço por tempo. O escopo, as provas e os bloqueios ficam nos [pacotes W35](./PACOTE-WAVE35-ESTADOS-DASHBOARD.md) e [W36](./PACOTE-WAVE36-EVENTOS-DASHBOARD.md) e no registro de status, sem antecipar implantação ou aceite.
 
+Prova local de 05/10/2026: a jornada conjunta passou com 21 registros de estados/guards, 22 casos de transporte de eventos, proxy/final reais inspecionados e cleanup confirmado. Mídia e upstream editorial permanecem controlados. Inputs idênticos não criam operações duplicadas; a proteção entre operações da mesma versão tem prova PostgreSQL separada. CI e integração são reconciliados no registro canônico, mantendo implantação, aceite e caixas TODO separados.
+
 ### Alterações da versão 1.2
 
 - API externa como contrato obrigatório e paritário para todas as capacidades operáveis.
