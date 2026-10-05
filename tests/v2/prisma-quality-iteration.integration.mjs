@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import net from 'node:net'
 import test from 'node:test'
+import { createMediaArtifactManifest } from '../../src/v2/domain/media-artifact.ts'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
@@ -222,11 +223,16 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
 
     const proxyRepository = new PrismaProxyReviewRepository(client)
     const sourceManifestId = `quality-source-manifest-${suffix}`
+    const sourceManifest = createMediaArtifactManifest({ artifactKey: `quality/${selectedArtifactId}.mp4`,
+      artifactSha256: '1'.repeat(64), byteSize: 2_000, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'quality-source', version: '1.0.0', parameters: {} }, sources: [],
+      probe: { width: 540, height: 960, duration: 10, fps: 30, codec: 'h264', container: 'mp4' },
+    })
     await client.v2MediaArtifactManifest.create({ data: {
       id: sourceManifestId, workspaceId, artifactId: selectedArtifactId,
-      schemaVersion: 'media-artifact-manifest/v2', manifestHash: calculateVersionHash({ sourceManifestId }),
-      recipeId: 'quality-source', recipeVersion: '1.0.0', parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-      manifestJson: stableSerialize({ artifact: { artifactKey: `quality/${selectedArtifactId}.mp4` } }), createdAt,
+      schemaVersion: sourceManifest.schemaVersion, manifestHash: sourceManifest.manifestHash,
+      recipeId: sourceManifest.recipe.id, recipeVersion: sourceManifest.recipe.version, parametersHash: sourceManifest.recipe.parametersHash,
+      manifestJson: stableSerialize(sourceManifest), createdAt,
     } })
     let proxySequence = 0
     async function seedProxy(label, criticIssues) {
