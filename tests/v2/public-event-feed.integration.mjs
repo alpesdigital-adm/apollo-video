@@ -5,6 +5,7 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { PROJECT_DASHBOARD_EVENT_TYPES } from '../../src/v2/domain/public-event-feed.ts'
 
 // W36 contract proof of GET /v1/events/feed on real PostgreSQL and a real
 // `next start` HTTP server: authentication, scope, capability policy, workspace
@@ -160,7 +161,7 @@ test('W36 persisted project event feed is authenticated, workspace-scoped, commi
     const oracle = (workspaceId, extra = {}) => client.v2PublicEventOutbox.findMany({
       where: {
         workspaceId,
-        type: { in: ['project.created', 'project.name.changed', 'project.status.changed'] },
+        type: { in: [...PROJECT_DASHBOARD_EVENT_TYPES] },
         ...extra,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -316,6 +317,23 @@ test('W36 persisted project event feed is authenticated, workspace-scoped, commi
       }
       const stillWorks = await feed(bearer(writer), `after=${encodeURIComponent(cursor)}`)
       assert.equal(stillWorks.status, 200)
+    })
+
+    await t.test('non-project operation events stay outside projects:read and full filtered pages advance', async () => {
+      const fresh = await feed(bearer(writer), 'startAt=latest')
+      const ids = [randomUUID(), randomUUID()].sort()
+      await client.v2PublicEventOutbox.createMany({ data: ids.map((id, index) => ({
+        id, workspaceId: workspaceA, type: 'operation.status.changed', version: '1.0.0',
+        occurredAt: new Date(), resourceType: 'operation', resourceId: `w36-filter-operation-${index}`,
+        dataJson: JSON.stringify({ status: 'running', ...(index ? { projectId: 'w36-filter-project' } : {}) }),
+      })) })
+      const first = await readUntil(bearer(writer), fresh.body.data.nextCursor, (data) => data.hasMore, 1)
+      assert.deepEqual(first.body.data.events, [])
+      assert.equal(decodeCursor(first.body.data.nextCursor).id, ids[0])
+      const second = await feed(bearer(writer), `after=${encodeURIComponent(first.body.data.nextCursor)}&limit=1`)
+      assert.equal(second.body.data.events[0].id, ids[1])
+      assert.equal(second.body.data.events[0].data.projectId, 'w36-filter-project')
+      assert.equal(second.body.data.hasMore, false)
     })
 
     await t.test('REAL late worker progress and annotation transactions are withheld, delivered in order and never skipped', async () => {

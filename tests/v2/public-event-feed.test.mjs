@@ -20,6 +20,25 @@ import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 const WORKSPACE = 'w36-unit-workspace'
 const OTHER_WORKSPACE = 'w36-unit-other-workspace'
 
+test('W36 non-project operations are omitted without trapping the cursor on a filtered full page', async () => {
+  const entries = [1, 2].map((index) => ({ event: createPublicEvent({
+    id: uuid(index), type: 'operation.status.changed', version: '1.0.0', workspaceId: WORKSPACE,
+    occurredAt: '2026-10-05T12:00:00.000Z', resource: { type: 'operation', id: `w36-operation-${index}` },
+    data: { status: 'running', ...(index === 2 ? { projectId: 'w36-project' } : {}) },
+  }), position: { id: uuid(index), createdAt: `2026-10-05T12:00:0${index}.000Z` } }))
+  const read = readPublicEventFeedService({ feed: {
+    async readCommittedWatermark() { return '2026-10-05T12:00:10.000Z' },
+    async listCommitted({ after }) { return after ? entries.filter((entry) => entry.position.id > after.id) : entries },
+  } })
+  const first = await read({ workspaceId: WORKSPACE, limit: 1 })
+  assert.deepEqual(first.events, [])
+  assert.equal(first.hasMore, true)
+  const second = await read({ workspaceId: WORKSPACE, limit: 1, after: first.nextCursor })
+  assert.equal(second.events[0].id, uuid(2))
+  assert.equal(second.hasMore, false)
+  assert.notEqual(first.nextCursor, second.nextCursor)
+})
+
 function uuid(index) {
   return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 }
