@@ -1144,10 +1144,11 @@ export default function ProjectWorkspacePage() {
       focusedReviewEntry.current = null
       return
     }
-    if (loading || !review || focusedReviewEntry.current === projectId) return
+    const entryIdentity = `${projectId}:${review ? 'ready' : 'unavailable'}`
+    if (loading || focusedReviewEntry.current === entryIdentity) return
     const target = reviewEntryTarget.current
     if (!target) return
-    focusedReviewEntry.current = projectId
+    focusedReviewEntry.current = entryIdentity
     target.focus({ preventScroll: true })
     target.scrollIntoView({ block: 'start' })
   }, [loading, projectId, review, reviewEntry])
@@ -4108,6 +4109,12 @@ export default function ProjectWorkspacePage() {
             </section>
           ) : null}
 
+          {reviewEntry && !review ? (
+            <section ref={reviewEntryTarget} tabIndex={-1} data-testid="review-entry-panel" data-entry-mode="review" aria-label="Mesa de revisão editorial" className="mt-5 scroll-mt-6 border-y border-white/[0.08] py-5">
+              <p className="text-sm font-semibold text-[#c9c3b9]">Mesa de revisão</p>
+              <p className="mt-1 text-xs text-[#88847d]">{workspaceHasMedia ? 'A revisão será exibida quando um proxy autorizado estiver disponível.' : 'Este projeto ainda não possui mídia e proxy disponíveis para revisão.'}</p>
+            </section>
+          ) : null}
           {review ? (
             <section ref={reviewEntryTarget} tabIndex={-1} data-testid="review-entry-panel" data-entry-mode={reviewEntry ? 'review' : 'editor'} className="mt-5 scroll-mt-6 border-y border-white/[0.08] bg-[#090909] py-5" aria-label="Mesa de revisão editorial">
               <div className="flex flex-wrap items-start justify-between gap-4 px-1">
