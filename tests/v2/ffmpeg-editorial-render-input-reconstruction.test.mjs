@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -81,15 +81,22 @@ test('approved FFmpeg final reconstructs exact MP4 bytes from materialized input
   assert.equal(registry.supportsRenderer(input.renderer), true)
   assert.equal(registry.supportsComposition(input.composition), true)
   const outputRoot = join(root, 'outputs')
-  await mkdir(outputRoot)
   const adapter = new FfmpegEditorialRenderInputRenderer({ outputRoot, workRoot: join(root, 'reconstruction-work') })
   const key = 'workspaces/test/renders/final.mp4'
+  assert.equal(await adapter.recover(input, { outputKey: key }), null)
   const staged = await adapter.stage(input, { outputKey: key })
   assert.equal(staged.receipt.outputSha256, expected.sha256)
   const committed = await staged.commit()
   assert.equal(committed.outputSha256, expected.sha256)
   assert.equal((await adapter.recover(input, { outputKey: key })).outputSha256, expected.sha256)
-  const mediaServer = createServer((_request, response) => {
+  let slowDownloadCompleted = false
+  const mediaServer = createServer((request, response) => {
+    if (request.url === '/missing') { response.writeHead(404); response.end(); return }
+    if (request.url === '/slow') {
+      response.on('finish', () => { slowDownloadCompleted = true })
+      setTimeout(() => { response.writeHead(200, { 'Content-Length': spec.assets[0].byteSize }); createReadStream(source).pipe(response) }, 100)
+      return
+    }
     response.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': spec.assets[0].byteSize })
     createReadStream(source).pipe(response)
   })
@@ -99,6 +106,20 @@ test('approved FFmpeg final reconstructs exact MP4 bytes from materialized input
   const remoteInput = { ...input, assets: [{ ...input.assets[0], uri: `http://127.0.0.1:${port}/signed-source` }] }
   const remote = await adapter.stage(remoteInput, { outputKey: 'workspaces/test/renders/from-http.mp4' })
   assert.equal((await remote.commit()).outputSha256, expected.sha256)
+  const failedProps = { ...props, sourceArtifactIds: [artifactId, 'artifact-editorial-reconstruct-audio'] }
+  const failedSpec = createRenderInputSpec({ schemaVersion: spec.schemaVersion, renderer: spec.renderer,
+    composition: { id: spec.composition.id, version: spec.composition.version, propsSchemaRef: spec.composition.propsSchemaRef },
+    plan: spec.plan, output: { id: spec.output.id, locale: spec.output.locale, aspectRatio: spec.output.aspectRatio,
+      width: spec.output.width, height: spec.output.height, fps: spec.output.fps, safeArea: spec.output.safeArea,
+      durationInFrames: spec.output.durationInFrames },
+    assets: [spec.assets[0], { ...spec.assets[0], id: 'asset-2', artifactId: 'artifact-editorial-reconstruct-audio',
+      artifactKey: 'masters/reconstruction-audio.mp4', kind: 'audio', ordinal: 1 }], props: failedProps })
+  const failedInput = { ...failedSpec, assets: failedSpec.assets.map((asset, index) => ({ ...asset,
+    uri: `http://127.0.0.1:${port}/${index === 0 ? 'missing' : 'slow'}` })) }
+  await assert.rejects(adapter.stage(failedInput, { outputKey: 'workspaces/test/renders/failed-download.mp4' }),
+    (error) => error.code === 'INVALID_RENDER_INPUT')
+  assert.equal(slowDownloadCompleted, true, 'failure waits for the other owned download before cleanup')
+  assert.deepEqual(await readdir(join(root, 'reconstruction-work')), [])
   assert.equal(registry.supportsRenderer({ ...input.renderer, version: 'other' }), false)
   assert.equal(registry.supportsComposition({ ...input.composition, id: 'unsupported-editorial' }), false)
   const specWithProps = (nextProps) => createRenderInputSpec({ schemaVersion: spec.schemaVersion, renderer: spec.renderer, composition: {

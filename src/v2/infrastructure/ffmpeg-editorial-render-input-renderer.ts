@@ -108,7 +108,8 @@ async function assetPath(asset: MaterializedRenderInputAsset, directory: string,
   }
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) invalid('Editorial source URI is unsupported')
   const target = resolve(directory, `${asset.ordinal}-${asset.sha256}`)
-  const response = await fetch(url, { redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000) })
+  const transferSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000)
+  const response = await fetch(url, { redirect: 'error', signal: transferSignal })
   if (!response.ok || !response.body) invalid('Editorial source could not be downloaded')
   let byteSize = 0
   const hash = createHash('sha256')
@@ -118,7 +119,7 @@ async function assetPath(asset: MaterializedRenderInputAsset, directory: string,
     hash.update(chunk)
     callback(null, chunk)
   } })
-  await pipeline(Readable.fromWeb(response.body as never), meter, createWriteStream(target, { flags: 'wx' }))
+  await pipeline(Readable.fromWeb(response.body as never), meter, createWriteStream(target, { flags: 'wx' }), { signal: transferSignal })
   if (byteSize !== asset.byteSize || hash.digest('hex') !== asset.sha256) invalid('Editorial source download changed its immutable identity')
   return target
 }
@@ -141,7 +142,12 @@ export class FfmpegEditorialRenderInputRenderer implements RenderInputRenderer {
 
   private async outputPath(outputKey: string, createParent: boolean): Promise<string> {
     if (!outputKey.endsWith('.mp4') || outputKey.split('/').some((part) => !part || part === '.' || part === '..') || outputKey.includes('\\')) invalid('Editorial output key is invalid')
-    const root = await realpath(this.outputRoot)
+    if (createParent) await mkdir(this.outputRoot, { recursive: true })
+    const root = await realpath(this.outputRoot).catch((error: NodeJS.ErrnoException) => {
+      if (!createParent && error.code === 'ENOENT') return null
+      throw error
+    })
+    if (!root) return ''
     const path = resolve(root, ...outputKey.split('/'))
     if (!contained(root, path)) invalid('Editorial output escaped its configured root')
     if (createParent) await mkdir(dirname(path), { recursive: true })
@@ -182,7 +188,10 @@ export class FfmpegEditorialRenderInputRenderer implements RenderInputRenderer {
     const partialPath = resolve(dirname(finalPath), `.${basename(finalPath, '.mp4')}.${stageId}.partial.mp4`)
     await mkdir(workDirectory, { recursive: true })
     try {
-      const paths = await Promise.all(input.assets.map((asset) => assetPath(asset, workDirectory, request.signal)))
+      const resolvedAssets = await Promise.allSettled(input.assets.map((asset) => assetPath(asset, workDirectory, request.signal)))
+      const failedAsset = resolvedAssets.find((result) => result.status === 'rejected')
+      if (failedAsset?.status === 'rejected') throw failedAsset.reason
+      const paths = resolvedAssets.map((result) => (result as PromiseFulfilledResult<string>).value)
       const byAssetId = new Map(input.assets.map((asset, index) => [asset.id, paths[index]!]))
       const compilations = new Map(props.compilations.map((item) => [item.sourceArtifactId, item]))
       const lutPaths: Record<string, string> = {}
