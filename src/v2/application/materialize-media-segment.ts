@@ -41,7 +41,16 @@ export function materializeMediaSegmentDerivativeService(dependencies: {
       const stored = await dependencies.storage.promoteDerived({ workspaceId, sourcePath: extracted.outputPath, sha256: extracted.sha256, extension: source.mediaType === 'audio' ? 'wav' : 'mp4', prefix: 'segments' })
       if (input.signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Segment extraction was cancelled')
       const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-extract-range/1.0.0').digest('hex')
-      const manifest = createMediaArtifactManifestV2({ artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: source.mediaType, container: source.mediaType === 'audio' ? 'wav' : 'mp4', recipe: { id: 'extract-range', version: '1.0.0', parameters: { segmentId, segmentHash: segment.segmentHash, consumerKey, sourceRangeMs: recipe.sourceRangeMs, sourceImmutable: true } }, sources: [{ artifactKey: source.artifactKey, sha256: source.sha256, role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } } }], ...(extracted.probe ? { probe: extracted.probe } : {}) })
+      const manifest = createMediaArtifactManifestV2({
+        artifactKey: stored.key,
+        artifactSha256: stored.sha256,
+        byteSize: stored.byteSize,
+        mediaType: source.mediaType,
+        container: source.mediaType === 'audio' ? 'wav' : 'mp4',
+        recipe: { id: 'extract-range', version: '1.0.0', parameters: { segmentId, segmentHash: segment.segmentHash, consumerKey, sourceRangeMs: recipe.sourceRangeMs, sourceImmutable: true } },
+        sources: [{ artifactKey: source.artifactKey, sha256: source.sha256, role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } } }],
+        ...(extracted.probe ? { probe: extracted.probe } : {}),
+      })
       return {
         bundle: { workspaceId, artifactId: identity.artifactId, manifestId: identity.manifestId, lineageIds: [`lineage-${createHash('sha256').update(`${workspaceId}:${identity.manifestId}:${source.artifactId}`).digest('hex')}`], manifest, createdAt: (dependencies.clock?.() ?? new Date()).toISOString() },
         materialization: { workspaceId, id: identity.materializationId, segmentId, consumerKey, sourceArtifactSha256: source.sha256, createdAt: (dependencies.clock?.() ?? new Date()).toISOString() },
