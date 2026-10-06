@@ -705,6 +705,8 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       sources: [{ artifactKey: roleFiles['final-audio'].key, sha256: bytes['final-audio'].sha256,
         role: 'provider-authorized-input', execution: {
           tool: { id: 'controlled-provider-fixture', version: '1.0.0', digest: hash('a') },
+          model: { provider: 'heygen', id: canonicalJob.providerJobId, version: canonicalJob.adapterVersion,
+            config: { operation: canonicalJob.operation, fixture: 'controlled-master-reuse/v1' } },
         } }],
       probe: { width: videoStream.width, height: videoStream.height,
         duration: Number(originalProbe.format.duration), fps: rateNumerator / rateDenominator },
