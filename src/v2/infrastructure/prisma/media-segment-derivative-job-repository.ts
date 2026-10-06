@@ -66,7 +66,7 @@ export class PrismaMediaSegmentDerivativeJobRepository implements MediaSegmentDe
             return Object.freeze({ job: mapped(sameDerivative), replayed: true })
           }
           const segment = await tx.v2MediaSegment.findFirst({ where: { id: input.segmentId, workspaceId: input.workspaceId }, include: { artifact: { select: { sha256: true, currentRightsSnapshotId: true, status: true, mediaType: true } } } })
-          if (!segment || segment.segmentHash !== input.segmentHash || segment.artifact.sha256 !== input.sourceSha256 || segment.artifact.currentRightsSnapshotId !== input.rightsSnapshotId || segment.artifact.status !== 'available' || segment.artifact.mediaType !== 'video') throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Segment source or rights changed before derivative job creation')
+          if (!segment || segment.segmentHash !== input.segmentHash || segment.artifact.sha256 !== input.sourceSha256 || segment.artifact.currentRightsSnapshotId !== input.rightsSnapshotId || segment.artifact.status !== 'available' || !['video', 'audio'].includes(segment.artifact.mediaType)) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Segment source or rights changed before derivative job creation')
           const created = await tx.v2MediaSegmentDerivativeJob.create({ data: { ...input, status: 'queued', attempt: 0, maxAttempts: 3, createdAt: new Date(input.createdAt), updatedAt: new Date(input.createdAt), deadlineAt: new Date(input.deadlineAt) } })
           return Object.freeze({ job: mapped(created), replayed: false })
         }, { isolationLevel: 'Serializable' })

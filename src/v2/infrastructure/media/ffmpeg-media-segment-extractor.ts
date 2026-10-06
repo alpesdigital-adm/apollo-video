@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { MediaSegmentExtractor } from '../../application/ports/media-segment-extractor.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
-import { probeVideo } from './video-probe.ts'
+import { probeAudioDurationSeconds, probeVideo } from './video-probe.ts'
 import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
 type ProcessObservation = { operationId: string; pid: number; state: 'started' | 'exited' }
@@ -44,18 +44,25 @@ export class FfmpegMediaSegmentExtractor implements MediaSegmentExtractor {
     if (rel.startsWith('..') || isAbsolute(rel)) throw new DomainError('INVALID_ARGUMENT', 'Segment extraction path escaped its root')
     return directory
   }
-  async extract(input: { operationId: string; sourcePath: string; startMs: number; endMs: number; signal?: AbortSignal }) {
+  async extract(input: { operationId: string; sourcePath: string; mediaType: 'video' | 'audio'; startMs: number; endMs: number; signal?: AbortSignal }) {
     if (!isAbsolute(input.sourcePath) || !Number.isSafeInteger(input.startMs) || !Number.isSafeInteger(input.endMs) || input.startMs < 0 || input.endMs <= input.startMs) throw new DomainError('INVALID_ARGUMENT', 'Segment extraction input is invalid')
-    const directory = this.directory(input.operationId); await mkdir(directory, { recursive: true }); const outputPath = join(directory, 'segment.mp4')
-    await runOwnedFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', (input.startMs / 1000).toFixed(3), '-i', input.sourcePath, '-t', ((input.endMs - input.startMs) / 1000).toFixed(3), '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', outputPath], input.signal, (state, pid) => { try { this.observe?.({ operationId: input.operationId, pid, state }) } catch { /* A diagnostic observer cannot strand its process. */ } })
+    if (input.mediaType !== 'video' && input.mediaType !== 'audio') throw new DomainError('INVALID_ARGUMENT', 'Segment media type is invalid')
+    const directory = this.directory(input.operationId); await mkdir(directory, { recursive: true }); const outputPath = join(directory, input.mediaType === 'audio' ? 'segment.wav' : 'segment.mp4')
+    const common = ['-hide_banner', '-loglevel', 'error', '-y', '-ss', (input.startMs / 1000).toFixed(3), '-i', input.sourcePath, '-t', ((input.endMs - input.startMs) / 1000).toFixed(3)]
+    const encoding = input.mediaType === 'audio'
+      ? ['-map', '0:a:0', '-vn', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2']
+      : ['-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart']
+    await runOwnedFfmpeg([...common, ...encoding, outputPath], input.signal, (state, pid) => { try { this.observe?.({ operationId: input.operationId, pid, state }) } catch { /* A diagnostic observer cannot strand its process. */ } })
     if (input.signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Segment extraction was cancelled')
     // A short probe finishes under its own deadline before cleanup; cancellation
     // is checked afterward rather than treating an early error event as exit.
-    const [metadata, sha256, probe] = await Promise.all([stat(outputPath), calculateFileSha256(outputPath), probeVideo(outputPath, { requireAudio: false })])
+    const [metadata, sha256, measured] = await Promise.all([stat(outputPath), calculateFileSha256(outputPath), input.mediaType === 'audio' ? probeAudioDurationSeconds(outputPath, { signal: input.signal }) : probeVideo(outputPath, { requireAudio: false, signal: input.signal })])
     if (input.signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Segment extraction was cancelled')
     const expected = (input.endMs - input.startMs) / 1000
-    if (!metadata.isFile() || metadata.size < 1 || Math.abs(probe.duration - expected) > Math.max(0.12, 1 / probe.fps * 2)) throw new DomainError('RENDER_OUTPUT_INVALID', 'Segment derivative duration is invalid')
-    return Object.freeze({ outputPath, sha256, byteSize: metadata.size, probe: Object.freeze({ width: probe.width, height: probe.height, duration: probe.duration, fps: probe.fps }) })
+    const duration = typeof measured === 'number' ? measured : measured.duration
+    const tolerance = typeof measured === 'number' ? 0.12 : Math.max(0.12, 2 / measured.fps)
+    if (!metadata.isFile() || metadata.size < 1 || Math.abs(duration - expected) > tolerance) throw new DomainError('RENDER_OUTPUT_INVALID', 'Segment derivative duration is invalid')
+    return Object.freeze({ outputPath, sha256, byteSize: metadata.size, ...(typeof measured === 'number' ? {} : { probe: Object.freeze({ width: measured.width, height: measured.height, duration: measured.duration, fps: measured.fps }) }) })
   }
   async cleanup(operationId: string) { await rm(this.directory(operationId), { recursive: true, force: true }) }
 }

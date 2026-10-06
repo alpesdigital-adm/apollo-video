@@ -135,3 +135,27 @@ test('T-FR-049 ignores ineligible persisted output and requires provider/model f
   assert.throws(() => assertAutomaticCatalogCandidate(candidate({ outputKind: 'deepfake-raw', searchableKind: 'segment', sourceDurationMs: 1000, lineage: [{ sourceArtifactId: 'artifact-source-a', role: 'generated-from', ordinal: 0 }] })), /requires provider and model/)
   assert.doesNotThrow(() => assertAutomaticCatalogCandidate(candidate({ outputKind: 'deepfake-raw', searchableKind: 'segment', sourceDurationMs: 1000 })))
 })
+
+test('W58 deepfake catalog preserves explicit output rights and refuses a wider or revoked decision', async () => {
+  const raw = candidate({ outputKind: 'deepfake-raw', searchableKind: 'segment', sourceDurationMs: 2000 })
+  const source = rights('artifact-source-a')
+  for (const output of [
+    rights('artifact-output', { allowedUses: ['editorial-reuse'] }),
+    rights('artifact-output', { allowedUses: ['editorial-reuse', 'social-publish', 'unlicensed-use'] }),
+    rights('artifact-output', { status: 'revoked', allowedUses: [] }),
+  ]) {
+    let writes = 0
+    const service = catalogApprovedOutputService({
+      repository: { async inspect() { return raw }, async persist() { writes++; return { record: { id: 'raw-record' }, replayed: false } } },
+      rights: {
+        async findCurrentForArtifacts() { return new Map([['artifact-source-a', source]]) },
+        async findCurrent() { return { artifactId: 'artifact-output', revision: assetRightsRevision('artifact-output', 1), snapshot: output } },
+        async setCurrent() { throw new Error('explicit output rights must never be overwritten') },
+      },
+      clock: () => new Date('2026-08-12T13:00:00.000Z'),
+    })
+    const result = await service(raw)
+    assert.equal(result.status, writes ? 'cataloged' : 'ignored')
+    assert.equal(writes, output.allowedUses.length === 1 && output.status === 'approved' ? 1 : 0)
+  }
+})

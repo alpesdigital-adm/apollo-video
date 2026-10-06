@@ -12,6 +12,7 @@ import {
 } from '../../domain/automatic-catalog.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { createMediaSegment } from '../../domain/media-segment.ts'
 
 function parseValidators(value: string): readonly { code: string; passed: boolean; message: string }[] {
   try {
@@ -70,13 +71,14 @@ export class PrismaAutomaticCatalogRepository implements AutomaticCatalogReposit
     const manifest = await this.client.v2MediaArtifactManifest.findFirst({
       where: { id: target.manifestId, artifactId: target.artifactId, workspaceId: target.workspaceId },
       include: {
-        artifact: { select: { status: true } },
+        artifact: { select: { status: true, sha256: true, mediaType: true } },
         lineageEdges: { orderBy: { ordinal: 'asc' } },
       },
     })
     if (!manifest || manifest.artifact.status !== 'available') return null
     let outputKind: AutomaticCatalogOutputKind
     let eligibilityEvidenceHash: string
+    let sourceDurationMs: number | undefined
     if (manifest.recipeId === 'editorial-proxy') {
       const review = await this.client.v2ProxyReview.findFirst({
         where: { workspaceId: target.workspaceId, proxyArtifactId: target.artifactId, proxyManifestId: target.manifestId },
@@ -100,9 +102,24 @@ export class PrismaAutomaticCatalogRepository implements AutomaticCatalogReposit
         operationId: attempt.operationId, attempt: attempt.attempt, validators,
         outputSha256: attempt.outputSha256, outputByteSize: attempt.outputByteSize?.toString() ?? null,
       })
+    } else if (manifest.recipeId === 'synthetic-provider-result' && manifest.artifact.mediaType === 'video') {
+      const ref = await this.client.v2SyntheticMasterArtifact.findFirst({
+        where: { workspaceId: target.workspaceId, artifactId: target.artifactId, sha256: manifest.artifact.sha256, role: 'provider-original' },
+        include: { master: true },
+      })
+      if (!ref || ref.master.criticReportHash.length !== 64) return null
+      const [job, critic] = await Promise.all([
+        this.client.v2ProviderJob.findFirst({ where: { id: ref.master.providerJobId, workspaceId: target.workspaceId }, select: { status: true, criticResultHash: true } }),
+        this.client.v2SyntheticCriticReport.findFirst({ where: { id: ref.master.criticReportId, workspaceId: target.workspaceId }, select: { reportHash: true, decision: true } }),
+      ])
+      if (job?.status !== 'approved' || job.criticResultHash !== ref.master.criticReportHash || critic?.decision !== 'approved' || critic.reportHash !== ref.master.criticReportHash) return null
+      outputKind = 'deepfake-raw'
+      sourceDurationMs = ref.master.videoDurationMs
+      eligibilityEvidenceHash = calculateCanonicalHash({ schemaVersion: 'automatic-catalog-eligibility/v1', outputKind,
+        masterId: ref.master.id, masterHash: ref.master.masterHash, authorizationHash: ref.master.authorizationHash,
+        criticReportHash: ref.master.criticReportHash, artifactSha256: ref.sha256, manifestHash: manifest.manifestHash })
     } else {
-      // There is no durable deepfake promotion/approval aggregate in the current runtime.
-      // Unknown, temporary and failed recipes are deliberately not inferred as eligible.
+      // Unknown, temporary and failed recipes cannot be inferred as approved.
       return null
     }
     const lineage = Object.freeze(manifest.lineageEdges.map((edge) => Object.freeze({
@@ -123,8 +140,9 @@ export class PrismaAutomaticCatalogRepository implements AutomaticCatalogReposit
       artifactId: target.artifactId,
       manifestId: target.manifestId,
       outputKind,
-      searchableKind: 'asset',
+      searchableKind: outputKind === 'deepfake-raw' ? 'segment' : 'asset',
       label: projectAsset?.originalFileName ?? `${outputKind}-${target.artifactId}`,
+      ...(sourceDurationMs !== undefined ? { sourceDurationMs } : {}),
       eligibilityEvidenceHash,
       lineage,
     })
@@ -173,7 +191,17 @@ export class PrismaAutomaticCatalogRepository implements AutomaticCatalogReposit
             } })
           } else {
             const duration = input.candidate.sourceDurationMs!
-            const segmentHash = calculateCanonicalHash({ schemaVersion: 'media-segment/v1', artifactId: input.candidate.artifactId, parentSegmentId: null, label: input.candidate.label, description: '', startMs: 0, endMs: duration, sourceDurationMs: duration })
+            const parent = await transaction.v2MediaLibraryEntry.findUnique({ where: { artifactId: input.candidate.artifactId } })
+            if (parent && (parent.workspaceId !== input.candidate.workspaceId || parent.originType !== 'generated')) throw new DomainError('PERSISTENCE_CONFLICT', 'Catalog segment parent conflicts with the library')
+            if (!parent) await transaction.v2MediaLibraryEntry.create({ data: {
+              artifactId: input.candidate.artifactId, workspaceId: input.candidate.workspaceId,
+              label: input.candidate.label, peopleJson: '[]', peopleSearch: '\n', topicsJson: '[]', topicsSearch: '\n',
+              originType: 'generated', parentArtifactId: input.candidate.lineage.length === 1 ? input.candidate.lineage[0].sourceArtifactId : null,
+              createdAt: new Date(input.createdAt), updatedAt: new Date(input.createdAt),
+            } })
+            const segment = createMediaSegment({ id: segmentId!, workspaceId: input.candidate.workspaceId, parentAssetId: input.candidate.artifactId,
+              parentDurationMs: duration, label: input.candidate.label, startMs: 0, endMs: duration, createdAt: input.createdAt })
+            const segmentHash = segment.segmentHash
             const prior = await transaction.v2MediaSegment.findUnique({ where: { id: segmentId! } })
             if (prior && (prior.workspaceId !== input.candidate.workspaceId || prior.segmentHash !== segmentHash)) throw new DomainError('PERSISTENCE_CONFLICT', 'Catalog output conflicts with an existing segment')
             if (!prior) await transaction.v2MediaSegment.create({ data: { id: segmentId!, workspaceId: input.candidate.workspaceId, artifactId: input.candidate.artifactId, label: input.candidate.label, description: '', startMs: 0, endMs: duration, sourceDurationMs: duration, segmentHash, createdAt: new Date(input.createdAt) } })

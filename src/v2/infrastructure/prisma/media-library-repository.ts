@@ -220,7 +220,7 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
         query.kind === 'segment' ? Promise.resolve([] as EntryWithArtifact[]) : this.client.v2MediaLibraryEntry.findMany({
           where: {
             workspaceId: query.workspaceId,
-            artifact: { mediaType: query.kind ?? { in: ['video', 'audio', 'image'] } },
+            artifact: { mediaType: query.kind ?? { in: ['video', 'audio', 'image'] }, automaticCatalogRecords: { none: { outputKind: 'deepfake-raw' } } },
             ...libraryFilter,
             ...afterFor('asset', scan),
           },
@@ -257,7 +257,7 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
 
   async findById(workspaceId: string, itemId: string, now: Date, locale = 'pt-BR') {
     const [row, segment] = await Promise.all([
-      this.client.v2MediaLibraryEntry.findFirst({ where: { workspaceId, artifactId: itemId }, include }) as Promise<EntryWithArtifact | null>,
+      this.client.v2MediaLibraryEntry.findFirst({ where: { workspaceId, artifactId: itemId, artifact: { automaticCatalogRecords: { none: { outputKind: 'deepfake-raw' } } } }, include }) as Promise<EntryWithArtifact | null>,
       this.client.v2MediaSegment.findFirst({ where: { workspaceId, id: itemId, artifact: { libraryEntry: { isNot: null } } }, include: segmentInclude }) as Promise<SegmentWithArtifact | null>,
     ])
     if (row && segment) throw new DomainError('PERSISTENCE_CONFLICT', 'Media library identity is ambiguous')

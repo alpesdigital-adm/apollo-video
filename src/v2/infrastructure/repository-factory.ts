@@ -1365,6 +1365,16 @@ export function createSyntheticMasterAssetServices(environment: NodeJS.ProcessEn
       ),
       clock: () => new Date(),
       createId: () => `synthetic-master-${randomUUID()}`,
+      async catalogApprovedMaster(master) {
+        const original = master.artifacts.find((artifact) => artifact.role === 'provider-original')
+        if (!original) throw new DomainError('PERSISTENCE_CONFLICT', 'Approved synthetic master has no provider-original artifact')
+        const manifest = await resolveV2Client().v2MediaArtifactManifest.findFirst({
+          where: { workspaceId: master.workspaceId, artifactId: original.artifactId, recipeId: 'synthetic-provider-result' },
+          orderBy: { createdAt: 'desc' }, select: { id: true },
+        })
+        if (!manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Approved synthetic master has no provider-result manifest')
+        await createAutomaticCatalogService()({ workspaceId: master.workspaceId, artifactId: original.artifactId, manifestId: manifest.id })
+      },
     }),
     readMaster: readSyntheticMasterAssetService({ masters }),
     listMasters: listSyntheticMasterAssetsService({ masters }),

@@ -128,6 +128,32 @@ export function createInheritedCatalogRights(input: {
   })
 }
 
+/** A promoted synthetic master keeps its independently approved output rights.
+ * They must be at least as restrictive as the rights of every source. */
+export function assertCatalogOutputRightsWithinSources(output: AssetRightsSnapshot, inherited: AssetRightsSnapshot, at: string): void {
+  const subset = (values: readonly string[], bounds: readonly string[]) => values.every((value) => bounds.includes(value))
+  const scoped = (values: readonly string[] | undefined, bounds: readonly string[] | undefined) => bounds === undefined || (values !== undefined && subset(values, bounds))
+  const earlier = (value: string | undefined, bound: string | undefined) => bound === undefined || (value !== undefined && Date.parse(value) <= Date.parse(bound))
+  assertDomain(output.workspaceId === inherited.workspaceId && output.status === 'approved' && output.consent.status === inherited.consent.status,
+    'ASSET_RIGHTS_BLOCKED', 'Catalog output rights or consent are not approved')
+  assertDomain(output.allowedUses.includes('editorial-reuse') && !output.prohibitedUses.includes('editorial-reuse') &&
+    subset(output.allowedUses, inherited.allowedUses) && subset(inherited.prohibitedUses, output.prohibitedUses) &&
+    subset(output.allowedWorkspaceIds, inherited.allowedWorkspaceIds) &&
+    scoped(output.allowedMarkets, inherited.allowedMarkets) && scoped(output.allowedLocales, inherited.allowedLocales) &&
+    scoped(output.allowedSyntheticOperations, inherited.allowedSyntheticOperations) && earlier(output.expiresAt, inherited.expiresAt) &&
+    (!output.expiresAt || Date.parse(output.expiresAt) > Date.parse(at)),
+    'ASSET_RIGHTS_BLOCKED', 'Catalog output rights exceed source rights')
+  if (inherited.consent.status === 'approved') {
+    assertDomain(subset(output.consent.allowedUses, inherited.consent.allowedUses) && output.consent.allowedUses.includes('editorial-reuse') &&
+      scoped(output.consent.allowedMarkets, inherited.consent.allowedMarkets) && scoped(output.consent.allowedLocales, inherited.consent.allowedLocales) &&
+      scoped(output.consent.allowedSyntheticOperations, inherited.consent.allowedSyntheticOperations) &&
+      earlier(output.consent.expiresAt, inherited.consent.expiresAt) &&
+      (!output.consent.expiresAt || Date.parse(output.consent.expiresAt) > Date.parse(at)) &&
+      output.consent.documentArtifactId === inherited.consent.documentArtifactId,
+      'ASSET_RIGHTS_BLOCKED', 'Catalog output consent exceeds source consent')
+  }
+}
+
 export function assertAutomaticCatalogCandidate(candidate: AutomaticCatalogCandidate): void {
   assertDomain(AUTOMATIC_CATALOG_OUTPUT_KINDS.includes(candidate.outputKind), 'PERSISTENCE_CONFLICT', 'Catalog output kind is invalid')
   assertDomain(candidate.searchableKind === (candidate.outputKind === 'deepfake-raw' ? 'segment' : 'asset'), 'PERSISTENCE_CONFLICT', 'Catalog searchable kind does not match output kind')

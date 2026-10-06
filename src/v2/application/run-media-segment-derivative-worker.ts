@@ -42,7 +42,7 @@ export function runNextMediaSegmentDerivativeJobService(dependencies: {
       const [segment, item] = await Promise.all([dependencies.segments.find(job.workspaceId, job.segmentId), dependencies.library.findById(job.workspaceId, job.segmentId, clock())])
       if (!segment || segment.segmentHash !== job.segmentHash || !item || item.kind !== 'segment' || item.status !== 'usable' || item.rights.status !== 'eligible' || item.rights.snapshotId !== job.rightsSnapshotId) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Derivative source or rights changed before execution')
       const source = await dependencies.segments.readSource(job.workspaceId, segment.parentAssetId)
-      if (!source || source.mediaType !== 'video' || source.sha256 !== job.sourceSha256) throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative source hash changed')
+      if (!source || source.sha256 !== job.sourceSha256) throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative source hash changed')
       if (abort.signal.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Derivative job stopped before extraction')
       const result = await dependencies.materialize({ workspaceId: job.workspaceId, segmentId: job.segmentId, consumerKey: job.consumerKey, requiresPhysicalDerivative: true, signal: abort.signal, publish: (prepare) => dependencies.jobs.publish(job.id, owner, job.attempt, prepare, abort.signal) })
       if (!('outputArtifactId' in result) || !('outputManifestId' in result)) throw new DomainError('PERSISTENCE_CONFLICT', 'Derivative worker did not produce an artifact')

@@ -757,6 +757,17 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId, artifactId: output.artifactId } }), 1)
     assert.equal(await client.v2MediaLibraryEntry.count({ where: { workspaceId, artifactId: output.artifactId } }), 1)
     assert.equal((await new PrismaAssetRightsRepository(client).findCurrent(workspaceId, output.artifactId)).snapshot.id, inheritedRights.snapshot.id)
+    // Recreate the first catalog write from an approved, promoted real output.
+    // This exercises the unique PostgreSQL commit under simultaneous writers;
+    // the replay above only exercises reads of an already existing record.
+    await client.v2AutomaticCatalogRecord.delete({ where: { id: catalogRecord.id } })
+    await client.v2MediaLibraryEntry.delete({ where: { artifactId: output.artifactId } })
+    const concurrentFirstWrites = await Promise.all([catalog(target), catalog(target), catalog(target)])
+    assert.deepEqual(concurrentFirstWrites.map((item) => item.status).sort(), ['already-cataloged', 'already-cataloged', 'cataloged'])
+    assert.ok(concurrentFirstWrites.every((item) => item.record.recordHash === catalogRecord.recordHash))
+    assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId, artifactId: output.artifactId } }), 1)
+    assert.equal(await client.v2MediaLibraryEntry.count({ where: { workspaceId, artifactId: output.artifactId } }), 1)
+    console.log(JSON.stringify({ event: 'automatic-catalog-first-write-concurrency', writers: 3, statuses: concurrentFirstWrites.map((item) => item.status).sort(), recordHash: catalogRecord.recordHash, catalogRows: 1, libraryRows: 1 }))
     // Raw source has no approved output recipe; cataloging it must not
     // create a searchable row even though it has explicit reuse rights.
     assert.deepEqual(await catalog({ workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId }), { status: 'ignored', reason: 'not-approved', record: null })
@@ -853,7 +864,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         runtime: ['public export API', 'factory worker', 'FFmpeg renderer', 'PostgreSQL', 'local artifact storage'],
         artifact: { id: output.artifactId, manifestId: output.manifestId, sha256: output.sha256, byteSize: downloadedBytes.byteLength },
         catalogRecord, catalogBrowser, inheritedRights: inheritedRights.snapshot, fullDecode: 'passed',
-        replayConcurrency: 3, catalogRows: 1, libraryRows: 1, failedAttemptCatalogRows: 0, rejectedOutputCatalogRows: 0, quarantinedOutputLibraryRows: 0,
+        replayConcurrency: 3, firstWriteConcurrency: 3, catalogRows: 1, libraryRows: 1, failedAttemptCatalogRows: 0, rejectedOutputCatalogRows: 0, quarantinedOutputLibraryRows: 0,
         deployed: false, ownerAccepted: false,
       }, null, 2))
     }

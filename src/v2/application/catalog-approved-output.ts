@@ -1,5 +1,5 @@
 import { createAssetRightsChangeIntent } from '../domain/asset-rights-change.ts'
-import { assertAutomaticCatalogCandidate, createInheritedCatalogRights } from '../domain/automatic-catalog.ts'
+import { assertAutomaticCatalogCandidate, assertCatalogOutputRightsWithinSources, createInheritedCatalogRights } from '../domain/automatic-catalog.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { AutomaticCatalogRepository } from './ports/automatic-catalog-repository.ts'
@@ -23,7 +23,7 @@ export function catalogApprovedOutputService(dependencies: {
     if (snapshots.some((snapshot) => snapshot === null)) return Object.freeze({ status: 'ignored' as const, reason: 'source-rights-missing' as const, record: null })
     const current = await dependencies.rights.findCurrent(candidate.workspaceId, candidate.artifactId)
     if (!current) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Catalog output artifact was not found')
-    if (current.snapshot && (current.snapshot.createdBy.type !== 'system' || current.snapshot.createdBy.id !== 'automatic-catalog')) {
+    if (candidate.outputKind !== 'deepfake-raw' && current.snapshot && (current.snapshot.createdBy.type !== 'system' || current.snapshot.createdBy.id !== 'automatic-catalog')) {
       return Object.freeze({ status: 'ignored' as const, reason: 'output-rights-managed' as const, record: null })
     }
     const createdAt = clock().toISOString()
@@ -40,7 +40,14 @@ export function catalogApprovedOutputService(dependencies: {
       throw error
     }
     let rightsSnapshot = current.snapshot
-    if (rightsSnapshot?.snapshotHash !== inherited.snapshotHash) {
+    if (candidate.outputKind === 'deepfake-raw') {
+      if (!rightsSnapshot) return Object.freeze({ status: 'ignored' as const, reason: 'output-rights-managed' as const, record: null })
+      try { assertCatalogOutputRightsWithinSources(rightsSnapshot, inherited, createdAt) }
+      catch (error) {
+        if (error instanceof DomainError && error.code === 'ASSET_RIGHTS_BLOCKED') return Object.freeze({ status: 'ignored' as const, reason: 'source-rights-blocked' as const, record: null })
+        throw error
+      }
+    } else if (rightsSnapshot?.snapshotHash !== inherited.snapshotHash) {
       const change = createAssetRightsChangeIntent({
         workspaceId: candidate.workspaceId,
         artifactId: candidate.artifactId,
@@ -51,7 +58,7 @@ export function catalogApprovedOutputService(dependencies: {
       })
       rightsSnapshot = (await dependencies.rights.setCurrent(inherited, current.revision, change)).snapshot
     }
-    if (!rightsSnapshot || rightsSnapshot.snapshotHash !== inherited.snapshotHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Catalog output rights did not converge')
+    if (!rightsSnapshot || (candidate.outputKind !== 'deepfake-raw' && rightsSnapshot.snapshotHash !== inherited.snapshotHash)) throw new DomainError('PERSISTENCE_CONFLICT', 'Catalog output rights did not converge')
     const result = await dependencies.repository.persist({ candidate, rightsSnapshotId: rightsSnapshot.id, rightsSnapshotHash: rightsSnapshot.snapshotHash, createdAt })
     return Object.freeze({ status: result.replayed ? 'already-cataloged' as const : 'cataloged' as const, record: result.record })
   }

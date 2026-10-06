@@ -26,3 +26,21 @@ test('library preview checks source authorization and lineage before opening byt
   await assert.rejects(() => read(input), (error) => error.code === 'PERSISTENCE_CONFLICT')
   assert.equal(opens, 1)
 })
+
+test('physical segment bytes recheck the current source rights on direct content reads', async () => {
+  let opens = 0
+  let status = 'eligible'
+  const source = { id: 'audio-source', status: 'available', artifactKey: 'masters/audio', sha256: 'a'.repeat(64) }
+  const derivative = { id: 'audio-wav', status: 'available', mediaType: 'audio', container: 'wav', artifactKey: 'segments/audio', byteSize: 4n, sha256: 'b'.repeat(64),
+    manifests: [{ recipe: { id: 'extract-range' }, sources: [{ artifactId: source.id, artifactKey: source.artifactKey, sha256: source.sha256, role: 'source-master' }] }] }
+  const read = readArtifactContentService({
+    artifacts: { async findById(_workspace, id) { return id === source.id ? source : derivative } },
+    library: { async findById() { return { status: 'usable', rights: { status } } } },
+    storage: { async open() { opens++; return { body: new Uint8Array(4), byteSize: 4, start: 0, end: 3 } } },
+  })
+  const input = { workspaceId: 'workspace-a', artifactId: derivative.id, rangeHeader: null }
+  assert.equal((await read(input)).contentType, 'audio/wav')
+  status = 'restricted'
+  await assert.rejects(() => read(input), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+  assert.equal(opens, 1)
+})

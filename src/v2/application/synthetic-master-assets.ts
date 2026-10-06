@@ -144,6 +144,7 @@ export function promoteSyntheticMasterAssetService(dependencies: {
   durations: MasterDurationProber
   clock: () => Date
   createId: () => string
+  catalogApprovedMaster?: (master: Readonly<SyntheticMasterAsset>) => Promise<void>
 }) {
   return async function promote(request: PromoteSyntheticMasterRequest): Promise<
     Readonly<{ master: Readonly<SyntheticMasterAsset>; replayed: boolean }>
@@ -185,6 +186,7 @@ export function promoteSyntheticMasterAssetService(dependencies: {
         'IDEMPOTENCY_PAYLOAD_MISMATCH',
         'Synthetic master promotion idempotency key was already used for a different request',
       )
+      await dependencies.catalogApprovedMaster?.(replay.master)
       return Object.freeze({ master: replay.master, replayed: true })
     }
 
@@ -219,7 +221,10 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       workspaceId: request.workspaceId,
       providerJobId: request.providerJobId,
     })
-    if (sealed) return Object.freeze({ master: sealed.master, replayed: true })
+    if (sealed) {
+      await dependencies.catalogApprovedMaster?.(sealed.master)
+      return Object.freeze({ master: sealed.master, replayed: true })
+    }
 
     // 2. Every ingested role must exist as a provider result artifact.
     const results = await dependencies.resultArtifacts.listByJob({
@@ -487,6 +492,7 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       idempotencyKey,
       authenticationAudit: audit,
     })
+    await dependencies.catalogApprovedMaster?.(persisted.value.master)
     return Object.freeze({ master: persisted.value.master, replayed: persisted.replayed })
   }
 }
