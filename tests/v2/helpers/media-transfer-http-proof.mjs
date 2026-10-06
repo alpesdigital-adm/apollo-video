@@ -149,6 +149,7 @@ export async function proveMediaTransferHttp({ baseUrl, client, authorization, w
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId, resourceId: { in: projects } } })
     await client.v2MediaUpload.deleteMany({ where: { id: { in: uploads } } })
     await client.v2Project.updateMany({ where: { workspaceId, id: { in: projects } }, data: { currentVersionId: null } })
+    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId, projectId: { in: projects } } })
     await client.v2ProjectVersion.deleteMany({ where: { workspaceId, projectId: { in: projects } } })
     await client.v2Project.deleteMany({ where: { workspaceId, id: { in: projects } } })
   }
