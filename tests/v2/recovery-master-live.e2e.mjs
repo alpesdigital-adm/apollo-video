@@ -91,7 +91,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     evidence.sourceProbe = probe
     evidence.cost = { capUsd: 2, rateUsdPerHour: 0.04, maximumSpeechCalls: 2, maximumAudioSecondsPerCall: 110, upperEstimateUsd: 0.04 * 220 / 3600, rateSource: 'https://console.groq.com/docs/models', billingReceipt: 'unavailable' }
     await factory.createWorkspaceRepository().create(createWorkspace({ id: workspaceId, slug: workspaceId, name: 'Imersão recovery live proof', status: 'active', createdAt: new Date().toISOString() }))
-    const issued = await createApiClientService({ repository: factory.createApiClientRepository(), credentialCrypto: nodeApiCredentialCrypto, clock: () => new Date() })({ id: `recovery-client-${suffix}`, workspaceId, name: 'Isolated recovery actor', environment: 'production', scopes: ['projects:read', 'projects:write', 'projects:approve', 'media:write', 'artifacts:read', 'artifacts:write', 'artifacts:rights', 'operations:read', 'operations:cancel', 'operations:retry'] })
+    const issued = await createApiClientService({ repository: factory.createApiClientRepository(), credentialCrypto: nodeApiCredentialCrypto, clock: () => new Date() })({ id: `recovery-client-${suffix}`, workspaceId, name: 'Isolated recovery actor', environment: 'production', scopes: ['projects:read', 'projects:write', 'projects:approve', 'media:write', 'artifacts:read', 'artifacts:write', 'artifacts:rights', 'artifacts:render', 'operations:read', 'operations:cancel', 'operations:retry'] })
     const port = await freePort()
     const baseUrl = `http://127.0.0.1:${port}`
     const environment = { ...process.env, NODE_ENV: 'production', __NEXT_PROCESSED_ENV: 'true', APOLLO_API_ENVIRONMENT: 'production', APOLLO_V2_ARTIFACT_ROOT: artifactRoot, APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local', APOLLO_V2_RENDER_WORK_ROOT: join(root, 'work'), APOLLO_MEDIA_UPLOAD_BASE_URL: `${baseUrl}/`, APOLLO_MEDIA_UPLOAD_SIGNING_SECRET: `recovery-upload-${suffix}-with-at-least-32-bytes` }
@@ -233,7 +233,10 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const reassessed = await api(`/v1/projects/${projectId}/commands`, { type: 'run-director', baseVersionId: applied.version.id, baseHash: applied.version.baseHash, reason: 'Reassess the confirmed caption correction without overwriting its annotation-bound text.' })
     assert.notEqual(reassessed.directorRun.id, direction.directorRun.id)
     const exportVersion = reassessed.version
-    evidence.captionReassessment = { directorRunId: reassessed.directorRun.id, resultVersionId: exportVersion.id, priorVersionId: applied.version.id, qualityReport: reassessed.directorRun.qualityReport }
+    const reassessedRun = await prisma.v2DirectorRun.findUniqueOrThrow({ where: { id: reassessed.directorRun.id }, include: { qualitySnapshot: true } })
+    assert.equal(reassessedRun.resultVersionId, exportVersion.id)
+    assert.equal(reassessedRun.status, 'succeeded')
+    evidence.captionReassessment = { directorRunId: reassessedRun.id, resultVersionId: exportVersion.id, priorVersionId: applied.version.id, qualitySnapshotId: reassessedRun.qualitySnapshotId, qualitySnapshotHash: reassessedRun.qualitySnapshot.contentHash, qualityReport: JSON.parse(reassessedRun.qualitySnapshot.contentJson) }
     assert.equal((await renderProxy(`recovery-reassessed-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) }))?.status, 'succeeded')
     const finalVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: exportVersion.id }, include: { editPlanSnapshot: true } })
     const finalPlan = JSON.parse(finalVersion.editPlanSnapshot.contentJson)
@@ -263,6 +266,8 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     await checkpoint()
     assert.equal(finalResult?.status, 'succeeded', JSON.stringify(evidence.finalOperation))
     const finalOp = await prisma.v2ProjectFinalExportOperation.findUniqueOrThrow({ where: { operationId: exported.operation.id } })
+    assert.equal(finalOp.directorRunId, reassessedRun.id)
+    assert.equal(finalOp.qualitySnapshotId, reassessedRun.qualitySnapshotId)
     const finalArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: finalOp.outputArtifactId } })
     const finalPath = join(artifactRoot, ...finalArtifact.artifactKey.split('/'))
     const finalBytes = await readFile(finalPath)
@@ -307,6 +312,24 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(reconstruction.payloadAuthenticated, true)
     assert.equal(reconstruction.eligible, true, JSON.stringify(reconstruction.issues))
     assert.equal(reconstruction.inputHash, input.inputHash)
+    const materialization = await api(`/v1/artifacts/${finalArtifact.id}/materialization-authorizations/${manifestRow.id}`, { use: 'rendering' })
+    evidence.final.materialization = materialization
+    await checkpoint()
+    assert.equal(materialization.authorization.status, 'authorized', JSON.stringify(materialization.authorization.issues))
+    const rerender = await api(`/v1/artifacts/${finalArtifact.id}/renders/${manifestRow.id}`, { authorizationId: materialization.authorization.id })
+    const rerenderEnvironment = { ...environment, APOLLO_V2_RENDER_OUTPUT_ROOT: join(root, 'reconstructed'), APOLLO_V2_RENDER_TIMEOUT_MS: '420000' }
+    const rerenderResult = await factory.createPublicOperationWorker(rerenderEnvironment)(`recovery-reconstruction-${suffix}`, AbortSignal.timeout(420_000))
+    evidence.final.rerender = { operationId: rerender.operation.id, result: rerenderResult, operation: (await api(`/v1/operations/${rerender.operation.id}`)).operation }
+    await checkpoint()
+    assert.equal(rerenderResult?.status, 'succeeded', JSON.stringify(evidence.final.rerender.operation))
+    const reconstructionRow = await prisma.v2ArtifactRenderOperation.findUniqueOrThrow({ where: { operationId: rerender.operation.id } })
+    assert.equal(reconstructionRow.outputSha256, finalArtifact.sha256)
+    const reconstructedPath = join(rerenderEnvironment.APOLLO_V2_RENDER_OUTPUT_ROOT, ...reconstructionRow.outputKey.split('/'))
+    const reconstructedBytes = await readFile(reconstructedPath)
+    assert.equal(hash(reconstructedBytes), finalArtifact.sha256)
+    assert.equal(reconstructedBytes.length, finalBytes.length)
+    evidence.final.rerender.byteIdentical = true
+    await copyFile(reconstructedPath, join(evidenceDir, 'reconstructed-final.mp4'))
     evidence.final.reconstruction = reconstruction
     await writeFile(join(evidenceDir, 'final-manifest.json'), JSON.stringify(manifest, null, 2))
     await writeFile(join(evidenceDir, 'final-render-input.json'), JSON.stringify(input, null, 2))
