@@ -235,7 +235,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const exportVersion = reassessed.version
     const reassessedRun = await prisma.v2DirectorRun.findUniqueOrThrow({ where: { id: reassessed.directorRun.id }, include: { qualitySnapshot: true } })
     assert.equal(reassessedRun.resultVersionId, exportVersion.id)
-    assert.equal(reassessedRun.status, 'succeeded')
+    assert.equal(reassessedRun.status, 'planned', 'Director planning persists a planned run; export operation proves rendering success separately')
     evidence.captionReassessment = { directorRunId: reassessedRun.id, resultVersionId: exportVersion.id, priorVersionId: applied.version.id, qualitySnapshotId: reassessedRun.qualitySnapshotId, qualitySnapshotHash: reassessedRun.qualitySnapshot.contentHash, qualityReport: JSON.parse(reassessedRun.qualitySnapshot.contentJson) }
     assert.equal((await renderProxy(`recovery-reassessed-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) }))?.status, 'succeeded')
     const finalVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: exportVersion.id }, include: { editPlanSnapshot: true } })
