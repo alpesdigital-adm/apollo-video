@@ -6,9 +6,10 @@ import { join, dirname } from 'node:path'
 // Actual HTTP routes, signed PUT bytes, local storage and PostgreSQL. The
 // transfer payload is controlled bytes; this does not assert successful ingest
 // or media perception, and the downloadable artifact metadata is a PG seed.
-export async function proveMediaTransferHttp({ baseUrl, client, authorization, workspaceId, projectId, artifactRoot, createMediaArtifactManifest }) {
+export async function proveMediaTransferHttp({ baseUrl, client, authorization, workspaceId, artifactRoot, createMediaArtifactManifest }) {
   const tag = randomUUID().slice(0, 8)
   const uploads = []
+  const projects = []
   const artifactId = `w51-download-${tag}`
   const evidence = { schemaVersion: 'media-transfer-http-proof/v1', sourceSha: process.env.GITHUB_SHA,
     provenance: { transport: 'real HTTP', persistence: 'real PostgreSQL', storage: 'real local bytes', payload: 'controlled binary', artifactMetadata: 'controlled PG seed', ingest: 'queued only; not executed', s3: 'not exercised' }, cases: [] }
@@ -21,6 +22,10 @@ export async function proveMediaTransferHttp({ baseUrl, client, authorization, w
   }
   const begin = async (bytes, key) => {
     const checksum = createHash('sha256').update(bytes).digest('hex')
+    const created = await call('/v1/projects', { name: `W51 transfer ${key}`, objective: 'discovery', format: '16:9', locale: 'pt-BR' }, `${key}-project`)
+    assert.equal(created.status, 201, JSON.stringify(created.result))
+    const projectId = created.result.data.project.id
+    projects.push(projectId)
     const body = { projectId, fileName: 'controlled-transfer.mp4', rightsConfirmed: true, kind: 'video', size: String(bytes.length), mimeType: 'video/mp4', checksum }
     const first = await call('/v1/media/uploads', body, key)
     assert.equal(first.status, 201, JSON.stringify(first.result))
@@ -131,6 +136,10 @@ export async function proveMediaTransferHttp({ baseUrl, client, authorization, w
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId, resourceId: { in: ids } } })
     await client.v2MediaIngestOperation.deleteMany({ where: { workspaceId, uploadId: { in: uploads } } })
     await client.v2PublicOperation.deleteMany({ where: { id: { in: ids } } })
+    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId, resourceId: { in: projects } } })
     await client.v2MediaUpload.deleteMany({ where: { id: { in: uploads } } })
+    await client.v2Project.updateMany({ where: { workspaceId, id: { in: projects } }, data: { currentVersionId: null } })
+    await client.v2ProjectVersion.deleteMany({ where: { workspaceId, projectId: { in: projects } } })
+    await client.v2Project.deleteMany({ where: { workspaceId, id: { in: projects } } })
   }
 }

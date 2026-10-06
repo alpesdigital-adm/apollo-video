@@ -151,7 +151,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const workspace = await api(`/v1/projects/${projectId}`)
     const initialDirection = await api(`/v1/projects/${projectId}/commands`, { type: 'run-director', baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash, reason: editorial.instruction })
     const renderProxy = factory.createProjectProxyRenderWorker(environment)
-    const initialProxy = await renderProxy(`recovery-initial-proxy-${suffix}`, AbortSignal.timeout(180_000))
+    const initialProxy = await renderProxy(`recovery-initial-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) })
     assert.equal(initialProxy?.status, 'succeeded')
     const review = await api(`/v1/projects/${projectId}/annotations?projectVersionId=${initialDirection.version.id}`)
     const initialArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: review.session.proxyArtifactId } })
@@ -164,13 +164,13 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     evidence.cutCommandId = cut.command.id; evidence.exclusions = cut.editorial.exclusions
     // The removal command queues its own proxy. Consume it before the final
     // direction, rather than letting an obsolete proxy write into the new head.
-    assert.equal((await renderProxy(`recovery-cut-proxy-${suffix}`, AbortSignal.timeout(180_000)))?.status, 'succeeded')
+    assert.equal((await renderProxy(`recovery-cut-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) }))?.status, 'succeeded')
     const direction = await api(`/v1/projects/${projectId}/commands`, { type: 'run-director', baseVersionId: cut.version.id, baseHash: cut.version.baseHash, reason: editorial.instruction })
     assert.equal(direction.directorRun.editPlan.automaticZoom, false)
     evidence.directorRunId = direction.directorRun.id; evidence.direction = direction.directorRun
-    assert.equal((await renderProxy(`recovery-final-proxy-${suffix}`, AbortSignal.timeout(180_000)))?.status, 'succeeded')
+    assert.equal((await renderProxy(`recovery-final-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) }))?.status, 'succeeded')
     const proxyReview = await api(`/v1/projects/${projectId}/proxy-reviews?projectVersionId=${direction.version.id}`)
-    assert.notEqual(proxyReview.review.status, 'hard-blocked')
+    assert.notEqual(proxyReview.review.status, 'blocked')
     const proxyArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: proxyReview.review.proxyArtifactId } })
     const previewPath = join(artifactRoot, ...proxyArtifact.artifactKey.split('/'))
     await copyFile(previewPath, join(evidenceDir, 'review-proxy.mp4'))
@@ -183,6 +183,9 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     for (const gate of ['continuity', 'faceSafeSubtitles', 'naturalFraming', 'justifiedTransitions']) assert.equal(proxyVisual[gate], true, gate)
     evidence.proxyVisualReview = proxyVisual
     if (proxyReview.review.status === 'warning-ack-required') await api(`/v1/projects/${projectId}/proxy-reviews`, { action: 'acknowledge-warnings', proxyReviewId: proxyReview.review.id, projectVersionId: direction.version.id, baseRevision: proxyReview.review.reviewHash, expectedRevision: proxyReview.review.revision })
+    const readyReview = await api(`/v1/projects/${projectId}/proxy-reviews?projectVersionId=${direction.version.id}`)
+    assert.equal(readyReview.review.status, 'ready-for-final')
+    assert.equal(readyReview.review.finalAllowed, true)
     const exported = await api(`/v1/projects/${projectId}/exports`, { projectVersionId: direction.version.id, projectVersionHash: direction.version.baseHash, format: '16:9', approval: { approved: true, note: 'Supervised local technical export; not owner acceptance or production deployment.' } })
     assert.equal((await factory.createProjectFinalExportWorker(environment)(`recovery-final-${suffix}`, AbortSignal.timeout(180_000)))?.status, 'succeeded')
     const finalOp = await prisma.v2ProjectFinalExportOperation.findUniqueOrThrow({ where: { operationId: exported.operation.id } })
@@ -211,6 +214,24 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     evidence.visualReview = visual
     const manifestRow = await prisma.v2MediaArtifactManifest.findFirstOrThrow({ where: { artifactId: finalArtifact.id } })
     evidence.final.manifestId = manifestRow.id; evidence.final.manifestHash = manifestRow.manifestHash
+    const manifest = JSON.parse(manifestRow.manifestJson)
+    assert.equal(manifest.schemaVersion, 'media-artifact-manifest/v4')
+    assert.equal(manifest.artifact.sha256, finalArtifact.sha256)
+    assert.equal(manifest.artifact.byteSize, finalBytes.length)
+    assert.equal(manifest.recipe.id, 'editorial-final')
+    assert.ok(manifest.recipe.parametersRef)
+    assert.ok(manifest.sources.length > 0)
+    const input = await factory.createProtectedRenderInputStore().read(workspaceId, manifest.renderInput.ref, manifest.renderInput.inputHash)
+    assert.ok(input)
+    assert.equal(input.inputHash, manifest.renderInput.inputHash)
+    assert.ok(input.assets.some((asset) => asset.artifactId === sourceArtifactId))
+    const reconstruction = await api(`/v1/artifacts/${finalArtifact.id}/reconstruction-preflight/${manifestRow.id}`, {}, { method: 'POST' })
+    assert.equal(reconstruction.payloadAuthenticated, true)
+    assert.equal(reconstruction.eligible, true)
+    assert.equal(reconstruction.inputHash, input.inputHash)
+    evidence.final.reconstruction = reconstruction
+    await writeFile(join(evidenceDir, 'final-manifest.json'), JSON.stringify(manifest, null, 2))
+    await writeFile(join(evidenceDir, 'final-render-input.json'), JSON.stringify(input, null, 2))
     evidence.outcome = 'passed'
   } catch (error) {
     evidence.outcome = 'failed'; evidence.error = { name: error.name, message: error.message }
