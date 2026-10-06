@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import fs from 'node:fs'
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -124,6 +126,64 @@ test('local V2 storage streams multipart bytes, verifies checksum, promotes a ma
 
   await storage.discard(uploadId)
   await assert.rejects(() => storage.verifiedSourcePath(upload, receipts), /missing|ENOENT/)
+})
+
+test('multipart assembly bounds error listeners across repeated drain and removes partial bytes on write failure', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-v2-media-backpressure-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const storage = new LocalMediaUploadStorage(root)
+  const partBytes = [Buffer.alloc(1024 * 1024, 0x61), Buffer.alloc(1024 * 1024, 0x62)]
+  const source = Buffer.concat(partBytes)
+  const originalCreateWriteStream = fs.createWriteStream
+  let drainWaits = 0
+  let maxErrorListeners = 0
+  let failAssembly = false
+  fs.createWriteStream = function instrumentAssembly(path, options) {
+    const stream = originalCreateWriteStream(path, options)
+    if (!String(path).includes('assembled.')) return stream
+    const write = stream.write.bind(stream)
+    stream.write = (chunk, ...args) => {
+      const accepted = write(chunk, ...args)
+      if (!accepted) {
+        drainWaits += 1
+        if (failAssembly && drainWaits === 1) queueMicrotask(() => stream.destroy(new Error('injected assembly write failure')))
+      }
+      maxErrorListeners = Math.max(maxErrorListeners, stream.listenerCount('error'))
+      return accepted
+    }
+    stream.on('drain', () => { maxErrorListeners = Math.max(maxErrorListeners, stream.listenerCount('error')) })
+    return stream
+  }
+  syncBuiltinESMExports()
+  try {
+    const stage = async (id) => {
+      const upload = createMediaUpload({
+        ...verifiedUpload(), id, status: 'uploading', byteSize: String(source.length),
+        partSize: String(partBytes[0].length), expectedSha256: sha(source),
+        actualSha256: undefined, actualByteSize: undefined, verifiedAt: undefined,
+      })
+      const parts = []
+      for (const [index, bytes] of partBytes.entries()) {
+        const receipt = await storage.write({ upload, mode: 'multipart', partNumber: index + 1, body: new Blob([bytes]).stream(), contentLength: bytes.length })
+        parts.push({ uploadId: id, partNumber: index + 1, ...receipt, recordedAt: '2026-07-18T18:05:00.000Z' })
+      }
+      return { upload, parts }
+    }
+
+    const complete = await stage('123e4567-e89b-42d3-a456-426614174911')
+    assert.deepEqual(await storage.verify(complete), { byteSize: String(source.length), mimeType: 'video/mp4', sha256: sha(source) })
+    assert.ok(drainWaits > 10, `expected repeated backpressure, observed ${drainWaits} waits`)
+    assert.ok(maxErrorListeners <= 1, `error listeners accumulated to ${maxErrorListeners}`)
+
+    const failing = await stage('123e4567-e89b-42d3-a456-426614174912')
+    drainWaits = 0
+    failAssembly = true
+    await assert.rejects(storage.verify(failing), /injected assembly write failure/)
+    assert.equal((await readdir(join(root, '.uploads', failing.upload.id))).some((name) => name.includes('.partial')), false)
+  } finally {
+    fs.createWriteStream = originalCreateWriteStream
+    syncBuiltinESMExports()
+  }
 })
 
 test('local artifact checksum verification is shared across HTTP range storage instances', async (t) => {
