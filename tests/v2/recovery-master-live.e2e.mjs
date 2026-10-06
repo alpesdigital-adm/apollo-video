@@ -111,6 +111,8 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
       if (!response.ok) {
         evidence.apiFailure = { path, status: response.status, error: payload.error }
         await checkpoint()
+        const safeLogs = process.env.GROQ_API_KEY ? logs.replaceAll(process.env.GROQ_API_KEY, '[REDACTED_SECRET]') : logs
+        await writeFile(join(evidenceDir, 'server-diagnostic.log'), safeLogs)
       }
       assert.ok(response.ok, `${path}: ${response.status}/${payload.error?.code}`)
       return payload.data
@@ -119,7 +121,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const projectId = created.project.id
     evidence.projectId = projectId
     evidence.initialVersionId = created.version.id
-    evidence.brief = { inputMode: 'media-only', objective: 'discovery', format: '16:9', editorialInstructionOrigin: 'AGENTS owner recovery requirements, persisted in first Director Command, annotation and removal Command before final direction', textualOwnerBrief: 'absent at media-only creation' }
+    evidence.brief = { inputMode: 'media-only', objective: 'discovery', format: '16:9', editorialInstructionOrigin: 'AGENTS owner recovery requirements, persisted in removal Command and annotation before first Director Command', textualOwnerBrief: 'absent at media-only creation' }
     // The preserved archive filename ends in .mp4, but the unmodified master
     // has an ISO-BMFF ftyp qt signature. Declare its actual QuickTime container
     // for V2 inspection; keep exactly the owner-selected bytes and SHA.
@@ -150,6 +152,13 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(transcript.model, 'whisper-large-v3-turbo')
     assert.ok(transcript.words.length > 200)
     const sourceArtifactId = transcriptRow.sourceArtifactId
+    const sourceManifest = await prisma.v2MediaArtifactManifest.findFirstOrThrow({ where: { artifactId: sourceArtifactId }, orderBy: { createdAt: 'desc' } })
+    const trustedProbe = await factory.createColorPipelineCompilationRepository().loadTrustedProbe({ workspaceId, projectId, sourceArtifactId, sourceManifestId: sourceManifest.id })
+    assert.equal(trustedProbe?.detection.state, 'ready', 'Real master color metadata must be available before rendering')
+    const colorMetadata = trustedProbe.detection.metadata
+    const stage = (id, kind, enabled, provider, parameters) => ({ id, kind, version: 'v1', enabled, output: colorMetadata, implementation: { provider, version: 'v1', parameters, parametersHash: hash(Buffer.from(JSON.stringify(parameters))) } })
+    const color = await api(`/v1/projects/${projectId}/color-pipeline-compilations`, { sourceArtifactId, sourceManifestId: sourceManifest.id, outputMetadata: colorMetadata, stages: [stage('technical-rec709', 'technical', true, 'ffmpeg-zscale', { mode: 'identity' }), stage('match-source', 'match', false, 'apollo-match', { mode: 'bypass' }), stage('creative-none', 'creative-lut', false, 'apollo-lut', { mode: 'none' }), stage('output-rec709', 'output', true, 'ffmpeg-zscale', { dither: true })] })
+    evidence.colorCompilation = { id: color.compilation.id, sourceManifestId: sourceManifest.id, probeHash: trustedProbe.probeHash, pipelineHash: color.compilation.pipeline.pipelineHash }
     const rightsResponse = await fetch(`${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`, { headers })
     assert.equal(rightsResponse.status, 200)
     await api(`/v1/artifacts/${sourceArtifactId}/rights`, { status: 'approved', owner: 'Owner-selected Imersão recovery input', license: 'owner-authorized-recovery', allowedUses: ['editorial-reuse', 'rendering', 'editing', 'distribution', 'transcription'], prohibitedUses: [], consent: { status: 'not-required', allowedUses: [] } }, { method: 'PUT', headers: { ...headers, 'if-match': rightsResponse.headers.get('etag') } })
@@ -162,22 +171,20 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(editorial.transcriptHash, transcript.transcriptHash)
     assert.ok(Array.isArray(editorial.exclusionOverrides) && editorial.exclusionOverrides.length >= 2)
     const workspace = await api(`/v1/projects/${projectId}`)
-    const initialDirection = await api(`/v1/projects/${projectId}/commands`, { type: 'run-director', baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash, reason: editorial.instruction })
+    // The critic correctly rejects the uncut dated master. Apply reviewed
+    // removals before requesting direction; never relax that gate for the test.
+    const cut = await api(`/v1/projects/${projectId}/commands`, { type: 'remove-spoken-content', baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash, sourceTranscriptId: transcriptRow.id, rules: editorial.rules, exclusionOverrides: editorial.exclusionOverrides, reason: editorial.instruction })
+    evidence.cutCommandId = cut.command.id; evidence.exclusions = cut.editorial.exclusions
     const renderProxy = factory.createProjectProxyRenderWorker(environment)
-    const initialProxy = await renderProxy(`recovery-initial-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) })
+    const initialProxy = await renderProxy(`recovery-cut-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) })
     assert.equal(initialProxy?.status, 'succeeded')
-    const review = await api(`/v1/projects/${projectId}/annotations?projectVersionId=${initialDirection.version.id}`)
+    const review = await api(`/v1/projects/${projectId}/annotations?projectVersionId=${cut.version.id}`)
     const initialArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: review.session.proxyArtifactId } })
     const screenshotPath = join(evidenceDir, 'initial-review-frame.jpg')
     await execute(require('ffmpeg-static'), ['-hide_banner', '-v', 'error', '-y', '-i', join(artifactRoot, ...initialArtifact.artifactKey.split('/')), '-frames:v', '1', '-vf', 'scale=640:-1', screenshotPath], { windowsHide: true, timeout: 30_000 })
     const screenshotRef = `data:image/jpeg;base64,${(await readFile(screenshotPath)).toString('base64')}`
-    const annotation = await api(`/v1/projects/${projectId}/annotations`, { projectVersionId: initialDirection.version.id, proxyArtifactId: review.session.proxyArtifactId, proxyHash: review.session.proxyHash, frame: 0, timeRangeMs: [0, 0], scope: 'point', targetIds: [], screenshotRef, text: editorial.instruction })
+    const annotation = await api(`/v1/projects/${projectId}/annotations`, { projectVersionId: cut.version.id, proxyArtifactId: review.session.proxyArtifactId, proxyHash: review.session.proxyHash, frame: 0, timeRangeMs: [0, 0], scope: 'point', targetIds: [], screenshotRef, text: editorial.instruction })
     evidence.annotationId = annotation.annotation.id
-    const cut = await api(`/v1/projects/${projectId}/commands`, { type: 'remove-spoken-content', baseVersionId: initialDirection.version.id, baseHash: initialDirection.version.baseHash, sourceTranscriptId: transcriptRow.id, rules: editorial.rules, exclusionOverrides: editorial.exclusionOverrides, reason: editorial.instruction })
-    evidence.cutCommandId = cut.command.id; evidence.exclusions = cut.editorial.exclusions
-    // The removal command queues its own proxy. Consume it before the final
-    // direction, rather than letting an obsolete proxy write into the new head.
-    assert.equal((await renderProxy(`recovery-cut-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) }))?.status, 'succeeded')
     const direction = await api(`/v1/projects/${projectId}/commands`, { type: 'run-director', baseVersionId: cut.version.id, baseHash: cut.version.baseHash, reason: editorial.instruction })
     assert.equal(direction.directorRun.editPlan.automaticZoom, false)
     evidence.directorRunId = direction.directorRun.id; evidence.direction = direction.directorRun
