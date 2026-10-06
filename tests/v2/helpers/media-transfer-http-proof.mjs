@@ -59,7 +59,10 @@ export async function proveMediaTransferHttp({ baseUrl, client, authorization, w
     assert.equal(await client.v2MediaIngestOperation.count({ where: { workspaceId, uploadId: intent.id } }), 0)
     // A persisted expired session models elapsed wall time without sleeping ten
     // minutes. The signed URL is untouched, and the route must reject its PUT.
-    await client.v2MediaUpload.update({ where: { id: intent.id }, data: { sessionExpiresAt: new Date(Date.now() - 1000) } })
+    const beforeExpiry = await client.v2MediaUpload.findUniqueOrThrow({ where: { id: intent.id } })
+    const expiredAt = new Date(Date.now() - 1)
+    assert.ok(expiredAt > beforeExpiry.createdAt, 'elapsed session must remain after intent creation')
+    await client.v2MediaUpload.update({ where: { id: intent.id }, data: { sessionExpiresAt: expiredAt } })
     const expired = await refused(await send(session, bytes.subarray(partSize), 2))
     session = await issue(intent.id)
     const corrupt = Buffer.from(bytes.subarray(partSize))
