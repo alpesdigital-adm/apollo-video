@@ -531,6 +531,7 @@ import {
   type S3RenderInputObjectClient,
 } from './s3-render-input-object-client.ts'
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
+import { FfmpegEditorialRenderInputRenderer } from './ffmpeg-editorial-render-input-renderer.ts'
 import { NodeSyntheticBuildAttestationRunner, NodeSyntheticRuntimeIdentityReader } from './synthetic-build-attestation-runner.ts'
 import { PrismaSyntheticBuildAttestationRepository } from './prisma/synthetic-build-attestation-repository.ts'
 import { PrismaSyntheticMasterReuseRepository } from './prisma/synthetic-master-reuse-repository.ts'
@@ -2432,7 +2433,7 @@ export function createAuthorizedRenderExecutor(
     )
   }
   const configuredTimeout = Number(environment.APOLLO_V2_RENDER_TIMEOUT_MS)
-  const renderer = new RemotionRenderInputRenderer({
+  const remotion = new RemotionRenderInputRenderer({
     projectRoot: process.cwd(),
     outputRoot,
     ...(Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0
@@ -2440,6 +2441,22 @@ export function createAuthorizedRenderExecutor(
       : {}),
     clock,
   })
+  let editorial: FfmpegEditorialRenderInputRenderer | undefined
+  const getEditorial = () => editorial ??= new FfmpegEditorialRenderInputRenderer({
+    outputRoot,
+    workRoot: join(outputRoot, '.editorial-reconstruction-work'),
+    ffmpegPath: resolveFfmpegBinary(undefined, environment),
+    clock,
+  })
+  const select = (input: { renderer: { id: string }; composition: { id: string } }) => {
+    if (input.renderer.id === 'remotion' && input.composition.id === 'apollo-video') return remotion
+    if (input.renderer.id === 'ffmpeg' && input.composition.id === 'apollo-editorial') return getEditorial()
+    throw new DomainError('INVALID_RENDER_INPUT', 'No executor supports this render target and composition')
+  }
+  const renderer = {
+    recover: (input: Parameters<typeof remotion.recover>[0], request: Parameters<typeof remotion.recover>[1]) => select(input).recover(input, request),
+    stage: (input: Parameters<typeof remotion.stage>[0], request: Parameters<typeof remotion.stage>[1]) => select(input).stage(input, request),
+  }
   return renderAuthorizedInputService({
     materialize: createAuthorizedRenderInputMaterializer(environment, clock),
     renderer,

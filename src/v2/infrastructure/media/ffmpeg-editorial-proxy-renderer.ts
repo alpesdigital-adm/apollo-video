@@ -1014,7 +1014,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       // than a second opinion about them.
       subtitleAnchorPlan: input.placementPlan?.subtitleAnchorPlan ?? null,
     })
-    return Object.freeze({ outputPath, sha256, byteSize: metadata.size, probe, renderElementMap })
+    return Object.freeze({ outputPath, sha256, byteSize: metadata.size, probe, renderElementMap, ffmpegBinarySha256: await calculateFileSha256(this.ffmpegPath) })
   }
 
   async cleanup(operationId: string): Promise<void> {
