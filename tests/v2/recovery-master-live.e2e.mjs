@@ -128,8 +128,12 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     evidence.uploadId = begun.upload.id; evidence.ingestOperationId = completed.operation.id
     await checkpoint()
     const ingested = await factory.createMediaIngestWorker(environment)(`recovery-ingest-${suffix}`, AbortSignal.timeout(180_000))
-    assert.equal(ingested?.status, 'succeeded', JSON.stringify(ingested))
     const operation = await api(`/v1/operations/${completed.operation.id}`)
+    evidence.ingestResult = { worker: ingested, operation: operation.operation }
+    const inspectedUpload = await prisma.v2MediaUpload.findUniqueOrThrow({ where: { id: begun.upload.id } })
+    evidence.ingestInspection = { status: inspectedUpload.inspectionStatus, detectedMimeType: inspectedUpload.detectedMimeType, error: inspectedUpload.inspectionErrorJson ? JSON.parse(inspectedUpload.inspectionErrorJson) : null }
+    await checkpoint()
+    assert.equal(ingested?.status, 'succeeded', JSON.stringify(evidence.ingestResult))
     assert.equal(operation.operation.status, 'succeeded')
     const transcriptRow = await prisma.v2MediaTranscript.findFirstOrThrow({ where: { workspaceId, projectId }, orderBy: { createdAt: 'desc' } })
     const transcript = JSON.parse(transcriptRow.transcriptJson)
