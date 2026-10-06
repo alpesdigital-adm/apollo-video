@@ -208,6 +208,8 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const cue = directedPlan.subtitleTracks.flatMap(track => track.cues).find(item => item.text.includes(correction.matchText))
     assert.ok(cue, 'Reviewed correction must target a real rendered cue')
     const directedSession = await api(`/v1/projects/${projectId}/annotations?projectVersionId=${direction.version.id}`)
+    assert.equal(directedPlan.fps, directedSession.session.fps)
+    assert.ok(cue.endFrame - cue.startFrame > 1)
     const directedProxy = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: directedSession.session.proxyArtifactId } })
     const correctionFrame = cue.startFrame + 1
     const correctionTimeMs = Math.round(correctionFrame / directedPlan.fps * 1000)
@@ -221,15 +223,22 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(applied.command.type, 'apply-review-patch')
     assert.equal(applied.comparison.beforeVersionId, direction.version.id)
     evidence.captionCorrection = { annotationId: correctionAnnotation.annotation.id, proposalId: proposal.proposal.id, commandId: applied.command.id, beforeVersionId: direction.version.id, resultVersionId: applied.version.id, targetId: `subtitle:${cue.id}`, beforeText: cue.text, correctedText, reason: correction.reason, frame: correctionFrame }
-    const exportVersion = applied.version
     const patchResult = await renderProxy(`recovery-caption-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) })
     evidence.captionProxyResult = patchResult
     await checkpoint()
     assert.equal(patchResult?.status, 'succeeded', JSON.stringify(evidence.proxyFailure))
-    const patchedVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: exportVersion.id }, include: { editPlanSnapshot: true } })
+    const patchedVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: applied.version.id }, include: { editPlanSnapshot: true } })
     const patchedPlan = JSON.parse(patchedVersion.editPlanSnapshot.contentJson)
     assert.equal(patchedPlan.subtitleTracks.flatMap(track => track.cues).find(item => item.id === cue.id)?.text, correctedText)
-    await writeFile(join(evidenceDir, 'final-edit-plan.json'), JSON.stringify(patchedPlan, null, 2))
+    const reassessed = await api(`/v1/projects/${projectId}/commands`, { type: 'run-director', baseVersionId: applied.version.id, baseHash: applied.version.baseHash, reason: 'Reassess the confirmed caption correction without overwriting its annotation-bound text.' })
+    assert.notEqual(reassessed.directorRun.id, direction.directorRun.id)
+    const exportVersion = reassessed.version
+    evidence.captionReassessment = { directorRunId: reassessed.directorRun.id, resultVersionId: exportVersion.id, priorVersionId: applied.version.id, qualityReport: reassessed.directorRun.qualityReport }
+    assert.equal((await renderProxy(`recovery-reassessed-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) }))?.status, 'succeeded')
+    const finalVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: exportVersion.id }, include: { editPlanSnapshot: true } })
+    const finalPlan = JSON.parse(finalVersion.editPlanSnapshot.contentJson)
+    assert.equal(finalPlan.subtitleTracks.flatMap(track => track.cues).find(item => item.id === cue.id)?.text, correctedText)
+    await writeFile(join(evidenceDir, 'final-edit-plan.json'), JSON.stringify(finalPlan, null, 2))
     const proxyReview = await api(`/v1/projects/${projectId}/proxy-reviews?projectVersionId=${exportVersion.id}`)
     assert.notEqual(proxyReview.review.status, 'blocked')
     const proxyArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: proxyReview.review.proxyArtifactId } })
