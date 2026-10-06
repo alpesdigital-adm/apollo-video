@@ -83,13 +83,16 @@ export async function proveMediaTransferHttp({ baseUrl, client, authorization, w
     const audit = await client.v2MediaUploadAuditEntry.findMany({ where: { uploadId: intent.id } })
     assert.ok(audit.some((entry) => entry.action === 'complete'))
     evidence.cases.push({ id: 'multipart-interruption-expiry-corruption-resume', uploadId: intent.id, operationId: complete.result.data.operation.id, byteSize: bytes.length, sha256: intent.checksum, expired, incomplete: incomplete.result.error.code, corrupted: corrupted.result.error.code, auditActions: audit.map((entry) => entry.action) })
+    const cancelled = await call(`/v1/operations/${complete.result.data.operation.id}/cancel`, { reason: 'Transfer-only proof complete; do not ingest controlled binary.' })
+    assert.equal(cancelled.status, 200, JSON.stringify(cancelled.result))
 
     const small = Buffer.from('w51-real-http-single-bytes')
     const single = await begin(small, `w51-single-${tag}`)
     const singleSession = await issue(single.id)
     assert.equal(singleSession.mode, 'single')
     assert.equal((await send(singleSession, small)).status, 201)
-    assert.equal((await call(`/v1/media/uploads/${single.id}/complete`)).status, 202)
+    const singleComplete = await call(`/v1/media/uploads/${single.id}/complete`)
+    assert.equal(singleComplete.status, 202, JSON.stringify(singleComplete.result))
 
     const key = `workspaces/${workspaceId}/w51/${tag}.mp4`
     const path = join(artifactRoot, ...key.split('/'))
