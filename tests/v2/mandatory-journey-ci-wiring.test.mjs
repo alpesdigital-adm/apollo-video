@@ -147,7 +147,7 @@ const parseWorkflow = (workflow) => {
       }
     }
 
-    return { job: owner, name, npmScripts, suiteFiles, env, attrs }
+    return { job: owner, name, npmScripts, suiteFiles, env, attrs, body }
   })
 
   return { jobs, steps: parsed }
@@ -618,5 +618,6 @@ test('W51 S3 and W58 catalog variants cannot silently become skipped CI proofs',
     assert.ok(isLiteral(step.env.get(primary), '1'))
     assert.ok(step.suiteFiles.includes(suite) || step.npmScripts.some((script) => script === 'test:e2e:synthetic-wave24-journey'))
     if (variant === 'W51') assert.ok(isLiteral(step.env.get('APOLLO_V2_ARTIFACT_STORAGE_DRIVER'), 's3'))
+    if (variant === 'W58') assert.ok(step.body.includes('${process.env.APOLLO_WAVE24_EVIDENCE_ROOT}/${process.env.APOLLO_WAVE24_RUN_ID}/w58-catalog.json'))
   }
 })
