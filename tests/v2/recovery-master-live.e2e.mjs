@@ -225,7 +225,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.ok(input)
     assert.equal(input.inputHash, manifest.renderInput.inputHash)
     assert.ok(input.assets.some((asset) => asset.artifactId === sourceArtifactId))
-    const reconstruction = await api(`/v1/artifacts/${finalArtifact.id}/reconstruction-preflight/${manifestRow.id}`, {}, { method: 'POST' })
+    const reconstruction = await api(`/v1/artifacts/${finalArtifact.id}/reconstruction-preflight/${manifestRow.id}`, undefined, { method: 'POST' })
     assert.equal(reconstruction.payloadAuthenticated, true)
     assert.equal(reconstruction.eligible, true)
     assert.equal(reconstruction.inputHash, input.inputHash)
