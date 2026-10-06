@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-06T10:45:35.410Z",
+  "updatedAt": "2026-10-06T11:48:42.990Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "d33888224dc59986a1b1e1e5e1dfdacbe3bc036d",
+  "evidenceBaseCommit": "bec9e1d9812b6402d2ee90b8d657f756551b29ef",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -1449,17 +1449,13 @@
         "186dd251b68f-1",
         "9eeab33b085e-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
       "integration": "main",
       "validation": "real-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Revisão audiovisual final do recorte W60 (quatro IDs) ainda não confirmada; a suite local não equivale a audição integral."
-        },
         {
           "kind": "deployment",
           "text": "Implantação atual na DigitalOcean não comprovada para esta wave."
@@ -1697,10 +1693,46 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37448093633",
           "scope": "Automated checks associated with d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; head SHA, branch and success verified by GitHub API.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/77",
+          "scope": "W51-W60 code review associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; PR is not validation or deployment proof.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120255",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120240",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120152",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "C:\\Users\\leand\\Documents\\Apollo\\w51-60-20261005\\bailian-review-20261006\\owner-review.json",
+          "scope": "Technical full-output visual and auditory review bound to W60 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; not owner acceptance or deployment.",
+          "role": "real-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w51-60-20261005/bailian-review-20261006/bailian-review.json",
+          "scope": "Tentativa suplementar sem aprovação: áudio completo WAV derivado do MP4 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; CLI 2.1.0, timeout e diagnóstico HTTP 404 Model not exist no perfil Token Plan.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Concluir revisão audiovisual final dos quatro IDs W60 antes da promoção técnica.",
-      "notes": "Execução autorizada pelo proprietário em 05/10/2026, após o planejamento. Auditoria e construção em andamento; não há conclusão ou merge desta wave declarado. 38 IDs W51-W60 reconciliados individualmente na fase premerge (2d85c43a083d84dec87be4bb81c778abdef5e5b7). Esta wave tem 4 IDs; implantação e aceite permanecem pendentes. O status desta wave cobre apenas estes quatro IDs e não declara J.001 abrangente, detector de faces ou percepção visual completa. 38 IDs W51-W60 reconciliados individualmente na fase main (d33888224dc59986a1b1e1e5e1dfdacbe3bc036d). Esta wave tem 4 IDs; implantação e aceite permanecem pendentes. O status desta wave cobre apenas estes quatro IDs e não declara J.001 abrangente, detector de faces ou percepção visual completa."
+      "nextAction": "Concluir gates operacionais de implantação e registrar aceite separado.",
+      "notes": "W60 integrada pelo PR #77 e tecnicamente validada nos quatro IDs selecionados: execução real, reconstrução byte-idêntica e revisão integral do MP4 confirmada pelo proprietário em 06/10/2026, vinculada ao SHA final. As provas anteriores com audição pendente são históricas. Bailian atualizado para 2.1.0; tentativa suplementar no áudio completo terminou com timeout e diagnóstico sem mídia retornou HTTP 404 Model not exist no perfil Token Plan. Não há parecer automático. Percepção visual parcial e faceCoverage absent: não declara detector de faces nem fechamento abrangente de J.001. Implantação atual e aceite global permanecem pendentes. A validação da percepção cobre somente transcrição estruturada e fallback seguro efetivamente usados no run; não valida percepção audiovisual completa."
     },
     {
       "id": "W24",
@@ -18991,17 +19023,13 @@
       "todoItems": [
         "41f80ebe5d2a-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
       "integration": "main",
       "validation": "real-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Revisão audiovisual final dos quatro IDs W60 ainda não confirmada; full decode, transcript e frames não substituem audição integral."
-        },
         {
           "kind": "deployment",
           "text": "Implantação atual na DigitalOcean não comprovada para este ID."
@@ -19101,10 +19129,46 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37448093633",
           "scope": "Automated checks associated with d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; head SHA, branch and success verified by GitHub API.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/77",
+          "scope": "W51-W60 code review associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; PR is not validation or deployment proof.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120255",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120240",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120152",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "C:\\Users\\leand\\Documents\\Apollo\\w51-60-20261005\\bailian-review-20261006\\owner-review.json",
+          "scope": "41f80ebe5d2a-1: Technical full-output visual and auditory review bound to W60 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; not owner acceptance or deployment.",
+          "role": "real-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w51-60-20261005/bailian-review-20261006/bailian-review.json",
+          "scope": "Tentativa suplementar sem aprovação: áudio completo WAV derivado do MP4 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; CLI 2.1.0, timeout e diagnóstico HTTP 404 Model not exist no perfil Token Plan.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Concluir revisão audiovisual final do recorte W60 antes da promoção técnica.",
-      "notes": "Estado proposto a partir de código/runtime/teste existente; não muda checkbox nem auditoria 380/1259. A prova é parcial para o escopo total. Arquivo de teste existente não prova execução E2E específica; subfluxo parcial requer reconciliação do run/artifact antes de promover validação. Recorte individual 41f80ebe5d2a-1 de W60; grupo histórico H-019d6f44afde-open preservado nas evidências. Fase premerge, SHA 2d85c43a083d84dec87be4bb81c778abdef5e5b7; implantação e aceite não inferidos. Recorte individual 41f80ebe5d2a-1 de W60; grupo histórico T-41f80ebe5d2a-1 preservado nas evidências. Fase main, SHA d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; implantação e aceite não inferidos."
+      "nextAction": "Implantar somente após os gates operacionais aplicáveis e registrar aceite do proprietário separadamente.",
+      "notes": "W60 integrada pelo PR #77 e tecnicamente validada nos quatro IDs selecionados: execução real, reconstrução byte-idêntica e revisão integral do MP4 confirmada pelo proprietário em 06/10/2026, vinculada ao SHA final. As provas anteriores com audição pendente são históricas. Bailian atualizado para 2.1.0; tentativa suplementar no áudio completo terminou com timeout e diagnóstico sem mídia retornou HTTP 404 Model not exist no perfil Token Plan. Não há parecer automático. Percepção visual parcial e faceCoverage absent: não declara detector de faces nem fechamento abrangente de J.001. Implantação atual e aceite global permanecem pendentes."
     },
     {
       "id": "T-57ac9c7f3197-1",
@@ -19116,17 +19180,13 @@
       "todoItems": [
         "57ac9c7f3197-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
       "integration": "main",
       "validation": "real-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Revisão audiovisual final dos quatro IDs W60 ainda não confirmada; full decode, transcript e frames não substituem audição integral."
-        },
         {
           "kind": "deployment",
           "text": "Implantação atual na DigitalOcean não comprovada para este ID."
@@ -19226,10 +19286,46 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37448093633",
           "scope": "Automated checks associated with d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; head SHA, branch and success verified by GitHub API.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/77",
+          "scope": "W51-W60 code review associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; PR is not validation or deployment proof.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120255",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120240",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120152",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "C:\\Users\\leand\\Documents\\Apollo\\w51-60-20261005\\bailian-review-20261006\\owner-review.json",
+          "scope": "57ac9c7f3197-1: Technical full-output visual and auditory review bound to W60 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; not owner acceptance or deployment.",
+          "role": "real-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w51-60-20261005/bailian-review-20261006/bailian-review.json",
+          "scope": "Tentativa suplementar sem aprovação: áudio completo WAV derivado do MP4 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; CLI 2.1.0, timeout e diagnóstico HTTP 404 Model not exist no perfil Token Plan.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Concluir revisão audiovisual final do recorte W60 antes da promoção técnica.",
-      "notes": "Estado proposto a partir de código/runtime/teste existente; não muda checkbox nem auditoria 380/1259. A prova é parcial para o escopo total. Arquivo de teste existente não prova execução E2E específica; subfluxo parcial requer reconciliação do run/artifact antes de promover validação. Recorte individual 57ac9c7f3197-1 de W60; grupo histórico H-019d6f44afde-open preservado nas evidências. Fase premerge, SHA 2d85c43a083d84dec87be4bb81c778abdef5e5b7; implantação e aceite não inferidos. Recorte individual 57ac9c7f3197-1 de W60; grupo histórico T-57ac9c7f3197-1 preservado nas evidências. Fase main, SHA d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; implantação e aceite não inferidos."
+      "nextAction": "Implantar somente após os gates operacionais aplicáveis e registrar aceite do proprietário separadamente.",
+      "notes": "W60 integrada pelo PR #77 e tecnicamente validada nos quatro IDs selecionados: execução real, reconstrução byte-idêntica e revisão integral do MP4 confirmada pelo proprietário em 06/10/2026, vinculada ao SHA final. As provas anteriores com audição pendente são históricas. Bailian atualizado para 2.1.0; tentativa suplementar no áudio completo terminou com timeout e diagnóstico sem mídia retornou HTTP 404 Model not exist no perfil Token Plan. Não há parecer automático. Percepção visual parcial e faceCoverage absent: não declara detector de faces nem fechamento abrangente de J.001. Implantação atual e aceite global permanecem pendentes. A validação da percepção cobre somente transcrição estruturada e fallback seguro efetivamente usados no run; não valida percepção audiovisual completa."
     },
     {
       "id": "T-186dd251b68f-1",
@@ -19241,17 +19337,13 @@
       "todoItems": [
         "186dd251b68f-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
       "integration": "main",
       "validation": "real-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Revisão audiovisual final dos quatro IDs W60 ainda não confirmada; full decode, transcript e frames não substituem audição integral."
-        },
         {
           "kind": "deployment",
           "text": "Implantação atual na DigitalOcean não comprovada para este ID."
@@ -19351,10 +19443,46 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37448093633",
           "scope": "Automated checks associated with d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; head SHA, branch and success verified by GitHub API.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/77",
+          "scope": "W51-W60 code review associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; PR is not validation or deployment proof.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120255",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120240",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120152",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "C:\\Users\\leand\\Documents\\Apollo\\w51-60-20261005\\bailian-review-20261006\\owner-review.json",
+          "scope": "186dd251b68f-1: Technical full-output visual and auditory review bound to W60 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; not owner acceptance or deployment.",
+          "role": "real-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w51-60-20261005/bailian-review-20261006/bailian-review.json",
+          "scope": "Tentativa suplementar sem aprovação: áudio completo WAV derivado do MP4 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; CLI 2.1.0, timeout e diagnóstico HTTP 404 Model not exist no perfil Token Plan.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Concluir revisão audiovisual final do recorte W60 antes da promoção técnica.",
-      "notes": "Estado proposto a partir de código/runtime/teste existente; não muda checkbox nem auditoria 380/1259. A prova é parcial para o escopo total. Arquivo de teste existente não prova execução E2E específica; subfluxo parcial requer reconciliação do run/artifact antes de promover validação. Recorte individual 186dd251b68f-1 de W60; grupo histórico H-019d6f44afde-open preservado nas evidências. Fase premerge, SHA 2d85c43a083d84dec87be4bb81c778abdef5e5b7; implantação e aceite não inferidos. Recorte individual 186dd251b68f-1 de W60; grupo histórico T-186dd251b68f-1 preservado nas evidências. Fase main, SHA d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; implantação e aceite não inferidos."
+      "nextAction": "Implantar somente após os gates operacionais aplicáveis e registrar aceite do proprietário separadamente.",
+      "notes": "W60 integrada pelo PR #77 e tecnicamente validada nos quatro IDs selecionados: execução real, reconstrução byte-idêntica e revisão integral do MP4 confirmada pelo proprietário em 06/10/2026, vinculada ao SHA final. As provas anteriores com audição pendente são históricas. Bailian atualizado para 2.1.0; tentativa suplementar no áudio completo terminou com timeout e diagnóstico sem mídia retornou HTTP 404 Model not exist no perfil Token Plan. Não há parecer automático. Percepção visual parcial e faceCoverage absent: não declara detector de faces nem fechamento abrangente de J.001. Implantação atual e aceite global permanecem pendentes."
     },
     {
       "id": "T-9eeab33b085e-1",
@@ -19366,17 +19494,13 @@
       "todoItems": [
         "9eeab33b085e-1"
       ],
-      "state": "pendente-validacao",
+      "state": "validado",
       "construction": "implemented",
       "integration": "main",
       "validation": "real-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
-        {
-          "kind": "validation",
-          "text": "Revisão audiovisual final dos quatro IDs W60 ainda não confirmada; full decode, transcript e frames não substituem audição integral."
-        },
         {
           "kind": "deployment",
           "text": "Implantação atual na DigitalOcean não comprovada para este ID."
@@ -19476,10 +19600,46 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37448093633",
           "scope": "Automated checks associated with d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; head SHA, branch and success verified by GitHub API.",
           "role": "integration"
+        },
+        {
+          "type": "pr",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/pull/77",
+          "scope": "W51-W60 code review associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; PR is not validation or deployment proof.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120255",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120240",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37452120152",
+          "scope": "Automated checks associated with bec9e1d9812b6402d2ee90b8d657f756551b29ef; head SHA, branch and success verified by GitHub API.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "C:\\Users\\leand\\Documents\\Apollo\\w51-60-20261005\\bailian-review-20261006\\owner-review.json",
+          "scope": "9eeab33b085e-1: Technical full-output visual and auditory review bound to W60 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; not owner acceptance or deployment.",
+          "role": "real-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w51-60-20261005/bailian-review-20261006/bailian-review.json",
+          "scope": "Tentativa suplementar sem aprovação: áudio completo WAV derivado do MP4 final SHA 7f6f27805429418d56a98f9bec665da4aefc01763bd778fc1d019a75ceb3c876; CLI 2.1.0, timeout e diagnóstico HTTP 404 Model not exist no perfil Token Plan.",
+          "role": "classification"
         }
       ],
-      "nextAction": "Concluir revisão audiovisual final do recorte W60 antes da promoção técnica.",
-      "notes": "Estado proposto a partir de código/runtime/teste existente; não muda checkbox nem auditoria 380/1259. A prova é parcial para o escopo total. Arquivo de teste existente não prova execução E2E específica; subfluxo parcial requer reconciliação do run/artifact antes de promover validação. Recorte individual 9eeab33b085e-1 de W60; grupo histórico H-019d6f44afde-open preservado nas evidências. Fase premerge, SHA 2d85c43a083d84dec87be4bb81c778abdef5e5b7; implantação e aceite não inferidos. Recorte individual 9eeab33b085e-1 de W60; grupo histórico T-9eeab33b085e-1 preservado nas evidências. Fase main, SHA d33888224dc59986a1b1e1e5e1dfdacbe3bc036d; implantação e aceite não inferidos."
+      "nextAction": "Implantar somente após os gates operacionais aplicáveis e registrar aceite do proprietário separadamente.",
+      "notes": "W60 integrada pelo PR #77 e tecnicamente validada nos quatro IDs selecionados: execução real, reconstrução byte-idêntica e revisão integral do MP4 confirmada pelo proprietário em 06/10/2026, vinculada ao SHA final. As provas anteriores com audição pendente são históricas. Bailian atualizado para 2.1.0; tentativa suplementar no áudio completo terminou com timeout e diagnóstico sem mídia retornou HTTP 404 Model not exist no perfil Token Plan. Não há parecer automático. Percepção visual parcial e faceCoverage absent: não declara detector de faces nem fechamento abrangente de J.001. Implantação atual e aceite global permanecem pendentes."
     },
     {
       "id": "H-7a58d1cc014d-open",
