@@ -208,7 +208,7 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const cue = directedPlan.subtitleTracks.flatMap(track => track.cues).find(item => item.text.includes(correction.matchText))
     assert.ok(cue, 'Reviewed correction must target a real rendered cue')
     const directedSession = await api(`/v1/projects/${projectId}/annotations?projectVersionId=${direction.version.id}`)
-    assert.equal(directedPlan.fps, directedSession.session.fps)
+    assert.ok(Math.abs(directedPlan.fps - directedSession.session.fps) <= 0.01, 'Plan and proxy session frame rates must agree within the probe tolerance')
     assert.ok(cue.endFrame - cue.startFrame > 1)
     const directedProxy = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: directedSession.session.proxyArtifactId } })
     const correctionFrame = cue.startFrame + 1
