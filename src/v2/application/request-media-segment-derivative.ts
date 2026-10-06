@@ -59,7 +59,7 @@ export function requestMediaSegmentDerivativeService(dependencies: { segments: M
     if (!item || item.kind !== 'segment' || item.status !== 'usable' || item.rights.status !== 'eligible' || !item.rights.snapshotId) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Segment is not eligible for reuse')
     if (!recipe) return Object.freeze({ kind: 'virtual' as const, segmentId, parentArtifactId: segment.parentAssetId, segmentHash: segment.segmentHash, semanticRange: segment.semanticRange, sourceTimeMapping: segment.sourceTimeMapping, physicalDerivative: null, bytesDuplicated: false as const })
     const source = await dependencies.segments.readSource(workspaceId, segment.parentAssetId)
-    if (!source || source.mediaType !== 'video') throw new DomainError('INVALID_ARGUMENT', 'Physical derivative requires an available video source')
+    if (!source) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Physical derivative requires an available audio or video source')
     const existing = await dependencies.segments.findMaterialization(workspaceId, segmentId, consumerKey)
     if (existing) return Object.freeze({ kind: 'ready' as const, segmentId, materialization: existing, replayed: true as const })
     const key = input.idempotencyKey?.trim() ?? ''

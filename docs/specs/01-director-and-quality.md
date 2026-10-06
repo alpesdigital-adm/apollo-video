@@ -753,6 +753,12 @@ Issue sem range só é aceito para problema global de narrativa/policy.
 - Não regenerar asset quando reposicionamento resolve.
 - Não mudar story para resolver problema puramente visual.
 - Cada PatchSet possui expected score delta e invalidation preview.
+- Uma correção confirmada de legenda pertence à versão e à annotation que a
+  originaram. Ao executar novamente o Diretor, conservar seu texto somente se
+  IDs e tempos das cues coincidirem com o alinhamento atual. Revalidar policy,
+  conteúdo e legibilidade e persistir um novo DirectorRun/QualityReport para a
+  versão resultante; a qualidade da versão anterior não autoriza o novo export.
+  Divergência de timing exige nova revisão, sem sobrescrever a correção.
 
 ## 19. Convergência
 

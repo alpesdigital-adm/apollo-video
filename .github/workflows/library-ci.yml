@@ -61,7 +61,7 @@ jobs:
         run: npx prisma migrate deploy --schema prisma/v2/schema.prisma
       - run: npm run build
       - name: Independent repository, media and image proofs
-        run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-concurrency=1 tests/v2/prisma-media-library.integration.mjs tests/v2/media-segment-materialization.integration.mjs tests/v2/prisma-image-library-proof.integration.mjs tests/v2/library-preview-media.integration.mjs tests/v2/library-preview-process-fence.integration.mjs tests/v2/prisma-library-preview-fence.integration.mjs
+        run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-concurrency=1 tests/v2/prisma-media-library.integration.mjs tests/v2/media-segment-materialization.integration.mjs tests/v2/prisma-image-library-proof.integration.mjs tests/v2/image-analysis-tesseract.integration.mjs tests/v2/library-preview-media.integration.mjs tests/v2/library-preview-process-fence.integration.mjs tests/v2/prisma-library-preview-fence.integration.mjs
       - name: Consolidated HTTP and Chromium journey
         run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/library-journey.e2e.mjs
       - name: Approved output catalog through real export worker

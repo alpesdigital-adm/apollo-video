@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { once } from 'node:events'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { copyFile, mkdir, rename, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join, normalize, relative, resolve } from 'node:path'
@@ -151,10 +152,7 @@ export class LocalMediaUploadStorage implements MediaUploadContentStorage, Media
           throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Stored multipart part does not match its receipt')
         }
         for await (const chunk of createReadStream(partPath)) {
-          if (!output.write(chunk)) await new Promise<void>((resolveDrain, rejectDrain) => {
-            output.once('drain', resolveDrain)
-            output.once('error', rejectDrain)
-          })
+          if (!output.write(chunk)) await once(output, 'drain')
         }
       }
       await new Promise<void>((resolveEnd, rejectEnd) => {

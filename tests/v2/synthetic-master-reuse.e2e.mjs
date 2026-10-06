@@ -184,6 +184,9 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
   let primaryError
 
   const cleanupWorkspace = async (id) => {
+    await client.v2AutomaticCatalogRecord.deleteMany({ where: { workspaceId: id } })
+    await client.v2MediaSegment.deleteMany({ where: { workspaceId: id } })
+    await client.v2MediaLibraryEntry.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticPhaseGateEvidence.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticPhaseGate.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId: id } })
@@ -244,6 +247,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
     const { createSyntheticAudioMaster, createSyntheticAvatarAudioRange } = await import('../../src/v2/domain/synthetic-audio-master.ts')
     const { createAvatarOutputSpeechEvidence } = await import('../../src/v2/domain/avatar-output-speech-evidence.ts')
+    const { createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
@@ -680,6 +684,38 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       },
     })
 
+    // The controlled provider-result seed includes the same immutable manifest
+    // and authorized-input lineage that real result ingestion persists. Master
+    // promotion now catalogs the approved original and requires that evidence.
+    const originalProbe = JSON.parse(execFileSync(ffprobePath, [
+      '-v', 'error', '-show_streams', '-show_format', '-of', 'json',
+      absolute(roleFiles['provider-original'].key),
+    ], { encoding: 'utf8', windowsHide: true }))
+    const videoStream = originalProbe.streams.find((stream) => stream.codec_type === 'video')
+    const [rateNumerator, rateDenominator] = videoStream.avg_frame_rate.split('/').map(Number)
+    const originalManifest = createMediaArtifactManifestV2({
+      artifactKey: roleFiles['provider-original'].key,
+      artifactSha256: bytes['provider-original'].sha256,
+      byteSize: bytes['provider-original'].byteSize, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'synthetic-provider-result', version: '1.0.0', parameters: {
+        jobId: canonicalJob.id, providerJobId: canonicalJob.providerJobId,
+        adapterId: canonicalJob.adapterId, adapterVersion: canonicalJob.adapterVersion,
+        inputHash: canonicalJob.inputHash, authorizationHash: canonicalJob.authorization.authorizationHash,
+      } },
+      sources: [{ artifactKey: roleFiles['final-audio'].key, sha256: bytes['final-audio'].sha256,
+        role: 'provider-authorized-input', execution: {
+          tool: { id: 'controlled-provider-fixture', version: '1.0.0', digest: hash('a') },
+          model: { provider: 'heygen', id: canonicalJob.providerJobId, version: canonicalJob.adapterVersion,
+            config: { operation: canonicalJob.operation, fixture: 'controlled-master-reuse/v1' } },
+        } }],
+      probe: { width: videoStream.width, height: videoStream.height,
+        duration: Number(originalProbe.format.duration), fps: rateNumerator / rateDenominator },
+    })
+    await new PrismaMediaArtifactRepository(client).persistOrReplay({
+      workspaceId, artifactId: artifactIds['provider-original'], manifestId: 'master-reuse-original-manifest',
+      lineageIds: ['master-reuse-original-audio-lineage'], manifest: originalManifest, createdAt: at(7),
+    })
+
     // 4. A loopback provider boundary nothing in this journey may touch. Every
     //    request that reaches it is a paid call the reuse claim would have to
     //    answer for.
@@ -755,6 +791,11 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     assert.equal(promoted.payload.data.replayed, false)
     const master = promoted.payload.data.master
     const masterId = master.id
+    const catalog = await client.v2AutomaticCatalogRecord.findMany({ where: { workspaceId, artifactId: artifactIds['provider-original'] } })
+    // These source rights allow ads, not editorial-reuse. Sealing a reusable
+    // synthetic master does not widen them into searchable library rights.
+    assert.equal(catalog.length, 0, 'automatic library catalog must fail closed on ads-only source rights')
+    assert.equal(await client.v2MediaSegment.count({ where: { workspaceId, artifactId: artifactIds['provider-original'] } }), 0)
     assert.match(master.masterHash, /^[a-f0-9]{64}$/)
     assert.equal(master.artifacts.length, 3)
     assert.deepEqual(

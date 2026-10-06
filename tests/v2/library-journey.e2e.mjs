@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
@@ -11,6 +11,7 @@ import test from 'node:test'
 import { PrismaClient, Prisma } from '../../generated/prisma-v2/index.js'
 import { createImageFixtureBytes, seedAnalyzedImageLibrary } from './helpers/library-image-proof.mjs'
 import { proveLibraryBrowser } from './helpers/library-browser-proof.mjs'
+import { openJourneyObjectStore, closeJourneyObjectStore } from './helpers/journey-object-storage.mjs'
 
 const execute = promisify(execFile); const require = createRequire(import.meta.url)
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -52,13 +53,13 @@ async function cleanupWorkspace(prisma, workspaceId) {
   for (const identity of identities) await prisma.v2HumanIdentity.deleteMany({ where: { id: identity.identityId, memberships: { none: {} } } })
 }
 
-test('W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Chromium', { skip: process.env.APOLLO_LIBRARY_JOURNEY_E2E !== '1', timeout: 480_000 }, async () => {
+test(process.env.APOLLO_W51_S3_ONLY === '1' ? 'W51 transfer uses real HTTP, PostgreSQL and versioned S3 bytes' : 'W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Chromium', { skip: process.env.APOLLO_LIBRARY_JOURNEY_E2E !== '1', timeout: 480_000 }, async () => {
   assertIsolatedDatabase()
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
   const { LocalArtifactSourceMaterializer } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
   const { calculateFileSha256 } = await import('../../src/v2/infrastructure/media/local-artifact-manifest.ts')
-  const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
+  const { probeAudioDurationSeconds, probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
   const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
@@ -68,13 +69,18 @@ test('W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Ch
   const evidenceDir = resolve(process.env.APOLLO_LIBRARY_EVIDENCE_ROOT ?? join(root, 'evidence'))
   const fromRepo = relative(process.cwd(), evidenceDir); assert.ok(isAbsolute(evidenceDir) && (fromRepo.startsWith('..') || isAbsolute(fromRepo)))
   await mkdir(evidenceDir, { recursive: true }); await mkdir(artifactRoot, { recursive: true })
-  const prisma = new PrismaClient(); let server, otherWorkspace, logs = ''
+  const prisma = new PrismaClient(); let server, otherWorkspace, objectStore, logs = ''
   const evidence = { schemaVersion: 'library-journey/v1', sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null, runId: suffix, ownerPid: process.pid, workspaceId, outcome: 'started', checks: [], postflight: {} }
   try {
     await factory.createWorkspaceRepository().create(createWorkspace({ id: workspaceId, slug: workspaceId, name: 'Controlled library journey', status: 'active', createdAt: new Date().toISOString() }))
     const issued = await createApiClientService({ repository: factory.createApiClientRepository(), credentialCrypto: nodeApiCredentialCrypto, clock: () => new Date() })({ id: clientId, workspaceId, name: 'Controlled library actor', environment: 'production', scopes: ['projects:read', 'projects:write', 'media:write', 'artifacts:read', 'artifacts:write', 'artifacts:rights', 'operations:read', 'operations:cancel', 'operations:retry'] })
     const port = await freePort(); const baseUrl = `http://127.0.0.1:${port}`; const username = `library-${suffix}`; const password = `Library-${suffix}-controlled-password`
-    const environment = { ...process.env, NODE_ENV: 'production', __NEXT_PROCESSED_ENV: 'true', NEXT_TELEMETRY_DISABLED: '1', APOLLO_API_ENVIRONMENT: 'production', APOLLO_AUTH_MODE: 'bootstrap', APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true', APOLLO_UI_BOOTSTRAP_ROLE: 'operator', APOLLO_UI_USERNAME: username, APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(password, `library-salt-${suffix}`), APOLLO_UI_SESSION_SECRET: `library-${suffix}-session-with-32-bytes-minimum`, APOLLO_UI_API_CLIENT_ID: clientId, APOLLO_V2_ARTIFACT_ROOT: artifactRoot, APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local', APOLLO_V2_RENDER_WORK_ROOT: join(root, 'work'), APOLLO_MEDIA_UPLOAD_BASE_URL: `${baseUrl}/`, APOLLO_MEDIA_UPLOAD_SIGNING_SECRET: `library-upload-${suffix}-with-at-least-32-bytes` }
+    const s3Only = process.env.APOLLO_W51_S3_ONLY === '1'
+    if (s3Only) {
+      assert.equal(process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER, 's3')
+      objectStore = await openJourneyObjectStore()
+    }
+    const environment = { ...process.env, NODE_ENV: 'production', __NEXT_PROCESSED_ENV: 'true', NEXT_TELEMETRY_DISABLED: '1', APOLLO_API_ENVIRONMENT: 'production', APOLLO_AUTH_MODE: 'bootstrap', APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true', APOLLO_UI_BOOTSTRAP_ROLE: 'operator', APOLLO_UI_USERNAME: username, APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(password, `library-salt-${suffix}`), APOLLO_UI_SESSION_SECRET: `library-${suffix}-session-with-32-bytes-minimum`, APOLLO_UI_API_CLIENT_ID: clientId, APOLLO_V2_ARTIFACT_ROOT: artifactRoot, APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3Only ? 's3' : 'local', APOLLO_V2_RENDER_WORK_ROOT: join(root, 'work'), APOLLO_MEDIA_UPLOAD_BASE_URL: `${baseUrl}/`, APOLLO_MEDIA_UPLOAD_SIGNING_SECRET: `library-upload-${suffix}-with-at-least-32-bytes`, APOLLO_MEDIA_DOWNLOAD_BASE_URL: `${baseUrl}/`, APOLLO_MEDIA_DOWNLOAD_SIGNING_SECRET: `library-download-${suffix}-with-at-least-32-bytes` }
     server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-p', String(port)], { cwd: process.cwd(), env: environment, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     evidence.serverPid = server.pid
     server.stdout.on('data', (chunk) => { logs = (logs + String(chunk)).slice(-12000) }); server.stderr.on('data', (chunk) => { logs = (logs + String(chunk)).slice(-12000) })
@@ -101,6 +107,51 @@ test('W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Ch
     const videoPath = join(root, 'master.mp4')
     await execute(require('ffmpeg-static'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:size=320x180:rate=24:duration=4', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', videoPath], { windowsHide: true, timeout: 30_000 })
     const videoBytes = await readFile(videoPath); const sourceSha256 = sha256(videoBytes)
+    if (s3Only) {
+      const begun = await api('/v1/media/uploads', { projectId, fileName: 'w51-s3-master.mp4', rightsConfirmed: true,
+        kind: 'video', size: String(videoBytes.length), mimeType: 'video/mp4', checksum: sourceSha256 })
+      const session = await api(`/v1/media/uploads/${begun.upload.id}/session`, {})
+      assert.equal((await fetch(session.session.uploadUrl, { method: 'PUT', headers: session.session.requiredHeaders, body: videoBytes })).status, 201)
+      const completed = await api(`/v1/media/uploads/${begun.upload.id}/complete`, {})
+      const originalFetch = globalThis.fetch
+      try {
+        globalThis.fetch = async (url, options) => String(url) === 'https://api.groq.com/openai/v1/audio/transcriptions'
+          ? Response.json({ text: 'Material controlado.', words: [{ word: 'Material', start: 0, end: 1 }, { word: 'controlado.', start: 1, end: 3 }], segments: [{ id: 0, text: 'Material controlado.', start: 0, end: 3 }] })
+          : originalFetch(url, options)
+        const worked = await factory.createMediaIngestWorker({ ...environment, GROQ_API_KEY: 'controlled-test-key-not-live-000000', GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR: '7200' })(`w51-s3-worker-${suffix}`, AbortSignal.timeout(60_000))
+        assert.equal(worked?.status, 'succeeded')
+      } finally { globalThis.fetch = originalFetch }
+      const link = await prisma.v2ProjectMediaAsset.findFirstOrThrow({ where: { workspaceId, uploadId: begun.upload.id, role: 'source-master' } })
+      const stored = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: link.artifactId } })
+      assert.equal(stored.sha256, sourceSha256)
+      assert.equal(await stat(join(artifactRoot, ...stored.artifactKey.split('/'))).then(() => true, () => false), false,
+        'S3 master must not be silently read from local artifact storage')
+      const head = await objectStore.client.send(new objectStore.aws.HeadObjectCommand({ Bucket: objectStore.bucket, Key: stored.artifactKey, ChecksumMode: 'ENABLED' }))
+      assert.ok(head.VersionId && head.VersionId !== 'null')
+      assert.equal(head.ContentLength, videoBytes.length)
+      assert.ok(head.ChecksumSHA256 === Buffer.from(sourceSha256, 'hex').toString('base64') || head.Metadata?.['apollo-sha256'] === sourceSha256)
+      await grant(stored.id)
+      const download = await api(`/v1/artifacts/${stored.id}/download-grants`, { ttlSeconds: 30 })
+      const full = await fetch(download.downloadUrl)
+      assert.equal(full.status, 200)
+      assert.equal(sha256(Buffer.from(await full.arrayBuffer())), sourceSha256)
+      const range = await fetch(download.downloadUrl, { headers: { range: 'bytes=2-17' } })
+      assert.equal(range.status, 206)
+      assert.deepEqual(Buffer.from(await range.arrayBuffer()), videoBytes.subarray(2, 18))
+      await api(`/v1/media/download-grants/${download.grant.id}/revoke`, {})
+      assert.equal((await fetch(download.downloadUrl)).ok, false)
+      assert.equal((await fetch(download.downloadUrl, { headers: { range: 'bytes=2-17' } })).ok, false)
+      const expiring = await api(`/v1/artifacts/${stored.id}/download-grants`, { ttlSeconds: 30 })
+      assert.equal((await fetch(expiring.downloadUrl)).status, 200)
+      await new Promise((done) => setTimeout(done, 31_000))
+      assert.equal((await fetch(expiring.downloadUrl)).ok, false)
+      assert.equal((await fetch(expiring.downloadUrl, { headers: { range: 'bytes=2-17' } })).ok, false)
+      evidence.s3Transfer = { artifactId: stored.id, artifactKey: stored.artifactKey, versionId: head.VersionId,
+        byteSize: videoBytes.length, sha256: sourceSha256, uploadId: begun.upload.id, ingestOperationId: completed.operation.id,
+        fullStatus: 200, rangeStatus: 206, revoked: true, expiredAfterSeconds: 31, liveProvider: false }
+      evidence.outcome = 'passed'
+      return
+    }
     const uploads = []
     async function upload(bytes, kind, mimeType, fileName, approved = true) {
       const begun = await api('/v1/media/uploads', { projectId, fileName, rightsConfirmed: true, kind, size: String(bytes.length), mimeType, checksum: sha256(bytes) })
@@ -128,7 +179,8 @@ test('W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Ch
     const sourceArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } })
     const { path: sourcePath } = await new LocalArtifactSourceMaterializer(artifactRoot).materialize({ operationId: `library-source-${suffix}`, artifactKey: sourceArtifact.artifactKey, sha256: sourceSha256, byteSize: videoBytes.length })
     const audioPath = join(root, 'tone.wav'); await execute(require('ffmpeg-static'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:a', 'pcm_s16le', audioPath], { windowsHide: true, timeout: 30000 })
-    const audioId = await upload(await readFile(audioPath), 'audio', 'audio/wav', 'tone.wav')
+    const audioSourceBytes = await readFile(audioPath)
+    const audioId = await upload(audioSourceBytes, 'audio', 'audio/wav', 'tone.wav')
     const imageId = await upload(await createImageFixtureBytes('multilingual'), 'image', 'image/png', 'multilingual.png')
     const image = await api(`/v1/media/library/${imageId}/image-analysis`)
     if (process.env.APOLLO_TESSERACT_PATH) { assert.equal(image.ocr.state, 'available'); assert.ok(image.ocr.values.length) } else assert.equal(image.ocr.state, 'unavailable')
@@ -156,7 +208,8 @@ test('W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Ch
     for (let index = 0; index < 28; index += 1) segments.push(await api(`/v1/media/library/${artifactId}/segments`, { label: `Controlled range ${index}`, startMs: index * 100, endMs: index * 100 + 500 }))
     const nested = await api(`/v1/media/library/${artifactId}/segments`, { label: 'Nested range', parentSegmentId: segments[0].id, startMs: 100, endMs: 500 })
     assert.equal(nested.physicalObjectKey, null)
-    assert.equal((await api(`/v1/media/library/${audioId}/segments`, { label: 'Audio virtual range', startMs: 500, endMs: 1500 })).physicalObjectKey, null)
+    const audioSegment = await api(`/v1/media/library/${audioId}/segments`, { label: 'Audio virtual range', startMs: 500, endMs: 1500 })
+    assert.equal(audioSegment.physicalObjectKey, null)
     const beforeVirtual = await prisma.v2MediaArtifact.count({ where: { workspaceId } })
     const virtual = await api(`/v1/media/segments/${segments[0].id}/derivative-jobs`, { consumerKey: 'library-virtual-proof', requiresPhysicalDerivative: false })
     assert.equal(virtual.kind, 'virtual')
@@ -177,6 +230,27 @@ test('W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Ch
     const replay = await api(`/v1/media/segments/${segments[0].id}/derivative-jobs`, { consumerKey: 'library-physical-proof', requiresPhysicalDerivative: true })
     assert.equal(replay.kind, 'ready')
     evidence.derivativeJob = { jobId: job.job.id, outputArtifactId: output.id, sha256: output.sha256, bytes: outputBytes.length, duration: outputProbe.duration, replay: replay.kind }
+    const audioJob = await api(`/v1/media/segments/${audioSegment.id}/derivative-jobs`, { consumerKey: 'library-audio-proof', requiresPhysicalDerivative: true })
+    assert.equal(audioJob.kind, 'job')
+    const audioDerivative = await factory.createMediaSegmentDerivativeWorker(environment)(`library-audio-derivative-${suffix}`, AbortSignal.timeout(60_000))
+    assert.equal(audioDerivative?.jobId, audioJob.job.id); assert.equal(audioDerivative?.status, 'succeeded')
+    assert.equal((await api(`/v1/media/segment-derivative-jobs/${audioJob.job.id}`)).status, 'succeeded')
+    const audioOutput = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: audioDerivative.outputArtifactId }, include: { manifests: true } })
+    assert.equal(audioOutput.mediaType, 'audio'); assert.equal(audioOutput.container, 'wav')
+    const audioContent = await fetch(`${baseUrl}/v1/artifacts/${audioOutput.id}/content`, { headers, signal: AbortSignal.timeout(10_000) })
+    assert.equal(audioContent.status, 200)
+    const audioOutputBytes = Buffer.from(await audioContent.arrayBuffer())
+    assert.equal(sha256(audioOutputBytes), audioOutput.sha256)
+    const { path: audioOutputPath } = await new LocalArtifactSourceMaterializer(artifactRoot).materialize({ operationId: `library-audio-proof-${suffix}`, artifactKey: audioOutput.artifactKey, sha256: audioOutput.sha256, byteSize: Number(audioOutput.byteSize) })
+    assert.ok(Math.abs((await probeAudioDurationSeconds(audioOutputPath)) - 1) < 0.12)
+    await execute(require('ffmpeg-static'), ['-hide_banner', '-loglevel', 'error', '-i', audioOutputPath, '-f', 'null', '-'], { windowsHide: true, timeout: 30_000 })
+    assert.equal((await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: audioId } })).sha256, sha256(audioSourceBytes))
+    const audioManifest = JSON.parse(audioOutput.manifests[0].manifestJson)
+    assert.deepEqual(audioManifest.sources.map((source) => source.sha256), [sha256(audioSourceBytes)])
+    const audioReplay = await api(`/v1/media/segments/${audioSegment.id}/derivative-jobs`, { consumerKey: 'library-audio-proof', requiresPhysicalDerivative: true })
+    assert.equal(audioReplay.kind, 'ready')
+    await writeFile(join(evidenceDir, 'audio-segment-derivative.wav'), audioOutputBytes)
+    evidence.audioDerivativeJob = { jobId: audioJob.job.id, outputArtifactId: audioOutput.id, outputManifestId: audioOutput.manifests[0].id, sourceSha256: sha256(audioSourceBytes), sha256: audioOutput.sha256, bytes: audioOutputBytes.length, duration: await probeAudioDurationSeconds(audioOutputPath), replay: audioReplay.kind }
     evidence.checks.push({ strength: 'http-real+pg-real', name: 'virtual-ranges', segments: segments.map((segment) => segment.id), nestedId: nested.id })
     const login = await fetch(`${baseUrl}/v1/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }), signal: AbortSignal.timeout(10000) }); assert.equal(login.status, 200)
     const cookie = /apollo_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')?.[1]; assert.ok(cookie)
@@ -191,6 +265,7 @@ test('W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Ch
     await stop(server); evidence.postflight.serverTerminal = !server || server.exitCode !== null || server.signalCode !== null
     await disconnectV2PostgresClient(); await otherWorkspace?.cleanup(); await cleanupWorkspace(prisma, workspaceId)
     await prisma.$disconnect()
+    await closeJourneyObjectStore(objectStore)
     const observer = new PrismaClient()
     const supervisorObserver = process.env.APOLLO_LIBRARY_OBSERVER_APPLICATION_NAME ?? null
     if (supervisorObserver) assert.match(supervisorObserver, /^apollo-video-e2e-observer-[a-f0-9]{8}$/)

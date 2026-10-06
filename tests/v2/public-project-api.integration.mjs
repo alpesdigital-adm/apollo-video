@@ -18,6 +18,7 @@ import { proveW37RenameFromCard } from './helpers/dashboard-w37-rename.mjs'
 import { proveW38ArchiveRestore } from './helpers/dashboard-w38-archive-restore.mjs'
 import { createW39ArtifactRoot, proveW39DuplicateCopyOnWrite } from './helpers/dashboard-w39-duplicate.mjs'
 import { proveW40ConsolidatedJourney } from './helpers/dashboard-w40-consolidated.mjs'
+import { proveMediaTransferHttp } from './helpers/media-transfer-http-proof.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -331,6 +332,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'artifacts:render',
         'artifacts:rights',
         'clients:admin',
+        'media:write',
         'operations:cancel',
         'operations:read',
         'operations:retry',
@@ -693,6 +695,10 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_RENDERER_DIGEST: sha('8'),
           APOLLO_FFMPEG_PATH: ffmpegPath,
           APOLLO_V2_ARTIFACT_ROOT: w39ArtifactRoot,
+          APOLLO_MEDIA_UPLOAD_BASE_URL: baseUrl,
+          APOLLO_MEDIA_DOWNLOAD_BASE_URL: baseUrl,
+          APOLLO_MEDIA_UPLOAD_SIGNING_SECRET: 'w51-isolated-upload-signing-secret-32-characters',
+          APOLLO_MEDIA_DOWNLOAD_SIGNING_SECRET: 'w51-isolated-download-signing-secret-32-characters',
           // This broad journey generates hundreds of legitimate requests. Keep
           // request/spend spike detection out of this isolated error-rate proof.
           APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '2000000000',
@@ -1741,7 +1747,13 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.clients.create',
         'apollo.clients.credentials.rotate',
         'apollo.clients.credentials.revoke',
+        'apollo.media.uploads.begin',
         'apollo.media.uploads.content.put',
+        'apollo.media.uploads.session.issue',
+        'apollo.media.uploads.read',
+        'apollo.media.uploads.parts.record',
+        'apollo.media.uploads.complete',
+        'apollo.media.uploads.abort',
         'apollo.artifacts.download-grants.issue',
         'apollo.artifacts.download-grants.revoke',
         'apollo.governance.alerts.list',
@@ -5221,6 +5233,14 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(created.data.project.locale, 'pt-BR')
     assert.ok(created.data.version.snapshotRefs.brief)
     assert.equal(created.data.version.sequence, 1)
+
+    {
+      const transfer = await proveMediaTransferHttp({
+        baseUrl, client, authorization, workspaceId, projectId: created.data.project.id,
+        artifactRoot: w39ArtifactRoot, createMediaArtifactManifest,
+      })
+      assert.equal(transfer.outcome, 'passed')
+    }
 
     const replayResponse = await createRequest()
     const replay = await replayResponse.json()

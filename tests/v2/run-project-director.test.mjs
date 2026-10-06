@@ -384,6 +384,41 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   )
 })
 
+test('Director re-evaluates confirmed caption corrections without reusing the old quality snapshot', async () => {
+  const { repository, service } = fixture()
+  const original = await service(request())
+  const reviewed = structuredClone(original.run.editPlan)
+  reviewed.reviewPatch = { patchId: 'reviewed-patch-1', annotationIds: ['annotation-caption-1'] }
+  reviewed.subtitleTracks[0].cues[0].text = 'Seja bem-vindo!'
+  const readContext = repository.readContext.bind(repository)
+  repository.readContext = async (input) => ({ ...await readContext(input), editPlan: reviewed })
+  const replanned = await service(request({ baseVersionId: original.version.id, baseHash: original.version.baseHash, idempotency: { key: 'reviewed-captions' } }))
+  assert.equal(replanned.run.editPlan.subtitleTracks[0].cues[0].text, 'Seja bem-vindo!')
+  assert.notEqual(replanned.run.id, original.run.id)
+  assert.equal(replanned.version.parentVersionId, original.version.id)
+  assert.notEqual(replanned.run.qualityReport.id, original.run.qualityReport.id)
+  assert.equal(replanned.run.qualityReport.hardChecks.forbiddenSpeechAbsent, true)
+  assert.equal(replanned.run.editPlan.reviewPatch.patchId, 'reviewed-patch-1')
+})
+
+test('Director rejects unsafe or stale reviewed captions before persistence', async () => {
+  for (const mutation of [
+    (cue) => { cue.text = '31 de janeiro' },
+    (cue) => { cue.anchor = 'center' },
+    (cue) => { cue.startFrame += 1 },
+  ]) {
+    const { repository, service } = fixture()
+    const original = await service(request())
+    const reviewed = structuredClone(original.run.editPlan)
+    reviewed.reviewPatch = { patchId: 'reviewed-patch-1', annotationIds: ['annotation-caption-1'] }
+    mutation(reviewed.subtitleTracks[0].cues[0])
+    const readContext = repository.readContext.bind(repository)
+    repository.readContext = async (input) => ({ ...await readContext(input), editPlan: reviewed })
+    await assert.rejects(service(request({ baseVersionId: original.version.id, baseHash: original.version.baseHash, idempotency: { key: 'unsafe-caption' } })), (error) => error.code === 'INVALID_RENDER_INPUT')
+    assert.equal(repository.lastBundle.run.id, original.run.id)
+  }
+})
+
 test('Director blocks material brief conflicts before creating or persisting plans', async () => {
   const { repository, service } = fixture({
     ownerText: 'Tom: formal. Tom: totalmente informal.',

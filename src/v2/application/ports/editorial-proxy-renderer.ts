@@ -22,7 +22,7 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
  */
 export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.11.0'
 export const EDITORIAL_PROXY_RECIPE_VERSION = '1.11.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.6.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.7.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {
@@ -35,6 +35,7 @@ export interface EditorialProxyRenderResult {
   outputPath: string
   sha256: string
   byteSize: number
+  ffmpegBinarySha256?: string
   probe: { width: number; height: number; duration: number; fps: number; codec: string; audioCodec: string; container: string }
   renderElementMap: Readonly<RenderElementMap>
 }

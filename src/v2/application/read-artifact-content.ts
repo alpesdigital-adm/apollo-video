@@ -41,7 +41,7 @@ export function readArtifactContentService(dependencies: {
   return async function read(input: { workspaceId: string; artifactId: string; rangeHeader: string | null }) {
     const artifact = await dependencies.artifacts.findById(input.workspaceId, input.artifactId.trim())
     if (!artifact || artifact.status !== 'available') throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media artifact content was not found')
-    const previewRecipes = new Set(['media-library-thumbnail', 'media-library-waveform', 'image-thumbnail', 'image-preview'])
+    const previewRecipes = new Set(['media-library-thumbnail', 'media-library-waveform', 'image-thumbnail', 'image-preview', 'extract-range'])
     const previewManifests = artifact.manifests.filter((manifest) => previewRecipes.has(manifest.recipe.id))
     if (previewManifests.length) {
       if (!dependencies.library) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Preview source authorization is required')

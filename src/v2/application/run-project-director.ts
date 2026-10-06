@@ -872,11 +872,32 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       ...(briefCompilation?.compiled.assumptions ?? []),
       ...(mediaOnlyTreatment?.assumptions ?? []),
     ])])
-    const subtitleCues = buildSubtitleCues({
+    const generatedSubtitleCues = buildSubtitleCues({
       words: context.editPlan.retimedTranscript.words,
       durationFrames: context.editPlan.durationFrames,
       fps: context.editPlan.fps,
     })
+    // Confirmed review Commands own their caption text. Replanning must assess
+    // that text afresh instead of silently replacing it from the transcript.
+    const reviewedPlan = context.editPlan as unknown as {
+      reviewPatch?: { patchId: string; annotationIds: readonly string[] }
+      subtitleTracks: readonly { cues: readonly DirectedSubtitleCue[] }[]
+    }
+    let subtitleCues = generatedSubtitleCues
+    if (reviewedPlan.reviewPatch) {
+      assertDomain(typeof reviewedPlan.reviewPatch.patchId === 'string' &&
+        Array.isArray(reviewedPlan.reviewPatch.annotationIds) &&
+        reviewedPlan.reviewPatch.annotationIds.length > 0,
+      'INVALID_RENDER_INPUT', 'Reviewed captions require confirmed annotation lineage')
+      const reviewedCues = reviewedPlan.subtitleTracks.flatMap((track) => track.cues)
+      assertDomain(reviewedCues.length === generatedSubtitleCues.length &&
+        reviewedCues.every((cue, index) => {
+          const generated = generatedSubtitleCues[index]!
+          return cue.id === generated.id && cue.startFrame === generated.startFrame &&
+            cue.endFrame === generated.endFrame
+        }), 'INVALID_RENDER_INPUT', 'Reviewed caption timing must match the current transcript alignment')
+      subtitleCues = Object.freeze(reviewedCues.map((cue) => Object.freeze({ ...cue })))
+    }
     const transitions = Object.freeze(clips.slice(0, -1).map((clip, index) => Object.freeze({
       id: `transition-${index + 1}`,
       fromClipId: clip.id,

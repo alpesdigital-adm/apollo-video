@@ -19,6 +19,7 @@ const ffprobePath = require('ffprobe-static').path
 const execFileAsync = promisify(execFile)
 
 const RUN = process.env.APOLLO_SYNTHETIC_WAVE24_JOURNEY_E2E === '1'
+const W58_CATALOG = process.env.APOLLO_W58_CATALOG_E2E === '1'
 const SKIP = RUN
   ? false
   : 'set APOLLO_SYNTHETIC_WAVE24_JOURNEY_E2E=1 with built Next/Remotion, isolated PostgreSQL and controlled media'
@@ -184,6 +185,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
   let fallbackFixture = null
   let serverLogs = ''
   let primaryError = null
+  let w58CatalogEvidence = null
   const expectedRenderOutputKeys = []
   const appendServerLog = (chunk) => {
     serverLogs = `${serverLogs}${String(chunk)}`.slice(-256 * 1024)
@@ -238,6 +240,9 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     await client.v2SyntheticSpeechSegment.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId } })
+    await client.v2AutomaticCatalogRecord.deleteMany({ where: { workspaceId } })
+    await client.v2MediaSegment.deleteMany({ where: { workspaceId } })
+    await client.v2MediaLibraryEntry.deleteMany({ where: { workspaceId } })
     await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
     await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
@@ -291,6 +296,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     const { SpecializedSyntheticProviderResultCritic } = await import('../../src/v2/application/synthetic-provider-critic.ts')
     const { createSyntheticAudioMasterService } = await import('../../src/v2/application/synthetic-audio-masters.ts')
     const { promoteSyntheticMasterAssetService } = await import('../../src/v2/application/synthetic-master-assets.ts')
+    const { catalogApprovedOutputService } = await import('../../src/v2/application/catalog-approved-output.ts')
     const { catalogSyntheticSpeechSegmentsService } = await import('../../src/v2/application/synthetic-speech-segments.ts')
     const { createSyntheticProductionRunService } = await import('../../src/v2/application/synthetic-production.ts')
     const { prepareCanonicalSyntheticMasterReuseService } = await import('../../src/v2/application/prepare-synthetic-master-reuse.ts')
@@ -314,6 +320,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticAudioMasterRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts')
     const { PrismaSyntheticMasterAssetRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-asset-repository.ts')
+    const { PrismaAutomaticCatalogRepository } = await import('../../src/v2/infrastructure/prisma/automatic-catalog-repository.ts')
+    const { PrismaMediaLibraryRepository } = await import('../../src/v2/infrastructure/prisma/media-library-repository.ts')
     const { PrismaSyntheticSpeechSegmentRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-speech-segment-repository.ts')
     const { PrismaPromotableProviderJobReader, PrismaStoredArtifactIdentityReader } = await import('../../src/v2/infrastructure/prisma/synthetic-master-promotion-readers.ts')
     const { PrismaSyntheticMasterReuseRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-reuse-repository.ts')
@@ -401,7 +409,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
         id: 'journey-consent', evidenceArtifactId: 'journey-consent-evidence', granted: true,
-        allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+        allowedUses: W58_CATALOG ? ['ads', 'editorial-reuse'] : ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
       },
       actor, idempotencyKey: 'journey-profile-key',
@@ -727,8 +735,9 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       const snapshot = createAssetRightsSnapshot({
         id: `journey-rights-${index + 1}`, workspaceId, artifactId, sequence: 1,
         draft: {
-          status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
-          allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
+          status: 'approved', allowedUses: W58_CATALOG ? ['ads', 'editorial-reuse'] : ['ads'], prohibitedUses: [],
+          ...(W58_CATALOG ? {} : { allowedMarkets: ['BRA'] }), allowedLocales: ['pt-BR'],
+          allowedSyntheticOperations: W58_CATALOG ? ['tts', 'audio-avatar', 'video-to-video', 'generated-cutaway'] : ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
           consent: { status: 'not-required', allowedUses: [] },
         },
         createdBy: { type: 'api-client', id: clientId }, createdAt: at(9),
@@ -872,7 +881,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       const snapshot = createAssetRightsSnapshot({
         id: `journey-avatar-rights-${index + 1}`, workspaceId, artifactId: result.artifactId, sequence: 1,
         draft: {
-          status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+          status: 'approved', allowedUses: W58_CATALOG ? ['ads', 'editorial-reuse'] : ['ads'], prohibitedUses: [],
+          ...(W58_CATALOG ? {} : { allowedMarkets: ['BRA'] }), allowedLocales: ['pt-BR'],
           allowedSyntheticOperations: result.role === 'primary-video'
             ? ['tts', 'audio-avatar', 'video-to-video', 'generated-cutaway']
             : ['audio-avatar'],
@@ -994,6 +1004,12 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     }))
 
     const masterRepository = new PrismaSyntheticMasterAssetRepository(client)
+    const automaticCatalog = new PrismaAutomaticCatalogRepository(client)
+    const catalogApproved = catalogApprovedOutputService({ repository: automaticCatalog, rights: rightsRepository, clock: () => new Date(at(14)) })
+    const rawManifest = await client.v2MediaArtifactManifest.findFirst({ where: { workspaceId, artifactId: avatarRow.id, recipeId: 'synthetic-provider-result' } })
+    assert.ok(rawManifest)
+    assert.equal(await automaticCatalog.inspect({ workspaceId, artifactId: avatarRow.id, manifestId: rawManifest.id }), null,
+      'approved provider output is not reusable until the master is sealed')
     const promoted = await promoteSyntheticMasterAssetService({
       masters: masterRepository,
       jobs: new PrismaPromotableProviderJobReader(client),
@@ -1014,6 +1030,23 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       ),
       clock: () => new Date(at(14)),
       createId: () => 'journey-synthetic-master-a',
+      async catalogApprovedMaster(master) {
+        if (!W58_CATALOG) return
+        const result = await catalogApproved({ workspaceId, artifactId: avatarRow.id, manifestId: rawManifest.id })
+        if (result.status === 'ignored') {
+          const edges = await client.v2MediaArtifactLineage.findMany({ where: { manifestId: rawManifest.id } })
+          const summaries = []
+          for (const artifactId of [avatarRow.id, ...edges.map((edge) => edge.sourceArtifactId)]) {
+            const snapshot = (await rightsRepository.findCurrent(workspaceId, artifactId))?.snapshot
+            summaries.push({ artifactId, status: snapshot?.status, uses: snapshot?.allowedUses, operations: snapshot?.allowedSyntheticOperations, consent: snapshot?.consent.status })
+          }
+          t.diagnostic(JSON.stringify({ catalogReason: result.reason, summaries }))
+        }
+        assert.equal(result.status, 'cataloged', JSON.stringify(result))
+        assert.equal(result.record.outputKind, 'deepfake-raw')
+        assert.equal(result.record.searchableKind, 'segment')
+        assert.equal(result.record.segmentId !== undefined, true)
+      },
     })({
       workspaceId,
       projectId: project.project.id,
@@ -1034,6 +1067,37 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     ])
     assert.equal(promoted.master.provenance.providerJobId, avatarJobId)
     assert.equal(promoted.master.cost.minorUnits, 0)
+    if (W58_CATALOG) {
+      const rawRecord = await automaticCatalog.find(workspaceId, avatarRow.id)
+      assert.equal(rawRecord?.outputKind, 'deepfake-raw')
+      const rawSegment = await client.v2MediaSegment.findUnique({ where: { id: rawRecord.segmentId } })
+      assert.equal(rawSegment?.artifactId, avatarRow.id)
+      assert.equal(rawSegment?.endMs, promoted.master.videoDurationMs)
+      const librarySegment = await new PrismaMediaLibraryRepository(client).findById(workspaceId, rawRecord.segmentId, new Date(at(14)))
+      assert.equal(librarySegment?.rights.status, 'eligible', JSON.stringify(librarySegment?.rights))
+      const libraryPage = await new PrismaMediaLibraryRepository(client).list({ workspaceId, kind: 'segment', limit: 20 }, new Date(at(14)))
+      assert.equal(libraryPage.items.some((item) => item.id === rawRecord.segmentId), true)
+      assert.equal((await catalogApproved({ workspaceId, artifactId: avatarRow.id, manifestId: rawManifest.id })).status, 'already-cataloged')
+      await client.v2AutomaticCatalogRecord.delete({ where: { id: rawRecord.id } })
+      await client.v2MediaSegment.delete({ where: { id: rawRecord.segmentId } })
+      await client.v2MediaLibraryEntry.delete({ where: { artifactId: avatarRow.id } })
+      const raced = await Promise.all(Array.from({ length: 3 }, () => catalogApproved({ workspaceId, artifactId: avatarRow.id, manifestId: rawManifest.id })))
+      assert.deepEqual(raced.map((result) => result.status).sort(), ['already-cataloged', 'already-cataloged', 'cataloged'])
+      assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId, artifactId: avatarRow.id } }), 1)
+      assert.equal(await client.v2MediaSegment.count({ where: { workspaceId, artifactId: avatarRow.id } }), 1)
+      w58CatalogEvidence = {
+        schemaVersion: 'w58-approved-synthetic-catalog-proof/v1', sourceSha: process.env.GITHUB_SHA ?? null,
+        runId: process.env.APOLLO_WAVE24_RUN_ID, workspaceId, provider: 'controlled', liveProvider: false,
+        prePromotion: { approvedProviderResultWithoutMaster: 'not-cataloged' },
+        catalog: { artifactId: avatarRow.id, manifestId: rawManifest.id, recordId: rawRecord.id,
+          segmentId: rawRecord.segmentId, artifactSha256: avatarRow.sha256, masterHash: promoted.master.masterHash,
+          criticReportHash: promoted.master.critic.reportHash, segmentHash: rawSegment.segmentHash,
+          libraryKind: librarySegment.kind, libraryRights: librarySegment.rights.status, listed: true },
+        replay: 'already-cataloged', firstWriteConcurrency: { attempts: raced.length, statuses: raced.map((result) => result.status).sort(), records: 1, segments: 1 },
+      }
+      t.diagnostic(JSON.stringify({ w58Catalog: w58CatalogEvidence.catalog, firstWriteConcurrency: w58CatalogEvidence.firstWriteConcurrency }))
+      return
+    }
 
     const catalogued = await catalogSyntheticSpeechSegmentsService({
       masters: masterRepository,
@@ -1902,6 +1966,14 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     })
     if (cleanupErrors.length === 0) {
       await cleanupStep('scratch-root removal failed', () => rm(root, { recursive: true, force: true }))
+    }
+    if (W58_CATALOG && w58CatalogEvidence && !primaryError && cleanupErrors.length === 0) {
+      await cleanupStep('W58 catalog proof artifact write failed', () => writeFile(join(evidenceRoot, 'w58-catalog.json'), `${JSON.stringify({
+        ...w58CatalogEvidence, outcome: 'passed', postflight: { browserClosed: browser === null,
+          serverTerminal: server === null || server.exitCode !== null || server.signalCode !== null,
+          databaseCleanup: 'passed', databaseClientDisconnected: true, scratchRootRemoved: true,
+          backendCheck: 'external-supervisor', objectStorage: objectStore ? 'bucket-removed' : 'local' },
+      }, null, 2)}\n`, 'utf8'))
     }
     if (cleanupErrors.length > 0) {
       throw new AggregateError(

@@ -147,7 +147,7 @@ const parseWorkflow = (workflow) => {
       }
     }
 
-    return { job: owner, name, npmScripts, suiteFiles, env, attrs }
+    return { job: owner, name, npmScripts, suiteFiles, env, attrs, body }
   })
 
   return { jobs, steps: parsed }
@@ -354,7 +354,6 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
  * `NO_SCRIPT` are debts; the other two are decisions.
  */
 const PAID_PROVIDERS = 'calls paid providers, which the owner’s briefing forbids in CI'
-const NEEDS_TESSERACT = 'needs a Tesseract install the workflow does not provision'
 const PHASE_1_3 = 'Phase 1-3 suite with an npm script and no CI step'
 const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means writing one first'
 
@@ -382,6 +381,7 @@ const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means
  * reason that has nothing to do with coverage.
  */
 const KNOWN_UNRUN_SUITES = [
+  { file: 'tests/v2/recovery-master-live.e2e.mjs', reason: 'requires the private owner-selected Imersão master, authorized live Groq credential/cost cap and supervised editorial/visual review; local proof is separate from hosted CI', citedBy: ['docs/quality/w51-60-integration.md'] },
   { file: 'tests/v2/contamination-golden-fixtures.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/contiguous-evaluation-repository.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/contiguous-evidence-repository.integration.mjs', reason: NO_SCRIPT },
@@ -390,11 +390,6 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/ffmpeg-contiguous-visual-evidence-provider.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/ffmpeg-speaker-diarization-audio-preparer.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/format-quality-critic.integration.mjs', reason: PHASE_1_3 },
-  {
-    file: 'tests/v2/image-analysis-tesseract.integration.mjs',
-    reason: `${NEEDS_TESSERACT}; PRD FR-145 and the F4.015 traceability row cite it as why the OCR engine is present but unrun in CI`,
-    citedBy: ['docs/PLANO-WAVES-51-60.md', 'docs/PRD-APOLLO-V2.md', 'docs/REQUIREMENTS-TRACEABILITY.md'],
-  },
   { file: 'tests/v2/long-form-stage-fencing.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/media-input-runtime.integration.mjs', reason: PHASE_1_3 },
   {
@@ -605,4 +600,24 @@ test('T-F4.016 every unrun suite a document leans on says so where it is declare
     [],
     `a document naming a suite CI never runs is a claim resting on a proof that did not execute; record it in that entry's citedBy, or stop citing it:\n  ${wrong.join('\n  ')}`,
   )
+})
+
+test('W51 S3 and W58 catalog variants cannot silently become skipped CI proofs', async () => {
+  const { steps } = parseWorkflow(await read('.github/workflows/ci.yml'))
+  for (const [variant, gate, primary, suite] of [
+    ['W51', 'APOLLO_W51_S3_ONLY', 'APOLLO_LIBRARY_JOURNEY_E2E', 'tests/v2/library-journey.e2e.mjs'],
+    ['W58', 'APOLLO_W58_CATALOG_E2E', 'APOLLO_SYNTHETIC_WAVE24_JOURNEY_E2E', 'tests/v2/synthetic-wave24-journey.e2e.mjs'],
+  ]) {
+    const matches = steps.filter((step) => isLiteral(step.env.get(gate), '1'))
+    assert.equal(matches.length, 1, `${variant} must have one mandatory variant run`)
+    const step = matches[0]
+    assert.equal(step.attrs.get('if'), undefined)
+    assert.equal(step.job.attrs.get('if'), undefined)
+    assert.ok(!isLiteral(step.attrs.get('continue-on-error'), 'true'))
+    assert.ok(!isLiteral(step.job.attrs.get('continue-on-error'), 'true'))
+    assert.ok(isLiteral(step.env.get(primary), '1'))
+    assert.ok(step.suiteFiles.includes(suite) || step.npmScripts.some((script) => script === 'test:e2e:synthetic-wave24-journey'))
+    if (variant === 'W51') assert.ok(isLiteral(step.env.get('APOLLO_V2_ARTIFACT_STORAGE_DRIVER'), 's3'))
+    if (variant === 'W58') assert.ok(step.body.includes('${process.env.APOLLO_WAVE24_EVIDENCE_ROOT}/${process.env.APOLLO_WAVE24_RUN_ID}/w58-catalog.json'))
+  }
 })
