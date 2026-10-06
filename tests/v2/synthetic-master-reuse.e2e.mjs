@@ -792,10 +792,10 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const master = promoted.payload.data.master
     const masterId = master.id
     const catalog = await client.v2AutomaticCatalogRecord.findMany({ where: { workspaceId, artifactId: artifactIds['provider-original'] } })
-    assert.equal(catalog.length, 1)
-    assert.equal(catalog[0].outputKind, 'deepfake-raw')
-    assert.equal(catalog[0].manifestId, 'master-reuse-original-manifest')
-    assert.equal(await client.v2MediaSegment.count({ where: { workspaceId, artifactId: artifactIds['provider-original'] } }), 1)
+    // These source rights allow ads, not editorial-reuse. Sealing a reusable
+    // synthetic master does not widen them into searchable library rights.
+    assert.equal(catalog.length, 0, 'automatic library catalog must fail closed on ads-only source rights')
+    assert.equal(await client.v2MediaSegment.count({ where: { workspaceId, artifactId: artifactIds['provider-original'] } }), 0)
     assert.match(master.masterHash, /^[a-f0-9]{64}$/)
     assert.equal(master.artifacts.length, 3)
     assert.deepEqual(
