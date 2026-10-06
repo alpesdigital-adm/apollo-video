@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -1843,6 +1845,32 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     })
     assert.deepEqual((await discoverWorkspaces()).workspaceIds, [workspaceId])
     const activeWebhookSigningKey = Buffer.alloc(32, 43)
+    // A local receiver supplies real HTTP and independent signature/replay
+    // checks. The destination mapping is controlled test transport, not an
+    // exception to the production adapter's outbound network policy.
+    const receivedEvents = new Set()
+    let lastHttpRequest
+    const receiver = createServer(async (request, response) => {
+      try {
+        const chunks = []
+        for await (const chunk of request) chunks.push(chunk)
+        const rawBody = Buffer.concat(chunks)
+        const verified = verifyWebhookSignature({ secret: activeWebhookSigningKey, rawBody, headers: request.headers, now: deliveryClock })
+        if (request.url === '/timeout') return
+        if (receivedEvents.has(verified.eventId)) { response.writeHead(409); response.end(); return }
+        receivedEvents.add(verified.eventId)
+        response.writeHead(204); response.end()
+      } catch { response.writeHead(401); response.end() }
+    })
+    receiver.listen(0, '127.0.0.1')
+    await once(receiver, 'listening')
+    const receiverUrl = `http://127.0.0.1:${receiver.address().port}`
+    const httpSend = async (transportRequest) => {
+      lastHttpRequest = transportRequest
+      const response = await fetch(receiverUrl, { method: 'POST', headers: transportRequest.headers, body: transportRequest.rawBody, signal: AbortSignal.timeout(5000) })
+      const responseBytes = Buffer.from(await response.arrayBuffer())
+      return { statusCode: response.status, responseBodyHash: createHash('sha256').update(responseBytes).digest('hex') }
+    }
     const dispatchDelivery = dispatchWebhookDeliveryService({
       repository: deliveryRepository,
       secrets: {
@@ -1867,10 +1895,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
             headers: transportRequest.headers,
             now: deliveryClock,
           }).eventId, eventRows[1].id)
-          return {
-            statusCode: 204,
-            responseBodyHash: createHash('sha256').update('').digest('hex'),
-          }
+          return httpSend(transportRequest)
         },
       },
       clock: () => deliveryClock,
@@ -1881,7 +1906,22 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       dispatch: dispatchDelivery,
       heartbeatIntervalMs: 100,
     })
-    const succeeded = await runDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })
+    let succeeded
+    try {
+      succeeded = await runDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })
+      assert.ok(lastHttpRequest, 'Durable worker must send to the real receiver')
+      assert.equal(receivedEvents.has(eventRows[1].id), true)
+      const replay = await fetch(receiverUrl, { method: 'POST', headers: lastHttpRequest.headers, body: lastHttpRequest.rawBody, signal: AbortSignal.timeout(5000) })
+      assert.equal(replay.status, 409)
+      await replay.arrayBuffer()
+      const invalid = await fetch(receiverUrl, { method: 'POST', headers: lastHttpRequest.headers, body: Buffer.from('tampered-payload'), signal: AbortSignal.timeout(5000) })
+      assert.equal(invalid.status, 401)
+      await invalid.arrayBuffer()
+      await assert.rejects(fetch(`${receiverUrl}/timeout`, { method: 'POST', headers: lastHttpRequest.headers, body: lastHttpRequest.rawBody, signal: AbortSignal.timeout(50) }), (error) => error.name === 'TimeoutError')
+    } finally {
+      receiver.closeAllConnections()
+      await new Promise((resolve, reject) => receiver.close((error) => error ? reject(error) : resolve()))
+    }
     assert.equal(succeeded.status, 'succeeded')
     assert.equal(succeeded.deliveryId, firstClaim.delivery.id)
     assert.equal(succeeded.attemptNumber, 3)

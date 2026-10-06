@@ -332,6 +332,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'artifacts:render',
         'artifacts:rights',
         'clients:admin',
+        'media:write',
         'operations:cancel',
         'operations:read',
         'operations:retry',
