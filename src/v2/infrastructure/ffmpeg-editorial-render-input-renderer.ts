@@ -51,7 +51,7 @@ function editorialProps(input: MaterializedRenderInputV1) {
     input.assets.slice(sourceIds.length).some((asset) => asset.kind !== 'lut') ||
     editPlan.id !== input.plan.id || editPlan.projectVersionId !== input.plan.versionId ||
     !Array.isArray(editPlan.videoTracks) || !Array.isArray(editPlan.subtitleTracks) ||
-    editPlan.fps !== input.output.fps || outputSpec.fps !== input.output.fps ||
+    !Number.isFinite(editPlan.fps) || Math.abs(editPlan.fps - input.output.fps) > 0.01 || outputSpec.fps !== input.output.fps ||
     outputSpec.width !== input.output.width || outputSpec.height !== input.output.height ||
     outputSpec.aspectRatio !== input.output.aspectRatio || outputSpec.codec !== 'h264' ||
     outputSpec.audioCodec !== 'aac' || outputSpec.container !== 'mp4' || outputSpec.quality !== 'final') {

@@ -53,9 +53,12 @@ test('approved FFmpeg final reconstructs exact MP4 bytes from materialized input
   const compilation = colorCompilation()
   const clips = [{ id: 'clip-editorial-reconstruct', sourceArtifactId: artifactId, sourceInFrame: 0, sourceOutFrame: 30,
     timelineInFrame: 0, timelineOutFrame: 30, rate: 1 }]
-  const audioTimelineHash = createEditorialAudioTimelineHash({ fps: 30, clips })
+  // A real MOV source can probe at 30.000000097244733 while its final output is 30 fps.
+  // The approved Director audio identity retains that probe precision; the renderer targets 30.
+  const approvedPlanFps = 30.000000097244733
+  const audioTimelineHash = createEditorialAudioTimelineHash({ fps: approvedPlanFps, clips })
   const editPlan = { schemaVersion: 2, state: 'compiled', id: 'edit-plan-editorial-reconstruct', projectVersionId,
-    fps: 30, videoTracks: [{ kind: 'base-video', clips }], subtitleTracks: [], transitions: [], audioTracks: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 } }
+    fps: approvedPlanFps, videoTracks: [{ kind: 'base-video', clips }], subtitleTracks: [], transitions: [], audioTracks: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 } }
   const expected = await new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'original-work'), ffmpegPath }).render({
     operationId: 'original-final', renderKind: 'final', sources: [{ artifactId, path: source, mediaType: 'video', colorPipelineCompilation: compilation }],
     lutPaths: {}, clips, audioTimelineHash, fps: 30, format: '16:9', outputSpec: { width: 320, height: 180, fps: 30 }, subtitleCues: [], transitions: [],
@@ -136,6 +139,9 @@ test('approved FFmpeg final reconstructs exact MP4 bytes from materialized input
     (error) => error.code === 'INVALID_RENDER_INPUT')
   const wrongExpectedHash = specWithProps({ ...props, expectedOutputSha256: '0'.repeat(64) })
   await assert.rejects(adapter.stage({ ...wrongExpectedHash, assets: input.assets }, { outputKey: 'workspaces/test/renders/wrong-output.mp4' }),
+    (error) => error.code === 'INVALID_RENDER_INPUT')
+  const wrongPlanFps = specWithProps({ ...props, editPlan: { ...editPlan, fps: 30.02 } })
+  await assert.rejects(adapter.stage({ ...wrongPlanFps, assets: input.assets }, { outputKey: 'workspaces/test/renders/wrong-fps.mp4' }),
     (error) => error.code === 'INVALID_RENDER_INPUT')
   assert.equal(await stat(join(outputRoot, 'workspaces', 'test', 'renders', 'wrong-output.mp4')).catch(() => null), null)
 })
