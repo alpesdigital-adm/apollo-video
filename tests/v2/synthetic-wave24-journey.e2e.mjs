@@ -185,6 +185,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
   let fallbackFixture = null
   let serverLogs = ''
   let primaryError = null
+  let w58CatalogEvidence = null
   const expectedRenderOutputKeys = []
   const appendServerLog = (chunk) => {
     serverLogs = `${serverLogs}${String(chunk)}`.slice(-256 * 1024)
@@ -1084,9 +1085,17 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       assert.deepEqual(raced.map((result) => result.status).sort(), ['already-cataloged', 'already-cataloged', 'cataloged'])
       assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId, artifactId: avatarRow.id } }), 1)
       assert.equal(await client.v2MediaSegment.count({ where: { workspaceId, artifactId: avatarRow.id } }), 1)
-      t.diagnostic(JSON.stringify({ w58Catalog: { artifactId: avatarRow.id, manifestId: rawManifest.id, recordId: rawRecord.id,
-        segmentId: rawRecord.segmentId, sha256: avatarRow.sha256, masterHash: promoted.master.masterHash,
-        criticReportHash: promoted.master.critic.reportHash, segmentHash: rawSegment.segmentHash, firstWriteConcurrency: raced.length } }))
+      w58CatalogEvidence = {
+        schemaVersion: 'w58-approved-synthetic-catalog-proof/v1', sourceSha: process.env.GITHUB_SHA ?? null,
+        runId: process.env.APOLLO_WAVE24_RUN_ID, workspaceId, provider: 'controlled', liveProvider: false,
+        prePromotion: { approvedProviderResultWithoutMaster: 'not-cataloged' },
+        catalog: { artifactId: avatarRow.id, manifestId: rawManifest.id, recordId: rawRecord.id,
+          segmentId: rawRecord.segmentId, artifactSha256: avatarRow.sha256, masterHash: promoted.master.masterHash,
+          criticReportHash: promoted.master.critic.reportHash, segmentHash: rawSegment.segmentHash,
+          libraryKind: librarySegment.kind, libraryRights: librarySegment.rights.status, listed: true },
+        replay: 'already-cataloged', firstWriteConcurrency: { attempts: raced.length, statuses: raced.map((result) => result.status).sort(), records: 1, segments: 1 },
+      }
+      t.diagnostic(JSON.stringify({ w58Catalog: w58CatalogEvidence.catalog, firstWriteConcurrency: w58CatalogEvidence.firstWriteConcurrency }))
       return
     }
 
@@ -1957,6 +1966,14 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     })
     if (cleanupErrors.length === 0) {
       await cleanupStep('scratch-root removal failed', () => rm(root, { recursive: true, force: true }))
+    }
+    if (W58_CATALOG && w58CatalogEvidence && !primaryError && cleanupErrors.length === 0) {
+      await cleanupStep('W58 catalog proof artifact write failed', () => writeFile(join(evidenceRoot, 'w58-catalog.json'), `${JSON.stringify({
+        ...w58CatalogEvidence, outcome: 'passed', postflight: { browserClosed: browser === null,
+          serverTerminal: server === null || server.exitCode !== null || server.signalCode !== null,
+          databaseCleanup: 'passed', databaseClientDisconnected: true, scratchRootRemoved: true,
+          backendCheck: 'external-supervisor', objectStorage: objectStore ? 'bucket-removed' : 'local' },
+      }, null, 2)}\n`, 'utf8'))
     }
     if (cleanupErrors.length > 0) {
       throw new AggregateError(
