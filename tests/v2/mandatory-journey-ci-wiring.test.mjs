@@ -381,7 +381,7 @@ const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means
  * reason that has nothing to do with coverage.
  */
 const KNOWN_UNRUN_SUITES = [
-  { file: 'tests/v2/recovery-master-live.e2e.mjs', reason: 'requires the private owner-selected Imersão master, authorized live Groq credential/cost cap and supervised editorial/visual review; local proof is separate from hosted CI' },
+  { file: 'tests/v2/recovery-master-live.e2e.mjs', reason: 'requires the private owner-selected Imersão master, authorized live Groq credential/cost cap and supervised editorial/visual review; local proof is separate from hosted CI', citedBy: ['docs/quality/w51-60-integration.md'] },
   { file: 'tests/v2/contamination-golden-fixtures.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/contiguous-evaluation-repository.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/contiguous-evidence-repository.integration.mjs', reason: NO_SCRIPT },
