@@ -116,7 +116,12 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     evidence.projectId = projectId
     evidence.initialVersionId = created.version.id
     evidence.brief = { inputMode: 'media-only', objective: 'discovery', format: '16:9', editorialInstructionOrigin: 'AGENTS owner recovery requirements, persisted in first Director Command, annotation and removal Command before final direction', textualOwnerBrief: 'absent at media-only creation' }
-    const begun = await api('/v1/media/uploads', { projectId, fileName: 'imersao-master.mp4', rightsConfirmed: true, kind: 'video', size: String(bytes.length), mimeType: 'video/mp4', checksum: hash(bytes) })
+    // The preserved archive filename ends in .mp4, but the unmodified master
+    // has an ISO-BMFF ftyp qt signature. Declare its actual QuickTime container
+    // for V2 inspection; keep exactly the owner-selected bytes and SHA.
+    assert.equal(bytes.subarray(4, 12).toString('ascii'), 'ftypqt  ')
+    evidence.uploadContainer = { archiveExtension: 'mp4', signature: 'ftyp qt', declaredExtension: 'mov', declaredMimeType: 'video/quicktime', sourceBytesChanged: false }
+    const begun = await api('/v1/media/uploads', { projectId, fileName: 'imersao-master.mov', rightsConfirmed: true, kind: 'video', size: String(bytes.length), mimeType: 'video/quicktime', checksum: hash(bytes) })
     const { session } = await api(`/v1/media/uploads/${begun.upload.id}/session`, {})
     assert.equal(session.mode, 'multipart')
     for (let part = 1; part <= session.maxParts; part++) {

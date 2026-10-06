@@ -826,7 +826,17 @@ jobs:
           APOLLO_W38_EVIDENCE_DIR: ${{ runner.temp }}/w38-archive-restore-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_W39_EVIDENCE_DIR: ${{ runner.temp }}/w39-duplicate-${{ github.run_id }}-${{ github.run_attempt }}
           APOLLO_W40_EVIDENCE_DIR: ${{ runner.temp }}/w40-consolidated-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_W51_EVIDENCE_ROOT: ${{ runner.temp }}/w51-transfer-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+
+      - name: Publish W51 HTTP transfer evidence
+        if: always() && steps.public-api-integration.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: w51-transfer-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w51-transfer-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Verify Wave 29 browser, evidence and PostgreSQL postflight
         if: always() && steps.public-api-integration.conclusion != 'skipped'
@@ -1586,6 +1596,40 @@ jobs:
 
       - name: Build production application for the browser journey
         run: npm run build
+
+      - name: Prove W51 signed downloads through HTTP PostgreSQL and versioned MinIO
+        run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/library-journey.e2e.mjs
+        env:
+          APOLLO_LIBRARY_JOURNEY_E2E: "1"
+          APOLLO_W51_S3_ONLY: "1"
+          APOLLO_LIBRARY_EVIDENCE_ROOT: ${{ runner.temp }}/w51-s3-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+          APOLLO_V2_S3_BUCKET: apollo-w51-${{ github.run_id }}-${{ github.run_attempt }}
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: w51-ci
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-w51-s3-${{ github.run_id }}-${{ github.run_attempt }}&connection_limit=1&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero W51 S3 orphan database clients
+        if: always()
+        run: |
+          count=$(docker compose -f infra/postgres/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d apollo_video_v2_e2e -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='apollo-video-e2e-w51-s3-${{ github.run_id }}-${{ github.run_attempt }}'")
+          test "$count" = 0
+
+      - name: Publish W51 versioned object store evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: w51-s3-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/w51-s3-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Provision the isolated synthetic W24 journey database
         run: |
