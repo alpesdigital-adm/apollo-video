@@ -121,6 +121,9 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const projectId = created.project.id
     evidence.projectId = projectId
     evidence.initialVersionId = created.version.id
+    const lut = await api(`/v1/projects/${projectId}/lut-selection`, { baseVersionId: created.version.id, baseHash: created.version.baseHash, selection: { mode: 'none' }, reason: 'Preserve natural source colors for the owner recovery master.' })
+    assert.equal(lut.selection.resolved.mode, 'none')
+    evidence.lutSelectionId = lut.selection.id
     evidence.brief = { inputMode: 'media-only', objective: 'discovery', format: '16:9', editorialInstructionOrigin: 'AGENTS owner recovery requirements, persisted in removal Command and annotation before first Director Command', textualOwnerBrief: 'absent at media-only creation' }
     // The preserved archive filename ends in .mp4, but the unmodified master
     // has an ISO-BMFF ftyp qt signature. Declare its actual QuickTime container
@@ -163,6 +166,9 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(rightsResponse.status, 200)
     await api(`/v1/artifacts/${sourceArtifactId}/rights`, { status: 'approved', owner: 'Owner-selected Imersão recovery input', license: 'owner-authorized-recovery', allowedUses: ['editorial-reuse', 'rendering', 'editing', 'distribution', 'transcription'], prohibitedUses: [], consent: { status: 'not-required', allowedUses: [] } }, { method: 'PUT', headers: { ...headers, 'if-match': rightsResponse.headers.get('etag') } })
     evidence.transcriptId = transcriptRow.id; evidence.transcriptHash = transcript.transcriptHash
+    const beforeSubtitles = await api(`/v1/projects/${projectId}`)
+    const subtitle = await api(`/v1/projects/${projectId}/subtitle-configuration`, { baseVersionId: beforeSubtitles.version.id, baseHash: beforeSubtitles.version.baseHash, variantId: '16:9', action: 'set', mode: 'manual', presetId: 'clean-color', presetVersion: 1, reason: 'Short readable subtitles in the bottom safe area, protecting the speaker face.' })
+    evidence.subtitleConfiguration = subtitle
     await writeFile(join(evidenceDir, 'source-transcript.json'), JSON.stringify(transcript, null, 2))
     await checkpoint()
     console.log(JSON.stringify({ event: 'recovery-editorial-review-required', evidenceDir, transcriptId: transcriptRow.id }))
@@ -175,8 +181,12 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     // removals before requesting direction; never relax that gate for the test.
     const cut = await api(`/v1/projects/${projectId}/commands`, { type: 'remove-spoken-content', baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash, sourceTranscriptId: transcriptRow.id, rules: editorial.rules, exclusionOverrides: editorial.exclusionOverrides, reason: editorial.instruction })
     evidence.cutCommandId = cut.command.id; evidence.exclusions = cut.editorial.exclusions
-    const renderProxy = factory.createProjectProxyRenderWorker(environment)
+    const renderProxy = factory.createProjectProxyRenderWorker(environment, () => new Date(), ({ operationId, error }) => {
+      evidence.proxyFailure = { operationId, code: error.code, message: error.message, details: error.details }
+    })
     const initialProxy = await renderProxy(`recovery-cut-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) })
+    evidence.cutProxyResult = initialProxy
+    await checkpoint()
     assert.equal(initialProxy?.status, 'succeeded')
     const review = await api(`/v1/projects/${projectId}/annotations?projectVersionId=${cut.version.id}`)
     const initialArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: review.session.proxyArtifactId } })
@@ -189,7 +199,38 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(direction.directorRun.editPlan.automaticZoom, false)
     evidence.directorRunId = direction.directorRun.id; evidence.direction = direction.directorRun
     assert.equal((await renderProxy(`recovery-final-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) }))?.status, 'succeeded')
-    const proxyReview = await api(`/v1/projects/${projectId}/proxy-reviews?projectVersionId=${direction.version.id}`)
+    // Apply a correction observed in the actual first proxy through the public
+    // annotation -> proposal -> confirmed Command chain, not a detached note.
+    const correction = editorial.captionCorrection
+    assert.ok(correction?.matchText && correction.replacementText && correction.reason, 'Reviewed caption correction is required')
+    const directedVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: direction.version.id }, include: { editPlanSnapshot: true } })
+    const directedPlan = JSON.parse(directedVersion.editPlanSnapshot.contentJson)
+    const cue = directedPlan.subtitleTracks.flatMap(track => track.cues).find(item => item.text.includes(correction.matchText))
+    assert.ok(cue, 'Reviewed correction must target a real rendered cue')
+    const directedSession = await api(`/v1/projects/${projectId}/annotations?projectVersionId=${direction.version.id}`)
+    const directedProxy = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: directedSession.session.proxyArtifactId } })
+    const correctionFrame = cue.startFrame + 1
+    const correctionTimeMs = Math.round(correctionFrame / directedPlan.fps * 1000)
+    const correctionFramePath = join(evidenceDir, 'caption-before.jpg')
+    await execute(require('ffmpeg-static'), ['-v', 'error', '-y', '-ss', String(correctionFrame / directedPlan.fps), '-i', join(artifactRoot, ...directedProxy.artifactKey.split('/')), '-frames:v', '1', '-vf', 'scale=640:-1', correctionFramePath], { windowsHide: true, timeout: 30_000 })
+    const correctedText = cue.text.replace(correction.matchText, correction.replacementText)
+    const correctionAnnotation = await api(`/v1/projects/${projectId}/annotations`, { projectVersionId: direction.version.id, proxyArtifactId: directedProxy.id, proxyHash: directedProxy.sha256, frame: correctionFrame, timeRangeMs: [correctionTimeMs, correctionTimeMs], scope: 'point', targetIds: [`subtitle:${cue.id}`], screenshotRef: `data:image/jpeg;base64,${(await readFile(correctionFramePath)).toString('base64')}`, text: `Corrigir a legenda para "${correctedText}".` })
+    const proposal = await api(`/v1/projects/${projectId}/patch-proposals`, { annotationId: correctionAnnotation.annotation.id })
+    assert.equal(proposal.proposal.status, 'ready')
+    const applied = await api(`/v1/projects/${projectId}/patch-proposals/${proposal.proposal.id}/apply`, { confirmed: true })
+    assert.equal(applied.command.type, 'apply-review-patch')
+    assert.equal(applied.comparison.beforeVersionId, direction.version.id)
+    evidence.captionCorrection = { annotationId: correctionAnnotation.annotation.id, proposalId: proposal.proposal.id, commandId: applied.command.id, beforeVersionId: direction.version.id, resultVersionId: applied.version.id, targetId: `subtitle:${cue.id}`, beforeText: cue.text, correctedText, reason: correction.reason, frame: correctionFrame }
+    const exportVersion = applied.version
+    const patchResult = await renderProxy(`recovery-caption-proxy-${suffix}`, { signal: AbortSignal.timeout(180_000) })
+    evidence.captionProxyResult = patchResult
+    await checkpoint()
+    assert.equal(patchResult?.status, 'succeeded', JSON.stringify(evidence.proxyFailure))
+    const patchedVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: exportVersion.id }, include: { editPlanSnapshot: true } })
+    const patchedPlan = JSON.parse(patchedVersion.editPlanSnapshot.contentJson)
+    assert.equal(patchedPlan.subtitleTracks.flatMap(track => track.cues).find(item => item.id === cue.id)?.text, correctedText)
+    await writeFile(join(evidenceDir, 'final-edit-plan.json'), JSON.stringify(patchedPlan, null, 2))
+    const proxyReview = await api(`/v1/projects/${projectId}/proxy-reviews?projectVersionId=${exportVersion.id}`)
     assert.notEqual(proxyReview.review.status, 'blocked')
     const proxyArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: proxyReview.review.proxyArtifactId } })
     const previewPath = join(artifactRoot, ...proxyArtifact.artifactKey.split('/'))
@@ -202,12 +243,16 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(proxyVisual.artifactSha256, proxyArtifact.sha256)
     for (const gate of ['continuity', 'faceSafeSubtitles', 'naturalFraming', 'justifiedTransitions']) assert.equal(proxyVisual[gate], true, gate)
     evidence.proxyVisualReview = proxyVisual
-    if (proxyReview.review.status === 'warning-ack-required') await api(`/v1/projects/${projectId}/proxy-reviews`, { action: 'acknowledge-warnings', proxyReviewId: proxyReview.review.id, projectVersionId: direction.version.id, baseRevision: proxyReview.review.reviewHash, expectedRevision: proxyReview.review.revision })
-    const readyReview = await api(`/v1/projects/${projectId}/proxy-reviews?projectVersionId=${direction.version.id}`)
+    if (proxyReview.review.status === 'warning-ack-required') await api(`/v1/projects/${projectId}/proxy-reviews`, { action: 'acknowledge-warnings', proxyReviewId: proxyReview.review.id, projectVersionId: exportVersion.id, baseRevision: proxyReview.review.reviewHash, expectedRevision: proxyReview.review.revision })
+    const readyReview = await api(`/v1/projects/${projectId}/proxy-reviews?projectVersionId=${exportVersion.id}`)
     assert.equal(readyReview.review.status, 'ready-for-final')
     assert.equal(readyReview.review.finalAllowed, true)
-    const exported = await api(`/v1/projects/${projectId}/exports`, { projectVersionId: direction.version.id, projectVersionHash: direction.version.baseHash, format: '16:9', approval: { approved: true, note: 'Supervised local technical export; not owner acceptance or production deployment.' } })
-    assert.equal((await factory.createProjectFinalExportWorker(environment)(`recovery-final-${suffix}`, AbortSignal.timeout(180_000)))?.status, 'succeeded')
+    const exported = await api(`/v1/projects/${projectId}/exports`, { projectVersionId: exportVersion.id, projectVersionHash: exportVersion.baseHash, format: '16:9', approval: { approved: true, note: 'Supervised local technical export; not owner acceptance or production deployment.' } })
+    const finalResult = await factory.createProjectFinalExportWorker(environment)(`recovery-final-${suffix}`, AbortSignal.timeout(420_000))
+    evidence.finalWorkerResult = finalResult
+    evidence.finalOperation = (await api(`/v1/operations/${exported.operation.id}`)).operation
+    await checkpoint()
+    assert.equal(finalResult?.status, 'succeeded', JSON.stringify(evidence.finalOperation))
     const finalOp = await prisma.v2ProjectFinalExportOperation.findUniqueOrThrow({ where: { operationId: exported.operation.id } })
     const finalArtifact = await prisma.v2MediaArtifact.findUniqueOrThrow({ where: { id: finalOp.outputArtifactId } })
     const finalPath = join(artifactRoot, ...finalArtifact.artifactKey.split('/'))
@@ -246,8 +291,12 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     assert.equal(input.inputHash, manifest.renderInput.inputHash)
     assert.ok(input.assets.some((asset) => asset.artifactId === sourceArtifactId))
     const reconstruction = await api(`/v1/artifacts/${finalArtifact.id}/reconstruction-preflight/${manifestRow.id}`, undefined, { method: 'POST' })
+    evidence.final.reconstruction = reconstruction
+    await writeFile(join(evidenceDir, 'final-manifest.json'), JSON.stringify(manifest, null, 2))
+    await writeFile(join(evidenceDir, 'final-render-input.json'), JSON.stringify(input, null, 2))
+    await checkpoint()
     assert.equal(reconstruction.payloadAuthenticated, true)
-    assert.equal(reconstruction.eligible, true)
+    assert.equal(reconstruction.eligible, true, JSON.stringify(reconstruction.issues))
     assert.equal(reconstruction.inputHash, input.inputHash)
     evidence.final.reconstruction = reconstruction
     await writeFile(join(evidenceDir, 'final-manifest.json'), JSON.stringify(manifest, null, 2))
