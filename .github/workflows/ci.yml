@@ -1598,7 +1598,19 @@ jobs:
         run: npm run build
 
       - name: Prove W51 signed downloads through HTTP PostgreSQL and versioned MinIO
-        run: node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/library-journey.e2e.mjs
+        run: |
+          node --experimental-transform-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/library-journey.e2e.mjs
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import { readFile } from 'node:fs/promises'
+          const proof = JSON.parse(await readFile(`${process.env.APOLLO_LIBRARY_EVIDENCE_ROOT}/library-journey.json`, 'utf8'))
+          assert.equal(proof.outcome, 'passed')
+          assert.ok(proof.s3Transfer?.versionId && proof.s3Transfer.versionId !== 'null')
+          assert.equal(proof.s3Transfer.revoked, true)
+          assert.equal(proof.s3Transfer.expiredAfterSeconds, 31)
+          assert.equal(proof.postflight.serverTerminal, true)
+          assert.deepEqual(proof.postflight.backends, [])
+          NODE
         env:
           APOLLO_LIBRARY_JOURNEY_E2E: "1"
           APOLLO_W51_S3_ONLY: "1"
@@ -1653,7 +1665,22 @@ jobs:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_synthetic_wave24_e2e?schema=public&application_name=apollo-video-e2e-synthetic-wave24-ci-${{ github.run_id }}-${{ github.run_attempt }}&connection_limit=1&pool_timeout=10&connect_timeout=10
 
       - name: Run W58 sealed synthetic master catalog proof
-        run: npm run test:e2e:synthetic-wave24-journey
+        run: |
+          npm run test:e2e:synthetic-wave24-journey
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import { readFile } from 'node:fs/promises'
+          const proof = JSON.parse(await readFile(`${process.env.APOLLO_WAVE24_EVIDENCE_ROOT}/w58-catalog.json`, 'utf8'))
+          assert.equal(proof.outcome, 'passed')
+          assert.equal(proof.sourceSha, process.env.GITHUB_SHA)
+          assert.equal(proof.prePromotion.approvedProviderResultWithoutMaster, 'not-cataloged')
+          assert.equal(proof.firstWriteConcurrency.records, 1)
+          assert.equal(proof.firstWriteConcurrency.segments, 1)
+          assert.equal(proof.catalog.listed, true)
+          assert.equal(proof.catalog.libraryRights, 'eligible')
+          assert.equal(proof.postflight.databaseCleanup, 'passed')
+          assert.equal(proof.postflight.serverTerminal, true)
+          NODE
         env:
           APOLLO_SYNTHETIC_WAVE24_JOURNEY_E2E: "1"
           APOLLO_W58_CATALOG_E2E: "1"

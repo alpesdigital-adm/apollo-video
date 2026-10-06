@@ -108,6 +108,10 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
     const api = async (path, body, options = {}) => {
       const response = await fetch(`${baseUrl}${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { ...headers, ...(body === undefined ? {} : { 'idempotency-key': randomUUID() }), ...options.headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30_000), ...options })
       const payload = await response.json()
+      if (!response.ok) {
+        evidence.apiFailure = { path, status: response.status, error: payload.error }
+        await checkpoint()
+      }
       assert.ok(response.ok, `${path}: ${response.status}/${payload.error?.code}`)
       return payload.data
     }

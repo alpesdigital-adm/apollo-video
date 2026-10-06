@@ -601,3 +601,22 @@ test('T-F4.016 every unrun suite a document leans on says so where it is declare
     `a document naming a suite CI never runs is a claim resting on a proof that did not execute; record it in that entry's citedBy, or stop citing it:\n  ${wrong.join('\n  ')}`,
   )
 })
+
+test('W51 S3 and W58 catalog variants cannot silently become skipped CI proofs', async () => {
+  const { steps } = parseWorkflow(await read('.github/workflows/ci.yml'))
+  for (const [variant, gate, primary, suite] of [
+    ['W51', 'APOLLO_W51_S3_ONLY', 'APOLLO_LIBRARY_JOURNEY_E2E', 'tests/v2/library-journey.e2e.mjs'],
+    ['W58', 'APOLLO_W58_CATALOG_E2E', 'APOLLO_SYNTHETIC_WAVE24_JOURNEY_E2E', 'tests/v2/synthetic-wave24-journey.e2e.mjs'],
+  ]) {
+    const matches = steps.filter((step) => isLiteral(step.env.get(gate), '1'))
+    assert.equal(matches.length, 1, `${variant} must have one mandatory variant run`)
+    const step = matches[0]
+    assert.equal(step.attrs.get('if'), undefined)
+    assert.equal(step.job.attrs.get('if'), undefined)
+    assert.ok(!isLiteral(step.attrs.get('continue-on-error'), 'true'))
+    assert.ok(!isLiteral(step.job.attrs.get('continue-on-error'), 'true'))
+    assert.ok(isLiteral(step.env.get(primary), '1'))
+    assert.ok(step.suiteFiles.includes(suite) || step.npmScripts.some((script) => script === 'test:e2e:synthetic-wave24-journey'))
+    if (variant === 'W51') assert.ok(isLiteral(step.env.get('APOLLO_V2_ARTIFACT_STORAGE_DRIVER'), 's3'))
+  }
+})
