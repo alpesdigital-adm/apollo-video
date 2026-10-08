@@ -4,10 +4,14 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 const readJson = (relativePath) => JSON.parse(readFileSync(new URL(`../../${relativePath}`, import.meta.url), 'utf8'))
-const patched = '16.3.6'
+const patched = '16.4.0'
 const forkVersion = '16.3.6-apollo.2'
 const forkTarball = 'tools/vendor/next-eslint-plugin-next-16.3.6-apollo.2.tgz'
-// GHSA-vcvr-r3jv-pc5j: affected >=16.2.0 <16.3.6; this is a pin check, not an exploit test.
+// Current audit findings GHSA-3w37-wq28-93x7 and GHSA-4jqv-mc3x-m676,
+// GHSA-39w2-rjm5-chcv, GHSA-f87g-xv8r-7p7x, GHSA-mcj8-r9mp-w47p,
+// GHSA-cjq9-62q9-8jv4 report 16.3.x through 16.3.7 as affected. This checks
+// the current 16.3 advisory range and the exact 16.4.0 pin, not exploitation
+// or arbitrary historical Next versions. The vendor fork is versioned apart.
 const parts = (version) => version.split('.').map(Number)
 const compare = (left, right) => {
   const a = parts(left)
@@ -15,13 +19,12 @@ const compare = (left, right) => {
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i]
   return 0
 }
-const affected = (version) => compare(version, '16.2.0') >= 0 && compare(version, patched) < 0
+const affectedIn16_3 = (version) => compare(version, '16.3.0') >= 0 && compare(version, '16.3.7') <= 0
 
-test('old Next pin is in GHSA-vcvr-r3jv-pc5j range; patched baseline is outside', () => {
-  assert.equal(affected('16.3.4'), true)
-  assert.equal(affected('16.3.6'), false)
-  assert.equal(affected('16.2.0'), true)
-  assert.equal(affected('16.1.9'), false)
+test('Next 16.3.7 is in the current advisory range; patched baseline is outside', () => {
+  assert.equal(affectedIn16_3('16.3.0'), true)
+  assert.equal(affectedIn16_3('16.3.7'), true)
+  assert.equal(affectedIn16_3(patched), false)
 })
 
 test('platform and paired Next/eslint-config-next manifests use the patched exact pin', () => {
@@ -30,7 +33,7 @@ test('platform and paired Next/eslint-config-next manifests use the patched exac
   assert.equal(versions.web.next, patched)
   assert.equal(pkg.dependencies.next, patched)
   assert.equal(pkg.devDependencies['eslint-config-next'], patched)
-  assert.equal(affected(pkg.dependencies.next), false)
+  assert.equal(affectedIn16_3(pkg.dependencies.next), false)
 })
 
 test('npm lock root and resolved Next/eslint-config-next use patched pair', () => {
