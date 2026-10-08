@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-06T11:48:42.990Z",
+  "updatedAt": "2026-10-08T21:34:17.886Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
     "source": "TODO.md"
   },
-  "evidenceBaseCommit": "bec9e1d9812b6402d2ee90b8d657f756551b29ef",
+  "evidenceBaseCommit": "252f6bd851b03d3c2728a4820f17b8df71d71bb0",
   "coverage": {
     "unit": "todo-section",
     "total": 250,
@@ -14,6 +14,497 @@
     "unclassified": 0
   },
   "items": [
+    {
+      "id": "W61",
+      "title": "W61 — contrato de observação verificável e fail-closed",
+      "kind": "wave",
+      "todoSections": [
+        "F1.016",
+        "F1.018"
+      ],
+      "todoItems": [
+        "95648df1db63-1",
+        "ae8074fdef11-1",
+        "85514de89d9b-1",
+        "76e7e1f536dd-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: contrato V2/PG já existente; precede W62–W67."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W61: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Na execução, fechar a política unknown/review e o preflight do modelo local antes de iniciar inferência facial.",
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W62",
+      "title": "W62 — faces e regiões detectadas nos bytes",
+      "kind": "wave",
+      "todoSections": [
+        "F1.016",
+        "F1.018",
+        "F1.014"
+      ],
+      "todoItems": [
+        "26845752a027-1",
+        "95648df1db63-1",
+        "b73740a47fce-1",
+        "9a30a9b79c59-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W61 e preflight do modelo local."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W62: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W63",
+      "title": "W63 — OCR, shots e motion na mesma timeline",
+      "kind": "wave",
+      "todoSections": [
+        "F1.016"
+      ],
+      "todoItems": [
+        "26845752a027-1",
+        "b543c60be203-1",
+        "85514de89d9b-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W61; pode desenvolver OCR/shot em paralelo à W62, integração serial."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W63: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W64",
+      "title": "W64 — Diretor usa percepção persistida com confiança",
+      "kind": "wave",
+      "todoSections": [
+        "F1.019",
+        "F1.018"
+      ],
+      "todoItems": [
+        "8662d19a6473-1",
+        "f3338d39d1ad-1",
+        "d5d3f39c6aad-1",
+        "76e7e1f536dd-1",
+        "6a723f9a056c-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W61–W63."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W64: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W65",
+      "title": "W65 — anchor e placement por variante",
+      "kind": "wave",
+      "todoSections": [
+        "F1.036",
+        "F1.030"
+      ],
+      "todoItems": [
+        "e388518a7504-1",
+        "09dcdf656d1d-1",
+        "19f872a9d137-1",
+        "d7f581a07db8-1",
+        "247f7694a332-1",
+        "3c5a68e99d79-1",
+        "a4aa3d1b7ac4-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W62–W64."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W65: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W66",
+      "title": "W66 — reframe com trajetória e override por formato",
+      "kind": "wave",
+      "todoSections": [
+        "F1.031"
+      ],
+      "todoItems": [
+        "eba5d6a20bbd-1",
+        "0293bff3321f-1",
+        "4d9bedfd87ea-1",
+        "da5a414c29b3-1",
+        "72babc1df6c4-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W62–W64; integra com W65."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W66: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W67",
+      "title": "W67 — crítica independente do arquivo de cada formato",
+      "kind": "wave",
+      "todoSections": [
+        "F1.032"
+      ],
+      "todoItems": [
+        "68bbd7860ffc-1",
+        "3f670a796ca3-1",
+        "65ee578c6695-1",
+        "fa2bbfa8f082-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W65–W66."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W67: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W68",
+      "title": "W68 — issues até override e recompilação na UI",
+      "kind": "wave",
+      "todoSections": [
+        "F1.037",
+        "F1.018"
+      ],
+      "todoItems": [
+        "3bf6a6b94291-1",
+        "523a307339cd-1",
+        "5f9c1e599441-1",
+        "afac8c37ae94-1",
+        "99221a4bc2bd-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W65–W67."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W68: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W69",
+      "title": "W69 — sidecars do alignment final",
+      "kind": "wave",
+      "todoSections": [
+        "F1.038"
+      ],
+      "todoItems": [
+        "92ef89b25708-1",
+        "60ac0370b814-1",
+        "dce77836c7bd-1",
+        "3372d6445ac4-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W68 e output final por variante."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W69: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 4–6 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
+    {
+      "id": "W70",
+      "title": "W70 — master real, dois MP4 e revisão de falhas",
+      "kind": "wave",
+      "todoSections": [
+        "H-019d6f44afde"
+      ],
+      "todoItems": [
+        "41f80ebe5d2a-1",
+        "57ac9c7f3197-1",
+        "186dd251b68f-1",
+        "9eeab33b085e-1"
+      ],
+      "state": "fila",
+      "construction": "not-started",
+      "integration": "not-integrated",
+      "validation": "none",
+      "deployment": "pending",
+      "acceptance": "pending",
+      "blockers": [
+        {
+          "kind": "implementation",
+          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W61–W69 completos em seus subescopos aplicáveis."
+        },
+        {
+          "kind": "validation",
+          "text": "Produzir evidência do recorte com dados, workers, PostgreSQL, API e output reais conforme o plano; promoção individual exige cobrir o pedido literal."
+        },
+        {
+          "kind": "deployment",
+          "text": "Implantação atual na DigitalOcean é uma etapa posterior aos gates aplicáveis."
+        },
+        {
+          "kind": "owner-acceptance",
+          "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        }
+      ],
+      "evidence": [
+        {
+          "type": "repo",
+          "ref": "docs/PLANO-WAVES-61-70.md",
+          "scope": "W70: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "role": "planned-not-started"
+        }
+      ],
+      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+    },
     {
       "id": "W51",
       "title": "W51 — Upload e reconciliação de evidência histórica",

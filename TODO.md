@@ -20,7 +20,7 @@ Consulta individual: `npm run project:status -- --task-state falta-implantacao` 
 
 Planos anteriores: [W31–W40](./docs/PLANO-WAVES-31-40.md) e [W41–W50](./docs/PLANO-WAVES-41-50.md). Esses documentos preservam os pacotes originais; execução e evidências atuais estão no painel.
 
-Próxima fila preparada: [W51–W60](./docs/PLANO-WAVES-51-60.md), dez pacotes progressivos de reconciliação, integração e fechamento de lacunas, com IDs explícitos do TODO. Planejar não inicia construção, não altera caixas e não concede implantação ou aceite.
+W51–W60 estão integradas e tecnicamente validadas nos recortes registrados em [seu plano](./docs/PLANO-WAVES-51-60.md). Próxima fila preparada em 08/10/2026: [W61–W70](./docs/PLANO-WAVES-61-70.md), percepção visual real, legendas e reenquadramento orientados por evidência, crítica por formato e jornada final em 9:16/16:9. Os IDs são associações aos requisitos existentes; preparar uma wave não inicia construção nem altera as caixas, a implantação ou o aceite.
 
 Trilhas distribuídas: [W31–W40](./docs/PLANO-WAVES-31-40.md) ao Claude Code; [W41–W50](./docs/PLANO-WAVES-41-50.md) ao Codex, com arquivos e integração compartilhada coordenados. Atribuição não comprova início nem entrega.
 
