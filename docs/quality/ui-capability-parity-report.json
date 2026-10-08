@@ -38,7 +38,7 @@
     {
       "uiAction": "src/app/batches/page.tsx:1043",
       "capabilityId": "apollo.projects.workspace.current.read",
-      "capabilityVersion": "10.0.0",
+      "capabilityVersion": "11.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -58,7 +58,7 @@
     {
       "uiAction": "src/app/batches/page.tsx:1121",
       "capabilityId": "apollo.projects.workspace.current.read",
-      "capabilityVersion": "10.0.0",
+      "capabilityVersion": "11.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -658,7 +658,7 @@
     {
       "uiAction": "src/app/color-match/page.tsx:270",
       "capabilityId": "apollo.projects.workspace.current.read",
-      "capabilityVersion": "10.0.0",
+      "capabilityVersion": "11.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -886,7 +886,7 @@
     {
       "uiAction": "src/app/localization/page.tsx:289",
       "capabilityId": "apollo.projects.workspace.read",
-      "capabilityVersion": "10.0.0",
+      "capabilityVersion": "11.0.0",
       "endpoint": "GET /v1/projects/{projectId}",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -1118,7 +1118,7 @@
     {
       "uiAction": "src/app/multicam-direction/page.tsx:226",
       "capabilityId": "apollo.projects.workspace.current.read",
-      "capabilityVersion": "10.0.0",
+      "capabilityVersion": "11.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -1520,7 +1520,7 @@
     {
       "uiAction": "src/app/projects/[id]/page.tsx:1286",
       "capabilityId": "apollo.projects.workspace.current.read",
-      "capabilityVersion": "10.0.0",
+      "capabilityVersion": "11.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2412,7 +2412,7 @@
     {
       "uiAction": "src/app/ProjectsPageClient.tsx:595",
       "capabilityId": "apollo.projects.workspace.current.read",
-      "capabilityVersion": "10.0.0",
+      "capabilityVersion": "11.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2586,7 +2586,7 @@
     {
       "uiAction": "src/components/MediaLibraryWorkspace.tsx:152",
       "capabilityId": "apollo.projects.workspace.read",
-      "capabilityVersion": "10.0.0",
+      "capabilityVersion": "11.0.0",
       "endpoint": "GET /v1/projects/{projectId}",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -3680,7 +3680,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/project-workspace/v11",
+      "outputSchemaRef": "apollo://schemas/project-workspace/v12",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3691,7 +3691,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/project-workspace/v11",
+      "outputSchemaRef": "apollo://schemas/project-workspace/v12",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3867,7 +3867,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/perception",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/perception-range-response/v1",
+      "outputSchemaRef": "apollo://schemas/perception-range-response/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3878,7 +3878,7 @@
       "exposure": "public",
       "endpoint": "PUT /v1/projects/{projectId}/perception",
       "inputSchemaRef": "apollo://schemas/perception-timeline-put-request/v1",
-      "outputSchemaRef": "apollo://schemas/perception-timeline-put-response/v1",
+      "outputSchemaRef": "apollo://schemas/perception-timeline-put-response/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -5825,7 +5825,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/director-runs/{directorRunId}/quality-report",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/director-quality-report-read/v1",
+      "outputSchemaRef": "apollo://schemas/director-quality-report-read/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -68,6 +68,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
+  const { PrismaProjectFinalExportRepository } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
@@ -215,9 +216,11 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       projectVersionId: baseVersionId,
     }
     const qualityReport = {
-      schemaVersion: 'director-quality-report/v1',
+      schemaVersion: 'director-quality-report/v3',
       id: `final-export-quality-report-${suffix}`,
       status: 'approved',
+      faceSafety: { status: 'verified', reasonCode: 'CONTROLLED_UPSTREAM_EVIDENCE', evidenceRefs: [`controlled-evidence-${suffix}`] },
+      hardChecks: { subtitlesFaceSafe: true },
       score: 0.98,
       issues: [],
       evaluatedAt: createdAt.toISOString(),
@@ -230,7 +233,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
       [snapshotIds.baseEditPlan, 'edit-plan', 2, baseEditPlan],
       [snapshotIds.editPlan, 'edit-plan', 2, editPlan],
-      [snapshotIds.quality, 'quality-report', 1, qualityReport],
+      [snapshotIds.quality, 'quality-report', 3, qualityReport],
     ]
     for (const [id, kind, schemaVersion, content] of snapshots) {
       await client.v2ProjectSnapshot.create({
@@ -571,6 +574,28 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       },
     })
 
+    // Controlled upstream seed exercises the repository gate; it is not detector validation.
+    const finalExportRepository = new PrismaProjectFinalExportRepository(client)
+    const approvalInput = { workspaceId, projectId, projectVersionId, projectVersionHash,
+      outputSpecId: 'preset-9x16', requireCurrent: true }
+    const reviewReport = { ...qualityReport, status: 'review-required',
+      faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
+      hardChecks: { subtitlesFaceSafe: false } }
+    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
+      contentJson: stableSerialize(reviewReport), contentHash: calculateVersionHash(reviewReport),
+    } })
+    assert.equal(await finalExportRepository.readApproval(approvalInput), null)
+    const forgedReport = { ...reviewReport, status: 'approved' }
+    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
+      contentJson: stableSerialize(forgedReport), contentHash: calculateVersionHash(forgedReport),
+    } })
+    await assert.rejects(finalExportRepository.readApproval(approvalInput),
+      (error) => error.code === 'PERSISTENCE_CONFLICT')
+    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
+      contentJson: stableSerialize(qualityReport), contentHash: calculateVersionHash(qualityReport),
+    } })
+    assert.equal((await finalExportRepository.readApproval(approvalInput)).qualityStatus, 'approved')
+
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
     server = spawn(process.execPath, ['node_modules/next/dist/bin/next', ...(process.env.APOLLO_FINAL_EXPORT_SERVER_MODE === 'dev' ? ['dev', '--webpack'] : ['start']), '-p', String(port)], {
@@ -623,6 +648,21 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       format: '9:16',
       approval: { approved: true, note: 'Aprovado pelo E2E para render final.' },
     }
+    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
+      contentJson: stableSerialize(reviewReport), contentHash: calculateVersionHash(reviewReport),
+    } })
+    const reviewBlockedResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json',
+        'idempotency-key': `final-export-review-blocked-${suffix}` },
+      body: JSON.stringify(exportBody),
+    })
+    const reviewBlockedPayload = await reviewBlockedResponse.json()
+    assert.equal(reviewBlockedResponse.status, 422, JSON.stringify(reviewBlockedPayload))
+    assert.equal(reviewBlockedPayload.error.code, 'EDITORIAL_ACCEPTANCE_FAILED')
+    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
+      contentJson: stableSerialize(qualityReport), contentHash: calculateVersionHash(qualityReport),
+    } })
     const enqueueResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
       method: 'POST',
       headers: {
@@ -707,7 +747,14 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     await new Promise((resolve) => setTimeout(resolve, 25))
     const worker = createProjectFinalExportWorker(workerEnvironment)
     const completedOutcome = await worker(`final-export-worker-promoted-${suffix}`)
-    assert.deepEqual(completedOutcome, { operationId, status: 'succeeded' })
+    const promotedAttempt = await client.v2ProjectFinalExportAttempt.findUnique({
+      where: { operationId_attempt: { operationId, attempt: 2 } },
+    })
+    assert.deepEqual(completedOutcome, { operationId, status: 'succeeded' }, JSON.stringify({
+      attemptStatus: promotedAttempt?.status,
+      errorCode: promotedAttempt?.errorCode,
+      errorMessage: promotedAttempt?.errorMessage,
+    }))
 
     const attemptsResponse = await fetch(
       `${baseUrl}/v1/operations/${operationId}/final-export-attempts`,

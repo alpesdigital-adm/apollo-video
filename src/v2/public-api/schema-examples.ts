@@ -846,6 +846,13 @@ const queuedSyntheticProductionRenderOperationVisibleExample = {
     terminal: false,
   },
 }
+const queuedPerceptionProducerOperationVisibleExample = {
+  ...queuedProjectDirectorOperationVisibleExample,
+  id: 'operation-perception-example-1',
+  type: 'perception-producer-run',
+  progress: { completed: 0, total: 4, unit: 'stage' },
+  target: { type: 'project-version', id: 'project-version-example-1' },
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -7849,6 +7856,19 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/perception-producer-run-request/v1': [{
+      projectVersionId: 'project-version-example-1',
+      sourceArtifactId: 'artifact-source-example-1',
+      sampleIntervalFrames: 30,
+    }],
+    'apollo://schemas/perception-producer-operation-created/v1': [{
+      data: { operation: queuedPerceptionProducerOperationVisibleExample, replayed: false },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/perception-producer-operation-read/v1': [{
+      data: { operation: queuedPerceptionProducerOperationVisibleExample },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/enqueue-provider-job-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'audio-avatar',
       adapterId: 'controlled-avatar', adapterVersion: 'version-1', providerInput: { audioArtifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR' },
@@ -7902,6 +7922,8 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/perception-timeline-put-request/v1': [{ projectVersionId: 'project-version-example-1', baseRevision: null, durationMs: 3_000, observations: [perceptionObservation], coverage: perceptionInputCoverage }],
     'apollo://schemas/perception-timeline-put-response/v1': [{ data: { id: 'perception-timeline-example-1', projectId: 'project-example-1', projectVersionId: 'project-version-example-1', timeline: perceptionTimeline, createdAt, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/perception-range-response/v1': [{ data: { id: 'perception-timeline-example-1', workspaceId, projectId: 'project-example-1', projectVersionId: 'project-version-example-1', createdAt, result: { schemaVersion: 'perception-range/v1', timelineHash: 'c'.repeat(64), range: { startMs: 0, endMs: 1_500 }, kinds: ['transcript-word', 'face'], observations: [perceptionObservation], coverage: [{ kind: 'transcript-word', state: 'complete', ranges: [[0, 1_500]], observedMs: 1_500 }, { kind: 'face', state: 'absent', ranges: [], observedMs: 0 }], inventedValues: 0 } }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/perception-timeline-put-response/v2': [{ data: { id: 'perception-timeline-example-1', projectId: 'project-example-1', projectVersionId: 'project-version-example-1', origin: { kind: 'manual-controlled', trust: 'unverified', suppliedByClientId: clientId }, timeline: perceptionTimeline, createdAt, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/perception-range-response/v2': [{ data: { id: 'perception-timeline-example-1', workspaceId, projectId: 'project-example-1', projectVersionId: 'project-version-example-1', origin: { kind: 'manual-controlled', trust: 'unverified', suppliedByClientId: clientId }, createdAt, result: { schemaVersion: 'perception-range/v1', timelineHash: 'c'.repeat(64), range: { startMs: 0, endMs: 1_500 }, kinds: ['transcript-word', 'face'], observations: [perceptionObservation], coverage: [{ kind: 'transcript-word', state: 'complete', ranges: [[0, 1_500]], observedMs: 1_500 }, { kind: 'face', state: 'absent', ranges: [], observedMs: 0 }], inventedValues: 0 } }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/editorial-beat-derive-request/v1': [{ projectVersionId: 'project-version-example-1', transcriptId: 'transcript-example-1', expectedTranscriptHash: 'a'.repeat(64), signals: [{ wordId: 'word-example-000001', intent: 'explain', argumentId: 'argument-a', visualContext: 'speaker' }] }],
     'apollo://schemas/editorial-beat-set/v1': [{ data: { schemaVersion: 'editorial-beat-set/v1', id: 'beat-set-example-1', workspaceId, projectId, projectVersionId: 'project-version-example-1', transcriptId: 'transcript-example-1', transcriptHash: 'a'.repeat(64), derivationVersion: 'editorial-beat-derivation/v1', pauseBoundaryMs: 450, maxDurationMs: 8000, words: [{ id: 'word-example-000001', index: 0, text: 'Olá.', startMs: 0, endMs: 500 }], wordsHash: 'b'.repeat(64), signals: [{ wordId: 'word-example-000001', intent: 'explain', argumentId: 'argument-a', visualContext: 'speaker' }], signalsHash: 'c'.repeat(64), beats: [{ schemaVersion: 'editorial-beat/v1', id: 'beat-example-1', ordinal: 0, startMs: 0, endMs: 500, wordIds: ['word-example-000001'], intent: 'explain', argumentId: 'argument-a', visualContext: 'speaker', boundaryReasons: ['sentence-end'], beatHash: 'd'.repeat(64) }], beatsHash: 'e'.repeat(64), idempotencyKey: 'beat-example-key-1', requestFingerprint: 'f'.repeat(64), actor: { clientId }, replayed: false, createdAt, recordHash: '1'.repeat(64) }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/editorial-beat-adjustment-request/v1': [{ beatId: 'beat-example-1', directorRunId: 'director-run-example-1', startWordId: 'word-example-000001', endWordId: 'word-example-000001', reason: 'Preserve the complete argument.' }],
@@ -8807,6 +8829,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v12': [
       { data: { operation: queuedSyntheticProductionRenderOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v13': [
+      { data: { operation: queuedPerceptionProducerOperationVisibleExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -8854,6 +8879,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v11': [
       { data: { operations: [queuedSyntheticProductionRenderOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v12': [
+      { data: { operations: [queuedPerceptionProducerOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/enqueue-project-director-run-request/v1': [
       {
@@ -8946,6 +8974,64 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               issues: [{
                 code: 'FACE_PERCEPTION_UNAVAILABLE_SAFE_FALLBACK', severity: 'warning',
                 category: 'editorial', message: 'Conservative caption safe area used.',
+                correctable: true,
+              }],
+              criticVersion: 'apollo-director-critic/v2',
+              evaluatedAt: createdAt,
+            },
+          },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/director-quality-report-read/v2': [
+      {
+        data: {
+          qualityReport: {
+            directorRunId: 'director-run-example-1',
+            projectId,
+            objective: 'discovery',
+            objectiveVersion: 1,
+            rubricRef: 'awareness-discovery/v1',
+            qualitySnapshot: { id: 'quality-snapshot-example-1', contentSchemaVersion: 3, contentHash: '7'.repeat(64) },
+            report: {
+              schemaVersion: 'director-quality-report/v3',
+              id: 'quality-report-example-1',
+              status: 'review-required',
+              faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
+              score: 0.93,
+              strategic: {
+                schemaVersion: 'strategic-quality-report/v1',
+                rubric: {
+                  id: 'awareness-discovery', version: 1, objective: 'discovery',
+                  purpose: 'editorial-quality-proxy', threshold: 68,
+                  requiredGates: ['narrative-integrity', 'legibility', 'rights-compliance'],
+                },
+                score: 93,
+                passed: true,
+                gateResults: [
+                  { id: 'narrative-integrity', passed: true, evidence: ['edit-plan:example:narrative=true'] },
+                  { id: 'legibility', passed: true, evidence: ['edit-plan:example:legibility=true'] },
+                  { id: 'rights-compliance', passed: true, evidence: ['rights:example:eligible=true'] },
+                ],
+                gateFailures: [],
+                evidence: [
+                  { criterionId: 'hook-clarity', score: 100, weight: 0.35, evidence: ['story:example:opening=true'] },
+                  { criterionId: 'problem-recognition', score: 85, weight: 0.2, evidence: ['story:example:development=true'] },
+                  { criterionId: 'narrative-integrity', score: 100, weight: 0.15, evidence: ['edit-plan:example:timeline-continuous=true'] },
+                  { criterionId: 'legibility', score: 100, weight: 0.15, evidence: ['edit-plan:example:subtitle-bounded=true'] },
+                  { criterionId: 'rights-compliance', score: 100, weight: 0.15, evidence: ['rights:example:approved'] },
+                ],
+                evaluatedAt: createdAt,
+              },
+              hardChecks: {
+                openingMotionProtected: true, automaticZoomDisabled: true,
+                subtitlesFaceSafe: false, subtitlesBounded: true,
+                forbiddenSpeechAbsent: true, timelineContinuous: true,
+              },
+              issues: [{
+                code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED', severity: 'warning',
+                category: 'editorial', message: 'Caption placement requires review.',
                 correctable: true,
               }],
               criticVersion: 'apollo-director-critic/v2',
@@ -12259,6 +12345,48 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-workspace/v12': [
+      {
+        data: {
+          project: {
+            id: projectId, workspaceId, name: 'Anuncio com incerteza calibrada', status: 'reviewing-proxy',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'reviewing-proxy', tone: 'warning',
+              progress: { mode: 'none' }, primaryAction: 'review-output',
+              availableActions: ['review-output'], terminal: false,
+            },
+          },
+          version: {
+            id: 'project-version-confidence-1', sequence: 3,
+            baseHash: '4'.repeat(64), createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          brief: compiledProjectBriefExample,
+          directorRuns: [{
+            id: 'director-run-confidence-1', status: 'succeeded',
+            plannerVersion: 'apollo-director-policy/v1', criticVersion: 'apollo-director-critic/v2',
+            objective: 'discovery', objectiveVersion: 1, rubricRef: 'discovery/v1',
+            baseVersionId: 'project-version-confidence-0', resultVersionId: 'project-version-confidence-1',
+            treatmentSnapshotId: 'project-snapshot-treatment-confidence', storySnapshotId: 'project-snapshot-story-confidence',
+            qualitySnapshotId: 'project-snapshot-quality-confidence', qualityStatus: 'review-required',
+            qualityScore: 0.88, decisionCount: 6, assumptionCount: 1,
+            uncertainties: [{
+              id: 'decision-layout-review', label: 'manual-layout-review', type: 'generation',
+              band: 'review', value: 0.72, reasonCodes: ['DIRECTOR_LAYOUT'],
+              calibrationVersion: 'director-confidence-2026-08-v1', evidenceCount: 2,
+            }],
+            subtitleCueCount: 22, transitionCount: 2, automaticZoom: false, createdAt,
+          }],
+          commands: [], media: [], transcripts: [], operationIds: [], operations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-created/v3': [
       {
         data: {
@@ -12454,6 +12582,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/project-list/v7': [
+      { data: { projects: [] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/production-batch-read/v1': [
       {
@@ -14228,6 +14359,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-final-export-attempt-history/v2': [{
+      data: {
+        operationId: 'operation-project-final-example-1', projectId,
+        projectVersionId: 'project-version-example-4', proxyReviewId: 'proxy-review-example-1',
+        outputSpec: { aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
+          codec: 'h264', audioCodec: 'aac', container: 'mp4', quality: 'final' },
+        attempts: [{ attempt: 1, status: 'failed',
+          validators: [{ code: 'FINAL_WORKFLOW', passed: false, message: 'Final workflow did not reach post-render validation.' }],
+          error: { code: 'required_file_missing', message: 'Project final export could not be completed', stage: 'lut-materialization' },
+          startedAt: createdAt, completedAt: createdAt }],
+      }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/api-client-list/v1': [
       { data: { clients: [] }, meta: { apiVersion: 'v1' } },
     ],

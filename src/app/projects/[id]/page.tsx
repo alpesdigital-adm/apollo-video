@@ -601,7 +601,7 @@ interface ContiguousExtractionData {
 interface DirectorRunSummary {
   id: string; status: 'planned' | 'rendering' | 'succeeded' | 'failed'; plannerVersion: string; criticVersion: string;
   baseVersionId: string; resultVersionId: string; treatmentSnapshotId: string; storySnapshotId: string; qualitySnapshotId: string;
-  qualityStatus: 'approved' | 'approved-with-warnings' | 'blocked'; qualityScore: number; decisionCount: number; assumptionCount: number;
+  qualityStatus: 'approved' | 'approved-with-warnings' | 'review-required' | 'blocked'; qualityScore: number; decisionCount: number; assumptionCount: number;
   uncertainties: readonly {
     id: string; label: string; type: string; band: 'review' | 'block'; value: number;
     reasonCodes: readonly string[]; calibrationVersion: string; evidenceCount: number
@@ -3079,7 +3079,7 @@ export default function ProjectWorkspacePage() {
       !latestDirectorRun ||
       latestDirectorRun.resultVersionId !== workspace.version.id ||
       latestDirectorRun.status !== 'succeeded' ||
-      latestDirectorRun.qualityStatus === 'blocked' ||
+      !['approved', 'approved-with-warnings'].includes(latestDirectorRun.qualityStatus) ||
       reviewLoading ||
       reviewFailure !== null ||
       proxyReviewFailure !== null ||
@@ -3447,7 +3447,7 @@ export default function ProjectWorkspacePage() {
           </div>
           <div className="mt-5 rounded-xl border border-[#6962de]/15 bg-[#6962de]/[0.045] p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#8c85e8]">Gate atual</p>
-            <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : 'aprovado com ressalvas'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
+            <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'review-required' ? 'aguardando revisão de segurança facial' : latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : latestDirectorRun.qualityStatus === 'approved-with-warnings' ? 'aprovado com ressalvas' : 'bloqueado'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
             {latestDirectorRun?.uncertainties.length ? (
               <div className="mt-3 flex flex-wrap gap-1.5" data-testid="director-confidence-uncertainties">
                 {latestDirectorRun.uncertainties.map((uncertainty) => (
@@ -3465,7 +3465,7 @@ export default function ProjectWorkspacePage() {
             {workspace.editPlan?.state === 'compiled' ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Zoom automático {workspace.editPlan.automaticZoom ? 'ativo' : 'desativado'}</span><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Proteção facial {workspace.editPlan.subtitleFaceProtection ? 'ativa' : 'pendente'}</span></div> : null}
             {latestDirectorRun ? <div className="mt-3 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.subtitleCueCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">blocos de legenda</span></div><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.transitionCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">transições</span></div></div> : null}
             {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || exportRunning || operationActive} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
-            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || reviewLoading || reviewFailure !== null || proxyReviewFailure !== null || proxyReviewLoading || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || operationActive} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : reviewLoading || reviewFailure || proxyReviewFailure || proxyReviewLoading ? 'Laudo indisponível' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
+            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && ['approved', 'approved-with-warnings'].includes(latestDirectorRun.qualityStatus) ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || reviewLoading || reviewFailure !== null || proxyReviewFailure !== null || proxyReviewLoading || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || operationActive} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : reviewLoading || reviewFailure || proxyReviewFailure || proxyReviewLoading ? 'Laudo indisponível' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
             {finalOutput ? <a className="mt-2 block w-full rounded-lg border border-white/[0.08] px-3 py-2.5 text-center text-xs text-[#aaa49a] transition hover:border-white/[0.16] hover:text-white" download={finalOutput.originalFileName} href={`/v1/artifacts/${encodeURIComponent(finalOutput.artifactId)}/content`}>Baixar MP4 final</a> : null}
           </div>
           {workspace.version ? <SyntheticPhaseGatePanel

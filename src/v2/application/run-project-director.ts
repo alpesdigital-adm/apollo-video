@@ -56,7 +56,7 @@ import {
 } from './authenticate-api-client.ts'
 
 export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v1'
-export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v1'
+export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v2'
 const SUBTITLE_MAX_CHARACTERS = 32
 
 export interface RunProjectDirectorRequest {
@@ -345,9 +345,9 @@ function buildDecisions(input: {
       alternatives: ['center-crop', 'top-aligned-inset'],
     },
     {
-      id: 'decision-subtitle-bottom', category: 'subtitle', choice: 'bottom-face-safe-clean',
-      reason: 'Face observations are unavailable, so captions use a conservative region below the inset instead of covering the eyes.',
-      evidenceRefs: [input.transcriptRef, input.policyRef], confidence: 0.96,
+      id: 'decision-subtitle-bottom', category: 'subtitle', choice: 'reserved-bottom-review-required',
+      reason: 'Face observations are unavailable. Captions use the reserved bottom region for proxy review; facial safety remains unknown.',
+      evidenceRefs: [input.transcriptRef, input.policyRef], confidence: 0.5,
       alternatives: ['lower-third-dynamic', 'manual-anchor-review'],
     },
     {
@@ -431,7 +431,8 @@ function buildQualityReport(input: {
   const hardChecks = Object.freeze({
     openingMotionProtected: input.plan.movementPolicy.protectedOpeningFrames >= Math.round(input.plan.fps * 4) && input.plan.effectTracks.length === 0,
     automaticZoomDisabled: input.plan.movementPolicy.automaticZoom === false,
-    subtitlesFaceSafe: cues.every((cue) => cue.anchor === 'bottom') && input.plan.subtitlePolicy.faceProtection === true,
+    // Placement intent is not evidence that rendered captions avoid faces.
+    subtitlesFaceSafe: false,
     subtitlesBounded: cues.every((cue) => cue.text.length <= input.plan.subtitlePolicy.maxCharactersPerBlock),
     forbiddenSpeechAbsent,
     timelineContinuous,
@@ -448,7 +449,7 @@ function buildQualityReport(input: {
   const narrativeIntegrity = hardChecks.openingMotionProtected &&
     hardChecks.automaticZoomDisabled && hardChecks.forbiddenSpeechAbsent &&
     hardChecks.timelineContinuous
-  const legibility = hardChecks.subtitlesFaceSafe && hardChecks.subtitlesBounded
+  const legibility = hardChecks.subtitlesBounded
   const structuredCta = input.storyPlan.blocks.some((block) =>
     block.role === 'cta' && block.content.ctaId === input.desiredActionRef.id)
   assertDomain(
@@ -509,8 +510,7 @@ function buildQualityReport(input: {
         `edit-plan:${input.plan.id}:timeline-continuous=${hardChecks.timelineContinuous}`,
       ]],
       legibility: [legibility ? 100 : 0, [
-        `edit-plan:${input.plan.id}:subtitle-face-safe=${hardChecks.subtitlesFaceSafe}`,
-        `edit-plan:${input.plan.id}:subtitle-bounded=${hardChecks.subtitlesBounded}`,
+        `edit-plan:${input.plan.id}:subtitle-bounded=${hardChecks.subtitlesBounded}:text-only`,
       ]],
       'rights-compliance': [rightsPassed ? 100 : 0, [
         input.sourceRights.state === 'present'
@@ -541,10 +541,10 @@ function buildQualityReport(input: {
     evaluatedAt: input.evaluatedAt,
   })
   const baseIssues: DirectorQualityIssue[] = [{
-    code: 'FACE_PERCEPTION_UNAVAILABLE_SAFE_FALLBACK',
+    code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED',
     severity: 'warning' as const,
     category: 'editorial' as const,
-    message: 'No face detector evidence is available; the caption track uses the conservative bottom safe region.',
+    message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.',
     rangeMs: [0, Math.round(input.plan.durationFrames / input.plan.fps * 1000)] as const,
     targetId: input.plan.subtitleTracks[0]?.id ?? 'subtitle-track',
     correctable: true,
@@ -575,12 +575,13 @@ function buildQualityReport(input: {
     }))
   }
   const issues = Object.freeze(baseIssues)
-  const blocked = !strategic.passed || Object.values(hardChecks).some((value) => !value)
+  const blocked = !strategic.passed || Object.entries(hardChecks).some(([key, value]) => key !== 'subtitlesFaceSafe' && !value)
   return Object.freeze({
-    schemaVersion: 'director-quality-report/v2' as const,
+    schemaVersion: 'director-quality-report/v3' as const,
     id: input.id,
     desiredActionRef: input.desiredActionRef,
-    status: blocked ? 'blocked' as const : issues.length ? 'approved-with-warnings' as const : 'approved' as const,
+    status: blocked ? 'blocked' as const : 'review-required' as const,
+    faceSafety: Object.freeze({ status: 'unknown' as const, reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: Object.freeze([] as string[]) }),
     score: strategic.score / 100,
     strategic,
     hardChecks,
@@ -1014,7 +1015,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       snapshot({ id: treatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: treatmentPlan.schemaVersion, value: treatmentPlan, createdAt }),
       snapshot({ id: storySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
       snapshot({ id: editPlanSnapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2, value: editPlan, createdAt }),
-      snapshot({ id: qualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 2, value: qualityReport, createdAt }),
+      snapshot({ id: qualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 3, value: qualityReport, createdAt }),
     ])
     const snapshotRefs = Object.freeze({
       brief: briefSnapshotId,

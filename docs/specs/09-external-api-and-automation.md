@@ -940,6 +940,53 @@ O security E2E também deve provar em HTTP/PostgreSQL que reviewer não herda sc
 
 ## 30. Critérios de aceite
 
+### W61 — Status explícito de segurança facial
+
+As capabilities de leitura `apollo.projects.director-runs.quality.read` (2.0.0),
+`apollo.projects.workspace.read` (12.0.0) e
+`apollo.projects.workspace.current.read` (11.0.0) passam a expor os schemas
+`director-quality-report-read/v2` e `project-workspace/v12`. A mudança é
+deliberadamente breaking e está registrada no baseline público; os schemas
+anteriores permanecem imutáveis como histórico, sem adaptador runtime.
+
+Sem percepção facial verificada, o Diretor persiste `review-required`,
+`faceSafety.status=unknown`, razão explícita e lista vazia de evidence refs.
+`subtitlesFaceSafe=false` nesse caso; posição `bottom` e flag de proteção são
+somente intenção de layout. A métrica estratégica de legibilidade cobre
+limites textuais, não ausência de colisão facial. A UI e API mostram a revisão;
+o repositório de exportação final exige aprovação e evidência facial verificada.
+Um proxy pode servir à revisão, sem promover o resultado a aprovado. Snapshots
+antigos sem esse campo não são prova de segurança para nova exportação.
+As capabilities `apollo.projects.perception.read` e `.put` passam a 2.0.0,
+com respostas `perception-range-response/v2` e
+`perception-timeline-put-response/v2`. O `PUT` recebe somente observações
+manuais/controladas; o servidor grava `origin.kind=manual-controlled`,
+`trust=unverified` e o client autenticado no hash do registro. O `GET` e o
+`PUT` devolvem essa origem. Proveniência e confidence alegadas por observação
+permanecem dados do caller; não autorizam consumo automático como detector.
+
+`POST /v1/projects/{projectId}/perception-producer-operations` exige
+`projects:write`, `Idempotency-Key` e corpo limitado a `projectVersionId`,
+`sourceArtifactId` e `sampleIntervalFrames` opcional (1–300; padrão 30).
+O servidor resolve e vincula workspace, ProjectVersion corrente, hash da versão,
+EditPlan imutável, source-master disponível, SHA da mídia e direitos atuais.
+O caller não informa autoridade, confiança, modelo, observações ou status facial.
+Replays da mesma identidade/corpo retornam a operação anterior; payload diferente
+com a mesma chave falha. O worker produz somente envelope OCR, com fonte única,
+vídeo CFR e fps da fonte igual ao EditPlan; vídeo com fps divergente, direitos
+revogados, source alterado, versão obsoleta e lease perdido falham fechados.
+`GET /v1/projects/{projectId}/perception-producer-operations/{operationId}`
+exige `projects:read` e isola workspace/projeto/tipo; só expõe o envelope selado
+após `succeeded`. A operação mantém fases e tentativa duráveis, mas OCR não é
+evidência de rosto nem aprova safe-area facial.
+
+`GET /v1/operations/{operationId}/final-export-attempts` passa a capability
+2.0.0 e schema `project-final-export-attempt-history/v2`: tentativas falhas
+novas podem incluir `error.stage` sanitizado, além de código e mensagem seguros.
+Estágios legados podem estar ausentes; nenhuma stack, caminho local ou segredo
+integra a resposta. A observabilidade da tentativa termina no registro
+imutável de promoção; falhas posteriores continuam na PublicOperation.
+
 1. Os dez FRs 240–249 possuem endpoints/contracts e testes correspondentes.
 2. Capability registry cobre todas as ações operáveis da UI.
 3. OpenAPI e JSON Schemas são publicados e validados no CI.

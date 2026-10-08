@@ -1464,6 +1464,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const compiledWorkspace = await compiledWorkspaceResponse.json()
     assert.equal(compiledWorkspaceResponse.status, 200, JSON.stringify(compiledWorkspace))
+    assert.equal(compiledWorkspace.data.directorRuns.at(-1).qualityStatus, 'review-required')
     assert.equal(
       compiledWorkspace.data.brief.briefCompilation.audit.outputHash,
       compiledBriefSnapshot.briefCompilation.audit.outputHash,
@@ -1479,9 +1480,19 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(qualityRead.data.qualityReport.objective, 'sale')
     assert.equal(qualityRead.data.qualityReport.objectiveVersion, 2)
     assert.equal(qualityRead.data.qualityReport.rubricRef, 'conversion-sale/v1')
-    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 2)
+    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 3)
     assert.match(qualityRead.data.qualityReport.qualitySnapshot.contentHash, /^[a-f0-9]{64}$/)
-    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v2')
+    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v3')
+    assert.equal(qualityRead.data.qualityReport.report.status, 'review-required')
+    assert.equal(qualityRead.data.qualityReport.report.hardChecks.subtitlesFaceSafe, false)
+    assert.deepEqual(qualityRead.data.qualityReport.report.faceSafety, {
+      status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [],
+    })
+    const persistedQualitySnapshot = await client.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: storedAsyncOperation.projectDirectorRun.directorRun.qualitySnapshotId },
+    })
+    assert.equal(persistedQualitySnapshot.schemaVersion, 3)
+    assert.equal(JSON.parse(persistedQualitySnapshot.contentJson).status, 'review-required')
     assert.equal(
       qualityRead.data.qualityReport.report.desiredActionRef.id,
       storedStoryPlan.desiredActionRef.id,

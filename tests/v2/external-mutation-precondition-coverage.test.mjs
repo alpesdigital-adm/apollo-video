@@ -412,6 +412,9 @@ const coverage = Object.freeze({
   'apollo.projects.perception.put': {
     mode: 'explicit-precondition', mechanism: 'body-revision', evidence: 'baseRevision is null only for the first timeline and otherwise must equal the latest immutable timelineHash inside the serializable transaction',
   },
+  'apollo.projects.perception-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W61 body binds current projectVersionId and sourceArtifactId; server resolves source SHA, edit snapshot, rights and actor-bound Idempotency-Key before admission',
+  },
   'apollo.media.segments.create': {
     mode: 'natural-idempotent-create', evidence: 'content-addressed segment identity and hash converge while the serializable transaction rechecks immutable source duration and optional parent bounds',
   },
@@ -811,7 +814,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 72,
+    'idempotent-create': 73,
     'identity-bound-action': 11,
     'natural-idempotent-create': 10,
     'state-machine-action': 20,

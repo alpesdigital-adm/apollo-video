@@ -420,7 +420,7 @@ class PerceptionTimelineRepository {
 
   record(projectVersionId, timeline) {
     const content = Object.freeze({
-      schemaVersion: 'persisted-perception-timeline/v1',
+      schemaVersion: 'persisted-perception-timeline/v2',
       id: `perception-${projectVersionId}`,
       workspaceId: WORKSPACE_ID,
       projectId: PROJECT_ID,

@@ -663,15 +663,19 @@ const directorQualityReportReadSchema = {
     qualitySnapshot: {
       type: 'object', additionalProperties: false,
       required: ['id', 'contentSchemaVersion', 'contentHash'],
-      properties: { id: idSchema, contentSchemaVersion: { const: 2 }, contentHash: sha256Schema },
+      properties: { id: idSchema, contentSchemaVersion: { const: 3 }, contentHash: sha256Schema },
     },
     report: {
       type: 'object', additionalProperties: false,
-      required: ['schemaVersion', 'id', 'status', 'score', 'strategic', 'hardChecks', 'issues', 'criticVersion', 'evaluatedAt'],
+      required: ['schemaVersion', 'id', 'status', 'faceSafety', 'score', 'strategic', 'hardChecks', 'issues', 'criticVersion', 'evaluatedAt'],
       properties: {
-        schemaVersion: { const: 'director-quality-report/v2' },
+        schemaVersion: { const: 'director-quality-report/v3' },
         id: idSchema,
-        status: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
+        status: { enum: ['approved', 'approved-with-warnings', 'review-required', 'blocked'] },
+        faceSafety: { type: 'object', additionalProperties: false, required: ['status', 'reasonCode', 'evidenceRefs'], properties: {
+          status: { enum: ['unknown', 'verified'] }, reasonCode: { type: 'string', minLength: 1, maxLength: 128 },
+          evidenceRefs: { type: 'array', maxItems: 128, items: idSchema },
+        } },
         score: { type: 'number', minimum: 0, maximum: 1 },
         strategic: directorStrategicQualityReportSchema,
         hardChecks: {
@@ -701,6 +705,26 @@ const directorQualityReportReadSchema = {
         },
         criticVersion: { type: 'string', minLength: 1, maxLength: 128 },
         evaluatedAt: dateTimeSchema,
+      },
+    },
+  },
+} as const
+const { faceSafety: _faceSafetySchema, ...directorReportPropertiesV1 } = directorQualityReportReadSchema.properties.report.properties
+const directorQualityReportReadSchemaV1 = {
+  ...directorQualityReportReadSchema,
+  properties: {
+    ...directorQualityReportReadSchema.properties,
+    qualitySnapshot: {
+      ...directorQualityReportReadSchema.properties.qualitySnapshot,
+      properties: { ...directorQualityReportReadSchema.properties.qualitySnapshot.properties, contentSchemaVersion: { const: 2 } },
+    },
+    report: {
+      ...directorQualityReportReadSchema.properties.report,
+      required: directorQualityReportReadSchema.properties.report.required.filter((key) => key !== 'faceSafety'),
+      properties: {
+        ...directorReportPropertiesV1,
+        schemaVersion: { const: 'director-quality-report/v2' },
+        status: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
       },
     },
   },
@@ -8557,6 +8581,25 @@ const searchableProjectSchemaV4 = {
   },
 }
 
+const projectDashboardOperationSchemaV2 = {
+  ...projectDashboardOperationSchema,
+  properties: {
+    ...projectDashboardOperationSchema.properties,
+    type: { enum: [...projectDashboardOperationSchema.properties.type.enum, 'perception-producer-run'] },
+  },
+}
+const projectDashboardSummarySchemaV3 = {
+  ...projectDashboardSummarySchemaV2,
+  properties: {
+    ...projectDashboardSummarySchemaV2.properties,
+    latestOperation: { oneOf: [{ type: 'null' }, projectDashboardOperationSchemaV2] },
+  },
+}
+const searchableProjectSchemaV5 = {
+  ...searchableProjectSchemaV4,
+  properties: { ...searchableProjectSchemaV4.properties, dashboard: projectDashboardSummarySchemaV3 },
+}
+
 const projectAdministrationStateSchema = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'revision', 'archivedFromStatus'],
@@ -8916,6 +8959,14 @@ const publicOperationSchemaV12 = {
         'synthetic-production-render',
       ],
     },
+  },
+}
+
+const publicOperationSchemaV13 = {
+  ...publicOperationSchemaV12,
+  properties: {
+    ...publicOperationSchemaV12.properties,
+    type: { enum: [...publicOperationSchemaV12.properties.type.enum, 'perception-producer-run'] },
   },
 }
 
@@ -16553,6 +16604,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'projectId', 'projectVersionId', 'createdAt', 'result'],
     properties: { id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, createdAt: dateTimeSchema, result: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'timelineHash', 'range', 'kinds', 'observations', 'coverage', 'inventedValues'], properties: { schemaVersion: { const: 'perception-range/v1' }, timelineHash: sha256Schema, range: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } }, kinds: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: perceptionKindSchema }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 1, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 } } } },
   })),
+  defineSchema('perception-timeline-put-response', 2, 'Persisted immutable project perception timeline', successSchema({
+    type: 'object', additionalProperties: false, required: ['id', 'projectId', 'projectVersionId', 'origin', 'timeline', 'createdAt', 'replayed'],
+    properties: { id: idSchema, projectId: idSchema, projectVersionId: idSchema, origin: { type: 'object', additionalProperties: false, required: ['kind', 'trust', 'suppliedByClientId'], properties: { kind: { const: 'manual-controlled' }, trust: { const: 'unverified' }, suppliedByClientId: idSchema } }, timeline: perceptionTimelineSchema, createdAt: dateTimeSchema, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('perception-range-response', 2, 'Range query over one immutable project perception timeline', successSchema({
+    type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'projectId', 'projectVersionId', 'origin', 'createdAt', 'result'],
+    properties: { id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, origin: { type: 'object', additionalProperties: false, required: ['kind', 'trust', 'suppliedByClientId'], properties: { kind: { const: 'manual-controlled' }, trust: { const: 'unverified' }, suppliedByClientId: idSchema } }, createdAt: dateTimeSchema, result: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'timelineHash', 'range', 'kinds', 'observations', 'coverage', 'inventedValues'], properties: { schemaVersion: { const: 'perception-range/v1' }, timelineHash: sha256Schema, range: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } }, kinds: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: perceptionKindSchema }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 1, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 } } } },
+  })),
   defineSchema('editorial-beat-derive-request', 1, 'Semantic editorial beat derivation request', {
     type: 'object', additionalProperties: false, required: ['projectVersionId', 'transcriptId', 'expectedTranscriptHash', 'signals'],
     properties: { projectVersionId: idSchema, transcriptId: idSchema, expectedTranscriptHash: sha256Schema, pauseBoundaryMs: { type: 'integer', minimum: 100, maximum: 5000 }, maxDurationMs: { type: 'integer', minimum: 1000, maximum: 30000 }, signals: { type: 'array', minItems: 1, maxItems: 500000, items: { type: 'object', additionalProperties: false, required: ['wordId', 'intent', 'argumentId', 'visualContext'], properties: { wordId: idSchema, intent: idSchema, argumentId: idSchema, visualContext: idSchema } } } },
@@ -18073,6 +18132,10 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV12 },
     }),
   ),
+  defineSchema('public-operation-detail', 13, 'Public operation detail including perception producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV13 } }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -18169,6 +18232,50 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             ],
           },
         },
+      },
+    }),
+  ),
+  defineSchema('project-final-export-attempt-history', 2, 'Immutable final export attempts with sanitized failure stage',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['operationId', 'projectId', 'projectVersionId', 'proxyReviewId', 'outputSpec', 'attempts'],
+      properties: {
+        operationId: idSchema, projectId: idSchema, projectVersionId: idSchema, proxyReviewId: idSchema,
+        outputSpec: { type: 'object', additionalProperties: false,
+          required: ['aspectRatio', 'width', 'height', 'fps', 'codec', 'audioCodec', 'container', 'quality'],
+          properties: {
+            aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+            width: { type: 'integer', minimum: 2, multipleOf: 2 }, height: { type: 'integer', minimum: 2, multipleOf: 2 },
+            fps: { type: 'integer', minimum: 1, maximum: 120 }, codec: { const: 'h264' },
+            audioCodec: { const: 'aac' }, container: { const: 'mp4' }, quality: { const: 'final' },
+          } },
+        attempts: { type: 'array', maxItems: 100, items: { oneOf: [
+          { type: 'object', additionalProperties: false,
+            required: ['attempt', 'status', 'validators', 'error', 'startedAt', 'completedAt'],
+            properties: {
+              attempt: { type: 'integer', minimum: 1 }, status: { const: 'failed' },
+              validators: { type: 'array', minItems: 1, maxItems: 100, items: {
+                type: 'object', additionalProperties: false, required: ['code', 'passed', 'message'],
+                properties: { code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' }, passed: { type: 'boolean' }, message: { type: 'string', minLength: 1, maxLength: 500 } },
+              } },
+              error: { type: 'object', additionalProperties: false, required: ['code', 'message'],
+                properties: { code: { type: 'string', minLength: 1, maxLength: 64 }, message: { type: 'string', minLength: 1, maxLength: 500 },
+                  stage: { enum: ['source-read', 'color-plan', 'color-bindings', 'lut-materialization', 'input-validation', 'rights', 'source-materialization', 'render', 'output-verification', 'output-promotion', 'artifact-persistence'] } } },
+              startedAt: dateTimeSchema, completedAt: dateTimeSchema,
+            } },
+          { type: 'object', additionalProperties: false,
+            required: ['attempt', 'status', 'validators', 'output', 'startedAt', 'completedAt'],
+            properties: {
+              attempt: { type: 'integer', minimum: 1 }, status: { const: 'promoted' },
+              validators: { type: 'array', minItems: 1, maxItems: 100, items: {
+                type: 'object', additionalProperties: false, required: ['code', 'passed', 'message'],
+                properties: { code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' }, passed: { type: 'boolean' }, message: { type: 'string', minLength: 1, maxLength: 500 } },
+              } },
+              output: { type: 'object', additionalProperties: false, required: ['artifactId', 'manifestId', 'sha256', 'byteSize'],
+                properties: { artifactId: idSchema, manifestId: idSchema, sha256: sha256Schema, byteSize: { type: 'integer', minimum: 1 } } },
+              startedAt: dateTimeSchema, completedAt: dateTimeSchema,
+            } },
+        ] } },
       },
     }),
   ),
@@ -18533,6 +18640,13 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('project-list', 7, 'Project dashboard list including perception producer operation status',
+    successSchema({ type: 'object', additionalProperties: false, required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchemaV5 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      } }),
+  ),
   defineSchema('rename-project-request', 1, 'Revision-fenced project rename command', {
     type: 'object', additionalProperties: false,
     required: ['baseRevision', 'name'],
@@ -18613,6 +18727,13 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
       },
     }),
+  ),
+  defineSchema('public-operation-list', 12, 'Public operation list including perception producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV13 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      } }),
   ),
   defineSchema('operation-telemetry-summary', 1, 'Bounded durable operation telemetry summary',
     successSchema({
@@ -22664,7 +22785,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  ...([8, 9, 10, 11] as const).map((version) => defineSchema(
+  ...([8, 9, 10, 11, 12] as const).map((version) => defineSchema(
     'project-workspace',
     version,
     version === 8
@@ -22673,7 +22794,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         ? 'Project workspace with canonical optional production brief'
         : version === 10
           ? 'Project workspace with evidence-bound compiled production brief'
-          : 'Project workspace with review and block Director confidence uncertainty',
+          : version === 11
+            ? 'Project workspace with review and block Director confidence uncertainty'
+            : 'Project workspace with face-safety review status',
     successSchema({
       type: 'object', additionalProperties: false,
       required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
@@ -22715,7 +22838,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               'objectiveVersion', 'rubricRef', 'baseVersionId', 'resultVersionId',
               'treatmentSnapshotId', 'storySnapshotId', 'qualitySnapshotId', 'qualityStatus',
               'qualityScore', 'decisionCount', 'assumptionCount', 'subtitleCueCount', 'transitionCount',
-              'automaticZoom', ...(version === 11 ? ['uncertainties'] : []), 'createdAt',
+              'automaticZoom', ...(version >= 11 ? ['uncertainties'] : []), 'createdAt',
             ],
             properties: {
               id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
@@ -22726,10 +22849,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               supersedesRunId: idSchema,
               baseVersionId: idSchema, resultVersionId: idSchema, treatmentSnapshotId: idSchema,
               storySnapshotId: idSchema, qualitySnapshotId: idSchema,
-              qualityStatus: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
+              qualityStatus: { enum: version === 12
+                ? ['approved', 'approved-with-warnings', 'review-required', 'blocked']
+                : ['approved', 'approved-with-warnings', 'blocked'] },
               qualityScore: { type: 'number', minimum: 0, maximum: 1 },
               decisionCount: { type: 'integer', minimum: 0, maximum: 64 }, assumptionCount: { type: 'integer', minimum: 0, maximum: 64 },
-              ...(version === 11 ? {
+              ...(version >= 11 ? {
                 uncertainties: {
                   type: 'array', maxItems: 64,
                   items: {
@@ -24512,6 +24637,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       type: 'object',
       additionalProperties: false,
       required: ['qualityReport'],
+      properties: { qualityReport: directorQualityReportReadSchemaV1 },
+    }),
+  ),
+  defineSchema('director-quality-report-read', 2, 'Read Director quality with explicit face-safety uncertainty',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['qualityReport'],
       properties: { qualityReport: directorQualityReportReadSchema },
     }),
   ),
@@ -25872,6 +26003,37 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
         replayed: { type: 'boolean' },
       },
+    }),
+  ),
+  defineSchema('perception-producer-run-request', 1, 'Queue bounded OCR perception against a server-resolved current source version', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'sourceArtifactId'],
+    properties: {
+      projectVersionId: idSchema, sourceArtifactId: idSchema,
+      sampleIntervalFrames: { type: 'integer', minimum: 1, maximum: 300 },
+    },
+  }),
+  defineSchema('perception-producer-operation-created', 1, 'Queued or replayed perception producer operation',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation', 'replayed'],
+      properties: { operation: publicOperationSchemaV13, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('perception-producer-operation-read', 1, 'Perception operation with a sealed envelope only after success',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: {
+        operation: publicOperationSchemaV13,
+        envelope: { type: 'object', additionalProperties: true,
+          required: ['schemaVersion', 'id', 'projectVersionId', 'operationId', 'sourceArtifactId', 'sourceSha256', 'modality', 'samples', 'gaps', 'envelopeHash', 'faceSafety'],
+          properties: {
+            schemaVersion: { const: 'perception-producer-envelope/v1' }, id: idSchema,
+            projectVersionId: idSchema, operationId: idSchema, sourceArtifactId: idSchema,
+            sourceSha256: sha256Schema, modality: { const: 'ocr' },
+            samples: { type: 'array' }, gaps: { type: 'array' },
+            envelopeHash: sha256Schema, faceSafety: { const: 'unknown' },
+          } },
+      },
+      allOf: [{ if: { type: 'object', required: ['operation'], properties: {
+        operation: { type: 'object', required: ['status'], properties: { status: { const: 'succeeded' } } },
+      } }, then: { type: 'object', required: ['envelope'], properties: { envelope: { type: 'object' } } } }],
     }),
   ),
   defineSchema('create-synthetic-audio-master-request', 1, 'Approve immutable aligned audio before synthetic video generation', {

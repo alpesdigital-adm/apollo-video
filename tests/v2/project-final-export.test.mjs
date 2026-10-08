@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -12,6 +13,8 @@ import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { createQualityReport, resolveStrategicRubric } from '../../src/v2/domain/strategic-rubric.ts'
+import { parseFinalExportQuality, PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 import {
   advancePublicOperationPhase,
   createQueuedPublicOperation,
@@ -21,6 +24,69 @@ import {
 } from '../../src/v2/domain/public-operation.ts'
 
 const workspaceId = 'workspace-final-export-test'
+
+test('final export rejects unknown, legacy and hash-altered face-safety claims', async () => {
+  const rubric = resolveStrategicRubric('discovery')
+  const evaluatedAt = '2026-10-08T00:00:00.000Z'
+  const strategic = createQualityReport({ objective: 'discovery',
+    evidence: rubric.criteria.map((criterion) => ({ criterionId: criterion.id, score: 100,
+      evidence: [`controlled:${criterion.id}`] })),
+    gates: { narrativeIntegrity: true, legibility: true, rights: true }, evaluatedAt })
+  const quality = {
+    schemaVersion: 'director-quality-report/v3', id: 'quality-controlled',
+    desiredActionRef: { id: 'action-controlled' }, status: 'review-required', score: 1,
+    strategic, issues: [], criticVersion: 'project-director-critic/v2', evaluatedAt,
+    faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] },
+    hardChecks: { openingMotionProtected: true, automaticZoomDisabled: true,
+      subtitlesFaceSafe: false, subtitlesBounded: true, forbiddenSpeechAbsent: true,
+      timelineContinuous: true },
+  }
+  const encoded = JSON.stringify(quality)
+  const parse = (report, hash = calculateVersionHash(report)) => parseFinalExportQuality({
+    contentJson: JSON.stringify(report), contentHash: hash, contentSchemaVersion: 3,
+    objective: 'discovery', rubricRef: `${rubric.id}/v${rubric.version}`,
+  })
+  assert.equal(parse(quality).status, 'review-required')
+  for (const candidate of [
+    { ...quality, status: 'approved' },
+    { ...quality, status: 'approved-with-warnings' },
+    { ...quality, status: 'approved', faceSafety: undefined },
+    { ...quality, schemaVersion: 'director-quality-report/v2', status: 'approved' },
+    { ...quality, status: 'approved', faceSafety: { status: 'verified', reasonCode: 'DETECTOR_PASS', evidenceRefs: [] }, hardChecks: { ...quality.hardChecks, subtitlesFaceSafe: true } },
+    { ...quality, status: 'approved', faceSafety: { status: 'verified', reasonCode: 'DETECTOR_PASS', evidenceRefs: [null] }, hardChecks: { ...quality.hardChecks, subtitlesFaceSafe: true } },
+    { ...quality, status: 'approved', faceSafety: { status: 'verified', reasonCode: '', evidenceRefs: ['evidence-1'] }, hardChecks: { ...quality.hardChecks, subtitlesFaceSafe: true } },
+    { ...quality, hardChecks: { subtitlesFaceSafe: false } },
+  ]) {
+    assert.throws(() => parse(candidate),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
+  }
+  assert.throws(() => parse(quality, 'f'.repeat(64)),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
+  const verified = { ...quality, status: 'approved',
+    faceSafety: { status: 'verified', reasonCode: 'DETECTOR_PASS', evidenceRefs: ['evidence-1'] },
+    hardChecks: { ...quality.hardChecks, subtitlesFaceSafe: true } }
+  assert.equal(parse(verified).status, 'approved', 'syntax-only parser does not grant evidence authority')
+  const observed = []
+  const repository = new PrismaProjectFinalExportRepository({
+    v2Project: { async findFirst() { return {
+      locale: 'pt-BR', versions: [{ id: 'result-version' }],
+      directorRuns: [{ id: 'director-run', baseVersionId: 'input-version',
+        qualitySnapshotId: 'quality-snapshot', objective: 'discovery',
+        rubricRef: `${rubric.id}/v${rubric.version}`,
+        qualitySnapshot: { schemaVersion: 3, contentJson: JSON.stringify(verified),
+          contentHash: calculateVersionHash(verified) } }],
+      proxyReviews: [{ id: 'proxy-review', reviewHash: 'a'.repeat(64), proxyArtifactId: 'proxy-artifact' }],
+    } } },
+  })
+  repository.perceptionEvidence = { async read(input) { observed.push(input); return { modality: 'ocr' } } }
+  const request = { workspaceId, projectId: 'project-controlled', projectVersionId: 'result-version',
+    projectVersionHash: 'b'.repeat(64), outputSpecId: 'output-spec-controlled', requireCurrent: true }
+  assert.equal(await repository.readApproval(request), null,
+    'an immutable OCR envelope cannot authorize facial safety')
+  assert.equal(observed[0].inputVersionId, 'input-version')
+  repository.perceptionEvidence = { async read() { return null } }
+  assert.equal(await repository.readApproval(request), null, 'missing evidence cannot authorize export')
+})
 const projectId = 'project-final-export-test'
 const projectVersionId = 'project-version-final-export-test'
 const sourceArtifactId = 'artifact-final-export-source'
@@ -472,6 +538,28 @@ function workerDependencies(
     },
   }
 }
+
+test('final export records a sanitized LUT materialization stage for a real missing file', async () => {
+  const operations = createOperations()
+  const { dependencies } = workerDependencies(operations)
+  const missingPath = join(tmpdir(), `apollo-final-export-missing-lut-${process.pid}.cube`)
+  let recorded
+  const originalRecord = dependencies.projects.recordAttempt
+  dependencies.projects.recordAttempt = async (input) => {
+    recorded = input
+    await originalRecord(input)
+  }
+  dependencies.luts.materialize = async () => {
+    await readFile(missingPath)
+  }
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-missing-lut')
+  assert.equal(outcome.status, 'retrying')
+  assert.equal(recorded.status, 'failed')
+  assert.equal(recorded.error.stage, 'lut-materialization')
+  assert.equal(recorded.error.code, 'required_file_missing')
+  assert.equal(recorded.error.message, 'Project final export could not be completed')
+  assert.equal(JSON.stringify(recorded).includes(missingPath), false)
+})
 
 test('final export worker revalidates rights, persists lineage and completes the project', async () => {
   const operations = createOperations()

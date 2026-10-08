@@ -105,6 +105,10 @@ function normalizeCoverage(
 }
 
 function normalizeProvenance(value: PerceptionProvenance): Readonly<PerceptionProvenance> {
+  if (typeof value !== 'object' || value === null ||
+      Object.keys(value).some((key) => !['source', 'model', 'version', 'confidence'].includes(key))) {
+    throw new DomainError('INVALID_ARGUMENT', 'Invalid perception observation provenance')
+  }
   const source = value.source?.trim()
   const model = value.model?.trim()
   const version = value.version?.trim()
@@ -119,6 +123,10 @@ function normalizeObservation(
   value: PerceptionObservation,
   durationMs: number,
 ): Readonly<PerceptionObservation> {
+  if (typeof value !== 'object' || value === null ||
+      Object.keys(value).some((key) => !['id', 'kind', 'startMs', 'endMs', 'value', 'provenance'].includes(key))) {
+    throw new DomainError('INVALID_ARGUMENT', 'Perception observation contains an unsupported field')
+  }
   if (
     !ID.test(value.id?.trim()) || !PERCEPTION_KINDS.includes(value.kind) ||
     !Number.isSafeInteger(value.startMs) || !Number.isSafeInteger(value.endMs) ||

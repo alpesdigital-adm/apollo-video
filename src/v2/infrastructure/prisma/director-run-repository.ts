@@ -16,6 +16,7 @@ import {
   type DirectorQualityReport,
   type DirectorRun,
   type RunDirectorCommandPayload,
+  hasConsistentFaceSafetyClaim,
   validateDirectedEditPlan,
   validateDirectorDecisions,
 } from '../../domain/director-run.ts'
@@ -113,7 +114,7 @@ async function editPlanOriginIsInVersionLineage(input: {
   return rows.length === 1
 }
 
-function parseDirectorQualityReport(input: {
+export function parseDirectorQualityReport(input: {
   contentJson: string
   contentHash: string
   contentSchemaVersion: number
@@ -147,15 +148,16 @@ function parseDirectorQualityReport(input: {
       ))
   })
   if (
-    input.contentSchemaVersion !== 2 ||
-    record.schemaVersion !== 'director-quality-report/v2' ||
+    input.contentSchemaVersion !== 3 ||
+    record.schemaVersion !== 'director-quality-report/v3' ||
     typeof record.id !== 'string' ||
-    !['approved', 'approved-with-warnings', 'blocked'].includes(String(record.status)) ||
+    !['approved', 'approved-with-warnings', 'review-required', 'blocked'].includes(String(record.status)) ||
     typeof record.score !== 'number' || !Number.isFinite(record.score) ||
     record.score !== strategic.score / 100 ||
     strategic.rubric.objective !== objective.id ||
     `${strategic.rubric.id}/v${strategic.rubric.version}` !== input.rubricRef ||
-    (strategic.passed !== ['approved', 'approved-with-warnings'].includes(String(record.status))) ||
+    (strategic.passed !== ['approved', 'approved-with-warnings', 'review-required'].includes(String(record.status))) ||
+    !hasConsistentFaceSafetyClaim(record) ||
     typeof hardChecks !== 'object' || hardChecks === null ||
     Object.keys(hardChecks).sort().join('|') !== [...expectedHardChecks].sort().join('|') ||
     !expectedHardChecks.every((key) => typeof hardChecks[key] === 'boolean') ||
@@ -265,14 +267,14 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     editPlan.projectVersionId !== version.id || editPlan.directorRunId !== row.id ||
     treatmentPlan.id !== editPlan.treatmentPlanId || storyPlan.id !== editPlan.storyPlanId ||
     treatmentPlan.objective !== objective.id || storyPlan.objective !== objective.id ||
-    qualityReport.schemaVersion !== 'director-quality-report/v2' ||
+    qualityReport.schemaVersion !== 'director-quality-report/v3' ||
     !qualityReport.strategic ||
     qualityReport.strategic.rubric.id + `/v${qualityReport.strategic.rubric.version}` !== row.rubricRef ||
     qualityReport.strategic.rubric.objective !== objective.id ||
     qualityReport.strategic.rubric.purpose !== 'editorial-quality-proxy' ||
     qualityReport.score !== qualityReport.strategic.score / 100 ||
-    qualityReport.strategic.passed !== ['approved', 'approved-with-warnings'].includes(qualityReport.status) ||
-    row.qualitySnapshot.schemaVersion !== 2 ||
+    qualityReport.strategic.passed !== ['approved', 'approved-with-warnings', 'review-required'].includes(qualityReport.status) ||
+    row.qualitySnapshot.schemaVersion !== 3 ||
     qualityReport.status === 'blocked' || row.initiatedByType !== 'api-client'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored DirectorRun references are inconsistent')
   const run: DirectorRun = Object.freeze({
@@ -429,13 +431,13 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
             latestDirectorRun.rubricRef !== `${storedObjective.rubricId}/v1` ||
             !Number.isSafeInteger(latestDirectorRun.objectiveVersion) ||
             latestDirectorRun.objectiveVersion < 1 ||
-            latestDirectorRun.qualitySnapshot.schemaVersion !== 2 ||
-            quality.schemaVersion !== 'director-quality-report/v2' ||
+            latestDirectorRun.qualitySnapshot.schemaVersion !== 3 ||
+            quality.schemaVersion !== 'director-quality-report/v3' ||
             !quality.strategic ||
             quality.strategic.rubric.id + `/v${quality.strategic.rubric.version}` !== latestDirectorRun.rubricRef ||
             quality.strategic.rubric.objective !== storedObjective.id ||
             quality.score !== quality.strategic.score / 100 ||
-            !['approved', 'approved-with-warnings', 'blocked'].includes(String(quality.status))
+            !['approved', 'approved-with-warnings', 'review-required', 'blocked'].includes(String(quality.status))
           ) throw new DomainError(
             'PERSISTENCE_CONFLICT',
             'Latest Director objective evidence is invalid',

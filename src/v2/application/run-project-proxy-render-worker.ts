@@ -54,11 +54,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   storage: VerifiedMediaStorage
   renderer: EditorialProxyRenderer
   renderElementMaps: RenderElementMapRepository
-  /**
-   * F1.036 / FR-173. The worker reads the persisted perception timeline of the project so the
-   * subtitle anchor is decided from real observations. It is a repository, not a payload: nothing
-   * the render request carries can substitute for the evidence actually stored.
-   */
+  /** Reserved for a future server-verified producer; caller PUT timelines cannot authorize face safety. */
   perceptionTimelines: PerceptionTimelineRepository
   proxyReviews: ProxyReviewRepository
   colorPipelines: ColorPipelineCompilationRepository
@@ -254,15 +250,10 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
         timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
       }))
-      // Perception evidence for *this* version. A timeline recorded against another version is not
-      // evidence about these frames, so it is ignored rather than approximated — the anchor then
-      // falls back to the reserved bottom band, which is the Director's face-safe fallback.
-      const persistedPerception = subtitleResolution?.enabled && subtitleCues.length
-        ? await dependencies.perceptionTimelines.findLatest({ workspaceId: operation.workspaceId, projectId: context.projectId })
-        : null
-      const perceptionTimeline = persistedPerception && persistedPerception.projectVersionId === context.projectVersionId
-        ? persistedPerception.timeline
-        : undefined
+      // Public PUT timelines are manual/controlled and cannot establish face safety.
+      // No verified detector snapshot producer is wired yet, so proxy placement uses
+      // no trusted face observations and remains subject to explicit review.
+      const perceptionTimeline: undefined = undefined
       const placementPlan = createRenderPlacementPlan({
         format: source.format as OutputAspectRatio,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
@@ -499,6 +490,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         map: rendered.renderElementMap,
         ...('composition' in source.editPlan
           ? {
+              // Existing geometry field describes reserved layout, not verified face clearance.
               faceSafeRegion: source.editPlan.composition.faceSafeFallback,
               subtitleSafeRegion: source.editPlan.composition.subtitleSafeRegion,
             }

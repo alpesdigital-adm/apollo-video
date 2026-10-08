@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-08T21:34:17.886Z",
+  "updatedAt": "2026-10-08T23:27:56.926Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -28,8 +28,8 @@
         "85514de89d9b-1",
         "76e7e1f536dd-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -37,7 +37,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: contrato V2/PG já existente; precede W62–W67."
+          "text": "Envelope server-owned OCR, persistência imutável, fencing e resolução de referências implementados no branch. PostgreSQL/runner real passaram no recorte; prova HTTP em andamento. OCR não autoriza faceSafety; produtor facial e jornada positiva de exportação ainda pendentes."
         },
         {
           "kind": "validation",
@@ -56,12 +56,12 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-61-70.md",
-          "scope": "W61: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "scope": "W61: escopo, dependências, IDs e critérios de execução; não comprova implementação ou validação.",
           "role": "planned-not-started"
         }
       ],
-      "nextAction": "Na execução, fechar a política unknown/review e o preflight do modelo local antes de iniciar inferência facial.",
-      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+      "nextAction": "Concluir prova HTTP do produtor OCR, consolidar slice coerente e integrar produtor facial validado para restaurar a jornada positiva sem autoridade fictícia.",
+      "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite."
     },
     {
       "id": "W62",
@@ -78,8 +78,8 @@
         "b73740a47fce-1",
         "9a30a9b79c59-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -87,7 +87,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W61 e preflight do modelo local."
+          "text": "YuNet CPU isolado, sem integração ou acurácia validada. V4 interrompido por HTTP429 em 41/60 development, PID encerrado. Spike CVDF 8/8 verificou orientação0 e hashes de bytes derivados; V5 requer inventário/pré-registro com mesmas quotas e limiares antes de inferência."
         },
         {
           "kind": "validation",
@@ -106,11 +106,11 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-61-70.md",
-          "scope": "W62: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "scope": "W62: escopo, dependências, IDs e critérios; não comprova implementação ou validação.",
           "role": "planned-not-started"
         }
       ],
-      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "nextAction": "Congelar V5 Rotation0 com corpus CVDF e licença individual, completar splits disjuntos e medir detector sem selecionar por resultado.",
       "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
     },
     {
@@ -125,8 +125,8 @@
         "b543c60be203-1",
         "85514de89d9b-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -134,7 +134,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W61; pode desenvolver OCR/shot em paralelo à W62, integração serial."
+          "text": "OCR real com PTS e rejeição de fonte alterada/rotação passou isoladamente e no runner com PostgreSQL. HTTP em validação. Recorte source único, CFR/fps iguais; avaliação independente OCR e shots/motion permanecem pendentes."
         },
         {
           "kind": "validation",
@@ -153,11 +153,11 @@
         {
           "type": "repo",
           "ref": "docs/PLANO-WAVES-61-70.md",
-          "scope": "W63: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
+          "scope": "W63: escopo, dependências, IDs e critérios; não comprova implementação ou validação.",
           "role": "planned-not-started"
         }
       ],
-      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
+      "nextAction": "Concluir HTTP OCR e implementar adapter temporal isolado com PTS/cobertura próprios antes da agregação versionada.",
       "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
     },
     {

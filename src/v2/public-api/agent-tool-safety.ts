@@ -738,6 +738,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Compiles a deterministic edit from persisted analysis and current media authority, atomically publishing its renderer snapshot without provider dispatch.',
     },
+    'apollo.projects.perception-producer-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues sampled local OCR only for one current rights-approved source version, under fixed sample and worker deadlines; facial safety remains unknown.',
+    },
     'apollo.projects.music-analyses.request': { impact: 'bounded', confirmation: 'none', reason: 'Queues local deterministic FFmpeg analysis only after current project, byte identity and music rights authority are bound.' },
     'apollo.projects.music-analyses.cancel': { impact: 'bounded', confirmation: 'none', reason: 'Stops one bounded analysis request and invalidates its worker lease without modifying source media.' },
     'apollo.projects.music-analyses.retry': { impact: 'bounded', confirmation: 'none', reason: 'Requeues one failed local analysis under a fixed three-attempt ceiling and preserves its source fingerprint.' },

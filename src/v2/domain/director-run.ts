@@ -185,10 +185,15 @@ export interface DirectorQualityIssue {
 }
 
 export interface DirectorQualityReport {
-  schemaVersion: 'director-quality-report/v2'
+  schemaVersion: 'director-quality-report/v3'
   id: string
   desiredActionRef: Readonly<DesiredActionReference>
-  status: 'approved' | 'approved-with-warnings' | 'blocked'
+  status: 'approved' | 'approved-with-warnings' | 'review-required' | 'blocked'
+  faceSafety: Readonly<{
+    status: 'unknown' | 'verified'
+    reasonCode: string
+    evidenceRefs: readonly string[]
+  }>
   score: number
   strategic: Readonly<StrategicQualityReport>
   hardChecks: Readonly<{
@@ -202,6 +207,26 @@ export interface DirectorQualityReport {
   issues: readonly Readonly<DirectorQualityIssue>[]
   criticVersion: string
   evaluatedAt: string
+}
+
+export function hasConsistentFaceSafetyClaim(value: Readonly<Record<string, unknown>>): boolean {
+  const faceSafety = value.faceSafety as Record<string, unknown> | null
+  const hardChecks = value.hardChecks as Record<string, unknown> | null
+  if (!faceSafety || typeof faceSafety !== 'object' || Array.isArray(faceSafety) ||
+      !hardChecks || typeof hardChecks !== 'object' || Array.isArray(hardChecks) ||
+      Object.keys(faceSafety).sort().join('|') !== 'evidenceRefs|reasonCode|status' ||
+      !['unknown', 'verified'].includes(String(faceSafety.status)) ||
+      typeof faceSafety.reasonCode !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(faceSafety.reasonCode) ||
+      !Array.isArray(faceSafety.evidenceRefs) || faceSafety.evidenceRefs.length > 128 ||
+      faceSafety.evidenceRefs.some((ref) => typeof ref !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(ref)) ||
+      new Set(faceSafety.evidenceRefs).size !== faceSafety.evidenceRefs.length ||
+      typeof hardChecks.subtitlesFaceSafe !== 'boolean') return false
+  if (faceSafety.status === 'unknown') {
+    return faceSafety.evidenceRefs.length === 0 && hardChecks.subtitlesFaceSafe === false &&
+      ['review-required', 'blocked'].includes(String(value.status))
+  }
+  return faceSafety.evidenceRefs.length > 0 && hardChecks.subtitlesFaceSafe === true &&
+    ['approved', 'approved-with-warnings', 'blocked'].includes(String(value.status))
 }
 
 export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'overlayTracks' | 'subtitleTracks' | 'audioTracks' | 'effectTracks' | 'subtitlePolicy'> & Readonly<{
@@ -392,7 +417,7 @@ export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<Direc
     const cue = cues[index]!
     assertDomain(cue.startFrame >= 0 && cue.endFrame > cue.startFrame && cue.endFrame <= plan.durationFrames, 'INVALID_RENDER_INPUT', 'Subtitle cue timing is invalid')
     assertDomain(cue.text.trim().length > 0 && cue.text.length <= plan.subtitlePolicy.maxCharactersPerBlock, 'INVALID_RENDER_INPUT', 'Subtitle cue text is outside policy')
-    assertDomain(cue.anchor === 'bottom', 'INVALID_RENDER_INPUT', 'Subtitle cue must use the face-safe fallback anchor')
+    assertDomain(cue.anchor === 'bottom', 'INVALID_RENDER_INPUT', 'Subtitle cue must use the reserved bottom anchor pending face review')
     if (index > 0) assertDomain(cue.startFrame >= cues[index - 1]!.endFrame, 'INVALID_RENDER_INPUT', 'Subtitle cues cannot overlap')
   }
   for (const overlay of plan.overlayTracks) {

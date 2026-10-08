@@ -46,6 +46,7 @@ import {
 } from '../application/run-synthetic-phase-gate.ts'
 import { SpecializedSyntheticProviderResultCritic } from '../application/synthetic-provider-critic.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
+import { runNextPerceptionProducerOperationService } from '../application/run-perception-producer-worker.ts'
 import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
@@ -490,6 +491,9 @@ import { PrismaProxyReviewRepository } from './prisma/proxy-review-repository.ts
 import { PrismaProjectFinalExportRepository } from './prisma/project-final-export-repository.ts'
 import { PrismaExportMatrixRepository } from './prisma/export-matrix-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
+import { PrismaPerceptionProducerRequestContextRepository } from './prisma/perception-producer-request-context-repository.ts'
+import { PrismaPerceptionProducerEnvelopeRepository } from './prisma/perception-producer-envelope-repository.ts'
+import { TesseractOcrVideoAdapter } from './perception/tesseract-ocr-video-adapter.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { CompositeOperationTelemetry, StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
 import {
@@ -2011,6 +2015,45 @@ export function createPublicOperationRepository(
     ),
     telemetry,
   )
+}
+
+export function createPerceptionProducerRequestContextRepository() {
+  return new PrismaPerceptionProducerRequestContextRepository(resolveV2Client())
+}
+
+export function createPerceptionProducerEnvelopeRepository() {
+  return new PrismaPerceptionProducerEnvelopeRepository(resolveV2Client())
+}
+
+export function createPerceptionProducerWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for OCR producer`)
+    return value
+  }
+  const tessdataDirectory = required('APOLLO_V2_OCR_TESSDATA_DIR')
+  const licensePath = required('APOLLO_V2_OCR_TESSDATA_LICENSE')
+  const languages = required('APOLLO_V2_OCR_LANGUAGES').split(',').map((value) => value.trim())
+  if (languages.length < 1 || languages.some((value) => value !== 'por' && value !== 'eng') ||
+      new Set(languages).size !== languages.length) {
+    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'OCR languages must be unique por/eng values')
+  }
+  return runNextPerceptionProducerOperationService({
+    repository: createPerceptionProducerEnvelopeRepository(),
+    materializer: createArtifactSourceMaterializer(environment),
+    adapter: new TesseractOcrVideoAdapter({
+      ffmpegBinary: required('APOLLO_V2_OCR_FFMPEG_BIN'),
+      ffprobeBinary: required('APOLLO_V2_OCR_FFPROBE_BIN'),
+      tesseractBinary: required('APOLLO_V2_OCR_TESSERACT_BIN'),
+      tessdataDirectory,
+      traineddata: languages.map((language) => ({ language: language as 'por' | 'eng',
+        path: join(tessdataDirectory, `${language}.traineddata`), licensePath })),
+    }),
+    clock,
+  })
 }
 
 function createConfiguredOperationTelemetry(environment: NodeJS.ProcessEnv = process.env): OperationTelemetrySink {

@@ -353,8 +353,11 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
         : decision)),
     (error) => error.code === 'PERSISTENCE_CONFLICT',
   )
-  assert.equal(result.run.qualityReport.status, 'approved-with-warnings')
-  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v2')
+  assert.equal(result.run.qualityReport.status, 'review-required')
+  assert.deepEqual(result.run.qualityReport.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] })
+  assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+  assert.ok(result.run.qualityReport.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
+  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v3')
   assert.equal(result.run.qualityReport.strategic.rubric.id, 'awareness-discovery')
   assert.equal(result.run.qualityReport.strategic.rubric.threshold, 68)
   assert.equal(result.run.qualityReport.strategic.rubric.purpose, 'editorial-quality-proxy')
@@ -362,8 +365,8 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.deepEqual(result.run.qualityReport.strategic.gateFailures, [])
   assert.equal(result.run.qualityReport.strategic.evidence.length, 6)
   assert.equal(result.run.qualityReport.score, result.run.qualityReport.strategic.score / 100)
-  assert.equal(Object.values(result.run.qualityReport.hardChecks).every(Boolean), true)
-  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 2)
+  assert.equal(Object.entries(result.run.qualityReport.hardChecks).filter(([key]) => key !== 'subtitlesFaceSafe').every(([, value]) => value), true)
+  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 3)
   assert.equal(repository.lastBundle.event.type, 'project.version.created')
   assert.deepEqual(result.impact.changeKinds, ['director-replan'])
   assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
@@ -457,12 +460,11 @@ test('Director binds every strategic objective to its canonical rubric in runtim
   }
 })
 
-test('approved strategic objective change creates a new brief, version and superseding DirectorRun', async () => {
+test('an explicitly approved predecessor can be superseded by a new objective', async () => {
   const { repository, service } = fixture({ ctaText: 'Compre' })
-  const first = await service(request())
+  // Unit fixture models an already approved predecessor; this does not claim detector evidence.
+  repository.latestDirectorObjective = { runId: 'director-run-approved-0', objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1', approved: true }
   const changed = await service(request({
-    baseVersionId: first.version.id,
-    baseHash: first.version.baseHash,
     objective: 'sale',
     desiredAction: {
       destination: { type: 'url', value: 'https://checkout.example/oferta' },
@@ -473,26 +475,20 @@ test('approved strategic objective change creates a new brief, version and super
     reason: 'A campanha aprovada agora precisa levar a uma oferta explícita.',
     idempotency: { key: 'director-objective-change-sale' },
   }))
-
   assert.equal(changed.run.objective, 'sale')
   assert.equal(changed.run.objectiveVersion, 2)
   assert.equal(changed.run.rubricRef, 'conversion-sale/v1')
-  assert.equal(changed.run.supersedesRunId, first.run.id)
+  assert.equal(changed.run.supersedesRunId, 'director-run-approved-0')
   assert.equal(changed.command.payload.previousObjective, 'discovery')
-  assert.equal(changed.command.payload.supersedesRunId, first.run.id)
-  assert.notEqual(
-    changed.command.payload.snapshotRefs.brief,
-    first.command.payload.snapshotRefs.brief,
-  )
-  assert.equal(changed.version.parentVersionId, first.version.id)
+  assert.equal(changed.command.payload.supersedesRunId, 'director-run-approved-0')
+  assert.notEqual(changed.command.payload.snapshotRefs.brief, 'snapshot-brief-1')
+  assert.equal(changed.version.parentVersionId, 'project-version-4')
   assert.equal(repository.projectObjective, 'sale')
-  const brief = JSON.parse(repository.lastBundle.snapshots.find(
-    (snapshot) => snapshot.kind === 'brief',
-  ).contentJson)
+  const brief = JSON.parse(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief').contentJson)
   assert.equal(brief.objective, 'sale')
   assert.equal(brief.desiredAction.kind, 'buy')
   assert.equal(brief.desiredAction.visualCta, 'Comprar agora')
-  assert.equal(brief.objectiveChange.supersedesRunId, first.run.id)
+  assert.equal(brief.objectiveChange.supersedesRunId, 'director-run-approved-0')
   const actionRef = changed.run.storyPlan.desiredActionRef
   assert.equal(actionRef.id, changed.run.editPlan.desiredActionRef.id)
   assert.equal(actionRef.id, changed.run.editPlan.subtitleTracks[0].desiredActionRef.id)
@@ -501,12 +497,10 @@ test('approved strategic objective change creates a new brief, version and super
   assert.equal(changed.run.editPlan.overlayTracks[0].text, 'Comprar agora')
 })
 
-test('approved Desired Action change supersedes the run without changing objective', async () => {
+test('an explicitly approved predecessor can be superseded by a new Desired Action', async () => {
   const { repository, service } = fixture({ projectObjective: 'sale', ctaText: 'Compre' })
-  const first = await service(request({ objective: 'sale' }))
+  repository.latestDirectorObjective = { runId: 'director-run-approved-0', objective: 'sale', objectiveVersion: 1, rubricRef: 'conversion-sale/v1', approved: true }
   const changed = await service(request({
-    baseVersionId: first.version.id,
-    baseHash: first.version.baseHash,
     objective: 'sale',
     desiredAction: {
       destination: { type: 'url', value: 'https://checkout.example/nova-oferta' },
@@ -518,13 +512,23 @@ test('approved Desired Action change supersedes the run without changing objecti
   }))
   assert.equal(changed.run.objective, 'sale')
   assert.equal(changed.run.objectiveVersion, 2)
-  assert.equal(changed.run.supersedesRunId, first.run.id)
-  assert.notEqual(changed.command.payload.snapshotRefs.brief, first.command.payload.snapshotRefs.brief)
-  const brief = JSON.parse(repository.lastBundle.snapshots.find(
-    (snapshot) => snapshot.kind === 'brief',
-  ).contentJson)
+  assert.equal(changed.run.supersedesRunId, 'director-run-approved-0')
+  assert.notEqual(changed.command.payload.snapshotRefs.brief, 'snapshot-brief-1')
+  const brief = JSON.parse(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief').contentJson)
   assert.equal(brief.desiredAction.destination.value, 'https://checkout.example/nova-oferta')
   assert.equal(brief.desiredAction.visualCta, 'Ver nova oferta')
+})
+
+test('unreviewed face safety cannot supersede a Director objective or Desired Action', async () => {
+  const firstFixture = fixture({ ctaText: 'Compre' })
+  const first = await firstFixture.service(request())
+  assert.equal(first.run.qualityReport.status, 'review-required')
+  await assert.rejects(() => firstFixture.service(request({
+    baseVersionId: first.version.id, baseHash: first.version.baseHash, objective: 'sale',
+    desiredAction: { destination: { type: 'url', value: 'https://checkout.example/oferta' } },
+    reason: 'Nova oferta.', idempotency: { key: 'unreviewed-objective-change' },
+  })), (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED')
+  assert.equal(firstFixture.repository.lastBundle.run.id, first.run.id)
 })
 
 test('objective change fails before persistence without reason or required destination', async () => {

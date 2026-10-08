@@ -15,7 +15,7 @@ import {
   FFMPEG_EDITORIAL_RENDERER_VERSION,
   type EditorialProxyRenderer,
 } from './ports/editorial-proxy-renderer.ts'
-import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
+import type { ProjectFinalExportFailureStage, ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
@@ -42,12 +42,15 @@ const NON_RETRYABLE_CODES = new Set([
   'ASSET_RIGHTS_BLOCKED',
 ])
 
-function safeFailure(error: unknown) {
+function safeFailure(error: unknown, stage: ProjectFinalExportFailureStage) {
   const retryable = !(error instanceof DomainError && NON_RETRYABLE_CODES.has(error.code))
+  const nodeCode = error && typeof error === 'object' && 'code' in error ? (error as { code?: unknown }).code : undefined
   return {
-    code: error instanceof DomainError ? error.code.toLowerCase() : 'final_export_failed',
+    code: error instanceof DomainError ? error.code.toLowerCase()
+      : nodeCode === 'ENOENT' ? 'required_file_missing' : 'final_export_failed',
     message: 'Project final export could not be completed',
     retryable,
+    stage,
   }
 }
 
@@ -112,6 +115,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
     let renewal: Promise<boolean> | undefined
     let leaseCommandTail: Promise<void> = Promise.resolve()
     let attemptRecorded = false
+    let failureStage: ProjectFinalExportFailureStage = 'source-read'
     let validators: Array<{ code: string; passed: boolean; message: string }> = []
     const command = (now: Date) => ({ operationId: operation.id, leaseOwner, attempt, now: now.toISOString() })
     const withLeaseCommand = <T>(action: () => Promise<T>): Promise<T> => {
@@ -197,11 +201,13 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+      failureStage = 'color-plan'
       const colorPlan = await dependencies.colorPlans.readEffectiveForVersion({
         workspaceId: operation.workspaceId,
         projectId: context.projectId,
         projectVersionId: context.projectVersionId,
       })
+      failureStage = 'color-bindings'
       const colorPipelines = await loadBoundRenderColorPipelines({
         repository: dependencies.colorPipelines, workspaceId: operation.workspaceId,
         projectId: context.projectId, bindings: context.colorPipelineBindings,
@@ -210,11 +216,13 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         (!colorPipelines.has(asset.artifactId) || context.colorPipelineBindings.find((binding) => binding.sourceArtifactId === asset.artifactId)?.sourceManifestId !== asset.manifestId))) {
         throw new DomainError('INVALID_RENDER_INPUT', 'Final render video source is missing its bound color pipeline')
       }
+      failureStage = 'lut-materialization'
       const materializedLut = await dependencies.luts.materialize({
         workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
         operationId: operation.id, compilations: [...colorPipelines.values()],
         ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
+      failureStage = 'input-validation'
       const immutableInputHash = calculateVersionHash({
         kind: 'project-final-export/v1',
         projectId: context.projectId,
@@ -246,7 +254,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         Math.abs(source.editPlan.fps - context.outputSpec.fps) > 0.01
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Approved EditPlan or final OutputSpec is not safe to render')
       const renderSourceIds = source.renderSources.map((asset) => asset.artifactId)
+      failureStage = 'rights'
       await assertRights(renderSourceIds, source.locale)
+      failureStage = 'input-validation'
       const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
@@ -256,6 +266,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         : createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
       if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before final render')
       await enter('rendering')
+      failureStage = 'source-materialization'
       const materializedSources = await Promise.all(source.renderSources.map((asset) =>
         dependencies.sources.materialize({
           operationId: operation.id,
@@ -263,6 +274,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           sha256: asset.sha256,
           byteSize: asset.byteSize,
         })))
+      failureStage = 'render'
       const render = () => dependencies.renderer.render({
         operationId: operation.id,
         renderKind: 'final',
@@ -297,6 +309,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           })
         : await render()
       await enter('verifying')
+      failureStage = 'output-verification'
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
       const expectedFrames = clips.reduce(
         (total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame,
@@ -356,7 +369,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       if (validators.some((validator) => !validator.passed)) {
         throw new DomainError('RENDER_OUTPUT_INVALID', 'Final export does not match its approved OutputSpec')
       }
+      failureStage = 'rights'
       await assertRights(renderSourceIds, source.locale)
+      failureStage = 'output-promotion'
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({
         workspaceId: operation.workspaceId,
@@ -498,6 +513,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         },
         renderInput,
       })
+      failureStage = 'artifact-persistence'
       const persisted = await dependencies.artifacts.persistOrReplay({
         workspaceId: operation.workspaceId,
         artifactId: context.outputArtifactId,
@@ -575,7 +591,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       // retryable and comes back immediately, and the attempt record below says so
       // rather than blaming a validator that never ran.
       const shuttingDown = signal?.aborted === true
-      const failure = shuttingDown ? workerShutdownFailure() : safeFailure(error)
+      const failure = shuttingDown ? { ...workerShutdownFailure(), stage: failureStage } : safeFailure(error, failureStage)
       if (!attemptRecorded) {
         if (validators.length === 0) {
           validators = [{
@@ -592,7 +608,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             attempt,
             status: 'failed',
             validators,
-            error: { code: failure.code, message: failure.message },
+            error: { code: failure.code, message: failure.message, stage: failure.stage },
             startedAt: attemptStartedAt,
             completedAt: failedAt.toISOString(),
           })

@@ -130,6 +130,7 @@
     "worker:v2:ingest": "tsx --env-file=.env scripts/run-v2-ingest-worker.mjs",
     "worker:v2:webhook": "tsx --env-file=.env scripts/run-v2-webhook-worker.mjs",
     "worker:v2:long-form": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/run-v2-long-form-worker.mjs",
+    "worker:v2:perception-producer": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/run-v2-perception-producer-worker.mjs",
     "worker:v2:provider": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/run-v2-provider-worker.mjs",
     "worker:v2:capture-sync": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/run-v2-capture-sync-worker.mjs",
     "worker:v2:music-analysis": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/run-v2-music-analysis-worker.mjs",

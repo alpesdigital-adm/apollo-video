@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-08T21:34:17.886Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
+Atualizado: 2026-10-08T23:27:56.926Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
 
-Snapshot JSON SHA256: `7c730d3a17914a773edab5b195973e884fb91a30849630fc6cf83133ae889596` (somente project-status.json; TODO verificado separadamente).
+Snapshot JSON SHA256: `adc91f104665803452ad28656b6d3e5d41baf2a9e4cc3b46c448c9158abddcfd` (somente project-status.json; TODO verificado separadamente).
 
 TODO auditado: **380/1259** caixas marcadas como concluídas no histórico. Isso não afirma implantação ou aceite atuais.
 
@@ -1369,8 +1369,8 @@ IDs de caixas preservam a identidade ao trocar `[ ]` por `[x]`; mudar ou duplica
 | --- | --- | ---: |
 | wave | validado | 37 |
 | wave | pendente-validacao | 0 |
-| wave | em-construcao | 0 |
-| wave | fila | 10 |
+| wave | em-construcao | 3 |
+| wave | fila | 7 |
 | capability | validado | 115 |
 | capability | pendente-validacao | 0 |
 | capability | em-construcao | 188 |
@@ -1391,9 +1391,9 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 
 | ID | Escopo | Estado | Integração | Validação | Implantação | Aceite | Só aceite do owner? | Evidências | Próxima ação |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W61 | W61 — contrato de observação verificável e fail-closed | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Na execução, fechar a política unknown/review e o preflight do modelo local antes de iniciar inferência facial. |
-| W62 | W62 — faces e regiões detectadas nos bytes | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
-| W63 | W63 — OCR, shots e motion na mesma timeline | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
+| W61 | W61 — contrato de observação verificável e fail-closed | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Concluir prova HTTP do produtor OCR, consolidar slice coerente e integrar produtor facial validado para restaurar a jornada positiva sem autoridade fictícia. |
+| W62 | W62 — faces e regiões detectadas nos bytes | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Congelar V5 Rotation0 com corpus CVDF e licença individual, completar splits disjuntos e medir detector sem selecionar por resultado. |
+| W63 | W63 — OCR, shots e motion na mesma timeline | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Concluir HTTP OCR e implementar adapter temporal isolado com PTS/cobertura próprios antes da agregação versionada. |
 | W64 | W64 — Diretor usa percepção persistida com confiança | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
 | W65 | W65 — anchor e placement por variante | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
 | W66 | W66 — reframe com trajetória e override por formato | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |

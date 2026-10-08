@@ -839,12 +839,13 @@ test('T-FR-233 project proxy worker carries every stale range into renderer, rec
   assert.equal(new Set(hashes).size, 3, 'each stale-range set must address a distinct recipe')
 })
 
-test('T-FR-173 project proxy worker decides the subtitle anchor from persisted perception and carries it into recipe and critic', async () => {
+test('T-FR-173 project proxy worker does not trust manually supplied perception for automatic subtitle safety', async () => {
   const persisted = (projectVersionId) => ({
-    schemaVersion: 'persisted-perception-timeline/v1',
+    schemaVersion: 'persisted-perception-timeline/v2',
     id: 'perception-proxy-test', workspaceId: 'workspace-project-proxy-test',
     projectId: 'project-proxy-test', projectVersionId, baseRevision: null,
     timeline: SUBTITLE_ANCHOR_PERCEPTION_FIXTURES.lowerFace,
+    origin: { kind: 'manual-controlled', trust: 'unverified', suppliedByClientId: 'client-proxy-test' },
     requestFingerprint: 'f'.repeat(64), idempotencyKey: 'idem-perception-proxy-test',
     authenticationAudit: {}, createdByClientId: 'client-proxy-test',
     createdAt: '2026-08-21T09:00:00.000Z', recordHash: 'e'.repeat(64),
@@ -882,7 +883,7 @@ test('T-FR-173 project proxy worker decides the subtitle anchor from persisted p
     return { operations, deps: base.deps, render: () => seen, manifest: () => manifest }
   }
 
-  // The perception recorded for THIS version decides the anchor, and the renderer receives it.
+  // Even a matching manually supplied timeline cannot certify face clearance.
   const matched = withPerception('project-version-proxy-test')
   assert.deepEqual(
     await runNextProjectProxyRenderOperationService(matched.deps)('worker-project-proxy-anchor'),
@@ -890,12 +891,12 @@ test('T-FR-173 project proxy worker decides the subtitle anchor from persisted p
   )
   const anchorPlan = matched.render().placementPlan.subtitleAnchorPlan
   assert.ok(anchorPlan, 'the worker must hand the renderer a decided anchor plan')
-  assert.equal(anchorPlan.perceptionTimelineHash, SUBTITLE_ANCHOR_PERCEPTION_FIXTURES.lowerFace.timelineHash)
-  assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').anchor, 'upper-third')
+  assert.equal(anchorPlan.perceptionTimelineHash, null)
+  assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').anchor, 'bottom')
   const matchedParametersHash = matched.manifest().recipe.parametersHash
   assert.match(matchedParametersHash, /^[a-f0-9]{64}$/)
 
-  // Perception recorded against another version is not evidence about these frames.
+  // A different project version remains equally untrusted.
   const mismatched = withPerception('project-version-somewhere-else')
   assert.deepEqual(
     await runNextProjectProxyRenderOperationService(mismatched.deps)('worker-project-proxy-anchor-other'),
@@ -905,15 +906,12 @@ test('T-FR-173 project proxy worker decides the subtitle anchor from persisted p
   assert.equal(fallbackPlan.perceptionTimelineHash, null)
   assert.equal(subtitleAnchorDecisionFor(fallbackPlan, 'cue-1').anchor, 'bottom')
 
-  // The decision is part of the artifact identity, not a runtime detail that vanishes after render:
-  // the same sources with a different anchor decision address a different recipe and a different
-  // placement plan, so a replay can never silently substitute one for the other.
-  assert.notEqual(anchorPlan.anchorPlanHash, fallbackPlan.anchorPlanHash)
-  assert.notEqual(
+  assert.equal(anchorPlan.anchorPlanHash, fallbackPlan.anchorPlanHash)
+  assert.equal(
     matched.render().placementPlan.placementPlanHash,
     mismatched.render().placementPlan.placementPlanHash,
   )
-  assert.notEqual(matchedParametersHash, mismatched.manifest().recipe.parametersHash)
+  assert.equal(matchedParametersHash, mismatched.manifest().recipe.parametersHash)
 })
 
 // ---------------------------------------------------------------------------

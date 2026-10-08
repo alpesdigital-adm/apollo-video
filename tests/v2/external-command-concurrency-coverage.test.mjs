@@ -408,6 +408,9 @@ const coverage = Object.freeze({
   'apollo.projects.perception.put': {
     mode: 'durable-covered', evidence: 'F1.016 actor-bound idempotency plus serializable baseRevision CAS over the latest immutable PerceptionTimeline',
   },
+  'apollo.projects.perception-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W61 request fingerprint binds actor/key, current ProjectVersion, source SHA, edit-plan snapshot and sample interval; PostgreSQL concurrency proof remains pending',
+  },
   'apollo.media.segments.create': {
     mode: 'durable-covered', evidence: 'F1.013 serializable source/parent recheck, immutable content hash, database range constraints and natural replay identity',
   },
