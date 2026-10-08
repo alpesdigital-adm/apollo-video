@@ -42,6 +42,9 @@ import {
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
 import { parseDirectorDecisionLog } from '../../domain/director-decision.ts'
+import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
+import type { PerceptionProducerEnvelope } from '../../domain/perception-producer-envelope.ts'
+import { createPerceptionTimeline, PERCEPTION_KINDS, type PerceptionTimeline } from '../../domain/perception-timeline.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -54,6 +57,44 @@ const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
 })
 
 type StoredDirectorRun = Prisma.V2DirectorRunGetPayload<{ include: typeof directorRunInclude }>
+
+function ocrSnapshotEvidence(envelope: Readonly<PerceptionProducerEnvelope>) {
+  return {
+    envelopeId: envelope.id, envelopeHash: envelope.envelopeHash,
+    sourceArtifactId: envelope.sourceArtifactId, sourceSha256: envelope.sourceSha256,
+    timeMapHash: envelope.timeMapHash,
+    sampledTimelineFrames: envelope.samples.map((sample) => sample.timelineFrame),
+    emptyTextTimelineFrames: envelope.samples.filter((sample) => sample.ocr.length === 0)
+      .map((sample) => sample.timelineFrame),
+  }
+}
+
+function expectedOcrTimeline(envelope: Readonly<PerceptionProducerEnvelope>,
+  fps: number, durationFrames: number) {
+  const durationMs = Math.max(1, Math.ceil(durationFrames / fps * 1000))
+  const sampleRanges = envelope.samples.map((sample) => {
+    const startMs = Math.min(durationMs - 1, Math.round(sample.timelineFrame / fps * 1000))
+    const endMs = Math.min(durationMs, Math.max(startMs + 1,
+      Math.round((sample.timelineFrame + 1) / fps * 1000)))
+    return [startMs, endMs] as const
+  })
+  const observations = envelope.samples.flatMap((sample, sampleIndex) => {
+    const [startMs, endMs] = sampleRanges[sampleIndex]!
+    return sample.ocr.map((region, index) => ({
+      id: `ocr-${sample.timelineFrame}-${index}-${envelope.envelopeHash.slice(0, 12)}`,
+      kind: 'ocr' as const, startMs, endMs,
+      value: { text: region.text, language: region.language, box: region.box,
+        confidence: region.confidence, sourceFrame: sample.sourceFrame,
+        sourcePts: sample.sourcePts, timelineFrame: sample.timelineFrame,
+        sampleImageSha256: sample.imageSha256 },
+      provenance: { source: envelope.id, model: 'tesseract',
+        version: envelope.envelopeHash, confidence: region.confidence },
+    }))
+  })
+  return createPerceptionTimeline({ durationMs, observations,
+    coverage: PERCEPTION_KINDS.map((kind) => ({ kind,
+      ranges: kind === 'ocr' ? sampleRanges : [] })) })
+}
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
   try {
@@ -72,6 +113,95 @@ function parseArray(value: string, field: string): unknown[] {
     return parsed
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
+}
+
+function parseDirectorPerceptionSnapshotUnchecked(input: {
+  contentJson: string; contentHash: string; schemaVersion: number; baseVersionId: string
+}): Readonly<DirectorPerceptionSnapshot> {
+  const record = parseRecord(input.contentJson, 'Director perception')
+  if (calculateCanonicalHash(record) !== input.contentHash ||
+      record.schemaVersion !== input.schemaVersion || ![1, 2].includes(input.schemaVersion)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception snapshot hash or schema is invalid')
+  }
+  const expectedKeys = input.schemaVersion === 2
+    ? ['schemaVersion', 'id', 'inputVersionId', 'timeline', 'summary',
+        ...('ocrEvidence' in record ? ['ocrEvidence'] : [])]
+    : ['schemaVersion', 'id', 'timeline', 'summary']
+  if (Object.keys(record).sort().join('|') !== expectedKeys.sort().join('|') ||
+      typeof record.id !== 'string' || !record.id ||
+      (input.schemaVersion === 2 && record.inputVersionId !== input.baseVersionId)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception snapshot identity is invalid')
+  }
+  const stored = record as unknown as DirectorPerceptionSnapshot
+  let rebuilt: Readonly<PerceptionTimeline>
+  try {
+    rebuilt = createPerceptionTimeline({ durationMs: stored.timeline.durationMs,
+      observations: stored.timeline.observations,
+      coverage: stored.timeline.coverage.map((item) => ({ kind: item.kind, ranges: item.ranges })),
+    })
+  } catch { throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception timeline is invalid') }
+  if (stableSerialize(rebuilt) !== stableSerialize(stored.timeline) ||
+      !stored.summary || stored.summary.faceCoverage !== 'absent' ||
+      stored.summary.id !== `${stored.id}-summary` ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(stored.summary.sourceTranscriptId) ||
+      !Number.isFinite(stored.summary.speechCoverage) ||
+      stored.summary.speechCoverage < 0 || stored.summary.speechCoverage > 1 ||
+      !Number.isFinite(stored.summary.confidence) ||
+      stored.summary.confidence < 0 || stored.summary.confidence > 1) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception coverage is invalid')
+  }
+  if (input.schemaVersion === 2) {
+    const evidence = stored.ocrEvidence
+    const ocrCoverage = stored.timeline.coverage.find((entry) => entry.kind === 'ocr')
+    const ocrObservations = stored.timeline.observations.filter((item) => item.kind === 'ocr')
+    if (evidence !== undefined) {
+      const keys = ['envelopeId', 'envelopeHash', 'sourceArtifactId', 'sourceSha256',
+        'timeMapHash', 'sampledTimelineFrames', 'emptyTextTimelineFrames']
+      if (Object.keys(evidence).sort().join('|') !== keys.sort().join('|') ||
+          !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(evidence.envelopeId) ||
+          !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(evidence.sourceArtifactId) ||
+          [evidence.envelopeHash, evidence.sourceSha256, evidence.timeMapHash]
+            .some((hash) => !/^[a-f0-9]{64}$/.test(hash)) ||
+          !Array.isArray(evidence.sampledTimelineFrames) ||
+          !Array.isArray(evidence.emptyTextTimelineFrames) ||
+          evidence.sampledTimelineFrames.some((frame, index) =>
+            !Number.isSafeInteger(frame) || frame < 0 ||
+            (index > 0 && frame <= evidence.sampledTimelineFrames[index - 1]!)) ||
+          evidence.emptyTextTimelineFrames.some((frame) =>
+            !Number.isSafeInteger(frame) || frame < 0 ||
+            !evidence.sampledTimelineFrames.includes(frame)) ||
+          evidence.emptyTextTimelineFrames.some((frame, index) =>
+            index > 0 && frame <= evidence.emptyTextTimelineFrames[index - 1]!) ||
+          stored.summary.visualCoverage !==
+            (evidence.sampledTimelineFrames.length > 0 ? 'partial' : 'absent') ||
+          !ocrCoverage || (evidence.sampledTimelineFrames.length > 0 && ocrCoverage.observedMs === 0) ||
+          (evidence.sampledTimelineFrames.length === 0 && ocrCoverage.observedMs !== 0) ||
+          ocrObservations.some((item) => item.provenance.source !== evidence.envelopeId ||
+            item.provenance.version !== evidence.envelopeHash ||
+            !evidence.sampledTimelineFrames.includes((item.value as Record<string, unknown>).timelineFrame as number) ||
+            evidence.emptyTextTimelineFrames.includes((item.value as Record<string, unknown>).timelineFrame as number)) ||
+          evidence.sampledTimelineFrames.some((frame) =>
+            !evidence.emptyTextTimelineFrames.includes(frame) &&
+            !ocrObservations.some((item) => (item.value as Record<string, unknown>).timelineFrame === frame))) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR snapshot evidence is invalid')
+      }
+    } else if (ocrObservations.length > 0 || ocrCoverage?.observedMs !== 0 ||
+        stored.summary.visualCoverage !== 'absent') {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR observations lack an envelope')
+    }
+  }
+  return Object.freeze(stored)
+}
+
+function parseDirectorPerceptionSnapshot(input: {
+  contentJson: string; contentHash: string; schemaVersion: number; baseVersionId: string
+}): Readonly<DirectorPerceptionSnapshot> {
+  try {
+    return parseDirectorPerceptionSnapshotUnchecked(input)
+  } catch (error) {
+    if (error instanceof DomainError) throw error
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director perception snapshot is invalid')
   }
 }
 
@@ -214,7 +344,12 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     commandId: row.resultVersion.commandId ?? undefined,
     createdAt: row.resultVersion.createdAt.toISOString(),
   })
-  const perception = parseRecord(row.perceptionSnapshot.contentJson, 'Director perception') as unknown as DirectorPerceptionSnapshot
+  const perception = parseDirectorPerceptionSnapshot({
+    contentJson: row.perceptionSnapshot.contentJson,
+    contentHash: row.perceptionSnapshot.contentHash,
+    schemaVersion: row.perceptionSnapshot.schemaVersion,
+    baseVersionId: row.baseVersionId,
+  })
   const treatmentPlanRecord = parseRecord(row.treatmentSnapshot.contentJson, 'TreatmentPlan') as unknown as TreatmentPlan & { id: string }
   validateTreatmentPlan(treatmentPlanRecord)
   const treatmentPlan = Object.freeze(treatmentPlanRecord)
@@ -328,7 +463,7 @@ function isPrismaCode(error: unknown, code: string): boolean {
 export class PrismaDirectorRunRepository implements DirectorRunRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = getV2PostgresClient()) {
+  constructor(client: PrismaClient = getV2PostgresClient(), private readonly clock: () => Date = () => new Date()) {
     this.client = client
   }
 
@@ -503,6 +638,18 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames <= 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan duration is invalid')
     }
+    const latestOcr = await this.client.v2PerceptionProducerEnvelope.findFirst({
+      where: { workspaceId: project.workspaceId, projectId: project.id,
+        projectVersionId: versionRow.id, sourceArtifactId: transcriptRow.sourceArtifactId,
+        modality: 'ocr' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true },
+    })
+    const ocrEnvelope = latestOcr
+      ? await readPerceptionProducerEnvelope(this.client, { id: latestOcr.id,
+          workspaceId: project.workspaceId, projectId: project.id,
+          inputVersionId: versionRow.id, now: this.clock() })
+      : null
+    if (latestOcr && !ocrEnvelope) throw new DomainError('PERSISTENCE_CONFLICT', 'Selected OCR envelope disappeared')
     return Object.freeze({
       workspaceId: project.workspaceId,
       project: Object.freeze({ id: project.id, objective: projectObjective.id, format: project.format, locale: project.locale }),
@@ -557,6 +704,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         model: transcriptRow.model,
         transcriptHash: transcriptRow.transcriptHash,
       }),
+      ...(ocrEnvelope ? { ocrEnvelope } : {}),
     })
   }
 
@@ -707,6 +855,48 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           } }),
         ])
         if (!project?.currentVersion || !transcript || !sourceMaster) throw new DomainError('PERSISTENCE_CONFLICT', 'Director source evidence disappeared before commit')
+        const latestOcr = await transaction.v2PerceptionProducerEnvelope.findFirst({
+          where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+            projectVersionId: bundle.command.baseVersionId,
+            sourceArtifactId: bundle.sourceEvidence.sourceArtifactId, modality: 'ocr' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true },
+        })
+        if ((latestOcr?.id ?? undefined) !== bundle.sourceEvidence.ocrEnvelope?.id) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR selection changed before commit')
+        }
+        if (latestOcr) {
+          const resolvedOcr = await readPerceptionProducerEnvelope(transaction, {
+            id: latestOcr.id, workspaceId: bundle.command.workspaceId,
+            projectId: bundle.command.projectId, inputVersionId: bundle.command.baseVersionId,
+            now: this.clock(),
+          })
+          const selected = bundle.sourceEvidence.ocrEnvelope
+          if (!resolvedOcr) throw new DomainError('PERSISTENCE_CONFLICT',
+            'Selected OCR envelope disappeared before Director commit')
+          const expectedOcr = expectedOcrTimeline(resolvedOcr,
+            bundle.run.editPlan.fps, bundle.run.editPlan.durationFrames)
+          if (!selected || resolvedOcr.envelopeHash !== selected.envelopeHash ||
+              resolvedOcr.projectVersionId !== selected.inputVersionId ||
+              resolvedOcr.sourceArtifactId !== selected.sourceArtifactId ||
+              resolvedOcr.timeMapHash !== selected.timeMapHash ||
+              bundle.run.perception.schemaVersion !== 2 ||
+              bundle.run.perception.inputVersionId !== bundle.command.baseVersionId ||
+              stableSerialize(bundle.run.perception.ocrEvidence) !== stableSerialize(ocrSnapshotEvidence(resolvedOcr)) ||
+              !bundle.run.decisions.some((decision) => decision.evidenceRefs.includes(resolvedOcr.id)) ||
+              stableSerialize(bundle.run.perception.timeline.observations
+                .filter((item) => item.kind === 'ocr')) !==
+                stableSerialize(expectedOcr.observations) ||
+              stableSerialize(bundle.run.perception.timeline.coverage.find((entry) =>
+                entry.kind === 'ocr')) !== stableSerialize(expectedOcr.coverage.find((entry) =>
+                entry.kind === 'ocr'))) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR evidence is not bound to the sealed input')
+          }
+        } else if (bundle.run.perception.schemaVersion !== 2 ||
+            bundle.run.perception.inputVersionId !== bundle.command.baseVersionId ||
+            bundle.run.perception.ocrEvidence !== undefined ||
+            bundle.run.perception.timeline.coverage.find((item) => item.kind === 'ocr')?.observedMs !== 0) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception claims OCR without a sealed envelope')
+        }
         const targetObjective = resolveStrategicObjective(bundle.command.payload.objective)
         const latestRun = project.directorRuns[0]
         const latestQuality = latestRun

@@ -10,6 +10,7 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
+import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
@@ -149,6 +150,7 @@ class InMemoryDirectorRepository {
     this.projectObjective = options.projectObjective ?? 'discovery'
     this.latestDirectorObjective = options.latestDirectorObjective
     this.selectedInsert = options.selectedInsert ?? false
+    this.ocrEnvelope = options.ocrEnvelope
     this.ownerText = Object.hasOwn(options, 'ownerText')
       ? options.ownerText
       : 'Tom: direto, natural e sem efeitos gratuitos.'
@@ -221,6 +223,7 @@ class InMemoryDirectorRepository {
         id: 'transcript-1', sourceArtifactId: 'artifact-master-1', language: 'pt-BR',
         provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
       },
+      ...(this.ocrEnvelope ? { ocrEnvelope: this.ocrEnvelope } : {}),
     }
   }
 
@@ -287,6 +290,92 @@ function request(overrides = {}) {
     ...overrides,
   }
 }
+
+function controlledOcrEnvelope({ empty = false, regions = 1 } = {}) {
+  return createPerceptionProducerEnvelope({
+    id: 'ocr-envelope-controlled-1', workspaceId: 'workspace-1', projectId: 'project-1',
+    projectVersionId: 'project-version-4', operationId: 'ocr-operation-controlled-1',
+    operationAttempt: 1, operationFenceHash: '1'.repeat(64),
+    sourceArtifactId: 'artifact-master-1', sourceSha256: '2'.repeat(64),
+    editPlanSnapshotId: 'snapshot-edit-4', editPlanSnapshotHash: '3'.repeat(64),
+    timelineDurationFrames: 300,
+    timeMap: compiledEditorialPlan().videoTracks[0].clips.map((clip) => ({
+      clipId: clip.id, sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame,
+      timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame, rate: clip.rate,
+    })),
+    sourceTimebase: { num: 1, den: 1000 }, sourceFps: { num: 30, den: 1 },
+    timelineFps: { num: 30, den: 1 }, sourcePtsStart: 0,
+    sourcePtsRounding: 'nearest', sourceClock: 'constant-frame-rate', modality: 'ocr',
+    producer: { name: 'tesseract', ffmpegSha256: '4'.repeat(64), ffprobeSha256: '5'.repeat(64),
+      executableSha256: '6'.repeat(64), executableVersion: 'controlled-unit-fixture',
+      traineddata: [{ language: 'por', sha256: '7'.repeat(64), licenseSha256: '8'.repeat(64) }] },
+    samplePolicy: { strategy: 'fixed-interval', intervalFrames: 1, maxSamples: 2 },
+    samples: [
+      { sourcePts: 0, sourcePtsEvidenceHash: '9'.repeat(64), sourceFrame: 0, timelineFrame: 0,
+        imageSha256: 'a'.repeat(64), ocr: empty ? [] : Array.from({ length: regions }, (_, index) =>
+          ({ text: `Texto observado ${index}`, language: 'por',
+            box: [0.1, 0.75, 0.3, 0.1], confidence: 0.76 })) },
+      { sourcePts: 5333, sourcePtsEvidenceHash: 'b'.repeat(64), sourceFrame: 160,
+        timelineFrame: 100, imageSha256: 'c'.repeat(64), ocr: [] },
+    ],
+    gaps: [
+      { startTimelineFrame: 1, endTimelineFrame: 100, reasonCode: 'NOT_SAMPLED' },
+      { startTimelineFrame: 101, endTimelineFrame: 300, reasonCode: 'NOT_SAMPLED' },
+    ],
+    createdAt: '2026-07-18T21:00:00.000Z',
+  })
+}
+
+test('Director binds controlled OCR samples to snapshot v2 while face safety remains unknown', async () => {
+  for (const empty of [false, true]) {
+    const envelope = controlledOcrEnvelope({ empty })
+    const { repository, service } = fixture({ ocrEnvelope: envelope })
+    const result = await service(request())
+    const snapshot = repository.lastBundle.snapshots.find((item) => item.kind === 'perception')
+    assert.equal(snapshot.contentSchemaVersion, 2)
+    assert.equal(result.run.plannerVersion, 'apollo-director-policy/v2')
+    assert.equal(result.run.perception.schemaVersion, 2)
+    assert.equal(result.run.perception.inputVersionId, 'project-version-4')
+    assert.equal(result.run.perception.ocrEvidence.envelopeId, envelope.id)
+    assert.deepEqual(result.run.perception.ocrEvidence.sampledTimelineFrames, [0, 100])
+    assert.deepEqual(result.run.perception.ocrEvidence.emptyTextTimelineFrames,
+      empty ? [0, 100] : [100])
+    assert.equal(result.run.perception.timeline.observations.filter((item) => item.kind === 'ocr').length,
+      empty ? 0 : 1)
+    assert.ok(result.run.perception.timeline.coverage.find((item) => item.kind === 'ocr').observedMs > 0)
+    assert.ok(result.run.decisions.some((decision) => decision.evidenceRefs.includes(envelope.id)))
+    assert.equal(result.run.perception.summary.confidence, 0.82)
+    assert.equal(result.run.qualityReport.status, 'review-required')
+    assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
+    assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+    assert.equal(result.run.qualityReport.issues.some((issue) =>
+      issue.code === 'OCR_SOURCE_LOWER_REGION_REVIEW_REQUIRED'), !empty)
+  }
+})
+
+test('Director rejects OCR bound to a different version or source map before planning', async () => {
+  const envelope = controlledOcrEnvelope()
+  for (const tampered of [
+    { ...envelope, projectVersionId: 'project-version-other' },
+    { ...envelope, timeMap: [{ ...envelope.timeMap[0], sourceInFrame: 1 }, ...envelope.timeMap.slice(1)] },
+  ]) {
+    const { service } = fixture({ ocrEnvelope: tampered })
+    await assert.rejects(service(request()), (error) =>
+      error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
+  }
+})
+
+test('Director canonicalizes twelve OCR regions from one sampled frame without changing source authority', async () => {
+  const envelope = controlledOcrEnvelope({ regions: 12 })
+  const { service } = fixture({ ocrEnvelope: envelope })
+  const result = await service(request())
+  const ocr = result.run.perception.timeline.observations.filter((item) => item.kind === 'ocr')
+  assert.equal(ocr.length, 12)
+  assert.equal(ocr[2].id.includes('-10-'), true)
+  assert.equal(ocr.every((item) => item.provenance.source === envelope.id &&
+    item.provenance.version === envelope.envelopeHash), true)
+  assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
+})
 
 test('Director V2 persists perception, treatment, story, edit plan and critic as one immutable version', async () => {
   const { repository, service } = fixture()

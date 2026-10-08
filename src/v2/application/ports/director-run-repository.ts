@@ -12,6 +12,7 @@ import type {
   StrategicObjectiveId,
 } from '../../domain/strategic-objective.ts'
 import type { DirectorDecisionLog } from '../../domain/director-decision.ts'
+import type { PerceptionProducerEnvelope } from '../../domain/perception-producer-envelope.ts'
 
 export interface DirectorRunContext {
   workspaceId: string
@@ -49,6 +50,8 @@ export interface DirectorRunContext {
     model: string
     transcriptHash: string
   }>
+  /** Absent means no server-produced OCR envelope exists for this input version. */
+  ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
 }
 
 export interface DirectorRunCommit {
@@ -64,6 +67,13 @@ export interface DirectorRunCommit {
     transcriptId: string
     transcriptHash: string
     sourceArtifactId: string
+    ocrEnvelope?: Readonly<{
+      id: string
+      envelopeHash: string
+      inputVersionId: string
+      sourceArtifactId: string
+      timeMapHash: string
+    }>
   }>
   operationFence?: Readonly<{
     operationId: string

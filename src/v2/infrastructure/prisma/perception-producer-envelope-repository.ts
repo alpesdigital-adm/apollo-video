@@ -369,7 +369,15 @@ export class PrismaPerceptionProducerEnvelopeRepository {
   }
 
   async read(input: { id: string; workspaceId: string; projectId: string; inputVersionId: string; now: Date }) {
-    const row = await this.client.v2PerceptionProducerEnvelope.findFirst({
+    return readPerceptionProducerEnvelope(this.client, input)
+  }
+}
+
+/** Shared fenced read for ordinary queries and Director commit transactions. */
+export async function readPerceptionProducerEnvelope(client: Prisma.TransactionClient, input: {
+  id: string; workspaceId: string; projectId: string; inputVersionId: string; now: Date
+}) {
+    const row = await client.v2PerceptionProducerEnvelope.findFirst({
       where: { id: input.id, workspaceId: input.workspaceId, projectId: input.projectId,
         projectVersionId: input.inputVersionId },
       include: { operation: { include: { perceptionProducerOperation: true } },
@@ -409,7 +417,7 @@ export class PrismaPerceptionProducerEnvelopeRepository {
       conflict('Producer operation did not publish this fenced envelope')
     }
     const version = row.projectVersion
-    const attached = await this.client.v2ProjectMediaAsset.findFirst({
+    const attached = await client.v2ProjectMediaAsset.findFirst({
       where: { workspaceId: envelope.workspaceId, projectId: envelope.projectId,
         artifactId: envelope.sourceArtifactId, role: 'source-master' }, select: { id: true },
     })
@@ -430,5 +438,4 @@ export class PrismaPerceptionProducerEnvelopeRepository {
       throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights are no longer approved')
     }
     return envelope
-  }
 }

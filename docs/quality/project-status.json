@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-08T23:34:55.385Z",
+  "updatedAt": "2026-10-08T23:58:04.471Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -164,7 +164,7 @@
         }
       ],
       "nextAction": "Validar adapter temporal e definir agregação versionada de evidências por modalidade, preservando cobertura e gaps.",
-      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Adapter temporal isolado commit b17001ef: goldens controlados e negativos passaram após revisão de pins, threads, prazo/abort e domínio PTS; ainda sem labels externos ou persistência."
     },
     {
       "id": "W64",
@@ -181,8 +181,8 @@
         "76e7e1f536dd-1",
         "6a723f9a056c-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -190,7 +190,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W61–W63."
+          "text": "Consumer OCR server-owned implementado no branch e provado com PostgreSQL e runner Tesseract real. Snapshot v2 e policy v2 preservam observações, amostras vazias e review. Faces, agregação multimodal, prova HTTP do consumer e decisões/editorial completas permanecem pendentes."
         },
         {
           "kind": "validation",
@@ -211,10 +211,16 @@
           "ref": "docs/PLANO-WAVES-61-70.md",
           "scope": "W64: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
           "role": "planned-not-started"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w64-director-ocr-5002ece4/result.json",
+          "scope": "Consumer OCR no Diretor: PG e runner real, negativos scoped/replay e cleanup. Não comprova percepção facial, HTTP do consumer ou decisões multimodais completas.",
+          "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+      "nextAction": "Agregar evidências temporais e faciais validadas ao consumer com cobertura por modalidade, depois provar HTTP e decisões por variante.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Run w64-director-ocr-5002ece4: 1/1 PG sem skip com OCR real, PUT manual ignorado, hash/rights negativos, refs/snapshot/review persistidos, replay adulterado e parent stale. SHA do relatório 3d5db0f69cccd5a9e567b606dc24a8910d34da63b061c9b31ec847f1c7943759; 11 PIDs terminais, zero backends e cluster parado. Unit25/25, typecheck e API registry passaram. Prova parcial, sem face-safe ou aceite da wave."
     },
     {
       "id": "W65",

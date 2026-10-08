@@ -22,7 +22,8 @@ import {
   type DesiredActionInput,
 } from '../domain/desired-action.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
-import { createPerceptionTimeline, type PerceptionObservation } from '../domain/perception-timeline.ts'
+import { createPerceptionTimeline, PERCEPTION_KINDS, type PerceptionObservation } from '../domain/perception-timeline.ts'
+import type { PerceptionProducerEnvelope } from '../domain/perception-producer-envelope.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
@@ -55,7 +56,7 @@ import {
   type AuthenticatedExternalActor,
 } from './authenticate-api-client.ts'
 
-export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v1'
+export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v2'
 export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v2'
 const SUBTITLE_MAX_CHARACTERS = 32
 
@@ -144,6 +145,7 @@ function mergeCoverage(ranges: readonly (readonly [number, number])[]): number {
 
 function buildPerception(input: {
   id: string
+  inputVersionId: string
   durationFrames: number
   fps: number
   transcript: {
@@ -159,6 +161,7 @@ function buildPerception(input: {
     timelineStartFrame: number
     timelineEndFrame: number
   }>[]
+  ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
 }): Readonly<DirectorPerceptionSnapshot> {
   const durationMs = Math.max(1, Math.ceil(input.durationFrames / input.fps * 1000))
   const observations: PerceptionObservation[] = input.words.map((word, index) => ({
@@ -180,18 +183,52 @@ function buildPerception(input: {
   })).map((observation) => observation.endMs <= observation.startMs
     ? { ...observation, endMs: Math.min(durationMs, observation.startMs + 1) }
     : observation)
-  const timeline = createPerceptionTimeline({ durationMs, observations })
+  const sampleRanges = (input.ocrEnvelope?.samples ?? []).map((sample) => {
+    const startMs = Math.min(durationMs - 1, Math.round(sample.timelineFrame / input.fps * 1_000))
+    return [startMs, Math.min(durationMs, Math.max(startMs + 1,
+      Math.round((sample.timelineFrame + 1) / input.fps * 1_000)))] as const
+  })
+  for (const [sampleIndex, sample] of (input.ocrEnvelope?.samples ?? []).entries()) {
+    const [startMs, endMs] = sampleRanges[sampleIndex]!
+    for (const [regionIndex, region] of sample.ocr.entries()) observations.push({
+      id: `ocr-${sample.timelineFrame}-${regionIndex}-${input.ocrEnvelope!.envelopeHash.slice(0, 12)}`,
+      kind: 'ocr', startMs, endMs,
+      value: Object.freeze({ text: region.text, language: region.language, box: region.box,
+        confidence: region.confidence, sourceFrame: sample.sourceFrame,
+        sourcePts: sample.sourcePts, timelineFrame: sample.timelineFrame,
+        sampleImageSha256: sample.imageSha256 }),
+      provenance: Object.freeze({ source: input.ocrEnvelope!.id, model: 'tesseract',
+        version: input.ocrEnvelope!.envelopeHash, confidence: region.confidence }),
+    })
+  }
+  const coverage = PERCEPTION_KINDS.map((kind) => ({ kind,
+    ranges: kind === 'ocr' ? sampleRanges : kind === 'transcript-word'
+      ? observations.filter((item) => item.kind === 'transcript-word')
+        .map((item) => [item.startMs, item.endMs] as const) : [],
+  }))
+  const timeline = createPerceptionTimeline({ durationMs, observations, coverage })
   const speechMs = mergeCoverage(timeline.observations
     .filter((item) => item.kind === 'transcript-word')
     .map((item) => [item.startMs, item.endMs] as const))
   return Object.freeze({
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     id: input.id,
+    inputVersionId: input.inputVersionId,
+    ...(input.ocrEnvelope ? { ocrEvidence: Object.freeze({
+      envelopeId: input.ocrEnvelope.id,
+      envelopeHash: input.ocrEnvelope.envelopeHash,
+      sourceArtifactId: input.ocrEnvelope.sourceArtifactId,
+      sourceSha256: input.ocrEnvelope.sourceSha256,
+      timeMapHash: input.ocrEnvelope.timeMapHash,
+      sampledTimelineFrames: Object.freeze(input.ocrEnvelope.samples.map((sample) => sample.timelineFrame)),
+      emptyTextTimelineFrames: Object.freeze(input.ocrEnvelope.samples.filter((sample) =>
+        sample.ocr.length === 0).map((sample) => sample.timelineFrame)),
+    }) } : {}),
     timeline,
     summary: Object.freeze({
       id: `${input.id}-summary`,
       speechCoverage: Number(Math.min(1, speechMs / durationMs).toFixed(4)),
-      visualCoverage: 'partial' as const,
+      visualCoverage: (sampleRanges.length ? 'partial' : 'absent') as 'partial' | 'absent',
       faceCoverage: 'absent' as const,
       confidence: 0.82,
       sourceTranscriptId: input.transcript.id,
@@ -322,6 +359,8 @@ function buildDecisions(input: {
   hasSelectedInsert: boolean
   briefCompilationRef?: string
   mediaOnly: boolean
+  ocrEnvelopeRef?: string
+  ocrLowerRiskCount: number
 }): readonly Readonly<DirectorDecision>[] {
   const decisions: readonly DirectorDecisionInput[] = [
     {
@@ -346,8 +385,11 @@ function buildDecisions(input: {
     },
     {
       id: 'decision-subtitle-bottom', category: 'subtitle', choice: 'reserved-bottom-review-required',
-      reason: 'Face observations are unavailable. Captions use the reserved bottom region for proxy review; facial safety remains unknown.',
-      evidenceRefs: [input.transcriptRef, input.policyRef], confidence: 0.5,
+      reason: input.ocrLowerRiskCount > 0
+        ? `Face observations are unavailable. ${input.ocrLowerRiskCount} sampled OCR frame(s) include text in the lower source region; source-to-canvas placement requires localized review. Facial safety remains unknown.`
+        : 'Face observations are unavailable. Captions use the reserved bottom region for proxy review; facial safety remains unknown.',
+      evidenceRefs: [input.transcriptRef, input.policyRef,
+        ...(input.ocrEnvelopeRef ? [input.ocrEnvelopeRef] : [])], confidence: 0.5,
       alternatives: ['lower-third-dynamic', 'manual-anchor-review'],
     },
     {
@@ -368,6 +410,20 @@ function buildDecisions(input: {
     },
   ]
   return validateDirectorDecisions(decisions)
+}
+
+type OcrLowerRisk = Readonly<{ envelopeId: string; sourceFrame: number; rangeMs: readonly [number, number] }>
+function ocrLowerSourceRisks(envelope: Readonly<PerceptionProducerEnvelope> | undefined,
+  fps: number, durationFrames: number): readonly OcrLowerRisk[] {
+  if (!envelope) return Object.freeze([])
+  const durationMs = Math.round(durationFrames / fps * 1_000)
+  return Object.freeze(envelope.samples.filter((sample) => sample.ocr.some((region) =>
+    region.box[1] + region.box[3] > 0.7)).map((sample) => {
+    const startMs = Math.min(durationMs - 1, Math.round(sample.timelineFrame / fps * 1_000))
+    return Object.freeze({ envelopeId: envelope.id, sourceFrame: sample.sourceFrame,
+      rangeMs: Object.freeze([startMs, Math.min(durationMs, Math.max(startMs + 1,
+        Math.round((sample.timelineFrame + 1) / fps * 1_000)))] as const) })
+  }))
 }
 
 function normalizedSpeech(value: string): string {
@@ -422,6 +478,7 @@ function buildQualityReport(input: {
       }
   >
   evaluatedAt: string
+  ocrLowerRisks: readonly OcrLowerRisk[]
 }): Readonly<DirectorQualityReport> {
   const cues = input.plan.subtitleTracks.flatMap((track) => track.cues)
   const allSubtitleText = normalizedSpeech(cues.map((cue) => cue.text).join(' '))
@@ -549,6 +606,12 @@ function buildQualityReport(input: {
     targetId: input.plan.subtitleTracks[0]?.id ?? 'subtitle-track',
     correctable: true,
   }]
+  for (const risk of input.ocrLowerRisks.slice(0, 32)) baseIssues.push(Object.freeze({
+    code: 'OCR_SOURCE_LOWER_REGION_REVIEW_REQUIRED',
+    severity: 'warning' as const, category: 'editorial' as const,
+    message: `Server-produced OCR sample ${risk.sourceFrame} has text in the lower source region; output-canvas collision is unverified. Evidence ${risk.envelopeId}.`,
+    rangeMs: risk.rangeMs, targetId: risk.envelopeId, correctable: true,
+  }))
   const gateIssue = {
     'narrative-integrity': ['STRATEGIC_NARRATIVE_INTEGRITY_FAILED', 'integrity'],
     legibility: ['STRATEGIC_LEGIBILITY_FAILED', 'technical'],
@@ -756,6 +819,21 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     )
     const clips = context.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
     assertDomain(clips.length > 0 && context.editPlan.retimedTranscript.words.length > 0, 'INVALID_COMMAND', 'Director requires a compiled editorial timeline and retimed transcript')
+    const ocrEnvelope = context.ocrEnvelope
+    if (ocrEnvelope) {
+      const sourceRanges = context.editPlan.videoTracks.flatMap((track) => track.clips)
+        .filter((clip) => clip.sourceArtifactId === context.transcript.sourceArtifactId)
+        .map((clip) => ({ clipId: clip.id, sourceInFrame: clip.sourceInFrame,
+          sourceOutFrame: clip.sourceOutFrame, timelineInFrame: clip.timelineInFrame,
+          timelineOutFrame: clip.timelineOutFrame, rate: clip.rate }))
+      assertDomain(ocrEnvelope.authority === 'server-produced' && ocrEnvelope.modality === 'ocr' &&
+        ocrEnvelope.faceSafety === 'unknown' && ocrEnvelope.workspaceId === workspaceId &&
+        ocrEnvelope.projectId === projectId && ocrEnvelope.projectVersionId === baseVersionId &&
+        ocrEnvelope.sourceArtifactId === context.transcript.sourceArtifactId &&
+        ocrEnvelope.editPlanSnapshotId === context.currentVersion.snapshotRefs.editPlan &&
+        stableSerialize(ocrEnvelope.timeMap) === stableSerialize(sourceRanges),
+      'PERSISTENCE_CONFLICT', 'Director OCR evidence does not match its input version and source map')
+    }
     const hasSelectedInsert = clips.some(
       (clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId,
     )
@@ -784,11 +862,15 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       : currentBriefSnapshotId
     const perception = buildPerception({
       id: perceptionId,
+      inputVersionId: baseVersionId,
       durationFrames: context.editPlan.durationFrames,
       fps: context.editPlan.fps,
       transcript: context.transcript,
       words: context.editPlan.retimedTranscript.words,
+      ...(ocrEnvelope ? { ocrEnvelope } : {}),
     })
+    const lowerOcrRisks = ocrLowerSourceRisks(ocrEnvelope,
+      context.editPlan.fps, context.editPlan.durationFrames)
     const mediaOnlyAnalysis = productionBrief.ownerInput
       ? undefined
       : createMediaOnlyAnalysis({
@@ -864,9 +946,11 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         ? { briefCompilationRef: briefCompilation.audit.outputHash }
         : {}),
       mediaOnly: Boolean(mediaOnlyTreatment),
+      ...(ocrEnvelope ? { ocrEnvelopeRef: ocrEnvelope.id } : {}),
+      ocrLowerRiskCount: lowerOcrRisks.length,
     })
     const assumptions = Object.freeze([...new Set([
-      'Face detector evidence is unavailable; use a conservative caption-safe region below the source inset.',
+      'Face evidence is unavailable; reserve the bottom caption region for human visual review.',
       hasSelectedInsert
         ? 'The selected insert already passed the asset-selection and rights gates.'
         : 'No rights-approved B-roll candidate is linked; omission is safer than an irrelevant insert.',
@@ -948,6 +1032,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const, maxCharactersPerBlock: SUBTITLE_MAX_CHARACTERS }),
       createdAt,
     }
+    // Source-space OCR remains valid only while the result keeps the input clip map.
+    assertDomain(stableSerialize(editPlan.videoTracks) === stableSerialize(context.editPlan.videoTracks),
+      'PERSISTENCE_CONFLICT', 'Director result changed source mapping before OCR projection')
     validateDirectedEditPlan(editPlan)
     const qualityReport = buildQualityReport({
       id: qualityReportId,
@@ -962,6 +1049,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       transcriptId: context.transcript.id,
       sourceRights: context.sourceRights,
       evaluatedAt: createdAt,
+      ocrLowerRisks: lowerOcrRisks,
     })
     assertDomain(
       qualityReport.status !== 'blocked',
@@ -1011,7 +1099,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
             createdAt,
           })]
         : []),
-      snapshot({ id: perceptionSnapshotId, workspaceId, projectId, kind: 'perception', contentSchemaVersion: 1, value: perception, createdAt }),
+      snapshot({ id: perceptionSnapshotId, workspaceId, projectId, kind: 'perception', contentSchemaVersion: 2, value: perception, createdAt }),
       snapshot({ id: treatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: treatmentPlan.schemaVersion, value: treatmentPlan, createdAt }),
       snapshot({ id: storySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
       snapshot({ id: editPlanSnapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2, value: editPlan, createdAt }),
@@ -1131,6 +1219,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         transcriptId: context.transcript.id,
         transcriptHash: context.transcript.transcriptHash,
         sourceArtifactId: context.transcript.sourceArtifactId,
+        ...(ocrEnvelope ? { ocrEnvelope: Object.freeze({ id: ocrEnvelope.id,
+          envelopeHash: ocrEnvelope.envelopeHash, inputVersionId: baseVersionId,
+          sourceArtifactId: ocrEnvelope.sourceArtifactId, timeMapHash: ocrEnvelope.timeMapHash }) } : {}),
       },
       ...(request.operationFence ? { operationFence: request.operationFence } : {}),
     })

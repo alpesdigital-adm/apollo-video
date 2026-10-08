@@ -117,8 +117,7 @@ export type DirectorDecisionInput = Omit<
   'decisionType' | 'confidenceDetail' | 'confidenceBand'
 >
 
-export interface DirectorPerceptionSnapshot {
-  schemaVersion: 1
+export type DirectorPerceptionSnapshot = Readonly<{
   id: string
   timeline: Readonly<PerceptionTimeline>
   summary: Readonly<{
@@ -129,7 +128,20 @@ export interface DirectorPerceptionSnapshot {
     confidence: number
     sourceTranscriptId: string
   }>
-}
+}> & (Readonly<{ schemaVersion: 1; inputVersionId?: never; ocrEvidence?: never }> | Readonly<{
+  /** Version 2 binds observed OCR samples to the Director's input version. */
+  schemaVersion: 2
+  inputVersionId: string
+  ocrEvidence?: Readonly<{
+    envelopeId: string
+    envelopeHash: string
+    sourceArtifactId: string
+    sourceSha256: string
+    timeMapHash: string
+    sampledTimelineFrames: readonly number[]
+    emptyTextTimelineFrames: readonly number[]
+  }>
+}>)
 
 export interface DirectedSubtitleCue {
   id: string

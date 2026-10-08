@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-08T23:34:55.385Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
+Atualizado: 2026-10-08T23:58:04.471Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
 
-Snapshot JSON SHA256: `d05e97d2a1f628125bec214dcc38d1690d193b211377c92c6af57b76858c9a10` (somente project-status.json; TODO verificado separadamente).
+Snapshot JSON SHA256: `9647bf98cf3a3db90f729671f8994774a4dd964bea4ea75d20f85bcc30f5b7d8` (somente project-status.json; TODO verificado separadamente).
 
 TODO auditado: **380/1259** caixas marcadas como concluídas no histórico. Isso não afirma implantação ou aceite atuais.
 
@@ -1369,8 +1369,8 @@ IDs de caixas preservam a identidade ao trocar `[ ]` por `[x]`; mudar ou duplica
 | --- | --- | ---: |
 | wave | validado | 37 |
 | wave | pendente-validacao | 0 |
-| wave | em-construcao | 3 |
-| wave | fila | 7 |
+| wave | em-construcao | 4 |
+| wave | fila | 6 |
 | capability | validado | 115 |
 | capability | pendente-validacao | 0 |
 | capability | em-construcao | 188 |
@@ -1394,7 +1394,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | W61 | W61 — contrato de observação verificável e fail-closed | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Congelar corpus V5 e preflight verificável, integrar produtor facial validado e restaurar a jornada positiva sem autoridade fictícia. |
 | W62 | W62 — faces e regiões detectadas nos bytes | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Congelar V5 Rotation0 com corpus CVDF e licença individual, completar splits disjuntos e medir detector sem selecionar por resultado. |
 | W63 | W63 — OCR, shots e motion na mesma timeline | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Validar adapter temporal e definir agregação versionada de evidências por modalidade, preservando cobertura e gaps. |
-| W64 | W64 — Diretor usa percepção persistida com confiança | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
+| W64 | W64 — Diretor usa percepção persistida com confiança | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Agregar evidências temporais e faciais validadas ao consumer com cobertura por modalidade, depois provar HTTP e decisões por variante. |
 | W65 | W65 — anchor e placement por variante | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
 | W66 | W66 — reframe com trajetória e override por formato | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
 | W67 | W67 — crítica independente do arquivo de cada formato | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
