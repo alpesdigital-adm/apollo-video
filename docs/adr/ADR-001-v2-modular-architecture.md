@@ -40,7 +40,7 @@ renderer ◄── RenderInput materializado
 
 ## Runtime baseline da Fundação
 
-- Next.js 16.3.6 e React/React DOM 19.2.7. Pin de segurança para GHSA-vcvr-r3jv-pc5j (faixa afetada >=16.2.0,<16.3.6); o lock e a instalação devem ser regenerados e validados antes do aceite.
+- Next.js 16.4.0 e React/React DOM 19.2.7. O pin de segurança avança além das faixas afetadas até 16.3.7 identificadas no audit de 08/10/2026; o lock e a instalação devem ser regenerados e validados antes do aceite.
 - Verificação de suporte em 2 de agosto de 2026: [Next.js 16.x está em Active LTS](https://nextjs.org/support-policy) e [React 19.2 é a linha documentada mais recente, com o patch 19.2.7 publicado](https://react.dev/versions). Essa constatação é temporal e deve ser reavaliada ao alterar a baseline.
 - Remotion, CLI, Player e Renderer 4.0.489; o subprojeto usa React/React DOM 19.2.7.
 - Node.js 20.9+; a imagem de aplicação usa Node 22 bookworm-slim e desenvolvimento atual também é validado em Node 24.
