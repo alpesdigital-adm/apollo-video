@@ -72,7 +72,7 @@ test('W61 HTTP producer POST converges, fences workspaces and serves only a seal
       const base = `http://127.0.0.1:${port}`
       const logPath = join(process.env.APOLLO_LIBRARY_EVIDENCE_ROOT, 'perception-http-server.log')
       serverLog = createWriteStream(logPath)
-      server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-p', String(port)], {
+      server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', String(port)], {
         cwd: process.cwd(), windowsHide: true,
         env: { ...process.env, NODE_ENV: 'production', __NEXT_PROCESSED_ENV: 'true',
           APOLLO_API_ENVIRONMENT: 'production', NEXT_TELEMETRY_DISABLED: '1',

@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-08T23:27:56.926Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
+Atualizado: 2026-10-08T23:34:55.385Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
 
-Snapshot JSON SHA256: `adc91f104665803452ad28656b6d3e5d41baf2a9e4cc3b46c448c9158abddcfd` (somente project-status.json; TODO verificado separadamente).
+Snapshot JSON SHA256: `d05e97d2a1f628125bec214dcc38d1690d193b211377c92c6af57b76858c9a10` (somente project-status.json; TODO verificado separadamente).
 
 TODO auditado: **380/1259** caixas marcadas como concluídas no histórico. Isso não afirma implantação ou aceite atuais.
 
@@ -1391,9 +1391,9 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 
 | ID | Escopo | Estado | Integração | Validação | Implantação | Aceite | Só aceite do owner? | Evidências | Próxima ação |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W61 | W61 — contrato de observação verificável e fail-closed | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Concluir prova HTTP do produtor OCR, consolidar slice coerente e integrar produtor facial validado para restaurar a jornada positiva sem autoridade fictícia. |
+| W61 | W61 — contrato de observação verificável e fail-closed | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Congelar corpus V5 e preflight verificável, integrar produtor facial validado e restaurar a jornada positiva sem autoridade fictícia. |
 | W62 | W62 — faces e regiões detectadas nos bytes | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Congelar V5 Rotation0 com corpus CVDF e licença individual, completar splits disjuntos e medir detector sem selecionar por resultado. |
-| W63 | W63 — OCR, shots e motion na mesma timeline | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Concluir HTTP OCR e implementar adapter temporal isolado com PTS/cobertura próprios antes da agregação versionada. |
+| W63 | W63 — OCR, shots e motion na mesma timeline | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Validar adapter temporal e definir agregação versionada de evidências por modalidade, preservando cobertura e gaps. |
 | W64 | W64 — Diretor usa percepção persistida com confiança | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
 | W65 | W65 — anchor e placement por variante | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
 | W66 | W66 — reframe com trajetória e override por formato | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
