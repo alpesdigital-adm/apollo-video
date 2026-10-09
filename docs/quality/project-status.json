@@ -272,7 +272,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Slice conservador implementado e PG de receipt current-version passou. Snapshot attachment, publicação atômica com lease/cancel, browser e critic final pendentes. Cues permanecem suprimidas com faceSafety unknown; não comprova placement facial seguro."
+          "text": "Finalização atômica current-version passou em integração PG controlada, com rollback/replay e fences negativos. Snapshot histórico com render real, corrida concorrente de cancel/takeover, browser e critic final pendentes. Cues permanecem suprimidas com faceSafety unknown; não comprova placement facial seguro."
         },
         {
           "kind": "validation",
@@ -305,9 +305,15 @@
           "ref": "Apollo/w61-70-20261008/w65-ocr-receipt-current-af1a1c74/result.json",
           "scope": "PG 1/1 com OCR real e attachment current-version controlado: receipt/hash/rights/version/map negativos; postflight limpo. Não executa render, snapshot attachment nem prova corrida de lease.",
           "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w65-ocr-receipt-current3-3ba81569/result.json",
+          "scope": "Hydrator offline 1/1 e PG 1/1: finalização current-version controlada com OCR/Director reais, cancelado controlado, owner/attempt divergentes, rollback catálogo, sucesso terminal e replay. SHA 022c521a4bc06c9bf47c51a8871720252d9f69b06af37bca65b9bacddd114358; postflight sem processos/backends. Não prova corrida concorrente, render ou snapshot histórico. Falha anterior current2 por actor audit da fixture preservada; hidratação completa corrigida antes deste run.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Finalizar publicação atômica com lease/cancel nos dois attachments; provar runtime e snapshot, depois browser/critic por variante.",
+      "nextAction": "Provar render real e finalização do snapshot histórico sem alterar head; cobrir corrida cancel/takeover, depois browser e critic por variante.",
       "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: shared OCR projection, elegibilidade conservadora e override como preferência, sem conceder autoridade facial. Checkpoint parcial: factory runtime v2 conservadora, solver geométrico puro sem autoridade, leitura histórica separada; UI prioriza motivo facial hard. Unit worker+anchor 29/29 e attach controlado 2/2; goldens pixel controlados 8/8 e supressão v2 FFmpeg 1/1 passaram. PG reader SHA 6fe42287f7fcce2fb7bde7dfad494e85167253253ed0ad3f3b2047b65d068607. Novos attach com receipt/hash/rights/context em Serializable ainda sem PG; typecheck final retido por geração Prisma facial travada. Não é conclusão W65 nem critic de MP4 final. Atualização: geração checkout íntegra e typecheck final exit0. Primeiro PG attachment falhou antes do attach por datas inconsistentes na fixture; correção explícita em validação, sem promoção da prova. PG current-version receipt passou 1/1 após corrigir duas falhas de preparo da fixture (datas e progress), preservadas no histórico; SHA 11af87e6df3fe895f3d3bd55a56cf07bb5413efd12bd99693dcd3dcfbcccbfe4. Fixture agora usa transições do domínio. Revisão encontrou attach antes de succeed sem fence transacional; correção necessária antes da prova runtime, sem promoção da wave."
     },
     {
