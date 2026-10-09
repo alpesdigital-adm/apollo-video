@@ -13,14 +13,15 @@ import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeli
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { createProjectColorPlan } from '../../src/v2/domain/project-color-plan.ts'
 import { createEditorialAudioTimelineHash } from '../../src/v2/domain/production-modes.ts'
+import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { createDesiredAction, createDesiredActionReference } from '../../src/v2/domain/desired-action.ts'
 import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
 import { materializePatchEditPlan } from '../../src/v2/domain/review-system.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
-const ffprobePath = require('ffprobe-static').path
+const ffmpegPath = process.env.FFMPEG_BIN ?? require('ffmpeg-static')
+const ffprobePath = process.env.FFPROBE_BIN ?? require('ffprobe-static').path
 const colorMetadata = Object.freeze({
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
   range: 'limited', bitDepth: 8,
@@ -87,6 +88,15 @@ test('T-FR-227 talking-head proxy and final renders keep one audio timeline at 3
       const audioTimelineHash = createEditorialAudioTimelineHash({ fps, clips })
       const outputs = []
       for (const renderKind of ['proxy', 'final']) {
+        const caption = { id: `caption-${durationSeconds}`, startFrame: 6, endFrame: 36,
+          text: 'Fala principal', anchor: 'bottom' }
+        const canvas = renderKind === 'proxy' ? { width: 540, height: 960 } : { width: 270, height: 480 }
+        const placementPlan = createRenderPlacementPlan({ format: '9:16', canvas,
+          durationFrames, subtitlePresetId: 'kinetic', elements: [],
+          subtitleAnchor: { fps, cues: [{ id: caption.id, startFrame: caption.startFrame,
+            endFrame: caption.endFrame }],
+            faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' } },
+        })
         const result = await renderer.render({
           operationId: `talking-${renderKind}-${durationSeconds}`,
           renderKind,
@@ -97,10 +107,7 @@ test('T-FR-227 talking-head proxy and final renders keep one audio timeline at 3
           fps,
           format: '9:16',
           outputSpec: { width: 270, height: 480, fps },
-          subtitleCues: [{
-            id: `caption-${durationSeconds}`, startFrame: 6, endFrame: 36,
-            text: 'Fala principal', anchor: 'bottom',
-          }],
+          subtitleCues: [caption], placementPlan,
           transitions: [{
             id: `cut-${durationSeconds}`, fromClipId: clips[0].id, toClipId: clips[1].id,
             atFrame: splitFrame, type: 'straight-cut', audioFadeMs: 120,
@@ -117,7 +124,6 @@ test('T-FR-227 talking-head proxy and final renders keep one audio timeline at 3
         assert.ok(Math.abs(Number(audio.duration) - durationSeconds) <= 1 / fps)
         assert.ok(Math.abs(Number(video.duration) - Number(audio.duration)) <= 1 / fps, `${renderKind} ${durationSeconds}s A/V drift`)
         assert.equal(result.renderElementMap.durationFrames, durationFrames)
-        const canvas = renderKind === 'proxy' ? { width: 540, height: 960 } : { width: 270, height: 480 }
         assert.deepEqual(result.renderElementMap.canvas, canvas)
         const presenter = result.renderElementMap.elements.find((element) => element.type === 'presenter' && element.clipId === clips[0].id)
         assert.ok(presenter.bounds.width < canvas.width, 'speaker reframe must leave a measurable face-safe inset')
@@ -126,7 +132,9 @@ test('T-FR-227 talking-head proxy and final renders keep one audio timeline at 3
         const captionCrop = renderKind === 'proxy' ? 'crop=500:150:20:780' : 'crop=250:90:10:370'
         const captionInside = pixelAt(result.outputPath, 0.7, captionCrop)
         const captionOutside = pixelAt(result.outputPath, 2, captionCrop)
-        assert.ok(brightPixels(captionInside) > brightPixels(captionOutside) + 20, `${renderKind} ${durationSeconds}s caption pixels`)
+        assert.ok(brightPixels(captionInside) <= brightPixels(captionOutside) + 20,
+          `${renderKind} ${durationSeconds}s unknown-face cue must not create caption pixels`)
+        assert.ok(!result.renderElementMap.elements.some((element) => element.elementId === `subtitle:${caption.id}`))
         outputs.push(result)
       }
       assert.equal(audioTimelineHash.length, 64)
@@ -484,7 +492,7 @@ test('T-FR-233 renderer applies a scoped normalized crop only inside the stale p
   }
 })
 
-test('T-FR-233 applied review patch changes subtitle pixels only inside its frame-first stale range', async () => {
+test('T-FR-233 subtitle patch reuses unaffected frames while unknown-face captions stay suppressed', async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-subtitle-range-render-'))
   const masterPath = join(root, 'subtitle-master.mp4')
   try {
@@ -541,15 +549,24 @@ test('T-FR-233 applied review patch changes subtitle pixels only inside its fram
       }],
     })
     assert.deepEqual(impact.affectedRanges, [{ startFrame: 30, endFrame: 60 }])
+    const safePlanFor = (cues) => createRenderPlacementPlan({
+      format: '16:9', canvas: { width: 960, height: 540 },
+      durationFrames: 90, subtitlePresetId: 'kinetic', elements: [],
+      subtitleAnchor: { fps: 30, cues: cues.map((item) => ({ id: item.id,
+        startFrame: item.startFrame, endFrame: item.endFrame })),
+        faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' } },
+    })
     const base = await renderer.render({
       operationId: 'subtitle-range-base', renderKind: 'proxy', sources: [source], clips,
       fps: 30, format: '16:9',
       subtitleCues: beforePlan.subtitleTracks[0].cues,
+      placementPlan: safePlanFor(beforePlan.subtitleTracks[0].cues),
     })
     const revised = await renderer.render({
       operationId: 'subtitle-range-partial', renderKind: 'proxy', sources: [source], clips: afterPlan.videoTracks[0].clips,
       fps: 30, format: '16:9',
       subtitleCues: afterPlan.subtitleTracks[0].cues,
+      placementPlan: safePlanFor(afterPlan.subtitleTracks[0].cues),
       rangeReuse: {
         schemaVersion: 'project-proxy-range-reuse/v1',
         commandId: impact.commandId, impactHash: impact.impactHash,
@@ -565,17 +582,14 @@ test('T-FR-233 applied review patch changes subtitle pixels only inside its fram
       '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
     ], { windowsHide: true })
     assert.deepEqual(sample(revised.outputPath, 0.5), sample(base.outputPath, 0.5))
-    assert.notDeepEqual(sample(revised.outputPath, 1.5), sample(base.outputPath, 1.5))
     assert.deepEqual(sample(revised.outputPath, 2.5), sample(base.outputPath, 2.5))
+    assert.ok(!base.renderElementMap.elements.some((item) => item.type === 'subtitle'))
+    assert.ok(!revised.renderElementMap.elements.some((item) => item.type === 'subtitle'))
     const rangeProbe = await probeVideo(
       join(root, 'work', 'subtitle-range-partial', 'editorial-proxy-range.mp4'),
     )
     assert.ok(Math.abs(rangeProbe.duration - 1) <= 0.1)
     assert.ok(Math.abs(revised.probe.duration - 3) <= 0.1)
-    assert.equal(revised.renderElementMap.elements.some((item) =>
-      item.type === 'subtitle' && item.frame === 15), false)
-    assert.equal(revised.renderElementMap.elements.some((item) =>
-      item.type === 'subtitle' && item.frame === 45), true)
     await renderer.cleanup('subtitle-range-partial')
     await renderer.cleanup('subtitle-range-base')
   } finally {

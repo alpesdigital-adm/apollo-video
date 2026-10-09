@@ -10,6 +10,7 @@ import { createDirectedAudioTimelineHash } from "../../src/v2/domain/director-ru
 import {
   approveLocalizationMediaRun,
   beginLocalizationMediaRun,
+  collectLocalizationDependentPlanIds,
   createLocalizationMediaRun,
   recordLocalizationMediaEvidence,
 } from "../../src/v2/domain/localization-media-run.ts";
@@ -281,14 +282,39 @@ test("T-FR-195 approval is fenced behind measured render evidence", () => {
 });
 
 test("T-FR-195 approval replay is bound to the full actor context and normalized payload before mutable reads", async () => {
-  let reads = 0, replayInput;
+  let reads = 0; const replayInputs = [];
   const approved = { id: "media-run-replay", status: "approved" };
   const service = approveLocalizationMediaService({ clock: () => new Date(at), runs: {
-    async findApprovalReplay(input) { replayInput = input; return approved; },
+    async findApprovalReplay(input) { replayInputs.push(input); return approved; },
     async read() { reads += 1; assert.fail("a committed replay must not reread mutable state"); },
   } });
-  const result = await service({ workspaceId: "workspace-001", projectId: "project-001", variantId: "variant-001", runId: "media-run-replay", expectedRevision: 3, expectedRunHash: sha("a"), actorClientId: "client-001", authenticationAudit: { contextHash: sha("b") }, idempotencyKey: "approval-replay", note: "  checked  " });
-  assert.equal(result, approved); assert.equal(reads, 0); assert.equal(replayInput.actorContextHash, sha("b")); assert.equal(replayInput.requestFingerprint.length, 64);
+  const request = { workspaceId: "workspace-001", projectId: "project-001", variantId: "variant-001", runId: "media-run-replay", expectedRevision: 3, expectedRunHash: sha("a"), actorClientId: "client-001", authenticationAudit: { contextHash: sha("b") }, idempotencyKey: "approval-replay", note: "  checked  " };
+  assert.equal(await service(request), approved);
+  assert.equal(await service({ ...request, note: "checked" }), approved);
+  assert.equal(await service({ ...request, variantId: "variant-002" }), approved);
+  assert.equal(await service({ ...request, authenticationAudit: { contextHash: sha("c") } }), approved);
+  assert.equal(reads, 0);
+  assert.equal(replayInputs[0].actorContextHash, sha("b"));
+  assert.equal(replayInputs[0].requestFingerprint.length, 64);
+  assert.equal(replayInputs[0].requestFingerprint, replayInputs[1].requestFingerprint,
+    'normalized note is an idempotent replay of the same request');
+  assert.notEqual(replayInputs[0].requestFingerprint, replayInputs[2].requestFingerprint,
+    'another variant cannot reuse the request fingerprint');
+  assert.notEqual(replayInputs[0].actorContextHash, replayInputs[3].actorContextHash,
+    'another authenticated actor context cannot reuse the replay identity');
+});
+
+test('controlled localization dependent-plan mechanics bind caption and clip IDs from the renderable plan', () => {
+  const plan = { subtitleTracks: [{ cues: [{ id: 'caption-z' }, { id: 'caption-a' }] }],
+    videoTracks: [{ kind: 'base-video', clips: [{ id: 'clip-z' }, { id: 'clip-a' }] },
+      { kind: 'broll', clips: [{ id: 'insert-1' }] }],
+    transitions: [{ id: 'transition-1' }] };
+  const ids = collectLocalizationDependentPlanIds([plan, plan]);
+  assert.deepEqual(ids, { captionIds: ['caption-a', 'caption-z'], clipIds: ['clip-a', 'clip-z'],
+    brollIds: ['insert-1'], eventIds: ['transition-1'] });
+  assert.ok(!ids.captionIds.includes('snapshot-hash'), 'snapshot identities are not caption identities');
+  assert.throws(() => collectLocalizationDependentPlanIds([{ ...plan, subtitleTracks: [] }]),
+    (error) => error?.code === 'PRECONDITION_REQUIRED');
 });
 
 test("T-FR-192 processor persists the exact plan and requires a real proxy artifact result", async () => {

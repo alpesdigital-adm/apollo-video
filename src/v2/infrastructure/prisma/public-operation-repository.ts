@@ -57,6 +57,7 @@ import { resolveStrategicObjective } from '../../domain/strategic-objective.ts'
 import { bindDirectorObjective } from '../../domain/strategic-objective.ts'
 import { parseDesiredAction } from '../../domain/desired-action.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { readSafeReusableProxy } from './proxy-reuse-safety.ts'
 import { editPlanReferencesSource } from './perception-producer-request-context-repository.ts'
 import {
   persistPublicEvents,
@@ -89,6 +90,7 @@ export type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     projectDirectorRun: { include: { directorRun: true } }
     perceptionProducerOperation: true
     temporalProducerOperation: true
+    faceProducerOperation: true
     syntheticProductionRender: true
   }
 }>
@@ -118,6 +120,7 @@ export const OPERATION_INCLUDE = {
   projectDirectorRun: { include: { directorRun: true } },
   perceptionProducerOperation: true,
   temporalProducerOperation: true,
+  faceProducerOperation: true,
   syntheticProductionRender: true,
 } as const
 
@@ -406,6 +409,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
   const directorDetail = row.projectDirectorRun
   const perceptionDetail = row.perceptionProducerOperation
   const temporalDetail = row.temporalProducerOperation
+  const faceDetail = row.faceProducerOperation
   const syntheticRenderDetail = row.syntheticProductionRender
   const syntheticRenderContext = syntheticRenderDetail
     ? hydrateSyntheticRenderContext(syntheticRenderDetail)
@@ -419,6 +423,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
   const isDirector = row.type === 'project-director-run'
   const isPerception = row.type === 'perception-producer-run'
   const isTemporal = row.type === 'perception-temporal-run'
+  const isFace = row.type === 'perception-face-run'
   const isSyntheticRender = row.type === 'synthetic-production-render'
   const projectColorBindings = projectRenderDetail
     ? parseColorPipelineBindings(projectRenderDetail.colorPipelineBindingsJson)
@@ -435,8 +440,8 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
     ? parseColorPipelineBindings(finalExportDetail.colorPipelineBindingsJson)
     : undefined
   if (
-    (((isDirector || isSyntheticRender || isPerception || isTemporal) && row.targetType !== 'project-version') ||
-      (!isDirector && !isSyntheticRender && !isPerception && !isTemporal && row.targetType !== 'media-artifact')) ||
+    (((isDirector || isSyntheticRender || isPerception || isTemporal || isFace) && row.targetType !== 'project-version') ||
+      (!isDirector && !isSyntheticRender && !isPerception && !isTemporal && !isFace && row.targetType !== 'media-artifact')) ||
     [
       isRender,
       isIngest,
@@ -447,10 +452,11 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
       isDirector,
       isPerception,
       isTemporal,
+      isFace,
       isSyntheticRender,
     ].filter(Boolean).length !== 1
     || [renderDetail, ingestDetail, projectRenderDetail, finalExportDetail,
-      sourceCleanupDetail, longFormDetail, directorDetail, perceptionDetail, temporalDetail, syntheticRenderDetail]
+      sourceCleanupDetail, longFormDetail, directorDetail, perceptionDetail, temporalDetail, faceDetail, syntheticRenderDetail]
       .filter(Boolean).length !== 1
   ) {
     throw new DomainError(
@@ -675,6 +681,21 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
   )) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored temporal producer operation context is invalid', { operationId: row.id })
   }
+  if (isFace && (
+    !faceDetail || row.projectId !== faceDetail.projectId ||
+    row.workspaceId !== faceDetail.workspaceId || row.targetId !== faceDetail.projectVersionId ||
+    faceDetail.operationId !== row.id ||
+    ![faceDetail.projectId, faceDetail.projectVersionId,
+      faceDetail.sourceArtifactId, faceDetail.editPlanSnapshotId]
+      .every((value) => ID_PATTERN.test(value)) ||
+    ![faceDetail.projectVersionHash, faceDetail.sourceSha256,
+      faceDetail.editPlanSnapshotHash, faceDetail.requestHash]
+      .every((value) => SHA256_PATTERN.test(value)) ||
+    !Number.isSafeInteger(faceDetail.sampleIntervalFrames) ||
+    faceDetail.sampleIntervalFrames < 1 || faceDetail.sampleIntervalFrames > 300
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored face producer operation context is invalid', { operationId: row.id })
+  }
   const outputFields = checkpointFields(renderDetail)
   const hasAnyCheckpoint = outputFields.some((value) => value !== null)
   if (
@@ -762,12 +783,13 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         : {}),
       cancelable: row.cancelable,
       retryable: row.retryable,
-      target: isDirector || isSyntheticRender || isPerception || isTemporal ? {
+      target: isDirector || isSyntheticRender || isPerception || isTemporal || isFace ? {
         type: 'project-version',
         id: isDirector
           ? directorDetail!.resultVersionId
           : isPerception ? perceptionDetail!.projectVersionId
-            : isTemporal ? temporalDetail!.projectVersionId : syntheticRenderContext!.projectVersionId,
+            : isTemporal ? temporalDetail!.projectVersionId
+              : isFace ? faceDetail!.projectVersionId : syntheticRenderContext!.projectVersionId,
       } : {
         type: 'media-artifact',
         id: isRender
@@ -977,6 +999,17 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         editPlanSnapshotId: temporalDetail!.editPlanSnapshotId,
         editPlanSnapshotHash: temporalDetail!.editPlanSnapshotHash,
         requestHash: temporalDetail!.requestHash,
+      } : isFace ? {
+        kind: 'perception-face-run' as const,
+        projectId: faceDetail!.projectId,
+        projectVersionId: faceDetail!.projectVersionId,
+        projectVersionHash: faceDetail!.projectVersionHash,
+        sourceArtifactId: faceDetail!.sourceArtifactId,
+        sourceSha256: faceDetail!.sourceSha256,
+        editPlanSnapshotId: faceDetail!.editPlanSnapshotId,
+        editPlanSnapshotHash: faceDetail!.editPlanSnapshotHash,
+        sampleIntervalFrames: faceDetail!.sampleIntervalFrames,
+        requestHash: faceDetail!.requestHash,
       } : {
         kind: 'project-director-run' as const,
         projectId: directorDetail!.projectId,
@@ -1066,6 +1099,8 @@ async function transitionCurrentProxyProject(
 ): Promise<boolean> {
   const context = operation.projectProxyRender
   if (operation.type !== 'project-proxy-render' || !context) return false
+  // An explicit renderable snapshot is historical and does not own the project head.
+  if (context.renderablePlanHash) return false
   // Acquire the project lock before the next statement takes its read snapshot.
   // A concurrent admission either finishes first and is visible to `none`, or
   // waits and must revalidate the status after this transition commits.
@@ -1257,7 +1292,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       if (!persisted) return null
       const result = hydratePublicOperationRecord(persisted)
       if (updated.count === 1) {
-        if (stored.type === 'project-proxy-render' && !await transitionCurrentProxyProject(
+        if (stored.type === 'project-proxy-render' && !stored.projectProxyRender?.renderablePlanHash &&
+          !await transitionCurrentProxyProject(
           transaction, stored, ['failed', 'rendering-proxy'], 'rendering-proxy',
         )) throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Proxy retry no longer owns the current project version and operation')
         await transaction.v2PublicOperationControlCommand.create({
@@ -1440,7 +1476,10 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     const temporalContext = input.operation.type === 'perception-temporal-run' && input.context.kind === 'perception-temporal-run'
       ? input.context
       : undefined
-    const producerContext = perceptionContext ?? temporalContext
+    const faceContext = input.operation.type === 'perception-face-run' && input.context.kind === 'perception-face-run'
+      ? input.context
+      : undefined
+    const producerContext = perceptionContext ?? temporalContext ?? faceContext
     const mediaTarget = input.operation.target.type === 'media-artifact'
       ? input.operation.target
       : undefined
@@ -1478,6 +1517,20 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           temporalContext.editPlanSnapshotHash, temporalContext.requestHash]
           .every((value) => SHA256_PATTERN.test(value)) ||
         temporalContext.requestHash !== input.requestFingerprint
+      )) ||
+      (faceContext && (
+        input.operation.projectId !== faceContext.projectId ||
+        input.operation.target.type !== 'project-version' ||
+        input.operation.target.id !== faceContext.projectVersionId ||
+        ![faceContext.projectId, faceContext.projectVersionId,
+          faceContext.sourceArtifactId, faceContext.editPlanSnapshotId]
+          .every((value) => ID_PATTERN.test(value)) ||
+        ![faceContext.projectVersionHash, faceContext.sourceSha256,
+          faceContext.editPlanSnapshotHash, faceContext.requestHash]
+          .every((value) => SHA256_PATTERN.test(value)) ||
+        faceContext.requestHash !== input.requestFingerprint ||
+        !Number.isSafeInteger(faceContext.sampleIntervalFrames) ||
+        faceContext.sampleIntervalFrames < 1 || faceContext.sampleIntervalFrames > 300
       )) ||
       (renderContext && (input.operation.projectId !== undefined || !SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (syntheticRenderContext && (
@@ -1855,6 +1908,16 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             )
           }
           parseColorPipelineBindings(reusedOperation.colorPipelineBindingsJson)
+          const safeReuse = await readSafeReusableProxy(transaction, {
+            workspaceId: input.operation.workspaceId,
+            projectId: projectReuseContext.projectId,
+            baseVersionId: projectReuseContext.baseVersionId,
+            operationId: projectReuseContext.reusedFromOperationId,
+            artifactId: projectReuseContext.outputArtifactId,
+            manifestId: projectReuseContext.outputManifestId,
+          })
+          if (!safeReuse) throw new DomainError('PERSISTENCE_CONFLICT',
+            'Project proxy reuse has no compatible subtitle-suppression receipt')
           reusedColorPipelineBindingsJson = reusedOperation.colorPipelineBindingsJson
         }
         if (finalExportContext) {
@@ -2148,18 +2211,23 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         } else if (projectRenderContext || projectReuseContext) {
           const context = projectRenderContext ?? projectReuseContext!
-          const nextProjectStatus = projectReuseContext ? 'reviewing-proxy' : 'rendering-proxy'
-          const project = await transaction.v2Project.updateMany({
-            where: {
-              id: context.projectId,
-              workspaceId: input.operation.workspaceId,
-              currentVersionId: context.projectVersionId,
-              status: { in: projectStatusTransitionSources(nextProjectStatus, { includeSame: true }) },
-            },
-            data: { status: nextProjectStatus },
-          })
-          if (project.count !== 1) {
-            throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter proxy rendering from its current version and status')
+          // Explicit renderable snapshots are immutable historical targets. Their
+          // scoped source/version/plan/color bindings were checked above; admitting
+          // one must not move the current project head or its workflow status.
+          if (!projectRenderContext?.renderableSnapshot) {
+            const nextProjectStatus = projectReuseContext ? 'reviewing-proxy' : 'rendering-proxy'
+            const project = await transaction.v2Project.updateMany({
+              where: {
+                id: context.projectId,
+                workspaceId: input.operation.workspaceId,
+                currentVersionId: context.projectVersionId,
+                status: { in: projectStatusTransitionSources(nextProjectStatus, { includeSame: true }) },
+              },
+              data: { status: nextProjectStatus },
+            })
+            if (project.count !== 1) {
+              throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter proxy rendering from its current version and status')
+            }
           }
           await transaction.v2ProjectProxyRenderOperation.create({
             data: {
@@ -2271,6 +2339,21 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             editPlanSnapshotId: temporalContext.editPlanSnapshotId,
             editPlanSnapshotHash: temporalContext.editPlanSnapshotHash,
             requestHash: temporalContext.requestHash,
+            createdAt: new Date(input.operation.createdAt),
+          } })
+        } else if (faceContext) {
+          await transaction.v2FaceProducerOperation.create({ data: {
+            operationId: input.operation.id,
+            workspaceId: input.operation.workspaceId,
+            projectId: faceContext.projectId,
+            projectVersionId: faceContext.projectVersionId,
+            projectVersionHash: faceContext.projectVersionHash,
+            sourceArtifactId: faceContext.sourceArtifactId,
+            sourceSha256: faceContext.sourceSha256,
+            editPlanSnapshotId: faceContext.editPlanSnapshotId,
+            editPlanSnapshotHash: faceContext.editPlanSnapshotHash,
+            sampleIntervalFrames: faceContext.sampleIntervalFrames,
+            requestHash: faceContext.requestHash,
             createdAt: new Date(input.operation.createdAt),
           } })
         } else {
@@ -2523,11 +2606,21 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     transition: (operation: PublicOperation) => Readonly<PublicOperation>,
     requiresCheckpoint = false,
   ): Promise<PublicOperationRecord | null> {
+    return this.client.$transaction((transaction) => this.transitionRunningInTransaction(
+      transaction, input, transition, requiresCheckpoint,
+    ))
+  }
+
+  private async transitionRunningInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: PublicOperationLeaseCommand,
+    transition: (operation: PublicOperation) => Readonly<PublicOperation>,
+    requiresCheckpoint = false,
+  ): Promise<PublicOperationRecord | null> {
     const now = parseCommandDate(input.now, 'now')
     if (!ID_PATTERN.test(input.leaseOwner)) {
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Worker lease owner is invalid')
     }
-    return this.client.$transaction(async (transaction) => {
       const stored = await transaction.v2PublicOperation.findUnique({
         where: { id: input.operationId },
         include: OPERATION_INCLUDE,
@@ -2609,7 +2702,16 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         this.createEventId,
       )
       return result
-    })
+  }
+
+  /** Complete a proxy render inside the caller's attachment transaction. */
+  succeedProxyInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: PublicOperationLeaseCommand,
+  ): Promise<PublicOperationRecord | null> {
+    return this.transitionRunningInTransaction(
+      transaction, input, (operation) => succeedPublicOperation(operation, input.now), true,
+    )
   }
 
   async advancePhase(input: PublicOperationLeaseCommand & {

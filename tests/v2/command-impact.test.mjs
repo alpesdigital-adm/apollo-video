@@ -52,6 +52,23 @@ const resultVersionId = 'project-version-impact-2'
 const commandId = 'edit-command-impact-1'
 const createdAt = '2026-07-31T19:00:00.000Z'
 
+function controlledSourceRightsRow(artifactId) {
+  const rights = createAssetRightsSnapshot({ id: `rights-${artifactId}`, workspaceId,
+    artifactId, sequence: 1,
+    draft: { status: 'approved', allowedUses: ['editorial-reuse'], prohibitedUses: [],
+      consent: { status: 'not-required', allowedUses: [] } },
+    createdBy: { type: 'user', id: 'owner-impact' }, createdAt })
+  return { ...rights, allowedUsesJson: '["editorial-reuse"]', prohibitedUsesJson: '[]',
+    allowedWorkspaceIdsJson: JSON.stringify(rights.allowedWorkspaceIds),
+    consentStatus: rights.consent.status, allowedMarketsJson: null, allowedLocalesJson: null,
+    allowedSyntheticOperationsJson: null, consentAllowedUsesJson: '[]',
+    consentAllowedMarketsJson: null, consentAllowedLocalesJson: null,
+    consentSyntheticOperationsJson: null, consentExpiresAt: null,
+    consentDocumentArtifactId: null, createdByType: 'user', createdById: 'owner-impact',
+    createdAt: new Date(createdAt), expiresAt: null, owner: null, license: null,
+    sourceNote: null }
+}
+
 function impactActor() {
   const auditContext = createExternalAuditContext({
     clientId: 'client-impact-1', credentialId: 'credential-impact-1',
@@ -569,6 +586,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
         artifact: {
           id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4',
           sha256: 'c'.repeat(64), byteSize: 4_096n,
+          currentRightsSnapshot: controlledSourceRightsRow('source-1'),
           manifests: [{
             id: 'manifest-source-1',
             manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }),
@@ -624,6 +642,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
         artifact: {
           id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4',
           sha256: 'c'.repeat(64), byteSize: 4_096n,
+          currentRightsSnapshot: controlledSourceRightsRow('source-1'),
           manifests: [{
             id: 'manifest-source-1',
             manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }),
@@ -654,7 +673,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
 test('T-FR-233 completed proxy atomically records scoped invalidation resolutions', async () => {
   let invalidationQuery
   const resolutionUpserts = []
-  const recipeParameters = { ocrReceipt: null, inputHash: 'a'.repeat(64),
+  const recipeParameters = { ocrReceipt: null, inputHash: 'a'.repeat(64), format: '9:16',
     projectVersionId: resultVersionId, editPlanSnapshotId: 'edit-plan-proxy-2' }
   const outputManifest = createMediaArtifactManifestV2({
     artifactKey: 'proxies/replacement.mp4', artifactSha256: 'd'.repeat(64),
@@ -701,6 +720,8 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
   })
   // The unit checks invalidation writes; its current source is controlled context. PostgreSQL
   // integration separately exercises the real scoped reader and transactional rights check.
+  repository.assertCompletionLease = async () => new Date(createdAt)
+  repository.completeProxyTransaction = async () => {}
   repository.queryProject = async () => ({ id: projectId, workspaceId, locale: 'pt-BR',
     format: '9:16', currentVersionId: resultVersionId,
     versions: [{ id: resultVersionId, editPlanSnapshotId: recipeParameters.editPlanSnapshotId,
@@ -729,6 +750,7 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
     outputArtifactId: 'artifact-proxy-replacement',
     outputManifestId: 'manifest-proxy-replacement',
     originalFileName: 'replacement.mp4', createdAt, recipeParameters, ocrReceipt: null,
+    lease: { owner: 'controlled-unit', attempt: 1, now: createdAt }, review: {},
   })
   assert.deepEqual(invalidationQuery.where, {
     workspaceId, projectId, resultVersionId,
@@ -788,11 +810,15 @@ test('W65 renderable snapshot attachment accepts only its own sealed null-OCR re
     editPlanHash: planHash, sourceArtifactId, sourceManifestId,
     renderSources: [{ artifactKey: sourceKey, sha256: sourceSha256, role: 'source-master' }],
   })
+  // Isolate recipe/source binding here; transaction fencing is covered by PostgreSQL.
+  repository.assertCompletionLease = async () => new Date(createdAt)
+  repository.completeProxyTransaction = async () => {}
   const attach = (recipeParameters, ocrReceipt) => repository.attachCompletedSnapshotOutput({
     workspaceId, operationId: 'operation-snapshot-proxy-2', projectId,
     variantId: '9:16', outputArtifactId: artifactId, outputManifestId: manifestId,
     originalFileName: 'snapshot-proxy.mp4', createdAt,
     recipeParameters, ocrReceipt,
+    lease: { owner: 'controlled-unit', attempt: 1, now: createdAt }, review: {},
   })
   await assert.rejects(attach({ ...parameters, ocrReceipt: { envelopeId: 'forged' } }, null),
     /receipt|recipe/i)
@@ -1330,6 +1356,7 @@ test('T-FR-233 applied review patch persists impact v2 and normalized invalidati
         role: 'source-master', artifactId: 'source-1', originalFileName: 'source.mp4', createdAt: new Date(createdAt), upload: null,
         artifact: {
           id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4', sha256: 'c'.repeat(64), byteSize: 4096n,
+          currentRightsSnapshot: controlledSourceRightsRow('source-1'),
           manifests: [{ id: 'manifest-source-1', manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }) }],
         },
       }],

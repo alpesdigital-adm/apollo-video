@@ -210,7 +210,47 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
   }
 
   async persistGenerated(input: Parameters<ProxyReviewRepository['persistGenerated']>[0]) {
-    return this.client.$transaction(async (transaction) => {
+    return this.client.$transaction(
+      (transaction) => this.persistGeneratedInTransaction(transaction, input),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    )
+  }
+
+  async persistGeneratedInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProxyReviewRepository['persistGenerated']>[0],
+  ): Promise<Readonly<PersistedProxyReview>> {
+    return this.persistGeneratedScopedInTransaction(transaction, input, null)
+  }
+
+  async persistRenderableSnapshotInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProxyReviewRepository['persistGenerated']>[0],
+    binding: Readonly<{ planId: string; planHash: string }>,
+  ): Promise<Readonly<PersistedProxyReview>> {
+    const detail = await transaction.v2ProjectProxyRenderOperation.findUnique({
+      where: { operationId: input.operationId },
+    })
+    const snapshot = await transaction.v2RenderablePlanSnapshot.findFirst({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId,
+        projectVersionId: input.review.projectVersionId,
+        planId: binding.planId, planHash: binding.planHash },
+    })
+    if (!detail || !snapshot || detail.workspaceId !== input.workspaceId ||
+        detail.projectId !== input.projectId ||
+        detail.projectVersionId !== input.review.projectVersionId ||
+        detail.renderablePlanId !== binding.planId ||
+        detail.renderablePlanHash !== binding.planHash) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot review binding is invalid')
+    }
+    return this.persistGeneratedScopedInTransaction(transaction, input, binding)
+  }
+
+  private async persistGeneratedScopedInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProxyReviewRepository['persistGenerated']>[0],
+    renderableSnapshot: Readonly<{ planId: string; planHash: string }> | null,
+  ): Promise<Readonly<PersistedProxyReview>> {
       const existing = await transaction.v2ProxyReview.findUnique({
         where: { operationId: input.operationId },
       })
@@ -283,7 +323,9 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           updatedAt: createdAt,
         },
       })
-      const project = await transaction.v2Project.updateMany({
+      const project = renderableSnapshot ? { count: await transaction.v2Project.count({
+        where: { id: input.projectId, workspaceId: input.workspaceId },
+      }) } : await transaction.v2Project.updateMany({
         where: {
           id: input.projectId,
           workspaceId: input.workspaceId,
@@ -328,7 +370,6 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
         },
       })
       return hydrateProxyReview(row)
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   }
 
   async findCurrent(input: Parameters<ProxyReviewRepository['findCurrent']>[0]) {

@@ -998,6 +998,21 @@ exige `projects:read` e isola workspace/projeto/tipo; só expõe o envelope sela
 após `succeeded`. A operação mantém fases e tentativa duráveis, mas OCR não é
 evidência de rosto nem aprova safe-area facial.
 
+`POST /v1/projects/{projectId}/face-producer-operations` recebe apenas
+`projectVersionId`, `sourceArtifactId` e `sampleIntervalFrames` opcional
+(1–300; padrão 30), com `projects:write` e `Idempotency-Key`. O servidor vincula
+workspace, versão corrente, EditPlan imutável, source-master, SHA e direitos;
+replay com outra carga sob a mesma chave falha. Não aceita boxes, autoridade,
+confiança ou modelo do caller. O worker exige um único clip unit-rate de até
+300 frames, vídeo CFR, orientação neutra e fps iguais; amostra no máximo 30
+frames com detector YuNet CPU 640/score 0,50/NMS 0,30, cujo gate V5 falhou.
+`GET /v1/projects/{projectId}/face-producer-operations/{operationId}` exige
+`projects:read`, isola workspace/projeto/tipo e só retorna envelope selado após
+`succeeded`, revalidando source, versão, direitos e integridade. Sucesso da
+operação comprova persistência de candidatos amostrados; o envelope conserva
+`faceSafety=unknown`, `identity=not-performed`, lacunas de cobertura e avaliação
+`failed-gate`. Não aprova rosto humano, legenda, crop, Diretor ou exportação.
+
 `GET /v1/operations/{operationId}/final-export-attempts` passa a capability
 2.0.0 e schema `project-final-export-attempt-history/v2`: tentativas falhas
 novas podem incluir `error.stage` sanitizado, além de código e mensagem seguros.

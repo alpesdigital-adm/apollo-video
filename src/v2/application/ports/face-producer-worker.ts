@@ -26,13 +26,21 @@ export interface FaceProducerWorkerRepository {
 /** Adapter returns source-frame evidence, never a verified-human or safe-placement claim. */
 export interface FaceVideoAnalyzer {
   analyze(input: { sourcePath: string; expectedSourceSha256: string; workDirectory: string
+    sourceInFrame: number; sourceOutFrame: number
     sampleIntervalFrames: number; maxSamples: number
     timelineFps: FaceProducerEnvelope['timelineFps']; signal?: AbortSignal }): Promise<Readonly<{
       sourceTimebase: FaceProducerEnvelope['sourceTimebase']
       sourceFps: FaceProducerEnvelope['sourceFps']
       sourcePtsStart: number; sourceClock: 'constant-frame-rate'
       sourcePtsRounding: 'nearest'
+      /** Read from the verified source probe, never copied from the request. */
+      sourceWidth: FaceProducerEnvelope['sourceWidth']
+      sourceHeight: FaceProducerEnvelope['sourceHeight']
+      sourceOrientation: FaceProducerEnvelope['sourceOrientation']
+      /** Exact runtime configuration used for these candidate boxes. */
+      detectorConfig: FaceProducerEnvelope['detectorConfig']
       producer: FaceProducerEnvelope['producer']
+      /** Frame dimensions and hashes come from the decoded frame bytes. */
       samples: readonly Omit<FaceProducerEnvelope['samples'][number], 'timelineFrame'>[]
     }>>
 }

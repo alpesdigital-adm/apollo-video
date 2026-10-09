@@ -857,6 +857,10 @@ const queuedTemporalProducerOperationVisibleExample = {
   ...queuedPerceptionProducerOperationVisibleExample,
   id: 'operation-temporal-example-1', type: 'perception-temporal-run',
 }
+const queuedFaceProducerOperationVisibleExample = {
+  ...queuedPerceptionProducerOperationVisibleExample,
+  id: 'operation-face-example-1', type: 'perception-face-run',
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -7884,6 +7888,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       data: { operation: queuedTemporalProducerOperationVisibleExample },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/face-producer-run-request/v1': [{
+      projectVersionId: 'project-version-example-1', sourceArtifactId: 'artifact-source-example-1',
+      sampleIntervalFrames: 30,
+    }],
+    'apollo://schemas/face-producer-operation-created/v1': [{
+      data: { operation: queuedFaceProducerOperationVisibleExample, replayed: false },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/face-producer-operation-read/v1': [{
+      data: { operation: queuedFaceProducerOperationVisibleExample },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/enqueue-provider-job-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'audio-avatar',
       adapterId: 'controlled-avatar', adapterVersion: 'version-1', providerInput: { audioArtifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR' },
@@ -8850,6 +8866,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v14': [
       { data: { operation: queuedTemporalProducerOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v15': [
+      { data: { operation: queuedFaceProducerOperationVisibleExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -8903,6 +8922,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v13': [
       { data: { operations: [queuedTemporalProducerOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v14': [
+      { data: { operations: [queuedFaceProducerOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/enqueue-project-director-run-request/v1': [
       {
@@ -12613,6 +12635,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       { data: { projects: [] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/project-list/v8': [
+      { data: { projects: [] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-list/v9': [
       { data: { projects: [] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/production-batch-read/v1': [

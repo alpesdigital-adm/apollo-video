@@ -5,6 +5,7 @@ import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-
 import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { createPerceptionProducerEnvelope, type PerceptionProducerEnvelope, type PerceptionProducerEnvelopeInput } from '../../domain/perception-producer-envelope.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { startPublicOperationAttempt } from '../../domain/public-operation.ts'
 import { createPublicOperationProgressEvents } from '../../domain/public-operation-event.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
@@ -122,16 +123,21 @@ export class PrismaPerceptionProducerEnvelopeRepository {
       }
       const candidate = candidates.find((row) => row.attempt < row.maxAttempts)
       if (!candidate || !candidate.perceptionProducerOperation) return null
-      const nextAttempt = candidate.attempt + 1
+      const claimed = startPublicOperationAttempt(
+        hydratePublicOperationRecord(candidate).operation, input.now.toISOString())
+      const nextAttempt = claimed.attempt
       const updated = await transaction.v2PublicOperation.updateMany({
         where: { id: candidate.id, status: candidate.status, attempt: candidate.attempt,
           leaseOwner: candidate.leaseOwner, leaseExpiresAt: candidate.leaseExpiresAt },
-        data: { status: 'running', phase: 'probing', attempt: nextAttempt,
-          progressCompleted: 0, progressTotal: 4, progressUnit: 'stage',
+        data: { status: claimed.status, phase: claimed.phase, attempt: claimed.attempt,
+          progressCompleted: claimed.progress?.completed, progressTotal: claimed.progress?.total,
+          progressUnit: claimed.progress?.unit, cancelable: claimed.cancelable,
+          retryable: claimed.retryable,
           leaseOwner: input.leaseOwner, leaseExpiresAt: new Date(input.now.getTime() + input.leaseMs),
-          heartbeatAt: input.now, startedAt: candidate.startedAt ?? input.now,
-          nextAttemptAt: null, completedAt: null, errorCode: null, errorMessage: null,
-          errorRetryable: null, resultJson: null },
+          heartbeatAt: input.now, startedAt: new Date(claimed.startedAt as string),
+          nextAttemptAt: null, completedAt: null, deadLetteredAt: null,
+          errorCode: null, errorMessage: null, errorRetryable: null, resultJson: null,
+          updatedAt: input.now },
       })
       if (updated.count !== 1) return null
       let source: NonNullable<Awaited<ReturnType<typeof transaction.v2MediaArtifact.findFirst>>>

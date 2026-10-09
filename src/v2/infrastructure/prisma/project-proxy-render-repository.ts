@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { EditorialCutEditPlan } from '../../application/apply-editorial-cut-command.ts'
@@ -6,11 +6,12 @@ import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../application/ports/editorial-proxy-renderer.ts'
+import { catalogApprovedOutputService } from '../../application/catalog-approved-output.ts'
 import type { ProxyQualityIssue } from '../../application/render-workflow.ts'
 import { calculateVersionHash } from '../../application/version-hash.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { evaluateAssetUse } from '../../domain/asset-rights.ts'
-import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { hydrateAssetRights, PrismaAssetRightsRepository } from './asset-rights-repository.ts'
 import { expectedOcrTimeline } from '../../domain/projected-ocr-timeline.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
@@ -19,8 +20,12 @@ import {
 } from '../../domain/command-impact.ts'
 import { editCommandRenderPolicy } from '../../domain/edit-command-registry.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './renderable-plan-snapshot-repository.ts'
+import { readSafeReusableProxy } from './proxy-reuse-safety.ts'
 import { parseDirectorPerceptionSnapshotUnchecked } from './director-run-repository.ts'
 import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
+import { PrismaAutomaticCatalogRepository } from './automatic-catalog-repository.ts'
+import { PrismaProxyReviewRepository } from './proxy-review-repository.ts'
+import { PrismaPublicOperationRepository } from './public-operation-repository.ts'
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
   try {
@@ -88,8 +93,11 @@ function parseArray(value: string, field: string): readonly unknown[] {
 
 function assertSealedProxyRecipe(input: Readonly<{
   recipeParameters: Readonly<Record<string, unknown>>
+  variantId: string
   ocrReceipt: Readonly<NonNullable<Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0]['ocrReceipt']>> | null
-}>, operation: Readonly<{ inputHash: string; projectVersionId: string; editPlanSnapshotId: string }>,
+}>, operation: Readonly<{ inputHash: string; projectVersionId: string; editPlanSnapshotId: string;
+  renderablePlanHash?: string | null; renderableVariantId?: string | null;
+  renderableFormat?: string | null }>,
 artifact: Readonly<{ artifactKey: string; sha256: string; byteSize: bigint; mediaType: string; container: string }>,
 manifest: Readonly<{ manifestJson: string; manifestHash: string }>): void {
   const manifestBody = parseRecord(manifest.manifestJson, 'project proxy output manifest')
@@ -113,7 +121,11 @@ manifest: Readonly<{ manifestJson: string; manifestHash: string }>): void {
       calculateCanonicalHash(input.recipeParameters.ocrReceipt) !== calculateCanonicalHash(input.ocrReceipt) ||
       input.recipeParameters.inputHash !== operation.inputHash ||
       input.recipeParameters.projectVersionId !== operation.projectVersionId ||
-      input.recipeParameters.editPlanSnapshotId !== operation.editPlanSnapshotId) {
+      input.recipeParameters.editPlanSnapshotId !== operation.editPlanSnapshotId ||
+      (operation.renderablePlanHash
+        ? (operation.renderableVariantId !== input.variantId ||
+          input.recipeParameters.format !== operation.renderableFormat)
+        : input.recipeParameters.format !== input.variantId)) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy receipt is not sealed by the output recipe')
   }
 }
@@ -134,6 +146,7 @@ function assertProxySourceLineage(manifestJson: string,
 function hydrateSource(
   project: Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>,
   expected?: { sourceArtifactId?: string; sourceManifestId?: string },
+  evaluatedAt: Date = new Date(),
 ): Readonly<ProjectProxyRenderSource> | null {
   const version = project?.versions[0]
   const media = project?.mediaAssets.find((item) =>
@@ -184,12 +197,12 @@ function hydrateSource(
     const musicTrack = 'audioTracks' in editPlan ? editPlan.audioTracks.find((track) => track.artifactId === artifactId) : undefined
     if (musicTrack) {
       const rights = link.artifact.currentRightsSnapshot
-      if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= new Date())) throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
+      if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= evaluatedAt)) throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
     } else {
       const rights = link.artifact.currentRightsSnapshot
         ? hydrateAssetRights(link.artifact.currentRightsSnapshot) : null
       if (evaluateAssetUse(rights, { workspaceId: project.workspaceId,
-        use: 'editorial-reuse', locale: project.locale ?? 'und' }, new Date()).outcome !== 'allow') {
+        use: 'editorial-reuse', locale: project.locale ?? 'und' }, evaluatedAt).outcome !== 'allow') {
         throw new DomainError('ASSET_RIGHTS_BLOCKED', `Render source ${artifactId} no longer has approved current rights`)
       }
     }
@@ -350,7 +363,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   }
 
   async readRenderableSnapshotSource(input: { workspaceId: string; projectId: string; planId: string; planHash: string; format: string },
-    client: PrismaClient | Prisma.TransactionClient = this.client) {
+    client: PrismaClient | Prisma.TransactionClient = this.client, evaluatedAt: Date = new Date()) {
     // Renderable snapshots use their own edit maps. OCR from a Director result is never inherited;
     // the worker renders cues only with explicit unknown-face review and no OCR coordinates.
     const snapshot = await new PrismaRenderablePlanSnapshotRepository(client).readByPlan(input)
@@ -381,14 +394,14 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       const musicTrack = snapshot.plan.audioTracks.find((track) => track.artifactId === artifactId)
       if (musicTrack) {
         const rights = link.artifact.currentRightsSnapshot
-        if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= new Date())) {
+        if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= evaluatedAt)) {
           throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
         }
       } else {
         const rights = link.artifact.currentRightsSnapshot
           ? hydrateAssetRights(link.artifact.currentRightsSnapshot) : null
         if (evaluateAssetUse(rights, { workspaceId: project.workspaceId,
-          use: 'editorial-reuse', locale: project.locale ?? 'und' }, new Date()).outcome !== 'allow') {
+          use: 'editorial-reuse', locale: project.locale ?? 'und' }, evaluatedAt).outcome !== 'allow') {
           throw new DomainError('ASSET_RIGHTS_BLOCKED', `Renderable source ${artifactId} no longer has approved current rights`)
         }
       }
@@ -426,6 +439,139 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     })
   }
 
+  private async assertCompletionLease(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0] |
+      Parameters<ProjectProxyRenderRepository['attachCompletedSnapshotOutput']>[0],
+  ): Promise<Date | null> {
+    // The row lock serializes cancellation, heartbeat and final publication. Use the
+    // database clock after acquiring it, so time spent waiting on a lock cannot
+    // extend an expired lease through a stale worker timestamp.
+    await transaction.$queryRaw`SELECT id FROM public_operations WHERE id = ${input.operationId} FOR UPDATE`
+    const [{ observedAt }] = await transaction.$queryRaw<readonly { observedAt: Date }[]>`
+      SELECT clock_timestamp() AS "observedAt"`
+    const operation = await transaction.v2PublicOperation.findUnique({ where: { id: input.operationId } })
+    if (operation?.status === 'succeeded' && operation.phase === 'completed') {
+      const [detail, review, association, artifact, manifest] = await Promise.all([
+        transaction.v2ProjectProxyRenderOperation.findUnique({ where: { operationId: input.operationId } }),
+        transaction.v2ProxyReview.findUnique({ where: { operationId: input.operationId } }),
+        transaction.v2ProjectMediaAsset.findFirst({ where: { workspaceId: input.workspaceId,
+          projectId: input.projectId, artifactId: input.outputArtifactId, role: 'editorial-proxy' } }),
+        transaction.v2MediaArtifact.findUnique({ where: { id: input.outputArtifactId } }),
+        transaction.v2MediaArtifactManifest.findUnique({ where: { id: input.outputManifestId } }),
+      ])
+      const result = operation.resultJson ? parseRecord(operation.resultJson, 'completed proxy result') : null
+      const resource = result?.resource
+      if (!detail || !review || !association || !artifact || !manifest ||
+          operation.type !== 'project-proxy-render' ||
+          operation.workspaceId !== input.workspaceId || operation.projectId !== input.projectId ||
+          operation.targetType !== 'media-artifact' || operation.targetId !== input.outputArtifactId ||
+          operation.attempt !== input.lease.attempt ||
+          detail.workspaceId !== input.workspaceId || detail.projectId !== input.projectId ||
+          detail.projectVersionId !== input.review.projectVersionId ||
+          detail.outputArtifactId !== input.outputArtifactId ||
+          detail.outputManifestId !== input.outputManifestId ||
+          ('projectVersionId' in input && detail.projectVersionId !== input.projectVersionId) ||
+          (detail.renderablePlanHash
+            ? detail.renderableVariantId !== input.variantId
+            : input.recipeParameters.format !== input.variantId) ||
+          artifact.workspaceId !== input.workspaceId || artifact.status !== 'available' ||
+          manifest.workspaceId !== input.workspaceId || manifest.artifactId !== input.outputArtifactId ||
+          review.workspaceId !== input.workspaceId || review.projectId !== input.projectId ||
+          review.projectVersionId !== detail.projectVersionId ||
+          review.reviewHash !== input.review.reviewHash ||
+          review.proxyArtifactId !== input.outputArtifactId ||
+          review.proxyManifestId !== input.outputManifestId ||
+          typeof resource !== 'object' || resource === null || Array.isArray(resource) ||
+          (resource as Record<string, unknown>).type !== 'media-artifact' ||
+          (resource as Record<string, unknown>).id !== input.outputArtifactId ||
+          (resource as Record<string, unknown>).manifestId !== input.outputManifestId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Completed proxy replay identity did not converge')
+      }
+      assertSealedProxyRecipe(input, detail, artifact, manifest)
+      return null
+    }
+    if (!operation || operation.type !== 'project-proxy-render' ||
+        operation.workspaceId !== input.workspaceId || operation.projectId !== input.projectId ||
+        operation.targetType !== 'media-artifact' || operation.targetId !== input.outputArtifactId ||
+        operation.status !== 'running' || operation.phase !== 'persisting' ||
+        operation.leaseOwner !== input.lease.owner || operation.attempt !== input.lease.attempt ||
+        !operation.leaseExpiresAt || operation.leaseExpiresAt <= observedAt ||
+        !Number.isSafeInteger(input.lease.attempt) || input.lease.attempt < 1 ||
+        !Number.isFinite(new Date(input.lease.now).getTime())) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy completion lost its active worker lease')
+    }
+    return observedAt
+  }
+
+  private async completeProxyTransaction(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0] |
+      Parameters<ProjectProxyRenderRepository['attachCompletedSnapshotOutput']>[0],
+    observedAt: Date,
+  ): Promise<void> {
+    const detail = await transaction.v2ProjectProxyRenderOperation.findUnique({
+      where: { operationId: input.operationId },
+    })
+    if (!detail || detail.workspaceId !== input.workspaceId || detail.projectId !== input.projectId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy context changed before completion')
+    }
+    const reviewInput = {
+      id: `proxy-review-${createHash('sha256').update(input.operationId).digest('hex').slice(0, 32)}`,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      operationId: input.operationId,
+      review: input.review,
+      createdAt: input.createdAt,
+      lease: input.lease,
+    }
+    const reviews = new PrismaProxyReviewRepository(this.client)
+    if (detail.renderablePlanHash) {
+      if (!detail.renderablePlanId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot plan identity is missing')
+      }
+      await reviews.persistRenderableSnapshotInTransaction(transaction, reviewInput, {
+        planId: detail.renderablePlanId, planHash: detail.renderablePlanHash,
+      })
+    } else {
+      await reviews.persistGeneratedInTransaction(transaction, reviewInput)
+    }
+    await catalogApprovedOutputService({
+      repository: new PrismaAutomaticCatalogRepository(transaction),
+      rights: new PrismaAssetRightsRepository(transaction),
+      clock: () => observedAt,
+    })({ workspaceId: input.workspaceId, artifactId: input.outputArtifactId,
+      manifestId: input.outputManifestId })
+    const completedAt = await this.assertCompletionLease(transaction, input)
+    if (!completedAt) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy completed while finalizing')
+    if (detail.renderablePlanHash) {
+      const source = await this.readRenderableSnapshotSource({
+        workspaceId: input.workspaceId, projectId: input.projectId,
+        planId: detail.renderablePlanId ?? '', planHash: detail.renderablePlanHash,
+        format: detail.renderableFormat ?? '',
+      }, transaction, completedAt)
+      if (!source || source.sourceArtifactId !== detail.sourceArtifactId ||
+          source.sourceManifestId !== detail.sourceManifestId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable source changed before completion')
+      }
+    } else {
+      const project = await this.queryProject({ workspaceId: input.workspaceId,
+        projectId: input.projectId, projectVersionId: detail.projectVersionId }, transaction)
+      const source = hydrateSource(project, { sourceArtifactId: detail.sourceArtifactId,
+        sourceManifestId: detail.sourceManifestId }, completedAt)
+      if (!project || project.currentVersionId !== detail.projectVersionId ||
+          !source || source.editPlanSnapshotId !== detail.editPlanSnapshotId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy source changed before completion')
+      }
+    }
+    const completed = await new PrismaPublicOperationRepository(this.client).succeedProxyInTransaction(
+      transaction,
+      { operationId: input.operationId, leaseOwner: input.lease.owner,
+        attempt: input.lease.attempt, now: completedAt.toISOString() },
+    )
+    if (!completed) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy completion lost its lease')
+  }
+
   private async readReusableProxy(input: {
     workspaceId: string
     projectId: string
@@ -444,31 +590,10 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       select: { operationId: true, outputArtifactId: true, outputManifestId: true },
     })
     if (!previous) return null
-    const artifact = await this.client.v2MediaArtifact.findFirst({
-      where: {
-        id: previous.outputArtifactId,
-        workspaceId: input.workspaceId,
-        status: 'available',
-      },
-      include: {
-        manifests: { where: { id: previous.outputManifestId }, take: 1 },
-      },
-    })
-    const manifest = artifact?.manifests[0]
-    if (!artifact || !manifest || !Number.isSafeInteger(Number(artifact.byteSize))) return null
-    const manifestBody = parseRecord(manifest.manifestJson, 'reusable project proxy manifest')
-    const artifactBody = manifestBody.artifact
-    if (
-      typeof artifactBody !== 'object' || artifactBody === null || Array.isArray(artifactBody) ||
-      typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
-    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Reusable project proxy manifest is invalid')
-    return Object.freeze({
-      operationId: previous.operationId,
-      artifactId: artifact.id,
-      manifestId: manifest.id,
-      artifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,
-      sha256: artifact.sha256,
-      byteSize: Number(artifact.byteSize),
+    return readSafeReusableProxy(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId,
+      baseVersionId: input.baseVersionId, operationId: previous.operationId,
+      artifactId: previous.outputArtifactId, manifestId: previous.outputManifestId,
     })
   }
 
@@ -592,6 +717,8 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         await this.client.$transaction(async (transaction) => {
+      const observedAt = await this.assertCompletionLease(transaction, input)
+      if (!observedAt) return
       const [operation, artifact, manifest] = await Promise.all([
         transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
           operationId: input.operationId, workspaceId: input.workspaceId, projectId: input.projectId,
@@ -695,6 +822,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         },
         data: { status: 'succeeded' },
       })
+      await this.completeProxyTransaction(transaction, input, observedAt)
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
         return
       } catch (error) {
@@ -711,6 +839,8 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         await this.client.$transaction(async (transaction) => {
+      const observedAt = await this.assertCompletionLease(transaction, input)
+      if (!observedAt) return
       const [operation, artifact, manifest] = await Promise.all([
         transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
           operationId: input.operationId, workspaceId: input.workspaceId, projectId: input.projectId,
@@ -750,6 +880,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         },
         update: {},
       })
+      await this.completeProxyTransaction(transaction, input, observedAt)
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
         return
       } catch (error) {

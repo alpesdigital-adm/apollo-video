@@ -125,3 +125,37 @@ export class PrismaTemporalProducerRequestContextRepository implements Perceptio
     return row ? Object.freeze(row) : null
   }
 }
+
+/** Face diagnosis is deliberately narrower: one current unit-rate source clip, never a montage. */
+export class PrismaFaceProducerRequestContextRepository implements PerceptionProducerRequestContextRepository {
+  private readonly temporal: PrismaTemporalProducerRequestContextRepository
+
+  constructor(private readonly client: PrismaClient) {
+    this.temporal = new PrismaTemporalProducerRequestContextRepository(client)
+  }
+
+  async read(input: { workspaceId: string; projectId: string; projectVersionId: string;
+    sourceArtifactId: string }) {
+    const context = await this.temporal.read(input)
+    if (!context) return null
+    const snapshot = await this.client.v2ProjectSnapshot.findFirst({ where: {
+      id: context.editPlanSnapshotId, workspaceId: input.workspaceId,
+      projectId: input.projectId, kind: 'edit-plan', contentHash: context.editPlanSnapshotHash,
+    }, select: { contentJson: true } })
+    if (!snapshot) return null
+    let plan: Record<string, unknown>
+    try { plan = JSON.parse(snapshot.contentJson) as Record<string, unknown> }
+    catch { return null }
+    if (!plan || !Array.isArray(plan.videoTracks)) return null
+    const clips = plan.videoTracks.flatMap((track: unknown) =>
+      track && typeof track === 'object' && Array.isArray((track as Record<string, unknown>).clips)
+        ? (track as { clips: unknown[] }).clips : [])
+    return clips.length === 1 ? context : null
+  }
+
+  async readEnvelopeId(input: { workspaceId: string; projectId: string; operationId: string }) {
+    const row = await this.client.v2FaceProducerEnvelope.findFirst({ where: input,
+      select: { id: true, projectVersionId: true } })
+    return row ? Object.freeze(row) : null
+  }
+}

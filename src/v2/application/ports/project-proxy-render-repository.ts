@@ -4,7 +4,7 @@ import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic
 import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
 import type { SubtitlePresetId, SubtitlePresetSnapshot } from '../../domain/subtitle-system.ts'
-import type { ProxyQualityIssue } from '../render-workflow.ts'
+import type { ProxyQualityIssue, ProxyReview } from '../render-workflow.ts'
 
 /**
  * Upper bound on how many disjoint stale ranges a single partial proxy render may
@@ -121,6 +121,12 @@ export interface ProjectProxyOcrReceipt {
   editPlanHash: string
 }
 
+export interface ProjectProxyCompletionLease {
+  readonly owner: string
+  readonly attempt: number
+  readonly now: string
+}
+
 export interface ProjectProxyRenderRepository {
   readCurrentSource(input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectProxyRenderSource> | null>
   readImmutableSource(input: {
@@ -139,6 +145,8 @@ export interface ProjectProxyRenderRepository {
     format: string
   }): Promise<Readonly<ProjectProxyRenderSource> | null>
   attachCompletedOutput(input: {
+    lease: Readonly<ProjectProxyCompletionLease>
+    review: Readonly<ProxyReview>
     workspaceId: string
     operationId: string
     projectId: string
@@ -152,6 +160,8 @@ export interface ProjectProxyRenderRepository {
     ocrReceipt: Readonly<ProjectProxyOcrReceipt> | null
   }): Promise<void>
   attachCompletedSnapshotOutput(input: {
+    lease: Readonly<ProjectProxyCompletionLease>
+    review: Readonly<ProxyReview>
     workspaceId: string
     operationId: string
     projectId: string

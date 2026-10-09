@@ -44,7 +44,7 @@ function catalogId(workspaceId: string, artifactId: string, manifestId: string):
 }
 
 export class PrismaAutomaticCatalogRepository implements AutomaticCatalogRepository {
-  constructor(private readonly client: PrismaClient) {}
+  constructor(private readonly client: PrismaClient | Prisma.TransactionClient) {}
 
   async find(workspaceId: string, artifactId: string): Promise<AutomaticCatalogRecord | null> {
     const row = await this.client.v2AutomaticCatalogRecord.findFirst({ where: { workspaceId, artifactId }, orderBy: { createdAt: 'desc' } })
@@ -174,7 +174,7 @@ export class PrismaAutomaticCatalogRepository implements AutomaticCatalogReposit
     const recordHash = automaticCatalogRecordHash(recordData)
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        return await this.client.$transaction(async (transaction) => {
+        const execute = async (transaction: Prisma.TransactionClient) => {
           const [rights, existing] = await Promise.all([
             transaction.v2MediaArtifact.findFirst({ where: { id: input.candidate.artifactId, workspaceId: input.candidate.workspaceId }, select: { currentRightsSnapshotId: true, currentRightsSnapshot: { select: { snapshotHash: true } } } }),
             transaction.v2AutomaticCatalogRecord.findUnique({ where: { workspaceId_artifactId_manifestId: { workspaceId: input.candidate.workspaceId, artifactId: input.candidate.artifactId, manifestId: input.candidate.manifestId } } }),
@@ -226,8 +226,13 @@ export class PrismaAutomaticCatalogRepository implements AutomaticCatalogReposit
           const expectedHash = automaticCatalogRecordHash({ workspaceId: record.workspaceId, artifactId: record.artifactId, manifestId: record.manifestId, outputKind: record.outputKind, searchableKind: record.searchableKind, ...(record.segmentId ? { segmentId: record.segmentId } : {}), rightsSnapshotId: record.rightsSnapshotId, rightsSnapshotHash: record.rightsSnapshotHash, eligibilityEvidenceHash: record.eligibilityEvidenceHash, lineage: record.lineage })
           if (expectedHash !== row.recordHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored automatic catalog record hash is invalid')
           return Object.freeze({ record, replayed: existing !== null })
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+        }
+        return await ('$transaction' in this.client
+          ? this.client.$transaction(execute, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+          : execute(this.client))
       } catch (error) {
+        // The owner of an enclosing transaction retries the whole finalization.
+        if (!('$transaction' in this.client)) throw error
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
         if (attempt < 3 && (code === 'P2034' || code === 'P2002')) continue
         throw error

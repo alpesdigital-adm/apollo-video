@@ -746,6 +746,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Queues at most 300 observed frames of pinned local FFmpeg measurement for one current rights-approved unit-rate source; no hard-cut, motion semantic or face approval is inferred.',
     },
+    'apollo.projects.face-producer-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues sampled local YuNet candidate boxes for one current rights-approved source under a fixed worker deadline; the model failed quality gates and cannot approve face safety.',
+    },
     'apollo.projects.music-analyses.request': { impact: 'bounded', confirmation: 'none', reason: 'Queues local deterministic FFmpeg analysis only after current project, byte identity and music rights authority are bound.' },
     'apollo.projects.music-analyses.cancel': { impact: 'bounded', confirmation: 'none', reason: 'Stops one bounded analysis request and invalidates its worker lease without modifying source media.' },
     'apollo.projects.music-analyses.retry': { impact: 'bounded', confirmation: 'none', reason: 'Requeues one failed local analysis under a fixed three-attempt ceiling and preserves its source fingerprint.' },

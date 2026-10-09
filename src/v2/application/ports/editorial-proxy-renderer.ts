@@ -19,10 +19,13 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
  *
  * 1.10.0 binds each ColorPlan target to its exact resolved pipeline and materialized creative-LUT
  * intensity. Final recipe 1.5.0 carries the same target-scoped color lineage.
+ * Renderer 1.12.0 requires a v2 unknown-face plan for every rendered cue. Proxy recipe 1.13.0
+ * and final recipe 1.8.0 distinguish these suppressed pixels from older bottom-anchor output;
+ * an older proxy cannot be reused across the safety-policy change.
  */
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.11.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.12.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.7.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.12.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.13.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.8.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {

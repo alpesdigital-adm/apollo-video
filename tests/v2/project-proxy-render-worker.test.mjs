@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -19,7 +20,11 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaRenderablePlanSnapshotRepository } from '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
-import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
+import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
+import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
+import { renderElementMapHash } from '../../src/v2/domain/review-system.ts'
 import { SUBTITLE_ANCHOR_PERCEPTION_FIXTURES, subtitleAnchorDecisionFor } from '../../src/v2/domain/subtitle-anchor-plan.ts'
 import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { evaluateColorCriticService } from '../../src/v2/application/color-critic.ts'
@@ -149,6 +154,9 @@ function createOperations(immutableSource = source(), contextOverride = {}) {
     get operation() { return operation },
     loseLease() { denyHeartbeat = true },
     repository: {
+      async findById(workspaceId, operationId) {
+        return workspaceId === operation.workspaceId && operationId === operation.id ? record() : null
+      },
       async claimNext(input) {
         assert.equal(input.type, 'project-proxy-render')
         if (!['queued', 'retrying'].includes(operation.status)) return null
@@ -195,7 +203,7 @@ function source() {
       fps: 30,
       durationFrames: 300,
       movementPolicy: Object.freeze({ automaticZoom: false, protectedOpeningFrames: 120 }),
-      subtitleTracks: Object.freeze([{ cues: Object.freeze([
+      subtitleTracks: Object.freeze([{ presetId: 'kinetic', cues: Object.freeze([
         Object.freeze({ id: 'cue-1', startFrame: 0, endFrame: 60, text: 'Legenda segura', anchor: 'bottom' }),
       ]) }]),
       transitions: Object.freeze([]),
@@ -243,9 +251,9 @@ function multicamSource() {
 
 function dependencies(operations, overrides = {}) {
   const calls = { attached: 0, cleaned: 0, lutCleaned: 0, persisted: 0, mapped: 0, reviewed: 0, cataloged: 0 }
+  let attachedReview = null
   const artifactRoot = join(tmpdir(), 'apollo-project-proxy-worker-artifacts')
   const deps = {
-    async catalogOutput(input) { calls.cataloged += 1; assert.equal(input.artifactId, 'artifact-project-proxy-output') },
     operations: operations.repository,
     colorPipelines: { async read() { return { compilation: colorCompilation } } },
     colorPlans: { async readEffectiveForVersion() { return null } },
@@ -259,6 +267,16 @@ function dependencies(operations, overrides = {}) {
         calls.attached += 1
         assert.equal(input.variantId, '9:16')
         assert.equal(input.outputArtifactId, 'artifact-project-proxy-output')
+        assert.equal(input.review.proxyArtifactId, input.outputArtifactId)
+        attachedReview = input.review
+        assert.equal(input.review.spec.codec, 'h264')
+        assert.equal(input.review.spec.width, 540)
+        assert.equal(input.review.spec.height, 960)
+        assert.ok(input.review.timeToFirstProxyMs >= 120_000)
+        calls.reviewed += 1
+        calls.cataloged += 1
+        assert.ok(await operations.repository.succeed({ operationId: input.operationId,
+          leaseOwner: input.lease.owner, attempt: input.lease.attempt, now: input.lease.now }))
       },
     },
     artifacts: {
@@ -298,19 +316,6 @@ function dependencies(operations, overrides = {}) {
         return { record: {}, replayed: false }
       },
     },
-    proxyReviews: {
-      async persistGenerated(input) {
-        calls.reviewed += 1
-        assert.equal(input.review.proxyArtifactId, 'artifact-project-proxy-output')
-        assert.equal(input.review.status, 'ready-for-final')
-        assert.equal(input.review.finalAllowed, true)
-        assert.equal(input.review.spec.codec, 'h264')
-        assert.equal(input.review.spec.width, 540)
-        assert.equal(input.review.spec.height, 960)
-        assert.ok(input.review.timeToFirstProxyMs >= 120_000)
-        return { ...input.review, id: input.id }
-      },
-    },
     artifactRoot,
     sources: {
       async materialize(input) { return { path: join(artifactRoot, ...input.artifactKey.split('/')), sha256: input.sha256, byteSize: input.byteSize } },
@@ -321,18 +326,43 @@ function dependencies(operations, overrides = {}) {
     heartbeatIntervalMs: 1_000,
     ...overrides,
   }
-  return { calls, deps }
+  return { calls, deps, attachedReview: () => attachedReview }
 }
 
 test('project proxy worker materializes, attaches and settles the exact immutable output', async () => {
   const operations = createOperations()
-  const { calls, deps } = dependencies(operations)
+  const { calls, deps, attachedReview } = dependencies(operations)
   const outcome = await runNextProjectProxyRenderOperationService(deps)('worker-project-proxy-success')
 
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
   assert.deepEqual(operations.operation.result.resource, operations.operation.target)
+  assert.equal(attachedReview()?.status, 'blocked')
+  assert.equal(attachedReview()?.finalAllowed, false)
+  assert.ok(attachedReview()?.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
   assert.deepEqual(calls, { attached: 1, cleaned: 1, lutCleaned: 1, persisted: 1, mapped: 1, reviewed: 1, cataloged: 1 })
+})
+
+test('project proxy worker converges after an attachment commits but its response is lost', async () => {
+  const operations = createOperations()
+  const base = dependencies(operations)
+  const attach = base.deps.projects.attachCompletedOutput
+  let replayed = 0
+  base.deps.projects.attachCompletedOutput = async (input) => {
+    if (operations.operation.status === 'succeeded') {
+      replayed += 1
+      assert.equal(input.lease.attempt, operations.operation.attempt)
+      assert.equal(input.outputArtifactId, operations.operation.target.id)
+      return
+    }
+    await attach(input)
+    throw new Error('W65_CONTROLLED_RESPONSE_LOSS_AFTER_COMMIT')
+  }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-project-proxy-response-loss')
+  assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
+  assert.equal(replayed, 1)
+  assert.equal(base.calls.attached, 1)
+  assert.equal(operations.operation.status, 'succeeded')
 })
 
 test('snapshot proxy worker rehydrates the fenced plan and attaches without mutating project version state', async () => {
@@ -361,11 +391,47 @@ test('snapshot proxy worker rehydrates the fenced plan and attaches without muta
     async attachCompletedSnapshotOutput(input) {
       snapshotAttached += 1
       assert.equal(input.variantId, renderableSnapshot.variantId)
+      assert.ok(await operations.repository.succeed({ operationId: input.operationId,
+        leaseOwner: input.lease.owner, attempt: input.lease.attempt, now: input.lease.now }))
     },
   } })
+  let renderedInput = null
+  const render = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer,
+    async render(input) { renderedInput = input; return render(input) } }
   const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-snapshot-proxy-test')
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
   assert.equal(snapshotAttached, 1)
+  assert.equal(immutableSource.subtitleResolution, undefined)
+  assert.equal(renderedInput.subtitleCues.length, 1)
+  assert.equal(renderedInput.placementPlan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
+  const decision = subtitleAnchorDecisionFor(renderedInput.placementPlan.subtitleAnchorPlan, 'cue-1')
+  assert.equal(decision.suppressed, true)
+  assert.equal(decision.anchor, null)
+  assert.equal(decision.issues[0].code, 'FACE_PERCEPTION_UNAVAILABLE')
+  const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(tmpdir(), 'w65-no-anchor-guard'),
+    ffmpegPath: process.execPath })
+  let colorPasses = 0
+  renderer.colorProcessor.process = async () => { colorPasses += 1 }
+  await assert.rejects(renderer.render({ ...renderedInput, placementPlan: null }),
+    /complete unknown-face review plan/)
+  assert.equal(colorPasses, 0, 'missing facial decisions must fail before the FFmpeg color prepass')
+})
+
+test('an explicitly disabled subtitle resolution sends no cues to the renderer', async () => {
+  const immutableSource = Object.freeze({ ...source(), subtitleResolution: Object.freeze({ enabled: false }) })
+  const operations = createOperations(immutableSource)
+  const base = dependencies(operations)
+  base.deps.projects = { ...base.deps.projects,
+    async readImmutableSource() { return immutableSource } }
+  let renderedInput = null
+  const render = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer,
+    async render(input) { renderedInput = input; return render(input) } }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-disabled-subtitles')
+  assert.equal(outcome.status, 'succeeded')
+  assert.deepEqual(renderedInput.subtitleCues, [])
+  assert.equal(renderedInput.placementPlan.subtitleAnchorPlan, null)
 })
 
 test('project proxy worker does not attach an output after losing its lease', async () => {
@@ -409,7 +475,13 @@ test('T-FR-233 project proxy worker materializes only the persisted stale range 
   const base = dependencies(operations, {
     projects: {
       async readImmutableSource() { return immutableSource },
-      async attachCompletedOutput() { base.calls.attached += 1 },
+      async attachCompletedOutput(input) {
+        base.calls.attached += 1
+        base.calls.reviewed += 1
+        assert.equal(input.review.proxyArtifactId, input.outputArtifactId)
+        assert.ok(await operations.repository.succeed({ operationId: input.operationId,
+          leaseOwner: input.lease.owner, attempt: input.lease.attempt, now: input.lease.now }))
+      },
     },
     renderer: {
       async render(input) {
@@ -501,6 +573,61 @@ test('T-FR-233 render-free selection completes by exact proxy reuse without colo
   assert.deepEqual(persisted.operation.result.resource, persisted.operation.target)
   assert.equal(createdArtifactId, false)
   assert.equal(createdManifestId, false)
+})
+
+test('proxy reuse rejects output from the earlier bottom-anchor recipe', async () => {
+  const toolDigest = createHash('sha256')
+    .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex')
+  const manifestFor = (version, digest = toolDigest) => createMediaArtifactManifestV2({
+    artifactKey: 'editorial-proxies/reusable.mp4', artifactSha256: 'a'.repeat(64),
+    byteSize: 4096, mediaType: 'video', container: 'mp4',
+    recipe: { id: 'editorial-proxy', version, parameters: { inputHash: 'b'.repeat(64) } },
+    sources: [{ artifactKey: 'masters/source.mp4', sha256: 'c'.repeat(64),
+      role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest } } }],
+  })
+  let storedManifest = manifestFor(EDITORIAL_PROXY_RECIPE_VERSION)
+  let storedArtifactKey = 'editorial-proxies/reusable.mp4'
+  let storedMap = { schemaVersion: 'render-element-map/v1', proxyHash: 'a'.repeat(64),
+    fps: 30, durationFrames: 60, canvas: { width: 540, height: 960 }, elements: [] }
+  const repository = new PrismaProjectProxyRenderRepository({
+    v2ProjectProxyRenderOperation: { async findFirst() { return {
+      operationId: 'operation-reusable', outputArtifactId: 'artifact-reusable',
+      outputManifestId: 'manifest-reusable',
+    } } },
+    v2MediaArtifact: { async findFirst() { return {
+      id: 'artifact-reusable', workspaceId: 'workspace-reusable',
+      artifactKey: storedArtifactKey, sha256: 'a'.repeat(64), byteSize: 4096n,
+      manifests: [{ id: 'manifest-reusable', manifestHash: storedManifest.manifestHash,
+        workspaceId: 'workspace-reusable', artifactId: 'artifact-reusable',
+        manifestJson: stableSerialize(storedManifest) }],
+    } } },
+    v2RenderElementMap: { async findFirst() { return storedMap && {
+      id: '7fd27609-9633-47d5-9186-028639f56ed1', workspaceId: 'workspace-reusable',
+      projectId: 'project-reusable', projectVersionId: 'version-reusable',
+      proxyArtifactId: 'artifact-reusable', proxyHash: storedMap.proxyHash,
+      mapHash: renderElementMapHash(storedMap), schemaVersion: storedMap.schemaVersion,
+      fps: storedMap.fps, durationFrames: storedMap.durationFrames,
+      canvasWidth: storedMap.canvas.width, canvasHeight: storedMap.canvas.height,
+      elementsJson: '[]', createdAt: new Date('2026-10-09T00:00:00.000Z'),
+    } } },
+  })
+  const scope = { workspaceId: 'workspace-reusable', projectId: 'project-reusable',
+    baseVersionId: 'version-reusable' }
+  assert.equal((await repository.readReusableProxy(scope))?.artifactId, 'artifact-reusable')
+  storedManifest = manifestFor('1.12.0')
+  assert.equal(await repository.readReusableProxy(scope), null,
+    'an old bottom-anchor proxy cannot enter unchanged or partial range reuse')
+  storedManifest = manifestFor(EDITORIAL_PROXY_RECIPE_VERSION, 'f'.repeat(64))
+  assert.equal(await repository.readReusableProxy(scope), null,
+    'recipe version alone cannot replace the pinned renderer provenance')
+  storedManifest = manifestFor(EDITORIAL_PROXY_RECIPE_VERSION)
+  storedArtifactKey = 'editorial-proxies/substituted.mp4'
+  assert.equal(await repository.readReusableProxy(scope), null,
+    'a manifest cannot attest a different artifact storage key')
+  storedArtifactKey = 'editorial-proxies/reusable.mp4'
+  storedMap = null
+  assert.equal(await repository.readReusableProxy(scope), null,
+    'a missing content-addressed element map cannot prove the old pixels have no captions')
 })
 
 test('T-FR-233 render-free selection fails closed when its base proxy is unavailable', async () => {
@@ -654,6 +781,18 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   let projectCasCount = 0
   let projectCasAccepted = true
   const bindingsJson = stableSerialize(colorPipelineBindings)
+  const rendererDigest = createHash('sha256')
+    .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex')
+  const safeManifest = createMediaArtifactManifestV2({
+    artifactKey: 'editorial-proxies/base-selection.mp4', artifactSha256: 'a'.repeat(64),
+    byteSize: 4096, mediaType: 'video', container: 'mp4',
+    recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+      parameters: { inputHash: context.inputHash } },
+    sources: [{ artifactKey: 'masters/source.mp4', sha256: 'c'.repeat(64),
+      role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest: rendererDigest } } }],
+  })
+  const safeMap = { schemaVersion: 'render-element-map/v1', proxyHash: 'a'.repeat(64),
+    fps: 30, durationFrames: 60, canvas: { width: 540, height: 960 }, elements: [] }
   const repository = new PrismaPublicOperationRepository({
     async $transaction(callback) {
       return callback({
@@ -695,11 +834,26 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           },
         } } },
         v2ProjectProxyRenderOperation: {
-          async findFirst() { return { colorPipelineBindingsJson: bindingsJson } },
+          async findFirst() { return { operationId: context.reusedFromOperationId,
+            colorPipelineBindingsJson: bindingsJson } },
           async create({ data }) { detailData = data },
         },
-        v2MediaArtifact: { async findFirst() { return { id: context.outputArtifactId } } },
+        v2MediaArtifact: { async findFirst() { return {
+          id: context.outputArtifactId, workspaceId: operation.workspaceId,
+          artifactKey: 'editorial-proxies/base-selection.mp4', sha256: 'a'.repeat(64),
+          byteSize: 4096n, manifests: [{ id: context.outputManifestId,
+            workspaceId: operation.workspaceId, artifactId: context.outputArtifactId,
+            manifestHash: safeManifest.manifestHash, manifestJson: stableSerialize(safeManifest) }],
+        } } },
         v2MediaArtifactManifest: { async findFirst() { return { id: context.outputManifestId } } },
+        v2RenderElementMap: { async findFirst() { return {
+          workspaceId: operation.workspaceId, projectId: operation.projectId,
+          projectVersionId: baseVersionId, proxyArtifactId: context.outputArtifactId,
+          schemaVersion: safeMap.schemaVersion, proxyHash: safeMap.proxyHash,
+          fps: safeMap.fps, durationFrames: safeMap.durationFrames,
+          canvasWidth: safeMap.canvas.width, canvasHeight: safeMap.canvas.height,
+          elementsJson: '[]', mapHash: renderElementMapHash(safeMap),
+        } } },
       })
     },
   })
@@ -771,7 +925,13 @@ async function runWithStaleRanges(ranges) {
   const base = dependencies(operations, {
     projects: {
       async readImmutableSource() { return immutableSource },
-      async attachCompletedOutput() { base.calls.attached += 1 },
+      async attachCompletedOutput(input) {
+        base.calls.attached += 1
+        base.calls.reviewed += 1
+        assert.equal(input.review.proxyArtifactId, input.outputArtifactId)
+        assert.ok(await operations.repository.succeed({ operationId: input.operationId,
+          leaseOwner: input.lease.owner, attempt: input.lease.attempt, now: input.lease.now }))
+      },
     },
     renderer: {
       async render(input) {
@@ -866,6 +1026,17 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
         })
       },
     }
+    const attachWithFinalization = base.deps.projects.attachCompletedOutput
+    let review = null
+    base.deps.projects.attachCompletedOutput = async (input) => {
+      review = input.review
+      assert.equal(review.status, 'blocked')
+      assert.equal(review.finalAllowed, false)
+      assert.equal(review.formatQuality?.exportAllowed, false)
+      assert.ok(review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' &&
+        issue.severity === 'hard' && issue.evidenceRange.startFrame === 0 && issue.evidenceRange.endFrame === 60))
+      return attachWithFinalization(input)
+    }
     base.deps.perceptionTimelines = { async findLatest() { return persisted(projectVersionId) } }
     const originalRender = base.deps.renderer.render
     base.deps.renderer = {
@@ -873,18 +1044,6 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
       async render(input) { seen = input; return originalRender(input) },
     }
     let manifest = null
-    let review = null
-    base.deps.proxyReviews = {
-      async persistGenerated(input) {
-        review = input.review
-        assert.equal(review.status, 'blocked')
-        assert.equal(review.finalAllowed, false)
-        assert.equal(review.formatQuality?.exportAllowed, false)
-        assert.ok(review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' &&
-          issue.severity === 'hard' && issue.evidenceRange.startFrame === 0 && issue.evidenceRange.endFrame === 60))
-        return { ...review, id: input.id }
-      },
-    }
     base.deps.artifacts = {
       async persistOrReplay(input) {
         manifest = input.manifest
@@ -1006,13 +1165,12 @@ async function runWithCritic(options = {}) {
     colorPipelines: { async read() { return { compilation: criticCompilation } } },
     projects: {
       async readImmutableSource() { return immutableSource },
-      async attachCompletedOutput() { base.calls.attached += 1 },
-    },
-    proxyReviews: {
-      async persistGenerated(input) {
+      async attachCompletedOutput(input) {
+        base.calls.attached += 1
         base.calls.reviewed += 1
         review = input.review
-        return { ...input.review, id: input.id }
+        assert.ok(await operations.repository.succeed({ operationId: input.operationId,
+          leaseOwner: input.lease.owner, attempt: input.lease.attempt, now: input.lease.now }))
       },
     },
     colorCritic: runtime.colorCritic,
@@ -1031,8 +1189,9 @@ test('T-F4.014 a colour rejection reaches the proxy review as a hard issue and b
     'the session is located by the cameras this render cut to, not by which session was touched last')
   const hard = run.review.criticIssues.filter((issue) => issue.severity === 'hard')
   assert.ok(hard.length >= 1, `the rejection never reached the review: ${JSON.stringify(run.review.criticIssues)}`)
-  assert.ok(hard.every((issue) => issue.code === 'COLOR_CRITIC_REJECTED'))
-  assert.ok(hard.every((issue) => issue.evidenceIds.some((ref) => ref.startsWith('color-critic-report:'))))
+  assert.ok(hard.some((issue) => issue.code === 'COLOR_CRITIC_REJECTED' &&
+    issue.evidenceIds.some((ref) => ref.startsWith('color-critic-report:'))))
+  assert.ok(hard.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
   assert.equal(run.review.status, 'blocked')
   assert.equal(run.review.finalAllowed, false)
   // The critic's intermediates and crops are released with the renderer's.
@@ -1046,7 +1205,7 @@ test('T-F4.014 a critic that was wired and could not run leaves a warning, not a
   assert.equal(warnings.length, 1)
   assert.equal(warnings[0].severity, 'warning')
   assert.match(warnings[0].message, /was not judged/)
-  assert.equal(run.review.status, 'warning-ack-required')
+  assert.equal(run.review.status, 'blocked', 'the colour warning cannot override unknown facial safety')
   assert.equal(run.review.finalAllowed, false)
   assert.equal(run.runtime.calls.cleaned, 1, 'a failed evaluation still wrote intermediates')
 })
@@ -1060,7 +1219,8 @@ test('T-F4.014 a rejection whose report could not be written still blocks, and s
   assert.equal(run.runtime.rows.size, 0, 'nothing was stored')
   const hard = run.review.criticIssues.filter((issue) => issue.severity === 'hard')
   assert.ok(hard.length >= 1, `a lost row must not lose the rejection: ${JSON.stringify(run.review.criticIssues)}`)
-  assert.ok(hard.every((issue) => issue.code === 'COLOR_CRITIC_REJECTED'))
+  assert.ok(hard.some((issue) => issue.code === 'COLOR_CRITIC_REJECTED'))
+  assert.ok(hard.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
   const unrecorded = run.review.criticIssues.filter((issue) => issue.code === 'COLOR_CRITIC_REPORT_UNRECORDED')
   assert.equal(unrecorded.length, 1)
   assert.match(unrecorded[0].message, /could not be recorded/)
@@ -1073,9 +1233,10 @@ test('T-F4.014 a rejection whose report could not be written still blocks, and s
 test('T-F4.014 an approved colour adds nothing to the review and still releases the critic work', async () => {
   const run = await runWithCritic()
   assert.equal(run.outcome.status, 'succeeded')
-  assert.deepEqual(run.review.criticIssues, [])
-  assert.equal(run.review.status, 'ready-for-final')
-  assert.equal(run.review.finalAllowed, true)
+  assert.ok(run.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
+  assert.ok(run.review.criticIssues.every((issue) => issue.code !== 'COLOR_CRITIC_REJECTED'))
+  assert.equal(run.review.status, 'blocked')
+  assert.equal(run.review.finalAllowed, false)
   assert.equal(run.runtime.calls.cleaned, 1)
   assert.equal(run.runtime.rows.size, 1, 'the approving verdict is recorded too')
 })

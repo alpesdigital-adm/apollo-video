@@ -48,6 +48,7 @@ import { SpecializedSyntheticProviderResultCritic } from '../application/synthet
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { runNextPerceptionProducerOperationService } from '../application/run-perception-producer-worker.ts'
 import { runNextTemporalProducerOperationService } from '../application/run-temporal-producer-worker.ts'
+import { runNextFaceProducerOperationService } from '../application/run-face-producer-worker.ts'
 import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
@@ -493,11 +494,15 @@ import { PrismaProjectFinalExportRepository } from './prisma/project-final-expor
 import { PrismaExportMatrixRepository } from './prisma/export-matrix-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaPerceptionProducerRequestContextRepository,
-  PrismaTemporalProducerRequestContextRepository } from './prisma/perception-producer-request-context-repository.ts'
+  PrismaTemporalProducerRequestContextRepository,
+  PrismaFaceProducerRequestContextRepository } from './prisma/perception-producer-request-context-repository.ts'
 import { PrismaPerceptionProducerEnvelopeRepository } from './prisma/perception-producer-envelope-repository.ts'
 import { PrismaTemporalProducerEnvelopeRepository } from './prisma/temporal-producer-envelope-repository.ts'
+import { PrismaFaceProducerEnvelopeRepository } from './prisma/face-producer-envelope-repository.ts'
 import { TesseractOcrVideoAdapter } from './perception/tesseract-ocr-video-adapter.ts'
 import { FfmpegTemporalVideoAnalyzer } from './perception/ffmpeg-temporal-video-analyzer.ts'
+import { FfmpegYunetFaceVideoAnalyzer } from './perception/ffmpeg-yunet-face-video-analyzer.ts'
+import { YunetCpuFaceDetector } from './perception/yunet-cpu-face-detector.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { CompositeOperationTelemetry, StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
 import {
@@ -2029,12 +2034,56 @@ export function createTemporalProducerRequestContextRepository() {
   return new PrismaTemporalProducerRequestContextRepository(resolveV2Client())
 }
 
+export function createFaceProducerRequestContextRepository() {
+  return new PrismaFaceProducerRequestContextRepository(resolveV2Client())
+}
+
 export function createPerceptionProducerEnvelopeRepository() {
   return new PrismaPerceptionProducerEnvelopeRepository(resolveV2Client())
 }
 
 export function createTemporalProducerEnvelopeRepository() {
   return new PrismaTemporalProducerEnvelopeRepository(resolveV2Client())
+}
+
+export function createFaceProducerEnvelopeRepository() {
+  return new PrismaFaceProducerEnvelopeRepository(resolveV2Client())
+}
+
+/** Diagnostic-only YuNet/V5 composition; every binary and model is pinned at execution. */
+export function createFaceProducerWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for face diagnosis`)
+    return value
+  }
+  const detector = new YunetCpuFaceDetector({
+    pythonExecutable: required('APOLLO_V2_FACE_PYTHON_BIN'),
+    pythonExecutableSha256: required('APOLLO_V2_FACE_PYTHON_SHA256'),
+    pythonModulePath: required('APOLLO_V2_FACE_PYTHON_MODULE_DIR'),
+    modelPath: required('APOLLO_V2_FACE_MODEL_BIN'),
+    bridgePath: required('APOLLO_V2_FACE_BRIDGE_SCRIPT'),
+    bridgeSha256: required('APOLLO_V2_FACE_BRIDGE_SHA256'),
+    opencvBinaryPath: required('APOLLO_V2_FACE_OPENCV_BINARY'),
+    opencvBinarySha256: required('APOLLO_V2_FACE_OPENCV_SHA256'),
+    timeoutMs: 30_000,
+  })
+  return runNextFaceProducerOperationService({
+    repository: createFaceProducerEnvelopeRepository(),
+    materializer: createArtifactSourceMaterializer(environment),
+    analyzer: new FfmpegYunetFaceVideoAnalyzer({
+      ffmpeg: { path: required('APOLLO_V2_FACE_FFMPEG_BIN'),
+        sha256: required('APOLLO_V2_FACE_FFMPEG_SHA256') },
+      ffprobe: { path: required('APOLLO_V2_FACE_FFPROBE_BIN'),
+        sha256: required('APOLLO_V2_FACE_FFPROBE_SHA256') },
+      modelLicense: { path: required('APOLLO_V2_FACE_MODEL_LICENSE'),
+        sha256: required('APOLLO_V2_FACE_MODEL_LICENSE_SHA256') },
+    }, detector),
+    clock,
+  })
 }
 
 export function createTemporalProducerWorker(
@@ -2686,8 +2735,6 @@ export function createProjectProxyRenderWorker(
     sources: createArtifactSourceMaterializer(environment), clock,
     renderElementMaps: createRenderElementMapRepository(),
     perceptionTimelines: createPerceptionTimelineRepository(),
-    proxyReviews: createProxyReviewRepository(),
-    catalogOutput: createAutomaticCatalogService(clock),
     colorPipelines: createColorPipelineCompilationRepository(),
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),

@@ -40,3 +40,8 @@ export function parseTemporalProducerRunRequest(raw: unknown): Readonly<{
   return Object.freeze({ projectVersionId: value.projectVersionId,
     sourceArtifactId: value.sourceArtifactId })
 }
+
+/** Face requests accept source identity and cadence only; scores and approvals are server-owned. */
+export function parseFaceProducerRunRequest(raw: unknown): ReturnType<typeof parsePerceptionProducerRunRequest> {
+  return parsePerceptionProducerRunRequest(raw)
+}

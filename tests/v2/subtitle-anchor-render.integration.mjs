@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -11,6 +12,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { critiqueOutputFormat } from '../../src/v2/domain/format-quality-critic.ts'
+import { buildRenderElementMap } from '../../src/v2/domain/review-system.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
 import { createEditorialAudioTimelineHash } from '../../src/v2/domain/production-modes.ts'
 import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
@@ -25,10 +27,9 @@ import {
 /**
  * F1.036 / FR-173 visual goldens.
  *
- * Every assertion below is a measurement on the decoded pixels of an MP4 that the real
- * `FfmpegEditorialProxyRenderer` produced from a controlled geometry fixture. This checks only
- * the renderer and five-band solver mechanics; the W65 product worker requires unknown-face v2
- * plans and suppresses cues until independent facial evidence exists.
+ * The v1 geometry goldens below burn a controlled ASS fixture on a caption-free renderer base.
+ * They measure FFmpeg placement/font mechanics, not a product-authorized face-safe render.
+ * The W65 v2 case uses the real renderer and suppresses every cue with unknown facial coverage.
  */
 
 const require = createRequire(import.meta.url)
@@ -159,12 +160,54 @@ function planWith(perceptionTimeline, cues, elements = []) {
 }
 
 async function renderWith(context, plan, cues) {
-  return context.renderer.render({
+  const input = {
     operationId: `render-anchor-${plan.subtitleAnchorPlan.anchorPlanHash.slice(0, 12)}`,
     renderKind: 'proxy', sources: context.sources, lutPaths: {}, clips: context.clips,
     audioTimelineHash: context.audioTimelineHash, fps: FPS, format: FORMAT,
     subtitleCues: cues, placementPlan: plan,
+  }
+  if (plan.subtitleAnchorPlan.schemaVersion === 'subtitle-anchor-plan/v2') {
+    return context.renderer.render(input)
+  }
+  // The runtime rejects v1 cues. Keep the historic positive pixel goldens as a
+  // test-only ASS experiment over a real caption-free FFmpeg proxy.
+  const base = await context.renderer.render({ ...input, subtitleCues: [] })
+  const timestamp = (frame) => {
+    const cs = Math.round(frame / FPS * 100)
+    return `0:${String(Math.floor(cs / 6000)).padStart(2, '0')}:${String(Math.floor(cs % 6000 / 100)).padStart(2, '0')}.${String(cs % 100).padStart(2, '0')}`
+  }
+  const events = cues.flatMap((item) => {
+    const decision = subtitleAnchorDecisionFor(plan.subtitleAnchorPlan, item.id)
+    if (decision.suppressed) return []
+    const bounds = decision.bounds
+    const x = Math.round((bounds.x + bounds.width / 2) * CANVAS.width)
+    const y = Math.round((bounds.y + bounds.height / 2) * CANVAS.height)
+    return [`Dialogue: 0,${timestamp(item.startFrame)},${timestamp(item.endFrame)},Default,,0,0,0,,{\\an5\\pos(${x},${y})}${item.text}`]
   })
+  const ass = [
+    '[Script Info]', 'ScriptType: v4.00+', 'WrapStyle: 2',
+    `PlayResX: ${CANVAS.width}`, `PlayResY: ${CANVAS.height}`, '',
+    '[V4+ Styles]',
+    'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
+    'Style: Default,Arial,64,&H00FFFFFF,&H0038AFE1,&H00111111,&H78000000,-1,0,0,0,100,100,0,0,3,1,0,2,38,38,72,1',
+    '', '[Events]',
+    'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text',
+    ...events, '',
+  ].join('\n')
+  const assPath = join(context.root, 'controlled-geometry.ass')
+  const outputPath = join(context.root, 'controlled-geometry.mp4')
+  await writeFile(assPath, ass)
+  const escapedAssPath = assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
+  execFileSync(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y',
+    '-i', base.outputPath, '-vf', `subtitles=filename='${escapedAssPath}'`,
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-c:a', 'copy', outputPath], { windowsHide: true, timeout: 180_000 })
+  const sha256 = createHash('sha256').update(await readFile(outputPath)).digest('hex')
+  const renderElementMap = buildRenderElementMap({ proxyHash: sha256, fps: FPS,
+    durationFrames: DURATION_FRAMES, canvas: CANVAS,
+    source: { width: SOURCE_WIDTH, height: SOURCE_HEIGHT }, clips: context.clips,
+    subtitleCues: cues, subtitleAnchorPlan: plan.subtitleAnchorPlan })
+  return { ...base, outputPath, sha256, renderElementMap }
 }
 
 /** The map the renderer produced must describe the same rectangle the plan decided. */

@@ -169,6 +169,13 @@ export class YunetCpuFaceDetector {
       if (failure) throw new Error(failure)
       if (spawnError || child.pid === undefined) throw new Error('FACE_PROCESS_NOT_STARTED')
       if (exitCode !== 0) throw new Error('FACE_PROCESS_FAILED')
+      const after = await Promise.all([hashFile(this.config.modelPath),
+        hashFile(this.config.bridgePath), hashFile(this.config.pythonExecutable),
+        hashFile(this.config.opencvBinaryPath)])
+      if (after[0] !== modelSha256 || after[1] !== hashes.bridge ||
+          after[2] !== hashes.python || after[3] !== hashes.opencv) {
+        throw new Error('FACE_RUNTIME_HASH_MISMATCH')
+      }
       let response: unknown
       try { response = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new Error('FACE_RESPONSE_JSON_INVALID') }
       const frames = validateResponse(response, expectedFrames, input.sourceSha256, hashes)

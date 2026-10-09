@@ -41,6 +41,8 @@ model V2Workspace {
   perceptionProducerOperations           V2PerceptionProducerOperation[]
   temporalProducerEnvelopes              V2TemporalProducerEnvelope[]
   temporalProducerOperations             V2TemporalProducerOperation[]
+  faceProducerEnvelopes                  V2FaceProducerEnvelope[]
+  faceProducerOperations                 V2FaceProducerOperation[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
   mediaUploads                           V2MediaUpload[]
   mediaUploadAuditEntries                V2MediaUploadAuditEntry[]
@@ -784,6 +786,8 @@ model V2Project {
   perceptionProducerOperations           V2PerceptionProducerOperation[]
   temporalProducerEnvelopes              V2TemporalProducerEnvelope[]
   temporalProducerOperations             V2TemporalProducerOperation[]
+  faceProducerEnvelopes                  V2FaceProducerEnvelope[]
+  faceProducerOperations                 V2FaceProducerOperation[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
   syntheticAudioMasters                  V2SyntheticAudioMaster[]
   syntheticProductionRenderOperations   V2SyntheticProductionRenderOperation[]
@@ -910,6 +914,8 @@ model V2ProjectSnapshot {
   perceptionProducerOperations V2PerceptionProducerOperation[] @relation("PerceptionProducerOperationEditPlanSnapshot")
   temporalProducerEnvelopes V2TemporalProducerEnvelope[] @relation("TemporalProducerEditPlanSnapshot")
   temporalProducerOperations V2TemporalProducerOperation[] @relation("TemporalProducerOperationEditPlanSnapshot")
+  faceProducerEnvelopes V2FaceProducerEnvelope[] @relation("FaceProducerEditPlanSnapshot")
+  faceProducerOperations V2FaceProducerOperation[] @relation("FaceProducerOperationEditPlanSnapshot")
 
   @@unique([id, projectId, workspaceId])
   @@unique([projectId, kind, contentHash])
@@ -1018,6 +1024,8 @@ model V2ProjectVersion {
   perceptionProducerOperations     V2PerceptionProducerOperation[]
   temporalProducerEnvelopes        V2TemporalProducerEnvelope[]
   temporalProducerOperations       V2TemporalProducerOperation[]
+  faceProducerEnvelopes            V2FaceProducerEnvelope[]
+  faceProducerOperations           V2FaceProducerOperation[]
   renderablePlanSnapshots          V2RenderablePlanSnapshot[]          @relation("RenderablePlanSnapshotVersion")
   mvpCoreGatesAsPrimary            V2MvpCoreGate[]                     @relation("MvpCoreGatePrimaryVersion")
   mvpCoreGatesAsCompanion          V2MvpCoreGate[]                     @relation("MvpCoreGateCompanionVersion")
@@ -1747,6 +1755,8 @@ model V2MediaArtifact {
   perceptionProducerOperations V2PerceptionProducerOperation[]
   temporalProducerEnvelopes   V2TemporalProducerEnvelope[]
   temporalProducerOperations  V2TemporalProducerOperation[]
+  faceProducerEnvelopes       V2FaceProducerEnvelope[]
+  faceProducerOperations      V2FaceProducerOperation[]
   imageAnalysisThumbnails      V2ImageAnalysis[]                         @relation("ImageAnalysisThumbnailArtifact")
   imageAnalysisPreviews        V2ImageAnalysis[]                         @relation("ImageAnalysisPreviewArtifact")
   imageReuseSources            V2ImageReuseReference[]                   @relation("ImageReuseSourceArtifact")
@@ -2161,6 +2171,64 @@ model V2TemporalProducerOperation {
   @@unique([operationId, workspaceId])
   @@index([workspaceId, projectId, projectVersionId])
   @@map("temporal_producer_operations")
+}
+
+model V2FaceProducerEnvelope {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  operationId          String   @unique @db.VarChar(128)
+  operationAttempt     Int
+  operationFenceHash   String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceSha256         String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  timeMapHash          String   @db.Char(64)
+  detectorConfigHash   String   @db.Char(64)
+  contentJson          String   @db.Text
+  envelopeHash         String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation        V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("FaceProducerEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, sourceSha256])
+  @@map("face_producer_envelopes")
+}
+
+model V2FaceProducerOperation {
+  operationId          String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  projectVersionHash   String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceSha256         String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  sampleIntervalFrames Int
+  requestHash          String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation        V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("FaceProducerOperationEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectId, projectVersionId])
+  @@map("face_producer_operations")
 }
 
 model V2MediaArtifactLifecycleTransition {
@@ -3235,6 +3303,8 @@ model V2PublicOperation {
   perceptionProducerOperation      V2PerceptionProducerOperation?
   temporalProducerEnvelope         V2TemporalProducerEnvelope?
   temporalProducerOperation        V2TemporalProducerOperation?
+  faceProducerEnvelope             V2FaceProducerEnvelope?
+  faceProducerOperation            V2FaceProducerOperation?
   longFormIndexRunsAsOrigin        V2LongFormIndexRun[]                      @relation("LongFormIndexRunOriginOperation")
   hierarchicalRunsAsOrigin         V2HierarchicalProcessingRun[]             @relation("HierarchicalRunOriginOperation")
   speakerDiarizationRunsAsOrigin   V2SpeakerDiarizationRun[]                 @relation("SpeakerDiarizationRunOriginOperation")

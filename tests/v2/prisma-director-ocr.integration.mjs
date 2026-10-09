@@ -19,14 +19,17 @@ import { PERCEPTION_KINDS } from '../../src/v2/domain/perception-timeline.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
-import { advancePublicOperationPhase, createQueuedPublicOperation, startPublicOperationAttempt,
-  succeedPublicOperation } from '../../src/v2/domain/public-operation.ts'
+import { advancePublicOperationPhase, cancelPublicOperation, createQueuedPublicOperation, startPublicOperationAttempt,
+} from '../../src/v2/domain/public-operation.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
+import { calculateProxyReviewHash, evaluateRenderedProxy } from '../../src/v2/application/render-workflow.ts'
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
 import { PrismaPerceptionProducerRequestContextRepository } from '../../src/v2/infrastructure/prisma/perception-producer-request-context-repository.ts'
 import { PrismaPerceptionTimelineRepository } from '../../src/v2/infrastructure/prisma/perception-timeline-repository.ts'
-import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+import { hydratePublicOperationRecord, PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+import { PrismaAutomaticCatalogRepository } from '../../src/v2/infrastructure/prisma/automatic-catalog-repository.ts'
+import { externalActorAuditData } from '../../src/v2/infrastructure/prisma/external-actor-audit.ts'
 import { expectedOcrTimeline } from '../../src/v2/domain/projected-ocr-timeline.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
@@ -34,9 +37,9 @@ import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
-// Controlled repository-gate fixture. It models a completed PublicOperation using the
-// same domain transitions as the worker; no FFmpeg render is claimed by this row.
-function controlledSucceededProxyOperation({ id, workspaceId, projectId, clientId,
+// Controlled repository-gate fixture. It models a leased worker at the persistence
+// phase using domain transitions; no FFmpeg render is claimed by this row.
+function controlledRunningProxyOperation({ id, workspaceId, projectId, clientId,
   artifactId, manifestId, now }) {
   const at = (offset) => new Date(now + offset).toISOString()
   const queued = createQueuedPublicOperation({ id, workspaceId, projectId, clientId,
@@ -46,8 +49,118 @@ function controlledSucceededProxyOperation({ id, workspaceId, projectId, clientI
   const rendering = advancePublicOperationPhase(started, 'rendering', at(-2_500))
   const verifying = advancePublicOperationPhase(rendering, 'verifying', at(-2_000))
   const persisting = advancePublicOperationPhase(verifying, 'persisting', at(-1_500))
-  return succeedPublicOperation(persisting, at(-1_000))
+  return persisting
 }
+
+function assertControlledProxyRowHydrates(operationData, detailData, auditHash) {
+  const hydrated = hydratePublicOperationRecord({
+    ...operationData, projectProxyRender: { ...detailData,
+      renderablePlanHash: null, renderablePlanId: null, renderableOrigin: null,
+      renderableSourceId: null, renderableSourceHash: null,
+      renderableVariantId: null, renderableFormat: null,
+      reusedFromOperationId: null, reuseCommandId: null,
+      reuseImpactHash: null, reuseBaseVersionId: null },
+    artifactRender: null, mediaIngest: null, syntheticProductionRender: null,
+    projectFinalExport: null, sourceCleanupPlan: null, longFormIndexWorkflow: null,
+    projectDirectorRun: null, perceptionProducerOperation: null,
+    temporalProducerOperation: null, faceProducerOperation: null,
+    resultJson: null, errorCode: null, errorMessage: null, errorRetryable: null,
+    completedAt: null, nextAttemptAt: null, deadLetteredAt: null, traceId: null,
+    delegatedUserId: null, delegatedIdentityId: null, workspaceRole: null,
+  })
+  assert.equal(hydrated.context.kind, 'project-proxy-render')
+  assert.equal(hydrated.authenticationAudit.contextHash, auditHash)
+}
+
+// The controller holds the operation row until both independent clients are
+// observed waiting on PostgreSQL's lock. The short polling interval observes
+// the latch; it does not choose which contender wins. Every path releases the
+// transaction and disconnects the clients in the caller's finally block.
+async function raceAtOperationLock({ controller, operationId, attachName,
+  cancelName, attach, cancel }) {
+  let readyResolve, readyReject, waitingResolve, waitingReject, release
+  const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject })
+  const waiting = new Promise((resolve, reject) => { waitingResolve = resolve; waitingReject = reject })
+  const released = new Promise((resolve) => { release = resolve })
+  const latch = controller.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw`SELECT id FROM public_operations
+      WHERE id = ${operationId} FOR UPDATE`
+    assert.equal(locked.length, 1, 'the latch must lock its exact operation row')
+    readyResolve()
+    const deadline = Date.now() + 3_000
+    while (Date.now() < deadline) {
+      await tx.$queryRaw`SELECT pg_stat_clear_snapshot() IS NULL AS cleared`
+      const rows = await tx.$queryRaw`SELECT application_name AS name,
+        wait_event_type AS "waitType" FROM pg_stat_activity
+        WHERE application_name IN (${attachName}, ${cancelName})`
+      const blocked = new Set(rows.filter((row) => row.waitType === 'Lock').map((row) => row.name))
+      if (blocked.has(attachName) && blocked.has(cancelName)) {
+        waitingResolve()
+        await released
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    throw new Error('W65 lock latch did not observe both contenders before its deadline')
+  }, { timeout: 8_000 }).catch((error) => {
+    readyReject(error)
+    waitingReject(error)
+    throw error
+  })
+  try { await ready } catch (error) { await latch.catch(() => {}); throw error }
+  const attachResult = attach().then((value) => ({ status: 'fulfilled', value }),
+    (reason) => ({ status: 'rejected', reason }))
+  const cancelResult = cancel().then((value) => ({ status: 'fulfilled', value }),
+    (reason) => ({ status: 'rejected', reason }))
+  let latchError = null
+  try { await waiting } catch (error) { latchError = error } finally { release() }
+  try { await latch } catch (error) { latchError ??= error }
+  const [attached, canceled] = await Promise.all([attachResult, cancelResult])
+  if (latchError) throw latchError
+  return { attach: attached, cancel: canceled }
+}
+
+function isolatedDbEndpoint(suffix) {
+  const url = new URL(process.env.V2_DATABASE_URL)
+  const runName = url.searchParams.get('application_name')
+  assert.ok(runName?.startsWith('apollo-video-e2e-'),
+    'the race must remain inside the supervised E2E application_name')
+  const applicationName = `${runName}-${suffix}`
+  assert.ok(applicationName.length <= 63,
+    'PostgreSQL must retain the full run identity and race contender name')
+  url.searchParams.set('application_name', applicationName)
+  url.searchParams.set('connection_limit', '1')
+  return { url: url.toString(), applicationName }
+}
+
+test('W65 controlled proxy fixture hydrates through the production operation parser before PostgreSQL', () => {
+  const workspaceId = 'w65-offline-workspace', projectId = 'w65-offline-project'
+  const clientId = 'w65-offline-client', artifactId = 'w65-offline-artifact'
+  const operationId = 'w65-offline-operation', manifestId = 'w65-offline-manifest'
+  const operation = controlledRunningProxyOperation({ id: operationId, workspaceId,
+    projectId, clientId, artifactId, manifestId, now: Date.now() })
+  const audit = createApiAccessAuditContext({ clientId, workspaceId,
+    credentialId: 'w65-offline-credential', environment: 'production', authenticationKind: 'bearer' })
+  assertControlledProxyRowHydrates({ id: operationId, workspaceId, projectId, clientId,
+    ...externalActorAuditData(audit, workspaceId, clientId),
+    type: operation.type, status: operation.status, phase: operation.phase,
+    targetType: operation.target.type, targetId: operation.target.id,
+    progressCompleted: operation.progress.completed, progressTotal: operation.progress.total,
+    progressUnit: operation.progress.unit, cancelable: operation.cancelable,
+    retryable: operation.retryable, attempt: operation.attempt, maxAttempts: operation.maxAttempts,
+    createdAt: new Date(operation.createdAt), startedAt: new Date(operation.startedAt),
+    updatedAt: new Date(operation.updatedAt), leaseOwner: 'w65-offline-worker',
+    heartbeatAt: new Date(operation.updatedAt), leaseExpiresAt: new Date(Date.now() + 120_000),
+  }, { operationId, workspaceId, projectId, projectVersionId: 'w65-offline-version',
+    editPlanSnapshotId: 'w65-offline-edit', sourceArtifactId: 'w65-offline-source',
+    sourceManifestId: 'w65-offline-source-manifest', outputArtifactId: artifactId,
+    outputManifestId: manifestId, originalFileName: 'controlled.mp4',
+    inputHash: 'a'.repeat(64), colorPipelineBindingsJson: stableSerialize([{
+      sourceArtifactId: 'w65-offline-source', sourceManifestId: 'w65-offline-source-manifest',
+      compilationId: 'w65-offline-color', compilationHash: 'b'.repeat(64),
+      pipelineHash: 'c'.repeat(64),
+    }]) }, audit.contextHash)
+})
 
 async function stopRunner(child) {
   if (!child) return
@@ -78,10 +191,13 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       !process.env.APOLLO_OCR_FFPROBE || !process.env.APOLLO_OCR_TESSERACT ||
       !process.env.APOLLO_OCR_TESSDATA,
     timeout: 180_000 }, async () => {
-    const db = new PrismaClient()
+    const db = new PrismaClient({ datasources: { db: {
+      url: isolatedDbEndpoint('main').url,
+    } } })
     const root = await mkdtemp(join(tmpdir(), 'apollo-w64-director-ocr-'))
     let runner
     let cleanupScope
+    let primaryError
     try {
       const suffix = randomUUID().slice(0, 8)
       const workspaceId = `w61-admission-${suffix}`
@@ -291,7 +407,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       const outputManifestId = `w65-proxy-manifest-${suffix}`
       const proxyOperationId = `w65-proxy-operation-${suffix}`
       const inputHash = sha(Buffer.from(`w65-proxy-input-${suffix}`))
-      const recipeParameters = { ocrReceipt, inputHash,
+      const recipeParameters = { ocrReceipt, inputHash, format: '9:16',
         projectVersionId: directed.version.id, editPlanSnapshotId: directedEdit.id }
       const outputManifest = createMediaArtifactManifestV2({
         artifactKey: `${workspaceId}/controlled-proxy.mp4`, artifactSha256: 'd'.repeat(64),
@@ -310,13 +426,17 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
          recipeVersion: outputManifest.recipe.version,
          parametersHash: outputManifest.recipe.parametersHash,
          manifestJson: stableSerialize(outputManifest) } })
-       const controlledOperation = controlledSucceededProxyOperation({
+       const controlledOperation = controlledRunningProxyOperation({
          id: proxyOperationId, workspaceId, projectId: world.projectId,
          clientId: world.clientId, artifactId: outputArtifactId,
          manifestId: outputManifestId, now: Date.now(),
        })
-       await db.v2PublicOperation.create({ data: { id: proxyOperationId, workspaceId,
+       const proxyAudit = createApiAccessAuditContext({ clientId: world.clientId,
+         credentialId: `w65-proxy-credential-${suffix}`, workspaceId,
+         environment: 'production', authenticationKind: 'bearer' })
+       const operationData = { id: proxyOperationId, workspaceId,
          projectId: world.projectId, clientId: world.clientId,
+         ...externalActorAuditData(proxyAudit, workspaceId, world.clientId),
          type: controlledOperation.type, status: controlledOperation.status,
          phase: controlledOperation.phase,
          targetType: 'media-artifact', targetId: outputArtifactId,
@@ -325,22 +445,84 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
          progressUnit: controlledOperation.progress.unit,
          cancelable: controlledOperation.cancelable, retryable: controlledOperation.retryable,
          attempt: controlledOperation.attempt, maxAttempts: controlledOperation.maxAttempts,
-         resultJson: stableSerialize(controlledOperation.result),
+         resultJson: null,
          idempotencyKey: `w65-proxy-attach-${suffix}`, requestFingerprint: inputHash,
          createdAt: new Date(controlledOperation.createdAt),
          startedAt: new Date(controlledOperation.startedAt),
-         completedAt: new Date(controlledOperation.completedAt),
-         updatedAt: new Date(controlledOperation.updatedAt) } })
-      await db.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId,
+         completedAt: null,
+         leaseOwner: 'w65-controlled-worker',
+         leaseExpiresAt: new Date(Date.now() + 120_000),
+         heartbeatAt: new Date(controlledOperation.updatedAt),
+         updatedAt: new Date(controlledOperation.updatedAt) }
+      const detailData = { operationId: proxyOperationId,
         workspaceId, projectId: world.projectId, projectVersionId: directed.version.id,
         editPlanSnapshotId: directedEdit.id, sourceArtifactId: world.sourceId,
-        sourceManifestId: manifestId, colorPipelineBindingsJson: '[]', inputHash,
-        outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4' } })
+        sourceManifestId: manifestId, colorPipelineBindingsJson: stableSerialize([{
+          sourceArtifactId: world.sourceId, sourceManifestId: manifestId,
+          compilationId: `w65-controlled-color-${suffix}`,
+          compilationHash: 'b'.repeat(64), pipelineHash: 'c'.repeat(64),
+        }]), inputHash,
+        outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4' }
+      // Exercise the production row hydrator before opening PostgreSQL: the
+      // controlled fixture must satisfy the same actor/context/phase invariants.
+      assertControlledProxyRowHydrates(operationData, detailData, proxyAudit.contextHash)
+      await db.v2PublicOperation.create({ data: operationData })
+      await db.v2ProjectProxyRenderOperation.create({ data: detailData })
+      const reviewTime = new Date().toISOString()
+      const controlledReview = evaluateRenderedProxy({
+        projectVersionId: directed.version.id, proxyArtifactId: outputArtifactId,
+        proxyManifestId: outputManifestId, proxySha256: 'd'.repeat(64), inputHash,
+        format: '9:16', sourceSha256: world.sourceSha256,
+        editPlanHash: directedEdit.contentHash,
+        expectedDurationMs: Math.round(directed.run.editPlan.durationFrames /
+          directed.run.editPlan.fps * 1000),
+        uploadReceivedAt: new Date(Date.now() - 60_000).toISOString(),
+        renderCompletedAt: reviewTime,
+        probe: { width: 540, height: 960,
+          duration: directed.run.editPlan.durationFrames / directed.run.editPlan.fps,
+          fps: directed.run.editPlan.fps, codec: 'h264', container: 'mp4' },
+        map: { schemaVersion: 'render-element-map/v1', proxyHash: 'd'.repeat(64),
+          fps: directed.run.editPlan.fps,
+          durationFrames: directed.run.editPlan.durationFrames,
+          canvas: { width: 540, height: 960 }, elements: [] },
+        criticIssues: [{ code: 'FACE_PERCEPTION_UNAVAILABLE', severity: 'hard',
+          category: 'integrity', message: 'Controlled face evidence remains unknown',
+          correctable: false }],
+      })
+      assert.equal(controlledReview.status, 'blocked')
       const attach = (receipt = ocrReceipt, parameters = recipeParameters) => proxy.attachCompletedOutput({
         workspaceId, operationId: proxyOperationId, projectId: world.projectId,
         projectVersionId: directed.version.id, variantId: '9:16',
         outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4',
-        createdAt: new Date().toISOString(), recipeParameters: parameters, ocrReceipt: receipt })
+        createdAt: reviewTime, recipeParameters: parameters, ocrReceipt: receipt,
+        lease: { owner: 'w65-controlled-worker', attempt: controlledOperation.attempt,
+          now: new Date().toISOString() }, review: controlledReview })
+      const canceledId = `w65-canceled-proxy-${suffix}`
+      const canceledQueued = createQueuedPublicOperation({ id: canceledId, workspaceId,
+        projectId: world.projectId, clientId: world.clientId,
+        type: 'project-proxy-render', target: { type: 'media-artifact',
+          id: outputArtifactId, manifestId: outputManifestId },
+        createdAt: new Date(Date.now() - 2_000).toISOString() })
+      const canceled = cancelPublicOperation(canceledQueued, new Date(Date.now() - 1_000).toISOString())
+      await db.v2PublicOperation.create({ data: { id: canceledId, workspaceId,
+        projectId: world.projectId, clientId: world.clientId,
+        ...externalActorAuditData(proxyAudit, workspaceId, world.clientId),
+        type: canceled.type, status: canceled.status, phase: canceled.phase,
+        targetType: 'media-artifact', targetId: outputArtifactId,
+        progressCompleted: canceled.progress.completed, progressTotal: canceled.progress.total,
+        progressUnit: canceled.progress.unit, cancelable: canceled.cancelable,
+        retryable: canceled.retryable, attempt: canceled.attempt, maxAttempts: canceled.maxAttempts,
+        idempotencyKey: `w65-canceled-${suffix}`, requestFingerprint: sha(Buffer.from(canceledId)),
+        createdAt: new Date(canceled.createdAt), updatedAt: new Date(canceled.updatedAt),
+        completedAt: new Date(canceled.completedAt) } })
+      await assert.rejects(proxy.attachCompletedOutput({
+        workspaceId, operationId: canceledId, projectId: world.projectId,
+        projectVersionId: directed.version.id, variantId: '9:16', outputArtifactId,
+        outputManifestId, originalFileName: 'controlled-proxy.mp4', createdAt: reviewTime,
+        recipeParameters, ocrReceipt, lease: { owner: 'w65-controlled-worker',
+          attempt: controlledOperation.attempt, now: new Date().toISOString() },
+        review: controlledReview,
+      }), /lease/i)
       await assert.rejects(attach(null), /receipt|recipe/i)
       await assert.rejects(attach({ ...ocrReceipt, envelopeHash: '0'.repeat(64) }), /receipt|recipe/i)
       await db.v2MediaArtifact.update({ where: { id: outputArtifactId },
@@ -363,9 +545,54 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       await assert.rejects(attach(), /changed|evidence|time.map/i)
       await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
         data: { contentJson: directedEdit.contentJson, contentHash: directedEdit.contentHash } })
+      await db.v2PublicOperation.update({ where: { id: proxyOperationId },
+        data: { leaseOwner: 'w65-takeover-worker' } })
+      await assert.rejects(attach(), /lease/i)
+      await db.v2PublicOperation.update({ where: { id: proxyOperationId },
+        data: { leaseOwner: 'w65-controlled-worker' } })
+      await assert.rejects(proxy.attachCompletedOutput({
+        workspaceId, operationId: proxyOperationId, projectId: world.projectId,
+        projectVersionId: directed.version.id, variantId: '9:16',
+        outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4',
+        createdAt: reviewTime, recipeParameters, ocrReceipt,
+        lease: { owner: 'w65-controlled-worker', attempt: controlledOperation.attempt + 1,
+          now: new Date().toISOString() }, review: controlledReview,
+      }), /lease/i)
+      const inspect = PrismaAutomaticCatalogRepository.prototype.inspect
+      PrismaAutomaticCatalogRepository.prototype.inspect = async () => {
+        throw new Error('W65_CONTROLLED_CATALOG_ROLLBACK')
+      }
+      try { await assert.rejects(attach(), /W65_CONTROLLED_CATALOG_ROLLBACK/) }
+      finally { PrismaAutomaticCatalogRepository.prototype.inspect = inspect }
+      assert.equal(await db.v2ProjectMediaAsset.count({ where: { projectId: world.projectId,
+        artifactId: outputArtifactId, role: 'editorial-proxy' } }), 0)
+      assert.equal(await db.v2ProxyReview.count({ where: { operationId: proxyOperationId } }), 0)
+      assert.equal((await db.v2PublicOperation.findUniqueOrThrow({
+        where: { id: proxyOperationId } })).status, 'running')
       await attach()
       assert.ok(await db.v2ProjectMediaAsset.findFirst({ where: { workspaceId,
         projectId: world.projectId, artifactId: outputArtifactId, role: 'editorial-proxy' } }))
+      const finalized = await db.v2PublicOperation.findUniqueOrThrow({ where: { id: proxyOperationId } })
+      assert.equal(finalized.status, 'succeeded')
+      assert.equal(finalized.phase, 'completed')
+      assert.equal(finalized.attempt, controlledOperation.attempt)
+      assert.equal((await db.v2ProxyReview.findUniqueOrThrow({
+        where: { operationId: proxyOperationId } })).status, 'blocked')
+      const catalogBeforeReplay = await db.v2AutomaticCatalogRecord.count({
+        where: { workspaceId, artifactId: outputArtifactId } })
+      await attach()
+      assert.equal(await db.v2ProjectMediaAsset.count({ where: { projectId: world.projectId,
+        artifactId: outputArtifactId, role: 'editorial-proxy' } }), 1)
+      assert.equal(await db.v2AutomaticCatalogRecord.count({
+        where: { workspaceId, artifactId: outputArtifactId } }), catalogBeforeReplay)
+      await assert.rejects(proxy.attachCompletedOutput({
+        workspaceId, operationId: proxyOperationId, projectId: world.projectId,
+        projectVersionId: world.versionId, variantId: '9:16',
+        outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4',
+        createdAt: reviewTime, recipeParameters, ocrReceipt,
+        lease: { owner: 'w65-controlled-worker', attempt: controlledOperation.attempt,
+          now: new Date().toISOString() }, review: controlledReview,
+      }), /replay identity/i)
       const stored = await db.v2ProjectSnapshot.findUniqueOrThrow({
         where: { id: directed.command.payload.snapshotRefs.perception } })
       assert.equal(stored.schemaVersion, 2)
@@ -379,34 +606,186 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       assert.equal(row.projectVersionId, directed.version.parentVersionId)
       assert.equal((await director.readContext({ workspaceId, projectId: world.projectId })).ocrEnvelope,
         undefined, 'OCR from parent version must not flow to a later version')
-    } finally {
-      try { await stopRunner(runner) }
-      finally {
-        try {
-          if (cleanupScope) {
-            const audit = createApiAccessAuditContext({ clientId: cleanupScope.clientId,
-              credentialId: `w64-credential-${cleanupScope.suffix}`,
-              workspaceId: cleanupScope.workspaceId, environment: 'production',
-              authenticationKind: 'bearer' })
-            const pending = await db.v2PublicOperation.findMany({
-              where: { workspaceId: cleanupScope.workspaceId,
-                idempotencyKey: `w64-ocr-${cleanupScope.suffix}` },
-              select: { id: true, status: true } })
-            const operations = new PrismaPublicOperationRepository(db)
-            for (const row of pending) if (['queued', 'running', 'waiting', 'retrying'].includes(row.status)) {
-              await operations.cancel({ workspaceId: cleanupScope.workspaceId,
-                operationId: row.id, commandId: `w64-cleanup-${randomUUID()}`,
-                authenticationAudit: audit, canceledAt: new Date().toISOString() })
-            }
-          }
-        } finally {
-          await db.$disconnect()
-          const scratch = await realpath(root)
-          const parent = await realpath(tmpdir())
-          assert.ok(scratch.startsWith(join(parent, 'apollo-w64-director-ocr-')),
-            'Scratch path must stay within the owned temporary directory')
-          await rm(scratch, { recursive: true, force: true })
+
+      await stopRunner(runner)
+      runner = undefined
+
+      // Two real PostgreSQL clients contend for the same operation row after a
+      // controlled render checkpoint. A third one holds an explicit row lock
+      // until both contenders are observed waiting; no timer chooses a winner.
+      // This is a persistence race proof, not an additional rendered MP4.
+      const raceId = `w65-race-operation-${suffix}`
+      const raceArtifactId = `w65-race-output-${suffix}`
+      const raceManifestId = `w65-race-manifest-${suffix}`
+      const raceInputHash = sha(Buffer.from(raceId))
+      const raceKey = `${workspaceId}/controlled-race-proxy.mp4`
+      const raceParameters = { ...recipeParameters, inputHash: raceInputHash }
+      const raceManifest = createMediaArtifactManifestV2({
+        artifactKey: raceKey, artifactSha256: 'd'.repeat(64), byteSize: 1024,
+        mediaType: 'video', container: 'mp4',
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+          parameters: raceParameters },
+        sources: [{ artifactKey, sha256: world.sourceSha256, role: 'source-master',
+          execution: { tool: { id: 'ffmpeg', version: 'static', digest: 'f'.repeat(64) } } }],
+      })
+      await db.v2MediaArtifact.create({ data: { id: raceArtifactId, workspaceId,
+        artifactKey: raceKey, sha256: 'd'.repeat(64), byteSize: 1024n,
+        mediaType: 'video', container: 'mp4', status: 'available' } })
+      await db.v2MediaArtifactManifest.create({ data: { id: raceManifestId,
+        workspaceId, artifactId: raceArtifactId,
+        schemaVersion: raceManifest.schemaVersion,
+        manifestHash: raceManifest.manifestHash,
+        recipeId: raceManifest.recipe.id,
+        recipeVersion: raceManifest.recipe.version,
+        parametersHash: raceManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(raceManifest) } })
+      const raceOperation = controlledRunningProxyOperation({ id: raceId,
+        workspaceId, projectId: world.projectId, clientId: world.clientId,
+        artifactId: raceArtifactId, manifestId: raceManifestId, now: Date.now() })
+      const raceOperationData = { ...operationData, id: raceId, targetId: raceArtifactId,
+        status: raceOperation.status, phase: raceOperation.phase,
+        progressCompleted: raceOperation.progress.completed,
+        progressTotal: raceOperation.progress.total,
+        progressUnit: raceOperation.progress.unit,
+        cancelable: raceOperation.cancelable, retryable: raceOperation.retryable,
+        attempt: raceOperation.attempt, maxAttempts: raceOperation.maxAttempts,
+        idempotencyKey: `w65-race-${suffix}`, requestFingerprint: raceInputHash,
+        createdAt: new Date(raceOperation.createdAt),
+        startedAt: new Date(raceOperation.startedAt),
+        updatedAt: new Date(raceOperation.updatedAt),
+        heartbeatAt: new Date(raceOperation.updatedAt),
+        leaseExpiresAt: new Date(Date.now() + 120_000) }
+      const raceDetailData = { ...detailData, operationId: raceId,
+        inputHash: raceInputHash, outputArtifactId: raceArtifactId,
+        outputManifestId: raceManifestId, originalFileName: 'controlled-race-proxy.mp4' }
+      assertControlledProxyRowHydrates(raceOperationData, raceDetailData,
+        proxyAudit.contextHash)
+      await db.v2PublicOperation.create({ data: raceOperationData })
+      await db.v2ProjectProxyRenderOperation.create({ data: raceDetailData })
+      await db.v2Project.update({ where: { id: world.projectId },
+        data: { status: 'rendering-proxy' } })
+      const raceReviewBase = { ...controlledReview }
+      delete raceReviewBase.reviewHash
+      const raceReviewTime = new Date().toISOString()
+      const raceReviewBody = { ...raceReviewBase, proxyArtifactId: raceArtifactId,
+        proxyManifestId: raceManifestId, inputHash: raceInputHash,
+        renderCompletedAt: raceReviewTime,
+        timeToFirstProxyMs: Date.parse(raceReviewTime) -
+          Date.parse(raceReviewBase.uploadReceivedAt) }
+      const raceReview = Object.freeze({ ...raceReviewBody,
+        reviewHash: calculateProxyReviewHash(raceReviewBody) })
+      const attachEndpoint = isolatedDbEndpoint(`attach-${suffix}`)
+      const cancelEndpoint = isolatedDbEndpoint(`cancel-${suffix}`)
+      const latchEndpoint = isolatedDbEndpoint(`latch-${suffix}`)
+      const attachName = attachEndpoint.applicationName
+      const cancelName = cancelEndpoint.applicationName
+      const controller = new PrismaClient({ datasources: { db: {
+        url: latchEndpoint.url } } })
+      const attachClient = new PrismaClient({ datasources: { db: {
+        url: attachEndpoint.url } } })
+      const cancelClient = new PrismaClient({ datasources: { db: {
+        url: cancelEndpoint.url } } })
+      let raceFailure
+      try {
+        await Promise.all([controller.$connect(), attachClient.$connect(),
+          cancelClient.$connect()])
+        await Promise.all([controller.$queryRaw`SELECT 1`,
+          attachClient.$queryRaw`SELECT 1`, cancelClient.$queryRaw`SELECT 1`])
+        const raced = await raceAtOperationLock({ controller, operationId: raceId,
+          attachName, cancelName,
+          attach: () => new PrismaProjectProxyRenderRepository(attachClient).attachCompletedOutput({
+            workspaceId, operationId: raceId, projectId: world.projectId,
+            projectVersionId: directed.version.id, variantId: '9:16',
+            outputArtifactId: raceArtifactId, outputManifestId: raceManifestId,
+            originalFileName: 'controlled-race-proxy.mp4',
+            createdAt: raceReviewTime, recipeParameters: raceParameters,
+            ocrReceipt, lease: { owner: 'w65-controlled-worker',
+              attempt: raceOperation.attempt, now: new Date().toISOString() },
+            review: raceReview,
+          }),
+          cancel: () => new PrismaPublicOperationRepository(cancelClient).cancel({
+            workspaceId, operationId: raceId,
+            commandId: `w65-race-cancel-${suffix}`,
+            authenticationAudit: proxyAudit, canceledAt: new Date().toISOString(),
+          }),
+        })
+        const raceFinal = await db.v2PublicOperation.findUniqueOrThrow({
+          where: { id: raceId } })
+        const raceLinks = await db.v2ProjectMediaAsset.count({ where: {
+          workspaceId, projectId: world.projectId, artifactId: raceArtifactId,
+          role: 'editorial-proxy' } })
+        const raceReviews = await db.v2ProxyReview.count({ where: {
+          workspaceId, operationId: raceId } })
+        if (raceFinal.status === 'succeeded') {
+          assert.equal(raced.attach.status, 'fulfilled')
+          assert.equal(raced.cancel.status, 'fulfilled')
+          assert.equal(raced.cancel.value.operation.status, 'succeeded')
+          assert.equal(raceLinks, 1)
+          assert.equal(raceReviews, 1)
+        } else {
+          assert.equal(raceFinal.status, 'canceled')
+          assert.equal(raced.attach.status, 'rejected')
+          assert.equal(raced.cancel.status, 'fulfilled')
+          assert.equal(raced.cancel.value.operation.status, 'canceled')
+          assert.equal(raceLinks, 0)
+          assert.equal(raceReviews, 0)
         }
+        assert.ok(['succeeded', 'canceled'].includes(raceFinal.status))
+        console.log(`W65 controlled PostgreSQL attach/cancel winner: ${raceFinal.status}`)
+      } catch (error) {
+        raceFailure = error
+        throw error
+      } finally {
+        const disconnected = await Promise.allSettled([controller.$disconnect(),
+          attachClient.$disconnect(), cancelClient.$disconnect()])
+        const failures = disconnected.filter((result) => result.status === 'rejected')
+          .map((result) => result.reason)
+        if (failures.length) throw new AggregateError(
+          raceFailure ? [raceFailure, ...failures] : failures,
+          'W65 PostgreSQL race clients did not disconnect cleanly',
+        )
       }
+    } catch (error) { primaryError = error } finally {
+      const cleanupErrors = []
+      try { await stopRunner(runner) } catch (error) { cleanupErrors.push(error) }
+      if (cleanupScope) {
+        const activeStatuses = ['queued', 'running', 'waiting', 'retrying']
+        try {
+          const audit = createApiAccessAuditContext({ clientId: cleanupScope.clientId,
+            credentialId: `w64-credential-${cleanupScope.suffix}`,
+            workspaceId: cleanupScope.workspaceId, environment: 'production',
+            authenticationKind: 'bearer' })
+          const pending = await db.v2PublicOperation.findMany({
+            where: { workspaceId: cleanupScope.workspaceId,
+              status: { in: activeStatuses } },
+            select: { id: true, updatedAt: true, nextAttemptAt: true } })
+          const operations = new PrismaPublicOperationRepository(db)
+          for (const row of pending) {
+            const canceledAt = new Date(Math.max(Date.now(),
+              row.updatedAt.getTime(), row.nextAttemptAt?.getTime() ?? 0))
+            await operations.cancel({ workspaceId: cleanupScope.workspaceId,
+              operationId: row.id, commandId: `w64-cleanup-${randomUUID()}`,
+              authenticationAudit: audit, canceledAt: canceledAt.toISOString() })
+          }
+        } catch (error) { cleanupErrors.push(error) }
+        try {
+          assert.equal(await db.v2PublicOperation.count({ where: {
+            workspaceId: cleanupScope.workspaceId,
+            status: { in: activeStatuses },
+          } }), 0, 'the private workspace must have no active operations after cleanup')
+        } catch (error) { cleanupErrors.push(error) }
+      }
+      try { await db.$disconnect() } catch (error) { cleanupErrors.push(error) }
+      try {
+        const scratch = await realpath(root)
+        const parent = await realpath(tmpdir())
+        assert.ok(scratch.startsWith(join(parent, 'apollo-w64-director-ocr-')),
+          'Scratch path must stay within the owned temporary directory')
+        await rm(scratch, { recursive: true, force: true })
+      } catch (error) { cleanupErrors.push(error) }
+      if (primaryError && cleanupErrors.length) throw new AggregateError(
+        [primaryError, ...cleanupErrors], 'W65 test and cleanup both failed')
+      if (primaryError) throw primaryError
+      if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'W65 cleanup failed')
     }
   })

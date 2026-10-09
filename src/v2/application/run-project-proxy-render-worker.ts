@@ -19,7 +19,6 @@ import {
 } from './ports/editorial-proxy-renderer.ts'
 import type { PerceptionTimelineRepository } from './ports/perception-timeline-repository.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
-import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
@@ -56,7 +55,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   renderElementMaps: RenderElementMapRepository
   /** Reserved for a future server-verified producer; caller PUT timelines cannot authorize face safety. */
   perceptionTimelines: PerceptionTimelineRepository
-  proxyReviews: ProxyReviewRepository
   colorPipelines: ColorPipelineCompilationRepository
   colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
@@ -94,7 +92,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       cameraIds: readonly string[]
     }) => Promise<string | null>
   }>
-  catalogOutput: (target: { workspaceId: string; artifactId: string; manifestId: string }) => Promise<unknown>
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
@@ -168,6 +165,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         dependencies.operations.advancePhase({ ...command(clock()), phase }))
       if (!entered) { leaseLost = true; abortController.abort(); throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost') }
     }
+    let verifyCommittedCompletion: (() => Promise<void>) | undefined
     try {
       scheduleHeartbeat()
       const source = context.renderableSnapshot
@@ -211,7 +209,20 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
-      const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
+      const cueTracks = source.editPlan.subtitleTracks.filter(
+        (track) => 'cues' in track && track.cues.length > 0,
+      )
+      const subtitleResolution = source.subtitleResolution
+      // An explicitly disabled style must never leak the EditPlan's cues into FFmpeg.
+      // A renderable snapshot can have cues without a style resolution; its persisted
+      // track preset only reserves geometry for the unknown-face review plan.
+      const subtitleCues = subtitleResolution?.enabled === false
+        ? [] : cueTracks.flatMap((track) => track.cues)
+      const subtitlePresetId = subtitleResolution?.enabled
+        ? subtitleResolution.presetId : subtitleCues.length ? cueTracks[0]?.presetId : null
+      if (subtitleCues.length && (!subtitlePresetId || cueTracks.some(
+        (track) => track.presetId !== subtitlePresetId,
+      ))) throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cues require one consistent persisted preset')
       const ctaOverlays = (source.editPlan.overlayTracks ?? []).filter(
         (track) => 'kind' in track && track.kind === 'cta',
       )
@@ -225,7 +236,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       // ---- Materialized geometry, decided and validated before the renderer is asked to run ----
       const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
       const durationFrames = source.editPlan.durationFrames
-      const subtitleResolution = source.subtitleResolution
       if (subtitleResolution?.enabled) {
         // Fail closed on coherence between the identity the resolution carries and the tokens it
         // carries. When the resolution names the *current* registry, the tokens must still be the
@@ -259,9 +269,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         durationFrames,
         // The subtitle band is reserved from the *resolved* preset, so a CTA is never solved into
         // the rows the subtitles already own — and never from a rectangle authored here.
-        subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null,
+        subtitlePresetId,
         elements: placementElements,
-        ...(subtitleResolution?.enabled && subtitleCues.length ? {
+        ...(subtitleCues.length ? {
           subtitleAnchor: {
             fps: source.editPlan.fps,
             cues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
@@ -513,22 +523,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         map: rendered.renderElementMap,
         createdAt: clock().toISOString(),
       })
-      if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
-      const attachOutput = context.renderableSnapshot
-        ? dependencies.projects.attachCompletedSnapshotOutput({
-            workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
-            variantId: context.renderableSnapshot.variantId, outputArtifactId: context.outputArtifactId,
-             outputManifestId: context.outputManifestId, originalFileName: context.originalFileName,
-             createdAt: clock().toISOString(), recipeParameters, ocrReceipt: null,
-          })
-        : dependencies.projects.attachCompletedOutput({
-        workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
-        projectVersionId: context.projectVersionId, variantId: source.format,
-         outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
-         originalFileName: context.originalFileName, createdAt: clock().toISOString(),
-         recipeParameters, ocrReceipt,
-      })
-      await attachOutput
       const reviewedAt = clock().toISOString()
       const review = evaluateRenderedProxy({
         projectVersionId: context.projectVersionId,
@@ -566,23 +560,38 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           subtitleAnchorPlan: placementPlan.subtitleAnchorPlan,
         },
       })
-      await dependencies.proxyReviews.persistGenerated({
-        id: `proxy-review-${createHash('sha256').update(operation.id).digest('hex').slice(0, 32)}`,
-        workspaceId: operation.workspaceId,
-        projectId: context.projectId,
-        operationId: operation.id,
-        review,
-        createdAt: reviewedAt,
+      if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
+      const completion = {
         lease: { owner: leaseOwner, attempt, now: clock().toISOString() },
-      })
-      await dependencies.catalogOutput({ workspaceId: operation.workspaceId, artifactId: persisted.artifactId, manifestId: persisted.manifestId })
+        review,
+        workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
+        outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
+        originalFileName: context.originalFileName, createdAt: reviewedAt, recipeParameters,
+      }
+      verifyCommittedCompletion = () => (context.renderableSnapshot
+        ? dependencies.projects.attachCompletedSnapshotOutput({
+            ...completion, variantId: context.renderableSnapshot.variantId, ocrReceipt: null,
+          })
+        : dependencies.projects.attachCompletedOutput({
+            ...completion, projectVersionId: context.projectVersionId,
+            variantId: source.format, ocrReceipt,
+          }))
+      await verifyCommittedCompletion()
       stopHeartbeat()
-      const succeeded = await withLeaseCommand(() =>
-        dependencies.operations.succeed(command(clock())))
-      if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
     } catch (error) {
       stopHeartbeat()
+      // A connection can fail after the database committed. The repository's
+      // succeeded replay verifies the complete sealed identity without writes.
+      if (verifyCommittedCompletion) {
+        try {
+          const committed = await dependencies.operations.findById(operation.workspaceId, operation.id)
+          if (committed?.operation.status === 'succeeded') {
+            await verifyCommittedCompletion()
+            return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
+          }
+        } catch { /* Preserve the original failure for the normal lease path. */ }
+      }
       dependencies.onFailureDiagnostic?.(Object.freeze({ operationId: operation.id, error }))
       if (leaseLost) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       const failedAt = clock()
