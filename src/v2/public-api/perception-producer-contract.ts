@@ -24,3 +24,19 @@ export function parsePerceptionProducerRunRequest(raw: unknown): Readonly<{
     ...(value.sampleIntervalFrames !== undefined ? { sampleIntervalFrames: value.sampleIntervalFrames as number } : {}),
   })
 }
+
+export function parseTemporalProducerRunRequest(raw: unknown): Readonly<{
+  projectVersionId: string; sourceArtifactId: string
+}> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new DomainError('INVALID_ARGUMENT', 'Temporal producer request must be an object')
+  }
+  const value = raw as Record<string, unknown>
+  if (Object.keys(value).sort().join('|') !== 'projectVersionId|sourceArtifactId' ||
+      typeof value.projectVersionId !== 'string' || !ID.test(value.projectVersionId) ||
+      typeof value.sourceArtifactId !== 'string' || !ID.test(value.sourceArtifactId)) {
+    throw new DomainError('INVALID_ARGUMENT', 'Temporal producer request fields are invalid')
+  }
+  return Object.freeze({ projectVersionId: value.projectVersionId,
+    sourceArtifactId: value.sourceArtifactId })
+}

@@ -22,6 +22,7 @@ export const PUBLIC_OPERATION_TYPES = [
   'long-form-index',
   'project-director-run',
   'perception-producer-run',
+  'perception-temporal-run',
   'production-batch-item',
 ] as const
 export type PublicOperationType = (typeof PUBLIC_OPERATION_TYPES)[number]
@@ -59,6 +60,7 @@ export const PUBLIC_OPERATION_PHASES = [
   'probing',
   'normalizing',
   'transcribing',
+  'analyzing',
   'diarizing',
   'chunking',
   'indexing',
@@ -194,6 +196,13 @@ const PERCEPTION_PRODUCER_PHASE_ORDER = [
   'persisting',
 ] as const
 
+const TEMPORAL_PRODUCER_PHASE_ORDER = [
+  'probing',
+  'analyzing',
+  'verifying',
+  'persisting',
+] as const
+
 const PRODUCTION_BATCH_ITEM_PHASE_ORDER = [
   'planning',
   'materializing',
@@ -207,6 +216,7 @@ export type PublicOperationRunningPhase =
   | (typeof LONG_FORM_INDEX_PHASE_ORDER)[number]
   | (typeof DIRECTOR_PHASE_ORDER)[number]
   | (typeof PERCEPTION_PRODUCER_PHASE_ORDER)[number]
+  | (typeof TEMPORAL_PRODUCER_PHASE_ORDER)[number]
   | (typeof PRODUCTION_BATCH_ITEM_PHASE_ORDER)[number]
 
 function runningPhasesFor(type: PublicOperationType): readonly PublicOperationRunningPhase[] {
@@ -219,6 +229,7 @@ function runningPhasesFor(type: PublicOperationType): readonly PublicOperationRu
   }
   if (isDirectorOperation(type)) return DIRECTOR_PHASE_ORDER
   if (type === 'perception-producer-run') return PERCEPTION_PRODUCER_PHASE_ORDER
+  if (type === 'perception-temporal-run') return TEMPORAL_PRODUCER_PHASE_ORDER
   return INGEST_PHASE_ORDER
 }
 
@@ -437,6 +448,7 @@ export function assertPublicOperation(operation: PublicOperation): void {
   assertDomain(
     operation.type === 'project-director-run' ||
       operation.type === 'perception-producer-run' ||
+      operation.type === 'perception-temporal-run' ||
       operation.type === 'synthetic-production-render'
       ? operation.target.type === 'project-version'
       : operation.type === 'production-batch-item'

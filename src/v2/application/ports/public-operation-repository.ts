@@ -177,6 +177,18 @@ export interface PerceptionProducerRunOperationContext {
   requestHash: string
 }
 
+export interface TemporalProducerRunOperationContext {
+  kind: 'perception-temporal-run'
+  projectId: string
+  projectVersionId: string
+  projectVersionHash: string
+  sourceArtifactId: string
+  sourceSha256: string
+  editPlanSnapshotId: string
+  editPlanSnapshotHash: string
+  requestHash: string
+}
+
 export type PublicOperationContext =
   | ArtifactRenderOperationContext
   | SyntheticProductionRenderOperationContext
@@ -188,6 +200,7 @@ export type PublicOperationContext =
   | LongFormIndexOperationContext
   | ProjectDirectorRunOperationContext
   | PerceptionProducerRunOperationContext
+  | TemporalProducerRunOperationContext
 
 export type PublicOperationCreationContext = Exclude<
   PublicOperationContext,

@@ -1,4 +1,4 @@
-export interface PerceptionProducerRequestContext {
+export interface SourceVersionProducerRequestContext {
   projectId: string
   projectVersionId: string
   projectVersionHash: string
@@ -8,11 +8,14 @@ export interface PerceptionProducerRequestContext {
   editPlanSnapshotHash: string
 }
 
-export interface PerceptionProducerRequestContextRepository {
+export interface SourceVersionProducerRequestContextRepository {
   read(input: {
     workspaceId: string
     projectId: string
     projectVersionId: string
     sourceArtifactId: string
-  }): Promise<Readonly<PerceptionProducerRequestContext> | null>
+  }): Promise<Readonly<SourceVersionProducerRequestContext> | null>
 }
+
+export type PerceptionProducerRequestContext = SourceVersionProducerRequestContext
+export interface PerceptionProducerRequestContextRepository extends SourceVersionProducerRequestContextRepository {}

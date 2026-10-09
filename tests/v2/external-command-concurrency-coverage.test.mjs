@@ -411,6 +411,9 @@ const coverage = Object.freeze({
   'apollo.projects.perception-producer-operations.create': {
     mode: 'idempotent-create', evidence: 'W61 request fingerprint binds actor/key, current ProjectVersion, source SHA, edit-plan snapshot and sample interval; PostgreSQL concurrency proof remains pending',
   },
+  'apollo.projects.temporal-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W63 actor/key request fingerprint binds current ProjectVersion, source SHA and edit-plan snapshot; PostgreSQL operation admission and fenced claim are exercised',
+  },
   'apollo.media.segments.create': {
     mode: 'durable-covered', evidence: 'F1.013 serializable source/parent recheck, immutable content hash, database range constraints and natural replay identity',
   },

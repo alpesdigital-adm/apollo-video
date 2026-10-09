@@ -8600,6 +8600,25 @@ const searchableProjectSchemaV5 = {
   properties: { ...searchableProjectSchemaV4.properties, dashboard: projectDashboardSummarySchemaV3 },
 }
 
+const projectDashboardOperationSchemaV3 = {
+  ...projectDashboardOperationSchemaV2,
+  properties: {
+    ...projectDashboardOperationSchemaV2.properties,
+    type: { enum: [...projectDashboardOperationSchemaV2.properties.type.enum, 'perception-temporal-run'] },
+  },
+}
+const projectDashboardSummarySchemaV4 = {
+  ...projectDashboardSummarySchemaV3,
+  properties: {
+    ...projectDashboardSummarySchemaV3.properties,
+    latestOperation: { oneOf: [{ type: 'null' }, projectDashboardOperationSchemaV3] },
+  },
+}
+const searchableProjectSchemaV6 = {
+  ...searchableProjectSchemaV5,
+  properties: { ...searchableProjectSchemaV5.properties, dashboard: projectDashboardSummarySchemaV4 },
+}
+
 const projectAdministrationStateSchema = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'revision', 'archivedFromStatus'],
@@ -8969,6 +8988,137 @@ const publicOperationSchemaV13 = {
     type: { enum: [...publicOperationSchemaV12.properties.type.enum, 'perception-producer-run'] },
   },
 }
+
+const publicOperationSchemaV14 = {
+  ...publicOperationSchemaV13,
+  properties: {
+    ...publicOperationSchemaV13.properties,
+    type: { enum: [...publicOperationSchemaV13.properties.type.enum, 'perception-temporal-run'] },
+  },
+}
+
+const temporalClockSchema = { type: 'object', additionalProperties: false,
+  required: ['num', 'den'], properties: {
+    num: { type: 'integer', minimum: 1 }, den: { type: 'integer', minimum: 1 },
+  } }
+const temporalSourceRangeSchema = { type: 'object', additionalProperties: false,
+  required: ['startSourcePts', 'endSourcePts'], properties: {
+    startSourcePts: { type: 'integer', minimum: 0 }, endSourcePts: { type: 'integer', minimum: 1 },
+  } }
+const temporalTimelineRangeSchema = { type: 'object', additionalProperties: false,
+  required: ['startTimelineFrame', 'endTimelineFrame'], properties: {
+    startTimelineFrame: { type: 'integer', minimum: 0 }, endTimelineFrame: { type: 'integer', minimum: 1 },
+  } }
+const temporalShotPairSchema = { type: 'object', additionalProperties: false,
+  required: ['startSourcePts', 'endSourcePts', 'previousFrame', 'currentFrame',
+    'previousGridSha256', 'currentGridSha256', 'changeScore'], properties: {
+    ...temporalSourceRangeSchema.properties,
+    previousFrame: { type: 'integer', minimum: 0 }, currentFrame: { type: 'integer', minimum: 1 },
+    previousGridSha256: sha256Schema, currentGridSha256: sha256Schema,
+    changeScore: { type: 'number', minimum: 0, maximum: 1 },
+  } }
+const temporalMotionPairSchema = { type: 'object', additionalProperties: false,
+  required: ['startSourcePts', 'endSourcePts', 'previousFrame', 'currentFrame',
+    'vectorPxPerSecond', 'residualMeanAbsoluteLuma', 'ambiguity'], properties: {
+    ...temporalSourceRangeSchema.properties,
+    previousFrame: { type: 'integer', minimum: 0 }, currentFrame: { type: 'integer', minimum: 1 },
+    vectorPxPerSecond: { type: 'object', additionalProperties: false, required: ['x', 'y'],
+      properties: { x: { type: 'number' }, y: { type: 'number' } } },
+    residualMeanAbsoluteLuma: { type: 'number', minimum: 0, maximum: 1 },
+    ambiguity: { type: 'number', minimum: 0, maximum: 1 },
+  } }
+const temporalProjectedFields = { clipId: idSchema,
+  startTimelineFrame: { type: 'integer', minimum: 0 },
+  endTimelineFrame: { type: 'integer', minimum: 1 } }
+const temporalGapSchema = { type: 'object', additionalProperties: false,
+  required: ['startTimelineFrame', 'endTimelineFrame', 'reasonCode'], properties: {
+    ...temporalTimelineRangeSchema.properties,
+    reasonCode: { enum: ['NO_ADJACENT_OBSERVED_PAIR', 'UNRELIABLE_FRAME_DIFFERENCE'] },
+  } }
+const temporalEnvelopeSchema = { type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'authority', 'interpretation', 'faceSafety', 'id', 'workspaceId',
+    'projectId', 'projectVersionId', 'operationId', 'operationAttempt', 'operationFenceHash',
+    'sourceArtifactId', 'sourceSha256', 'editPlanSnapshotId', 'editPlanSnapshotHash',
+    'timelineDurationFrames', 'timelineFps', 'timeMap', 'timeMapHash', 'analysis',
+    'shot', 'motion', 'createdAt', 'envelopeHash'],
+  properties: {
+    schemaVersion: { const: 'temporal-producer-envelope/v1' },
+    authority: { const: 'server-produced' }, interpretation: { const: 'raw-measurements-only' },
+    faceSafety: { const: 'unknown' }, id: idSchema, workspaceId: idSchema, projectId: idSchema,
+    projectVersionId: idSchema, operationId: idSchema,
+    operationAttempt: { type: 'integer', minimum: 1 }, operationFenceHash: sha256Schema,
+    sourceArtifactId: idSchema, sourceSha256: sha256Schema, editPlanSnapshotId: idSchema,
+    editPlanSnapshotHash: sha256Schema, timelineDurationFrames: { type: 'integer', minimum: 2, maximum: 300 },
+    timelineFps: temporalClockSchema, timeMapHash: sha256Schema,
+    timeMap: { type: 'array', minItems: 1, maxItems: 300, items: {
+      type: 'object', additionalProperties: false,
+      required: ['clipId', 'sourceInFrame', 'sourceOutFrame', 'timelineInFrame', 'timelineOutFrame', 'rate'],
+      properties: { clipId: idSchema, sourceInFrame: { type: 'integer', minimum: 0 },
+        sourceOutFrame: { type: 'integer', minimum: 1, maximum: 300 },
+        timelineInFrame: { type: 'integer', minimum: 0 }, timelineOutFrame: { type: 'integer', minimum: 1 },
+        rate: { const: 1 } },
+    } },
+    analysis: { type: 'object', additionalProperties: false,
+      required: ['algorithmVersion', 'sourceSha256', 'sourceFps', 'sourceTimebase', 'sourceClock',
+        'sourceWidth', 'sourceHeight', 'observedFrameCount', 'assessedDomain', 'analysisGrid',
+        'runtime', 'shot', 'motion'],
+      properties: {
+        algorithmVersion: { const: 'visual-temporal-grid/v1' }, sourceSha256: sha256Schema,
+        sourceFps: temporalClockSchema, sourceTimebase: temporalClockSchema,
+        sourceClock: { const: 'constant-frame-rate' },
+        sourceWidth: { type: 'integer', minimum: 1, maximum: 1920 },
+        sourceHeight: { type: 'integer', minimum: 1, maximum: 1080 },
+        observedFrameCount: { type: 'integer', minimum: 2, maximum: 300 },
+        assessedDomain: temporalSourceRangeSchema,
+        analysisGrid: { type: 'object', additionalProperties: false, required: ['width', 'height'],
+          properties: { width: { const: 160 }, height: { const: 90 } } },
+        runtime: { type: 'object', additionalProperties: false,
+          required: ['ffmpegSha256', 'ffprobeSha256'], properties: {
+            ffmpegSha256: sha256Schema, ffprobeSha256: sha256Schema,
+          } },
+        shot: { type: 'object', additionalProperties: false,
+          required: ['observations', 'coverage', 'gaps'], properties: {
+            observations: { type: 'array', maxItems: 299, items: temporalShotPairSchema },
+            coverage: { type: 'array', maxItems: 300, items: temporalSourceRangeSchema },
+            gaps: { type: 'array', maxItems: 300, items: { type: 'object', additionalProperties: false,
+              required: ['startSourcePts', 'endSourcePts', 'reasonCode'], properties: {
+                ...temporalSourceRangeSchema.properties,
+                reasonCode: { const: 'UNRELIABLE_FRAME_DIFFERENCE' },
+              } } },
+          } },
+        motion: { type: 'object', additionalProperties: false,
+          required: ['observations', 'coverage', 'gaps'], properties: {
+            observations: { type: 'array', maxItems: 299, items: temporalMotionPairSchema },
+            coverage: { type: 'array', maxItems: 300, items: temporalSourceRangeSchema },
+            gaps: { type: 'array', maxItems: 300, items: { type: 'object', additionalProperties: false,
+              required: ['startSourcePts', 'endSourcePts', 'reasonCode'], properties: {
+                ...temporalSourceRangeSchema.properties,
+                reasonCode: { const: 'UNRELIABLE_FRAME_DIFFERENCE' },
+              } } },
+          } },
+      } },
+    shot: { type: 'object', additionalProperties: false,
+      required: ['observations', 'coverage', 'gaps'], properties: {
+        observations: { type: 'array', maxItems: 299, items: {
+          ...temporalShotPairSchema,
+          required: [...temporalShotPairSchema.required, 'clipId', 'startTimelineFrame', 'endTimelineFrame'],
+          properties: { ...temporalShotPairSchema.properties, ...temporalProjectedFields },
+        } },
+        coverage: { type: 'array', maxItems: 300, items: temporalTimelineRangeSchema },
+        gaps: { type: 'array', maxItems: 300, items: temporalGapSchema },
+      } },
+    motion: { type: 'object', additionalProperties: false,
+      required: ['observations', 'coverage', 'gaps'], properties: {
+        observations: { type: 'array', maxItems: 299, items: {
+          ...temporalMotionPairSchema,
+          required: [...temporalMotionPairSchema.required, 'clipId', 'startTimelineFrame', 'endTimelineFrame'],
+          properties: { ...temporalMotionPairSchema.properties, ...temporalProjectedFields },
+        } },
+        coverage: { type: 'array', maxItems: 300, items: temporalTimelineRangeSchema },
+        gaps: { type: 'array', maxItems: 300, items: temporalGapSchema },
+      } },
+    createdAt: dateTimeSchema, envelopeHash: sha256Schema,
+  } }
 
 const longFormStageNames = [
   'probe',
@@ -18136,6 +18286,10 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
       properties: { operation: publicOperationSchemaV13 } }),
   ),
+  defineSchema('public-operation-detail', 14, 'Public operation detail including raw temporal producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV14 } }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -18647,6 +18801,13 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
       } }),
   ),
+  defineSchema('project-list', 8, 'Project dashboard list including raw temporal operation status',
+    successSchema({ type: 'object', additionalProperties: false, required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchemaV6 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      } }),
+  ),
   defineSchema('rename-project-request', 1, 'Revision-fenced project rename command', {
     type: 'object', additionalProperties: false,
     required: ['baseRevision', 'name'],
@@ -18732,6 +18893,13 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     successSchema({ type: 'object', additionalProperties: false, required: ['operations'],
       properties: {
         operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV13 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      } }),
+  ),
+  defineSchema('public-operation-list', 13, 'Public operation list including raw temporal producer runs',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV14 },
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
       } }),
   ),
@@ -26034,6 +26202,24 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       allOf: [{ if: { type: 'object', required: ['operation'], properties: {
         operation: { type: 'object', required: ['status'], properties: { status: { const: 'succeeded' } } },
       } }, then: { type: 'object', required: ['envelope'], properties: { envelope: { type: 'object' } } } }],
+    }),
+  ),
+  defineSchema('temporal-producer-run-request', 1, 'Queue raw temporal measurement against a server-resolved source version', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'sourceArtifactId'],
+    properties: { projectVersionId: idSchema, sourceArtifactId: idSchema },
+  }),
+  defineSchema('temporal-producer-operation-created', 1, 'Queued or replayed temporal producer operation',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation', 'replayed'],
+      properties: { operation: publicOperationSchemaV14, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('temporal-producer-operation-read', 1, 'Temporal operation with raw sealed measurements only after success',
+    successSchema({ type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV14, envelope: temporalEnvelopeSchema },
+      allOf: [{ if: { type: 'object', required: ['operation'], properties: {
+        operation: { type: 'object', required: ['status'], properties: { status: { const: 'succeeded' } } },
+      } }, then: { type: 'object', required: ['envelope'],
+        properties: { envelope: temporalEnvelopeSchema } } }],
     }),
   ),
   defineSchema('create-synthetic-audio-master-request', 1, 'Approve immutable aligned audio before synthetic video generation', {

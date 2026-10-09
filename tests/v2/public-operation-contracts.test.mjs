@@ -104,7 +104,19 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 380)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 384)
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.perception-producer-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.perception-producer-operations.create',
+      'apollo.projects.perception-producer-operations.read',
+    ])
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.temporal-producer-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.temporal-producer-operations.create',
+      'apollo.projects.temporal-producer-operations.read',
+    ])
   const endpoints = new Set()
 
   for (const capability of FOUNDATION_CAPABILITIES) {

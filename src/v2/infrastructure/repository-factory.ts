@@ -47,6 +47,7 @@ import {
 import { SpecializedSyntheticProviderResultCritic } from '../application/synthetic-provider-critic.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { runNextPerceptionProducerOperationService } from '../application/run-perception-producer-worker.ts'
+import { runNextTemporalProducerOperationService } from '../application/run-temporal-producer-worker.ts'
 import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
@@ -491,9 +492,12 @@ import { PrismaProxyReviewRepository } from './prisma/proxy-review-repository.ts
 import { PrismaProjectFinalExportRepository } from './prisma/project-final-export-repository.ts'
 import { PrismaExportMatrixRepository } from './prisma/export-matrix-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
-import { PrismaPerceptionProducerRequestContextRepository } from './prisma/perception-producer-request-context-repository.ts'
+import { PrismaPerceptionProducerRequestContextRepository,
+  PrismaTemporalProducerRequestContextRepository } from './prisma/perception-producer-request-context-repository.ts'
 import { PrismaPerceptionProducerEnvelopeRepository } from './prisma/perception-producer-envelope-repository.ts'
+import { PrismaTemporalProducerEnvelopeRepository } from './prisma/temporal-producer-envelope-repository.ts'
 import { TesseractOcrVideoAdapter } from './perception/tesseract-ocr-video-adapter.ts'
+import { FfmpegTemporalVideoAnalyzer } from './perception/ffmpeg-temporal-video-analyzer.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { CompositeOperationTelemetry, StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
 import {
@@ -2021,8 +2025,38 @@ export function createPerceptionProducerRequestContextRepository() {
   return new PrismaPerceptionProducerRequestContextRepository(resolveV2Client())
 }
 
+export function createTemporalProducerRequestContextRepository() {
+  return new PrismaTemporalProducerRequestContextRepository(resolveV2Client())
+}
+
 export function createPerceptionProducerEnvelopeRepository() {
   return new PrismaPerceptionProducerEnvelopeRepository(resolveV2Client())
+}
+
+export function createTemporalProducerEnvelopeRepository() {
+  return new PrismaTemporalProducerEnvelopeRepository(resolveV2Client())
+}
+
+export function createTemporalProducerWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for temporal producer`)
+    return value
+  }
+  return runNextTemporalProducerOperationService({
+    repository: createTemporalProducerEnvelopeRepository(),
+    materializer: createArtifactSourceMaterializer(environment),
+    analyzer: new FfmpegTemporalVideoAnalyzer({
+      ffmpegBinary: required('APOLLO_V2_TEMPORAL_FFMPEG_BIN'),
+      ffprobeBinary: required('APOLLO_V2_TEMPORAL_FFPROBE_BIN'),
+      expectedFFmpegSha256: required('APOLLO_V2_TEMPORAL_FFMPEG_SHA256'),
+      expectedFFprobeSha256: required('APOLLO_V2_TEMPORAL_FFPROBE_SHA256'),
+    }),
+    clock,
+  })
 }
 
 export function createPerceptionProducerWorker(

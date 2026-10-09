@@ -88,6 +88,7 @@ export type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     longFormIndexWorkflow: true
     projectDirectorRun: { include: { directorRun: true } }
     perceptionProducerOperation: true
+    temporalProducerOperation: true
     syntheticProductionRender: true
   }
 }>
@@ -116,6 +117,7 @@ export const OPERATION_INCLUDE = {
   longFormIndexWorkflow: true,
   projectDirectorRun: { include: { directorRun: true } },
   perceptionProducerOperation: true,
+  temporalProducerOperation: true,
   syntheticProductionRender: true,
 } as const
 
@@ -403,6 +405,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
     : undefined
   const directorDetail = row.projectDirectorRun
   const perceptionDetail = row.perceptionProducerOperation
+  const temporalDetail = row.temporalProducerOperation
   const syntheticRenderDetail = row.syntheticProductionRender
   const syntheticRenderContext = syntheticRenderDetail
     ? hydrateSyntheticRenderContext(syntheticRenderDetail)
@@ -415,6 +418,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
   const isLongFormIndex = row.type === 'long-form-index'
   const isDirector = row.type === 'project-director-run'
   const isPerception = row.type === 'perception-producer-run'
+  const isTemporal = row.type === 'perception-temporal-run'
   const isSyntheticRender = row.type === 'synthetic-production-render'
   const projectColorBindings = projectRenderDetail
     ? parseColorPipelineBindings(projectRenderDetail.colorPipelineBindingsJson)
@@ -431,8 +435,8 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
     ? parseColorPipelineBindings(finalExportDetail.colorPipelineBindingsJson)
     : undefined
   if (
-    (((isDirector || isSyntheticRender || isPerception) && row.targetType !== 'project-version') ||
-      (!isDirector && !isSyntheticRender && !isPerception && row.targetType !== 'media-artifact')) ||
+    (((isDirector || isSyntheticRender || isPerception || isTemporal) && row.targetType !== 'project-version') ||
+      (!isDirector && !isSyntheticRender && !isPerception && !isTemporal && row.targetType !== 'media-artifact')) ||
     [
       isRender,
       isIngest,
@@ -442,10 +446,11 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
       isLongFormIndex,
       isDirector,
       isPerception,
+      isTemporal,
       isSyntheticRender,
     ].filter(Boolean).length !== 1
     || [renderDetail, ingestDetail, projectRenderDetail, finalExportDetail,
-      sourceCleanupDetail, longFormDetail, directorDetail, perceptionDetail, syntheticRenderDetail]
+      sourceCleanupDetail, longFormDetail, directorDetail, perceptionDetail, temporalDetail, syntheticRenderDetail]
       .filter(Boolean).length !== 1
   ) {
     throw new DomainError(
@@ -657,6 +662,19 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
   )) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored perception producer operation context is invalid', { operationId: row.id })
   }
+  if (isTemporal && (
+    !temporalDetail || row.projectId !== temporalDetail.projectId ||
+    row.workspaceId !== temporalDetail.workspaceId || row.targetId !== temporalDetail.projectVersionId ||
+    temporalDetail.operationId !== row.id ||
+    ![temporalDetail.projectId, temporalDetail.projectVersionId,
+      temporalDetail.sourceArtifactId, temporalDetail.editPlanSnapshotId]
+      .every((value) => ID_PATTERN.test(value)) ||
+    ![temporalDetail.projectVersionHash, temporalDetail.sourceSha256,
+      temporalDetail.editPlanSnapshotHash, temporalDetail.requestHash]
+      .every((value) => SHA256_PATTERN.test(value))
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored temporal producer operation context is invalid', { operationId: row.id })
+  }
   const outputFields = checkpointFields(renderDetail)
   const hasAnyCheckpoint = outputFields.some((value) => value !== null)
   if (
@@ -744,11 +762,12 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         : {}),
       cancelable: row.cancelable,
       retryable: row.retryable,
-      target: isDirector || isSyntheticRender || isPerception ? {
+      target: isDirector || isSyntheticRender || isPerception || isTemporal ? {
         type: 'project-version',
         id: isDirector
           ? directorDetail!.resultVersionId
-          : isPerception ? perceptionDetail!.projectVersionId : syntheticRenderContext!.projectVersionId,
+          : isPerception ? perceptionDetail!.projectVersionId
+            : isTemporal ? temporalDetail!.projectVersionId : syntheticRenderContext!.projectVersionId,
       } : {
         type: 'media-artifact',
         id: isRender
@@ -948,6 +967,16 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         editPlanSnapshotHash: perceptionDetail!.editPlanSnapshotHash,
         sampleIntervalFrames: perceptionDetail!.sampleIntervalFrames,
         requestHash: perceptionDetail!.requestHash,
+      } : isTemporal ? {
+        kind: 'perception-temporal-run' as const,
+        projectId: temporalDetail!.projectId,
+        projectVersionId: temporalDetail!.projectVersionId,
+        projectVersionHash: temporalDetail!.projectVersionHash,
+        sourceArtifactId: temporalDetail!.sourceArtifactId,
+        sourceSha256: temporalDetail!.sourceSha256,
+        editPlanSnapshotId: temporalDetail!.editPlanSnapshotId,
+        editPlanSnapshotHash: temporalDetail!.editPlanSnapshotHash,
+        requestHash: temporalDetail!.requestHash,
       } : {
         kind: 'project-director-run' as const,
         projectId: directorDetail!.projectId,
@@ -1408,6 +1437,10 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     const perceptionContext = input.operation.type === 'perception-producer-run' && input.context.kind === 'perception-producer-run'
       ? input.context
       : undefined
+    const temporalContext = input.operation.type === 'perception-temporal-run' && input.context.kind === 'perception-temporal-run'
+      ? input.context
+      : undefined
+    const producerContext = perceptionContext ?? temporalContext
     const mediaTarget = input.operation.target.type === 'media-artifact'
       ? input.operation.target
       : undefined
@@ -1418,8 +1451,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       ) ||
       !SHA256_PATTERN.test(input.requestFingerprint) ||
       (input.traceId !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(input.traceId)) ||
-      (!renderContext && !syntheticRenderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext && !directorContext && !perceptionContext) ||
-      (!directorContext && !syntheticRenderContext && !perceptionContext && !mediaTarget) ||
+      (!renderContext && !syntheticRenderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext && !directorContext && !producerContext) ||
+      (!directorContext && !syntheticRenderContext && !producerContext && !mediaTarget) ||
       (perceptionContext && (
         input.operation.projectId !== perceptionContext.projectId ||
         input.operation.target.type !== 'project-version' ||
@@ -1433,6 +1466,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         perceptionContext.requestHash !== input.requestFingerprint ||
         !Number.isSafeInteger(perceptionContext.sampleIntervalFrames) ||
         perceptionContext.sampleIntervalFrames < 1 || perceptionContext.sampleIntervalFrames > 300
+      )) ||
+      (temporalContext && (
+        input.operation.projectId !== temporalContext.projectId ||
+        input.operation.target.type !== 'project-version' ||
+        input.operation.target.id !== temporalContext.projectVersionId ||
+        ![temporalContext.projectId, temporalContext.projectVersionId,
+          temporalContext.sourceArtifactId, temporalContext.editPlanSnapshotId]
+          .every((value) => ID_PATTERN.test(value)) ||
+        ![temporalContext.projectVersionHash, temporalContext.sourceSha256,
+          temporalContext.editPlanSnapshotHash, temporalContext.requestHash]
+          .every((value) => SHA256_PATTERN.test(value)) ||
+        temporalContext.requestHash !== input.requestFingerprint
       )) ||
       (renderContext && (input.operation.projectId !== undefined || !SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (syntheticRenderContext && (
@@ -1945,34 +1990,34 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         }
 
-        if (perceptionContext) {
+        if (producerContext) {
           const [project, version, attached, artifact] = await Promise.all([
             transaction.v2Project.findFirst({
-              where: { id: perceptionContext.projectId, workspaceId: input.operation.workspaceId,
-                currentVersionId: perceptionContext.projectVersionId },
+              where: { id: producerContext.projectId, workspaceId: input.operation.workspaceId,
+                currentVersionId: producerContext.projectVersionId },
               select: { id: true, locale: true },
             }),
             transaction.v2ProjectVersion.findFirst({
-              where: { id: perceptionContext.projectVersionId, workspaceId: input.operation.workspaceId,
-                projectId: perceptionContext.projectId, baseHash: perceptionContext.projectVersionHash,
-                editPlanSnapshotId: perceptionContext.editPlanSnapshotId },
+              where: { id: producerContext.projectVersionId, workspaceId: input.operation.workspaceId,
+                projectId: producerContext.projectId, baseHash: producerContext.projectVersionHash,
+                editPlanSnapshotId: producerContext.editPlanSnapshotId },
               include: { editPlanSnapshot: true },
             }),
             transaction.v2ProjectMediaAsset.findFirst({
-              where: { workspaceId: input.operation.workspaceId, projectId: perceptionContext.projectId,
-                artifactId: perceptionContext.sourceArtifactId, role: 'source-master' },
+              where: { workspaceId: input.operation.workspaceId, projectId: producerContext.projectId,
+                artifactId: producerContext.sourceArtifactId, role: 'source-master' },
               select: { id: true },
             }),
             transaction.v2MediaArtifact.findFirst({
-              where: { id: perceptionContext.sourceArtifactId, workspaceId: input.operation.workspaceId,
-                sha256: perceptionContext.sourceSha256, status: 'available', mediaType: 'video' },
+              where: { id: producerContext.sourceArtifactId, workspaceId: input.operation.workspaceId,
+                sha256: producerContext.sourceSha256, status: 'available', mediaType: 'video' },
               include: { currentRightsSnapshot: true },
             }),
           ])
           if (!project || !version || !attached || !artifact ||
               version.editPlanSnapshot.kind !== 'edit-plan' ||
-              version.editPlanSnapshot.contentHash !== perceptionContext.editPlanSnapshotHash ||
-              !editPlanReferencesSource(version.editPlanSnapshot.contentJson, perceptionContext.sourceArtifactId) ||
+              version.editPlanSnapshot.contentHash !== producerContext.editPlanSnapshotHash ||
+              !editPlanReferencesSource(version.editPlanSnapshot.contentJson, producerContext.sourceArtifactId) ||
               evaluateAssetUse(artifact.currentRightsSnapshot
                 ? hydrateAssetRights(artifact.currentRightsSnapshot) : null,
               { workspaceId: input.operation.workspaceId, use: 'editorial-reuse',
@@ -2214,6 +2259,20 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               createdAt: new Date(input.operation.createdAt),
             },
           })
+        } else if (temporalContext) {
+          await transaction.v2TemporalProducerOperation.create({ data: {
+            operationId: input.operation.id,
+            workspaceId: input.operation.workspaceId,
+            projectId: temporalContext.projectId,
+            projectVersionId: temporalContext.projectVersionId,
+            projectVersionHash: temporalContext.projectVersionHash,
+            sourceArtifactId: temporalContext.sourceArtifactId,
+            sourceSha256: temporalContext.sourceSha256,
+            editPlanSnapshotId: temporalContext.editPlanSnapshotId,
+            editPlanSnapshotHash: temporalContext.editPlanSnapshotHash,
+            requestHash: temporalContext.requestHash,
+            createdAt: new Date(input.operation.createdAt),
+          } })
         } else {
           await transaction.v2ProjectDirectorOperation.create({
             data: {
