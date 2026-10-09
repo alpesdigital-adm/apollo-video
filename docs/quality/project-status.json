@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-09T01:44:49.031Z",
+  "updatedAt": "2026-10-09T01:59:15.477Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -31,7 +31,7 @@
       "state": "em-construcao",
       "construction": "in-progress",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
@@ -67,7 +67,7 @@
         }
       ],
       "nextAction": "Preservar o preflight reprovado, avaliar hipótese facial pré-registrada e integrar produtor validado sem autoridade fictícia.",
-      "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch."
+      "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch."
     },
     {
       "id": "W62",
@@ -152,7 +152,7 @@
       "state": "em-construcao",
       "construction": "in-progress",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
@@ -188,7 +188,7 @@
         }
       ],
       "nextAction": "Integrar consumo temporal no Diretor e ampliar janela do master com PTS original, preservando medidas brutas, gaps e limites; avaliação externa ainda necessária.",
-      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Adapter temporal isolado commit b17001ef: goldens controlados e negativos passaram após revisão de pins, threads, prazo/abort e domínio PTS; ainda sem labels externos ou persistência. Núcleo temporal: run w64-temporal-producer-4837afc0 passou 1/1 PG sem skips, bootstrap e constraints, claim/fence/rights/outbox; SHA 765b8f0d673578c207bc72b49fe938a1549eda7e68ffa3cc726d56296a80fa9. Postflight confirmou três PIDs encerrados, zero backends, cluster parado e scratch removido. Esta prova não executou adapter/runner/browser; API em construção. Runner temporal real PG passou 2/2 no run w64-temporal-video-6621d218. Primeiro HTTP falhou em assert 400 vs contrato 422; correção apenas no teste, runtime inalterado. Run focado w64-temporal-http-fixed-ee4db7ec passou 1/1 sem skips; SHA 2f45bd9c40a6ea37bc9069a67468ebdd1d3b8b1e9d7da0b6ed74e2eb03f587bc. Build, tsc, lint, contratos e baseline passaram (384 capabilities, 675 schemas, 743 exemplos; schemas históricos preservados)."
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Adapter temporal isolado commit b17001ef: goldens controlados e negativos passaram após revisão de pins, threads, prazo/abort e domínio PTS; ainda sem labels externos ou persistência. Núcleo temporal: run w64-temporal-producer-4837afc0 passou 1/1 PG sem skips, bootstrap e constraints, claim/fence/rights/outbox; SHA 765b8f0d673578c207bc72b49fe938a1549eda7e68ffa3cc726d56296a80fa9. Postflight confirmou três PIDs encerrados, zero backends, cluster parado e scratch removido. Esta prova não executou adapter/runner/browser; API em construção. Runner temporal real PG passou 2/2 no run w64-temporal-video-6621d218. Primeiro HTTP falhou em assert 400 vs contrato 422; correção apenas no teste, runtime inalterado. Run focado w64-temporal-http-fixed-ee4db7ec passou 1/1 sem skips; SHA 2f45bd9c40a6ea37bc9069a67468ebdd1d3b8b1e9d7da0b6ed74e2eb03f587bc. Build, tsc, lint, contratos e baseline passaram (384 capabilities, 675 schemas, 743 exemplos; schemas históricos preservados). Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch."
     },
     {
       "id": "W64",
@@ -240,7 +240,7 @@
           "type": "private",
           "ref": "Apollo/w61-70-20261008/w64-director-ocr-5002ece4/result.json",
           "scope": "Consumer OCR no Diretor: PG e runner real, negativos scoped/replay e cleanup. Não comprova percepção facial, HTTP do consumer ou decisões multimodais completas.",
-          "role": "controlled-e2e"
+          "role": "integration"
         }
       ],
       "nextAction": "Agregar evidências temporais e faciais validadas ao consumer com cobertura por modalidade, depois provar HTTP e decisões por variante.",
@@ -298,13 +298,13 @@
           "type": "private",
           "ref": "Apollo/w61-70-20261008/w64-reader-face-unknown-7965929d/result.json",
           "scope": "Leitura OCR real→Director→proxy com hash/rights/map/lineage negativos: 1/1, postflight limpo; não executa novo gate attach nem browser.",
-          "role": "controlled-e2e"
+          "role": "integration"
         },
         {
           "type": "private",
           "ref": "Apollo/w61-70-20261008/w65-ocr-receipt-current-af1a1c74/result.json",
           "scope": "PG 1/1 com OCR real e attachment current-version controlado: receipt/hash/rights/version/map negativos; postflight limpo. Não executa render, snapshot attachment nem prova corrida de lease.",
-          "role": "controlled-e2e"
+          "role": "integration"
         }
       ],
       "nextAction": "Finalizar publicação atômica com lease/cancel nos dois attachments; provar runtime e snapshot, depois browser/critic por variante.",
