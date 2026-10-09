@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-09T00:53:03.176Z",
+  "updatedAt": "2026-10-09T01:07:27.630Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -93,7 +93,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "YuNet 640 e hipótese fixa 960 reprovaram dev/calib: recall 77,6%/86,2% em ambos; negativos FP 10%/15% no 640 e 20%/25% no 960. Corpus auditado 180/180, holdout 60 imagens sem inferência. Alternativa com licença explícita de pesos, produtor integrado e validação de vídeo pendentes."
+          "text": "Candidatos YuNet 640/960 e Intel retail0004 reprovaram a rubrica pré-registrada de localização. Intel: recall 43/67 e 37/58, cinco imagens com caixas inválidas contadas como falha. Holdout 60 imagens fechado. Produtor facial diagnóstico unknown em construção; nenhum modelo aprovado para segurança facial."
         },
         {
           "kind": "validation",
@@ -126,10 +126,16 @@
           "ref": "docs/quality/w61-visual-preflight-v6-yunet960-result.md",
           "scope": "Hipótese pré-registrada 960: 120/120 avaliações sem falhas, recursos passaram e acurácia reprovou; holdout fechado.",
           "role": "controlled-e2e"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w61-visual-preflight-v7-openvino-retail0004-result.md",
+          "scope": "Modelo Intel licenciado explicitamente, hashes oficiais e runtime isolado: recursos passaram, acurácia reprovou; 59/60 dev e 56/60 calib, falhas preservadas.",
+          "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Verificar candidato alternativo com licença dos pesos e nova hipótese pré-registrada; manter holdout fechado e segurança facial unknown.",
-      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Scripts, adapter e protocolos de aquisição preservados em f8a6ba07. V1–V4 falhas históricas mantidas; V5 run2/run3 encerraram por prazo e retomaram mesmos critérios/IDs com PIDs terminais, sem tuning por modelo. CPU/RAM passaram no spike local; qualidade não. Os cinco negativos com FP foram inspecionados qualitativamente como animais (macaco, papagaio, dois gatos e cachorro), sem mudar GT/seleção. Relatório documenta limites do derivado CVDF, 36/180 comparações com original e ausência de GT de vídeo/olhos."
+      "nextAction": "Integrar produtor facial diagnóstico sem autoridade de segurança; estudar geometria de proteção separadamente sem alterar GT/IoU nem abrir holdout.",
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Scripts, adapter e protocolos de aquisição preservados em f8a6ba07. V1–V4 falhas históricas mantidas; V5 run2/run3 encerraram por prazo e retomaram mesmos critérios/IDs com PIDs terminais, sem tuning por modelo. CPU/RAM passaram no spike local; qualidade não. Os cinco negativos com FP foram inspecionados qualitativamente como animais (macaco, papagaio, dois gatos e cachorro), sem mudar GT/seleção. Relatório documenta limites do derivado CVDF, 36/180 comparações com original e ausência de GT de vídeo/olhos. Inspeção qualitativa pós-hoc de seis misses grandes revelou truncamento/oclusão/perfil e diferenças de extensão de caixas; resultado original permanece reprovado. Não confundir caixa ampla/IoU com segurança dos pixels. Nova pesquisa de modelos suspensa durante integração diagnóstica."
     },
     {
       "id": "W63",

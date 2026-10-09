@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-09T00:53:03.176Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
+Atualizado: 2026-10-09T01:07:27.630Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
 
-Snapshot JSON SHA256: `4e7412eeaf328eaec6f1a9ed4d940e8886f876c13e5d937fc5b419716337a46c` (somente project-status.json; TODO verificado separadamente).
+Snapshot JSON SHA256: `de91adc2d9fcc9c917cf51b0d2a8fbb216cf840370cb6acca70d882fedcf0dae` (somente project-status.json; TODO verificado separadamente).
 
 TODO auditado: **380/1259** caixas marcadas como concluídas no histórico. Isso não afirma implantação ou aceite atuais.
 
@@ -1392,7 +1392,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | ID | Escopo | Estado | Integração | Validação | Implantação | Aceite | Só aceite do owner? | Evidências | Próxima ação |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W61 | W61 — contrato de observação verificável e fail-closed | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Preservar o preflight reprovado, avaliar hipótese facial pré-registrada e integrar produtor validado sem autoridade fictícia. |
-| W62 | W62 — faces e regiões detectadas nos bytes | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), [controlled-e2e: docs/quality/w61-visual-preflight-v5-result.md](../docs/quality/w61-visual-preflight-v5-result.md), [controlled-e2e: docs/quality/w61-visual-preflight-v6-yunet960-result.md](../docs/quality/w61-visual-preflight-v6-yunet960-result.md) | Verificar candidato alternativo com licença dos pesos e nova hipótese pré-registrada; manter holdout fechado e segurança facial unknown. |
+| W62 | W62 — faces e regiões detectadas nos bytes | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), [controlled-e2e: docs/quality/w61-visual-preflight-v5-result.md](../docs/quality/w61-visual-preflight-v5-result.md), [controlled-e2e: docs/quality/w61-visual-preflight-v6-yunet960-result.md](../docs/quality/w61-visual-preflight-v6-yunet960-result.md), [controlled-e2e: docs/quality/w61-visual-preflight-v7-openvino-retail0004-result.md](../docs/quality/w61-visual-preflight-v7-openvino-retail0004-result.md) | Integrar produtor facial diagnóstico sem autoridade de segurança; estudar geometria de proteção separadamente sem alterar GT/IoU nem abrir holdout. |
 | W63 | W63 — OCR, shots e motion na mesma timeline | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Integrar consumo temporal no Diretor e ampliar janela do master com PTS original, preservando medidas brutas, gaps e limites; avaliação externa ainda necessária. |
 | W64 | W64 — Diretor usa percepção persistida com confiança | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Agregar evidências temporais e faciais validadas ao consumer com cobertura por modalidade, depois provar HTTP e decisões por variante. |
 | W65 | W65 — anchor e placement por variante | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
