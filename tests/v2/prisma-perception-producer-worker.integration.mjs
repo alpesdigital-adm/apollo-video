@@ -10,12 +10,14 @@ import { promisify } from 'node:util'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-control.ts'
+import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { enqueuePerceptionProducerRunService } from '../../src/v2/application/enqueue-perception-producer-run.ts'
 import { runNextPerceptionProducerOperationService } from '../../src/v2/application/run-perception-producer-worker.ts'
 import { PrismaPerceptionProducerRequestContextRepository } from '../../src/v2/infrastructure/prisma/perception-producer-request-context-repository.ts'
 import { PrismaPerceptionProducerEnvelopeRepository } from '../../src/v2/infrastructure/prisma/perception-producer-envelope-repository.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
+import { cancelProducerFenceCase, verifyProducerPublishFences } from './helpers/producer-publish-lock-race.mjs'
 
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -162,7 +164,7 @@ test('W61 PostgreSQL runner publishes a real OCR envelope without facial clearan
         artifactKey, sourceSha256: sha(bytes), byteSize: BigInt(bytes.length) })
       const auditContext = createExternalAuditContext({ clientId: world.clientId,
         credentialId: `w61-credential-${suffix}`, workspaceId, environment: 'production' })
-      const actor = { ...auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+      const actor = { ...auditContext, scopes: new Set(['projects:write', 'operations:cancel']), authenticationKind: 'bearer',
         clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
         clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext }
       const operations = new PrismaPublicOperationRepository(db)
@@ -224,6 +226,26 @@ test('W61 PostgreSQL runner publishes a real OCR envelope without facial clearan
       assert.equal((await evidence.read({ id: row.id, workspaceId,
         projectId: world.projectId, inputVersionId: world.versionId, now: new Date() })).envelopeHash,
       envelope.envelopeHash)
+      await stopRunner(child)
+      child = null
+      const { schemaVersion, authority, faceSafety, timeMapHash, envelopeHash,
+        ...baseEnvelope } = envelope
+      await verifyProducerPublishFences({ db, world, repository: evidence,
+        Repository: PrismaPerceptionProducerEnvelopeRepository,
+        label: 'ocr', phases: ['transcribing', 'verifying', 'persisting'],
+        envelopeModel: 'v2PerceptionProducerEnvelope',
+        enqueue: async (label) => (await enqueue({ workspaceId, projectId: world.projectId,
+          projectVersionId: world.versionId, sourceArtifactId: world.sourceId,
+          sampleIntervalFrames: 60, actor,
+          idempotencyKey: `w61-${label}-${suffix}` })).operation.id,
+        cloneEnvelope: ({ operationId: nextId, attempt, fenceHash }) =>
+          createPerceptionProducerEnvelope({ ...baseEnvelope,
+            id: `w61-envelope-${randomUUID()}`, operationId: nextId,
+            operationAttempt: attempt, operationFenceHash: fenceHash,
+            createdAt: new Date().toISOString() }),
+        cancel: (nextId, kind) => cancelProducerFenceCase(db, operations, world, actor,
+          nextId, `ocr-${kind}`),
+      })
     } finally {
       try { await stopRunner(child) }
       finally {

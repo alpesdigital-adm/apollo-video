@@ -10,24 +10,83 @@ import { promisify } from 'node:util'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 
-import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { Prisma, PrismaClient } from '../../generated/prisma-v2/index.js'
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { cancelPublicOperationService } from '../../src/v2/application/cancel-public-operation.ts'
 import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-control.ts'
 import { enqueueFaceProducerRunService } from '../../src/v2/application/enqueue-face-producer-run.ts'
 import { runNextFaceProducerOperationService } from '../../src/v2/application/run-face-producer-worker.ts'
 import { createFaceProducerEnvelope } from '../../src/v2/domain/face-producer-envelope.ts'
+import { evaluateAssetUse } from '../../src/v2/domain/asset-rights.ts'
+import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PrismaFaceProducerRequestContextRepository } from '../../src/v2/infrastructure/prisma/perception-producer-request-context-repository.ts'
 import { PrismaFaceProducerEnvelopeRepository } from '../../src/v2/infrastructure/prisma/face-producer-envelope-repository.ts'
+import { hydrateAssetRights } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import { publicSchemaDocument } from '../../src/v2/public-api/schema-examples.ts'
 import { presentPublicOperationV2, presentSuccess } from '../../src/v2/public-api/presenters.ts'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
+import { createFenceChildVersion, createFenceRightsSnapshot, expectProducerPublishErrorCode, fenceRightsRow, verifyProducerPublishFences } from './helpers/producer-publish-lock-race.mjs'
 
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const expectedVideoSha = 'a6f255543f3b135ab51a463865625a09b5672d352cc97ac175de11619a5f38f7'
+
+test('W61 publish-race fixture hydrates a real child and rights expiry offline', () => {
+  const world = { workspaceId: 'workspace-fence-offline', projectId: 'project-fence-offline',
+    sourceId: 'artifact-fence-offline' }
+  const child = createFenceChildVersion(world, { id: 'version-fence-base', sequence: 1,
+    briefSnapshotId: 'brief-fence', treatmentSnapshotId: null, storySnapshotId: null,
+    editPlanSnapshotId: 'edit-fence', policiesSnapshotId: 'policies-fence',
+    baseHash: 'b'.repeat(64), createdBy: 'owner-fence' }, 'c'.repeat(64),
+  'version-fence-child')
+  assert.equal(child.sequence, 2)
+  assert.equal(child.parentVersionId, 'version-fence-base')
+  assert.equal(child.commandId, undefined)
+  assert.equal(child.snapshotRefs.editPlan, 'edit-fence')
+  assert.notEqual(child.baseHash, 'b'.repeat(64))
+  const expiresAt = new Date(Date.now() + 10_000)
+  const rights = createFenceRightsSnapshot(world, 2, expiresAt, 'offline')
+  const renewed = createFenceRightsSnapshot(world, 3, null, 'offline-renewed')
+  assert.equal(hydrateAssetRights(fenceRightsRow(rights)).snapshotHash, rights.snapshotHash)
+  assert.equal(hydrateAssetRights(fenceRightsRow(renewed)).snapshotHash, renewed.snapshotHash)
+  assert.notEqual(rights.snapshotHash, renewed.snapshotHash)
+  assert.equal(renewed.sequence, 3)
+  const context = { workspaceId: world.workspaceId, use: 'editorial-reuse', locale: 'pt-BR' }
+  assert.equal(evaluateAssetUse(rights, context, new Date(expiresAt.getTime() - 1), 1).outcome,
+    'allow')
+  assert.deepEqual(evaluateAssetUse(rights, context, expiresAt).reasonCodes,
+    ['RIGHTS_EXPIRED'])
+  assert.equal(evaluateAssetUse(renewed, context, expiresAt).outcome, 'allow')
+})
+
+test('W61 publish-race matcher checks typed codes, not error prose', () => {
+  const serialization = new Prisma.PrismaClientKnownRequestError('serialization conflict', {
+    code: 'P2010', clientVersion: '5.22.0', meta: { code: '40001' },
+  })
+  const otherSqlState = new Prisma.PrismaClientKnownRequestError('other raw query error', {
+    code: 'P2010', clientVersion: '5.22.0', meta: { code: '23514' },
+  })
+  assert.equal(expectProducerPublishErrorCode(
+    new DomainError('PERSISTENCE_CONFLICT', 'Producer operation is not held by the current fenced attempt'),
+    ['PERSISTENCE_CONFLICT']), true)
+  assert.equal(expectProducerPublishErrorCode(
+    new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights expired'),
+    ['ASSET_RIGHTS_BLOCKED']), true)
+  assert.equal(expectProducerPublishErrorCode(
+    new DomainError('PERSISTENCE_CONFLICT', 'wrong cause'), ['ASSET_RIGHTS_BLOCKED'], false), false)
+  assert.equal(expectProducerPublishErrorCode(new Error('lease expired'),
+    ['PERSISTENCE_CONFLICT'], false), false)
+  assert.equal(expectProducerPublishErrorCode(serialization,
+    ['PERSISTENCE_CONFLICT', 'P2034', 'P2010:40001'], false), true)
+  assert.equal(expectProducerPublishErrorCode(otherSqlState,
+    ['PERSISTENCE_CONFLICT', 'P2034', 'P2010:40001'], false), false)
+  assert.equal(expectProducerPublishErrorCode(serialization,
+    ['PERSISTENCE_CONFLICT'], false), false)
+  assert.equal(expectProducerPublishErrorCode(serialization,
+    ['ASSET_RIGHTS_BLOCKED'], false), false)
+})
 
 function actorFor(world) {
   const auditContext = createExternalAuditContext({ clientId: world.clientId,
@@ -137,7 +196,7 @@ test('W61 PostgreSQL face claim blocks revoked rights before materialization',
         idempotencyKey: `face-revoked-${world.suffix}` })
       operationId = queued.operation.id
       await db.v2MediaArtifact.update({ where: { id: world.sourceId },
-        data: { currentRightsSnapshotId: null, rightsRevision: 2 } })
+        data: { currentRightsSnapshotId: null, rightsRevision: { increment: 1 } } })
       let materialized = 0, analyzed = 0
       const worker = runNextFaceProducerOperationService({
         repository: new PrismaFaceProducerEnvelopeRepository(db),
@@ -339,6 +398,21 @@ test('W61 PostgreSQL real YuNet runner stores only failed-gate sampled candidate
         cleanupOperations.push(next.operation.id)
         return next.operation.id
       }
+      const { schemaVersion, authority, coverage, faceSafety, identity, timeMapHash,
+        detectorConfigHash, envelopeHash, ...baseEnvelope } = envelope
+      await verifyProducerPublishFences({ db, world, repository,
+        Repository: PrismaFaceProducerEnvelopeRepository,
+        label: 'face', phases: ['analyzing', 'verifying', 'persisting'],
+        envelopeModel: 'v2FaceProducerEnvelope',
+        enqueue: queueAnother,
+        cloneEnvelope: ({ operationId, attempt, fenceHash }) =>
+          createFaceProducerEnvelope({ ...baseEnvelope,
+            id: `face-envelope-${randomUUID()}`, operationId,
+            operationAttempt: attempt, operationFenceHash: fenceHash,
+            createdAt: new Date().toISOString() }),
+        cancel: (operationId, kind) => settleCaseOperation(db, world, operationId,
+          `face-${kind}-cleanup`),
+      })
       const leaseOwner = `face-fence-${world.suffix}`
       const fencedId = await queueAnother('cancel-fence')
       const claim = await repository.claimNext({ leaseOwner, now: new Date(), leaseMs: 120_000 })
@@ -347,8 +421,6 @@ test('W61 PostgreSQL real YuNet runner stores only failed-gate sampled candidate
         assert.equal(await repository.advancePhase({ operationId: fencedId, attempt: claim.attempt,
           leaseOwner, now: new Date(), phase }), true)
       }
-      const { schemaVersion, authority, coverage, faceSafety, identity, timeMapHash,
-        detectorConfigHash, envelopeHash, ...baseEnvelope } = envelope
       const fencedEnvelope = createFaceProducerEnvelope({ ...baseEnvelope,
         id: `face-envelope-${randomUUID()}`, operationId: fencedId,
         operationAttempt: claim.attempt,
@@ -418,7 +490,7 @@ test('W61 PostgreSQL real YuNet runner stores only failed-gate sampled candidate
       await db.v2FaceProducerEnvelope.update({ where: { id: row.id },
         data: { envelopeHash: envelope.envelopeHash } })
       await db.v2MediaArtifact.update({ where: { id: world.sourceId },
-        data: { currentRightsSnapshotId: null, rightsRevision: 2 } })
+        data: { currentRightsSnapshotId: null, rightsRevision: { increment: 1 } } })
       await assert.rejects(repository.read(input), /rights/i)
       assert.ok((await db.v2PublicEventOutbox.findMany({ where: {
         workspaceId: world.workspaceId, resourceId: queued.operation.id } }))

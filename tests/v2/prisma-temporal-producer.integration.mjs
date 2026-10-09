@@ -13,6 +13,7 @@ import addFormats from 'ajv-formats'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-control.ts'
+import { createTemporalProducerEnvelope } from '../../src/v2/domain/temporal-producer-envelope.ts'
 import { createApiClientService } from '../../src/v2/application/create-api-client.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createQueuedPublicOperation } from '../../src/v2/domain/public-operation.ts'
@@ -28,6 +29,7 @@ import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import { publicSchemaDocument } from '../../src/v2/public-api/schema-examples.ts'
 import { presentPublicOperationV2, presentSuccess } from '../../src/v2/public-api/presenters.ts'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
+import { cancelProducerFenceCase, verifyProducerPublishFences, writeFenceRightsSnapshot } from './helpers/producer-publish-lock-race.mjs'
 
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -110,7 +112,7 @@ test('W63 PostgreSQL runner publishes real pinned FFmpeg measurements with scope
       const auditContext = createExternalAuditContext({ clientId: world.clientId,
         credentialId: `w63-credential-${suffix}`, workspaceId,
         environment: 'production' })
-      const actor = { ...auditContext, scopes: new Set(['projects:write']),
+      const actor = { ...auditContext, scopes: new Set(['projects:write', 'operations:cancel']),
         authenticationKind: 'bearer', clientKillSwitchEngaged: false,
         workspaceKillSwitchEngaged: false, clientAccessStatus: 'active',
         workspaceAccessStatus: 'active', auditContext }
@@ -182,9 +184,31 @@ test('W63 PostgreSQL runner publishes real pinned FFmpeg measurements with scope
       await db.v2MediaArtifact.update({ where: { id: world.sourceId },
         data: { currentRightsSnapshotId: null, rightsRevision: 2 } })
       await assert.rejects(repository.read(input), /rights/i)
+      const restoredRightsId = await writeFenceRightsSnapshot(db, world, 3, null,
+        `temporal-restore-${suffix}`)
       await db.v2MediaArtifact.update({ where: { id: world.sourceId },
-        data: { currentRightsSnapshotId: world.rightsId, rightsRevision: 3 } })
+        data: { currentRightsSnapshotId: restoredRightsId, rightsRevision: 3 } })
       assert.equal((await repository.read(input)).envelopeHash, envelope.envelopeHash)
+      await stopRunner(child)
+      child = undefined
+      const { schemaVersion, authority, interpretation, faceSafety, timeMapHash,
+        shot, motion, envelopeHash, ...baseEnvelope } = envelope
+      await verifyProducerPublishFences({ db, world, repository,
+        Repository: PrismaTemporalProducerEnvelopeRepository,
+        label: 'temporal', phases: ['analyzing', 'verifying', 'persisting'],
+        envelopeModel: 'v2TemporalProducerEnvelope',
+        enqueue: async (label) => (await enqueue({ workspaceId,
+          projectId: world.projectId, projectVersionId: world.versionId,
+          sourceArtifactId: world.sourceId, actor,
+          idempotencyKey: `w63-${label}-${suffix}` })).operation.id,
+        cloneEnvelope: ({ operationId, attempt, fenceHash }) =>
+          createTemporalProducerEnvelope({ ...baseEnvelope,
+            id: `w63-envelope-${randomUUID()}`, operationId,
+            operationAttempt: attempt, operationFenceHash: fenceHash,
+            createdAt: new Date().toISOString() }),
+        cancel: (nextId, kind) => cancelProducerFenceCase(db, operations, world, actor,
+          nextId, `temporal-${kind}`),
+      })
       if (process.env.APOLLO_TEMPORAL_HTTP_E2E === '1') {
         await stopRunner(child)
         child = undefined

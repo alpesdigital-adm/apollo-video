@@ -9,6 +9,7 @@ import { startPublicOperationAttempt } from '../../domain/public-operation.ts'
 import { createPublicOperationProgressEvents } from '../../domain/public-operation-event.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
+import { lockProducerPublishOperation, lockProducerPublishProject, lockProducerPublishSource, producerPublishClock } from './producer-publish-fence.ts'
 import { hydratePublicOperationRecord, OPERATION_INCLUDE, persistOperationStatusEvents,
   type StoredOperation } from './public-operation-repository.ts'
 
@@ -288,8 +289,10 @@ export class PrismaPerceptionProducerEnvelopeRepository {
 
   async publish(input: { envelope: Readonly<PerceptionProducerEnvelope>; leaseOwner: string; now: Date }) {
     const envelope = hydrateContent(stableSerialize(input.envelope), input.envelope.envelopeHash)
-    const { leaseOwner, now } = input
+    const { leaseOwner } = input
     return this.client.$transaction(async (transaction) => {
+      await lockProducerPublishOperation(transaction, envelope.operationId, envelope.workspaceId)
+      const lockedAt = await producerPublishClock(transaction)
       const operation = await transaction.v2PublicOperation.findUnique({
         where: { id: envelope.operationId }, include: OPERATION_INCLUDE,
       })
@@ -298,7 +301,7 @@ export class PrismaPerceptionProducerEnvelopeRepository {
           operation.targetId !== envelope.projectVersionId ||
           operation.status !== 'running' || operation.phase !== 'persisting' ||
           operation.attempt !== envelope.operationAttempt ||
-          operation.leaseOwner !== leaseOwner || !operation.leaseExpiresAt || operation.leaseExpiresAt <= now) {
+          operation.leaseOwner !== leaseOwner || !operation.leaseExpiresAt || operation.leaseExpiresAt <= lockedAt) {
         conflict('Producer operation is not held by the current fenced attempt')
       }
       const expectedFenceHash = calculateCanonicalHash({
@@ -315,6 +318,7 @@ export class PrismaPerceptionProducerEnvelopeRepository {
           run.sampleIntervalFrames !== envelope.samplePolicy.intervalFrames) {
         conflict('Producer request context differs from the sealed result')
       }
+      await lockProducerPublishProject(transaction, envelope.projectId, envelope.workspaceId)
       const project = await transaction.v2Project.findFirst({
         where: { id: envelope.projectId, workspaceId: envelope.workspaceId },
         select: { currentVersionId: true, locale: true },
@@ -331,6 +335,7 @@ export class PrismaPerceptionProducerEnvelopeRepository {
           calculateCanonicalHash(sourceMap(version.editPlanSnapshot.contentJson, envelope.sourceArtifactId)) !== envelope.timeMapHash) {
         conflict('Producer input version or source-to-timeline map changed')
       }
+      await lockProducerPublishSource(transaction, envelope.sourceArtifactId, envelope.workspaceId)
       const artifact = await transaction.v2MediaArtifact.findFirst({
         where: { id: envelope.sourceArtifactId, workspaceId: envelope.workspaceId },
         include: { currentRightsSnapshot: true },
@@ -345,13 +350,16 @@ export class PrismaPerceptionProducerEnvelopeRepository {
         conflict('Producer source artifact is unavailable or changed')
       }
       const rights = artifact.currentRightsSnapshot ? hydrateAssetRights(artifact.currentRightsSnapshot) : null
-      if (evaluateAssetUse(rights, { workspaceId: envelope.workspaceId, use: 'editorial-reuse', locale: project.locale ?? 'und' }, now).outcome !== 'allow') {
+      const committedAt = await producerPublishClock(transaction)
+      if (operation.leaseExpiresAt <= committedAt) conflict('Producer lease expired before publication')
+      if (evaluateAssetUse(rights, { workspaceId: envelope.workspaceId, use: 'editorial-reuse', locale: project.locale ?? 'und' }, committedAt).outcome !== 'allow') {
         throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights are not approved')
       }
       const updated = await transaction.v2PublicOperation.updateMany({
         where: { id: operation.id, workspaceId: envelope.workspaceId, status: 'running', phase: 'persisting',
-          attempt: envelope.operationAttempt, leaseOwner, leaseExpiresAt: operation.leaseExpiresAt },
-        data: { status: 'succeeded', phase: 'completed', completedAt: now,
+          attempt: envelope.operationAttempt, leaseOwner,
+          leaseExpiresAt: { equals: operation.leaseExpiresAt, gt: committedAt } },
+        data: { status: 'succeeded', phase: 'completed', completedAt: committedAt, updatedAt: committedAt,
           cancelable: false, retryable: false, leaseOwner: null,
           leaseExpiresAt: null, heartbeatAt: null, nextAttemptAt: null,
           errorCode: null, errorMessage: null, errorRetryable: null,
@@ -370,6 +378,11 @@ export class PrismaPerceptionProducerEnvelopeRepository {
         createdAt: new Date(envelope.createdAt),
       } })
       await emitOperationTransition(transaction, operation, operation.id)
+      const returnedAt = await producerPublishClock(transaction)
+      if (operation.leaseExpiresAt <= returnedAt) conflict('Producer lease expired during publication')
+      if (evaluateAssetUse(rights, { workspaceId: envelope.workspaceId, use: 'editorial-reuse', locale: project.locale ?? 'und' }, returnedAt).outcome !== 'allow') {
+        throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights expired during publication')
+      }
       return envelope
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   }
