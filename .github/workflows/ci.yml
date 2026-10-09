@@ -35,12 +35,10 @@ jobs:
     # runs, and the whole suite went from about 213 s to 361.4, 400.1, 412.8
     # and 559.1 s over four runs.
     #
-    # The 35 minutes are a BUDGET, not a measurement. A hosted runner has fewer
-    # cores than either machine those seconds came from, this repository has no
-    # CI history to calibrate against, and how much of the old cap the job was
-    # already using is not observable from a developer machine. If a real run
-    # reports the job finishing well inside this, bring it back down.
-    timeout-minutes: 35
+    # The last green job took 34m04s; a later main run reached API 12/12 and
+    # cleanup but hit the 35m job limit. Allow five more minutes for postflight
+    # without changing any test or step deadline.
+    timeout-minutes: 40
 
     env:
       CI: true
