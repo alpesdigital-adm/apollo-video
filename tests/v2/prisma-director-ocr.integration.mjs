@@ -77,10 +77,14 @@ function assertControlledProxyRowHydrates(operationData, detailData, auditHash) 
 // the latch; it does not choose which contender wins. Every path releases the
 // transaction and disconnects the clients in the caller's finally block.
 async function raceAtOperationLock({ controller, operationId, attachName,
-  cancelName, attach, cancel }) {
-  let readyResolve, readyReject, waitingResolve, waitingReject, release
+  cancelName, attach, cancel, orderedFirst }) {
+  let readyResolve, readyReject, waitingResolve, waitingReject, firstResolve, firstReject, release
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject })
   const waiting = new Promise((resolve, reject) => { waitingResolve = resolve; waitingReject = reject })
+  const firstWaiting = orderedFirst && new Promise((resolve, reject) => {
+    firstResolve = resolve; firstReject = reject
+  })
+  firstWaiting?.catch(() => {})
   const released = new Promise((resolve) => { release = resolve })
   const latch = controller.$transaction(async (tx) => {
     const locked = await tx.$queryRaw`SELECT id FROM public_operations
@@ -94,6 +98,9 @@ async function raceAtOperationLock({ controller, operationId, attachName,
         wait_event_type AS "waitType" FROM pg_stat_activity
         WHERE application_name IN (${attachName}, ${cancelName})`
       const blocked = new Set(rows.filter((row) => row.waitType === 'Lock').map((row) => row.name))
+      if (orderedFirst && blocked.has(orderedFirst === 'cancel' ? cancelName : attachName)) {
+        firstResolve()
+      }
       if (blocked.has(attachName) && blocked.has(cancelName)) {
         waitingResolve()
         await released
@@ -105,15 +112,29 @@ async function raceAtOperationLock({ controller, operationId, attachName,
   }, { timeout: 8_000 }).catch((error) => {
     readyReject(error)
     waitingReject(error)
+    firstReject?.(error)
     throw error
   })
   try { await ready } catch (error) { await latch.catch(() => {}); throw error }
-  const attachResult = attach().then((value) => ({ status: 'fulfilled', value }),
+  const settled = (promise) => promise.then((value) => ({ status: 'fulfilled', value }),
     (reason) => ({ status: 'rejected', reason }))
-  const cancelResult = cancel().then((value) => ({ status: 'fulfilled', value }),
-    (reason) => ({ status: 'rejected', reason }))
+  let attachResult, cancelResult
   let latchError = null
-  try { await waiting } catch (error) { latchError = error } finally { release() }
+  try {
+    if (orderedFirst === 'cancel') {
+      cancelResult = settled(cancel())
+      await firstWaiting
+      attachResult = settled(attach())
+    } else if (orderedFirst === 'attach') {
+      attachResult = settled(attach())
+      await firstWaiting
+      cancelResult = settled(cancel())
+    } else {
+      attachResult = settled(attach())
+      cancelResult = settled(cancel())
+    }
+    await waiting
+  } catch (error) { latchError = error } finally { release() }
   try { await latch } catch (error) { latchError ??= error }
   const [attached, canceled] = await Promise.all([attachResult, cancelResult])
   if (latchError) throw latchError
@@ -744,6 +765,132 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
           raceFailure ? [raceFailure, ...failures] : failures,
           'W65 PostgreSQL race clients did not disconnect cleanly',
         )
+      }
+
+      // Two further controlled rows exercise an observed cancel-first lock queue
+      // and an actual expired-lease reclaim. They use the same sealed source and
+      // review shape; each output has a distinct artifact/manifest/operation.
+      async function seedOrderedRace(label, expiredLease = false) {
+        const id = `w65-${label}-operation-${suffix}`
+        const artifactId = `w65-${label}-output-${suffix}`
+        const manifestId = `w65-${label}-manifest-${suffix}`
+        const key = `${workspaceId}/controlled-${label}-proxy.mp4`
+        const hash = sha(Buffer.from(id))
+        const parameters = { ...recipeParameters, inputHash: hash }
+        const manifest = createMediaArtifactManifestV2({
+          artifactKey: key, artifactSha256: 'd'.repeat(64), byteSize: 1024,
+          mediaType: 'video', container: 'mp4',
+          recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+            parameters },
+          sources: [{ artifactKey, sha256: world.sourceSha256, role: 'source-master',
+            execution: { tool: { id: 'ffmpeg', version: 'static', digest: 'f'.repeat(64) } } }],
+        })
+        await db.v2MediaArtifact.create({ data: { id: artifactId, workspaceId,
+          artifactKey: key, sha256: 'd'.repeat(64), byteSize: 1024n,
+          mediaType: 'video', container: 'mp4', status: 'available' } })
+        await db.v2MediaArtifactManifest.create({ data: { id: manifestId,
+          workspaceId, artifactId, schemaVersion: manifest.schemaVersion,
+          manifestHash: manifest.manifestHash, recipeId: manifest.recipe.id,
+          recipeVersion: manifest.recipe.version,
+          parametersHash: manifest.recipe.parametersHash,
+          manifestJson: stableSerialize(manifest) } })
+        const running = controlledRunningProxyOperation({ id, workspaceId,
+          projectId: world.projectId, clientId: world.clientId,
+          artifactId, manifestId, now: Date.now() })
+        const publicRow = { ...raceOperationData, id, targetId: artifactId,
+          requestFingerprint: hash, idempotencyKey: `w65-${label}-${suffix}`,
+          createdAt: new Date(running.createdAt), startedAt: new Date(running.startedAt),
+          updatedAt: new Date(running.updatedAt), heartbeatAt: new Date(running.updatedAt),
+          leaseExpiresAt: new Date(Date.now() + (expiredLease ? -500 : 120_000)) }
+        const detailRow = { ...raceDetailData, operationId: id, inputHash: hash,
+          outputArtifactId: artifactId, outputManifestId: manifestId,
+          originalFileName: `controlled-${label}-proxy.mp4` }
+        assertControlledProxyRowHydrates(publicRow, detailRow, proxyAudit.contextHash)
+        await db.v2PublicOperation.create({ data: publicRow })
+        await db.v2ProjectProxyRenderOperation.create({ data: detailRow })
+        await db.v2Project.update({ where: { id: world.projectId },
+          data: { status: 'rendering-proxy' } })
+        const finishedAt = new Date().toISOString()
+        const base = { ...controlledReview }
+        delete base.reviewHash
+        const reviewBody = { ...base, proxyArtifactId: artifactId,
+          proxyManifestId: manifestId, inputHash: hash,
+          renderCompletedAt: finishedAt,
+          timeToFirstProxyMs: Date.parse(finishedAt) - Date.parse(base.uploadReceivedAt) }
+        const review = Object.freeze({ ...reviewBody,
+          reviewHash: calculateProxyReviewHash(reviewBody) })
+        return { id, artifactId, manifestId, parameters, review, running,
+          attach: (client) => new PrismaProjectProxyRenderRepository(client).attachCompletedOutput({
+            workspaceId, operationId: id, projectId: world.projectId,
+            projectVersionId: directed.version.id, variantId: '9:16',
+            outputArtifactId: artifactId, outputManifestId: manifestId,
+            originalFileName: `controlled-${label}-proxy.mp4`,
+            createdAt: finishedAt, recipeParameters: parameters,
+            ocrReceipt, lease: { owner: 'w65-controlled-worker',
+              attempt: running.attempt, now: new Date().toISOString() }, review,
+          }) }
+      }
+
+      for (const scenario of ['cancel-first', 'takeover']) {
+        const candidate = await seedOrderedRace(scenario, scenario === 'takeover')
+        const latchEndpoint = isolatedDbEndpoint(`latch-${scenario}-${suffix}`)
+        const attachEndpoint = isolatedDbEndpoint(`attach-${scenario}-${suffix}`)
+        const controlEndpoint = isolatedDbEndpoint(`control-${scenario}-${suffix}`)
+        const latchClient = new PrismaClient({ datasources: { db: { url: latchEndpoint.url } } })
+        const oldWorker = new PrismaClient({ datasources: { db: { url: attachEndpoint.url } } })
+        const controllerClient = new PrismaClient({ datasources: { db: { url: controlEndpoint.url } } })
+        let scenarioFailure
+        try {
+          await Promise.all([latchClient.$connect(), oldWorker.$connect(),
+            controllerClient.$connect()])
+          await Promise.all([latchClient.$queryRaw`SELECT 1`,
+            oldWorker.$queryRaw`SELECT 1`, controllerClient.$queryRaw`SELECT 1`])
+          const outcome = await raceAtOperationLock({ controller: latchClient,
+            operationId: candidate.id, attachName: attachEndpoint.applicationName,
+            cancelName: controlEndpoint.applicationName, orderedFirst: 'cancel',
+            attach: () => candidate.attach(oldWorker),
+            cancel: scenario === 'cancel-first'
+              ? () => new PrismaPublicOperationRepository(controllerClient).cancel({
+                workspaceId, operationId: candidate.id,
+                commandId: `w65-cancel-first-${suffix}`,
+                authenticationAudit: proxyAudit, canceledAt: new Date().toISOString(),
+              })
+              : () => new PrismaPublicOperationRepository(controllerClient).claimNext({
+                workspaceId, operationId: candidate.id, type: 'project-proxy-render',
+                leaseOwner: `w65-new-worker-${suffix}`, now: new Date().toISOString(),
+                leaseUntil: new Date(Date.now() + 120_000).toISOString(),
+              }),
+          })
+          const final = await db.v2PublicOperation.findUniqueOrThrow({
+            where: { id: candidate.id } })
+          assert.equal(outcome.cancel.status, 'fulfilled')
+          assert.equal(outcome.attach.status, 'rejected')
+          if (scenario === 'cancel-first') {
+            assert.equal(final.status, 'canceled')
+            assert.equal(outcome.cancel.value.operation.status, 'canceled')
+          } else {
+            assert.equal(final.status, 'running')
+            assert.equal(final.attempt, candidate.running.attempt + 1)
+            assert.equal(final.leaseOwner, `w65-new-worker-${suffix}`)
+            assert.equal(outcome.cancel.value.operation.attempt, final.attempt)
+          }
+          assert.equal(await db.v2ProjectMediaAsset.count({ where: {
+            workspaceId, projectId: world.projectId, artifactId: candidate.artifactId,
+            role: 'editorial-proxy' } }), 0)
+          assert.equal(await db.v2ProxyReview.count({ where: {
+            workspaceId, operationId: candidate.id } }), 0)
+          assert.equal(await db.v2AutomaticCatalogRecord.count({ where: {
+            workspaceId, artifactId: candidate.artifactId } }), 0)
+          console.log(`W65 observed PostgreSQL ${scenario}: ${final.status}, attempt ${final.attempt}`)
+        } catch (error) { scenarioFailure = error; throw error } finally {
+          const disconnected = await Promise.allSettled([latchClient.$disconnect(),
+            oldWorker.$disconnect(), controllerClient.$disconnect()])
+          const failures = disconnected.filter((result) => result.status === 'rejected')
+            .map((result) => result.reason)
+          if (failures.length) throw new AggregateError(
+            scenarioFailure ? [scenarioFailure, ...failures] : failures,
+            `W65 ${scenario} PostgreSQL clients did not disconnect cleanly`)
+        }
       }
     } catch (error) { primaryError = error } finally {
       const cleanupErrors = []

@@ -278,7 +278,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Finalização atômica current-version passou em PG controlado. Snapshot histórico executou worker/PG/FFmpeg e assertions 2/2 com supressão no frame inspecionado; supervisor falhou por amostra CIM, embora postflight tenha fechado sem órfãos. Corrida concorrente, browser e critic independente pendentes. Unknown suprime cues e não comprova placement facial seguro."
+          "text": "Finalização atômica current-version e corrida concorrente W65 passaram em PG controlado; cancel-first e lease takeover tiveram ordem observada. Snapshot histórico executou worker/PG/FFmpeg e assertions 2/2 com supressão no frame inspecionado, mas o supervisor daquela prova falhou por amostra CIM apesar do postflight sem órfãos. Browser, critic independente e aceite visual do MP4 final permanecem pendentes. Unknown suprime cues e não comprova placement facial seguro."
         },
         {
           "kind": "validation",
@@ -323,10 +323,22 @@
           "ref": "Apollo/w61-70-20261008/w65-snapshot-safety-20261009-267c5a78/result.json",
           "scope": "Assertions 2/2 e migrate/test exit0; supervisor success=false por falha de observação CIM durante execução, preservada. Postflight: dez identidades terminais, zero backends, cluster parado/porta livre/scratch removido. Relatório SHA b40d7d1e16800b9edb2e33bdace5a6f519da3fa8aa7fd162ae77afcf6d284ba5. Runtime/fixture manifest 1611 arquivos sem drift. MP4 SHA 1e483d5ae506417149851d39816d1937ab3dba4edc412326c3cfa867e65c0227 e frames preservados: frame1s inspecionado sem legenda sobre padrão controlado. Não é gate operacional verde, rosto real, browser ou critic completo.",
           "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w65-race-cancel-takeover-5f624877/result.json",
+          "scope": "PG 2/2, zero skip: cancel-first terminou canceled na tentativa 1 sem vínculo/review/catalog parcial; lease takeover ficou running na tentativa 2 sem publicação pelo owner antigo. A corrida espontânea anterior observou attach vencedor; estes resultados não alegam que ambos os vencedores ocorreram no mesmo caso. Snapshots do run: migrate 5/5 e test 12/12 completos. SHA256 49d0a010ce99c20112b39b19efe3c6f1f1deffa45e3947285c181bb04e7cbc17; postflight com dez PIDs terminais, zero backends, cluster parado/porta livre e manifest de 1611 arquivos sem drift. Não prova browser, critic facial ou MP4 final aprovado.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/process-smoke-42c5c68a/result.json",
+          "scope": "Smoke do supervisor de processos corrigido, SHA256 dfdd0a67921e2aefcddd9c9b44fd362028fb7dc44b2b326423f0c93914b85ce6; valida observação/cleanup de filhos para runs posteriores, sem mudar o status operacional do snapshot anterior.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Corrigir e testar contenção do observador; preservar run snapshot operacionalmente falho. Provar corrida cancel/finalização, API/browser e critic independente por variante.",
-      "notes": "Recorte parcial no branch: finalização atômica com fence/rights/replay, snapshot histórico sem alterar head, cues sem resolução recebem v2 unknown/suppressed e disabled envia zero cues. Renderer recusa cue sem decisão v2 antes de qualquer FFmpeg; ASS perdeu fallback bottom. Reuse antigo sem receita atual, manifest/map íntegros e mapa sem subtitle é recusado também na transação de admissão; identidade de versão declarada não é SHA do binário nem prova de pixels. TSC exit0, worker 22/22, goldens mecânicos ASS 6/6 e renderer completo 9/9 com bins explícitos. Falhas anteriores preservadas: fixture color metadata; MAX_PATH do ffprobe-static com bytes/hash existentes (cópia curta autenticada no teste); snapshot-path exibiu caption pelo bypass corrigido; corrida falhou no retorno void de pg_stat_clear_snapshot antes dos contenders (cast boolean corrigido, nova corrida pendente); suíte renderer invocada sem FFMPEG_BIN falhou por ENOENT antes de passar com bin explícito. Snapshot-safety assertions passaram, supervisor não. Nenhum TODO promovido."
+      "nextAction": "Preservar a falha operacional do snapshot anterior; comprovar API/browser e critic independente por variante, depois revisar cada MP4 final com hash próprio. A corrida cancel/finalização e o supervisor corrigido já têm provas delimitadas.",
+      "notes": "Recorte parcial no branch: finalização atômica com fence/rights/replay, snapshot histórico sem alterar head, cues sem resolução recebem v2 unknown/suppressed e disabled envia zero cues. Renderer recusa cue sem decisão v2 antes de qualquer FFmpeg; ASS perdeu fallback bottom. Reuse antigo sem receita atual, manifest/map íntegros e mapa sem subtitle é recusado também na transação de admissão; identidade de versão declarada não é SHA do binário nem prova de pixels. TSC exit0, worker 22/22, goldens mecânicos ASS 6/6 e renderer completo 9/9 com bins explícitos. Falhas anteriores preservadas: fixture color metadata; MAX_PATH do ffprobe-static com bytes/hash existentes (cópia curta autenticada no teste); snapshot-path exibiu caption pelo bypass corrigido; corrida antiga falhou no retorno void de pg_stat_clear_snapshot antes dos contenders, corrigida antes da prova cancel-first/takeover; suíte renderer invocada sem FFMPEG_BIN falhou por ENOENT antes de passar com bin explícito. Snapshot-safety assertions passaram, supervisor daquela execução não; smoke novo não reclassifica o run antigo. Nenhum TODO promovido."
     },
     {
       "id": "W66",
@@ -376,12 +388,12 @@
         {
           "type": "repo",
           "ref": "docs/quality/w66-version-overlay-integration-v1.md",
-          "scope": "Desenho de referência imutável e baseHash sem ciclo, matriz de 15 produtores/16 repositórios com política de herança ou issue de invalidação; nenhuma persistência implementada por este documento.",
+          "scope": "Desenho do set v2 com identidade real de variante separada do formato, referência imutável e baseHash sem ciclo, matriz de 15 produtores/16 repositórios e projeção geométrica versionada para herança ou issue de invalidação. Nenhuma persistência implementada por este documento.",
           "role": "planned-not-started"
         }
       ],
       "nextAction": "Integrar override por variante/range com Command, baseHash, persistência e RenderInput; provar PG/API/replay/stale e isolamento entre formatos, mantendo auto-plan bloqueado sem ROI adequada.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: contrato versionado de revisão obrigatória, sem geometria autorizada; autenticação, base, source e rights preservados. Validação de contratos e 10 testes unitários passaram; overlay puro não comprova runtime nem conclusão da capability."
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: contrato versionado de revisão obrigatória, sem geometria autorizada; autenticação, base, source e rights preservados. Validação de contratos e 10 testes unitários passaram. Set v2/projeção geométrica são apenas especificados: falta schema/Command/RenderInput/PG, e o overlay puro não comprova runtime nem conclusão da capability."
     },
     {
       "id": "W67",
@@ -405,7 +417,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W65–W66."
+          "text": "Protocolo e inventário local v2 foram preparados, mas quotas pré-registradas de múltiplas faces falharam (development 0/2; evaluation 1/2). Seleção e aquisição v2 encerradas em STOP, sem download, pixels, inferência ou render. Critic por formato e dependências W65–W66 permanecem pendentes."
         },
         {
           "kind": "validation",
@@ -448,12 +460,24 @@
         {
           "type": "repo",
           "ref": "docs/quality/w67-cvdf-acquisition-v2.md",
-          "scope": "Novo protocolo de aquisição de derivados oficiais CVDF, após inventário local confirmar apenas dois originais verificáveis fora W62. Direitos por HTML preservado, seleção e quotas disjuntas antes de baixar, novas identidades de bytes e correspondência geométrica explícita; sem retry Flickr, inferência ou qualificação automática.",
+          "scope": "Protocolo de derivados oficiais CVDF e encerramento STOP da seleção metadata-only: 27 IDs revalidados, 26 elegíveis; quotas development single7/multiple0 e evaluation single18/multiple1, abaixo de 2 por stratum. Nenhum download, pixel, inferência ou qualificação automática.",
+          "role": "planned-not-started"
+        },
+        {
+          "type": "repo",
+          "ref": "scripts/validation/w67-select-official-derivatives-v2.py",
+          "scope": "Seletor local metadata-only, SHA256 32a8c7883f1639e29c80c3cd56f64b48af233343e1da9e42a92ab556d006e6a5: revalida filtros, exclusões, hashes de CSV/cache, HTML histórico, licença/autor/URL e quotas antes de criar seleção. Não baixa nem abre imagens.",
+          "role": "planned-not-started"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w67-official-derivative-eligibility-v2-r2.json",
+          "scope": "Inventário final metadata-only SHA256 ddd50b1a597a0ce7c07158a9406977796711d60e37286b9a8e54578c34e7374d: 26/27 elegíveis; ID 491b80ed0e159494 excluído por nome de autor divergente, sem equiparar alias. Quotas múltiplas falham nos dois splits; manifesto de seleção v2 não foi criado.",
           "role": "planned-not-started"
         }
       ],
-      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+      "nextAction": "Resolver falta de candidatos multiple elegíveis por novo protocolo e inventário aprovados antes de qualquer aquisição; manter a seleção v2 encerrada. Depois cumprir dependências W65–W66 e provar critic independente sobre pixels finais por formato.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Inventário local de partida SHA256 4d273863096f75a6aa3c86944657496359b757e7c9d78c5f6c6389f69c935b2d. A checagem de direitos usa HTML preservado, não consulta atual ao Flickr. Tentativa v2 parou corretamente por quotas antes de criar seleção ou obter pixels; nenhuma tarefa de produto foi promovida."
     },
     {
       "id": "W68",

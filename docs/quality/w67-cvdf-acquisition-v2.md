@@ -25,3 +25,16 @@ Sem comparação original, declarar `aspect_original_unverified` e `orientation_
 ## Congelamento posterior e limite
 
 Depois da aquisição, registrar hashes únicos dos oito derivados, bytes de direitos, linhas/CSV humanos, split/stratum, falhas e correspondência geométrica. Duplicidade exata entre splits bloqueia; SHA diferente não comprova ausência de near-duplicate. Nenhum render/oráculo começa antes do manifesto completo e da calibração/labels de defeito especificados no protocolo principal. Quotas cumpridas na aquisição não significam corpus qualificado, modelo aprovado, W67 concluída ou aceite W70.
+
+## Encerramento desta tentativa de seleção, 2026-10-09
+
+O seletor local `scripts/validation/w67-select-official-derivatives-v2.py` (SHA-256 `32a8c7883f1639e29c80c3cd56f64b48af233343e1da9e42a92ab556d006e6a5`) revalidou os 27 IDs do inventário congelado. Conferiu os hashes dos CSVs e dos três manifestos de cache, filtros Open Images, exclusão dos 180 IDs W62 e oito W67 v1, URL e hash do HTML histórico, licença CC BY 2.0/4.0, nome e perfil do autor. Isso é verificação de evidência local capturada anteriormente, **não** consulta atual ao Flickr.
+
+O inventário final privado é `C:/Users/leand/Documents/Apollo/w61-70-20261008/w67-official-derivative-eligibility-v2-r2.json`, SHA-256 `ddd50b1a597a0ce7c07158a9406977796711d60e37286b9a8e54578c34e7374d`. Vinte e seis candidatos passaram a revalidação; `491b80ed0e159494` não passou porque o campo `Author` da metadata diz `Bodie Strain` e o HTML preservado identifica o autor como `pumpkinmook`. O perfil aponta à mesma conta, mas o nome não foi equiparado por inferência. A primeira saída `w67-official-derivative-eligibility-v2.json` foi preservada como diagnóstico antes de corrigir a contabilização de múltiplas tentativas de cache; `-r2` é o inventário final.
+
+| Split | Single elegíveis | Multiple elegíveis | Quota requerida |
+| --- | ---: | ---: | ---: |
+| Development | 7 | 0 | 2 de cada |
+| Evaluation | 18 | 1 | 2 de cada |
+
+Faltam dois `multiple` de development e um de evaluation. A seleção v2 **não foi criada**; nenhum derivado CVDF foi baixado, decodificado ou inferido. O gate de corpus permanece aberto. Não reduzir quota nem substituir IDs por resultado de pixels.
