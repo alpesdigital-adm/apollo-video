@@ -19,6 +19,8 @@ import { PERCEPTION_KINDS } from '../../src/v2/domain/perception-timeline.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
+import { advancePublicOperationPhase, createQueuedPublicOperation, startPublicOperationAttempt,
+  succeedPublicOperation } from '../../src/v2/domain/public-operation.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
 import { PrismaPerceptionProducerRequestContextRepository } from '../../src/v2/infrastructure/prisma/perception-producer-request-context-repository.ts'
@@ -31,6 +33,21 @@ import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-
 
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
+
+// Controlled repository-gate fixture. It models a completed PublicOperation using the
+// same domain transitions as the worker; no FFmpeg render is claimed by this row.
+function controlledSucceededProxyOperation({ id, workspaceId, projectId, clientId,
+  artifactId, manifestId, now }) {
+  const at = (offset) => new Date(now + offset).toISOString()
+  const queued = createQueuedPublicOperation({ id, workspaceId, projectId, clientId,
+    type: 'project-proxy-render', target: { type: 'media-artifact', id: artifactId, manifestId },
+    createdAt: at(-4_000) })
+  const started = startPublicOperationAttempt(queued, at(-3_000))
+  const rendering = advancePublicOperationPhase(started, 'rendering', at(-2_500))
+  const verifying = advancePublicOperationPhase(rendering, 'verifying', at(-2_000))
+  const persisting = advancePublicOperationPhase(verifying, 'persisting', at(-1_500))
+  return succeedPublicOperation(persisting, at(-1_000))
+}
 
 async function stopRunner(child) {
   if (!child) return
@@ -287,21 +304,33 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       await db.v2MediaArtifact.create({ data: { id: outputArtifactId, workspaceId,
         artifactKey: `${workspaceId}/controlled-proxy.mp4`, sha256: 'd'.repeat(64),
         byteSize: 1024n, mediaType: 'video', container: 'mp4', status: 'available' } })
-      await db.v2MediaArtifactManifest.create({ data: { id: outputManifestId, workspaceId,
-        artifactId: outputArtifactId, schemaVersion: outputManifest.schemaVersion,
-        manifestHash: outputManifest.manifestHash, recipeId: outputManifest.recipe.id,
-        recipeVersion: outputManifest.recipe.version,
-        parametersHash: outputManifest.recipe.parametersHash,
-        manifestJson: stableSerialize(outputManifest) } })
-      await db.v2PublicOperation.create({ data: { id: proxyOperationId, workspaceId,
-        projectId: world.projectId, clientId: world.clientId,
-        type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-        targetType: 'media-artifact', targetId: outputArtifactId,
-        cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: outputArtifactId,
-          manifestId: outputManifestId } }),
-        idempotencyKey: `w65-proxy-attach-${suffix}`, requestFingerprint: inputHash,
-        startedAt: new Date(), completedAt: new Date() } })
+       await db.v2MediaArtifactManifest.create({ data: { id: outputManifestId, workspaceId,
+         artifactId: outputArtifactId, schemaVersion: outputManifest.schemaVersion,
+         manifestHash: outputManifest.manifestHash, recipeId: outputManifest.recipe.id,
+         recipeVersion: outputManifest.recipe.version,
+         parametersHash: outputManifest.recipe.parametersHash,
+         manifestJson: stableSerialize(outputManifest) } })
+       const controlledOperation = controlledSucceededProxyOperation({
+         id: proxyOperationId, workspaceId, projectId: world.projectId,
+         clientId: world.clientId, artifactId: outputArtifactId,
+         manifestId: outputManifestId, now: Date.now(),
+       })
+       await db.v2PublicOperation.create({ data: { id: proxyOperationId, workspaceId,
+         projectId: world.projectId, clientId: world.clientId,
+         type: controlledOperation.type, status: controlledOperation.status,
+         phase: controlledOperation.phase,
+         targetType: 'media-artifact', targetId: outputArtifactId,
+         progressCompleted: controlledOperation.progress.completed,
+         progressTotal: controlledOperation.progress.total,
+         progressUnit: controlledOperation.progress.unit,
+         cancelable: controlledOperation.cancelable, retryable: controlledOperation.retryable,
+         attempt: controlledOperation.attempt, maxAttempts: controlledOperation.maxAttempts,
+         resultJson: stableSerialize(controlledOperation.result),
+         idempotencyKey: `w65-proxy-attach-${suffix}`, requestFingerprint: inputHash,
+         createdAt: new Date(controlledOperation.createdAt),
+         startedAt: new Date(controlledOperation.startedAt),
+         completedAt: new Date(controlledOperation.completedAt),
+         updatedAt: new Date(controlledOperation.updatedAt) } })
       await db.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId,
         workspaceId, projectId: world.projectId, projectVersionId: directed.version.id,
         editPlanSnapshotId: directedEdit.id, sourceArtifactId: world.sourceId,

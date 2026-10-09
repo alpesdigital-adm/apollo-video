@@ -121,10 +121,12 @@ manifest: Readonly<{ manifestJson: string; manifestHash: string }>): void {
 function assertProxySourceLineage(manifestJson: string,
   source: Readonly<ProjectProxyRenderSource>): void {
   const manifest = parseRecord(manifestJson, 'project proxy output manifest')
-  if (!Array.isArray(manifest.sources) || source.renderSources.some((asset) =>
-    !manifest.sources.some((candidate) => typeof candidate === 'object' && candidate !== null &&
-      !Array.isArray(candidate) && candidate.artifactKey === asset.artifactKey &&
-      candidate.sha256 === asset.sha256 && candidate.role === asset.role))) {
+  const sources: readonly unknown[] | null = Array.isArray(manifest.sources) ? manifest.sources : null
+  if (!sources || source.renderSources.some((asset) =>
+    !sources.some((candidate: unknown) => typeof candidate === 'object' && candidate !== null &&
+      !Array.isArray(candidate) && (candidate as Record<string, unknown>).artifactKey === asset.artifactKey &&
+      (candidate as Record<string, unknown>).sha256 === asset.sha256 &&
+      (candidate as Record<string, unknown>).role === asset.role))) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy source bytes are not sealed by output lineage')
   }
 }
@@ -729,7 +731,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       const source = await this.readRenderableSnapshotSource({
         workspaceId: input.workspaceId, projectId: input.projectId,
         planId: operation.renderablePlanId, planHash: operation.renderablePlanHash,
-        format: operation.renderableFormat,
+        format: operation.renderableFormat!,
       }, transaction)
       if (!source || source.projectVersionId !== operation.projectVersionId ||
           source.editPlanSnapshotId !== operation.editPlanSnapshotId ||

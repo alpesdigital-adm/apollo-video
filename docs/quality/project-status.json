@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-09T01:40:08.566Z",
+  "updatedAt": "2026-10-09T01:44:49.031Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -272,7 +272,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Slice conservador implementado: planos v2 exigem faceSafety unknown e suprimem cues com issue localizada; OCR e receipt selados nos dois attachments. Geração Prisma e typecheck final passaram. PG attachment em validação; browser e critic final pendentes. Não comprova placement facial seguro."
+          "text": "Slice conservador implementado e PG de receipt current-version passou. Snapshot attachment, publicação atômica com lease/cancel, browser e critic final pendentes. Cues permanecem suprimidas com faceSafety unknown; não comprova placement facial seguro."
         },
         {
           "kind": "validation",
@@ -299,10 +299,16 @@
           "ref": "Apollo/w61-70-20261008/w64-reader-face-unknown-7965929d/result.json",
           "scope": "Leitura OCR real→Director→proxy com hash/rights/map/lineage negativos: 1/1, postflight limpo; não executa novo gate attach nem browser.",
           "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w65-ocr-receipt-current-af1a1c74/result.json",
+          "scope": "PG 1/1 com OCR real e attachment current-version controlado: receipt/hash/rights/version/map negativos; postflight limpo. Não executa render, snapshot attachment nem prova corrida de lease.",
+          "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Concluir PG de attachment/rights/stale/tamper nos dois caminhos, depois browser e integração W66/W67.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: shared OCR projection, elegibilidade conservadora e override como preferência, sem conceder autoridade facial. Checkpoint parcial: factory runtime v2 conservadora, solver geométrico puro sem autoridade, leitura histórica separada; UI prioriza motivo facial hard. Unit worker+anchor 29/29 e attach controlado 2/2; goldens pixel controlados 8/8 e supressão v2 FFmpeg 1/1 passaram. PG reader SHA 6fe42287f7fcce2fb7bde7dfad494e85167253253ed0ad3f3b2047b65d068607. Novos attach com receipt/hash/rights/context em Serializable ainda sem PG; typecheck final retido por geração Prisma facial travada. Não é conclusão W65 nem critic de MP4 final. Atualização: geração checkout íntegra e typecheck final exit0. Primeiro PG attachment falhou antes do attach por datas inconsistentes na fixture; correção explícita em validação, sem promoção da prova."
+      "nextAction": "Finalizar publicação atômica com lease/cancel nos dois attachments; provar runtime e snapshot, depois browser/critic por variante.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: shared OCR projection, elegibilidade conservadora e override como preferência, sem conceder autoridade facial. Checkpoint parcial: factory runtime v2 conservadora, solver geométrico puro sem autoridade, leitura histórica separada; UI prioriza motivo facial hard. Unit worker+anchor 29/29 e attach controlado 2/2; goldens pixel controlados 8/8 e supressão v2 FFmpeg 1/1 passaram. PG reader SHA 6fe42287f7fcce2fb7bde7dfad494e85167253253ed0ad3f3b2047b65d068607. Novos attach com receipt/hash/rights/context em Serializable ainda sem PG; typecheck final retido por geração Prisma facial travada. Não é conclusão W65 nem critic de MP4 final. Atualização: geração checkout íntegra e typecheck final exit0. Primeiro PG attachment falhou antes do attach por datas inconsistentes na fixture; correção explícita em validação, sem promoção da prova. PG current-version receipt passou 1/1 após corrigir duas falhas de preparo da fixture (datas e progress), preservadas no histórico; SHA 11af87e6df3fe895f3d3bd55a56cf07bb5413efd12bd99693dcd3dcfbcccbfe4. Fixture agora usa transições do domínio. Revisão encontrou attach antes de succeed sem fence transacional; correção necessária antes da prova runtime, sem promoção da wave."
     },
     {
       "id": "W66",
