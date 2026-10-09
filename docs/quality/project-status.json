@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-08T23:58:04.471Z",
+  "updatedAt": "2026-10-09T00:28:37.089Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -37,7 +37,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Envelope OCR server-owned e referências foram implementados e provados com worker, PostgreSQL e HTTP real no branch. Corpus congelado e produtor facial continuam pendentes; OCR não autoriza faceSafety nem restaura a jornada positiva de exportação."
+          "text": "Envelope OCR server-owned e referências passaram com worker, PostgreSQL e HTTP real no branch. Preflight facial V5 terminou com candidato YuNet 640 reprovado em desenvolvimento/calibração; produtor facial validado e jornada positiva de exportação continuam pendentes. OCR não autoriza faceSafety."
         },
         {
           "kind": "validation",
@@ -66,8 +66,8 @@
           "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Congelar corpus V5 e preflight verificável, integrar produtor facial validado e restaurar a jornada positiva sem autoridade fictícia.",
-      "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira."
+      "nextAction": "Preservar o preflight reprovado, avaliar hipótese facial pré-registrada e integrar produtor validado sem autoridade fictícia.",
+      "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta."
     },
     {
       "id": "W62",
@@ -93,7 +93,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "YuNet CPU isolado, sem integração ou acurácia validada. V4 interrompido por HTTP429 em 41/60 development, PID encerrado. Spike CVDF 8/8 verificou orientação0 e hashes de bytes derivados; V5 requer inventário/pré-registro com mesmas quotas e limiares antes de inferência."
+          "text": "YuNet 640 não passou o gate preliminar: recall 52/67 (77,6%) em desenvolvimento e 50/58 (86,2%) em calibração; falsos positivos em negativos 2/20 e 3/20. Corpus V5 auditado 180/180; holdout 60 imagens ainda sem inferência. Produtor facial e validação de vídeo permanecem pendentes."
         },
         {
           "kind": "validation",
@@ -114,10 +114,16 @@
           "ref": "docs/PLANO-WAVES-61-70.md",
           "scope": "W62: escopo, dependências, IDs e critérios; não comprova implementação ou validação.",
           "role": "planned-not-started"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w61-visual-preflight-v5-result.md",
+          "scope": "Auditoria de fonte 180/180 e diagnóstico dev/calib 120/120; candidato reprovado, sem resultado de holdout nem segurança facial.",
+          "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Congelar V5 Rotation0 com corpus CVDF e licença individual, completar splits disjuntos e medir detector sem selecionar por resultado.",
-      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+      "nextAction": "Pré-registrar hipótese finita apoiada nos erros medidos, verificar licença de eventual modelo alternativo e manter holdout fechado até qualidade suficiente em dev/calib.",
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Scripts, adapter e protocolos de aquisição preservados em f8a6ba07. V1–V4 falhas históricas mantidas; V5 run2/run3 encerraram por prazo e retomaram mesmos critérios/IDs com PIDs terminais, sem tuning por modelo. CPU/RAM passaram no spike local; qualidade não. Os cinco negativos com FP foram inspecionados qualitativamente como animais (macaco, papagaio, dois gatos e cachorro), sem mudar GT/seleção. Relatório documenta limites do derivado CVDF, 36/180 comparações com original e ausência de GT de vídeo/olhos."
     },
     {
       "id": "W63",
@@ -140,7 +146,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "OCR real com PTS e rejeição de fonte alterada/rotação passou isoladamente, com runner PostgreSQL e HTTP. Recorte source único, CFR/fps iguais. Avaliação independente OCR, shots/motion e agregação canônica permanecem pendentes; adapter temporal isolado está em revisão."
+          "text": "OCR real passou runner PostgreSQL e HTTP no recorte source único CFR/fps iguais. Adapter temporal passou goldens e núcleo persistente passou PG 1/1; publicação pelo runner real, API HTTP, avaliação externa e agregação canônica ainda pendentes."
         },
         {
           "kind": "validation",
@@ -164,7 +170,7 @@
         }
       ],
       "nextAction": "Validar adapter temporal e definir agregação versionada de evidências por modalidade, preservando cobertura e gaps.",
-      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Adapter temporal isolado commit b17001ef: goldens controlados e negativos passaram após revisão de pins, threads, prazo/abort e domínio PTS; ainda sem labels externos ou persistência."
+      "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Adapter temporal isolado commit b17001ef: goldens controlados e negativos passaram após revisão de pins, threads, prazo/abort e domínio PTS; ainda sem labels externos ou persistência. Núcleo temporal: run w64-temporal-producer-4837afc0 passou 1/1 PG sem skips, bootstrap e constraints, claim/fence/rights/outbox; SHA 765b8f0d673578c207bc72b49fe938a1549eda7e68ffa3cc726d56296a80fa9. Postflight confirmou três PIDs encerrados, zero backends, cluster parado e scratch removido. Esta prova não executou adapter/runner/browser; API em construção."
     },
     {
       "id": "W64",
