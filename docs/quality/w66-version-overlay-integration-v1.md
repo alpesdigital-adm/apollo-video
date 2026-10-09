@@ -36,7 +36,7 @@ Há 15 chamadas de `createProjectVersion` em `src/v2/application` e 16 repositó
 | `apply-editorial-cut-command.ts` | `editorial-command-repository.ts` | Cortes normalmente mudam mapa; comparar e invalidar se mudou. |
 | `run-project-director.ts` | `director-run-repository.ts` | Comparar mapa dirigido ao pai; invalidar se alterado. |
 | `multicam-direction.ts` | `multicam-direction-command-repository.ts` | Comparar fontes e mapa; invalidar se alterados. |
-| `replace-source-transcript.ts` | `source-transcript-replacement-repository.ts` | Preservar só se source map e EditPlan estrutural iguais. |
+| `replace-source-transcript.ts` | `source-transcript-replacement-repository.ts` | Preservar só se a projeção geométrica versionada do pai e do filho for igual; mudança apenas textual não invalida crop, enquanto fonte, ordem ou tempo divergente gera issue. |
 | `review-patch.ts` | `review-patch-repository.ts` | Preservar só se mapa igual; edição temporal invalida. |
 | `review-patch-batch.ts` | `review-patch-batch-repository.ts` | Mesma política do patch, de forma atômica. |
 | `project-policy-overrides.ts` | `project-policy-overrides-repository.ts` | Preservar sob mapa igual. |

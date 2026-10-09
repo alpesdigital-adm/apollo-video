@@ -278,7 +278,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Finalização atômica current-version e corrida concorrente W65 passaram em PG controlado; cancel-first e lease takeover tiveram ordem observada. Snapshot histórico executou worker/PG/FFmpeg e assertions 2/2 com supressão no frame inspecionado, mas o supervisor daquela prova falhou por amostra CIM apesar do postflight sem órfãos. Browser, critic independente e aceite visual do MP4 final permanecem pendentes. Unknown suprime cues e não comprova placement facial seguro."
+          "text": "Finalização atômica current-version e corrida concorrente W65 passaram em PG controlado; cancel-first e lease takeover tiveram ordem observada. Snapshot histórico executou worker/PG/FFmpeg e assertions 2/2 com supressão no frame inspecionado. As identidades observadas terminaram e houve zero backends, mas o coletor CIM falhou: a execução permanece operacionalmente inconclusiva; o smoke posterior não a reclassifica. Browser, critic independente e aceite visual do MP4 final permanecem pendentes. Unknown suprime cues e não comprova placement facial seguro."
         },
         {
           "kind": "validation",

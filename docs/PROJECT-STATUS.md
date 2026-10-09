@@ -2,7 +2,7 @@
 
 Atualizado: 2026-10-09T10:44:13.229Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
 
-Snapshot JSON SHA256: `e9a26e6be2796c60bed7f118e4245c3b43b81ea247d67907c41d72306c41b011` (somente project-status.json; TODO verificado separadamente).
+Snapshot JSON SHA256: `c290fa8cfef53372cb401f942ae5f2d6320d3d0374f543f17e666c4ccdfd73c0` (somente project-status.json; TODO verificado separadamente).
 
 TODO auditado: **380/1259** caixas marcadas como concluídas no histórico. Isso não afirma implantação ou aceite atuais.
 
