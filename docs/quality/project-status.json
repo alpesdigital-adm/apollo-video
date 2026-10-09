@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-09T01:24:44.682Z",
+  "updatedAt": "2026-10-09T01:40:08.566Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -272,7 +272,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Slice conservador implementado: novos planos v2 exigem faceSafety unknown e suprimem cues com issue localizada; OCR autenticado e receipt selado em ambos caminhos de attachment. Typecheck final e PG dos attachments aguardam geração Prisma íntegra; browser e critic final pendentes. Não comprova placement facial seguro."
+          "text": "Slice conservador implementado: planos v2 exigem faceSafety unknown e suprimem cues com issue localizada; OCR e receipt selados nos dois attachments. Geração Prisma e typecheck final passaram. PG attachment em validação; browser e critic final pendentes. Não comprova placement facial seguro."
         },
         {
           "kind": "validation",
@@ -301,8 +301,8 @@
           "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Restaurar geração Prisma íntegra, executar typecheck e PG de attachment/rights/stale/tamper nos dois caminhos; depois browser e integração W66/W67.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: shared OCR projection, elegibilidade conservadora e override como preferência, sem conceder autoridade facial. Checkpoint parcial: factory runtime v2 conservadora, solver geométrico puro sem autoridade, leitura histórica separada; UI prioriza motivo facial hard. Unit worker+anchor 29/29 e attach controlado 2/2; goldens pixel controlados 8/8 e supressão v2 FFmpeg 1/1 passaram. PG reader SHA 6fe42287f7fcce2fb7bde7dfad494e85167253253ed0ad3f3b2047b65d068607. Novos attach com receipt/hash/rights/context em Serializable ainda sem PG; typecheck final retido por geração Prisma facial travada. Não é conclusão W65 nem critic de MP4 final."
+      "nextAction": "Concluir PG de attachment/rights/stale/tamper nos dois caminhos, depois browser e integração W66/W67.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: shared OCR projection, elegibilidade conservadora e override como preferência, sem conceder autoridade facial. Checkpoint parcial: factory runtime v2 conservadora, solver geométrico puro sem autoridade, leitura histórica separada; UI prioriza motivo facial hard. Unit worker+anchor 29/29 e attach controlado 2/2; goldens pixel controlados 8/8 e supressão v2 FFmpeg 1/1 passaram. PG reader SHA 6fe42287f7fcce2fb7bde7dfad494e85167253253ed0ad3f3b2047b65d068607. Novos attach com receipt/hash/rights/context em Serializable ainda sem PG; typecheck final retido por geração Prisma facial travada. Não é conclusão W65 nem critic de MP4 final. Atualização: geração checkout íntegra e typecheck final exit0. Primeiro PG attachment falhou antes do attach por datas inconsistentes na fixture; correção explícita em validação, sem promoção da prova."
     },
     {
       "id": "W66",
@@ -318,8 +318,8 @@
         "da5a414c29b3-1",
         "72babc1df6c4-1"
       ],
-      "state": "fila",
-      "construction": "not-started",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "not-integrated",
       "validation": "none",
       "deployment": "pending",
@@ -327,7 +327,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Pacote preparado em 08/10/2026; execução ainda não iniciada. Dependências: W62–W64; integra com W65."
+          "text": "Request v2 retorna review-required/plan:null sem aceitar observação do caller; domínio de override manual por variante existe isoladamente. Persistência atômica Command/versão, RenderInput, ROI real avaliada e trajetória automática ainda pendentes."
         },
         {
           "kind": "validation",
@@ -350,8 +350,8 @@
           "role": "planned-not-started"
         }
       ],
-      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
+      "nextAction": "Integrar override por variante/range com Command, baseHash, persistência e RenderInput; provar PG/API/replay/stale e isolamento entre formatos, mantendo auto-plan bloqueado sem ROI adequada.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: contrato versionado de revisão obrigatória, sem geometria autorizada; autenticação, base, source e rights preservados. Validação de contratos e 10 testes unitários passaram; overlay puro não comprova runtime nem conclusão da capability."
     },
     {
       "id": "W67",

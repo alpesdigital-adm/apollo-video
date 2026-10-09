@@ -21123,6 +21123,25 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       maxVelocityPerSecond: { type: 'number', minimum: 0.01, maximum: 2 }, maxAccelerationPerSecondSquared: { type: 'number', minimum: 0.01, maximum: 4 }, safetyMargin: { type: 'number', minimum: 0, maximum: 0.2 },
     },
   }),
+  defineSchema('reframe-plan-request', 2, 'Request reframe planning for an immutable version without caller observations', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'format'],
+    properties: {
+      baseVersionId: idSchema,
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+    },
+  }),
+  defineSchema('reframe-plan-request-result', 2, 'Review-required result when approved server-owned face perception is unavailable', successSchema({
+    type: 'object', additionalProperties: false,
+    required: ['schemaVersion', 'status', 'plan', 'reasonCode', 'baseVersionId', 'format'],
+    properties: {
+      schemaVersion: { const: 'reframe-plan-request-result/v2' },
+      status: { const: 'review-required' },
+      plan: { type: 'null' },
+      reasonCode: { const: 'FACE_PERCEPTION_UNAVAILABLE' },
+      baseVersionId: idSchema,
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+    },
+  })),
   defineSchema('reframe-plan', 1, 'Content-addressed per-format reframe plan with localized fallbacks', successSchema({
     type: 'object', additionalProperties: false, required: ['plan'], properties: { plan: {
       type: 'object', additionalProperties: false,

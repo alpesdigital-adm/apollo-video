@@ -23,7 +23,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const plan = await planProjectReframeService({ projects: createDirectorRunRepository() })({
       workspaceId: actor.workspaceId, projectId, ...body,
     })
-    return NextResponse.json(presentSuccess({ plan }), { headers: publicApiHeaders(requestId) })
+    return NextResponse.json(presentSuccess(plan), { headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)
   }

@@ -7703,15 +7703,15 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.reframe-plans.create": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "inputSchemaRef": "apollo://schemas/reframe-plan-request/v1",
-      "outputSchemaRef": "apollo://schemas/reframe-plan/v1",
+      "inputSchemaRef": "apollo://schemas/reframe-plan-request/v2",
+      "outputSchemaRef": "apollo://schemas/reframe-plan-request-result/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects/{projectId}/reframe-plans"
@@ -183492,6 +183492,68 @@
         }
       }
     },
+    "apollo://schemas/reframe-plan-request-result/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "status",
+            "plan",
+            "reasonCode",
+            "baseVersionId",
+            "format"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "reframe-plan-request-result/v2"
+            },
+            "status": {
+              "const": "review-required"
+            },
+            "plan": {
+              "type": "null"
+            },
+            "reasonCode": {
+              "const": "FACE_PERCEPTION_UNAVAILABLE"
+            },
+            "baseVersionId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "format": {
+              "enum": [
+                "9:16",
+                "16:9",
+                "4:5",
+                "1:1",
+                "21:9"
+              ]
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/reframe-plan-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -183758,6 +183820,30 @@
           "type": "number",
           "minimum": 0,
           "maximum": 0.2
+        }
+      }
+    },
+    "apollo://schemas/reframe-plan-request/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "format"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "format": {
+          "enum": [
+            "9:16",
+            "16:9",
+            "4:5",
+            "1:1",
+            "21:9"
+          ]
         }
       }
     },

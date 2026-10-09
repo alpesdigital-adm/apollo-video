@@ -940,6 +940,24 @@ O security E2E também deve provar em HTTP/PostgreSQL que reviewer não herda sc
 
 ## 30. Critérios de aceite
 
+### W66 — Pedido de plano sem observações do caller
+
+`apollo.projects.reframe-plans.create` passa a 2.0.0 no mesmo endpoint. O
+request `reframe-plan-request/v2` contém apenas `baseVersionId` e `format`;
+`observationSet` e `overrides` enviados pelo cliente são rejeitados. A versão
+anterior calculava um hash sobre caixas fornecidas pelo próprio cliente, que
+não autenticava detector, fonte ou coverage. A ruptura é deliberada e está no
+baseline; os schemas v1 permanecem somente como histórico.
+
+O resultado `reframe-plan-request-result/v2` informa `review-required`,
+`plan=null` e `FACE_PERCEPTION_UNAVAILABLE` depois de conferir projeto, versão,
+fonte única vinculada ao transcript no EditPlan e direitos atuais. Múltiplas
+fontes ainda recebem precondição explícita. Isso é o resultado da solicitação, não um
+crop aprovado. A geometria automática exige evidência facial server-owned com
+escopo e aptidão comprovados; o overlay manual por variante continua separado
+da percepção. Persistência, RenderInput por variante e prova do MP4 seguem
+pendentes no slice W66.
+
 ### W61 — Status explícito de segurança facial
 
 As capabilities de leitura `apollo.projects.director-runs.quality.read` (2.0.0),

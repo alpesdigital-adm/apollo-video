@@ -4,9 +4,9 @@
     "uiActions": 176,
     "capabilities": 156,
     "endpoints": 156,
-    "registeredCapabilities": 380,
-    "operableCapabilities": 380,
-    "publicContractCapabilities": 380,
+    "registeredCapabilities": 384,
+    "operableCapabilities": 384,
+    "publicContractCapabilities": 384,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -18,7 +18,7 @@
     {
       "uiAction": "src/app/batches/page.tsx:1016",
       "capabilityId": "apollo.projects.list",
-      "capabilityVersion": "4.0.0",
+      "capabilityVersion": "6.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -886,7 +886,7 @@
     {
       "uiAction": "src/app/localization/page.tsx:289",
       "capabilityId": "apollo.projects.workspace.read",
-      "capabilityVersion": "11.0.0",
+      "capabilityVersion": "12.0.0",
       "endpoint": "GET /v1/projects/{projectId}",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -906,7 +906,7 @@
     {
       "uiAction": "src/app/localization/page.tsx:352",
       "capabilityId": "apollo.projects.list",
-      "capabilityVersion": "4.0.0",
+      "capabilityVersion": "6.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2295,7 +2295,7 @@
     {
       "uiAction": "src/app/ProjectsPageClient.tsx:290",
       "capabilityId": "apollo.projects.list",
-      "capabilityVersion": "4.0.0",
+      "capabilityVersion": "6.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2315,7 +2315,7 @@
     {
       "uiAction": "src/app/ProjectsPageClient.tsx:378",
       "capabilityId": "apollo.projects.list",
-      "capabilityVersion": "4.0.0",
+      "capabilityVersion": "6.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2586,7 +2586,7 @@
     {
       "uiAction": "src/components/MediaLibraryWorkspace.tsx:152",
       "capabilityId": "apollo.projects.workspace.read",
-      "capabilityVersion": "11.0.0",
+      "capabilityVersion": "12.0.0",
       "endpoint": "GET /v1/projects/{projectId}",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2666,7 +2666,7 @@
     {
       "uiAction": "src/components/MediaLibraryWorkspace.tsx:97",
       "capabilityId": "apollo.projects.list",
-      "capabilityVersion": "4.0.0",
+      "capabilityVersion": "6.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -3669,7 +3669,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/project-list/v6",
+      "outputSchemaRef": "apollo://schemas/project-list/v8",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4197,7 +4197,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v11",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v13",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4208,7 +4208,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/dead-letter",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v11",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v13",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4219,7 +4219,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/{operationId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v12",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v14",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4230,7 +4230,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/{operationId}/final-export-attempts",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/project-final-export-attempt-history/v1",
+      "outputSchemaRef": "apollo://schemas/project-final-export-attempt-history/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4241,7 +4241,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/cancel",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v12",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v14",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4252,7 +4252,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/retry",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v12",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v14",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -5109,8 +5109,8 @@
       "capabilityId": "apollo.projects.reframe-plans.create",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/reframe-plans",
-      "inputSchemaRef": "apollo://schemas/reframe-plan-request/v1",
-      "outputSchemaRef": "apollo://schemas/reframe-plan/v1",
+      "inputSchemaRef": "apollo://schemas/reframe-plan-request/v2",
+      "outputSchemaRef": "apollo://schemas/reframe-plan-request-result/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -5815,6 +5815,50 @@
       "endpoint": "POST /v1/projects/{projectId}/director-runs",
       "inputSchemaRef": "apollo://schemas/enqueue-project-director-run-request/v3",
       "outputSchemaRef": "apollo://schemas/project-director-operation-enqueued/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.perception-producer-operations.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/perception-producer-operations",
+      "inputSchemaRef": "apollo://schemas/perception-producer-run-request/v1",
+      "outputSchemaRef": "apollo://schemas/perception-producer-operation-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.perception-producer-operations.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/perception-producer-operations/{operationId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/perception-producer-operation-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.temporal-producer-operations.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/temporal-producer-operations",
+      "inputSchemaRef": "apollo://schemas/temporal-producer-run-request/v1",
+      "outputSchemaRef": "apollo://schemas/temporal-producer-operation-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.temporal-producer-operations.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/temporal-producer-operations/{operationId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/temporal-producer-operation-read/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -96,25 +96,47 @@ test('T-FR-164 localizes uncertain perception and deterministic no-observation f
   assert.deepEqual(plan.segments.map((segment) => segment.mode), ['contain', 'crop', 'contain'])
 })
 
-test('T-FR-164 public application boundary binds workspace, immutable version and source artifact before planning', async () => {
-  const set = observationSet()
+test('T-FR-164 public application boundary returns localized review without approved server-owned ROI evidence', async () => {
   const reads = []
-  const plan = await planProjectReframeService({ projects: { async readContext(input) {
+  const plan = planProjectReframeService({ projects: { async readContext(input) {
     reads.push(input)
     return {
       currentVersion: { id: 'project-version-reframe-1' },
       editPlan: { videoTracks: [{ clips: [{ sourceArtifactId: 'artifact-reframe-1' }] }] },
+      transcript: { sourceArtifactId: 'artifact-reframe-1' },
+      sourceRights: { state: 'present', status: 'approved', consentStatus: 'not-required' },
     }
-  } } })({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-reframe-1', format: '4:5', observationSet: set })
-  assert.equal(plan.format, '4:5')
+  } } })
+  const result = await plan({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-reframe-1', format: '4:5' })
+  assert.deepEqual(result, { schemaVersion: 'reframe-plan-request-result/v2', status: 'review-required', plan: null,
+    reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', baseVersionId: 'project-version-reframe-1', format: '4:5' })
   assert.deepEqual(reads, [{ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1' }])
-  await assert.rejects(() => planProjectReframeService({ projects: { async readContext() { return { currentVersion: { id: 'project-version-new' }, editPlan: { videoTracks: [] } } } } })({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-stale', format: '4:5', observationSet: set }), /stale/)
+  await assert.rejects(() => planProjectReframeService({ projects: { async readContext() { return { currentVersion: { id: 'project-version-new' }, editPlan: { videoTracks: [] } } } } })({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-stale', format: '4:5' }), /stale/)
+  const denied = planProjectReframeService({ projects: { async readContext() { return {
+    currentVersion: { id: 'project-version-reframe-1' },
+    editPlan: { videoTracks: [{ clips: [{ sourceArtifactId: 'artifact-reframe-1' }] }] },
+    transcript: { sourceArtifactId: 'artifact-reframe-1' },
+    sourceRights: { state: 'present', status: 'approved', consentStatus: 'approved', expiresAt: '2026-10-07T00:00:00.000Z' },
+  } } }, clock: () => new Date('2026-10-08T00:00:00.000Z') })
+  await assert.rejects(() => denied({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-reframe-1', format: '4:5' }),
+    (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+  const multipleSources = planProjectReframeService({ projects: { async readContext() { return {
+    currentVersion: { id: 'project-version-reframe-1' },
+    editPlan: { videoTracks: [{ clips: [
+      { sourceArtifactId: 'artifact-reframe-1' }, { sourceArtifactId: 'artifact-reframe-2' },
+    ] }] },
+    transcript: { sourceArtifactId: 'artifact-reframe-1' },
+    sourceRights: { state: 'present', status: 'approved', consentStatus: 'not-required' },
+  } } } })
+  await assert.rejects(() => multipleSources({ workspaceId: 'workspace-reframe-1', projectId: 'project-reframe-1', baseVersionId: 'project-version-reframe-1', format: '4:5' }),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && /one transcript-bound source/.test(error.message))
 })
 
-test('T-FR-164 publishes an authenticated fail-closed API without claiming a detector', async () => {
-  const parsed = parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16', observationSet: observationSet() })
+test('T-FR-164 public request cannot inject observation or manual override as detector evidence', async () => {
+  const parsed = parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16' })
   assert.equal(parsed.format, '9:16')
-  assert.throws(() => parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16', observationSet: observationSet(), detector: 'fake' }), /unsupported/)
+  assert.throws(() => parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16', observationSet: observationSet() }), /unsupported/)
+  assert.throws(() => parseReframePlanRequest({ baseVersionId: 'project-version-reframe-1', format: '9:16', overrides: [] }), /unsupported/)
   const capability = FOUNDATION_CAPABILITIES.find((entry) => entry.id === 'apollo.projects.reframe-plans.create')
   assert.equal(capability.endpoint.path, '/v1/projects/{projectId}/reframe-plans')
   assert.deepEqual(capability.requiredScopes, ['projects:read'])

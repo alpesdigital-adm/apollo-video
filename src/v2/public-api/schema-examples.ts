@@ -11241,6 +11241,11 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       maxVelocityPerSecond: 0.35, maxAccelerationPerSecondSquared: 0.8, safetyMargin: 0.02,
     }],
+    'apollo://schemas/reframe-plan-request/v2': [{ baseVersionId: 'project-version-reframe-1', format: '9:16' }],
+    'apollo://schemas/reframe-plan-request-result/v2': [{ data: {
+      schemaVersion: 'reframe-plan-request-result/v2', status: 'review-required', plan: null,
+      reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', baseVersionId: 'project-version-reframe-1', format: '9:16',
+    }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/reframe-plan/v1': [{ data: { plan: {
       schemaVersion: 'reframe-plan/v1', format: '9:16', observationSetId: 'observations-reframe-example', observationSetHash: 'b'.repeat(64),
       outputFormatRegistryHash: OUTPUT_FORMAT_REGISTRY.registryHash, outputPresetHash: OUTPUT_FORMAT_REGISTRY.presets['9:16'].presetHash,
