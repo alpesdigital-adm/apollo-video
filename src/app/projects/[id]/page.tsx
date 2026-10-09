@@ -3515,10 +3515,15 @@ export default function ProjectWorkspacePage() {
                 </div>
                 {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].length ? (
                   <div className="mt-3 space-y-1.5" data-testid="proxy-review-issues">
-                    {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].slice(0, 4).map((issue) => (
-                      <div className="flex items-start gap-2 border-l border-white/[0.09] pl-2 text-[9px] leading-4 text-[#8e8980]" key={`${issue.code}:${issue.targetId ?? 'proxy'}`}>
+                    {[
+                      ...[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'),
+                      ...[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.code !== 'FACE_PERCEPTION_UNAVAILABLE').slice(0, 4),
+                    ].map((issue) => (
+                      <div className="flex items-start gap-2 border-l border-white/[0.09] pl-2 text-[9px] leading-4 text-[#8e8980]" key={`${issue.code}:${issue.targetId ?? 'proxy'}:${issue.evidenceRange?.startFrame ?? 'all'}`}>
                         <span className={issue.severity === 'hard' ? 'text-[#dc7777]' : 'text-[#d5ae52]'}>{issue.severity === 'hard' ? '!' : '△'}</span>
-                        <span><span className="font-mono text-[#aaa49a]">{issue.outputSpecId ?? proxyReview.outputSpecId}</span> · {issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
+                        <span><span className="font-mono text-[#aaa49a]">{issue.outputSpecId ?? proxyReview.outputSpecId}</span> · {issue.code === 'FACE_PERCEPTION_UNAVAILABLE'
+                          ? `Legenda ${issue.targetId?.replace(/^subtitle:/, '') ?? 'do trecho'} omitida: cobertura facial desconhecida; variante bloqueada para exportação.`
+                          : issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
                       </div>
                     ))}
                   </div>

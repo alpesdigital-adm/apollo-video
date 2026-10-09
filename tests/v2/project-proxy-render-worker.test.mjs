@@ -288,8 +288,7 @@ function dependencies(operations, overrides = {}) {
       },
       async cleanup() { calls.cleaned += 1 },
     },
-    // No perception recorded for this project: the anchor decision then has nothing to consult and
-    // the render keeps the reserved bottom band, which is the Director's face-safe fallback.
+    // Manual perception is deliberately absent from the automatic anchor decision.
     perceptionTimelines: { async findLatest() { return null } },
     renderElementMaps: {
       async persistOrReplay(input) {
@@ -874,13 +873,25 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
       async render(input) { seen = input; return originalRender(input) },
     }
     let manifest = null
+    let review = null
+    base.deps.proxyReviews = {
+      async persistGenerated(input) {
+        review = input.review
+        assert.equal(review.status, 'blocked')
+        assert.equal(review.finalAllowed, false)
+        assert.equal(review.formatQuality?.exportAllowed, false)
+        assert.ok(review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' &&
+          issue.severity === 'hard' && issue.evidenceRange.startFrame === 0 && issue.evidenceRange.endFrame === 60))
+        return { ...review, id: input.id }
+      },
+    }
     base.deps.artifacts = {
       async persistOrReplay(input) {
         manifest = input.manifest
         return { artifactId: input.artifactId, manifestId: input.manifestId, replayed: false }
       },
     }
-    return { operations, deps: base.deps, render: () => seen, manifest: () => manifest }
+    return { operations, deps: base.deps, render: () => seen, manifest: () => manifest, review: () => review }
   }
 
   // Even a matching manually supplied timeline cannot certify face clearance.
@@ -891,8 +902,10 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
   )
   const anchorPlan = matched.render().placementPlan.subtitleAnchorPlan
   assert.ok(anchorPlan, 'the worker must hand the renderer a decided anchor plan')
+  assert.equal(anchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
   assert.equal(anchorPlan.perceptionTimelineHash, null)
-  assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').anchor, 'bottom')
+  assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').anchor, null)
+  assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').issues[0].code, 'FACE_PERCEPTION_UNAVAILABLE')
   const matchedParametersHash = matched.manifest().recipe.parametersHash
   assert.match(matchedParametersHash, /^[a-f0-9]{64}$/)
 
@@ -904,7 +917,8 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
   )
   const fallbackPlan = mismatched.render().placementPlan.subtitleAnchorPlan
   assert.equal(fallbackPlan.perceptionTimelineHash, null)
-  assert.equal(subtitleAnchorDecisionFor(fallbackPlan, 'cue-1').anchor, 'bottom')
+  assert.equal(subtitleAnchorDecisionFor(fallbackPlan, 'cue-1').anchor, null)
+  assert.equal(subtitleAnchorDecisionFor(fallbackPlan, 'cue-1').issues[0].code, 'FACE_PERCEPTION_UNAVAILABLE')
 
   assert.equal(anchorPlan.anchorPlanHash, fallbackPlan.anchorPlanHash)
   assert.equal(

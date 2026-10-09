@@ -8,13 +8,13 @@ import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy
 import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../../domain/output-format-registry.ts'
-import { validateRenderPlacementPlan, type RenderPlacementPlanV1 } from '../../domain/render-placement-plan.ts'
+import { validateRenderPlacementPlan, type RenderPlacementPlan } from '../../domain/render-placement-plan.ts'
 import { validateRenderReframePlan, type RenderReframeRangeV1 } from '../../domain/render-reframe-plan.ts'
 import { createEditorialAudioTimelineHash } from '../../domain/production-modes.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseProjectColorPlan } from '../../domain/project-color-plan.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
-import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from '../../domain/subtitle-anchor-plan.ts'
+import { subtitleAnchorDecisionFor, type SubtitleAnchorPlan } from '../../domain/subtitle-anchor-plan.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
@@ -69,7 +69,7 @@ function buildAssSubtitles(input: {
    * evidence. Positions come from the decided band, not from a constant written here, so the
    * pixels and the plan cannot disagree.
    */
-  anchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
+  anchorPlan?: Readonly<SubtitleAnchorPlan> | null
 }): string {
   const fontSize = Math.max(
     32,
@@ -216,7 +216,7 @@ export function buildReframeCropFilter(input: Readonly<{
  * half-open `[startFrame, endFrame)` interval of the plan, expressed in FFmpeg's inclusive form.
  */
 export function buildPlacementOverlayFilters(input: Readonly<{
-  plan: Readonly<RenderPlacementPlanV1>
+  plan: Readonly<RenderPlacementPlan>
   assetInputIndexByElementId: Readonly<Record<string, number>>
   inputLabel: string
   outputLabel: string

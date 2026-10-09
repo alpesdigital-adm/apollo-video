@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
+import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { EditorialCutEditPlan } from '../../application/apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../application/ports/editorial-proxy-renderer.ts'
 import type { ProxyQualityIssue } from '../../application/render-workflow.ts'
 import { calculateVersionHash } from '../../application/version-hash.ts'
+import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { expectedOcrTimeline } from '../../domain/projected-ocr-timeline.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   parseCommandArtifactInvalidation,
@@ -14,6 +19,8 @@ import {
 } from '../../domain/command-impact.ts'
 import { editCommandRenderPolicy } from '../../domain/edit-command-registry.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './renderable-plan-snapshot-repository.ts'
+import { parseDirectorPerceptionSnapshotUnchecked } from './director-run-repository.ts'
+import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
   try {
@@ -79,6 +86,49 @@ function parseArray(value: string, field: string): readonly unknown[] {
   }
 }
 
+function assertSealedProxyRecipe(input: Readonly<{
+  recipeParameters: Readonly<Record<string, unknown>>
+  ocrReceipt: Readonly<NonNullable<Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0]['ocrReceipt']>> | null
+}>, operation: Readonly<{ inputHash: string; projectVersionId: string; editPlanSnapshotId: string }>,
+artifact: Readonly<{ artifactKey: string; sha256: string; byteSize: bigint; mediaType: string; container: string }>,
+manifest: Readonly<{ manifestJson: string; manifestHash: string }>): void {
+  const manifestBody = parseRecord(manifest.manifestJson, 'project proxy output manifest')
+  const { manifestHash, ...unsignedManifest } = manifestBody
+  const recipe = manifestBody.recipe
+  const manifestArtifact = manifestBody.artifact
+  if (manifestHash !== manifest.manifestHash ||
+      calculateCanonicalHash(unsignedManifest) !== manifestHash ||
+      typeof manifestArtifact !== 'object' || manifestArtifact === null || Array.isArray(manifestArtifact) ||
+      (manifestArtifact as Record<string, unknown>).artifactKey !== artifact.artifactKey ||
+      (manifestArtifact as Record<string, unknown>).sha256 !== artifact.sha256 ||
+      (manifestArtifact as Record<string, unknown>).byteSize !== Number(artifact.byteSize) ||
+      (manifestArtifact as Record<string, unknown>).mediaType !== artifact.mediaType ||
+      (manifestArtifact as Record<string, unknown>).container !== artifact.container ||
+      typeof recipe !== 'object' || recipe === null || Array.isArray(recipe) ||
+      (recipe as Record<string, unknown>).id !== 'editorial-proxy' ||
+      (recipe as Record<string, unknown>).version !== EDITORIAL_PROXY_RECIPE_VERSION ||
+      (recipe as Record<string, unknown>).parametersHash !== calculateCanonicalHash(input.recipeParameters) ||
+      !Object.hasOwn(input.recipeParameters, 'ocrReceipt') ||
+      !Object.hasOwn(input, 'ocrReceipt') ||
+      calculateCanonicalHash(input.recipeParameters.ocrReceipt) !== calculateCanonicalHash(input.ocrReceipt) ||
+      input.recipeParameters.inputHash !== operation.inputHash ||
+      input.recipeParameters.projectVersionId !== operation.projectVersionId ||
+      input.recipeParameters.editPlanSnapshotId !== operation.editPlanSnapshotId) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy receipt is not sealed by the output recipe')
+  }
+}
+
+function assertProxySourceLineage(manifestJson: string,
+  source: Readonly<ProjectProxyRenderSource>): void {
+  const manifest = parseRecord(manifestJson, 'project proxy output manifest')
+  if (!Array.isArray(manifest.sources) || source.renderSources.some((asset) =>
+    !manifest.sources.some((candidate) => typeof candidate === 'object' && candidate !== null &&
+      !Array.isArray(candidate) && candidate.artifactKey === asset.artifactKey &&
+      candidate.sha256 === asset.sha256 && candidate.role === asset.role))) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy source bytes are not sealed by output lineage')
+  }
+}
+
 function hydrateSource(
   project: Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>,
   expected?: { sourceArtifactId?: string; sourceManifestId?: string },
@@ -133,6 +183,13 @@ function hydrateSource(
     if (musicTrack) {
       const rights = link.artifact.currentRightsSnapshot
       if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= new Date())) throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
+    } else {
+      const rights = link.artifact.currentRightsSnapshot
+        ? hydrateAssetRights(link.artifact.currentRightsSnapshot) : null
+      if (evaluateAssetUse(rights, { workspaceId: project.workspaceId,
+        use: 'editorial-reuse', locale: project.locale ?? 'und' }, new Date()).outcome !== 'allow') {
+        throw new DomainError('ASSET_RIGHTS_BLOCKED', `Render source ${artifactId} no longer has approved current rights`)
+      }
     }
     return Object.freeze({
       artifactId,
@@ -185,12 +242,13 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     editPlanSnapshotId?: string
     sourceArtifactId?: string
     sourceManifestId?: string
-  }) {
-    return this.client.v2Project.findFirst({
+  }, client: PrismaClient | Prisma.TransactionClient = this.client) {
+    return client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
       select: {
         id: true,
         workspaceId: true,
+        locale: true,
         format: true,
         currentVersionId: true,
         versions: {
@@ -201,7 +259,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           take: 1,
           include: {
             editPlanSnapshot: true,
-            directorRunAsResult: { include: { qualitySnapshot: true } },
+            directorRunAsResult: { include: { qualitySnapshot: true, perceptionSnapshot: true } },
             command: {
               include: {
                 artifactInvalidations: {
@@ -230,17 +288,70 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   async readCurrentSource(input: { workspaceId: string; projectId: string }) {
     const project = await this.queryProject(input)
     const source = hydrateSource(project)
-    return source ? this.attachRangeReuse(input.workspaceId, project!, source) : null
+    return source ? this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)) : null
   }
 
   async readImmutableSource(input: { workspaceId: string; projectId: string; projectVersionId: string; editPlanSnapshotId: string; sourceArtifactId: string; sourceManifestId: string }) {
     const project = await this.queryProject(input)
     const source = hydrateSource(project, input)
-    return source ? this.attachRangeReuse(input.workspaceId, project!, source) : null
+    return source ? this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)) : null
   }
 
-  async readRenderableSnapshotSource(input: { workspaceId: string; projectId: string; planId: string; planHash: string; format: string }) {
-    const snapshot = await new PrismaRenderablePlanSnapshotRepository(this.client).readByPlan(input)
+  private async attachTrustedOcr(
+    project: NonNullable<Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>>,
+    source: Readonly<ProjectProxyRenderSource>,
+    client: PrismaClient | Prisma.TransactionClient = this.client,
+  ): Promise<Readonly<ProjectProxyRenderSource>> {
+    const run = project.versions[0]?.directorRunAsResult
+    if (!run) return source
+    if (run.resultVersionId !== source.projectVersionId || run.projectId !== project.id ||
+        run.workspaceId !== project.workspaceId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy Director result lineage is invalid')
+    }
+    const perception = parseDirectorPerceptionSnapshotUnchecked({
+      contentJson: run.perceptionSnapshot.contentJson,
+      contentHash: run.perceptionSnapshot.contentHash,
+      schemaVersion: run.perceptionSnapshot.schemaVersion,
+      baseVersionId: run.baseVersionId,
+    })
+    if (perception.schemaVersion !== 2 || !perception.ocrEvidence) return source
+    const evidence = perception.ocrEvidence
+    if (evidence.sourceArtifactId !== source.sourceArtifactId ||
+        evidence.sourceSha256 !== source.sourceSha256) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy OCR source identity differs from Director evidence')
+    }
+    const map = source.editPlan.videoTracks.filter((track) => track.kind === 'base-video')
+      .flatMap((track) => track.clips.map((clip) => ({ clipId: clip.id,
+        sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame,
+        timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+        rate: clip.rate })))
+    // A later edit may change the source→timeline projection. It must not inherit coordinates.
+    if (calculateCanonicalHash(map) !== evidence.timeMapHash) return source
+    const envelope = await readPerceptionProducerEnvelope(client, {
+      id: evidence.envelopeId, workspaceId: project.workspaceId, projectId: project.id,
+      inputVersionId: run.baseVersionId, now: new Date(),
+    })
+    if (!envelope || envelope.envelopeHash !== evidence.envelopeHash ||
+        envelope.timeMapHash !== evidence.timeMapHash ||
+        envelope.sourceArtifactId !== source.sourceArtifactId ||
+        envelope.sourceSha256 !== source.sourceSha256 ||
+        envelope.timelineDurationFrames !== source.editPlan.durationFrames ||
+        envelope.timelineFps.num !== source.editPlan.fps * envelope.timelineFps.den) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy OCR envelope is not bound to the rendered version')
+    }
+    return Object.freeze({ ...source, trustedOcr: Object.freeze({
+      envelopeId: envelope.id, envelopeHash: envelope.envelopeHash,
+      inputVersionId: run.baseVersionId, timeMapHash: envelope.timeMapHash,
+      timeline: expectedOcrTimeline(envelope, source.editPlan.fps,
+        source.editPlan.durationFrames),
+    }) })
+  }
+
+  async readRenderableSnapshotSource(input: { workspaceId: string; projectId: string; planId: string; planHash: string; format: string },
+    client: PrismaClient | Prisma.TransactionClient = this.client) {
+    // Renderable snapshots use their own edit maps. OCR from a Director result is never inherited;
+    // the worker renders cues only with explicit unknown-face review and no OCR coordinates.
+    const snapshot = await new PrismaRenderablePlanSnapshotRepository(client).readByPlan(input)
     if (!snapshot || snapshot.projectId !== input.projectId || snapshot.plan.projectVersionId.trim().length === 0) return null
     if (!snapshot.plan.formatVariantRefs.includes(input.format as never)) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot is not bound to the requested format')
@@ -249,7 +360,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       workspaceId: input.workspaceId,
       projectId: input.projectId,
       projectVersionId: snapshot.plan.projectVersionId,
-    })
+    }, client)
     const version = project?.versions[0]
     if (!project || !version) return null
     const clips = snapshot.plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
@@ -270,6 +381,13 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         const rights = link.artifact.currentRightsSnapshot
         if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= new Date())) {
           throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
+        }
+      } else {
+        const rights = link.artifact.currentRightsSnapshot
+          ? hydrateAssetRights(link.artifact.currentRightsSnapshot) : null
+        if (evaluateAssetUse(rights, { workspaceId: project.workspaceId,
+          use: 'editorial-reuse', locale: project.locale ?? 'und' }, new Date()).outcome !== 'allow') {
+          throw new DomainError('ASSET_RIGHTS_BLOCKED', `Renderable source ${artifactId} no longer has approved current rights`)
         }
       }
       return Object.freeze({
@@ -469,7 +587,9 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   }
 
   async attachCompletedOutput(input: Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0]): Promise<void> {
-    await this.client.$transaction(async (transaction) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.client.$transaction(async (transaction) => {
       const [operation, artifact, manifest] = await Promise.all([
         transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
           operationId: input.operationId, workspaceId: input.workspaceId, projectId: input.projectId,
@@ -479,6 +599,48 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.outputManifestId, workspaceId: input.workspaceId, artifactId: input.outputArtifactId } }),
       ])
       if (!operation || !artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy output is inconsistent')
+      if (operation.renderablePlanHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot cannot use project proxy attachment')
+      assertSealedProxyRecipe(input, operation, artifact, manifest)
+      const project = await this.queryProject({ workspaceId: input.workspaceId,
+        projectId: input.projectId, projectVersionId: input.projectVersionId }, transaction)
+      if (!project || project.currentVersionId !== input.projectVersionId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy result version is no longer current')
+      }
+      const source = hydrateSource(project, { sourceArtifactId: operation.sourceArtifactId,
+        sourceManifestId: operation.sourceManifestId })
+      if (!source || source.editPlanSnapshotId !== operation.editPlanSnapshotId ||
+          source.sourceArtifactId !== operation.sourceArtifactId ||
+          source.sourceManifestId !== operation.sourceManifestId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy source changed during rendering')
+      }
+      assertProxySourceLineage(manifest.manifestJson, source)
+      const resolved = await this.attachTrustedOcr(project, source, transaction)
+      const ocr = resolved.trustedOcr
+      if ((ocr === undefined) !== (input.ocrReceipt === null)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy OCR receipt presence differs from Director evidence')
+      }
+      if (input.ocrReceipt) {
+        if (operation.sourceArtifactId !== input.ocrReceipt.sourceArtifactId ||
+            operation.sourceManifestId !== input.ocrReceipt.sourceManifestId ||
+            operation.editPlanSnapshotId !== input.recipeParameters.editPlanSnapshotId ||
+            Object.keys(input.ocrReceipt).sort().join('|') !==
+              'editPlanHash|envelopeHash|envelopeId|inputVersionId|sourceArtifactId|sourceManifestId|sourceSha256|timeMapHash|timelineHash') {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy OCR receipt source binding is invalid')
+        }
+        if (source.editPlanHash !== input.ocrReceipt.editPlanHash ||
+            source.sourceSha256 !== input.ocrReceipt.sourceSha256 ||
+            source.sourceManifestId !== input.ocrReceipt.sourceManifestId ||
+            source.editPlanSnapshotId !== operation.editPlanSnapshotId) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy OCR source changed during rendering')
+        }
+        if (!ocr || ocr.envelopeId !== input.ocrReceipt.envelopeId ||
+            ocr.envelopeHash !== input.ocrReceipt.envelopeHash ||
+            ocr.inputVersionId !== input.ocrReceipt.inputVersionId ||
+            ocr.timeMapHash !== input.ocrReceipt.timeMapHash ||
+            ocr.timeline.timelineHash !== input.ocrReceipt.timelineHash) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy OCR evidence changed during rendering')
+        }
+      }
       await transaction.v2ProjectMediaAsset.upsert({
         where: { projectId_artifactId_role: { projectId: input.projectId, artifactId: input.outputArtifactId, role: 'editorial-proxy' } },
         create: {
@@ -531,11 +693,22 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         },
         data: { status: 'succeeded' },
       })
-    })
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+        return
+      } catch (error) {
+        const serialization = typeof error === 'object' && error !== null &&
+          'code' in error && error.code === 'P2034'
+        if (serialization && attempt < 2) continue
+        if (serialization) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy attachment serialization conflicted')
+        throw error
+      }
+    }
   }
 
   async attachCompletedSnapshotOutput(input: Parameters<ProjectProxyRenderRepository['attachCompletedSnapshotOutput']>[0]): Promise<void> {
-    await this.client.$transaction(async (transaction) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.client.$transaction(async (transaction) => {
       const [operation, artifact, manifest] = await Promise.all([
         transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
           operationId: input.operationId, workspaceId: input.workspaceId, projectId: input.projectId,
@@ -546,6 +719,26 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.outputManifestId, workspaceId: input.workspaceId, artifactId: input.outputArtifactId } }),
       ])
       if (!operation || !artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed renderable snapshot proxy output is inconsistent')
+      assertSealedProxyRecipe(input, operation, artifact, manifest)
+      if (input.ocrReceipt !== null || input.recipeParameters.ocrReceipt !== null ||
+          !operation.renderablePlanId || !operation.renderablePlanHash ||
+          operation.renderableVariantId !== input.variantId ||
+          operation.renderableFormat !== input.recipeParameters.format) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot proxy receipt is invalid')
+      }
+      const source = await this.readRenderableSnapshotSource({
+        workspaceId: input.workspaceId, projectId: input.projectId,
+        planId: operation.renderablePlanId, planHash: operation.renderablePlanHash,
+        format: operation.renderableFormat,
+      }, transaction)
+      if (!source || source.projectVersionId !== operation.projectVersionId ||
+          source.editPlanSnapshotId !== operation.editPlanSnapshotId ||
+          source.editPlanHash !== operation.renderablePlanHash ||
+          source.sourceArtifactId !== operation.sourceArtifactId ||
+          source.sourceManifestId !== operation.sourceManifestId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot source changed before proxy attachment')
+      }
+      assertProxySourceLineage(manifest.manifestJson, source)
       await transaction.v2ProjectMediaAsset.upsert({
         where: { projectId_artifactId_role: { projectId: input.projectId, artifactId: input.outputArtifactId, role: 'editorial-proxy' } },
         create: {
@@ -555,6 +748,15 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         },
         update: {},
       })
-    })
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+        return
+      } catch (error) {
+        const serialization = typeof error === 'object' && error !== null &&
+          'code' in error && error.code === 'P2034'
+        if (serialization && attempt < 2) continue
+        if (serialization) throw new DomainError('PERSISTENCE_CONFLICT', 'Snapshot proxy attachment serialization conflicted')
+        throw error
+      }
+    }
   }
 }

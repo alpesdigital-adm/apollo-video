@@ -7,13 +7,12 @@ import { PERCEPTION_GOLDEN_FIXTURES } from '../../src/v2/domain/perception-timel
 import { createRenderPlacementPlan, validateRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { deriveSubtitleRegion } from '../../src/v2/domain/subtitle-region.ts'
 import {
-  createSubtitleAnchorPlan,
+  solveSubtitleAnchorGeometry,
   deriveSubtitleAnchorBands,
   SUBTITLE_ANCHOR_BLOCKER_KINDS,
   SUBTITLE_ANCHOR_PERCEPTION_FIXTURES,
   SUBTITLE_ANCHOR_PREFERENCE,
   subtitleAnchorDecisionFor,
-  validateSubtitleAnchorPlan,
 } from '../../src/v2/domain/subtitle-anchor-plan.ts'
 
 const FORMAT = '9:16'
@@ -24,7 +23,7 @@ const region = deriveSubtitleRegion({ spec: preset.spec, presetId: 'kinetic' })
 const bands = deriveSubtitleAnchorBands({ region, safeArea: preset.spec.safeArea })
 const canvas = { width: preset.exportDefaults.proxy.width, height: preset.exportDefaults.proxy.height }
 
-const planFor = (perceptionTimeline, cues, extra = {}) => createSubtitleAnchorPlan({
+const planFor = (perceptionTimeline, cues, extra = {}) => solveSubtitleAnchorGeometry({
   spec: preset.spec, format: FORMAT, canvas, fps: FPS, durationFrames: DURATION_FRAMES,
   region, cues, ...(perceptionTimeline ? { perceptionTimeline } : {}), ...extra,
 })
@@ -62,10 +61,7 @@ test('T-FR-173 climbs off a low face and consults the content-addressed percepti
   assert.deepEqual(decision.blockerIds, ['face-lower'])
   assert.equal(decision.suppressed, false)
   assert.equal(plan.issues.length, 0)
-  validateSubtitleAnchorPlan(plan, {
-    region, safeArea: preset.spec.safeArea, outputSpecId: preset.spec.id,
-    format: FORMAT, canvas, durationFrames: DURATION_FRAMES,
-  })
+  assert.equal(plan.outputSpecId, preset.spec.id)
 })
 
 test('T-FR-173 preserves the previous anchor by hysteresis instead of taking the first candidate', () => {
@@ -150,14 +146,10 @@ test('T-FR-173 reads cta and logo geometry from the solved plan, not from a call
       minWidth: 0.5, maxWidth: 0.9, minHeight: 0.3, maxHeight: 0.6,
       timeRange: { startFrame: 0, endFrame: DURATION_FRAMES },
     }],
-    subtitleAnchor: {
-      fps: FPS,
-      cues: [{ id: 'cue-1', startFrame: 0, endFrame: 45 }],
-      perceptionTimeline: SUBTITLE_ANCHOR_PERCEPTION_FIXTURES.multipleOverlays,
-    },
   })
   validateRenderPlacementPlan(plan)
-  const anchorPlan = plan.subtitleAnchorPlan
+  const anchorPlan = planFor(SUBTITLE_ANCHOR_PERCEPTION_FIXTURES.multipleOverlays,
+    [{ id: 'cue-1', startFrame: 0, endFrame: 45 }], { placements: plan.placements })
   const decision = subtitleAnchorDecisionFor(anchorPlan, 'cue-1')
   const cta = plan.placements.find((placement) => placement.elementId === 'cta-hero')
   // Face, insert and the solved CTA all took part; the decision names each blocker it consulted.
@@ -177,7 +169,11 @@ test('T-FR-173 reads cta and logo geometry from the solved plan, not from a call
 test('T-FR-173 fails closed on a tampered anchor plan before a frame is rendered', () => {
   const plan = createRenderPlacementPlan({
     format: FORMAT, canvas, durationFrames: DURATION_FRAMES, subtitlePresetId: 'kinetic', elements: [],
-    subtitleAnchor: { fps: FPS, cues: [{ id: 'cue-1', startFrame: 0, endFrame: 45 }], perceptionTimeline: SUBTITLE_ANCHOR_PERCEPTION_FIXTURES.lowerFace },
+    subtitleAnchor: { fps: FPS, cues: [{ id: 'cue-1', startFrame: 0, endFrame: 45 }],
+      perceptionTimeline: SUBTITLE_ANCHOR_PERCEPTION_FIXTURES.lowerFace,
+      faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
+      ocrEvidence: { envelopeId: 'controlled-ocr-1', envelopeHash: 'a'.repeat(64),
+        inputVersionId: 'controlled-version-1', timeMapHash: 'b'.repeat(64) } },
   })
   validateRenderPlacementPlan(plan)
   const moved = {
@@ -187,7 +183,45 @@ test('T-FR-173 fails closed on a tampered anchor plan before a frame is rendered
       decisions: plan.subtitleAnchorPlan.decisions.map((decision) => ({ ...decision, bounds: bands.bottom })),
     },
   }
-  assert.throws(() => validateRenderPlacementPlan(moved), /hash is inconsistent|does not sit on its declared band/)
+  assert.throws(() => validateRenderPlacementPlan(moved), /facial evidence state is invalid|hash is inconsistent/)
   const rehashed = { ...plan, subtitleAnchorPlan: { ...plan.subtitleAnchorPlan, anchorPlanHash: '0'.repeat(64) } }
   assert.throws(() => validateRenderPlacementPlan(rehashed), /hash is inconsistent/)
+})
+
+test('W65 runtime plan suppresses every cue while facial coverage is unknown, even with OCR or override preference', () => {
+  for (const format of ['9:16', '16:9']) {
+    const selected = readOutputFormatPreset(format)
+    const selectedCanvas = { width: selected.exportDefaults.proxy.width,
+      height: selected.exportDefaults.proxy.height }
+    const plan = createRenderPlacementPlan({
+      format, canvas: selectedCanvas, durationFrames: DURATION_FRAMES,
+      subtitlePresetId: 'kinetic', elements: [],
+      subtitleAnchor: { fps: FPS,
+        cues: [{ id: 'cue-review', startFrame: 12, endFrame: 42 }],
+        perceptionTimeline: SUBTITLE_ANCHOR_PERCEPTION_FIXTURES.fullScreenOcr,
+        ocrEvidence: { envelopeId: 'controlled-ocr-2', envelopeHash: 'a'.repeat(64),
+          inputVersionId: 'controlled-version-2', timeMapHash: 'b'.repeat(64) },
+        faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' } },
+    })
+    assert.equal(plan.schemaVersion, 'render-placement-plan/v2')
+    assert.equal(plan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
+    const decision = subtitleAnchorDecisionFor(plan.subtitleAnchorPlan, 'cue-review')
+    assert.equal(decision.anchor, null)
+    assert.equal(decision.suppressed, true)
+    assert.deepEqual(decision.eligibleAnchors, [])
+    assert.equal(decision.issues[0].code, 'FACE_PERCEPTION_UNAVAILABLE')
+    assert.deepEqual(decision.issues[0].evidenceRange, { startFrame: 12, endFrame: 42 })
+    validateRenderPlacementPlan(plan)
+    const tampered = { ...plan, subtitleAnchorPlan: { ...plan.subtitleAnchorPlan,
+      faceSafety: { status: 'verified', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' } } }
+    assert.throws(() => validateRenderPlacementPlan(tampered), /facial evidence state is invalid/)
+    const missingEnvelope = { ...plan, subtitleAnchorPlan: { ...plan.subtitleAnchorPlan,
+      ocrEvidence: undefined } }
+    assert.throws(() => validateRenderPlacementPlan(missingEnvelope), /OCR evidence identity is invalid/)
+  }
+  assert.throws(() => createRenderPlacementPlan({
+    format: FORMAT, canvas, durationFrames: DURATION_FRAMES,
+    subtitlePresetId: 'kinetic', elements: [],
+    subtitleAnchor: { fps: FPS, cues: [{ id: 'cue-unsafe', startFrame: 0, endFrame: 30 }] },
+  }), /requires explicit unknown facial coverage/)
 })

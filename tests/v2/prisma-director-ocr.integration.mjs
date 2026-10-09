@@ -18,10 +18,15 @@ import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { PERCEPTION_KINDS } from '../../src/v2/domain/perception-timeline.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
+import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
 import { PrismaPerceptionProducerRequestContextRepository } from '../../src/v2/infrastructure/prisma/perception-producer-request-context-repository.ts'
 import { PrismaPerceptionTimelineRepository } from '../../src/v2/infrastructure/prisma/perception-timeline-repository.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+import { expectedOcrTimeline } from '../../src/v2/domain/projected-ocr-timeline.ts'
+import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
 
 const exec = promisify(execFile)
@@ -228,6 +233,110 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       assert.equal(directed.run.qualityReport.status, 'review-required')
       assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
       assert.equal(directed.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+      const proxy = new PrismaProjectProxyRenderRepository(db)
+      const proxySource = await proxy.readCurrentSource({ workspaceId, projectId: world.projectId })
+      assert.equal(proxySource?.trustedOcr?.envelopeId, envelopeId,
+        'Result version may read only its Director input envelope with the same source map')
+      assert.equal(proxySource.trustedOcr.inputVersionId, world.versionId)
+      assert.equal(proxySource.trustedOcr.timeline.timelineHash,
+        expectedOcrTimeline(context.ocrEnvelope, directed.run.editPlan.fps,
+          directed.run.editPlan.durationFrames).timelineHash)
+      await db.v2PerceptionProducerEnvelope.update({ where: { id: envelopeId },
+        data: { envelopeHash: 'f'.repeat(64) } })
+      await assert.rejects(proxy.readCurrentSource({ workspaceId, projectId: world.projectId }),
+        /integrity|hash/i)
+      await db.v2PerceptionProducerEnvelope.update({ where: { id: envelopeId },
+        data: { envelopeHash } })
+      await db.v2MediaArtifact.update({ where: { id: world.sourceId },
+        data: { currentRightsSnapshotId: null, rightsRevision: 4 } })
+      await assert.rejects(proxy.readCurrentSource({ workspaceId, projectId: world.projectId }),
+        /rights|blocked/i)
+      await db.v2MediaArtifact.update({ where: { id: world.sourceId },
+        data: { currentRightsSnapshotId: world.rightsId, rightsRevision: 5 } })
+      const directedEdit = await db.v2ProjectSnapshot.findUniqueOrThrow({
+        where: { id: directed.version.snapshotRefs.editPlan } })
+      const alteredEdit = JSON.parse(directedEdit.contentJson)
+      alteredEdit.videoTracks.find((track) => track.kind === 'base-video').clips[0].sourceInFrame += 1
+      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
+        data: { contentJson: stableSerialize(alteredEdit), contentHash: calculateVersionHash(alteredEdit) } })
+      assert.equal((await proxy.readCurrentSource({ workspaceId, projectId: world.projectId })).trustedOcr,
+        undefined, 'A changed result time map cannot carry source-frame OCR coordinates')
+      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
+        data: { contentJson: directedEdit.contentJson, contentHash: directedEdit.contentHash } })
+      // Controlled repository attachment: the receipt is bound to a sealed recipe, not a
+      // fabricated facial approval or a claim that this output was actually rendered.
+      const ocrReceipt = { envelopeId, envelopeHash, inputVersionId: world.versionId,
+        timeMapHash: proxySource.trustedOcr.timeMapHash,
+        timelineHash: proxySource.trustedOcr.timeline.timelineHash,
+        sourceArtifactId: world.sourceId, sourceManifestId: manifestId,
+        sourceSha256: world.sourceSha256, editPlanHash: directedEdit.contentHash }
+      const outputArtifactId = `w65-proxy-output-${suffix}`
+      const outputManifestId = `w65-proxy-manifest-${suffix}`
+      const proxyOperationId = `w65-proxy-operation-${suffix}`
+      const inputHash = sha(Buffer.from(`w65-proxy-input-${suffix}`))
+      const recipeParameters = { ocrReceipt, inputHash,
+        projectVersionId: directed.version.id, editPlanSnapshotId: directedEdit.id }
+      const outputManifest = createMediaArtifactManifestV2({
+        artifactKey: `${workspaceId}/controlled-proxy.mp4`, artifactSha256: 'd'.repeat(64),
+        byteSize: 1024, mediaType: 'video', container: 'mp4',
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+          parameters: recipeParameters },
+        sources: [{ artifactKey, sha256: world.sourceSha256, role: 'source-master',
+          execution: { tool: { id: 'ffmpeg', version: 'static', digest: 'f'.repeat(64) } } }],
+      })
+      await db.v2MediaArtifact.create({ data: { id: outputArtifactId, workspaceId,
+        artifactKey: `${workspaceId}/controlled-proxy.mp4`, sha256: 'd'.repeat(64),
+        byteSize: 1024n, mediaType: 'video', container: 'mp4', status: 'available' } })
+      await db.v2MediaArtifactManifest.create({ data: { id: outputManifestId, workspaceId,
+        artifactId: outputArtifactId, schemaVersion: outputManifest.schemaVersion,
+        manifestHash: outputManifest.manifestHash, recipeId: outputManifest.recipe.id,
+        recipeVersion: outputManifest.recipe.version,
+        parametersHash: outputManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(outputManifest) } })
+      await db.v2PublicOperation.create({ data: { id: proxyOperationId, workspaceId,
+        projectId: world.projectId, clientId: world.clientId,
+        type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
+        targetType: 'media-artifact', targetId: outputArtifactId,
+        cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
+        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: outputArtifactId,
+          manifestId: outputManifestId } }),
+        idempotencyKey: `w65-proxy-attach-${suffix}`, requestFingerprint: inputHash,
+        startedAt: new Date(), completedAt: new Date() } })
+      await db.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId,
+        workspaceId, projectId: world.projectId, projectVersionId: directed.version.id,
+        editPlanSnapshotId: directedEdit.id, sourceArtifactId: world.sourceId,
+        sourceManifestId: manifestId, colorPipelineBindingsJson: '[]', inputHash,
+        outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4' } })
+      const attach = (receipt = ocrReceipt, parameters = recipeParameters) => proxy.attachCompletedOutput({
+        workspaceId, operationId: proxyOperationId, projectId: world.projectId,
+        projectVersionId: directed.version.id, variantId: '9:16',
+        outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4',
+        createdAt: new Date().toISOString(), recipeParameters: parameters, ocrReceipt: receipt })
+      await assert.rejects(attach(null), /receipt|recipe/i)
+      await assert.rejects(attach({ ...ocrReceipt, envelopeHash: '0'.repeat(64) }), /receipt|recipe/i)
+      await db.v2MediaArtifact.update({ where: { id: outputArtifactId },
+        data: { sha256: 'e'.repeat(64) } })
+      await assert.rejects(attach(), /receipt|recipe/i)
+      await db.v2MediaArtifact.update({ where: { id: outputArtifactId },
+        data: { sha256: 'd'.repeat(64) } })
+      await db.v2Project.update({ where: { id: world.projectId },
+        data: { currentVersionId: world.versionId } })
+      await assert.rejects(attach(), /current|version/i)
+      await db.v2Project.update({ where: { id: world.projectId },
+        data: { currentVersionId: directed.version.id } })
+      await db.v2MediaArtifact.update({ where: { id: world.sourceId },
+        data: { currentRightsSnapshotId: null, rightsRevision: 6 } })
+      await assert.rejects(attach(), /rights|blocked/i)
+      await db.v2MediaArtifact.update({ where: { id: world.sourceId },
+        data: { currentRightsSnapshotId: world.rightsId, rightsRevision: 7 } })
+      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
+        data: { contentJson: stableSerialize(alteredEdit), contentHash: calculateVersionHash(alteredEdit) } })
+      await assert.rejects(attach(), /changed|evidence|time.map/i)
+      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
+        data: { contentJson: directedEdit.contentJson, contentHash: directedEdit.contentHash } })
+      await attach()
+      assert.ok(await db.v2ProjectMediaAsset.findFirst({ where: { workspaceId,
+        projectId: world.projectId, artifactId: outputArtifactId, role: 'editorial-proxy' } }))
       const stored = await db.v2ProjectSnapshot.findUniqueOrThrow({
         where: { id: directed.command.payload.snapshotRefs.perception } })
       assert.equal(stored.schemaVersion, 2)

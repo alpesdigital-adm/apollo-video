@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-09T01:07:27.630Z",
+  "updatedAt": "2026-10-09T01:24:44.682Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -272,7 +272,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Iniciada implementação de anchors por variante com OCR autenticado e fail-closed quando faces forem unknown; prova integrada, pixels e produtor facial válido permanecem pendentes."
+          "text": "Slice conservador implementado: novos planos v2 exigem faceSafety unknown e suprimem cues com issue localizada; OCR autenticado e receipt selado em ambos caminhos de attachment. Typecheck final e PG dos attachments aguardam geração Prisma íntegra; browser e critic final pendentes. Não comprova placement facial seguro."
         },
         {
           "kind": "validation",
@@ -293,10 +293,16 @@
           "ref": "docs/PLANO-WAVES-61-70.md",
           "scope": "W65: escopo, dependências, IDs e critérios planejados; não é execução ou validação.",
           "role": "planned-not-started"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w64-reader-face-unknown-7965929d/result.json",
+          "scope": "Leitura OCR real→Director→proxy com hash/rights/map/lineage negativos: 1/1, postflight limpo; não executa novo gate attach nem browser.",
+          "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: shared OCR projection, elegibilidade conservadora e override como preferência, sem conceder autoridade facial."
+      "nextAction": "Restaurar geração Prisma íntegra, executar typecheck e PG de attachment/rights/stale/tamper nos dois caminhos; depois browser e integração W66/W67.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: shared OCR projection, elegibilidade conservadora e override como preferência, sem conceder autoridade facial. Checkpoint parcial: factory runtime v2 conservadora, solver geométrico puro sem autoridade, leitura histórica separada; UI prioriza motivo facial hard. Unit worker+anchor 29/29 e attach controlado 2/2; goldens pixel controlados 8/8 e supressão v2 FFmpeg 1/1 passaram. PG reader SHA 6fe42287f7fcce2fb7bde7dfad494e85167253253ed0ad3f3b2047b65d068607. Novos attach com receipt/hash/rights/context em Serializable ainda sem PG; typecheck final retido por geração Prisma facial travada. Não é conclusão W65 nem critic de MP4 final."
     },
     {
       "id": "W66",

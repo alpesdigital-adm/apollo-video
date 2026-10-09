@@ -18,6 +18,7 @@ import { deriveSubtitleRegion } from '../../src/v2/domain/subtitle-region.ts'
 import {
   deriveSubtitleAnchorBands,
   SUBTITLE_ANCHOR_PERCEPTION_FIXTURES,
+  solveSubtitleAnchorGeometry,
   subtitleAnchorDecisionFor,
 } from '../../src/v2/domain/subtitle-anchor-plan.ts'
 
@@ -25,14 +26,13 @@ import {
  * F1.036 / FR-173 visual goldens.
  *
  * Every assertion below is a measurement on the decoded pixels of an MP4 that the real
- * `FfmpegEditorialProxyRenderer` produced from a real `RenderPlacementPlanV1`. Nothing is asserted
- * about the plan alone: the point of this file is that the anchor the plan decided is the row band
- * where the white subtitle glyphs actually land, and that a cue with nowhere safe to go leaves the
- * frame empty instead of covering a face.
+ * `FfmpegEditorialProxyRenderer` produced from a controlled geometry fixture. This checks only
+ * the renderer and five-band solver mechanics; the W65 product worker requires unknown-face v2
+ * plans and suppresses cues until independent facial evidence exists.
  */
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
+const ffmpegPath = process.env.FFMPEG_BIN ?? require('ffmpeg-static')
 
 const FORMAT = '9:16'
 const FPS = 30
@@ -141,15 +141,21 @@ async function fixture(name) {
 const cue = (id, startFrame, endFrame, text) => ({ id, startFrame, endFrame, text, anchor: 'bottom' })
 
 function planWith(perceptionTimeline, cues, elements = []) {
-  return createRenderPlacementPlan({
+  const placement = createRenderPlacementPlan({
     format: FORMAT, canvas: CANVAS, durationFrames: DURATION_FRAMES,
     subtitlePresetId: 'kinetic', elements,
-    subtitleAnchor: {
-      fps: FPS,
-      cues: cues.map((item) => ({ id: item.id, startFrame: item.startFrame, endFrame: item.endFrame })),
-      perceptionTimeline,
-    },
   })
+  const geometry = solveSubtitleAnchorGeometry({
+    spec: readOutputFormatPreset(FORMAT).spec, format: FORMAT, canvas: CANVAS,
+    fps: FPS, durationFrames: DURATION_FRAMES, region: placement.subtitleRegion,
+    cues: cues.map((item) => ({ id: item.id, startFrame: item.startFrame, endFrame: item.endFrame })),
+    perceptionTimeline, placements: placement.placements,
+  })
+  const anchorBody = { schemaVersion: 'subtitle-anchor-plan/v1', ...geometry }
+  const subtitleAnchorPlan = { ...anchorBody, anchorPlanHash: calculateCanonicalHash(anchorBody) }
+  const placementBody = { ...placement, subtitleAnchorPlan }
+  delete placementBody.placementPlanHash
+  return { ...placementBody, placementPlanHash: calculateCanonicalHash(placementBody) }
 }
 
 async function renderWith(context, plan, cues) {
@@ -195,6 +201,28 @@ test('T-FR-173 golden 1: a low face pushes the burned subtitle out of the bottom
     assert.ok(rows[0].y >= band.top - 8 && rows.at(-1).y <= band.bottom + 8, 'every glyph row must lie inside the decided band')
     assert.ok(rows.at(-1).y < faceTopPx, 'no glyph may reach the face region')
     assertMapMatchesBand(rendered.renderElementMap, 'cue-1', BANDS['upper-third'])
+  } finally {
+    await rm(context.root, { recursive: true, force: true })
+  }
+})
+
+test('W65 runtime v2 renders no caption pixels while face coverage is unknown', { timeout: 10 * 60_000 }, async () => {
+  const context = await fixture('unknown-face')
+  try {
+    const cues = [cue('cue-unknown', 6, 60, 'Legenda em revisão')]
+    const plan = createRenderPlacementPlan({
+      format: FORMAT, canvas: CANVAS, durationFrames: DURATION_FRAMES,
+      subtitlePresetId: 'kinetic', elements: [],
+      subtitleAnchor: { fps: FPS, cues: cues.map((item) => ({ id: item.id,
+        startFrame: item.startFrame, endFrame: item.endFrame })),
+        faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' } },
+    })
+    const decision = subtitleAnchorDecisionFor(plan.subtitleAnchorPlan, 'cue-unknown')
+    assert.equal(decision.anchor, null)
+    assert.equal(decision.issues[0].code, 'FACE_PERCEPTION_UNAVAILABLE')
+    const rendered = await renderWith(context, plan, cues)
+    assertMapMatchesBand(rendered.renderElementMap, 'cue-unknown', null)
+    assert.equal(glyphRows(frameBytes(rendered.outputPath, 20)).length, 0)
   } finally {
     await rm(context.root, { recursive: true, force: true })
   }

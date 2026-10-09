@@ -1,6 +1,7 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
+import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
 import type { SubtitlePresetId, SubtitlePresetSnapshot } from '../../domain/subtitle-system.ts'
 import type { ProxyQualityIssue } from '../render-workflow.ts'
@@ -57,6 +58,14 @@ export interface ProjectProxyRenderSource {
   editPlanHash: string
   editPlan: Readonly<EditorialCutEditPlan | DirectedEditPlan>
   format: string
+  /** Present only after repository verification of sealed OCR, base/result lineage and identical time map. */
+  trustedOcr?: Readonly<{
+    envelopeId: string
+    envelopeHash: string
+    inputVersionId: string
+    timeMapHash: string
+    timeline: Readonly<PerceptionTimeline>
+  }>
   sourceArtifactId: string
   sourceManifestId: string
   sourceArtifactKey: string
@@ -99,6 +108,19 @@ export interface ProjectProxyRenderSource {
   }>[]
 }
 
+/** Captured from the repository-resolved render input; re-resolved at attachment. */
+export interface ProjectProxyOcrReceipt {
+  envelopeId: string
+  envelopeHash: string
+  inputVersionId: string
+  timeMapHash: string
+  timelineHash: string
+  sourceArtifactId: string
+  sourceManifestId: string
+  sourceSha256: string
+  editPlanHash: string
+}
+
 export interface ProjectProxyRenderRepository {
   readCurrentSource(input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectProxyRenderSource> | null>
   readImmutableSource(input: {
@@ -126,6 +148,8 @@ export interface ProjectProxyRenderRepository {
     outputManifestId: string
     originalFileName: string
     createdAt: string
+    recipeParameters: Readonly<Record<string, unknown>>
+    ocrReceipt: Readonly<ProjectProxyOcrReceipt> | null
   }): Promise<void>
   attachCompletedSnapshotOutput(input: {
     workspaceId: string
@@ -136,5 +160,7 @@ export interface ProjectProxyRenderRepository {
     outputManifestId: string
     originalFileName: string
     createdAt: string
+    recipeParameters: Readonly<Record<string, unknown>>
+    ocrReceipt: null
   }): Promise<void>
 }

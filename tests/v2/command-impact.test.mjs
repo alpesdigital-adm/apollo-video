@@ -24,6 +24,10 @@ import { applyReviewPatchBatchService } from '../../src/v2/application/review-pa
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
 import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
+import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 import {
   presentArtifactInvalidationViewV2,
@@ -650,12 +654,41 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
 test('T-FR-233 completed proxy atomically records scoped invalidation resolutions', async () => {
   let invalidationQuery
   const resolutionUpserts = []
+  const recipeParameters = { ocrReceipt: null, inputHash: 'a'.repeat(64),
+    projectVersionId: resultVersionId, editPlanSnapshotId: 'edit-plan-proxy-2' }
+  const outputManifest = createMediaArtifactManifestV2({
+    artifactKey: 'proxies/replacement.mp4', artifactSha256: 'd'.repeat(64),
+    byteSize: 8_192, mediaType: 'video', container: 'mp4',
+    recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+      parameters: recipeParameters },
+    sources: [{ artifactKey: 'source/proxy-2.mp4', sha256: 'c'.repeat(64),
+      role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static',
+        digest: 'f'.repeat(64) } } }],
+  })
+  const sourceArtifactId = 'source-proxy-2'
+  const sourceManifestId = 'source-manifest-proxy-2'
+  const sourceSha256 = 'c'.repeat(64)
+  const sourcePlan = { schemaVersion: 2, state: 'compiled', videoTracks: [{ kind: 'base-video',
+    clips: [{ sourceArtifactId, sourceInFrame: 0, sourceOutFrame: 30,
+      timelineInFrame: 0, timelineOutFrame: 30, rate: 1 }] }], audioTracks: [] }
+  const rights = createAssetRightsSnapshot({ id: 'rights-proxy-2', workspaceId,
+    artifactId: sourceArtifactId, sequence: 1,
+    draft: { status: 'approved', allowedUses: ['editorial-reuse'], prohibitedUses: [],
+      consent: { status: 'not-required', allowedUses: [] } },
+    createdBy: { type: 'user', id: 'owner-proxy-2' }, createdAt })
   const repository = new PrismaProjectProxyRenderRepository({
     async $transaction(callback) {
       return callback({
-        v2ProjectProxyRenderOperation: { async findFirst() { return { operationId: 'operation-proxy-2' } } },
-        v2MediaArtifact: { async findFirst() { return { id: 'artifact-proxy-replacement' } } },
-        v2MediaArtifactManifest: { async findFirst() { return { id: 'manifest-proxy-replacement' } } },
+        v2ProjectProxyRenderOperation: { async findFirst() { return {
+          operationId: 'operation-proxy-2', inputHash: recipeParameters.inputHash,
+          projectVersionId: resultVersionId, editPlanSnapshotId: recipeParameters.editPlanSnapshotId,
+          sourceArtifactId, sourceManifestId,
+        } } },
+        v2MediaArtifact: { async findFirst() { return { id: 'artifact-proxy-replacement',
+          artifactKey: 'proxies/replacement.mp4', sha256: 'd'.repeat(64), byteSize: 8_192n,
+          mediaType: 'video', container: 'mp4' } } },
+        v2MediaArtifactManifest: { async findFirst() { return { id: 'manifest-proxy-replacement',
+          manifestHash: outputManifest.manifestHash, manifestJson: JSON.stringify(outputManifest) } } },
         v2ProjectMediaAsset: { async upsert() {} },
         v2CommandArtifactInvalidation: { async findMany(query) {
           invalidationQuery = query
@@ -666,12 +699,36 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
       })
     },
   })
+  // The unit checks invalidation writes; its current source is controlled context. PostgreSQL
+  // integration separately exercises the real scoped reader and transactional rights check.
+  repository.queryProject = async () => ({ id: projectId, workspaceId, locale: 'pt-BR',
+    format: '9:16', currentVersionId: resultVersionId,
+    versions: [{ id: resultVersionId, editPlanSnapshotId: recipeParameters.editPlanSnapshotId,
+      editPlanSnapshot: { workspaceId, projectId, contentJson: JSON.stringify(sourcePlan),
+        contentHash: calculateVersionHash(sourcePlan) }, directorRunAsResult: null }],
+    mediaAssets: [{ artifactId: sourceArtifactId, role: 'source-master',
+      originalFileName: 'source.mp4', createdAt: new Date(createdAt), upload: null,
+      artifact: { id: sourceArtifactId, sha256: sourceSha256, byteSize: 1_024n,
+        mediaType: 'video', container: 'mp4', status: 'available',
+        currentRightsSnapshot: { ...rights, allowedUsesJson: '["editorial-reuse"]',
+          prohibitedUsesJson: '[]', allowedWorkspaceIdsJson: JSON.stringify(rights.allowedWorkspaceIds),
+          consentStatus: rights.consent.status,
+          allowedMarketsJson: null, allowedLocalesJson: null,
+          allowedSyntheticOperationsJson: null, consentAllowedUsesJson: '[]',
+          consentAllowedMarketsJson: null, consentAllowedLocalesJson: null,
+          consentSyntheticOperationsJson: null, consentExpiresAt: null,
+          consentDocumentArtifactId: null, createdByType: 'user', createdById: 'owner-proxy-2',
+          createdAt: new Date(createdAt), expiresAt: null, owner: null, license: null,
+          sourceNote: null },
+        manifests: [{ id: sourceManifestId,
+          manifestJson: JSON.stringify({ artifact: { artifactKey: 'source/proxy-2.mp4' } }) }] } }],
+  })
   await repository.attachCompletedOutput({
     workspaceId, operationId: 'operation-proxy-2', projectId,
     projectVersionId: resultVersionId, variantId: '9:16',
     outputArtifactId: 'artifact-proxy-replacement',
     outputManifestId: 'manifest-proxy-replacement',
-    originalFileName: 'replacement.mp4', createdAt,
+    originalFileName: 'replacement.mp4', createdAt, recipeParameters, ocrReceipt: null,
   })
   assert.deepEqual(invalidationQuery.where, {
     workspaceId, projectId, resultVersionId,
@@ -687,6 +744,62 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
     { invalidationId: '1'.repeat(64), operationId: 'operation-proxy-2', replacementArtifactId: 'artifact-proxy-replacement', replacementManifestId: 'manifest-proxy-replacement' },
     { invalidationId: '2'.repeat(64), operationId: 'operation-proxy-2', replacementArtifactId: 'artifact-proxy-replacement', replacementManifestId: 'manifest-proxy-replacement' },
   ])
+})
+
+test('W65 renderable snapshot attachment accepts only its own sealed null-OCR recipe', async () => {
+  const inputHash = 'a'.repeat(64)
+  const planHash = '7'.repeat(64)
+  const snapshotId = 'snapshot-renderable-proxy-2'
+  const artifactId = 'artifact-snapshot-proxy-2'
+  const manifestId = 'manifest-snapshot-proxy-2'
+  const sourceArtifactId = 'source-snapshot-proxy-2'
+  const sourceManifestId = 'source-manifest-snapshot-proxy-2'
+  const sourceKey = 'source/snapshot-proxy-2.mp4'
+  const sourceSha256 = 'c'.repeat(64)
+  const parameters = { inputHash, projectVersionId: resultVersionId,
+    editPlanSnapshotId: snapshotId, format: '9:16', ocrReceipt: null }
+  const manifest = createMediaArtifactManifestV2({
+    artifactKey: 'proxies/snapshot-proxy-2.mp4', artifactSha256: 'd'.repeat(64),
+    byteSize: 2_048, mediaType: 'video', container: 'mp4',
+    recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+      parameters },
+    sources: [{ artifactKey: sourceKey, sha256: sourceSha256, role: 'source-master',
+      execution: { tool: { id: 'ffmpeg', version: 'static', digest: 'f'.repeat(64) } } }],
+  })
+  let attached = 0
+  const repository = new PrismaProjectProxyRenderRepository({
+    async $transaction(callback) {
+      return callback({
+        v2ProjectProxyRenderOperation: { async findFirst() { return {
+          inputHash, projectVersionId: resultVersionId, editPlanSnapshotId: snapshotId,
+          sourceArtifactId, sourceManifestId, renderablePlanId: 'plan-snapshot-proxy-2',
+          renderablePlanHash: planHash, renderableVariantId: '9:16', renderableFormat: '9:16',
+        } } },
+        v2MediaArtifact: { async findFirst() { return { artifactKey: 'proxies/snapshot-proxy-2.mp4',
+          sha256: 'd'.repeat(64), byteSize: 2_048n, mediaType: 'video', container: 'mp4' } } },
+        v2MediaArtifactManifest: { async findFirst() { return {
+          manifestJson: JSON.stringify(manifest), manifestHash: manifest.manifestHash } } },
+        v2ProjectMediaAsset: { async upsert() { attached += 1 } },
+      })
+    },
+  })
+  repository.readRenderableSnapshotSource = async () => ({
+    projectVersionId: resultVersionId, editPlanSnapshotId: snapshotId,
+    editPlanHash: planHash, sourceArtifactId, sourceManifestId,
+    renderSources: [{ artifactKey: sourceKey, sha256: sourceSha256, role: 'source-master' }],
+  })
+  const attach = (recipeParameters, ocrReceipt) => repository.attachCompletedSnapshotOutput({
+    workspaceId, operationId: 'operation-snapshot-proxy-2', projectId,
+    variantId: '9:16', outputArtifactId: artifactId, outputManifestId: manifestId,
+    originalFileName: 'snapshot-proxy.mp4', createdAt,
+    recipeParameters, ocrReceipt,
+  })
+  await assert.rejects(attach({ ...parameters, ocrReceipt: { envelopeId: 'forged' } }, null),
+    /receipt|recipe/i)
+  await assert.rejects(attach(parameters, { envelopeId: 'forged' }), /receipt|recipe/i)
+  assert.equal(attached, 0)
+  await attach(parameters, null)
+  assert.equal(attached, 1)
 })
 
 test('T-FR-233 Prisma context discovers only completed proxy/final outputs for the immutable base', async () => {

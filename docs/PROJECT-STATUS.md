@@ -1,8 +1,8 @@
 # Apollo — status por escopo
 
-Atualizado: 2026-10-09T01:07:27.630Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
+Atualizado: 2026-10-09T01:24:44.682Z. Evidência-base: `252f6bd851b03d3c2728a4820f17b8df71d71bb0`.
 
-Snapshot JSON SHA256: `de91adc2d9fcc9c917cf51b0d2a8fbb216cf840370cb6acca70d882fedcf0dae` (somente project-status.json; TODO verificado separadamente).
+Snapshot JSON SHA256: `2c1fbbf6ff941aec5cd7ab2db869b044b73e44d436134ab16393d03f99a0342f` (somente project-status.json; TODO verificado separadamente).
 
 TODO auditado: **380/1259** caixas marcadas como concluídas no histórico. Isso não afirma implantação ou aceite atuais.
 
@@ -1395,7 +1395,7 @@ Caixas em triagem de classificação: **0**. A soma dos quatro estados e da tria
 | W62 | W62 — faces e regiões detectadas nos bytes | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), [controlled-e2e: docs/quality/w61-visual-preflight-v5-result.md](../docs/quality/w61-visual-preflight-v5-result.md), [controlled-e2e: docs/quality/w61-visual-preflight-v6-yunet960-result.md](../docs/quality/w61-visual-preflight-v6-yunet960-result.md), [controlled-e2e: docs/quality/w61-visual-preflight-v7-openvino-retail0004-result.md](../docs/quality/w61-visual-preflight-v7-openvino-retail0004-result.md) | Integrar produtor facial diagnóstico sem autoridade de segurança; estudar geometria de proteção separadamente sem alterar GT/IoU nem abrir holdout. |
 | W63 | W63 — OCR, shots e motion na mesma timeline | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Integrar consumo temporal no Diretor e ampliar janela do master com PTS original, preservando medidas brutas, gaps e limites; avaliação externa ainda necessária. |
 | W64 | W64 — Diretor usa percepção persistida com confiança | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Agregar evidências temporais e faciais validadas ao consumer com cobertura por modalidade, depois provar HTTP e decisões por variante. |
-| W65 | W65 — anchor e placement por variante | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
+| W65 | W65 — anchor e placement por variante | em-construcao | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md), privado (controlled-e2e; referência local no JSON) | Restaurar geração Prisma íntegra, executar typecheck e PG de attachment/rights/stale/tamper nos dois caminhos; depois browser e integração W66/W67. |
 | W66 | W66 — reframe com trajetória e override por formato | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
 | W67 | W67 — crítica independente do arquivo de cada formato | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |
 | W68 | W68 — issues até override e recompilação na UI | fila | not-integrated | none | pending | pending | não | [planned-not-started: docs/PLANO-WAVES-61-70.md](../docs/PLANO-WAVES-61-70.md) | Executar após os pré-requisitos definidos no plano e registrar a prova do recorte por ID. |

@@ -250,10 +250,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
         timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
       }))
-      // Public PUT timelines are manual/controlled and cannot establish face safety.
-      // No verified detector snapshot producer is wired yet, so proxy placement uses
-      // no trusted face observations and remains subject to explicit review.
-      const perceptionTimeline: undefined = undefined
+      // Only the repository-resolved, scoped OCR envelope can supply text obstacles.
+      // It does not establish facial coverage; every cue stays review-required.
+      const perceptionTimeline = source.trustedOcr?.timeline
       const placementPlan = createRenderPlacementPlan({
         format: source.format as OutputAspectRatio,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
@@ -266,11 +265,32 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           subtitleAnchor: {
             fps: source.editPlan.fps,
             cues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+            faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
+            ...(source.trustedOcr ? { ocrEvidence: {
+              envelopeId: source.trustedOcr.envelopeId,
+              envelopeHash: source.trustedOcr.envelopeHash,
+              inputVersionId: source.trustedOcr.inputVersionId,
+              timeMapHash: source.trustedOcr.timeMapHash,
+            } } : {}),
             ...(perceptionTimeline ? { perceptionTimeline } : {}),
           },
         } : {}),
       })
       validateRenderPlacementPlan(placementPlan)
+      const ocrReceipt = source.trustedOcr ? Object.freeze({
+        envelopeId: source.trustedOcr.envelopeId,
+        envelopeHash: source.trustedOcr.envelopeHash,
+        inputVersionId: source.trustedOcr.inputVersionId,
+        timeMapHash: source.trustedOcr.timeMapHash,
+        timelineHash: source.trustedOcr.timeline.timelineHash,
+        sourceArtifactId: source.sourceArtifactId,
+        sourceManifestId: source.sourceManifestId,
+        sourceSha256: source.sourceSha256,
+        editPlanHash: source.editPlanHash,
+      }) : null
+      if (context.renderableSnapshot && ocrReceipt) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot cannot inherit Director OCR coordinates')
+      }
       const reframePlan = source.reframePlan
       if (reframePlan) {
         validateRenderReframePlan(reframePlan)
@@ -416,9 +436,44 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const toolDigest = createHash('sha256')
         .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`)
         .digest('hex')
+      const recipeParameters = Object.freeze({
+        inputHash: context.inputHash, audioTimelineHash,
+        projectVersionId: context.projectVersionId,
+        editPlanSnapshotId: context.editPlanSnapshotId,
+        format: source.format,
+        colorPipelineBindings: context.colorPipelineBindings,
+        colorPlanHash: colorPlan?.plan.planHash ?? null,
+        compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null,
+        rangeReuse: source.rangeReuse ? {
+          schemaVersion: source.rangeReuse.schemaVersion,
+          commandId: source.rangeReuse.commandId,
+          impactHash: source.rangeReuse.impactHash,
+          baseVersionId: source.rangeReuse.baseVersionId,
+          ranges: source.rangeReuse.ranges,
+          artifactId: source.rangeReuse.artifactId,
+          manifestId: source.rangeReuse.manifestId,
+          sha256: source.rangeReuse.sha256,
+          byteSize: source.rangeReuse.byteSize,
+        } : null,
+        projectLutSelectionId: materializedLut.selectionId,
+        projectLutSelectionHash: materializedLut.selectionHash,
+        materializedCubeHash: materializedLut.materializedCubeHash ?? null,
+        materializedCubeHashes: materializedLut.materializedCubeHashes ?? [],
+        placementPlanHash: placementPlan.placementPlanHash,
+        reframePlanHash: reframePlan?.reframePlanHash ?? null,
+        subtitleRegistryHash: subtitleResolution?.registryHash ?? null,
+        subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null,
+        subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null,
+        subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null,
+        subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null,
+        subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null,
+        perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null,
+        ocrReceipt,
+      })
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, colorPlanHash: colorPlan?.plan.planHash ?? null, compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, materializedCubeHashes: materializedLut.materializedCubeHashes ?? [], placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null, subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null, perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+          parameters: recipeParameters },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,
@@ -463,14 +518,15 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         ? dependencies.projects.attachCompletedSnapshotOutput({
             workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
             variantId: context.renderableSnapshot.variantId, outputArtifactId: context.outputArtifactId,
-            outputManifestId: context.outputManifestId, originalFileName: context.originalFileName,
-            createdAt: clock().toISOString(),
+             outputManifestId: context.outputManifestId, originalFileName: context.originalFileName,
+             createdAt: clock().toISOString(), recipeParameters, ocrReceipt: null,
           })
         : dependencies.projects.attachCompletedOutput({
         workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
         projectVersionId: context.projectVersionId, variantId: source.format,
-        outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
-        originalFileName: context.originalFileName, createdAt: clock().toISOString(),
+         outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
+         originalFileName: context.originalFileName, createdAt: clock().toISOString(),
+         recipeParameters, ocrReceipt,
       })
       await attachOutput
       const reviewedAt = clock().toISOString()

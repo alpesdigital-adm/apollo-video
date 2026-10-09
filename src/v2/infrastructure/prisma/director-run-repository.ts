@@ -44,7 +44,8 @@ import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
 import { parseDirectorDecisionLog } from '../../domain/director-decision.ts'
 import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
 import type { PerceptionProducerEnvelope } from '../../domain/perception-producer-envelope.ts'
-import { createPerceptionTimeline, PERCEPTION_KINDS, type PerceptionTimeline } from '../../domain/perception-timeline.ts'
+import { expectedOcrTimeline } from '../../domain/projected-ocr-timeline.ts'
+import { createPerceptionTimeline, type PerceptionTimeline } from '../../domain/perception-timeline.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -69,33 +70,6 @@ function ocrSnapshotEvidence(envelope: Readonly<PerceptionProducerEnvelope>) {
   }
 }
 
-function expectedOcrTimeline(envelope: Readonly<PerceptionProducerEnvelope>,
-  fps: number, durationFrames: number) {
-  const durationMs = Math.max(1, Math.ceil(durationFrames / fps * 1000))
-  const sampleRanges = envelope.samples.map((sample) => {
-    const startMs = Math.min(durationMs - 1, Math.round(sample.timelineFrame / fps * 1000))
-    const endMs = Math.min(durationMs, Math.max(startMs + 1,
-      Math.round((sample.timelineFrame + 1) / fps * 1000)))
-    return [startMs, endMs] as const
-  })
-  const observations = envelope.samples.flatMap((sample, sampleIndex) => {
-    const [startMs, endMs] = sampleRanges[sampleIndex]!
-    return sample.ocr.map((region, index) => ({
-      id: `ocr-${sample.timelineFrame}-${index}-${envelope.envelopeHash.slice(0, 12)}`,
-      kind: 'ocr' as const, startMs, endMs,
-      value: { text: region.text, language: region.language, box: region.box,
-        confidence: region.confidence, sourceFrame: sample.sourceFrame,
-        sourcePts: sample.sourcePts, timelineFrame: sample.timelineFrame,
-        sampleImageSha256: sample.imageSha256 },
-      provenance: { source: envelope.id, model: 'tesseract',
-        version: envelope.envelopeHash, confidence: region.confidence },
-    }))
-  })
-  return createPerceptionTimeline({ durationMs, observations,
-    coverage: PERCEPTION_KINDS.map((kind) => ({ kind,
-      ranges: kind === 'ocr' ? sampleRanges : [] })) })
-}
-
 function parseRecord(value: string, field: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value) as unknown
@@ -116,7 +90,7 @@ function parseArray(value: string, field: string): unknown[] {
   }
 }
 
-function parseDirectorPerceptionSnapshotUnchecked(input: {
+export function parseDirectorPerceptionSnapshotUnchecked(input: {
   contentJson: string; contentHash: string; schemaVersion: number; baseVersionId: string
 }): Readonly<DirectorPerceptionSnapshot> {
   const record = parseRecord(input.contentJson, 'Director perception')
