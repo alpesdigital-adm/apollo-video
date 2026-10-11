@@ -1011,7 +1011,18 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
           release()
           await latch
           const outcome = await attachResult
-          assert.equal(outcome.error?.code, 'ASSET_RIGHTS_BLOCKED')
+          const safeDiagnosticText = (value) => value === undefined || value === null ? null : String(value)
+            .replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted database URL]')
+            .replace(/[\r\n\t]+/g, ' ').slice(0, 800)
+          const outcomeDiagnostic = JSON.stringify({ label,
+            path: snapshotMode ? 'snapshot' : 'project', rightsChange,
+            unexpectedPublication: !outcome.error, error: outcome.error ? {
+              name: safeDiagnosticText(outcome.error.name), code: safeDiagnosticText(outcome.error.code),
+              message: safeDiagnosticText(outcome.error.message),
+              meta: { code: safeDiagnosticText(outcome.error.meta?.code) },
+            } : null })
+          assert.ok(outcome.error, outcomeDiagnostic)
+          assert.equal(outcome.error.code, 'ASSET_RIGHTS_BLOCKED', outcomeDiagnostic)
           assert.equal((await db.v2PublicOperation.findUniqueOrThrow({ where: { id: candidate.id } })).status, 'running')
           assert.equal(await db.v2ProjectMediaAsset.count({ where: { artifactId: candidate.artifactId, role: 'editorial-proxy' } }), 0)
           assert.equal(await db.v2ProxyReview.count({ where: { operationId: candidate.id } }), 0)
