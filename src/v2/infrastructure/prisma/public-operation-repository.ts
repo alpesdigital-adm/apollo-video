@@ -13,7 +13,7 @@ import type {
   ResumeWaitingPublicOperationCommand,
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { evaluatePerceptionSourceAnalysisRights } from '../../domain/perception-source-rights.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { createRenderInputPayload } from '../../domain/render-input-payload.ts'
 import type { RecipeParameterCipher } from '../../application/ports/recipe-parameter-cipher.ts'
@@ -59,6 +59,7 @@ import { parseDesiredAction } from '../../domain/desired-action.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { readSafeReusableProxy } from './proxy-reuse-safety.ts'
 import { editPlanReferencesSource } from './perception-producer-request-context-repository.ts'
+import { lockProducerPublishProject, lockProducerPublishSource, producerPublishClock } from './producer-publish-fence.ts'
 import {
   persistPublicEvents,
   type PublicEventOutboxTransaction,
@@ -2054,6 +2055,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         }
 
         if (producerContext) {
+          await lockProducerPublishProject(transaction, producerContext.projectId, input.operation.workspaceId)
+          await lockProducerPublishSource(transaction, producerContext.sourceArtifactId, input.operation.workspaceId)
           const [project, version, attached, artifact] = await Promise.all([
             transaction.v2Project.findFirst({
               where: { id: producerContext.projectId, workspaceId: input.operation.workspaceId,
@@ -2077,14 +2080,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               include: { currentRightsSnapshot: true },
             }),
           ])
+          const checkedAt = await producerPublishClock(transaction)
           if (!project || !version || !attached || !artifact ||
               version.editPlanSnapshot.kind !== 'edit-plan' ||
               version.editPlanSnapshot.contentHash !== producerContext.editPlanSnapshotHash ||
               !editPlanReferencesSource(version.editPlanSnapshot.contentJson, producerContext.sourceArtifactId) ||
-              evaluateAssetUse(artifact.currentRightsSnapshot
+              evaluatePerceptionSourceAnalysisRights(artifact.currentRightsSnapshot
                 ? hydrateAssetRights(artifact.currentRightsSnapshot) : null,
-              { workspaceId: input.operation.workspaceId, use: 'editorial-reuse',
-                locale: project.locale ?? 'und' }, new Date(input.operation.createdAt)).outcome !== 'allow') {
+              { workspaceId: input.operation.workspaceId,
+                locale: project.locale ?? 'und' }, checkedAt).outcome !== 'allow') {
             throw new DomainError('PERSISTENCE_CONFLICT', 'Perception producer source, version or rights are unavailable')
           }
         }

@@ -33,6 +33,10 @@ import { externalActorAuditData } from '../../src/v2/infrastructure/prisma/exter
 import { expectedOcrTimeline } from '../../src/v2/domain/projected-ocr-timeline.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
+import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { createDirectedAudioTimelineHash } from '../../src/v2/domain/director-run.ts'
+import { renderablePlanSnapshotOf } from '../../src/v2/application/renderable-edit-plan.ts'
+import { PrismaRenderablePlanSnapshotRepository } from '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
 
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -59,7 +63,7 @@ function assertControlledProxyRowHydrates(operationData, detailData, auditHash) 
       renderableSourceId: null, renderableSourceHash: null,
       renderableVariantId: null, renderableFormat: null,
       reusedFromOperationId: null, reuseCommandId: null,
-      reuseImpactHash: null, reuseBaseVersionId: null },
+      reuseImpactHash: null, reuseBaseVersionId: null, ...detailData },
     artifactRender: null, mediaIngest: null, syntheticProductionRender: null,
     projectFinalExport: null, sourceCleanupPlan: null, longFormIndexWorkflow: null,
     projectDirectorRun: null, perceptionProducerOperation: null,
@@ -409,6 +413,108 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         data: { currentRightsSnapshotId: world.rightsId, rightsRevision: 5 } })
       const directedEdit = await db.v2ProjectSnapshot.findUniqueOrThrow({
         where: { id: directed.version.snapshotRefs.editPlan } })
+      // Real PG rows exercise both source resolvers. The master retains the normal
+      // ingest grant (editing/rendering/etc.), with no library editorial-reuse.
+      const ingestUses = ['distribution', 'editing', 'rendering', 'transcription']
+      const rightsTemplate = await db.v2AssetRightsSnapshot.findUniqueOrThrow({ where: { id: world.rightsId } })
+      let rightsSequence = 10
+      async function installRights(artifactId, overrides = {}) {
+        const { rightsWorkspaceId = workspaceId, ...draft } = overrides
+        const sequence = rightsSequence++
+        const snapshot = createAssetRightsSnapshot({ id: `proxy-rights-${suffix}-${sequence}`,
+          workspaceId: rightsWorkspaceId, artifactId, sequence,
+          draft: { status: 'approved', allowedUses: ingestUses, prohibitedUses: [], sourceNote: `controlled revision ${sequence}`,
+            consent: { status: 'not-required', allowedUses: [] }, ...draft },
+          createdBy: { type: 'user', id: 'w61-owner' }, createdAt: new Date().toISOString() })
+        await db.v2AssetRightsSnapshot.create({ data: { ...rightsTemplate, id: snapshot.id,
+          workspaceId: snapshot.workspaceId, artifactId, sequence, snapshotHash: snapshot.snapshotHash,
+          status: snapshot.status, allowedUsesJson: stableSerialize(snapshot.allowedUses),
+          prohibitedUsesJson: stableSerialize(snapshot.prohibitedUses),
+          allowedWorkspaceIdsJson: stableSerialize(snapshot.allowedWorkspaceIds),
+          allowedLocalesJson: snapshot.allowedLocales ? stableSerialize(snapshot.allowedLocales) : null,
+          expiresAt: snapshot.expiresAt ? new Date(snapshot.expiresAt) : null,
+          consentStatus: snapshot.consent.status, consentAllowedUsesJson: stableSerialize(snapshot.consent.allowedUses),
+          consentExpiresAt: snapshot.consent.expiresAt ? new Date(snapshot.consent.expiresAt) : null,
+          sourceNote: snapshot.sourceNote, createdAt: new Date(snapshot.createdAt) } })
+        await db.v2MediaArtifact.update({ where: { id: artifactId },
+          data: { currentRightsSnapshotId: snapshot.id, rightsRevision: { increment: 1 } } })
+        return snapshot
+      }
+      const secondId = `proxy-rights-second-${suffix}`, secondManifestId = `proxy-rights-manifest-${suffix}`
+      const secondKey = `${workspaceId}/rights-controlled-second.mp4`
+      await db.v2MediaArtifact.create({ data: { id: secondId, workspaceId, artifactKey: secondKey,
+        sha256: '9'.repeat(64), byteSize: 1024n, mediaType: 'video', container: 'mp4', status: 'available' } })
+      await db.v2MediaArtifactManifest.create({ data: { id: secondManifestId, workspaceId,
+        artifactId: secondId, schemaVersion: 'media-artifact-manifest/v2',
+        manifestHash: sha(Buffer.from(secondManifestId)), recipeId: 'controlled-rights-source',
+        recipeVersion: '1.0.0', parametersHash: sha(Buffer.from(secondKey)),
+        manifestJson: stableSerialize({ artifact: { artifactKey: secondKey } }) } })
+      const secondLinkId = randomUUID(), ambiguousLinkId = randomUUID()
+      await db.v2ProjectMediaAsset.create({ data: { id: secondLinkId, workspaceId,
+        projectId: world.projectId, artifactId: secondId, role: 'selected-insert', originalFileName: 'controlled-second.mp4' } })
+      const rightsPlan = JSON.parse(directedEdit.contentJson)
+      rightsPlan.id = `proxy-rights-plan-${suffix}`
+      rightsPlan.formatVariantRefs = ['9:16']
+      const rightsClips = rightsPlan.videoTracks.find((t) => t.kind === 'base-video').clips
+      rightsClips[0].audioSourceArtifactId = secondId
+      rightsPlan.audioTimelineHash = createDirectedAudioTimelineHash({ fps: rightsPlan.fps,
+        clips: rightsClips, musicTracks: rightsPlan.audioTracks })
+      const rightsSnapshot = renderablePlanSnapshotOf({ workspaceId, projectId: world.projectId,
+        origin: 'react-playback', sourceId: `controlled-rights-playback-${suffix}`,
+        sourceHash: sha(Buffer.from(secondId)), sourceVersion: null, plan: rightsPlan })
+      await new PrismaRenderablePlanSnapshotRepository(db).persist({ snapshot: rightsSnapshot,
+        createdAt: new Date().toISOString() })
+      const snapshotRequest = { workspaceId, projectId: world.projectId, planId: rightsPlan.id,
+        planHash: rightsSnapshot.planHash, format: '9:16' }
+      const readRightsSnapshot = () => proxy.readRenderableSnapshotSource(snapshotRequest)
+      const readRightsProject = () => proxy.readImmutableSource({ workspaceId, projectId: world.projectId,
+        projectVersionId: directed.version.id, editPlanSnapshotId: directedEdit.id,
+        sourceArtifactId: world.sourceId, sourceManifestId: manifestId })
+      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
+        data: { contentJson: stableSerialize(rightsPlan), contentHash: calculateVersionHash(rightsPlan) } })
+      try {
+        assert.ok(!JSON.parse(rightsTemplate.allowedUsesJson).includes('editorial-reuse'),
+          'master fixture must match ingest rather than silently add library reuse')
+        for (const [role, mediaType, use, outputRole] of [
+          ['source-master', 'video', 'rendering', 'source-master'],
+          ['source-audio', 'audio', 'rendering', 'source-master'],
+          ['selected-insert', 'video', 'editorial-reuse', 'selected-insert'],
+        ]) {
+          await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role } })
+          await db.v2MediaArtifact.update({ where: { id: secondId }, data: { mediaType } })
+          await installRights(secondId, { allowedUses: [use] })
+          for (const read of [readRightsProject, readRightsSnapshot]) {
+            assert.equal((await read()).renderSources.find((s) => s.artifactId === secondId).role, outputRole)
+          }
+          await installRights(secondId, { allowedUses: [use === 'rendering' ? 'editorial-reuse' : 'rendering'] })
+          for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+        }
+        await installRights(secondId, { allowedUses: ['editorial-reuse'] })
+        for (const draft of [{ status: 'revoked' }, { status: 'expired' },
+          { expiresAt: '2020-01-01T00:00:00Z' }, { allowedUses: ['editing'], prohibitedUses: ['rendering'] },
+          { allowedLocales: ['en-US'] },
+          { consent: { status: 'revoked', allowedUses: [] } }]) {
+          await installRights(world.sourceId, draft)
+          for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+        }
+        await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: world.rightsId } })
+        assert.equal(await proxy.readCurrentSource({ workspaceId: world.otherWorkspaceId, projectId: world.projectId }), null)
+        assert.equal(await proxy.readRenderableSnapshotSource({ ...snapshotRequest, workspaceId: world.otherWorkspaceId }), null)
+        await db.v2ProjectMediaAsset.create({ data: { id: ambiguousLinkId,
+          workspaceId, projectId: world.projectId, artifactId: secondId,
+          role: 'source-master', originalFileName: 'ambiguous-second.mp4' } })
+        for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
+          error.code === 'PERSISTENCE_CONFLICT' && /unambiguous/i.test(error.message))
+        await db.v2ProjectMediaAsset.delete({ where: { id: ambiguousLinkId } })
+        await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role: 'source-video' } })
+        for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
+          error.code === 'PERSISTENCE_CONFLICT' && /unsupported/i.test(error.message))
+      } finally {
+        await db.v2ProjectMediaAsset.delete({ where: { id: secondLinkId } })
+        await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: world.rightsId } })
+        await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
+          data: { contentJson: directedEdit.contentJson, contentHash: directedEdit.contentHash } })
+      }
       const alteredEdit = JSON.parse(directedEdit.contentJson)
       alteredEdit.videoTracks.find((track) => track.kind === 'base-video').clips[0].sourceInFrame += 1
       await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
@@ -770,13 +876,22 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       // Two further controlled rows exercise an observed cancel-first lock queue
       // and an actual expired-lease reclaim. They use the same sealed source and
       // review shape; each output has a distinct artifact/manifest/operation.
-      async function seedOrderedRace(label, expiredLease = false) {
+      const expiryPlan = { ...JSON.parse(directedEdit.contentJson),
+        id: `proxy-expiry-plan-${suffix}`, formatVariantRefs: ['9:16'] }
+      const expirySnapshot = renderablePlanSnapshotOf({ workspaceId, projectId: world.projectId,
+        origin: 'react-playback', sourceId: `controlled-expiry-playback-${suffix}`,
+        sourceHash: sha(Buffer.from(`expiry-${suffix}`)), sourceVersion: null, plan: expiryPlan })
+      await new PrismaRenderablePlanSnapshotRepository(db).persist({ snapshot: expirySnapshot,
+        createdAt: new Date().toISOString() })
+
+      async function seedOrderedRace(label, expiredLease = false, snapshotMode = false) {
         const id = `w65-${label}-operation-${suffix}`
         const artifactId = `w65-${label}-output-${suffix}`
         const manifestId = `w65-${label}-manifest-${suffix}`
         const key = `${workspaceId}/controlled-${label}-proxy.mp4`
         const hash = sha(Buffer.from(id))
-        const parameters = { ...recipeParameters, inputHash: hash }
+        const parameters = { ...recipeParameters, inputHash: hash,
+          ...(snapshotMode ? { ocrReceipt: null } : {}) }
         const manifest = createMediaArtifactManifestV2({
           artifactKey: key, artifactSha256: 'd'.repeat(64), byteSize: 1024,
           mediaType: 'video', container: 'mp4',
@@ -804,7 +919,10 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
           leaseExpiresAt: new Date(Date.now() + (expiredLease ? -500 : 120_000)) }
         const detailRow = { ...raceDetailData, operationId: id, inputHash: hash,
           outputArtifactId: artifactId, outputManifestId: manifestId,
-          originalFileName: `controlled-${label}-proxy.mp4` }
+          originalFileName: `controlled-${label}-proxy.mp4`,
+          ...(snapshotMode ? { renderablePlanId: expiryPlan.id, renderablePlanHash: expirySnapshot.planHash,
+            renderableOrigin: expirySnapshot.origin, renderableSourceId: expirySnapshot.sourceId,
+            renderableSourceHash: expirySnapshot.sourceHash, renderableVariantId: '9:16', renderableFormat: '9:16' } : {}) }
         assertControlledProxyRowHydrates(publicRow, detailRow, proxyAudit.contextHash)
         await db.v2PublicOperation.create({ data: publicRow })
         await db.v2ProjectProxyRenderOperation.create({ data: detailRow })
@@ -815,20 +933,100 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         delete base.reviewHash
         const reviewBody = { ...base, proxyArtifactId: artifactId,
           proxyManifestId: manifestId, inputHash: hash,
+          ...(snapshotMode ? { editPlanHash: expirySnapshot.planHash } : {}),
           renderCompletedAt: finishedAt,
           timeToFirstProxyMs: Date.parse(finishedAt) - Date.parse(base.uploadReceivedAt) }
         const review = Object.freeze({ ...reviewBody,
           reviewHash: calculateProxyReviewHash(reviewBody) })
         return { id, artifactId, manifestId, parameters, review, running,
-          attach: (client) => new PrismaProjectProxyRenderRepository(client).attachCompletedOutput({
+          attach: (client) => new PrismaProjectProxyRenderRepository(client)[snapshotMode
+            ? 'attachCompletedSnapshotOutput' : 'attachCompletedOutput']({
             workspaceId, operationId: id, projectId: world.projectId,
             projectVersionId: directed.version.id, variantId: '9:16',
             outputArtifactId: artifactId, outputManifestId: manifestId,
             originalFileName: `controlled-${label}-proxy.mp4`,
             createdAt: finishedAt, recipeParameters: parameters,
-            ocrReceipt, lease: { owner: 'w65-controlled-worker',
+            ocrReceipt: snapshotMode ? null : ocrReceipt, lease: { owner: 'w65-controlled-worker',
               attempt: running.attempt, now: new Date().toISOString() }, review,
           }) }
+      }
+
+      // Observe an actual SQL lock wait, then the database clock crossing the
+      // rights deadline. No sleeping heuristic substitutes for either observation.
+      for (const [snapshotMode, rightsChange] of [[false, 'expiry'], [true, 'expiry'], [false, 'revoke'], [true, 'revoke']]) {
+        const label = `${snapshotMode ? 'snapshot' : 'project'}-rights-${rightsChange}`
+        const candidate = await seedOrderedRace(label, false, snapshotMode)
+        const latchEndpoint = isolatedDbEndpoint(`latch-exp-${Number(snapshotMode)}-${suffix}`)
+        const attachEndpoint = isolatedDbEndpoint(`attach-exp-${Number(snapshotMode)}-${suffix}`)
+        const latchClient = new PrismaClient({ datasources: { db: { url: latchEndpoint.url } } })
+        const workerClient = new PrismaClient({ datasources: { db: { url: attachEndpoint.url } } })
+        let latchFailure, attachResult, latch
+        let readyResolve, readyReject, gatesResolve, gatesReject, release
+        const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject })
+        const gates = new Promise((resolve, reject) => { gatesResolve = resolve; gatesReject = reject })
+        gates.catch(() => {})
+        const released = new Promise((resolve) => { release = resolve })
+        try {
+          await Promise.all([latchClient.$connect(), workerClient.$connect()])
+          const [clock] = await db.$queryRaw`SELECT clock_timestamp() AS now`
+          const expiring = await installRights(world.sourceId, rightsChange === 'expiry' ? {
+            expiresAt: new Date(clock.now.getTime() + 2_000).toISOString() } : {})
+          const before = snapshotMode
+            ? await proxy.readRenderableSnapshotSource({ workspaceId, projectId: world.projectId,
+              planId: expiryPlan.id, planHash: expirySnapshot.planHash, format: '9:16' })
+            : await proxy.readCurrentSource({ workspaceId, projectId: world.projectId })
+          assert.ok(before, 'rights must allow hydration before the observed wait')
+          latch = latchClient.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM public_operations WHERE id = ${candidate.id} FOR UPDATE`
+            readyResolve()
+            const deadline = Date.now() + 5_000
+            let sawWait = false, rightsChanged = false
+            while (Date.now() < deadline) {
+              await tx.$queryRaw`SELECT pg_stat_clear_snapshot() IS NULL AS cleared`
+              const waiting = await tx.$queryRaw`SELECT wait_event_type AS "waitType" FROM pg_stat_activity
+                WHERE application_name = ${attachEndpoint.applicationName}`
+              sawWait ||= waiting.some((row) => row.waitType === 'Lock')
+              if (rightsChange === 'expiry') {
+                const [observed] = await tx.$queryRaw`SELECT clock_timestamp() AS now`
+                rightsChanged = observed.now.getTime() >= Date.parse(expiring.expiresAt)
+              } else if (sawWait && !rightsChanged) {
+                const revoked = await installRights(world.sourceId, { status: 'revoked' })
+                const current = await db.v2MediaArtifact.findUniqueOrThrow({ where: { id: world.sourceId } })
+                rightsChanged = current.currentRightsSnapshotId === revoked.id
+              }
+              if (sawWait && rightsChanged) break
+              await new Promise((resolve) => setTimeout(resolve, 25))
+            }
+            assert.ok(sawWait, 'worker must be observed waiting on PostgreSQL')
+            assert.ok(rightsChanged, 'rights expiry/revocation must be observed before releasing worker')
+            gatesResolve()
+            await released
+          }, { timeout: 8_000 }).catch((error) => { readyReject(error); gatesReject(error); throw error })
+          latch.catch(() => {})
+          await ready
+          attachResult = candidate.attach(workerClient).then((value) => ({ value }), (error) => ({ error }))
+          await gates
+          release()
+          await latch
+          const outcome = await attachResult
+          assert.equal(outcome.error?.code, 'ASSET_RIGHTS_BLOCKED')
+          assert.equal((await db.v2PublicOperation.findUniqueOrThrow({ where: { id: candidate.id } })).status, 'running')
+          assert.equal(await db.v2ProjectMediaAsset.count({ where: { artifactId: candidate.artifactId, role: 'editorial-proxy' } }), 0)
+          assert.equal(await db.v2ProxyReview.count({ where: { operationId: candidate.id } }), 0)
+          assert.equal(await db.v2AutomaticCatalogRecord.count({ where: { artifactId: candidate.artifactId } }), 0)
+        } catch (error) { latchFailure = error; throw error } finally {
+          release()
+          await Promise.allSettled([latch, attachResult].filter(Boolean))
+          const failures = []
+          try {
+            await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: world.rightsId } })
+          } catch (error) { failures.push(error) } finally {
+            const disconnected = await Promise.allSettled([latchClient.$disconnect(), workerClient.$disconnect()])
+            failures.push(...disconnected.filter((r) => r.status === 'rejected').map((r) => r.reason))
+          }
+          if (failures.length) throw new AggregateError(latchFailure ? [latchFailure, ...failures] : failures,
+            'Rights PostgreSQL latch cleanup did not complete cleanly')
+        }
       }
 
       for (const scenario of ['cancel-first', 'takeover']) {

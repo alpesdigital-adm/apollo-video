@@ -4,8 +4,9 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import type {
   PerceptionProducerRequestContextRepository,
 } from '../../application/ports/perception-producer-request-context.ts'
-import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { evaluatePerceptionSourceAnalysisRights } from '../../domain/perception-source-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { producerPublishClock } from './producer-publish-fence.ts'
 
 export function editPlanReferencesSource(contentJson: string, sourceArtifactId: string): boolean {
   let plan: unknown
@@ -60,8 +61,9 @@ export class PrismaPerceptionProducerRequestContextRepository implements Percept
         !editPlanReferencesSource(version.editPlanSnapshot.contentJson, input.sourceArtifactId)) return null
     const rights = artifact.currentRightsSnapshot
       ? hydrateAssetRights(artifact.currentRightsSnapshot) : null
-    if (evaluateAssetUse(rights, { workspaceId: input.workspaceId,
-      use: 'editorial-reuse', locale: project.locale ?? 'und' }, new Date()).outcome !== 'allow') return null
+    const checkedAt = await producerPublishClock(this.client)
+    if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: input.workspaceId,
+      locale: project.locale ?? 'und' }, checkedAt).outcome !== 'allow') return null
     return Object.freeze({
       projectId: input.projectId,
       projectVersionId: input.projectVersionId,

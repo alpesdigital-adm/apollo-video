@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index
 import { randomUUID } from 'node:crypto'
 
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
-import { evaluateAssetUse } from '../../domain/asset-rights.ts'
+import { evaluatePerceptionSourceAnalysisRights } from '../../domain/perception-source-rights.ts'
 import { createTemporalProducerEnvelope, type TemporalProducerEnvelope, type TemporalProducerEnvelopeInput } from '../../domain/temporal-producer-envelope.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { startPublicOperationAttempt } from '../../domain/public-operation.ts'
@@ -148,6 +148,8 @@ export class PrismaTemporalProducerEnvelopeRepository {
       let plan: Record<string, unknown>
       let timeMap: ReturnType<typeof sourceMap>
       try {
+      await lockProducerPublishProject(transaction, candidate.temporalProducerOperation.projectId, candidate.workspaceId)
+      await lockProducerPublishSource(transaction, candidate.temporalProducerOperation.sourceArtifactId, candidate.workspaceId)
       const foundSource = await transaction.v2MediaArtifact.findFirst({
         where: { id: candidate.temporalProducerOperation.sourceArtifactId,
           workspaceId: candidate.workspaceId, status: 'available', mediaType: 'video' },
@@ -171,8 +173,10 @@ export class PrismaTemporalProducerEnvelopeRepository {
       })
       if (!project || !attached) conflict('Producer source is not current and attached')
       const rights = foundSource.currentRightsSnapshot ? hydrateAssetRights(foundSource.currentRightsSnapshot) : null
-      if (evaluateAssetUse(rights, { workspaceId: candidate.workspaceId,
-        use: 'editorial-reuse', locale: project.locale ?? 'und' }, input.now).outcome !== 'allow') {
+      const checkedAt = await producerPublishClock(transaction)
+      if (new Date(input.now.getTime() + input.leaseMs) <= checkedAt) conflict('Producer lease expired during claim')
+      if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: candidate.workspaceId,
+        locale: project.locale ?? 'und' }, checkedAt).outcome !== 'allow') {
         throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights are not approved')
       }
       const version = await transaction.v2ProjectVersion.findFirst({
@@ -356,7 +360,7 @@ export class PrismaTemporalProducerEnvelopeRepository {
       const rights = artifact.currentRightsSnapshot ? hydrateAssetRights(artifact.currentRightsSnapshot) : null
       const committedAt = await producerPublishClock(transaction)
       if (operation.leaseExpiresAt <= committedAt) conflict('Producer lease expired before publication')
-      if (evaluateAssetUse(rights, { workspaceId: envelope.workspaceId, use: 'editorial-reuse', locale: project.locale ?? 'und' }, committedAt).outcome !== 'allow') {
+      if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: envelope.workspaceId, locale: project.locale ?? 'und' }, committedAt).outcome !== 'allow') {
         throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights are not approved')
       }
       const updated = await transaction.v2PublicOperation.updateMany({
@@ -384,7 +388,7 @@ export class PrismaTemporalProducerEnvelopeRepository {
       await emitOperationTransition(transaction, operation, operation.id)
       const returnedAt = await producerPublishClock(transaction)
       if (operation.leaseExpiresAt <= returnedAt) conflict('Producer lease expired during publication')
-      if (evaluateAssetUse(rights, { workspaceId: envelope.workspaceId, use: 'editorial-reuse', locale: project.locale ?? 'und' }, returnedAt).outcome !== 'allow') {
+      if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: envelope.workspaceId, locale: project.locale ?? 'und' }, returnedAt).outcome !== 'allow') {
         throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights expired during publication')
       }
       return envelope
@@ -456,8 +460,9 @@ export async function readTemporalProducerEnvelope(client: Prisma.TransactionCli
       conflict('Producer source or time-map no longer matches the sealed input')
     }
     const rights = row.sourceArtifact.currentRightsSnapshot ? hydrateAssetRights(row.sourceArtifact.currentRightsSnapshot) : null
-    if (evaluateAssetUse(rights, { workspaceId: input.workspaceId, use: 'editorial-reuse',
-      locale: version.project.locale ?? 'und' }, input.now).outcome !== 'allow') {
+    const checkedAt = await producerPublishClock(client)
+    if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: input.workspaceId,
+      locale: version.project.locale ?? 'und' }, checkedAt).outcome !== 'allow') {
       throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights are no longer approved')
     }
     return envelope

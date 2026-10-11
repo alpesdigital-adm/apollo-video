@@ -53,7 +53,7 @@ test('W61 publish-race fixture hydrates a real child and rights expiry offline',
   assert.equal(hydrateAssetRights(fenceRightsRow(renewed)).snapshotHash, renewed.snapshotHash)
   assert.notEqual(rights.snapshotHash, renewed.snapshotHash)
   assert.equal(renewed.sequence, 3)
-  const context = { workspaceId: world.workspaceId, use: 'editorial-reuse', locale: 'pt-BR' }
+  const context = { workspaceId: world.workspaceId, use: 'editing', locale: 'pt-BR' }
   assert.equal(evaluateAssetUse(rights, context, new Date(expiresAt.getTime() - 1), 1).outcome,
     'allow')
   assert.deepEqual(evaluateAssetUse(rights, context, expiresAt).reasonCodes,

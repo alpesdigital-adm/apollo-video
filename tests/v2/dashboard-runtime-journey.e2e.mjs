@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import net from 'node:net'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -12,9 +12,10 @@ import { promisify } from 'node:util'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.mjs'
 
-// Only upstream Director snapshots, source bytes and color probe are controlled inputs.
-// Project creation/status, operations, proxy review, outputs and terminal transitions
-// are produced exclusively by public APIs and real production workers.
+// Source bytes, aligned transcript, initial timeline, rights and color probe are
+// controlled inputs. The real Director service materializes canonical snapshots.
+// Public final admission must reject UNKNOWN; a test-only approval port exercises
+// dashboard final mechanics with the real application service and fenced worker.
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
 const ffmpegStatic = require('ffmpeg-static')
@@ -57,14 +58,14 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
-  const { reconstructFinal } = await import('../../src/v2/application/render-workflow.ts')
+  const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
+  const { createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
+  const { runProjectDirectorService } = await import('../../src/v2/application/run-project-director.ts')
+  const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { PrismaDirectorRunRepository } = await import('../../src/v2/infrastructure/prisma/director-run-repository.ts')
+  const { createEvidenceBoundBriefCompiler } = await import('../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts')
   const { setProjectLutSelectionService } = await import('../../src/v2/application/project-lut-selections.ts')
-  const { catalogApprovedOutputService } = await import('../../src/v2/application/catalog-approved-output.ts')
-  const { PrismaAutomaticCatalogRepository } = await import('../../src/v2/infrastructure/prisma/automatic-catalog-repository.ts')
-  const { listMediaLibraryService } = await import('../../src/v2/application/media-library.ts')
-  const { PrismaMediaLibraryRepository } = await import('../../src/v2/infrastructure/prisma/media-library-repository.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
-  const { createProjectFinalExportWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
@@ -85,10 +86,6 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
   const directorRunId = `final-export-director-${suffix}`
   const sourceArtifactId = `final-export-source-${suffix}`
   const sourceManifestId = `final-export-source-manifest-${suffix}`
-  const proxyArtifactId = `final-export-proxy-${suffix}`
-  const proxyManifestId = `final-export-proxy-manifest-${suffix}`
-  const proxyOperationId = `final-export-proxy-operation-${suffix}`
-  const proxyReviewId = `final-export-proxy-review-${suffix}`
   const createdAt = new Date('2026-07-26T20:00:00.000Z')
   const sourceArtifactKey = `workspaces/final-export-e2e-${suffix}/masters/source.mp4`
   const sourcePath = join(artifactRoot, ...sourceArtifactKey.split('/'))
@@ -179,23 +176,23 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
     assert.equal(created.status, 201, JSON.stringify(createdBody))
     projectId = createdBody.data.project.id
     assert.equal(createdBody.data.project.status, 'draft')
-    const editPlanSnapshotId = `final-export-edit-plan-${suffix}`
-    const qualitySnapshotId = `final-export-quality-${suffix}`
     const snapshotIds = {
       brief: `final-export-brief-${suffix}`,
       policies: `final-export-policies-${suffix}`,
-      perception: `final-export-perception-${suffix}`,
-      treatment: `final-export-treatment-${suffix}`,
-      story: `final-export-story-${suffix}`,
       baseEditPlan: `final-export-base-edit-plan-${suffix}`,
-      editPlan: editPlanSnapshotId,
-      quality: qualitySnapshotId,
     }
+    const transcriptId = `runtime-transcript-${suffix}`
+    const transcript = createMediaTranscript({ language: 'pt-BR',
+      text: 'Bem vindo ao Apollo', provider: 'controlled', model: 'aligned-fixture-v1',
+      words: [{ word: 'Bem', start: 0.2, end: 0.5 }, { word: 'vindo', start: 0.5, end: 0.9 },
+        { word: 'ao', start: 0.9, end: 1.1 }, { word: 'Apollo', start: 1.1, end: 1.7 }],
+      segments: [{ id: 0, start: 0.2, end: 1.7, text: 'Bem vindo ao Apollo' }] })
     const editPlan = {
       schemaVersion: 2,
       state: 'compiled',
       id: `final-export-plan-${suffix}`,
       projectVersionId,
+      storyPlanId: null,
       fps: 30,
       durationFrames: 120,
       videoTracks: [{
@@ -212,6 +209,17 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
         }],
       }],
       subtitleTracks: [],
+      sources: [{ id: sourceArtifactId, artifactId: sourceArtifactId, kind: 'video', durationSeconds: 4 }],
+      overlayTracks: [], audioTracks: [], effectTracks: [], markers: [], protectedElements: [],
+      localeVariantRefs: [], formatVariantRefs: [], lineageRefs: [sourceArtifactId],
+      editorial: { commandType: 'remove-spoken-content', exclusions: [],
+        retainedSourceRanges: [{ sourceStartSeconds: 0, sourceEndSeconds: 4 }] },
+      subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 32 },
+      retimedTranscript: { sourceTranscriptId: transcriptId, sourceTranscriptHash: transcript.transcriptHash,
+        words: transcript.words.map((word) => ({ text: word.word, sourceStartSeconds: word.start,
+          sourceEndSeconds: word.end, timelineStartFrame: Math.round(word.start * 30),
+          timelineEndFrame: Math.round(word.end * 30) })) },
+      createdAt: createdAt.toISOString(),
       transitions: [],
       movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
       composition: {
@@ -228,24 +236,17 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
       id: `final-export-base-plan-${suffix}`,
       projectVersionId: baseVersionId,
     }
-    const qualityReport = {
-      schemaVersion: 'director-quality-report/v1',
-      id: `final-export-quality-report-${suffix}`,
-      status: 'approved',
-      score: 0.98,
-      issues: [],
-      evaluatedAt: createdAt.toISOString(),
-    }
     const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
     const snapshots = [
-      [snapshotIds.brief, 'brief', 1, { schemaVersion: 1, productionBrief: createProductionBrief({ ownerText: 'Final aprovado.' }) }],
-      [snapshotIds.policies, 'policies', 1, { schemaVersion: 1, state: 'configured' }],
-      [snapshotIds.perception, 'perception', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
+      [snapshotIds.brief, 'brief', 1, { schemaVersion: 1, objective: 'discovery',
+        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
+        outputSpec: { schemaVersion: 1, id: `runtime-output-${suffix}`, locale: 'pt-BR',
+          aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
+          safeArea: { top: 0.05, right: 0.05, bottom: 0.08, left: 0.05 } },
+        productionBrief: createProductionBrief({ ownerText: 'Público: equipes criativas. Tom: direto e natural.' }),
+        createdAt: createdAt.toISOString() }],
+      [snapshotIds.policies, 'policies', 1, { schemaVersion: 1, state: 'configured', guardrails: [], createdAt: createdAt.toISOString() }],
       [snapshotIds.baseEditPlan, 'edit-plan', 2, baseEditPlan],
-      [snapshotIds.editPlan, 'edit-plan', 2, editPlan],
-      [snapshotIds.quality, 'quality-report', 1, qualityReport],
     ]
     for (const [id, kind, schemaVersion, content] of snapshots) {
       await client.v2ProjectSnapshot.create({
@@ -294,79 +295,6 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
       reason: 'Keep this final-export fixture colorimetrically neutral.',
     })
     assert.equal(noLut.selection.resolved.mode, 'none')
-    await client.v2EditCommand.create({
-      data: {
-        id: commandId,
-        workspaceId,
-        projectId,
-        baseVersionId: noLut.version.id,
-        baseHash: noLut.version.baseHash,
-        type: 'run-director',
-        scopeJson: stableSerialize({ kind: 'video', targetIds: [] }),
-        payloadJson: stableSerialize({ schemaVersion: 1, directorRunId }),
-        reason: 'E2E final render',
-        actorType: 'api-client',
-        actorId: issued.client.id,
-        actorCredentialId: authenticationAudit.credentialId,
-        actorEnvironment: authenticationAudit.environment,
-        actorAuthenticationKind: authenticationAudit.authenticationKind,
-        actorContextHash: authenticationAudit.contextHash,
-        idempotencyKey: `final-export-director-${suffix}`,
-        requestFingerprint: calculateVersionHash({ commandId }),
-        createdAt,
-      },
-    })
-    const projectVersionHash = calculateVersionHash({ projectId, version: projectVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId,
-        workspaceId,
-        projectId,
-        sequence: 4,
-        parentVersionId: noLut.version.id,
-        briefSnapshotId: snapshotIds.brief,
-        treatmentSnapshotId: snapshotIds.treatment,
-        storySnapshotId: snapshotIds.story,
-        editPlanSnapshotId,
-        policiesSnapshotId: snapshotIds.policies,
-        baseHash: projectVersionHash,
-        createdBy: issued.client.id,
-        commandId,
-        createdAt,
-      },
-    })
-    await client.v2DirectorRun.create({
-      data: {
-        id: directorRunId,
-        workspaceId,
-        projectId,
-        commandId,
-        baseVersionId: noLut.version.id,
-        resultVersionId: projectVersionId,
-        status: 'succeeded',
-        objective: 'discovery',
-        objectiveVersion: 1,
-        rubricRef: 'awareness-discovery/v1',
-        plannerVersion: 'director-e2e-1.0.0',
-        criticVersion: 'critic-e2e-1.0.0',
-        perceptionSnapshotId: snapshotIds.perception,
-        treatmentSnapshotId: snapshotIds.treatment,
-        storySnapshotId: snapshotIds.story,
-        editPlanSnapshotId,
-        qualitySnapshotId,
-        decisionsJson: stableSerialize([]),
-        assumptionsJson: stableSerialize([]),
-        initiatedByType: 'api-client',
-        initiatedById: issued.client.id,
-        createdAt,
-        updatedAt: createdAt,
-      },
-    })
-    await client.v2Project.update({
-      where: { id: projectId },
-      data: { currentVersionId: projectVersionId },
-    })
-
     await client.v2MediaArtifact.create({
       data: {
         id: sourceArtifactId,
@@ -380,32 +308,23 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
         createdAt,
       },
     })
+    const sourceProbe = await probeVideo(sourcePath)
+    const sourceManifest = createMediaArtifactManifestV2({ artifactKey: sourceArtifactKey,
+      artifactSha256: sourceSha256, byteSize: sourceBytes.length, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'source-master', version: '1.0.0', parameters: { controlled: true, durationSeconds: 4 } },
+      sources: [], probe: { width: sourceProbe.width, height: sourceProbe.height,
+        duration: sourceProbe.duration, fps: sourceProbe.fps } })
     await client.v2MediaArtifactManifest.create({
       data: {
         id: sourceManifestId,
         workspaceId,
         artifactId: sourceArtifactId,
         schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateVersionHash({ sourceManifestId }),
+        manifestHash: sourceManifest.manifestHash,
         recipeId: 'source-master',
         recipeVersion: '1.0.0',
-        parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-        manifestJson: stableSerialize({
-          schemaVersion: 'media-artifact-manifest/v2',
-          artifact: {
-            artifactKey: sourceArtifactKey,
-            sha256: sourceSha256,
-            byteSize: sourceBytes.byteLength,
-            mediaType: 'video',
-            container: 'mp4',
-          },
-          recipe: {
-            id: 'source-master',
-            version: '1.0.0',
-            parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-          },
-          sources: [],
-        }),
+        parametersHash: sourceManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(sourceManifest),
         createdAt,
       },
     })
@@ -454,6 +373,33 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
       actor: { type: 'api-client', id: issued.client.id },
     })
 
+    await client.v2MediaTranscript.create({ data: { id: transcriptId, workspaceId, projectId,
+      sourceArtifactId, sourceManifestId, schemaVersion: transcript.schemaVersion,
+      language: transcript.language, provider: transcript.provider, model: transcript.model,
+      providerVersion: 'controlled-v1', transcriptHash: transcript.transcriptHash,
+      transcriptJson: stableSerialize(transcript), createdAt } })
+    const auditContext = createExternalAuditContext({ clientId: issued.client.id,
+      credentialId: issued.credential.id, workspaceId, environment: 'production' })
+    const actor = { ...auditContext, auditContext, scopes: new Set(['projects:write']),
+      authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' }
+    const directed = await runProjectDirectorService({
+      repository: new PrismaDirectorRunRepository(client), clock: () => createdAt,
+      createEventId: randomUUID, compileBrief: createEvidenceBoundBriefCompiler(),
+      createId: (kind) => kind === 'project-version' ? projectVersionId
+        : kind === 'director-run' ? directorRunId : kind === 'edit-command' ? commandId
+          : `runtime-${kind}-${randomUUID()}`,
+    })({ workspaceId, projectId, baseVersionId: noLut.version.id, baseHash: noLut.version.baseHash,
+      actor, idempotency: { key: `runtime-director-${suffix}` },
+      reason: 'Controlled upstream for dashboard mechanics; absent face evidence requires review.' })
+    assert.equal(directed.run.perception.schemaVersion, 2)
+    assert.equal(directed.run.perception.inputVersionId, noLut.version.id)
+    assert.equal(directed.run.perception.summary.faceCoverage, 'absent')
+    assert.equal(directed.run.qualityReport.status, 'review-required')
+    assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
+    assert.equal(directed.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
+    const projectVersionHash = directed.version.baseHash
+
     const stage = (id, kind, enabled, output, provider, parameters) => ({
       id, kind, version: 'v1', enabled, output,
       implementation: { provider, version: 'v1', parameters, parametersHash: sha256(JSON.stringify(parameters)) },
@@ -478,7 +424,10 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
       }),
     })
     assert.equal(compilationResponse.status, 201, `${await compilationResponse.text()}\n${serverLogs.slice(-4_000)}`)
-    await runDashboardRuntimeJourney({ client, baseUrl, authorization, workspaceId, projectId, projectVersionId, projectVersionHash, sourcePath, artifactRoot, uiUsername, uiPassword, suffix, signal: t.signal })
+    await runDashboardRuntimeJourney({ client, baseUrl, authorization, workspaceId, projectId,
+      projectVersionId, projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId,
+      sourceSha256, sourceByteSize: sourceBytes.length, sourceManifest, sourcePath, artifactRoot,
+      uiUsername, uiPassword, suffix, signal: t.signal })
   } finally {
     if (process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT) {
       await mkdir(process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT, { recursive: true })

@@ -43,7 +43,53 @@ The tracked source/test fingerprint remained
 pre-commit regression checkpoint, not the subsequent commit's build/PG proof
 or execution of the Linux pidfd/setsid scenario.
 
+PR81 froze commit `8428e82702540598c049356ef024379e11a976b5`. Its local build
+`checkpoint-build-v1-42a6c030` passed with 14 terminal identities and clean
+postflight; result SHA-256 is
+`408c396805ed7ae6307229c5f52786941020edf297d10719d46a8e6a76b0fe7d`.
+CI run `38176386786` failed before unit/perception suites: trailing CRLF in
+two new migrations and missing locked Remotion dependencies in the new job.
+Dashboard run `38176386738` exposed an old upstream perception/Director fixture.
+These failures remain failed evidence. The affected controlled journeys now
+include T-FR, the five-format matrix, and W35 dashboard states/worker/events.
+The dashboard correction must preserve the real API's 422 rejection with zero
+effects before any test-only controlled approval port; persisted quality remains
+review-required/unknown. It cannot establish editorial approval, facial safety,
+deployment or owner acceptance. New-SHA local proofs and mandatory CI remain
+pending; historical W35 results are not transferred to this checkpoint.
+
 The original isolated-adapter record below is retained as history.
+
+The rights/dashboard source revision passed literal `npm test` in
+`rights-unit-v3-6fe3d9fa`: 2792 tests, 2785 passing, zero failures and the same
+seven explicit skips. Result SHA-256:
+`9a90a1b98dbbe376b922748bcfbdedecd8ac16f0f8d56891759daef0de94fae2`.
+The source/test fingerprint was unchanged at
+`7ef0b14cfd67d730c1c4ec9a88efa3f63abc1b07ac74d2426b2a93ea9f4e9421`;
+35/35 process observations completed, 195 identities were terminal, and
+postflight/scratch cleanup passed. This is pre-commit regression evidence.
+Three preceding attempts remain failed supervisor runs (`rights-unit-v1`,
+`rights-unit-depth`, `rights-unit-v2`): the literal npm/cmd wrappers added two
+tree levels, and the private observer rejected a leaf at the allowed boundary.
+The corrected observer still records every descendant and fails beyond depth
+10 for that exact npm invocation (other commands retain depth 8). No tests were
+selected out, and none of those interrupted attempts counts as a passing suite.
+
+Rights-purpose correction prepared after the first CI run: OCR, temporal and
+face analysis of the project's attached source master require `editing`, one of
+the four uses granted by normal ingest. They neither require nor grant library
+`editorial-reuse`. Direct video masters and uploaded audio require `rendering`
+when materialized for a proxy; selected library inserts require `editorial-reuse`.
+Unknown or ambiguous project associations fail closed. Workspace, locale,
+consent, expiry, status and immutable source identity remain separate gates.
+Admission, claim and publication check the current rights against PostgreSQL
+time after lock waits. Diagnostic envelope reads check PostgreSQL time after
+their queries; they do not promise a linearizable snapshot of mutable rights or
+grant authority for a later render. Consumers that persist or publish must
+revalidate within their own transaction and fences. The new controlled ingest
+rights-stage test stops at an identified sentinel after real rights persistence;
+it is not a complete ingest E2E. These changes still require the new commit's
+local PostgreSQL proofs and mandatory CI before integration.
 
 This adapter is **implemented in isolation, not integrated or approved** for W62. It consumes only explicitly sampled encoded PNG/JPEG frames with strictly increasing nonnegative `ptsMs` and an upstream `sourceSha256` assertion. The caller must establish source bytes, lineage and sampling. The adapter cannot establish coverage between samples, eye visibility, safe subtitle placement, tracking, or identity. Every unsampled interval remains unknown.
 

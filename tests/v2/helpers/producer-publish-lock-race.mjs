@@ -140,7 +140,7 @@ export function createFenceRightsSnapshot(world, sequence, expiresAt, label) {
   return createAssetRightsSnapshot({
     id: `rights-${label}`, workspaceId: world.workspaceId,
     artifactId: world.sourceId, sequence,
-    draft: { status: 'approved', allowedUses: ['editorial-reuse'],
+    draft: { status: 'approved', allowedUses: ['editing'],
       prohibitedUses: [], ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
       sourceNote: `Controlled publish fence fixture ${label}`,
       consent: { status: 'not-required', allowedUses: [] } },

@@ -57,10 +57,10 @@ const createdAt = '2026-07-31T19:00:00.000Z'
 function controlledSourceRightsRow(artifactId) {
   const rights = createAssetRightsSnapshot({ id: `rights-${artifactId}`, workspaceId,
     artifactId, sequence: 1,
-    draft: { status: 'approved', allowedUses: ['editorial-reuse'], prohibitedUses: [],
+    draft: { status: 'approved', allowedUses: ['rendering'], prohibitedUses: [],
       consent: { status: 'not-required', allowedUses: [] } },
     createdBy: { type: 'user', id: 'owner-impact' }, createdAt })
-  return { ...rights, allowedUsesJson: '["editorial-reuse"]', prohibitedUsesJson: '[]',
+  return { ...rights, allowedUsesJson: '["rendering"]', prohibitedUsesJson: '[]',
     allowedWorkspaceIdsJson: JSON.stringify(rights.allowedWorkspaceIds),
     consentStatus: rights.consent.status, allowedMarketsJson: null, allowedLocalesJson: null,
     allowedSyntheticOperationsJson: null, consentAllowedUsesJson: '[]',
@@ -787,7 +787,7 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
       timelineInFrame: 0, timelineOutFrame: 30, rate: 1 }] }], audioTracks: [] }
   const rights = createAssetRightsSnapshot({ id: 'rights-proxy-2', workspaceId,
     artifactId: sourceArtifactId, sequence: 1,
-    draft: { status: 'approved', allowedUses: ['editorial-reuse'], prohibitedUses: [],
+    draft: { status: 'approved', allowedUses: ['rendering'], prohibitedUses: [],
       consent: { status: 'not-required', allowedUses: [] } },
     createdBy: { type: 'user', id: 'owner-proxy-2' }, createdAt })
   const repository = new PrismaProjectProxyRenderRepository({
@@ -826,7 +826,7 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
       originalFileName: 'source.mp4', createdAt: new Date(createdAt), upload: null,
       artifact: { id: sourceArtifactId, sha256: sourceSha256, byteSize: 1_024n,
         mediaType: 'video', container: 'mp4', status: 'available',
-        currentRightsSnapshot: { ...rights, allowedUsesJson: '["editorial-reuse"]',
+        currentRightsSnapshot: { ...rights, allowedUsesJson: '["rendering"]',
           prohibitedUsesJson: '[]', allowedWorkspaceIdsJson: JSON.stringify(rights.allowedWorkspaceIds),
           consentStatus: rights.consent.status,
           allowedMarketsJson: null, allowedLocalesJson: null,

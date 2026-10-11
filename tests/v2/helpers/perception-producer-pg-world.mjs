@@ -56,8 +56,11 @@ export async function seedPerceptionProducerContext(db, options = {}) {
     mediaType: 'video', container: 'mp4', status: 'available' } })
   await db.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId, projectId,
     artifactId: sourceId, role: 'source-master', originalFileName: 'source.mp4' } })
+  if (options.seedRights === false) return { suffix, workspaceId, otherWorkspaceId, clientId,
+    projectId, versionId, sourceId, editId, sourceSha256, byteSize, artifactKey, rightsId: null, plan }
   const rights = createAssetRightsSnapshot({ id: `w61-rights-${suffix}`, workspaceId, artifactId: sourceId,
-    sequence: 1, draft: { status: 'approved', allowedUses: ['editorial-reuse'], prohibitedUses: [],
+    // Match the normal media-ingest grant exactly; analysis never adds library reuse.
+    sequence: 1, draft: { status: 'approved', allowedUses: ['distribution', 'editing', 'rendering', 'transcription'], prohibitedUses: [],
       consent: { status: 'not-required', allowedUses: [] } },
     createdBy: { type: 'user', id: 'w61-owner' }, createdAt: now.toISOString() })
   await db.v2AssetRightsSnapshot.create({ data: {
