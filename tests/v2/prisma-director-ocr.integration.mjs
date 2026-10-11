@@ -506,7 +506,9 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
           error.code === 'PERSISTENCE_CONFLICT' && /unambiguous/i.test(error.message))
         await db.v2ProjectMediaAsset.delete({ where: { id: ambiguousLinkId } })
-        await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role: 'source-video' } })
+        // editing-proxy is permitted by the DB role CHECK but cannot authorize
+        // a referenced render source; exercise the reader rather than SQL 23514.
+        await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role: 'editing-proxy' } })
         for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
           error.code === 'PERSISTENCE_CONFLICT' && /unsupported/i.test(error.message))
       } finally {
