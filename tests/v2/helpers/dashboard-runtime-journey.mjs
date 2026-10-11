@@ -31,7 +31,7 @@ export async function runDashboardRuntimeJourney(input) {
   assert.ok(directory && isAbsolute(directory), 'Runtime evidence requires an absolute external directory')
   await mkdir(directory, { recursive: true })
   const evidence = { schemaVersion: 'dashboard-real-runtime/v1', runId: suffix, ownerPid: process.pid,
-    sourceCommit: process.env.GITHUB_SHA ?? null, states: [], outputs: [], screenshots: [],
+    sourceCommit: process.env.GITHUB_SHA ?? null, states: [], outputs: [], screenshots: [], httpResponses: [],
     proofScope: 'controlled-mechanics', editorialAcceptance: false, faceSafety: 'unknown',
     storedQualityStatus: 'review-required',
     controlledInputs: ['FFmpeg synthetic source bytes', 'aligned transcript', 'initial compiled timeline',
@@ -79,8 +79,25 @@ export async function runDashboardRuntimeJourney(input) {
     const response = await fetch(`${baseUrl}${path}`, { method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30000) })
-    const payload = await response.json()
-    assert.equal(response.status, expected, `${path}: ${JSON.stringify(payload)}`)
+    const text = await response.text()
+    // A missing public route returns Next HTML. Preserve enough evidence to
+    // identify it without recording response bodies, credentials or cookies.
+    const contentType = (response.headers.get('content-type') ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 128)
+    const diagnostic = { method: 'POST', path: new URL(path, baseUrl).pathname,
+      responsePath: response.url ? new URL(response.url).pathname : null, status: response.status,
+      contentType, redirected: response.redirected, bodyBytes: Buffer.byteLength(text), bodyHash: sha256(text),
+      bodyKind: /^\s*<(?:!doctype\s+html|html\b)/i.test(text) ? 'html' : 'other' }
+    evidence.httpResponses.push(diagnostic)
+    assert.match(contentType, /^application\/(?:json|[a-z0-9.+-]+\+json)(?:;|$)/i,
+      `Public API returned a non-JSON response: ${JSON.stringify(diagnostic)}`)
+    let payload
+    try { payload = JSON.parse(text) } catch {
+      diagnostic.jsonParseFailed = true
+      throw new Error(`Public API returned invalid JSON: ${JSON.stringify(diagnostic)}`)
+    }
+    diagnostic.bodyKind = 'json'
+    assert.equal(response.status, expected, JSON.stringify({ ...diagnostic, expected,
+      apiErrorCode: /^[A-Z][A-Z0-9_]+$/.test(payload?.error?.code ?? '') ? payload.error.code : null }))
     return payload.data
   }
   const annotationScreenshot = async (artifact, name) => {
@@ -283,7 +300,7 @@ export async function runDashboardRuntimeJourney(input) {
     // Color compilation is real, but its source metadata and fixture setup are
     // controlled. It belongs to the separate project/source identities.
     const principalCompilation = JSON.parse((await client.v2ColorPipelineCompilation.findFirstOrThrow({ where: { workspaceId, projectId } })).compilationJson)
-    await post(`/v1/projects/${mechanical.projectId}/color-pipeline/compile`, {
+    await post(`/v1/projects/${mechanical.projectId}/color-pipeline-compilations`, {
       sourceArtifactId: mechanical.sourceArtifactId, sourceManifestId: mechanical.sourceManifestId,
       outputMetadata: principalCompilation.pipeline.outputMetadata,
       stages: principalCompilation.pipeline.stages.map(({ id, kind, version, enabled, output, implementation, lut }) =>

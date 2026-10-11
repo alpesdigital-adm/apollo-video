@@ -10,8 +10,10 @@ import { promisify } from 'node:util'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
+import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { FfmpegIngestProcessor } from '../../src/v2/infrastructure/media/ffmpeg-ingest-processor.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -59,20 +61,47 @@ function colorCompilation(artifactId) {
   })
 }
 
+function unknownFaceReviewPlan({ canvas, durationFrames, fps, cues }) {
+  const plan = createRenderPlacementPlan({ format: '9:16', canvas, durationFrames,
+    subtitlePresetId: 'kinetic', elements: [], subtitleAnchor: { fps,
+      cues: cues.map(({ id, startFrame, endFrame }) => ({ id, startFrame, endFrame })),
+      faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' } } })
+  assert.equal(plan.schemaVersion, 'render-placement-plan/v2')
+  assert.equal(plan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
+  assert.deepEqual(plan.subtitleAnchorPlan.faceSafety,
+    { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' })
+  assert.deepEqual(plan.subtitleAnchorPlan.decisions.map(({ cueId, startFrame, endFrame }) => ({ cueId, startFrame, endFrame })),
+    cues.map(({ id, startFrame, endFrame }) => ({ cueId: id, startFrame, endFrame })))
+  for (const decision of plan.subtitleAnchorPlan.decisions) {
+    assert.equal(decision.suppressed, true)
+    assert.equal(decision.anchor, null)
+    assert.equal(decision.bounds, null)
+    assert.ok(decision.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
+  }
+  return plan
+}
+
 test('V2 FFmpeg ingest creates an inspectable proxy and speech derivative from a real master', async (t) => {
   assert.equal(typeof ffmpegPath, 'string')
   const root = await mkdtemp(join(tmpdir(), 'apollo-v2-ffmpeg-ingest-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const sourcePath = join(root, 'master.mp4')
+  // Declare the controlled RGB pattern's interpretation, actually transform its
+  // pixels to limited BT.709 and seal those facts in H.264 VUI as well as MP4 tags.
   await execFileAsync(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-y',
-    '-f', 'lavfi', '-i', 'testsrc2=size=1080x1920:rate=25:duration=1.2',
+    '-f', 'lavfi', '-i', 'testsrc=size=1080x1920:rate=25:duration=1.2',
     '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=48000:duration=1.2',
-    '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+    '-shortest', '-vf', 'format=gbrp,zscale=matrixin=gbr:primariesin=709:transferin=linear:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+    '-x264-params', 'colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off',
     '-colorspace', 'bt709', '-color_trc', 'bt709',
     '-color_primaries', 'bt709', '-color_range', 'tv',
     '-c:a', 'aac', sourcePath,
   ], { windowsHide: true, timeout: 60_000 })
+  assert.deepEqual((await probeVideo(sourcePath)).color, {
+    state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr',
+  }, 'Controlled master must have measured BT.709 colorimetry before normalization')
 
   const processor = new FfmpegIngestProcessor({ workRoot: join(root, 'work'), ffmpegPath })
   const result = await processor.normalize({ sourcePath, operationId: 'operation-real-ingest-1' })
@@ -103,7 +132,7 @@ test('V2 FFmpeg ingest creates an inspectable proxy and speech derivative from a
   await assert.rejects(() => access(result.proxyPath), { code: 'ENOENT' })
 })
 
-test('V2 editorial renderer materializes exact retained clips as a format-aware MP4 without crop zoom', async (t) => {
+test('V2 editorial renderer materializes exact retained clips without crop zoom and suppresses cues with unknown face coverage', async (t) => {
   assert.equal(typeof ffmpegPath, 'string')
   const root = await mkdtemp(join(tmpdir(), 'apollo-v2-ffmpeg-editorial-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -116,6 +145,11 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
   ], { windowsHide: true, timeout: 60_000 })
 
   const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
+  const subtitleCues = [
+    { id: 'cue-1', startFrame: 0, endFrame: 10, text: 'Legenda curta', anchor: 'bottom' },
+    { id: 'cue-2', startFrame: 10, endFrame: 20, text: 'Área segura', anchor: 'bottom' },
+  ]
+  const placementPlan = unknownFaceReviewPlan({ canvas: { width: 540, height: 960 }, durationFrames: 20, fps: 25, cues: subtitleCues })
   const result = await renderer.render({
     operationId: 'operation-editorial-render-1',
     renderKind: 'proxy',
@@ -131,10 +165,8 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
       { id: 'clip-1', sourceArtifactId: 'artifact-1', sourceInFrame: 0, sourceOutFrame: 10, timelineInFrame: 0, timelineOutFrame: 10, rate: 1 },
       { id: 'clip-2', sourceArtifactId: 'artifact-1', sourceInFrame: 20, sourceOutFrame: 30, timelineInFrame: 10, timelineOutFrame: 20, rate: 1 },
     ],
-    subtitleCues: [
-      { id: 'cue-1', startFrame: 0, endFrame: 10, text: 'Legenda curta', anchor: 'bottom' },
-      { id: 'cue-2', startFrame: 10, endFrame: 20, text: 'Área segura', anchor: 'bottom' },
-    ],
+    subtitleCues,
+    placementPlan,
     transitions: [
       { id: 'transition-1', fromClipId: 'clip-1', toClipId: 'clip-2', atFrame: 10, type: 'straight-cut', audioFadeMs: 24, reason: 'Invisible same-scene cut.' },
     ],
@@ -148,18 +180,18 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
   assert.ok(result.byteSize > 0)
   assert.equal(result.renderElementMap.proxyHash, result.sha256)
   assert.deepEqual(result.renderElementMap.canvas, { width: 540, height: 960 })
-  assert.deepEqual(result.renderElementMap.elements.filter((item) => item.frame === 5).map((item) => item.type), ['background', 'presenter', 'subtitle'])
+  assert.deepEqual(result.renderElementMap.elements.filter((item) => item.frame === 5).map((item) => item.type), ['background', 'presenter'])
+  assert.equal(result.renderElementMap.elements.some((item) => item.type === 'subtitle'), false)
   await access(result.outputPath)
   const captions = await readFile(join(root, 'work', 'operation-editorial-render-1', 'captions.ass'), 'utf8')
   assert.match(captions, /Alignment,MarginL,MarginR,MarginV/)
-  assert.match(captions, /Legenda curta/)
-  assert.match(captions, /Área segura/)
+  assert.doesNotMatch(captions, /Legenda curta|Área segura|^Dialogue:/m)
 
   await renderer.cleanup('operation-editorial-render-1')
   await assert.rejects(() => access(result.outputPath), { code: 'ENOENT' })
 })
 
-test('V2 editorial renderer produces a verified 1080x1920 final MP4 from the approved timeline', async (t) => {
+test('V2 editorial renderer produces a 1080x1920 controlled final MP4 while unknown face coverage suppresses captions', async (t) => {
   assert.equal(typeof ffmpegPath, 'string')
   const root = await mkdtemp(join(tmpdir(), 'apollo-v2-ffmpeg-final-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -172,6 +204,8 @@ test('V2 editorial renderer produces a verified 1080x1920 final MP4 from the app
   ], { windowsHide: true, timeout: 60_000 })
 
   const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
+  const subtitleCues = [{ id: 'cue-final-1', startFrame: 0, endFrame: 12, text: 'Legenda final segura', anchor: 'bottom' }]
+  const placementPlan = unknownFaceReviewPlan({ canvas: { width: 1080, height: 1920 }, durationFrames: 12, fps: 30, cues: subtitleCues })
   const result = await renderer.render({
     operationId: 'operation-editorial-final-1',
     renderKind: 'final',
@@ -187,9 +221,8 @@ test('V2 editorial renderer produces a verified 1080x1920 final MP4 from the app
     clips: [
       { id: 'clip-final-1', sourceArtifactId: 'artifact-1', sourceInFrame: 0, sourceOutFrame: 12, timelineInFrame: 0, timelineOutFrame: 12, rate: 1 },
     ],
-    subtitleCues: [
-      { id: 'cue-final-1', startFrame: 0, endFrame: 12, text: 'Legenda final segura', anchor: 'bottom' },
-    ],
+    subtitleCues,
+    placementPlan,
     transitions: [],
   })
 
@@ -201,5 +234,8 @@ test('V2 editorial renderer produces a verified 1080x1920 final MP4 from the app
   assert.ok(result.byteSize > 0)
   assert.equal(result.renderElementMap.proxyHash, result.sha256)
   assert.deepEqual(result.renderElementMap.canvas, { width: 1080, height: 1920 })
+  assert.equal(result.renderElementMap.elements.some((item) => item.type === 'subtitle'), false)
+  const captions = await readFile(join(root, 'work', 'operation-editorial-final-1', 'captions.ass'), 'utf8')
+  assert.doesNotMatch(captions, /Legenda final segura|^Dialogue:/m)
   await access(result.outputPath)
 })
