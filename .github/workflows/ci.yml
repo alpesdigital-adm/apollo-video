@@ -2064,6 +2064,8 @@ jobs:
           printf 'APOLLO_OCR_FFPROBE=%s\nAPOLLO_TEMPORAL_FFPROBE=%s\n' "$ffprobe" "$ffprobe" >> "$GITHUB_ENV"
           sha256sum "$ffmpeg" "$ffprobe" "$APOLLO_OCR_TESSERACT" "$APOLLO_OCR_TESSDATA/eng.traineddata" "$APOLLO_OCR_TESSDATA/LICENSE" > "$APOLLO_LIBRARY_EVIDENCE_ROOT/binary-provenance.sha256"
       - run: npx prisma migrate deploy --schema prisma/v2/schema.prisma
+      - name: Install locked renderer dependencies for perception build
+        run: npm ci --prefix remotion
       - run: npm run build
       - name: Real OCR and temporal media adapters
         run: |

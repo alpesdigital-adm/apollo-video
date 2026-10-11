@@ -189,6 +189,15 @@ function verifyPerceptionWiring(workflow) {
   assert.match(block, /^ {6}V2_DATABASE_URL: .*127\.0\.0\.1.*apollo_v2_perception.*application_name=apollo-video-e2e-perception-.*connection_limit=2.*pool_timeout=10.*connect_timeout=10/m)
   assert.match(block, /sha256sum.*binary-provenance\.sha256/)
   assert.match(block, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*18 \* 60 \* 1000/)
+  const rendererInstalls = steps.filter((step) => step.job === job && step.attrs.get('run') === 'npm ci --prefix remotion')
+  assert.equal(rendererInstalls.length, 1, 'perception requires one locked Remotion dependency installation')
+  const rendererInstall = rendererInstalls[0]
+  assert.equal(rendererInstall.attrs.get('if'), undefined)
+  assert.equal(rendererInstall.attrs.get('continue-on-error'), undefined)
+  assert.ok(gatesTheBuild(rendererInstall))
+  const productionBuild = steps.find((step) => step.job === job && step.attrs.get('run') === 'npm run build')
+  assert.ok(productionBuild && steps.indexOf(rendererInstall) < steps.indexOf(productionBuild),
+    'locked Remotion dependencies must be installed before the unchanged production build')
   for (const name of PERCEPTION_SUITES) {
     const suite = `tests/v2/${name}.integration.mjs`
     const matches = steps.filter((step) => step.job === job && step.suiteFiles.includes(suite))
@@ -222,6 +231,13 @@ test('W61 perception CI preserves supervised mandatory coverage and its exact fa
   }
   assert.throws(() => verifyPerceptionWiring(workflow.replace("APOLLO_TEMPORAL_HTTP_E2E: '1'", "APOLLO_TEMPORAL_HTTP_E2E: '0'")))
   assert.throws(() => verifyPerceptionWiring(workflow.replace(" 'publish-race|face control'", '')))
+  const rendererStep = '      - name: Install locked renderer dependencies for perception build\n        run: npm ci --prefix remotion\n'
+  assert.ok(workflow.includes(rendererStep))
+  assert.throws(() => verifyPerceptionWiring(workflow.replace(rendererStep, '')))
+  for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(rendererStep,
+      rendererStep.replace('        run:', `${replacement}        run:`))))
+  }
   const face = await read('tests/v2/prisma-face-producer.integration.mjs')
   const selected = [...face.matchAll(/^test\('([^']+)'/gm)].map((match) => match[1]).filter((name) => /publish-race|face control/.test(name))
   assert.deepEqual(selected, [
