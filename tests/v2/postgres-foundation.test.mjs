@@ -100,6 +100,7 @@ test('latest PostgreSQL operation constraints cover every V2 operation type and 
         definitions.push({
           kind,
           migration: directory,
+          sql,
           values: [...match[1].matchAll(/'([^']+)'/g)]
             .map((value) => value[1]),
         })
@@ -119,10 +120,44 @@ test('latest PostgreSQL operation constraints cover every V2 operation type and 
   )
   assert.equal(
     latest('type')?.migration,
-    '20260923143000_wave24_synthetic_render',
+    '20261009010000_face_producer_envelope',
   )
   assert.equal(
     latest('phase')?.migration,
-    '20260803223000_project_director_operations',
+    '20261008231000_temporal_public_operation_constraints',
   )
+
+  const sql = latest('type').sql
+  const versionTargets = sql.match(/"type" IN \(([^)]+)\) AND "targetType" = 'project-version'/)
+  assert.ok(versionTargets, 'producer operations must remain version-scoped')
+  assert.deepEqual([...versionTargets[1].matchAll(/'([^']+)'/g)].map((match) => match[1]), [
+    'project-director-run', 'synthetic-production-render',
+    'perception-producer-run', 'perception-temporal-run', 'perception-face-run',
+  ])
+  for (const [type, phases] of [
+    ['perception-producer-run', ['probing', 'transcribing', 'verifying', 'persisting']],
+    ['perception-temporal-run', ['probing', 'analyzing', 'verifying', 'persisting']],
+    ['perception-face-run', ['probing', 'analyzing', 'verifying', 'persisting']],
+  ]) {
+    const mappings = [...sql.matchAll(new RegExp(
+      `WHEN "type" = '${type}' AND "phase" = '([^']+)' THEN (\\d+)`, 'g',
+    ))].map((match) => [match[1], Number(match[2])])
+    assert.deepEqual(mappings, phases.map((phase, index) => [phase, index]),
+      `${type} must persist precisely its four measured stages`)
+    assert.match(sql, new RegExp(
+      `"type" <> '${type}' OR "status" <> 'running'\\s+OR "phase" IN \\(${phases.map((phase) => `'${phase}'`).join(', ')}\\)`,
+    ), `${type} must reject unrelated running phases`)
+  }
+  const projectScope = sql.match(/"type" IN \(([^)]+)\) AND "projectId" IS NOT NULL/)
+  assert.ok(projectScope)
+  const requiredProjectTypes = [...projectScope[1].matchAll(/'([^']+)'/g)].map((match) => match[1])
+  for (const type of ['perception-producer-run', 'perception-temporal-run', 'perception-face-run']) {
+    assert.equal(requiredProjectTypes.includes(type), true, `${type} requires projectId`)
+  }
+  const totalFour = sql.match(/WHEN "type" IN \(([^)]+)\) THEN 4/)
+  assert.ok(totalFour)
+  const fourStageTypes = [...totalFour[1].matchAll(/'([^']+)'/g)].map((match) => match[1])
+  for (const type of ['perception-producer-run', 'perception-temporal-run', 'perception-face-run']) {
+    assert.equal(fourStageTypes.includes(type), true, `${type} has four persisted stages`)
+  }
 })

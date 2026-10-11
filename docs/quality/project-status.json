@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-09T10:44:13.229Z",
+  "updatedAt": "2026-10-11T21:17:09.000Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -58,6 +58,12 @@
           "ref": "docs/PLANO-WAVES-61-70.md",
           "scope": "W61: escopo, dependências, IDs e critérios de execução; não comprova implementação ou validação.",
           "role": "planned-not-started"
+        },
+        {
+          "type": "repo",
+          "ref": "src/v2/infrastructure/prisma/producer-publish-fence.ts",
+          "scope": "Commit 3c1900c6 preserva fencing de publish OCR/temporal/face e fixtures revistas; nove latches observados em PostgreSQL local nos runs privados, não em CI. Nenhum resultado concede faceSafety verified.",
+          "role": "implementation"
         },
         {
           "type": "private",
@@ -124,10 +130,40 @@
           "ref": "Apollo/w61-70-20261008/fence-ocr-diagnostic-306d6cb3/result.json",
           "scope": "Run diagnóstico OCR falho preservado (SHA256 fc2f7e282bc1f86d507c11595e01aed0a87d2d54755ad8f8995ddd5e196333b7): erro primário head é Prisma P2010/meta.code 40001, serialização PostgreSQL após alteração concorrente controlada. Matcher ainda não o aceitava; postflight limpo. O run v4 posterior prova os asserts completos.",
           "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/matrix-controlled-v1-960d8d93/result.json",
+          "scope": "Matrix controlada em Next dev: 2/2, zero skips; API real nega preflight/commit sem autoridade facial, port DI testa cinco formatos, retry/cancel e hashes/decode completos. SHA256 2d49783e06e5519151322d06860db785ef63bda69d6b5e27964fc303531dc946. 15 identidades observadas terminais, zero backends, cluster parado/scratch removido. Não valida detector, pixels editoriais ou bundle build.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/resume-build-v1-bed99ab9/result.json",
+          "scope": "Build Next fresco em 11/10, API/schema e TypeScript PASS; SHA256 b62a41a926c20d49816b5af7e6d43f32af971001ad44d37653e8cb7aa952968d. Fonte1693 sem drift de runtime contra checkpoint anterior; 45 testes/helpers fingerprintados separadamente. Processos terminais e scratch removido. Não é deploy.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/tfr-resume-v4-27be433b/result.json",
+          "scope": "T-FR-231 controlado next start: 2/2, zero skips, Node terminou naturalmente; SHA256 a1b1cb8fb302b949661a26aa890a236401fc79842a4880c6e46ed3552d5cb229. API rejeita face unknown; port DI verifica render/catalog/download com quality review-required/unknown persistida. MP4 SHA3e90493b0c4c1ae214fa53a2ee82e2be1efe89435c218a11be96b19f9882778c,1576936 bytes,decode completo. Browser sem warnings/errors, ChildProcess close observado, listener WS fechado,33 identidades terminais,zero backends,cluster/scratch limpos. Hang histórico não reproduzido nem causa atribuída.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/face-http-resume-v1-39bfb5da/result.json",
+          "scope": "Repetição HTTP facial sobre build fresco:1/1 zero skips; SHA2561fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9. POST autenticado, runner YuNet diagnóstico real,GET selado e controles fail-closed. Postflight sem processos/conexões órfãos,cluster parado e scratch removido. faceSafety unknown; sem qualidade facial aprovada.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/unit-resume-v3-7f076ca8/result.json",
+          "scope": "Regressão completa pré-commit:2783 testes,2776 PASS,0 FAIL,7 skips explícitos (PG opt-in1,YuNet pinned5,supervisor Linux1 em Windows). SHA256 c4a9e8aae51a40c2b7415fff2df2bfd83a20b26ecb45b00433d36379588c52f8; fingerprint runtime/test antes/depois 0c09916d4e3b43255c9274cf202187291c6a7a5b76a113a41a1d4fa7038ca099,106 identidades terminais e postflight limpo. Reconciliou as43 falhas iniciais sem exclusão de testes. Não substitui CI Linux ou prova PG/build no commit final.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Consolidar regressão dos publishers e o checkpoint de código; repetir build/HTTP diagnóstico afetado e validar final-export real fail-closed com positivo mecânico apenas em port controlado. Preservar modelos reprovados e buscar validação facial independente antes de qualquer autoridade de segurança ou exportação positiva.",
-      "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch. Registro operacional: persistencia Brain pendente por HTTP 502 / embedding_provider_error:openai:401; nenhuma memoria gravada, credencial alterada ou nova tentativa prevista sem sinal de recuperacao. Evidencias continuam no repositorio e no arquivo privado de cada run. Produtor facial diagnostico passou PG/runner real 4/4 apos corrigir claim retrying via transicao oficial do dominio e audit incompleto dos controles da fixture. Falhas anteriores permanecem arquivadas; HTTP facial proprio passou 1/1 sem skips em build Next fresco, com POST autenticado, replay concorrente, worker diagnostico YuNet em video development licenciado e GET selado; SHA256 do result 1a1ba6d017fe1acab99cddd18c9b3e16e11c96dbc1554114f3cc42015075a5dc. Quatro amostras/quatro caixas, faceSafety unknown e postflight com zero backends/16 PIDs terminais. Isso comprova apenas a mecanica diagnostica; modelos V5/V6/V7 seguem reprovados e holdout fechado. Mesmo patch de claim aplicado a OCR/temporal, com typecheck e gate de arquitetura verdes; este run prova retry facial. Nenhum holdout aberto ou autoridade facial concedida."
+      "nextAction": "Retomada autorizada pelo proprietário em11/10. Regressão completa local passou2776 com7 skips explícitos; freeze do commit, build/producers/HTTP/T-FR afetados e CI/PR ainda pendentes. Matrix controlada2/2 next dev e T-FR2/2 next start anteriores permanecem provas delimitadas. Direção W66 revisada para schema/contratos/cutover integral, sem implementação ou PG validados. Modelos reprovados,holdout fechado; nenhum TODO,implantação ou aceite promovido.",
+      "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch. Registro operacional: persistencia Brain pendente por HTTP 502 / embedding_provider_error:openai:401; nenhuma memoria gravada, credencial alterada ou nova tentativa prevista sem sinal de recuperacao. Evidencias continuam no repositorio e no arquivo privado de cada run. Produtor facial diagnostico passou PG/runner real 4/4 apos corrigir claim retrying via transicao oficial do dominio e audit incompleto dos controles da fixture. Falhas anteriores permanecem arquivadas; HTTP facial proprio passou 1/1 sem skips em build Next fresco, com POST autenticado, replay concorrente, worker diagnostico YuNet em video development licenciado e GET selado; SHA256 do result 1a1ba6d017fe1acab99cddd18c9b3e16e11c96dbc1554114f3cc42015075a5dc. Quatro amostras/quatro caixas, faceSafety unknown e postflight com zero backends/16 PIDs terminais. Isso comprova apenas a mecanica diagnostica; modelos V5/V6/V7 seguem reprovados e holdout fechado. Mesmo patch de claim aplicado a OCR/temporal, com typecheck e gate de arquitetura verdes; este run prova retry facial. Nenhum holdout aberto ou autoridade facial concedida. CI proposto em 11/10: OCR e temporal reais em PostgreSQL isolado terão job dedicado com provenance de binários e supervisão serial; ainda não executado. tests/v2/prisma-face-producer-http.integration.mjs permanece fora do CI por insumos development privados/licenciados/pinados e runtime Python/OpenCV. Prova local face-http-resume-v1-39bfb5da SHA1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 não substitui CI. Face producer PG/runner também local; CI executa somente três casos offline de fixture/audit, sem detector apto ou holdout."
     },
     {
       "id": "W62",
@@ -605,7 +641,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Receipt de cues/ASS existe somente no domínio e passou 3 testes; renderer, persistência, contratos, sidecars e critic final não o consomem ainda. Timing ASS precisa prova independente nos pixels, incluindo cue curta/adjacente. Dependências W68 e output final continuam abertas."
+          "text": "Receipt de cues/ASS existe somente no domínio e passou 3 testes, que não comprovam clock ou OutputSpec corretos: Math.round ainda produz janela ASS divergente (30 fps [1,2) vira .03–.07 e inclui frame 2), e a validação aceita dimensões positivas incompatíveis com aspectRatio. Renderer, persistência, contratos, sidecars e critic final não o consomem ainda. W66 precisa remover identidades por formato e prover variante/revisão/estado reais. Publicação final ainda separa catálogo, attachment e succeed; W69 exige commit atômico de receipt/manifests/catalog/outbox/success sob fences de head/rights/attempt/lease/cancel. Timing ASS precisa correção e prova independente nos pixels, incluindo cue curta/adjacente e fragmento rebaseado. Dependências W68 e output final continuam abertas."
         },
         {
           "kind": "validation",
@@ -634,7 +670,7 @@
           "role": "implementation"
         }
       ],
-      "nextAction": "Integrar receipt emitido com o ASS real e persistência selada; reproduzir timing por pixels e escaping VTT independente; proteger export contra stale/rights/review/cancel.",
+      "nextAction": "Após o checkpoint diagnóstico, implementar clock/encoding/serializer e provas independentes de pixels/VTT; integrar receipt emitido somente após o cutover W66 com identidade real e publicação atômica, sem aliases de formato. Provar latches SQL após espera, rollback e sidecar stale/revoked/cancelled.",
       "notes": "Estimativa 4–6 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
     },
     {

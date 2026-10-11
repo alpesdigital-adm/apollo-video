@@ -8605,6 +8605,7 @@ const projectDashboardOperationSchemaV3 = {
   properties: {
     ...projectDashboardOperationSchemaV2.properties,
     type: { enum: [...projectDashboardOperationSchemaV2.properties.type.enum, 'perception-temporal-run'] },
+    phase: { enum: [...projectDashboardOperationSchemaV2.properties.phase.enum, 'analyzing'] },
   },
 }
 const projectDashboardSummarySchemaV4 = {
@@ -9013,6 +9014,7 @@ const publicOperationSchemaV14 = {
   properties: {
     ...publicOperationSchemaV13.properties,
     type: { enum: [...publicOperationSchemaV13.properties.type.enum, 'perception-temporal-run'] },
+    phase: { enum: [...publicOperationSchemaV13.properties.phase.enum, 'analyzing'] },
   },
 }
 

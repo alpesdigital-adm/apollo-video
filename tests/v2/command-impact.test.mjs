@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
@@ -27,7 +28,8 @@ import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/
 import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
-import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
+import { buildRenderElementMap, renderElementMapHash } from '../../src/v2/domain/review-system.ts'
 import { PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 import {
   presentArtifactInvalidationViewV2,
@@ -67,6 +69,54 @@ function controlledSourceRightsRow(artifactId) {
     consentDocumentArtifactId: null, createdByType: 'user', createdById: 'owner-impact',
     createdAt: new Date(createdAt), expiresAt: null, owner: null, license: null,
     sourceNote: null }
+}
+
+function controlledReusableProxyFixture({
+  operationId = 'operation-proxy-9x16',
+  manifestId = 'manifest-proxy-9x16',
+  artifactKey = 'editorial-proxies/base.mp4',
+  onOperationLookup = () => {},
+} = {}) {
+  const artifactId = 'artifact-proxy-9x16'
+  const sha256 = 'd'.repeat(64)
+  const rendererDigest = createHash('sha256')
+    .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex')
+  const createManifest = ({ recipeVersion = EDITORIAL_PROXY_RECIPE_VERSION, digest = rendererDigest } = {}) =>
+    createMediaArtifactManifestV2({
+      artifactKey, artifactSha256: sha256, byteSize: 8_192, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'editorial-proxy', version: recipeVersion,
+        parameters: { inputHash: 'b'.repeat(64), projectVersionId: baseVersionId,
+          editPlanSnapshotId: 'snapshot-edit-1', ocrReceipt: null } },
+      sources: [{ artifactKey: 'masters/source.mp4', sha256: 'c'.repeat(64),
+        role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest } } }],
+    })
+  const manifest = createManifest()
+  // This controlled proxy has no drawn captions; it does not assert face approval.
+  const map = buildRenderElementMap({
+    proxyHash: sha256, fps: 30, durationFrames: 180,
+    canvas: { width: 540, height: 960 }, source: { width: 1920, height: 1080 },
+    clips: plan().videoTracks[0].clips, subtitleCues: [],
+  })
+  const rows = {
+    operation: { operationId, outputArtifactId: artifactId, outputManifestId: manifestId },
+    artifact: { id: artifactId, workspaceId, status: 'available', artifactKey,
+      sha256, byteSize: 8_192n, manifests: [{ id: manifestId, workspaceId, artifactId,
+        manifestHash: manifest.manifestHash, manifestJson: JSON.stringify(manifest) }] },
+    map: { id: `map-${operationId}`, workspaceId, projectId, projectVersionId: baseVersionId,
+      proxyArtifactId: artifactId, proxyHash: sha256, schemaVersion: map.schemaVersion,
+      fps: map.fps, durationFrames: map.durationFrames,
+      canvasWidth: map.canvas.width, canvasHeight: map.canvas.height,
+      mapHash: renderElementMapHash(map), elementsJson: JSON.stringify(map.elements),
+      createdAt: new Date(createdAt) },
+  }
+  return { rows, map, createManifest, persistence: {
+    v2ProjectProxyRenderOperation: { async findFirst(query) {
+      onOperationLookup(query)
+      return rows.operation
+    } },
+    v2MediaArtifact: { async findFirst() { return rows.artifact } },
+    v2RenderElementMap: { async findFirst() { return rows.map } },
+  } }
 }
 
 function impactActor() {
@@ -560,6 +610,9 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
   })
 
   let proxyLookup
+  const reusableProxyFixture = controlledReusableProxyFixture({
+    onOperationLookup: (query) => { proxyLookup = query },
+  })
   const reusableProxyRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
@@ -594,31 +647,22 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
         },
       }],
     } } },
-    v2ProjectProxyRenderOperation: { async findFirst(query) {
-      proxyLookup = query
-      return {
-        operationId: 'operation-proxy-9x16',
-        outputArtifactId: 'artifact-proxy-9x16',
-        outputManifestId: 'manifest-proxy-9x16',
-      }
-    } },
-    v2MediaArtifact: { async findFirst() { return {
-      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8_192n,
-      manifests: [{
-        id: 'manifest-proxy-9x16',
-        manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/base.mp4' } }),
-      }],
-    } } },
+    ...reusableProxyFixture.persistence,
   })
   const reusableSource = await reusableProxyRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(reusableSource.projectVersionId, resultVersionId)
   assert.equal(reusableSource.rangeReuse.commandId, commandId)
   assert.deepEqual(reusableSource.rangeReuse.ranges, [{ startFrame: 0, endFrame: 90 }])
   assert.equal(reusableSource.rangeReuse.artifactId, 'artifact-proxy-9x16')
   assert.deepEqual(proxyLookup.where.operation, { status: 'succeeded', phase: 'completed' })
+  assert.equal(proxyLookup.where.projectVersionId, baseVersionId)
+  assert.equal(proxyLookup.where.operationId, 'operation-proxy-9x16')
+  assert.equal(reusableProxyFixture.rows.map.projectVersionId, baseVersionId)
 
   const selectionImpact = impact({
     operation: { kind: 'select', clipId: 'clip-1' },
   })
+  const selectionFixture = controlledReusableProxyFixture()
   const selectionRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
@@ -650,24 +694,75 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
         },
       }],
     } } },
-    v2ProjectProxyRenderOperation: { async findFirst() { return {
-      operationId: 'operation-proxy-9x16',
-      outputArtifactId: 'artifact-proxy-9x16',
-      outputManifestId: 'manifest-proxy-9x16',
-    } } },
-    v2MediaArtifact: { async findFirst() { return {
-      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8_192n,
-      manifests: [{
-        id: 'manifest-proxy-9x16',
-        manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/base.mp4' } }),
-      }],
-    } } },
+    ...selectionFixture.persistence,
   })
   const selectionSource = await selectionRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(selectionSource.projectVersionId, resultVersionId)
   assert.equal(selectionSource.unchangedReuseRequired, true)
   assert.equal(selectionSource.unchangedReuse.operationId, 'operation-proxy-9x16')
   assert.equal(selectionSource.unchangedReuse.artifactId, 'artifact-proxy-9x16')
   assert.equal(selectionSource.unchangedReuse.impactHash, selectionImpact.impactHash)
+
+  for (const [repository, fixture, reuseKind] of [
+    [reusableProxyRepository, reusableProxyFixture, 'rangeReuse'],
+    [selectionRepository, selectionFixture, 'unchangedReuse'],
+  ]) {
+    const validArtifact = fixture.rows.artifact
+    const validMap = fixture.rows.map
+    const withManifest = (manifest) => ({ ...validArtifact, manifests: [{
+      ...validArtifact.manifests[0], manifestHash: manifest.manifestHash,
+      manifestJson: JSON.stringify(manifest),
+    }] })
+    const tamperedManifest = JSON.parse(validArtifact.manifests[0].manifestJson)
+    tamperedManifest.recipe.parametersHash = 'e'.repeat(64)
+    const tamperedElements = JSON.parse(validMap.elementsJson)
+    tamperedElements[0].opacity = 0.5
+    const subtitleMap = { ...fixture.map, elements: [...fixture.map.elements, {
+      ...fixture.map.elements[0], type: 'subtitle', elementId: 'subtitle:cue-1',
+    }] }
+    const cases = [
+      ['missing map', () => { fixture.rows.map = null }],
+      ['missing manifest', () => { fixture.rows.artifact = { ...validArtifact, manifests: [] } }],
+      ['tampered manifest', () => { fixture.rows.artifact = withManifest(tamperedManifest) }],
+      ['substituted output checksum', () => {
+        fixture.rows.artifact = { ...validArtifact, sha256: 'e'.repeat(64) }
+      }],
+      ['tampered map hash', () => { fixture.rows.map = { ...validMap, mapHash: 'e'.repeat(64) } }],
+      ['tampered map content', () => {
+        fixture.rows.map = { ...validMap, elementsJson: JSON.stringify(tamperedElements) }
+      }],
+      ['map bound to result instead of base version', () => {
+        fixture.rows.map = { ...validMap, projectVersionId: resultVersionId }
+      }],
+      ['manifest from another workspace', () => {
+        fixture.rows.artifact = { ...validArtifact, manifests: [{
+          ...validArtifact.manifests[0], workspaceId: 'workspace-other',
+        }] }
+      }],
+      ['old recipe with a valid manifest hash', () => {
+        fixture.rows.artifact = withManifest(fixture.createManifest({ recipeVersion: '1.12.0' }))
+      }],
+      ['wrong renderer provenance with a valid manifest hash', () => {
+        fixture.rows.artifact = withManifest(fixture.createManifest({ digest: 'f'.repeat(64) }))
+      }],
+      ['authenticated map with drawn subtitles', () => {
+        fixture.rows.map = { ...validMap, mapHash: renderElementMapHash(subtitleMap),
+          elementsJson: JSON.stringify(subtitleMap.elements) }
+      }],
+    ]
+    for (const [reason, mutate] of cases) {
+      fixture.rows.artifact = validArtifact
+      fixture.rows.map = validMap
+      mutate()
+      const rejected = await repository.readCurrentSource({ workspaceId, projectId })
+      assert.equal(rejected[reuseKind], undefined, `${reuseKind}: ${reason}`)
+      if (reuseKind === 'unchangedReuse') assert.equal(rejected.unchangedReuseRequired, true, reason)
+    }
+    fixture.rows.artifact = validArtifact
+    fixture.rows.map = validMap
+    assert.equal((await repository.readCurrentSource({ workspaceId, projectId }))[reuseKind].artifactId,
+      validArtifact.id, `${reuseKind}: intact receipt remains reusable`)
+  }
 })
 
 test('T-FR-233 completed proxy atomically records scoped invalidation resolutions', async () => {
@@ -1340,6 +1435,10 @@ test('T-FR-233 applied review patch persists impact v2 and normalized invalidati
     createdAt: new Date(invalidation.createdAt),
     resolutions: [],
   }))
+  const rangeFixture = controlledReusableProxyFixture({
+    operationId: 'operation-review-base-1', manifestId: 'manifest-review-base-1',
+    artifactKey: 'editorial-proxies/review-base.mp4',
+  })
   const rangeRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
@@ -1361,16 +1460,22 @@ test('T-FR-233 applied review patch persists impact v2 and normalized invalidati
         },
       }],
     } } },
-    v2ProjectProxyRenderOperation: { async findFirst() { return {
-      operationId: 'operation-review-base-1', outputArtifactId: 'artifact-proxy-9x16', outputManifestId: 'manifest-review-base-1',
-    } } },
-    v2MediaArtifact: { async findFirst() { return {
-      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8192n,
-      manifests: [{ id: 'manifest-review-base-1', manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/review-base.mp4' } }) }],
-    } } },
+    ...rangeFixture.persistence,
   })
   const rangeSource = await rangeRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(rangeSource.projectVersionId, resultVersionId)
   assert.equal(rangeSource.rangeReuse.commandId, committed.command.id)
   assert.deepEqual(rangeSource.rangeReuse.ranges, [{ startFrame: 30, endFrame: 31 }])
   assert.equal(rangeSource.rangeReuse.artifactId, 'artifact-proxy-9x16')
+  assert.equal(rangeFixture.rows.map.projectVersionId, baseVersionId)
+  const validMap = rangeFixture.rows.map
+  rangeFixture.rows.map = null
+  assert.equal((await rangeRepository.readCurrentSource({ workspaceId, projectId })).rangeReuse, undefined,
+    'a review patch cannot reuse ranges without the base proxy map')
+  rangeFixture.rows.map = { ...validMap, proxyHash: 'e'.repeat(64) }
+  assert.equal((await rangeRepository.readCurrentSource({ workspaceId, projectId })).rangeReuse, undefined,
+    'a review patch cannot reuse a map attesting different MP4 bytes')
+  rangeFixture.rows.map = validMap
+  assert.equal((await rangeRepository.readCurrentSource({ workspaceId, projectId })).rangeReuse.artifactId,
+    'artifact-proxy-9x16')
 })

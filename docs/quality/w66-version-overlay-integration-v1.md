@@ -1,56 +1,194 @@
-# W66 — integração proposta do crop manual por variante
+# W66 — decisão proposta de estado de output selado por ProjectVersion
 
-Status: desenho, sem implementação de persistência ou aceite visual. A operação automática de reframe continua em `review-required`; crop manual é preferência editorial, não evidência de rosto seguro.
+**Estado em 11/10/2026:** direção revisada para preparar schema e contratos, condicionada à revisão do diff efetivo e ao cutover integral descrito abaixo. Schema, migration, contratos públicos e runtime ainda não estão implementados por este documento. Não há validação PostgreSQL, aceite visual ou entrega da W66. O registro canônico permanece em project-status.json/PROJECT-STATUS.md, sob responsabilidade do owner da integração.
 
-## Identidade e hash
+**Escopo:** F1.031 eba5d6a20bbd-1, 0293bff3321f-1, 4d9bedfd87ea-1, da5a414c29b3-1, 72babc1df6c4-1; handoff para W65/W67/W68. Crop manual é preferência editorial com provenance de Command. Não comprova rosto seguro nem libera reframe automático, que depende de percepção verificada e crítica visual.
 
-`variant-reframe-overrides/v1` já valida o Command de cada override, formato, source artifact/SHA, FPS, mapa de origem e ranges. Seu `variantId` atual é, na verdade, um **formato de saída** (`OutputAspectRatio`); a identidade de uma variante renderizável é distinta. Antes de persistir, versionar o set como `variant-reframe-overrides/v2`: cada override terá `variantId` real e `outputFormat` separados. O contexto autenticado da operação/snapshot resolve e vincula ambos; o caller não declara proveniência ou observação facial. Duas variantes reais com o mesmo formato devem continuar independentes, inclusive em Command, herança, invalidação e RenderInput. O parser v1 permanece apenas para leitura histórica, sem alimentar o runtime novo.
+## 1. Fatos conferidos no código
 
-Proposta de persistência: estado imutável `V2VariantReframeState`, discriminado em `active-set` ou `invalidated`. O set ativo contém o documento e `contentHash`; a invalidação contém o hash do set anterior, mapa antigo/novo e razão revisável. A versão contém `overlayStateHash` e `reframeStateId`; seu `baseHash` novo é hash versionado do hash base calculado pelo Command mais esse estado. O corpo do estado não contém `baseHash`, evitando ciclo de hashes. O estado guarda `resultVersionId` pré-alocado como valor escopado **sem FK reversa**; Version usa FK composta `(id, reframeStateId)` → State `(resultVersionId, id)`, além do escopo workspace/project. Isso permite inserir State e depois Version na mesma transação, sem Version nula nem UPDATE posterior. É preciso confirmar no Prisma a relação composta e criar a migration SQL correspondente, com teste de bootstrap PostgreSQL real. A integridade da associação é garantida pelo FK da Version; um State órfão eventualmente inserido isoladamente não pode ser lido/publicado como versão, e o repositório só grava ambos dentro da transação. Version histórica continua legível com seu contrato antigo; a fórmula nova deve ser explicitamente versionada. A alternativa de FKs nas duas direções exige deferral testado e aumenta o custo operacional sem melhorar a leitura canônica.
-
-O fingerprint de idempotência vincula baseVersionId/baseHash, ator autenticado, ação, variante/formato e payload antes de gerar IDs ou consultar o relógio. IDs prealocados de Command, versão e estado podem entrar no corpo persistido sem entrar nesse fingerprint. Replay compara fingerprint, ator e conteúdo já persistido; não reavalia crop nem troca a versão.
-
-## Política de transição
-
-Um helper puro recebe o estado da **versão pai exata**, EditPlan e source map do pai e do filho, Command e resultVersionId. Retorna `none`, `inherited-set`, `new-set` ou `invalidated` com hashes canônicos. A herança usa uma **projeção geométrica versionada**, não igualdade integral do EditPlan. Para o proxy FFmpeg atual, a projeção `variant-reframe-geometry/v1` deve conter:
-
-- `fps`, `durationFrames`, `outputFormat` e a identidade da variante real resolvida do detail/snapshot;
-- um único track `base-video` com sua identidade e **ordem** de clips, pois o renderer concatena nessa ordem; para cada clip: `id`, `sourceArtifactId`, SHA-256 e manifest de fonte resolvidos, `sourceInFrame`, `sourceOutFrame`, `timelineInFrame`, `timelineOutFrame` e `rate`;
-- largura, altura, FPS e orientação **observados** do vídeo de cada fonte, mais os campos de composição recebidos pelo renderer atual (`foregroundScale`, `verticalPosition`, incluindo a distinção entre ausente e presente);
-- a presença e conteúdo de `clip.crop` histórico. No caminho novo, crop global deve ser rejeitado em vez de competir com o overlay por variante.
-
-Essa lista decorre de `src/v2/application/run-project-proxy-render-worker.ts` (seleção do primeiro track `base-video`, extração de clips/composition/transitions e input do renderer), `src/v2/application/ports/editorial-proxy-renderer.ts` (`EditorialCutClip` e os dois campos de `composition`) e `src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts` (seek por `sourceInFrame`/FPS, trim, rate, concat na ordem dos clips, crop e composição). Hoje `transitions` afeta os fades **de áudio** nesse renderer, não o crop visual; a ordem e os spans dos clips já capturam a mudança visual de seam. `audioSource*`, câmera para ColorPlan, texto/cues, estilo, CTA, LUT e cor não entram na projeção geométrica. Campos `layout` ou `background` do EditPlan não são consumidos como controles de geometria por esse port atual e não serão incluídos por suposição. Se qualquer compiler, snapshot ou renderer posterior transformar vídeo usando outro campo, a projeção v1 não pode autorizar herança nesse caminho: documentar o campo, versionar a projeção e invalidar ou bloquear antes de persistir. Orientação/FPS/dimensões ausentes ou contraditórios também bloqueiam herança; não inferir orientação zero nem FPS da timeline. O `sourceMapHash` v1 atual ordena clips por ID e, sozinho, não detecta mudança de ordem: não serve como essa projeção. O helper conserva o `commandId` original em cada override herdado. Crop novo substitui apenas range exato da mesma variante real e clip; sobreposição parcial é conflito explícito. Alteração de fonte/tempo/geometria produz estado `invalidated` e issue de revisão persistida, nunca desaparecimento silencioso.
-
-Um helper Prisma recebe `Prisma.TransactionClient`, lê o pai e estado com escopo e lock/CAS, compara hashes, grava o filho e verifica o `overlayStateHash` e `baseHash` declarados. Todo writer de ProjectVersion com pai que possua estado ativo deve fornecer uma transição; omissão falha a transação. O render lê somente estado da versão exata, verifica FK/hash, variante→formato, EditPlan/source map e rights atuais, e inclui o hash no RenderInput/recipe/manifest. Estado invalidado não gera crop seguro; mantém issue/review. Sem busca por ancestral.
-
-## Matriz de writers
-
-Há 15 chamadas de `createProjectVersion` em `src/v2/application` e 16 repositórios com `v2ProjectVersion.create`. `createProjectVersion` apenas valida/congela; não há helper único de baseHash, herança ou commit. A política abaixo é determinada por comparação dos mapas, não pelo nome do Command.
-
-| Producer | Repositório de gravação | Política quando o pai tem overlay |
+| Ponto atual | Evidência no repositório | Lacuna para W66 |
 | --- | --- | --- |
-| `create-project.ts` | `project-creation-repository.ts` | Versão raiz sem herança. |
-| `run-media-ingest-worker.ts` | `project-media-repository.ts` | Plano inicial: sem herança; versões derivadas revalidam mapa. |
-| `duplicate-project.ts` | `project-duplication-repository.ts` | Novo projeto não herda identidade; invalidação explícita se o clone solicitar o estado. |
-| `manual-edit.ts` | `manual-edit-repository.ts` | Crop cria/substitui set; select/inspect/undo/redo/restore preservam só sob mapa igual, senão invalidam. |
-| `apply-editorial-cut-command.ts` | `editorial-command-repository.ts` | Cortes normalmente mudam mapa; comparar e invalidar se mudou. |
-| `run-project-director.ts` | `director-run-repository.ts` | Comparar mapa dirigido ao pai; invalidar se alterado. |
-| `multicam-direction.ts` | `multicam-direction-command-repository.ts` | Comparar fontes e mapa; invalidar se alterados. |
-| `replace-source-transcript.ts` | `source-transcript-replacement-repository.ts` | Preservar só se a projeção geométrica versionada do pai e do filho for igual; mudança apenas textual não invalida crop, enquanto fonte, ordem ou tempo divergente gera issue. |
-| `review-patch.ts` | `review-patch-repository.ts` | Preservar só se mapa igual; edição temporal invalida. |
-| `review-patch-batch.ts` | `review-patch-batch-repository.ts` | Mesma política do patch, de forma atômica. |
-| `project-policy-overrides.ts` | `project-policy-overrides-repository.ts` | Preservar sob mapa igual. |
-| `project-lut-selections.ts` | `project-lut-selection-repository.ts` | LUT não prova mudança de geometria; comparar mapa, preservar só se igual. |
-| `project-color-plans.ts` | `project-color-plan-repository.ts` | Preservar sob mapa igual. |
-| `project-subtitle-configurations.ts` | `project-subtitle-configuration-repository.ts` | Preservar sob mapa igual; necessário para W68. |
-| `subtitle-segment-overrides.ts` | `subtitle-segment-override-repository.ts` | Preservar sob mapa igual; necessário para W68. |
+| Identidade do override é formato | src/v2/domain/variant-reframe-overrides.ts: VariantReframeOverrideV1.variantId é OutputAspectRatio; clips ordenados por ID | Duas variantes 9:16 colidem; sourceMapHash não conserva ordem de reprodução. |
+| OutputSpec é valor de domínio | src/v2/domain/output-spec.ts; prisma/v2/schema.prisma | Não há registro persistente de variante/revisão ligado à versão. Preset não é variante. |
+| ProjectVersion valida/congela referências | src/v2/domain/project-version.ts; src/v2/application/version-hash.ts | Não sela outputs/overlays. Producers calculam hashes específicos, sem commit comum. |
+| Proxy resolve formato administrativo | src/v2/infrastructure/prisma/project-proxy-render-repository.ts, hydrateSource: project.format com default 9:16 | Formato de uma versão pode vir de fora de seu estado. |
+| Fonte secundária escolhe manifest da consulta | Mesmo repositório, hydrateSource e readRenderableSnapshotSource: artifact.manifests[0] | Manifest exato de cada clip precisa ser selado; consulta posterior não escolhe outro. |
+| Worker mistura identidade/formato | src/v2/application/run-project-proxy-render-worker.ts: compara reframePlan.variantId a source.format | Validar identidade, revisão e aspect ratio separadamente. |
+| Reframe consulta registry atual | src/v2/domain/render-reframe-plan.ts: readOutputFormatPreset na criação/validação | Mudança de preset não pode alterar output histórico; revisão materializada será autoridade. |
+| Final reconstrói identidade/safe area | src/v2/application/run-project-final-export-worker.ts: ID final derivado do aspectRatio, insets 0,05 | Final consome identidade/revisão seladas e passa sua própria prova visual. |
+| Writers distribuídos | 15 chamadas de createProjectVersion na aplicação; 16 repositórios com v2ProjectVersion.create | Cada caminho precisa transição; anexo de biblioteca é o writer direto extra. |
 
-O 16º repositório com inserção direta, `media-library-repository.ts`, não usa `createProjectVersion` na aplicação: seleção/anexo de asset deve comparar o mapa e preservar ou invalidar explicitamente. Nenhum writer pode herdar por `project.format` quando a operação real tem variante/formato próprios. Os leitores/hidratações de ProjectVersion nesses repositórios também precisam entender o campo versionado; os contratos públicos devem preservar schemas históricos e declarar a nova forma antes do baseline.
+Esses são fatos de leitura local, não comprovação da implantação. Este desenho substitui a proposta anterior de um estado exclusivo de crop: uma única autoridade sela também as revisões selecionadas dos outputs.
 
-## Provas mínimas antes de afirmar integração
+## 2. Modelo escolhido para revisão
 
-- Command de crop por variante: commit atômico de snapshot/set/Version/outbox, baseHash e fingerprint; replay exato e conflito de ator/payload.
-- Command seguinte de legenda ou cor com projeção geométrica idêntica herda crop e preserva provenance Command original; crop de outra variante não muda mesmo se ambas tiverem `outputFormat` igual. Source FPS 30→24 ou source SHA/frame map diferente gera issue persistida e não aplica o crop.
-- Writer posterior sem política recebe rejeição transacional, nunca uma versão que omite overlay silenciosamente.
-- Rights revogados, set/hash adulterado, version/variant/formato divergentes, range sobreposto e rollback no meio do commit falham fechados.
-- PG real confirma a FK composta e a ordem atômica escolhida (ou deferral, somente se essa alternativa for adotada), concorrência CAS e replay. Renderer real demonstra crop só na variante/range solicitados e mede pixels; inspeção final de MP4 e critic facial continuam gates separados.
+### OutputVariant e OutputSpecRevision
+
+OutputVariant tem ID estável, pertence a exatamente (workspaceId, projectId) e não representa formato, preset, índice de lista, filename nem hash do OutputSpec. Duas variantes distintas podem ter specs iguais e mesmo aspecto. Sua identidade sobrevive aos Commands e revisões.
+
+OutputSpecRevision é append-only, identifica (workspaceId, projectId, variantId, revisionId), conserva revisionNumber, Command de origem, documento OutputSpec e specHash. Materializa locale, aspectRatio, width/height/fps, safeArea e deliveryProfileId. Se usar preset, grava seu documento/hash/version. Toda dependência que afeta pixels ou encoding é materializada e selada: definição/revisão do perfil, codec, container, qualidade, áudio e legendas quando aplicáveis. Alterar valores cria revisão nova; não há UPDATE nem lookup do registry atual no render.
+
+Uma projeção administrativa pode mostrar o output selecionado no estado corrente; nenhum currentOutputSpec/maior revisionNumber é autoridade de render.
+
+### ProjectOutputState único
+
+Cada ProjectVersion nova possui exatamente um ProjectOutputState imutável com schemaVersion project-output-state/v1. Versão sem outputs grava entries vazio explicitamente; ausência não significa vazio.
+
+Uma variante pode existir antes do ingest, com geometria explicitamente unmaterialized e nenhuma fonte de vídeo referenciada. Nesse estado não há crop ativo nem render autorizado. Quando o plano passa a referenciar vídeo, geometria verified exige os metadados observados completos; fonte referenciada sem probe não pode ser convertida em unmaterialized para contornar o gate.
+
+Corpo canônico:
+
+- id, workspaceId, projectId, resultVersionId pré-alocado, parentVersionId/parentStateHash quando houver, Command/provenance e versão da política de transição;
+- editPlanSnapshotId/editPlanHash e, se outro plano for efetivamente renderizado, binding explícito para RenderablePlanSnapshot com planId/planHash e projeção correspondente;
+- entradas ordenadas por variantId; cada entrada seleciona uma revisão exata outputSpecRevisionId/specHash, documento materializado e geometryProjectionHash;
+- overlays tipados por variante/clip/range, documento/hash e Commands originais, estado active ou invalidated;
+- invalidations/issues por variante/range, hashes/revisões antigos e novos, motivo, Command causador e referência ao conteúdo desativado;
+- fontes/manifests/probes e mapa geométrico selados suficientes para reconstruir o input.
+
+stateHash é hash do corpo sem seu próprio hash. Não entram resultBaseHash, hash final da ProjectVersion ou artifact futuro. Documento, linhas auxiliares, overlays e issues formam um agregado atômico. Linhas normalizadas são índices/integridade desse mesmo estado; divergência com JSON/hash é erro, nunca preferência do leitor.
+
+Duas entradas irmãs podem ter outputFormat 9:16 e mesmo conteúdo de spec, mas têm variantId e revisionId distintos. Overrides, invalidations, artifacts, reports e reuso referenciam a entrada exata. Alteração de A muda stateHash total; não invalida automaticamente crop/artifact de B. Reuso de B exige igualdade de suas próprias dependências e lineage explícito na versão nova, nunca igualdade de formato.
+
+### Commands e baseline explícito
+
+Propor create-output-variant e revise-output-spec como Commands públicos, além do override por variante. Rotas /v1, schemas e capability IDs devem passar revisão e registro antes do runtime; o endpoint público de Commands pode expô-los. UI e automação usam o mesmo application service.
+
+create-output-variant recebe baseVersionId/baseHash, idempotency key e OutputSpec completo ou preset escolhido explicitamente. Cria identidade, primeira revisão e estado do filho atomicamente. Criação de projeto pode solicitar esse efeito explicitamente em seu contrato público/audit; sem solicitação, raiz tem estado vazio. **Nunca criar primeira variante, inferir canvas ou preencher revisão a partir de project.format/default ao ler, renderizar ou migrar.**
+
+Projeto histórico sem estado exige Command explícito de inicialização/criação de output para produzir filho selado. Serviço valida base/manifests/metadados observados; não reescreve versões antigas. Crop v1 por formato não é convertido por adivinhação: novo Command declara variante real/range. Documentos históricos permanecem legíveis para auditoria; parser histórico não alimenta o render novo.
+
+## 3. Hashes, FKs e commit sem ciclo
+
+Nomes de tabelas são propostas, não schema existente.
+
+| Relação | Constraint proposta | Garantia |
+| --- | --- | --- |
+| V2OutputVariant → Project | FK (projectId, workspaceId); unique (id, projectId, workspaceId) | Variante não atravessa escopo. |
+| V2OutputSpecRevision → Variant | FK (variantId, projectId, workspaceId); unique (variantId, revisionNumber, projectId, workspaceId) e (id, variantId, projectId, workspaceId, specHash) | Revisão pertence à identidade certa; hash vinculável. |
+| V2ProjectOutputState → Project/base | FK de projeto; FK opcional parentVersion escopada; unique (id, projectId, workspaceId), (resultVersionId, projectId, workspaceId) e (resultVersionId, id, projectId, workspaceId, stateHash) | No máximo um estado para resultVersionId. Sem FK reversa à versão resultado. |
+| Version → State | FK (id, outputStateId, projectId, workspaceId, outputStateHash) → State (resultVersionId, id, projectId, workspaceId, stateHash) | Outra versão, mesmo do projeto, não usa esse estado; hash/escopo devem coincidir. |
+| StateEntry → State/Revision | FK (stateId, projectId, workspaceId) do estado; FK (outputSpecRevisionId, variantId, projectId, workspaceId, specHash); unique (stateId, variantId) e (stateId, variantId, projectId, workspaceId) | Uma revisão por variante na versão; revisão não troca de irmã; chave composta referenciável pelos overlays. |
+| Overlay/Invalidation → Entry | FK (stateId, variantId, projectId, workspaceId); referências de Command/hash conforme contrato | Overlay não existe sem membership. Referência externa histórica é lineage, não membership. |
+
+Dependências imutáveis usam RESTRICT. Estados isolados não são publicáveis: leitura parte do FK de versão existente, nunca de resultVersionId isolado. Repositório sempre grava State+Version juntos. Proibir absolutamente órfãos ao COMMIT SQL pode usar constraint trigger deferred testado; não cria FK circular. Confirmar geração Prisma e índices compostos na revisão de schema.
+
+Ordem na transação serializável:
+
+1. Resolver replay/fingerprint, autenticação/workspace e autorização. Replay não recalcula crop, IDs nem datas. Rights atuais ainda podem bloquear novo uso/render de Command histórico.
+2. Ler base exata/state/revisions/fontes; conferir hashes e CAS da mutação. Ausência/contradição aborta, exceto baseline histórico público explícito descrito acima.
+3. Pré-alocar Command/resultVersionId/stateId/revisionIds; construir snapshot e transição pura. IDs e relógio ficam fora do fingerprint da requisição.
+4. Calcular producerHash pelo payload de versão de cada producer com schema declarado; stateHash = H(stateBody); baseHash = H({ schemaVersion: project-version-output-state/v1, workspaceId, projectId, resultVersionId, parentVersionId, previousBaseHash, producerHash, outputStateId, outputStateHash: stateHash }). Raiz usa parent/previous explicitamente nulos. State não contém baseHash nem valor dependente dele.
+5. Gravar Command/snapshots/revisões; State/entries/overlays/issues; Version já com FK/hash definitivos. Raiz cria Project antes de State; criação conserva audit próprio existente. Nenhuma Version provisória, FK nula temporária ou UPDATE posterior.
+6. CAS currentVersionId, invalidation records/outbox/audit no mesmo commit. Falha faz rollback integral, inclusive identidades/revisões novas.
+
+Fingerprint canônico versionado inclui workspace/project, baseVersionId/baseHash, ator/contexto autenticado, tipo, variantId/revisão esperada quando existentes, payload do spec/overlay, clip/range e razão relevante. Não inclui IDs gerados, createdAt ou mutable consultado depois. Mesma chave com payload/ator/irmã/revisão diferente gera IDEMPOTENCY_PAYLOAD_MISMATCH; base concorrente gera VERSION_CONFLICT. Writer revalida proposta da aplicação contra fatos locked; não aceita apenas hash do caller.
+
+## 4. Projeção geométrica versionada
+
+variant-reframe-geometry/v1 é distinta do EditPlan completo/state inteiro. Igualdade decide validade geométrica de crop, não reuso geral de render nem aprovação facial.
+
+| Grupo | Conteúdo canônico | Regra |
+| --- | --- | --- |
+| Output | variantId, aspectRatio, width/height, output fps e transformação de proxy→final versionada | Revisão completa fica selada; safe area invalida placement/critic conforme suas dependências. |
+| Timeline | fps/timebase, durationFrames, track base-video selecionado | Worker atual usa primeiro track desse kind; seleção ambígua/múltiplos tracks não suportados bloqueia. |
+| Clips | Array na ordem real de render: id, sourceArtifactId, sourceManifestId/hash, SHA-256 dos bytes, sourceIn/OutFrame, timelineIn/OutFrame, rate | Não ordenar por clip ID; troca de ordem muda projeção. Não escolher manifest mais recente. |
+| Probe de cada vídeo | width/height, fps/timebase observados, orientação/display transform, versão/hash de probe e normalização | Conferir SHA/manifest/probe com bytes materializados; ausência não vira orientação zero nem fps da timeline. |
+| Composição | Presença explícita e valor de foregroundScale/verticalPosition | Distinguir ausente de presente; defaults atuais 1 e 0,5 não autorizam equivalência sem policy versionada. |
+| Crop global | Presença de clip.crop no plano efetivo | Caminho novo rejeita crop global concorrente; corrigir por Command, sem convertê-lo por formato. |
+
+Fontes: run-project-proxy-render-worker.ts, ports/editorial-proxy-renderer.ts e infrastructure/media/ffmpeg-editorial-proxy-renderer.ts. Adapter busca por sourceInFrame/fps, recorta spans, aplica rate, concatena em ordem e compõe vídeo. Reframe atual exige ranges contíguos, um por clip, mesma dimensão de fonte e tamanho de crop constante. Limites continuam explícitos até novo contrato testado.
+
+audioSource*, música, texto/cues, estilo da legenda, CTA textual, LUT e ColorPlan **não entram na projeção de crop**. Hoje transitions nesse renderer aplica fades de áudio; não transforma seam visual. layout/background não são controles desse port e não entram por suposição. Esses dados continuam selados em seus contratos e entram no hash de RenderInput/recipe: exclusão da projeção de crop não autoriza reutilizar pixels após alterá-los.
+
+Novo campo que transforme vídeo, overlay visual que altere região disponível ou renderer diferente exige projeção/impact policy nova antes da herança. Placement/legenda têm dependências próprias de safe area, cue/range, obstáculos e percepção, tratadas por kind no mesmo estado. Projeção de crop não prova segurança facial.
+
+FPS fonte/timeline, rate e orientação exigem conversão explícita implementada/testada. Override v1 atual exige rate=1, spans iguais e source fps=timeline fps. Fonte 24 fps em timeline 30 fps não passa por preencher ambos com 30. Metadado ausente/contraditório bloqueia herança/materialização; não gerar estado ativo.
+
+## 5. Transição explícita de toda versão
+
+Helper de domínio proposto transitionProjectOutputState recebe base exata, planos/fontes/probes/revisões antes/depois, Command/resultVersionId e policy versionada. Retorna agregado selado, nunca undefined. Helper proposto commitProjectVersionWithOutputState recebe Prisma.TransactionClient, revalida fatos locked e grava atomicamente. Gate de arquitetura detecta inserções diretas fora do helper.
+
+| Transição | Condição | Resultado obrigatório |
+| --- | --- | --- |
+| initialize-empty | Raiz sem output solicitado | Estado vazio; render bloqueado por falta de variante. |
+| create-variant | Command explícito, base válida | Nova identidade/revisão/entrada; irmãs copiadas com revisions exatas. |
+| revise-output | Command explícito de variante | Nova revisão só dessa entrada; comparar dependências por kind e invalidar afetadas. |
+| inherit | Projeção igual e metadados coerentes | Copiar overlays preservando Command original; novo State/hash pertence ao filho. |
+| set-overlay/reset-overlay | Variante/clip/range exatos | Substituir range exato; reset auditado. Overlap parcial é conflito sem split automático. |
+| invalidate | Fonte/ordem/tempo/geometria ou outra dependência mudou | Preservar conteúdo desativado + issue/reason/old/new hashes. Range desaparecido continua referenciado como anterior. |
+| restore | Undo/redo/restore aponta versão alvo explícita | Novo estado a partir do alvo exato, membership válido no mesmo projeto, Command de restore/invalidation. Sem ancestral/latest. |
+| fork-empty | Duplicação para outro projeto | Estado vazio com origem explícita; identidades novas só por Command. Não herdar IDs/revisões de outro projeto. |
+
+Crop invalidado mantém review/block e exige resolução/redefinição/reset explícito pela policy; não reaplica set anterior nem promove artifact silenciosamente. Irmã conserva overlay quando suas próprias dependências não mudam. Texto/áudio/cor podem herdar crop, mas invalidam render/critic/sidecar conforme contratos. Safety policy mais restrita pode bloquear export mesmo com crop igual.
+
+### Matriz dos 15 builders e 16 writers PG
+
+Todos os caminhos precisam hidratar/propagar discriminator/stateId/hash/revisão, inclusive replay/eventos/respostas. A tabela especifica integração a fazer; não afirma que exista. Linhas conferidas nesta leitura; alterações posteriores exigem atualizar inventário.
+
+| # | Builder de aplicação | Writer Prisma | Transição obrigatória |
+| --- | --- | --- | --- |
+| 1 | create-project.ts:218 | project-creation-repository.ts:227 | initialize-empty; output explícito no contrato usa efeito create-variant auditado. Sem project.format. |
+| 2 | run-media-ingest-worker.ts:357 | project-media-repository.ts:258 | É versão filha: propagar entries/revisions; comparar geometria após ingest, inherit/invalidate. Pai vazio segue vazio. |
+| 3 | duplicate-project.ts:174 | project-duplication-repository.ts:496 | fork-empty com lineage; transferência editorial exige Command e reidentificação explícitos. |
+| 4 | manual-edit.ts:311 | manual-edit-repository.ts:544 | Crop novo é set-overlay fora do EditPlan; select/inspect preservam sob projeção igual. Undo/redo/restore: alvo exato. Outras edições comparam/invalidate. |
+| 5 | apply-editorial-cut-command.ts:543 | editorial-command-repository.ts:385 | Comparar mapa/tempo/order; corte geralmente invalidate ranges, preservando revisions. |
+| 6 | run-project-director.ts:1158 | director-run-repository.ts:977 | Resolver entries da base; comparar plano/fontes e inherit/invalidate. Reframe do Diretor liga à entrada/evidência verificada exatas. |
+| 7 | multicam-direction.ts:1414 | multicam-direction-command-repository.ts:465 | Mudança câmera/fonte/mapa compara SHA/probe/order; invalidate afetados. Sem crop da câmera anterior. |
+| 8 | replace-source-transcript.ts:144 | source-transcript-replacement-repository.ts:266 | Builder recompila plano: inherit somente sob projeção igual. Texto não garante tempo igual; mapa divergente invalida. |
+| 9 | review-patch.ts:286 | review-patch-repository.ts:448 | Patch temporal/geometria compara/invalida; somente texto/cor pode inherit crop sob igualdade comprovada. |
+| 10 | review-patch-batch.ts:305 | review-patch-batch-repository.ts:430 | Comparação após composição de todos patches; estado/issues atômicos para lote. |
+| 11 | project-policy-overrides.ts:142 | project-policy-overrides-repository.ts:403 | Crop inherit sob igualdade; reavaliar safety/placement se policy mudar. Sem elevar manual a detector. |
+| 12 | project-lut-selections.ts:124 | project-lut-selection-repository.ts:425 | Recompila EditPlan: comparar projeção; LUT sozinho permite inherit crop. Render/cor invalidam separadamente. |
+| 13 | project-color-plans.ts:217 | project-color-plan-repository.ts:473 | Inherit crop sob projeção igual; invalidar artifacts/critic de cor necessários. |
+| 14 | project-subtitle-configurations.ts:57 | project-subtitle-configuration-repository.ts:131 | Resolver variante real/revisão; inherit crop sob igualdade; alterar cues/placement/invalidations só do escopo afetado. |
+| 15 | subtitle-segment-overrides.ts:176 | subtitle-segment-override-repository.ts:327 | Igual à anterior; conservar Command/range original e reset explícito; texto/estilo não altera crop da irmã. |
+| 16 | Sem builder createProjectVersion; MediaLibraryRepository.attach | media-library-repository.ts:309 | Helper obrigatório. Anexo preserva EditPlan: inherit sob igualdade. Inserção posterior no vídeo por outro Command compara/invalida. |
+
+Futuros writers create-output-variant/revise-output-spec entram no inventário e gate. Writer que omite transição falha antes do commit; estado vazio também é propagado explicitamente. Corrigir apenas writer de crop é insuficiente.
+
+## 6. Leitura/render e handoff W65–W69
+
+| Consumidor | Cutover necessário |
+| --- | --- |
+| Detail/compare/restore/replay de Version | Expor estado/revisions exatos; distinguir histórico não selado, vazio e invalidated; não omitir hashes. |
+| enqueue-project-proxy-render.ts, port/repositório | Selecionar variant/revision na versão solicitada; selar state/entry hashes no contexto/fingerprint/inputHash. Retirar autoridade de project.format/manifests[0]. |
+| run-project-proxy-render-worker.ts / project-render-sources.ts | Revalidar exact version/state/spec/source SHA/probe/rights; materializar entrada. Identidade e formato em checks separados. |
+| RenderablePlanSnapshot / readRenderableSnapshotSource | Binding explícito plano/entrada com planHash/projeção. Mesma versão sem mesmo plano não basta; sem binding bloquear. |
+| run-project-final-export-worker.ts / repositório final | Mesma entrada/revisão da aprovação requerida; materializar reframe/placement no canvas final selado. Sem reconstruir ID/safe area por formato. |
+| render-reframe-plan.ts, placement/compiler/port | Novo contrato com identidade/revisão/specHash e geometria/probe por fonte; sem preset mutable ou consultas no renderer. |
+| Recipe/manifest/report/sidecar | Version/hash, state/hash, variant/revision/specHash, entry/dependency hash, RenderInput e MP4 SHA. Bump schema/recipe; artifact antigo não passa por input novo. |
+| UI/Command W68 | Issue/reset/override opera variante/range/revisão/base exatos. Command não aprova issue; novo MP4/critic necessários. |
+
+Render começa pelo FK da versão, valida corpo/referências seladas e verifica rights atuais. Revogação bloqueia uso sem reescrever snapshot. Nunca consultar ancestral, maior revisão, cabeça de overlay, versão corrente, project.format ou formato fallback para completar lacuna da versão solicitada.
+
+Manifest/probe/normalização precisam descrever bytes materializados. Contradição, adulteração, fonte ausente, revisão não membro, state inexistente ou invalidation não resolvida bloqueiam antes de FFmpeg/publicação. Persistir reason code e escopo sem promover artifact. Lease/retry/cancel/cleanup continuam obrigatórios; retry usa contexto selado idêntico.
+
+## 7. Migration e ordem proposta
+
+1. Revisão owner/root antes de schema/runtime; reconciliar ADR/spec/API e limites do renderer, especialmente probe/orientação e múltiplas fontes. Aprovação documental não altera TODO.
+2. Criar tabelas/relações/constraints; adicionar à Version discriminator de contrato e stateId/hash. Registros históricos continuam explicitamente não selados. Snapshots/baseHash antigos não são recalculados, nem outputs inferidos.
+3. Migration identifica histórico como contrato 0 sem state. Inserções seguintes exigem contrato 1 com state/hash/FK; constraint/trigger de INSERT recusa contrato 0 para writer antigo não contornar gate. Novo default é 1. Contrato 0 é auditável/base do Command explícito; não renderizável no caminho novo.
+4. Implementar helpers/domain/fingerprint/commit, adaptar todos os 15 builders/16 writers e hydrators. Baseline público usa OutputSpec explícito e source metadata observada.
+5. Adaptar leitores/snapshot/proxy/final/compiler/recipe/artifacts/UI/API no mesmo slice coerente; bloquear render até cutover completo. Sem fallback histórico ou variante igual ao aspectRatio.
+6. PG descartável local: bootstrap limpo, upgrade com histórico controlado, replay/rollback/CAS/FKs e cada writer; depois execução integrada da W66.
+
+Schema isolado não prova integração. Histórico bloqueado expõe motivo/Command necessário. Reset/deploy remoto têm gates próprios do AGENTS e não pertencem a esta decisão.
+
+## 8. Provas exigidas e rejeições
+
+| Prova a construir/executar | Positivo | Negativo obrigatório |
+| --- | --- | --- |
+| Domínio/hash | Reconstrução determinística com IDs pré-alocados sem ciclo | Troca resultVersionId/state/revision/hash/escopo/campo materializado rejeita. Igualdade de formato não basta. |
+| Duas irmãs 9:16 | A e B explícitas, spec/range iguais; crop A só afeta A | B com revision de A, replay A como B, render B com override/report A e cache por formato rejeitam. |
+| Revisão OutputSpec | Rev2 de A gera filho; V1 conserva rev1; B conserva sua revisão | Ler V1 pela revisão mais recente ou transferir revisão para B falha. Canvas/fps alterados invalidam crop afetado. |
+| Projeção | Texto/cor/áudio com geometria igual herdam crop/Command original | EditPlan hash diferente não invalida crop automaticamente; reorder com mesmo mapa por ID não herda. |
+| Fontes/tempo/composição | Metadados observados coerentes preservam crop | SHA/manifest/dimensões/fps/orientação/rate/duração/scale/verticalPosition alterados invalidam; ausência/contradição bloqueia. |
+| Ranges/reset | Range exato substitui, reset auditado, adjacente independente | Overlap parcial, range fora do clip, clip.crop global, geometria não suportada e overlay órfão rejeitam. |
+| Todos writers | Cada linha com pai ativo e vazio | Omissão de transição falha integralmente. Ingest não apaga estado; anexo não usa inserção direta. |
+| Restore/duplicação | Alvo exato restaurado; fork vazio com lineage | Ancestral ativo, IDs entre projetos e restore sem state fora do baseline explícito rejeitam. |
+| PG/bootstrap | State→Version, CAS/replay/scope/unique reais | FK para outra versão/hash/workspace, duas revisões por entrada, INSERT contrato 0, rollback após State e CAS duplo: rejeição/zero resíduos. |
+| Proxy/final runtime | API/PG/worker com entrada/revisão/manifests exatos | project.format/default/manifest recente, registry drift, bytes adulterados, rights revogados: bloqueio antes de publicar. |
+| Visual | Pixels/ranges de A/B independentes, dois canvases, MP4/full decode/frames/critic | Crop manual não vira face-safe; falha A não aprova B; fixture não é aceite global. |
+| API/segurança/observabilidade | Capability/contract tests, audit, errors/retry/cancel/lineage | Cross workspace, falsa provenance de detector, stale base/mismatch de ator não gravam; retry não troca fonte/spec. |
+
+Fixtures/domínio verificam invariantes; PG verifica persistência; renderer real verifica aplicação; pixels/MP4/critic verificam resultado. Implementação isolada, integração, E2E, implantação e aceite continuam separados. W66 permanece parcial enquanto faltar integração ou prova necessária.

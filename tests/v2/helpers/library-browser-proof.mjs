@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import net from 'node:net'
 import { promisify } from 'node:util'
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -15,13 +16,41 @@ export async function ownedBrowserProcesses(pid) {
   return JSON.parse(stdout)
 }
 export async function closeOwnedBrowser({ context, browser, server, child }) {
+  const originalWsEndpoint = server?.wsEndpoint()
   const observed = await ownedBrowserProcesses(child?.pid)
   const warnings = []
+  const steps = []
+  let processClosed = !child
+  const onClose = () => { processClosed = true }
+  child?.once('close', onClose)
+  const bounded = async (name, action) => {
+    const step = { name, startedAt: new Date().toISOString(), resourcesBefore: process.getActiveResourcesInfo() }
+    steps.push(step)
+    let timer
+    try {
+      await Promise.race([action(), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${name} cleanup timeout`)), 5000)
+      })])
+      step.status = 'completed'
+    } catch (error) {
+      step.status = 'failed'; step.error = error.message
+      throw error
+    } finally {
+      clearTimeout(timer)
+      step.resourcesAfter = process.getActiveResourcesInfo()
+      step.completedAt = new Date().toISOString()
+    }
+  }
+  let serverCleanup
   for (const [name, target] of [['context', context], ['browser', browser], ['browser-server', server]]) {
     if (!target) continue
-    let timer
-    try { await Promise.race([name === 'browser-server' ? target.kill() : target.close(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${name} cleanup timeout`)), 5000) })]) }
-    catch (error) { warnings.push(error.message) } finally { clearTimeout(timer) }
+    try {
+      await bounded(name, () => {
+        if (name !== 'browser-server') return target.close()
+        serverCleanup = target.kill()
+        return serverCleanup
+      })
+    } catch (error) { warnings.push(error.message) }
   }
   let remaining = []
   for (const identity of observed) {
@@ -34,7 +63,49 @@ export async function closeOwnedBrowser({ context, browser, server, child }) {
     const current = await ownedBrowserProcesses(identity.pid)
     remaining.push(...current.filter((item) => item.pid === identity.pid && item.created === identity.created))
   }
-  return { browserTerminal: remaining.length === 0, observed, remaining, warnings }
+  // Playwright waits for ChildProcess 'close' before releasing launchServer's
+  // WebSocket listener. On Windows a dead Chromium can leave its stdio pipes
+  // open. Release those handles only after OS PID/creation-time checks prove
+  // every observed owned process terminal; never destroy a live browser's IO.
+  let browserServerTerminal = !server
+  if (remaining.length === 0 && child && (observed.length > 0 || child.exitCode !== null || child.signalCode !== null)) {
+    try {
+      await bounded('terminal-browser-stdio', async () => {
+        for (const stream of child.stdio ?? []) stream?.destroy?.()
+        if (serverCleanup) await serverCleanup
+      })
+      if (server) {
+        await bounded('browser-websocket-listener', async () => {
+          const endpoint = new URL(originalWsEndpoint)
+          assert.ok(['ws:', 'wss:'].includes(endpoint.protocol), 'Owned browser endpoint must use WebSocket')
+          assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname), 'Owned browser endpoint must be local')
+          assert.ok(endpoint.port && Number(endpoint.port) > 0, 'Owned browser endpoint must declare its port')
+          const host = endpoint.hostname === '[::1]' ? '::1' : endpoint.hostname
+          const deadline = Date.now() + 4500
+          for (;;) {
+            const listening = await new Promise((resolve, reject) => {
+              const socket = net.connect({ host, port: Number(endpoint.port) })
+              socket.once('connect', () => { socket.destroy(); resolve(true) })
+              socket.once('error', (error) => {
+                socket.destroy()
+                if (error.code === 'ECONNREFUSED') resolve(false)
+                else reject(error)
+              })
+              socket.setTimeout(500, () => { socket.destroy(); reject(new Error('Browser WebSocket listener probe timeout')) })
+            })
+            if (!listening) break
+            if (Date.now() >= deadline) throw new Error('Owned browser WebSocket listener is still open')
+            await new Promise((resolve) => setTimeout(resolve, 100))
+          }
+        })
+        browserServerTerminal = true
+      }
+    } catch (error) { warnings.push(error.message) }
+  }
+  child?.removeListener('close', onClose)
+  return { browserTerminal: remaining.length === 0 && browserServerTerminal && processClosed,
+    browserServerTerminal, observed, remaining, warnings, steps,
+    process: child ? { pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode, closeObserved: processClosed } : null }
 }
 export async function proveLibraryBrowser({ baseUrl, cookie, prisma, workspaceId, projectId, sourceArtifactId, evidenceDir }) {
   const { chromium } = await import('playwright-core')

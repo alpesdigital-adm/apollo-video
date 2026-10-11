@@ -6,6 +6,11 @@ import { isAbsolute, join } from 'node:path'
 import { closeOwnedBrowser } from './library-browser-proof.mjs'
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
+const diagnosticMessage = (error) => String(error?.message ?? error)
+  .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+  .replace(/https?:\/\/[^\s)]+/gi, (value) => {
+    try { return new URL(value).pathname } catch { return '[url]' }
+  }).slice(0, 500)
 async function bounded(action, milliseconds, label) {
   let timer
   try { return await Promise.race([action(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} deadline exceeded`)), milliseconds) })]) }
@@ -13,10 +18,11 @@ async function bounded(action, milliseconds, label) {
 }
 
 /** Consumes the real worker's existing row; never seeds or catalogs an output. */
-export async function proveCatalogOutputBrowser({ baseUrl, authorization, username, password, prisma, workspaceId, output, catalogRecord, evidenceDir }) {
+export async function proveCatalogOutputBrowser({ baseUrl, authorization, username, password, prisma, workspaceId, output, catalogRecord, evidenceDir,
+  proofScope = 'unspecified', qualityStatus = 'unknown', faceSafety = 'unknown' }) {
   assert.ok(isAbsolute(evidenceDir))
   await mkdir(evidenceDir, { recursive: true })
-  const evidence = { schemaVersion: 'catalog-output-browser-proof/v1', sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null, ownerPid: process.pid, outcome: 'started', artifactId: output.artifactId, manifestId: output.manifestId, sha256: output.sha256, recordHash: catalogRecord.recordHash, checks: [], screenshots: [], postflight: {} }
+  const evidence = { schemaVersion: 'catalog-output-browser-proof/v1', sourceCommit: process.env.GITHUB_SHA ?? null, ciRunId: process.env.GITHUB_RUN_ID ?? null, ownerPid: process.pid, outcome: 'started', proofScope, qualityStatus, faceSafety, artifactId: output.artifactId, manifestId: output.manifestId, sha256: output.sha256, recordHash: catalogRecord.recordHash, checks: [], screenshots: [], network: [], pageErrors: [], postflight: {} }
   let server, child, browser, context, primaryError
   try {
     const query = '/v1/media/library?kind=video&rightsStatus=eligible&limit=24'
@@ -38,7 +44,7 @@ export async function proveCatalogOutputBrowser({ baseUrl, authorization, userna
     assert.equal(entry.workspaceId, workspaceId)
     assert.equal(entry.originType, 'generated')
     assert.equal(item.label, entry.label)
-    evidence.checks.push({ strength: 'bearer-http-real+pg-real', name: 'approved-output-search', id: item.id, label: item.label, rightsSnapshotId: item.rights.snapshotId })
+    evidence.checks.push({ strength: 'bearer-http-real+pg-real', name: 'generated-output-search', id: item.id, label: item.label, rightsSnapshotId: item.rights.snapshotId })
     const login = await fetch(`${baseUrl}/v1/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }), signal: AbortSignal.timeout(15_000) })
     assert.equal(login.status, 200, 'Real human session sign-in must succeed')
     const cookie = /apollo_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')?.[1]
@@ -54,15 +60,43 @@ export async function proveCatalogOutputBrowser({ baseUrl, authorization, userna
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     await bounded(async () => {
       const page = await context.newPage()
+      const libraryRequest = (candidate) => {
+        const url = new URL(candidate.url())
+        return url.origin === baseUrl && url.pathname === '/v1/media/library' &&
+          candidate.request().method() === 'GET'
+      }
+      page.on('response', (response) => {
+        if (!libraryRequest(response) || evidence.network.length >= 40) return
+        const params = new URL(response.url()).searchParams
+        evidence.network.push({ path: '/v1/media/library', status: response.status(),
+          method: 'GET', limit: params.get('limit'), kind: params.get('kind'),
+          rightsStatus: params.get('rightsStatus') })
+      })
+      page.on('pageerror', (error) => {
+        if (evidence.pageErrors.length < 20) evidence.pageErrors.push({ name: error.name,
+          message: diagnosticMessage(error) })
+      })
+      const initialRead = page.waitForResponse((candidate) => libraryRequest(candidate) &&
+        !new URL(candidate.url()).searchParams.has('kind') &&
+        !new URL(candidate.url()).searchParams.has('rightsStatus'))
       await page.goto(`${baseUrl}/library`, { waitUntil: 'domcontentloaded' })
+      const initialResponse = await initialRead
+      assert.equal(initialResponse.status(), 200)
+      const initialPayload = await initialResponse.json()
+      assert.ok(initialPayload.data.items.some((candidate) => candidate.id === output.artifactId))
+      const card = page.locator(`article[data-library-id="${output.artifactId}"]`)
+      await card.waitFor({ state: 'visible' })
       await page.getByLabel('Tipo', { exact: true }).selectOption('video')
       await page.getByLabel('Direitos', { exact: true }).selectOption('eligible')
-      const read = page.waitForResponse((candidate) => candidate.url().includes('/v1/media/library?') && candidate.url().includes('kind=video') && candidate.url().includes('rightsStatus=eligible') && candidate.request().method() === 'GET')
+      assert.equal(await page.getByLabel('Tipo', { exact: true }).inputValue(), 'video')
+      assert.equal(await page.getByLabel('Direitos', { exact: true }).inputValue(), 'eligible')
+      const read = page.waitForResponse((candidate) => libraryRequest(candidate) &&
+        new URL(candidate.url()).searchParams.get('kind') === 'video' &&
+        new URL(candidate.url()).searchParams.get('rightsStatus') === 'eligible')
       await page.getByRole('button', { name: 'Filtrar', exact: true }).click()
       const humanResponse = await read; assert.equal(humanResponse.status(), 200)
       const humanPayload = await humanResponse.json()
       assert.ok(humanPayload.data.items.some((candidate) => candidate.id === output.artifactId))
-      const card = page.locator(`article[data-library-id="${output.artifactId}"]`)
       await card.waitFor({ state: 'visible' })
       assert.equal(await card.locator('h2').innerText(), entry.label)
       await card.getByRole('button', { name: `Ver detalhes de ${entry.label}`, exact: true }).click()
@@ -79,7 +113,19 @@ export async function proveCatalogOutputBrowser({ baseUrl, authorization, userna
     evidence.outcome = 'passed'
     return evidence
   } catch (error) {
-    primaryError = error; evidence.outcome = 'failed'; evidence.failure = { name: error.name, message: error.message }; throw error
+    primaryError = error; evidence.outcome = 'failed'; evidence.failure = { name: error.name, message: diagnosticMessage(error) }
+    const page = context?.pages().at(-1)
+    if (page && !page.isClosed()) {
+      const name = 'w49-catalog-output-failure.png'
+      try {
+        await page.screenshot({ path: join(evidenceDir, name), fullPage: true, timeout: 10_000 })
+        const bytes = await readFile(join(evidenceDir, name))
+        evidence.screenshots.push({ name, sha256: digest(bytes), byteSize: bytes.length })
+      } catch (screenshotError) {
+        evidence.failure.screenshotError = { name: screenshotError.name, message: diagnosticMessage(screenshotError) }
+      }
+    }
+    throw error
   } finally {
     const errors = []
     try {

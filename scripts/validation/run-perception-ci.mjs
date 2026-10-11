@@ -1,0 +1,427 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { createWriteStream } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// Disposable Linux CI only. Ownership follows PID/starttime and an inherited
+// unique run marker, even across setsid/reparenting. Containment is not success.
+const RUN_MARKER = 'APOLLO_PERCEPTION_RUN_ID'
+// Reserve process containment plus PG postflight, log close and receipt IO.
+export const CLEANUP_BUDGET_MS = 90_000
+const TREE_CLEANUP_BUDGET_MS = 25_000
+const delay = (ms) => new Promise((done) => setTimeout(done, ms))
+const diagnostic = (error) => String(error?.stack ?? error)
+const identityKey = ({ pid, starttime }) => `${pid}:${starttime}`
+const live = (entry) => entry && !['Z', 'X', 'x'].includes(entry.state)
+
+async function bounded(action, ms, label) {
+  let timer
+  try { return await Promise.race([action(), new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} exceeded its deadline`)), ms)
+  })]) } finally { clearTimeout(timer) }
+}
+
+export function createPerceptionRunId() {
+  return `perception-${process.pid}-${Date.now()}-${randomUUID()}`
+}
+
+export function parseLinuxProcessStat(text) {
+  assert.equal(typeof text, 'string')
+  const end = text.lastIndexOf(')')
+  assert.match(text, /^[1-9]\d* \(/, 'Malformed Linux process identity')
+  assert.ok(end > text.indexOf('(') && text.slice(end, end + 2) === ') ', 'Malformed Linux comm delimiter')
+  const pid = Number(text.slice(0, text.indexOf(' ')))
+  const fields = text.slice(end + 2).trim().split(/\s+/)
+  assert.ok(end > 0 && Number.isSafeInteger(pid) && pid > 0 && fields.length >= 50 &&
+    /^[RSDZTtWXxIKP]$/.test(fields[0]) && /^\d+$/.test(fields[19]) &&
+    fields.slice(1).every((field) => /^-?\d+$/.test(field)) &&
+    fields.slice(1, 4).every((field) => /^\d+$/.test(field) && Number.isSafeInteger(Number(field))),
+  'Incomplete Linux process identity')
+  return { pid, state: fields[0], ppid: Number(fields[1]),
+    processGroupId: Number(fields[2]), sessionId: Number(fields[3]), starttime: fields[19] }
+}
+
+export async function readLinuxProcessIdentity(pid) {
+  assert.ok(Number.isSafeInteger(pid) && pid > 0)
+  try {
+    const identity = parseLinuxProcessStat(await readFile(`/proc/${pid}/stat`, 'utf8'))
+    assert.equal(identity.pid, pid, 'Linux stat PID mismatch')
+    return identity
+  }
+  catch (error) { if (['ENOENT', 'ESRCH'].includes(error.code)) return null; throw error }
+}
+
+export async function linuxProcessSnapshot(runId) {
+  assert.equal(process.platform, 'linux')
+  const started = Date.now(), entries = await readdir('/proc'), result = []
+  assert.ok(entries.length <= 16_384, 'Linux process inventory exceeds observation bound')
+  for (const name of entries.filter((value) => /^\d+$/.test(value))) {
+    assert.ok(Date.now() - started < 3000, 'Linux observation exceeded its deadline')
+    try {
+      const entry = await readLinuxProcessIdentity(Number(name))
+      if (!entry) continue
+      const owner = await stat(`/proc/${name}`)
+      // Permission denial on an unrelated other-user environ is normal. An
+      // unreadable same-user identity is inconclusive and closes the gate.
+      if (owner.uid === process.getuid() && live(entry)) {
+        const environment = await readFile(`/proc/${name}/environ`)
+        assert.ok(environment.length <= 2 * 1024 * 1024, 'Linux process environment exceeds observation bound')
+        entry.runMarked = environment.toString('utf8').split('\0').includes(`${RUN_MARKER}=${runId}`)
+        const verified = await readLinuxProcessIdentity(entry.pid)
+        if (!verified || verified.starttime !== entry.starttime) continue
+      }
+      result.push(entry)
+    } catch (error) { if (['ENOENT', 'ESRCH'].includes(error.code)) continue; throw error }
+  }
+  return result
+}
+
+export function collectOwnedIdentities(snapshot, observed, rootPid) {
+  assert.ok(snapshot.length <= 16_384 && observed.size <= 4096, 'Owned process inventory exceeds observation bound')
+  const owned = new Set([...observed.keys()])
+  for (const entry of snapshot) if (entry.runMarked) owned.add(identityKey(entry))
+  const children = new Map(), queue = snapshot.filter((entry) => owned.has(identityKey(entry)))
+  for (const entry of snapshot) {
+    const list = children.get(entry.ppid) ?? []
+    list.push(entry); children.set(entry.ppid, list)
+  }
+  for (let index = 0; index < queue.length; index += 1) {
+    for (const child of children.get(queue[index].pid) ?? []) {
+      if (owned.has(identityKey(child))) continue
+      owned.add(identityKey(child)); queue.push(child)
+    }
+  }
+  for (const entry of snapshot) {
+    if (!owned.has(identityKey(entry))) continue
+    const prior = observed.get(identityKey(entry))
+    observed.set(identityKey(entry), { ...entry,
+      firstObservedAt: prior?.firstObservedAt ?? new Date().toISOString(),
+      ownership: prior?.ownership ?? (entry.pid === rootPid ? 'spawn+run-id' : entry.runMarked ? 'run-id' : 'ancestry') })
+    assert.ok(observed.size <= 4096, 'Owned process inventory exceeds observation bound')
+  }
+}
+
+// The fd reserves the task identity before validation. Re-reading stat followed
+// by kill(pid) would still race PID reuse; there is deliberately no such fallback.
+const PIDFD_SIGNAL_PYTHON = String.raw`
+import os, sys, signal, json, time
+def deadline(signum, frame):
+    raise TimeoutError('pidfd helper deadline')
+signal.signal(signal.SIGALRM, deadline)
+pid, expected, requested, deadline_ms = int(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
+remaining = deadline_ms / 1000 - time.time()
+if remaining <= 0:
+    raise TimeoutError('aggregate cleanup deadline')
+signal.setitimer(signal.ITIMER_REAL, min(2, remaining))
+fd = None
+try:
+    if not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
+        raise RuntimeError('pidfd APIs unavailable')
+    fd = os.pidfd_open(pid, 0)
+    with open('/proc/%d/stat' % pid) as source:
+        raw = source.read()
+    end = raw.rfind(')')
+    fields = raw[end + 2:].split()
+    if end < 0 or len(fields) < 50 or not fields[19].isdigit() or int(raw.split(' ', 1)[0]) != pid:
+        raise RuntimeError('incomplete pidfd identity')
+    if fields[19] != expected:
+        outcome = 'pid-recycled'
+    elif fields[0] in ('Z', 'X', 'x'):
+        outcome = 'terminal-state'
+    else:
+        if time.time() * 1000 >= deadline_ms:
+            raise TimeoutError('aggregate cleanup deadline before signal')
+        signal.pidfd_send_signal(fd, getattr(signal, requested), None, 0)
+        outcome = 'signaled'
+    print(json.dumps({'result': outcome}))
+except ProcessLookupError:
+    print(json.dumps({'result': 'lookup-race'}))
+except FileNotFoundError:
+    print(json.dumps({'result': 'lookup-race'}))
+finally:
+    if fd is not None:
+        os.close(fd)
+    signal.setitimer(signal.ITIMER_REAL, 0)
+`
+
+async function sendPidfdSignal(identity, signal, runId, deadlineAt = Date.now() + 2500) {
+  assert.ok(deadlineAt > Date.now(), 'Aggregate cleanup deadline exhausted before pidfd helper')
+  const helper = spawn('python3', ['-c', PIDFD_SIGNAL_PYTHON, String(identity.pid), identity.starttime, signal, String(deadlineAt)], {
+    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, [RUN_MARKER]: runId ?? '' },
+  })
+  let stdout = '', stderr = ''
+  let oversized = false
+  helper.stdout.on('data', (chunk) => { stdout += chunk; if (stdout.length > 8192) { oversized = true; stdout = stdout.slice(0, 8192) } })
+  helper.stderr.on('data', (chunk) => { stderr += chunk; if (stderr.length > 8192) { oversized = true; stderr = stderr.slice(0, 8192) } })
+  return bounded(() => new Promise((done, reject) => {
+    helper.once('error', reject)
+    helper.once('close', (code) => {
+      if (oversized || code !== 0) reject(new Error(`pidfd helper failed (${code}): ${stderr}`))
+      else { try { done(JSON.parse(stdout)) } catch (error) { reject(error) } }
+    })
+  }), Math.max(1, Math.min(2500, deadlineAt - Date.now())), 'pidfd helper close')
+}
+
+export async function signalObservedIdentity(identity, signal, {
+  readIdentity = readLinuxProcessIdentity, pidfdSignal = sendPidfdSignal, runId, deadlineAt = Date.now() + 3500,
+} = {}) {
+  assert.ok(['SIGTERM', 'SIGKILL'].includes(signal))
+  const outcome = await pidfdSignal(identity, signal, runId, deadlineAt)
+  assert.ok(['signaled', 'pid-recycled', 'terminal-state', 'lookup-race'].includes(outcome.result), 'Invalid pidfd result')
+  if (outcome.result === 'signaled' || outcome.result === 'pid-recycled') return { ...identity, signal, ...outcome }
+  const current = await bounded(() => readIdentity(identity.pid), Math.max(1, Math.min(1000, deadlineAt - Date.now())), 'Terminal identity verification')
+  if (!current) return { ...identity, signal, result: 'absent' }
+  if (current.starttime !== identity.starttime) return { ...identity, signal, result: 'pid-recycled' }
+  assert.ok(!live(current), 'pidfd lookup failure did not prove terminality')
+  return { ...identity, signal, result: current.state === 'Z' ? 'zombie' : 'terminal-state', state: current.state }
+}
+
+export async function containObservedIdentities(identities, terminationSignal, deadlineAt, options = {}) {
+  const signals = [], errors = []
+  for (const identity of [...identities].reverse()) {
+    const remaining = deadlineAt - Date.now()
+    if (remaining <= 0) { errors.push('Aggregate cleanup deadline exhausted'); break }
+    try {
+      signals.push(await bounded(() => signalObservedIdentity(identity, terminationSignal, { ...options, deadlineAt }),
+        Math.min(3500, remaining), 'Identity containment'))
+    } catch (error) { errors.push(diagnostic(error)) }
+  }
+  return { signals, errors }
+}
+
+export function requireJobBudget(value, suiteDeadlineMs, now = Date.now()) {
+  assert.match(value ?? '', /^\d+$/, 'Missing or invalid aggregate perception job deadline')
+  const deadline = Number(value)
+  assert.ok(Number.isSafeInteger(deadline) && deadline > now &&
+    now + suiteDeadlineMs + CLEANUP_BUDGET_MS <= deadline, 'Insufficient aggregate perception job budget')
+  return deadline
+}
+
+export function attachSupervisorSignals(controller, report, emitter = process) {
+  const handlers = ['SIGINT', 'SIGTERM'].map((name) => {
+    const handler = () => { report.interruptedBy ??= name; controller.abort(new Error(`Perception supervisor received ${name}`)) }
+    emitter.on(name, handler)
+    return [name, handler]
+  })
+  return () => { for (const [name, handler] of handlers) emitter.removeListener(name, handler) }
+}
+
+export async function supervisePerceptionCommand({ command = process.execPath, args, cwd = process.cwd(),
+  env = process.env, log, signal, deadlineMs = 300_000, observationIntervalMs = 100,
+  snapshot = linuxProcessSnapshot, readIdentity = readLinuxProcessIdentity, jobDeadline = env.APOLLO_PERCEPTION_JOB_DEADLINE_MS }) {
+  assert.equal(process.platform, 'linux')
+  assert.ok(Number.isSafeInteger(deadlineMs) && deadlineMs > 0 && deadlineMs <= 300_000)
+  assert.ok(Number.isSafeInteger(observationIntervalMs) && observationIntervalMs >= 20 && observationIntervalMs <= 1000)
+  const runId = createPerceptionRunId(), started = Date.now(), observed = new Map()
+  const report = { runId, ownerPid: process.pid, startedAt: new Date(started).toISOString(),
+    deadlineAt: new Date(started + deadlineMs).toISOString(), observationIntervalMs,
+    observations: 0, observationComplete: true, signals: [], cleanupErrors: [] }
+  let child, closed = false, processError, primaryError
+  const observe = async () => {
+    try {
+      const entries = await bounded(() => snapshot(runId), 3500, 'Linux process snapshot')
+      collectOwnedIdentities(entries, observed, child?.pid)
+      const entriesByPid = new Map(entries.map((entry) => [entry.pid, entry]))
+      report.observations += 1
+      report.zombies = entries.filter((entry) => observed.has(identityKey(entry)) && entry.state === 'Z')
+      report.identityStates = [...observed.values()].map((identity) => {
+        const current = entriesByPid.get(identity.pid)
+        return { pid: identity.pid, starttime: identity.starttime,
+          observation: !current ? 'absent' : current.starttime !== identity.starttime ? 'pid-recycled' : current.state }
+      })
+      return [...observed.values()].filter((entry) => {
+        const current = entriesByPid.get(entry.pid)
+        return current && identityKey(current) === identityKey(entry) && live(current)
+      })
+    } catch (error) { report.observationComplete = false; throw error }
+  }
+  const checkActive = () => {
+    if (signal?.aborted) throw signal.reason ?? new Error('Perception supervisor interrupted')
+    if (Date.now() >= started + deadlineMs) throw new Error('Perception suite exceeded its deadline')
+  }
+  try {
+    report.jobDeadlineAt = new Date(requireJobBudget(jobDeadline, deadlineMs)).toISOString()
+    checkActive(); await observe(); checkActive()
+    requireJobBudget(jobDeadline, deadlineMs)
+    child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...env, [RUN_MARKER]: runId } })
+    report.rootPid = child.pid
+    if (log) { child.stdout.pipe(log, { end: false }); child.stderr.pipe(log, { end: false }) }
+    else { child.stdout.resume(); child.stderr.resume() }
+    child.once('error', (error) => { processError = error })
+    child.once('close', (code, terminationSignal) => {
+      closed = true; report.code = code; report.terminationSignal = terminationSignal
+    })
+    while (!closed) {
+      checkActive(); await observe()
+      if (processError) throw processError
+      await delay(Math.min(observationIntervalMs, Math.max(1, started + deadlineMs - Date.now())))
+    }
+    if (processError) throw processError
+    assert.ok([...observed.values()].some((identity) => identity.pid === child.pid &&
+      identity.ownership === 'spawn+run-id'), 'Spawned root identity was not observed completely')
+    assert.equal(report.code, 0, 'Perception suite did not exit successfully')
+    assert.deepEqual(await observe(), [], 'Suite left owned descendants after Node exited')
+  } catch (error) { primaryError = error; report.error = diagnostic(error) }
+  finally {
+    report.cleanupStartedAt = new Date().toISOString()
+    report.cleanupDeadlineAt = new Date(Date.now() + CLEANUP_BUDGET_MS).toISOString()
+    const cleanupDeadline = Date.now() + TREE_CLEANUP_BUDGET_MS
+    const remaining = () => {
+      const ms = cleanupDeadline - Date.now()
+      assert.ok(ms > 0, 'Aggregate cleanup deadline exhausted')
+      return ms
+    }
+    const cleanupObserve = () => bounded(observe, Math.min(3500, remaining()), 'Cleanup observation')
+    let active = []
+    try { active = await cleanupObserve() } catch (error) { report.cleanupErrors.push(diagnostic(error)) }
+    const contain = async (terminationSignal) => {
+      const contained = await containObservedIdentities(observed.values(), terminationSignal, cleanupDeadline, { readIdentity, runId })
+      report.signals.push(...contained.signals)
+      report.cleanupErrors.push(...contained.errors)
+    }
+    if ((child && !closed) || active.length || !report.observationComplete) {
+      report.containmentRequired = true
+      if (child?.pid && ![...observed.values()].some((entry) => entry.pid === child.pid)) {
+        try {
+          const identity = await bounded(() => readIdentity(child.pid), Math.min(3000, remaining()), 'Root identity')
+          if (identity) {
+            const environment = await bounded(() => readFile(`/proc/${child.pid}/environ`), Math.min(3000, remaining()), 'Root run marker')
+            assert.ok(environment.length <= 2 * 1024 * 1024, 'Root environment exceeds observation bound')
+            const verified = await bounded(() => readIdentity(child.pid), Math.min(3000, remaining()), 'Root identity recheck')
+            if (verified?.starttime === identity.starttime && environment.toString('utf8').split('\0').includes(`${RUN_MARKER}=${runId}`)) {
+              observed.set(identityKey(identity), { ...identity, ownership: 'spawn+run-id', firstObservedAt: new Date().toISOString() })
+            }
+          }
+        } catch (error) { report.cleanupErrors.push(diagnostic(error)) }
+      }
+      await contain('SIGTERM')
+      const graceRemaining = cleanupDeadline - Date.now()
+      if (graceRemaining > 0) await delay(Math.min(500, graceRemaining))
+      await contain('SIGKILL')
+    }
+    do {
+      try {
+        active = await cleanupObserve()
+        if (active.length) { report.containmentRequired = true; await contain('SIGKILL') }
+        // ChildProcess close also waits for inherited pipes. Release IO only
+        // once all observed processes and the spawned root are terminal.
+        if (!active.length && child && !closed && (child.exitCode !== null || child.signalCode !== null)) {
+          for (const stream of child.stdio ?? []) stream?.destroy?.()
+        }
+      } catch (error) { report.cleanupErrors.push(diagnostic(error)); break }
+      if ((!child || closed) && active.length === 0) break
+      if (Date.now() >= cleanupDeadline) break
+      const pollingRemaining = cleanupDeadline - Date.now()
+      if (pollingRemaining > 0) await delay(Math.min(100, pollingRemaining))
+    } while (Date.now() < cleanupDeadline)
+    report.activeSurvivors = active
+    report.childClosed = !child || closed
+    report.childCloseObserved = Boolean(child && closed)
+    report.observedProcesses = [...observed.values()]
+    report.processTreeTerminal = report.observationComplete && report.childClosed &&
+      active.length === 0 && report.cleanupErrors.length === 0
+    report.inventoryInconclusive = !report.observationComplete || report.cleanupErrors.length > 0
+    report.success = !primaryError && report.code === 0 && report.processTreeTerminal && !report.containmentRequired
+    report.completedAt = new Date().toISOString()
+  }
+  return report
+}
+
+async function main() {
+assert.equal(process.platform, 'linux')
+const [suite, pattern] = process.argv.slice(2)
+assert.match(suite ?? '', /^tests\/v2\/[a-z0-9-]+\.integration\.mjs$/)
+const root = process.env.APOLLO_LIBRARY_EVIDENCE_ROOT
+assert.ok(root?.startsWith('/tmp/') || (process.env.RUNNER_TEMP && root?.startsWith(process.env.RUNNER_TEMP + '/')))
+await bounded(() => mkdir(root, { recursive: true }), 5000, 'Evidence directory')
+const name = suite.split('/').pop().replace('.integration.mjs', '')
+const logPath = join(root, `${name}.log`)
+const log = createWriteStream(logPath)
+const report = { suite, pattern: pattern ?? null, sourceCommit: process.env.GITHUB_SHA,
+  ciRunId: process.env.GITHUB_RUN_ID, runId: createPerceptionRunId(), proofScope: pattern ? 'filtered-suite' : 'full-suite',
+  ownerPid: process.pid, startedAt: new Date().toISOString(),
+  jobDeadline: process.env.APOLLO_PERCEPTION_JOB_DEADLINE_MS, cleanupBudgetMs: CLEANUP_BUDGET_MS }
+const controller = new AbortController()
+const removeSignalHandlers = attachSupervisorSignals(controller, report)
+log.on('error', (error) => controller.abort(error))
+let primaryError
+let finalCleanupDeadline
+const cleanupWait = (action, limit, label, reserved = 5000) => {
+  const remaining = finalCleanupDeadline - reserved - Date.now()
+  assert.ok(remaining > 0, `${label}: aggregate cleanup deadline exhausted before action`)
+  return bounded(action, Math.min(limit, remaining), label)
+}
+async function requireEmptyDatabase(cleanup = false) {
+  const wait = cleanup ? cleanupWait : bounded
+  const { PrismaClient } = await wait(() => import('../../generated/prisma-v2/index.js'), 5000, 'Observer module import')
+  const url = new URL(process.env.V2_DATABASE_URL)
+  assert.equal(url.hostname, '127.0.0.1')
+  assert.equal(url.pathname, '/apollo_v2_perception')
+  url.username = 'apollo_admin'
+  url.searchParams.set('application_name', `apollo-video-e2e-perception-observer-${process.pid}-${randomUUID().slice(0, 8)}`)
+  url.searchParams.set('connection_limit', '1')
+  url.searchParams.set('pool_timeout', '10')
+  url.searchParams.set('connect_timeout', '10')
+  const observer = new PrismaClient({ datasources: { db: { url: url.toString() } } })
+  try {
+    const rows = await wait(() => observer.$queryRawUnsafe('SELECT application_name, count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() GROUP BY application_name'), 12_000, 'PostgreSQL pre/postflight')
+    assert.deepEqual(rows, [], 'Another suite still owns PostgreSQL connections')
+    return { backendCount: 0, checkedAt: new Date().toISOString() }
+  } finally { await wait(() => observer.$disconnect(), 5000, 'Observer disconnect') }
+}
+try {
+  report.jobDeadlineAt = new Date(requireJobBudget(process.env.APOLLO_PERCEPTION_JOB_DEADLINE_MS, 300_000)).toISOString()
+  report.preflight = await requireEmptyDatabase()
+  Object.assign(report, await supervisePerceptionCommand({ args: ['--experimental-transform-types',
+    '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--test', '--test-reporter=spec',
+    ...(pattern ? [`--test-name-pattern=${pattern}`] : []), suite], log, signal: controller.signal }))
+} catch (error) {
+  primaryError = error
+  report.error = String(error.stack ?? error)
+} finally {
+  finalCleanupDeadline = report.cleanupDeadlineAt ? Date.parse(report.cleanupDeadlineAt) : Date.now() + CLEANUP_BUDGET_MS
+  report.cleanupDeadlineAt = new Date(finalCleanupDeadline).toISOString()
+  try {
+    report.postflight = await requireEmptyDatabase(true)
+  } catch (error) {
+    report.cleanupError = String(error)
+    primaryError ??= error
+  }
+  try {
+  await cleanupWait(() => new Promise((resolve, reject) => { log.once('error', reject); log.end(resolve) }), 5000, 'Log close')
+  const output = await cleanupWait(() => readFile(logPath, 'utf8'), 5000, 'Log read')
+  process.stdout.write(output)
+  const passed = /(?:ℹ|#) pass (\d+)/.exec(output)
+  const skipped = /(?:ℹ|#) skipped (\d+)/.exec(output)
+  report.passed = Number(passed?.[1] ?? 0)
+  report.skipped = skipped ? Number(skipped[1]) : null
+  if (suite === 'tests/v2/prisma-face-producer.integration.mjs' && pattern === 'publish-race|face control') {
+    report.proofScope = 'face-offline-partial'
+    report.expectedSelectedTests = 3
+    assert.equal(report.passed, 3, 'Face offline filtered proof requires exactly three passing tests')
+    const expectedNames = [
+      'W61 publish-race fixture hydrates a real child and rights expiry offline',
+      'W61 publish-race matcher checks typed codes, not error prose',
+      'W61 face control uses scoped canonical audit before the repository transaction',
+    ]
+    report.selectedTestNames = [...output.matchAll(/^[ \t]*✔ (.+?) \([^\r\n]*\)\r?$/gm)].map((match) => match[1])
+    assert.deepEqual(report.selectedTestNames, expectedNames, 'Face proof must contain only the three named offline assertions')
+    report.pgCasesExecuted = 0
+  }
+  report.success = !primaryError && !controller.signal.aborted && report.passed > 0 && report.skipped === 0 &&
+    report.processTreeTerminal && report.success === true && !report.containmentRequired
+  report.completedAt = new Date().toISOString()
+  } catch (error) { report.success = false; report.evidenceError = diagnostic(error); primaryError ??= error }
+  report.completedAt = new Date().toISOString()
+  try { await cleanupWait(() => writeFile(join(root, `${name}.json`), JSON.stringify(report, null, 2)), 5000, 'Receipt write', 0) }
+  catch (error) { report.success = false; report.receiptWriteError = diagnostic(error); process.stderr.write(`Perception receipt write failed: ${diagnostic(error)}\n${JSON.stringify(report)}\n`); primaryError ??= error }
+  finally { removeSignalHandlers() }
+}
+if (!report.success) process.exitCode = 1
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main()

@@ -436,9 +436,11 @@ function isPrismaCode(error: unknown, code: string): boolean {
 
 export class PrismaDirectorRunRepository implements DirectorRunRepository {
   private readonly client: PrismaClient
+  private readonly clock: () => Date
 
-  constructor(client: PrismaClient = getV2PostgresClient(), private readonly clock: () => Date = () => new Date()) {
+  constructor(client: PrismaClient = getV2PostgresClient(), clock: () => Date = () => new Date()) {
     this.client = client
+    this.clock = clock
   }
 
   async readQualityReport(input: {

@@ -167,6 +167,70 @@ const gatesTheBuild = (step) =>
   !isLiteral(step.job?.attrs.get('if'), 'false') &&
   !isLiteral(step.job?.attrs.get('continue-on-error'), 'true')
 
+const PERCEPTION_SUITES = [
+  'tesseract-ocr-video-adapter', 'ffmpeg-temporal-video-analyzer',
+  'prisma-perception-producer-admission', 'prisma-perception-producer-worker',
+  'prisma-perception-producer-http', 'prisma-director-ocr',
+  'prisma-temporal-producer', 'prisma-face-producer',
+]
+
+function verifyPerceptionWiring(workflow) {
+  const { jobs, steps } = parseWorkflow(workflow)
+  const job = jobs.find((entry) => entry.id === 'perception')
+  assert.ok(job, 'perception job is mandatory')
+  assert.equal(job.attrs.get('if'), undefined)
+  assert.equal(job.attrs.get('continue-on-error'), undefined)
+  const block = workflow.split(/^  perception:\s*$/m)[1]?.split(/^  [a-zA-Z][\w-]*:\s*$/m)[0]
+  assert.ok(block)
+  for (const gate of ['APOLLO_OCR_VIDEO_E2E', 'APOLLO_PERCEPTION_HTTP_E2E',
+    'APOLLO_TEMPORAL_VIDEO_E2E', 'APOLLO_TEMPORAL_HTTP_E2E']) {
+    assert.match(block, new RegExp(`^ {6}${gate}: ['"]1['"]\\s*$`, 'm'))
+  }
+  assert.match(block, /^ {6}V2_DATABASE_URL: .*127\.0\.0\.1.*apollo_v2_perception.*application_name=apollo-video-e2e-perception-.*connection_limit=2.*pool_timeout=10.*connect_timeout=10/m)
+  assert.match(block, /sha256sum.*binary-provenance\.sha256/)
+  assert.match(block, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*18 \* 60 \* 1000/)
+  for (const name of PERCEPTION_SUITES) {
+    const suite = `tests/v2/${name}.integration.mjs`
+    const matches = steps.filter((step) => step.job === job && step.suiteFiles.includes(suite))
+    assert.equal(matches.length, 1, `${suite} has exactly one supervised mandatory run`)
+    const step = matches[0]
+    assert.equal(step.attrs.get('if'), undefined)
+    assert.equal(step.attrs.get('continue-on-error'), undefined)
+    assert.ok(gatesTheBuild(step))
+    const invocation = `node scripts/validation/run-perception-ci.mjs ${suite}`
+    assert.ok(step.body.includes(invocation))
+    if (name === 'prisma-face-producer') {
+      assert.ok(step.body.includes(`${invocation} 'publish-race|face control'`))
+    } else {
+      assert.ok(step.body.split('\n').some((line) => line.trim() === invocation || line.trim() === `run: ${invocation}`))
+    }
+  }
+}
+
+test('W61 perception CI preserves supervised mandatory coverage and its exact facial limitation', async () => {
+  const workflow = await read('.github/workflows/ci.yml')
+  verifyPerceptionWiring(workflow)
+  for (const replacement of ['    if: false\n', '    continue-on-error: true\n']) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace('  perception:\n', `  perception:\n${replacement}`)))
+  }
+  for (const name of PERCEPTION_SUITES) {
+    const invocation = `node scripts/validation/run-perception-ci.mjs tests/v2/${name}.integration.mjs`
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(invocation, 'echo removed')))
+  }
+  for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace('      - name: Real OCR and temporal media adapters\n', `      - name: Real OCR and temporal media adapters\n${replacement}`)))
+  }
+  assert.throws(() => verifyPerceptionWiring(workflow.replace("APOLLO_TEMPORAL_HTTP_E2E: '1'", "APOLLO_TEMPORAL_HTTP_E2E: '0'")))
+  assert.throws(() => verifyPerceptionWiring(workflow.replace(" 'publish-race|face control'", '')))
+  const face = await read('tests/v2/prisma-face-producer.integration.mjs')
+  const selected = [...face.matchAll(/^test\('([^']+)'/gm)].map((match) => match[1]).filter((name) => /publish-race|face control/.test(name))
+  assert.deepEqual(selected, [
+    'W61 publish-race fixture hydrates a real child and rights expiry offline',
+    'W61 publish-race matcher checks typed codes, not error prose',
+    'W61 face control uses scoped canonical audit before the repository transaction',
+  ])
+})
+
 const singleTestFileOf = (command) => {
   const files = [...command.matchAll(SUITE_FILE)].map((match) => match[0])
   return files.length === 1 ? files[0] : null
@@ -381,6 +445,11 @@ const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means
  * reason that has nothing to do with coverage.
  */
 const KNOWN_UNRUN_SUITES = [
+  {
+    file: 'tests/v2/prisma-face-producer-http.integration.mjs',
+    reason: 'W61 diagnostic face HTTP requires the licensed, hash-pinned development video/landing/lineage, YuNet model/license and local Python/OpenCV runtime; local result face-http-resume-v1-39bfb5da SHA256 1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 is a controlled proof, not CI coverage or approved facial quality. Face producer integration is wired only for three offline audit/fixture cases; its PG and runner cases are likewise local, with faceSafety unknown and holdout closed.',
+    citedBy: ['docs/quality/w61-yunet-cpu-adapter.md'],
+  },
   { file: 'tests/v2/recovery-master-live.e2e.mjs', reason: 'requires the private owner-selected Imersão master, authorized live Groq credential/cost cap and supervised editorial/visual review; local proof is separate from hosted CI', citedBy: ['docs/quality/w51-60-integration.md'] },
   { file: 'tests/v2/contamination-golden-fixtures.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/contiguous-evaluation-repository.integration.mjs', reason: NO_SCRIPT },

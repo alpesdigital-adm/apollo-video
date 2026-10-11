@@ -44,7 +44,8 @@ function catalogId(workspaceId: string, artifactId: string, manifestId: string):
 }
 
 export class PrismaAutomaticCatalogRepository implements AutomaticCatalogRepository {
-  constructor(private readonly client: PrismaClient | Prisma.TransactionClient) {}
+  private readonly client: PrismaClient | Prisma.TransactionClient
+  constructor(client: PrismaClient | Prisma.TransactionClient) { this.client = client }
 
   async find(workspaceId: string, artifactId: string): Promise<AutomaticCatalogRecord | null> {
     const row = await this.client.v2AutomaticCatalogRecord.findFirst({ where: { workspaceId, artifactId }, orderBy: { createdAt: 'desc' } })

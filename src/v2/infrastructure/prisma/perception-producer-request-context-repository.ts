@@ -76,9 +76,11 @@ export class PrismaPerceptionProducerRequestContextRepository implements Percept
 
 /** Admission for the first temporal slice: one source, unit-rate CFR mapping, at most 300 frames. */
 export class PrismaTemporalProducerRequestContextRepository implements PerceptionProducerRequestContextRepository {
+  private readonly client: PrismaClient
   private readonly base: PrismaPerceptionProducerRequestContextRepository
 
-  constructor(private readonly client: PrismaClient) {
+  constructor(client: PrismaClient) {
+    this.client = client
     this.base = new PrismaPerceptionProducerRequestContextRepository(client)
   }
 
@@ -128,9 +130,11 @@ export class PrismaTemporalProducerRequestContextRepository implements Perceptio
 
 /** Face diagnosis is deliberately narrower: one current unit-rate source clip, never a montage. */
 export class PrismaFaceProducerRequestContextRepository implements PerceptionProducerRequestContextRepository {
+  private readonly client: PrismaClient
   private readonly temporal: PrismaTemporalProducerRequestContextRepository
 
-  constructor(private readonly client: PrismaClient) {
+  constructor(client: PrismaClient) {
+    this.client = client
     this.temporal = new PrismaTemporalProducerRequestContextRepository(client)
   }
 

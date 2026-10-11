@@ -2002,3 +2002,97 @@ jobs:
       - name: Stop isolated infrastructure
         if: always()
         run: docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml down --volumes --remove-orphans --timeout 30
+
+  perception:
+    name: Perception OCR and temporal controlled proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: '1'
+      APOLLO_API_ENVIRONMENT: production
+      V2_DATABASE_URL: postgresql://apollo:perception-ci@127.0.0.1:5432/apollo_v2_perception?schema=public&application_name=apollo-video-e2e-perception-${{ github.run_id }}&connection_limit=2&pool_timeout=10&connect_timeout=10
+      APOLLO_LIBRARY_EVIDENCE_ROOT: /tmp/apollo-perception-${{ github.run_id }}/evidence
+      APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+      APOLLO_V2_ARTIFACT_ROOT: /tmp/apollo-perception-${{ github.run_id }}/artifacts
+      APOLLO_PROTECTED_PAYLOAD_KEY_ID: perception-ci-test
+      APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      APOLLO_OCR_VIDEO_E2E: '1'
+      APOLLO_PERCEPTION_HTTP_E2E: '1'
+      APOLLO_TEMPORAL_VIDEO_E2E: '1'
+      APOLLO_TEMPORAL_HTTP_E2E: '1'
+      APOLLO_OCR_TESSERACT: /usr/bin/tesseract
+      APOLLO_OCR_TESSDATA: /tmp/apollo-perception-${{ github.run_id }}/tessdata
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.5-pg16-trixie
+        env:
+          POSTGRES_DB: apollo_v2_perception
+          POSTGRES_USER: apollo_admin
+          POSTGRES_PASSWORD: perception-ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U apollo_admin -d apollo_v2_perception"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          cache: npm
+      - name: Prepare owned PostgreSQL and OCR dependencies
+        run: |
+          set -euo pipefail
+          echo "APOLLO_PERCEPTION_JOB_DEADLINE_MS=$(( $(date +%s%3N) + 18 * 60 * 1000 ))" >> "$GITHUB_ENV"
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng postgresql-client python3
+          mkdir -p "$APOLLO_LIBRARY_EVIDENCE_ROOT" "$APOLLO_V2_ARTIFACT_ROOT" "$APOLLO_OCR_TESSDATA"
+          data="$(dpkg -L tesseract-ocr-eng | awk '/\/eng.traineddata$/ { print; exit }')"
+          test -f "$data"
+          cp "$data" "$APOLLO_OCR_TESSDATA/eng.traineddata"
+          cp /usr/share/doc/tesseract-ocr-eng/copyright "$APOLLO_OCR_TESSDATA/LICENSE"
+          dpkg-query -W tesseract-ocr tesseract-ocr-eng > "$APOLLO_LIBRARY_EVIDENCE_ROOT/ocr-packages.txt"
+          PGPASSWORD=perception-ci psql -h 127.0.0.1 -U apollo_admin -d apollo_v2_perception -v ON_ERROR_STOP=1 -c "CREATE ROLE apollo LOGIN PASSWORD 'perception-ci' CONNECTION LIMIT 5; ALTER DATABASE apollo_v2_perception OWNER TO apollo; CREATE EXTENSION IF NOT EXISTS vector; ALTER ROLE apollo SET idle_in_transaction_session_timeout='30s'; ALTER ROLE apollo SET statement_timeout='120s';"
+      - run: npm ci
+      - name: Resolve and record exact CI media executables
+        run: |
+          set -euo pipefail
+          ffmpeg="$(node -p 'require("ffmpeg-static")')"
+          ffprobe="$(node -p 'require("ffprobe-static").path')"
+          test -x "$ffmpeg" && test -x "$ffprobe"
+          printf 'APOLLO_OCR_FFMPEG=%s\nAPOLLO_TEMPORAL_FFMPEG=%s\n' "$ffmpeg" "$ffmpeg" >> "$GITHUB_ENV"
+          printf 'APOLLO_OCR_FFPROBE=%s\nAPOLLO_TEMPORAL_FFPROBE=%s\n' "$ffprobe" "$ffprobe" >> "$GITHUB_ENV"
+          sha256sum "$ffmpeg" "$ffprobe" "$APOLLO_OCR_TESSERACT" "$APOLLO_OCR_TESSDATA/eng.traineddata" "$APOLLO_OCR_TESSDATA/LICENSE" > "$APOLLO_LIBRARY_EVIDENCE_ROOT/binary-provenance.sha256"
+      - run: npx prisma migrate deploy --schema prisma/v2/schema.prisma
+      - run: npm run build
+      - name: Real OCR and temporal media adapters
+        run: |
+          node scripts/validation/run-perception-ci.mjs tests/v2/tesseract-ocr-video-adapter.integration.mjs
+          node scripts/validation/run-perception-ci.mjs tests/v2/ffmpeg-temporal-video-analyzer.integration.mjs
+      - name: OCR admission, worker, SQL publication fences and HTTP
+        run: |
+          node scripts/validation/run-perception-ci.mjs tests/v2/prisma-perception-producer-admission.integration.mjs
+          node scripts/validation/run-perception-ci.mjs tests/v2/prisma-perception-producer-worker.integration.mjs
+          node scripts/validation/run-perception-ci.mjs tests/v2/prisma-perception-producer-http.integration.mjs
+          node scripts/validation/run-perception-ci.mjs tests/v2/prisma-director-ocr.integration.mjs
+      - name: Temporal worker, SQL publication fences and HTTP
+        run: node scripts/validation/run-perception-ci.mjs tests/v2/prisma-temporal-producer.integration.mjs
+      # Only these three offline assertions run here. Face PG/HTTP and the real
+      # failed-gate YuNet runner remain local, with licensed development inputs.
+      # No holdout/model acquisition or faceSafety authority is implied.
+      - name: Facial fixture and authenticated audit offline only
+        run: node scripts/validation/run-perception-ci.mjs tests/v2/prisma-face-producer.integration.mjs 'publish-race|face control'
+      - name: Require zero orphan perception clients
+        if: always()
+        run: |
+          set -euo pipefail
+          count="$(PGPASSWORD=perception-ci psql -h 127.0.0.1 -U apollo_admin -d apollo_v2_perception -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()")"
+          test "$count" = 0
+      - name: Publish scoped perception proof and binary provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perception-controlled-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.APOLLO_LIBRARY_EVIDENCE_ROOT }}
+          if-no-files-found: error
+          retention-days: 14

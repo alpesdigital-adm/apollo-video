@@ -29,7 +29,8 @@ import { PUBLIC_ERROR_CATALOG } from '../../src/v2/public-api/public-error-catal
  *
  * So two kinds of proof live here. The structural one says every spawn in
  * `src/` — every one, whatever its first argument is spelled, ffprobe included
- * — takes its path from the resolver, and is itself checked against sources
+ * — takes its path from the resolver or the exact required diagnostic paths
+ * audited below, and is itself checked against sources
  * that bypass it, because a scanner that matches nothing passes quietly. The
  * behavioural one exercises all four resolution steps, including the one that
  * only matters under a bundle: a directory laid out like `.next/server/chunks`,
@@ -115,6 +116,104 @@ const INBOUND_SPAWNS = new Map([
     producers: ['src/v2/infrastructure/repository-factory.ts'],
   })],
 ])
+
+// These diagnostic adapters deliberately require operator-supplied absolute
+// paths, with no package/PATH fallback for a bundle to rewrite. Their factory
+// and adapter guards are audited together. OCR records observed hashes and
+// checks stability; unlike temporal/face diagnosis it has no expected pins.
+const CONFIGURED_SPAWNS = new Map([
+  ['src/v2/infrastructure/perception/ffmpeg-temporal-video-analyzer.ts', {
+    constructor: 'FfmpegTemporalVideoAnalyzer', factory: 'createTemporalProducerWorker',
+    expressions: ['binary'], calls: ['this.runtime.ffprobeBinary', 'this.runtime.ffmpegBinary'],
+    variables: ['APOLLO_V2_TEMPORAL_FFMPEG_BIN', 'APOLLO_V2_TEMPORAL_FFPROBE_BIN',
+      'APOLLO_V2_TEMPORAL_FFMPEG_SHA256', 'APOLLO_V2_TEMPORAL_FFPROBE_SHA256'],
+    fields: ['ffmpegBinary', 'ffprobeBinary', 'expectedFFmpegSha256', 'expectedFFprobeSha256'],
+    guards: [/!isAbsolute\(runtime\.ffmpegBinary\)/, /!isAbsolute\(runtime\.ffprobeBinary\)/,
+      /!SHA\.test\(runtime\.expectedFFmpegSha256\)/, /!SHA\.test\(runtime\.expectedFFprobeSha256\)/,
+      /sha256File\(this\.runtime\.ffmpegBinary\)/g, /sha256File\(this\.runtime\.ffprobeBinary\)/g,
+      /before\[1\] !== this\.runtime\.expectedFFmpegSha256/,
+      /before\[2\] !== this\.runtime\.expectedFFprobeSha256/,
+      /after\.some\(\(value, index\) => value !== before\[index\]\)/],
+  }],
+  ['src/v2/infrastructure/perception/ffmpeg-yunet-face-video-analyzer.ts', {
+    constructor: 'FfmpegYunetFaceVideoAnalyzer', factory: 'createFaceProducerWorker',
+    expressions: ['binary'], calls: ['this.runtime.ffprobe.path', 'this.runtime.ffmpeg.path'],
+    variables: ['APOLLO_V2_FACE_FFMPEG_BIN', 'APOLLO_V2_FACE_FFPROBE_BIN',
+      'APOLLO_V2_FACE_FFMPEG_SHA256', 'APOLLO_V2_FACE_FFPROBE_SHA256'],
+    bindings: [/ffmpeg: \{ path: required\('APOLLO_V2_FACE_FFMPEG_BIN'\),\s*sha256: required\('APOLLO_V2_FACE_FFMPEG_SHA256'\) \}/,
+      /ffprobe: \{ path: required\('APOLLO_V2_FACE_FFPROBE_BIN'\),\s*sha256: required\('APOLLO_V2_FACE_FFPROBE_SHA256'\) \}/],
+    guards: [/\[runtime\.ffmpeg, runtime\.ffprobe, runtime\.modelLicense\]/,
+      /!isAbsolute\(binary\.path\)/, /!SHA\.test\(binary\.sha256\)/,
+      /hashFile\(this\.runtime\.ffmpeg\.path\)/g, /hashFile\(this\.runtime\.ffprobe\.path\)/g,
+      /pins\[1\] !== this\.runtime\.ffmpeg\.sha256/, /pins\[2\] !== this\.runtime\.ffprobe\.sha256/,
+      /after\.some\(\(value, index\) => value !== pins\[index\]\)/],
+  }],
+  ['src/v2/infrastructure/perception/tesseract-ocr-video-adapter.ts', {
+    constructor: 'TesseractOcrVideoAdapter', factory: 'createPerceptionProducerWorker',
+    expressions: ['this.runtime.tesseractBinary', 'this.runtime.ffprobeBinary',
+      'this.runtime.ffprobeBinary', 'this.runtime.ffmpegBinary'],
+    variables: ['APOLLO_V2_OCR_FFMPEG_BIN', 'APOLLO_V2_OCR_FFPROBE_BIN', 'APOLLO_V2_OCR_TESSERACT_BIN'],
+    fields: ['ffmpegBinary', 'ffprobeBinary', 'tesseractBinary'],
+    guards: [/\[runtime\.ffmpegBinary, runtime\.ffprobeBinary, runtime\.tesseractBinary,/,
+      /\.every\(\(value\) => isAbsolute\(value\)\)/,
+      /sha256File\(this\.runtime\.ffmpegBinary\)/g, /sha256File\(this\.runtime\.ffprobeBinary\)/g,
+      /sha256File\(this\.runtime\.tesseractBinary\)/g,
+      /hashesAfter\.slice\(0, 3\)\.some\(\(hash, index\) => hash !== runtimeHashes\[index\]\)/,
+      /executableSha256: runtimeHashes\[2\]/,
+      /ffmpegSha256: runtimeHashes\[0\]/, /ffprobeSha256: runtimeHashes\[1\]/],
+  }],
+  ['src/v2/infrastructure/perception/yunet-cpu-face-detector.ts', {
+    constructor: 'YunetCpuFaceDetector', factory: 'createFaceProducerWorker',
+    expressions: ['this.config.pythonExecutable'],
+    variables: ['APOLLO_V2_FACE_PYTHON_BIN', 'APOLLO_V2_FACE_PYTHON_SHA256',
+      'APOLLO_V2_FACE_BRIDGE_SCRIPT', 'APOLLO_V2_FACE_BRIDGE_SHA256',
+      'APOLLO_V2_FACE_OPENCV_BINARY', 'APOLLO_V2_FACE_OPENCV_SHA256'],
+    fields: ['pythonExecutable', 'pythonExecutableSha256', 'bridgePath', 'bridgeSha256',
+      'opencvBinaryPath', 'opencvBinarySha256'],
+    guards: [/config\.pythonExecutable, config\.pythonModulePath, config\.modelPath, config\.bridgePath, config\.opencvBinaryPath/,
+      /if \(!isAbsolute\(path\)\)/, /'FACE_PYTHON', config\.pythonExecutableSha256/, /assertSha\(hash, label\)/,
+      /hashFile\(this\.config\.pythonExecutable\)/g,
+      /hashes\.python !== this\.config\.pythonExecutableSha256/,
+      /after\[2\] !== hashes\.python/],
+  }],
+])
+
+function configuredSpawnViolations(sources, path, source, entry) {
+  const failures = []
+  const fail = (reason) => failures.push(`${path}: explicit diagnostic binary ${reason}`)
+  const factoryPath = 'src/v2/infrastructure/repository-factory.ts'
+  const factorySource = withoutComments(sources.get(factoryPath) ?? '')
+  const worker = functionBody(factorySource, entry.factory) ?? ''
+  if (!/const required = \(key: string\) => \{[\s\S]*?environment\[key\]\?\.trim\(\)[\s\S]*?if \(!value\) throw[\s\S]*?return value/.test(worker)) {
+    fail('lost its required environment guard')
+  }
+  for (const variable of entry.variables) {
+    if (!worker.includes(`required('${variable}')`)) fail(`lost required ${variable}`)
+  }
+  for (const [index, field] of (entry.fields ?? []).entries()) {
+    if (!worker.includes(`${field}: required('${entry.variables[index]}'),`)) fail(`lost required binding for ${field}`)
+  }
+  for (const binding of entry.bindings ?? []) {
+    if (!binding.test(worker)) fail('lost its path/digest constructor binding')
+  }
+  const construction = new RegExp(`\\bnew ${entry.constructor}\\(`, 'g')
+  const callers = [...sources].filter(([, raw]) => new RegExp(construction.source).test(withoutComments(raw))).map(([name]) => name)
+  if (JSON.stringify(callers) !== JSON.stringify([factoryPath]) ||
+      [...factorySource.matchAll(construction)].length !== 1 || !new RegExp(construction.source).test(worker)) {
+    fail('has an unverified construction site')
+  }
+  if (JSON.stringify(spawnExpressions(source)) !== JSON.stringify(entry.expressions)) fail('spawn inventory changed')
+  for (const guard of entry.guards) {
+    const matches = [...source.matchAll(new RegExp(guard.source, 'g'))]
+    if (matches.length < (guard.global ? 2 : 1)) fail(`lost guard ${guard.source}`)
+  }
+  if (entry.calls) {
+    const calls = [...source.matchAll(/\brunBinary\(\s*([^,\n]+)/g)]
+      .map((match) => match[1].trim()).filter((argument) => argument !== 'binary: string')
+    if (JSON.stringify(calls) !== JSON.stringify(entry.calls)) fail('decoder callers changed')
+  }
+  return failures
+}
 
 /** Block and line comments removed, so no rule ever reads prose as code. */
 function withoutComments(source) {
@@ -232,6 +331,7 @@ function mediaBinaryRoutingViolations(sources) {
   const routed = []
   const inbound = []
   const declaredNonMedia = []
+  const configured = []
   for (const [path, raw] of sources) {
     if (path === RESOLVER) continue
     const source = withoutComments(raw)
@@ -248,7 +348,16 @@ function mediaBinaryRoutingViolations(sources) {
       violations.push(`${path}: falls back to a bare executable name, which resolves only on a machine that has one`)
     }
 
+    const configuration = CONFIGURED_SPAWNS.get(path)
+    if (configuration) {
+      violations.push(...configuredSpawnViolations(sources, path, source, configuration))
+    }
+
     for (const expression of spawnExpressions(source)) {
+      if (configuration?.expressions.includes(expression)) {
+        configured.push(`${path}::${expression}`)
+        continue
+      }
       if ((NON_MEDIA_SPAWNS.get(path) ?? []).includes(expression)) {
         declaredNonMedia.push(`${path}::${expression}`)
         continue
@@ -278,12 +387,13 @@ function mediaBinaryRoutingViolations(sources) {
     routed: [...new Set(routed)],
     inbound: [...new Set(inbound)].sort(),
     declaredNonMedia: [...new Set(declaredNonMedia)].sort(),
+    configured: [...new Set(configured)].sort(),
   }
 }
 
-test('every ffmpeg and ffprobe spawn in src/ takes its path from the resolver', () => {
+test('every ffmpeg and ffprobe spawn in src/ uses the resolver or audited explicit diagnostic configuration', () => {
   const sources = repositorySources()
-  const { violations, routed, inbound, declaredNonMedia } = mediaBinaryRoutingViolations(sources)
+  const { violations, routed, inbound, declaredNonMedia, configured } = mediaBinaryRoutingViolations(sources)
   assert.deepEqual(violations, [], violations.join('\n'))
 
   // A scanner that found nothing would also report no violations, so the
@@ -319,10 +429,53 @@ test('every ffmpeg and ffprobe spawn in src/ takes its path from the resolver', 
     'src/v2/infrastructure/media/audio-concatenation.ts::ffprobePath',
     'src/v2/infrastructure/media/audio-concatenation.ts::input.ffmpegPath',
   ])
+  assert.deepEqual(configured, [
+    'src/v2/infrastructure/perception/ffmpeg-temporal-video-analyzer.ts::binary',
+    'src/v2/infrastructure/perception/ffmpeg-yunet-face-video-analyzer.ts::binary',
+    'src/v2/infrastructure/perception/tesseract-ocr-video-adapter.ts::this.runtime.ffmpegBinary',
+    'src/v2/infrastructure/perception/tesseract-ocr-video-adapter.ts::this.runtime.ffprobeBinary',
+    'src/v2/infrastructure/perception/tesseract-ocr-video-adapter.ts::this.runtime.tesseractBinary',
+    'src/v2/infrastructure/perception/yunet-cpu-face-detector.ts::this.config.pythonExecutable',
+  ])
 
   // And the resolver is the one module allowed to name ffmpeg-static.
   const naming = [...sources].filter(([, source]) => /['"]ffmpeg-static['"]/.test(source)).map(([path]) => path)
   assert.deepEqual(naming, [RESOLVER])
+})
+
+test('explicit diagnostic binary registration refuses lost required paths, absolute guards, hashes and new spawns', () => {
+  const sources = repositorySources()
+  assert.deepEqual(mediaBinaryRoutingViolations(sources).violations, [])
+  const factoryPath = 'src/v2/infrastructure/repository-factory.ts'
+  const refuses = (path, from, to, label) => {
+    const raw = sources.get(path)
+    assert.ok(raw.includes(from), `mutation fixture missing ${label}`)
+    const changed = new Map(sources)
+    changed.set(path, raw.replace(from, to))
+    assert.ok(mediaBinaryRoutingViolations(changed).violations.length > 0, `${label} was accepted`)
+  }
+  for (const [path, entry] of CONFIGURED_SPAWNS) {
+    for (const variable of entry.variables) {
+      refuses(factoryPath, `required('${variable}')`, `environment['${variable}']`, `${path} unchecked ${variable}`)
+    }
+    for (const guard of entry.guards) {
+      const match = new RegExp(guard.source).exec(sources.get(path))
+      assert.ok(match, `mutation fixture missing ${guard.source}`)
+      refuses(path, match[0], 'REMOVED_DIAGNOSTIC_GUARD', `${path} removed ${guard.source}`)
+    }
+    const additional = new Map(sources)
+    additional.set(path, `${sources.get(path)}\nspawn(${entry.expressions[0]}, [])\n`)
+    assert.ok(mediaBinaryRoutingViolations(additional).violations.length > 0, `${path} extra registered-expression spawn was accepted`)
+    additional.set(path, `${sources.get(path)}\nspawn(uncheckedBinary, [])\n`)
+    assert.ok(mediaBinaryRoutingViolations(additional).violations.length > 0, `${path} unchecked spawn was accepted`)
+    if (entry.calls) {
+      additional.set(path, `${sources.get(path)}\nrunBinary(uncheckedBinary, [], {})\n`)
+      assert.ok(mediaBinaryRoutingViolations(additional).violations.length > 0, `${path} unchecked decoder caller was accepted`)
+    }
+    const caller = new Map(sources)
+    caller.set('src/v2/infrastructure/perception/unchecked-producer.ts', `new ${entry.constructor}(uncheckedRuntime)\n`)
+    assert.ok(mediaBinaryRoutingViolations(caller).violations.length > 0, `${path} unverified constructor caller was accepted`)
+  }
 })
 
 test('the build attestation non-media spawn is fenced to Git, Node and taskkill cleanup', () => {

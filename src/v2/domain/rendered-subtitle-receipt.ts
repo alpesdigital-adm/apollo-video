@@ -136,7 +136,8 @@ export function createRenderedSubtitleReceipt(input: {
     scriptEvents.length === input.drawnCues.length,
   'INVALID_RENDER_INPUT', 'Subtitle receipt does not cover exactly the emitted ASS events')
   const seen = new Set<string>()
-  const seenEvents = new Set<string>()
+  // Per-document ASS line uniqueness; this is not cross-request replay state.
+  const uniqueAssLines = new Set<string>()
   const drawn = input.drawnCues.map((cue) => {
     assertDomain(CUE_ID.test(cue.cueId) && !seen.has(cue.cueId) &&
       Number.isSafeInteger(cue.startFrame) && cue.startFrame >= 0 &&
@@ -148,11 +149,11 @@ export function createRenderedSubtitleReceipt(input: {
     assertDomain(fields[1] === assTimestamp(cue.startFrame, input.outputSpec.fps) &&
       fields[2] === assTimestamp(cue.endFrame, input.outputSpec.fps),
     'INVALID_RENDER_INPUT', 'Subtitle receipt ASS timestamps differ from cue frames')
-    assertDomain(scriptEvents.includes(cue.assEventLine) && !seenEvents.has(cue.assEventLine) &&
+    assertDomain(scriptEvents.includes(cue.assEventLine) && !uniqueAssLines.has(cue.assEventLine) &&
       cue.displayText === displayTextFromAssEvent(cue.assEventLine),
     'INVALID_RENDER_INPUT', 'Subtitle receipt text differs from the emitted ASS event')
     seen.add(cue.cueId)
-    seenEvents.add(cue.assEventLine)
+    uniqueAssLines.add(cue.assEventLine)
     return Object.freeze({ ...cue })
   })
   const suppressed = [...input.suppressedCueIds]

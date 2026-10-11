@@ -62182,7 +62182,8 @@
                     "failed",
                     "canceled",
                     "planning",
-                    "reviewing"
+                    "reviewing",
+                    "analyzing"
                   ]
                 },
                 "progress": {
@@ -62726,7 +62727,8 @@
                     "failed",
                     "canceled",
                     "planning",
-                    "reviewing"
+                    "reviewing",
+                    "analyzing"
                   ]
                 },
                 "progress": {
@@ -128439,7 +128441,8 @@
                                   "retrying",
                                   "completed",
                                   "failed",
-                                  "canceled"
+                                  "canceled",
+                                  "analyzing"
                                 ]
                               },
                               "progress": {
@@ -129521,7 +129524,8 @@
                                   "retrying",
                                   "completed",
                                   "failed",
-                                  "canceled"
+                                  "canceled",
+                                  "analyzing"
                                 ]
                               },
                               "progress": {
@@ -177489,7 +177493,8 @@
                     "failed",
                     "canceled",
                     "planning",
-                    "reviewing"
+                    "reviewing",
+                    "analyzing"
                   ]
                 },
                 "progress": {
@@ -178030,7 +178035,8 @@
                     "failed",
                     "canceled",
                     "planning",
-                    "reviewing"
+                    "reviewing",
+                    "analyzing"
                   ]
                 },
                 "progress": {
@@ -182557,7 +182563,8 @@
                       "failed",
                       "canceled",
                       "planning",
-                      "reviewing"
+                      "reviewing",
+                      "analyzing"
                     ]
                   },
                   "progress": {
@@ -183108,7 +183115,8 @@
                       "failed",
                       "canceled",
                       "planning",
-                      "reviewing"
+                      "reviewing",
+                      "analyzing"
                     ]
                   },
                   "progress": {
@@ -241017,7 +241025,8 @@
                     "failed",
                     "canceled",
                     "planning",
-                    "reviewing"
+                    "reviewing",
+                    "analyzing"
                   ]
                 },
                 "progress": {
@@ -241560,7 +241569,8 @@
                     "failed",
                     "canceled",
                     "planning",
-                    "reviewing"
+                    "reviewing",
+                    "analyzing"
                   ]
                 },
                 "progress": {

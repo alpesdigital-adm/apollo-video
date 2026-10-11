@@ -14,6 +14,7 @@ import {
   presentProjectWorkspaceV7,
 } from '../../src/v2/public-api/presenters.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
+import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
 import { PrismaProjectWorkspaceQueryRepository } from '../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts'
 
 function project(id, createdAt) {
@@ -183,8 +184,8 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   assert.equal(publicProject.visibleState.label, 'draft')
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  assert.equal(capabilities.get('apollo.projects.list').version, '4.0.0')
-  assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v6')
+  assert.equal(capabilities.get('apollo.projects.list').version, '6.0.0')
+  assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v9')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v5').ref, 'apollo://schemas/project-list/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v4').ref, 'apollo://schemas/project-list/v4')
   assert.equal(capabilities.get('apollo.projects.create').version, '5.0.0')
@@ -263,13 +264,16 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
   assert.equal(Object.isFrozen(publicWorkspace.version.visibleState), true)
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  for (const id of ['apollo.projects.workspace.read', 'apollo.projects.workspace.current.read']) {
-    assert.equal(capabilities.get(id).version, '10.0.0')
-    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v11')
+  for (const [id, version] of [
+    ['apollo.projects.workspace.read', '12.0.0'],
+    ['apollo.projects.workspace.current.read', '11.0.0'],
+  ]) {
+    assert.equal(capabilities.get(id).version, version)
+    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v12')
   }
   assert.equal(getPublicSchema('apollo://schemas/project-workspace/v6').ref, 'apollo://schemas/project-workspace/v6')
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-    .compile(getPublicSchema('apollo://schemas/project-workspace/v11').schema)
+    .compile(getPublicSchema('apollo://schemas/project-workspace/v12').schema)
   const validBody = { data: publicWorkspace, meta: { apiVersion: 'v1' } }
   assert.equal(validate(validBody), true, JSON.stringify(validate.errors))
   const mismatch = structuredClone(validBody)
@@ -326,4 +330,46 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
     () => repository.read({ workspaceId: 'workspace-projects-1', projectId: 'project-workspace-corrupt-1' }),
     /Stored project status is invalid/,
   )
+})
+
+test('project list v9 accepts measured perception stages without widening historical list contracts', () => {
+  const ajv = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/project-list/v9').schema)
+  const cases = [
+    ['perception-producer-run', 'transcribing', 7],
+    ['perception-temporal-run', 'analyzing', 8],
+    ['perception-face-run', 'analyzing', 9],
+  ]
+  for (const [type, middlePhase, firstVersion] of cases) {
+    const historical = ajv.compile(getPublicSchema(`apollo://schemas/project-list/v${firstVersion - 1}`).schema)
+    for (const [completed, phase] of ['probing', middlePhase, 'verifying', 'persisting'].entries()) {
+      const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-list/v6'))
+        .find((example) => example.data.projects.length > 0))
+      body.data.projects[0].dashboard.latestOperation = {
+        id: 'operation-perception-dashboard-1', type, status: 'running', phase,
+        progress: { completed, total: 4, unit: 'stage' }, updatedAt: '2026-10-08T00:00:00.000Z',
+      }
+      assert.equal(validate(body), true, `${type}/${phase}: ${JSON.stringify(validate.errors)}`)
+      assert.equal(historical(body), false, `list v${firstVersion - 1} must not admit ${type}`)
+      const inventedPhase = structuredClone(body)
+      inventedPhase.data.projects[0].dashboard.latestOperation.phase = 'detecting-faces'
+      assert.equal(validate(inventedPhase), false)
+      const fabricatedSafety = structuredClone(body)
+      fabricatedSafety.data.projects[0].dashboard.latestOperation.faceSafety = 'verified'
+      assert.equal(validate(fabricatedSafety), false)
+    }
+  }
+})
+
+test('workspace v12 exposes Director review-required without promoting it to approval', () => {
+  const ajv = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v12').schema)
+  const historical = ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v11').schema)
+  const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-workspace/v12'))[0])
+  assert.equal(body.data.directorRuns[0].qualityStatus, 'review-required')
+  assert.equal(validate(body), true, JSON.stringify(validate.errors))
+  assert.equal(historical(body), false, 'v11 remains closed over its published quality states')
+  const inventedApproval = structuredClone(body)
+  inventedApproval.data.directorRuns[0].qualityStatus = 'face-safe-approved'
+  assert.equal(validate(inventedApproval), false)
 })

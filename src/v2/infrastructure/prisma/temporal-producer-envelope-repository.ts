@@ -85,7 +85,8 @@ function hydrateContent(contentJson: string, expectedHash: string): TemporalProd
 }
 
 export class PrismaTemporalProducerEnvelopeRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+  constructor(client: PrismaClient) { this.client = client }
 
   async currentFenceHash(input: { operationId: string; attempt: number; leaseOwner: string; now: Date }) {
     const operation = await this.client.v2PublicOperation.findFirst({ where: {
