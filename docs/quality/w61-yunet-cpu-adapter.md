@@ -91,6 +91,40 @@ rights-stage test stops at an identified sentinel after real rights persistence;
 it is not a complete ingest E2E. These changes still require the new commit's
 local PostgreSQL proofs and mandatory CI before integration.
 
+The subsequent proxy PostgreSQL run `rights-proxy-pg-v3-fcf434ce` exposed a real
+publication race: a rights revocation committed while the publisher waited for
+its operation lock, but a plain reread retained the older SERIALIZABLE snapshot.
+Fresh PostgreSQL time alone prevented expiry, not that revocation. The failed
+result remains preserved (SHA-256
+`e73d4572221ce6a511e3e2a24b1803c3df98b14458a0a590b48825df513ab3ac`).
+The prepared correction locks operation, project and all authoritative source,
+music and output artifacts, then refreshes lease/time and rereads. Only exact
+P2034 or P2010/40001 conflicts retry the complete transaction, at most three
+times. Both resolver paths still require the four real expiry/revocation latches
+to pass on the final commit; unit tests do not establish this gate.
+
+The revised staged source passed literal `npm test` in
+`rights-fences-unit-v1-49bd2d46`: 2801 tests, 2794 passing, zero failures and seven
+identified skips. Result SHA-256
+`ab87e861470b3de18e0bd4114bb0dcae38efc3f2a7c4c8e3895ab0d7268a245d`;
+fingerprint before/after
+`2776c66b85e0a86657e7eb799b4a324778e859e97cd7d766adac173b5c75dc4b`.
+All 24 observations completed, 138 process identities were terminal, no database
+backends remained, and scratch cleanup passed. This is pre-commit regression
+evidence; Linux supervision, PostgreSQL, build and journeys remain separate gates.
+
+CI on `030b7ea8` exposed additional fixture/supervision failures. EACCES reading
+an older process environment stopped Quality and perception before their proof;
+the new observer excludes only a frozen, rechecked PID/starttime/UID/parent
+identity predating the owner, outside every owned/marked descendant tree.
+Linux execution remains mandatory. Compose fixtures now explicitly grant their
+generated podcast recordings rights and remove an unintended territorial limit
+from the generated editor source; the runtime's market and missing-rights gates
+remain intact. Dashboard's real project remains `revising`, unknown/blocked and
+publicly unexportable. Its final state mechanics use a separately identified
+seeded project and test-only approval port, with independent IDs, manifests and
+lineage. Neither the seed nor a completed mechanical export is editorial approval.
+
 This adapter is **implemented in isolation, not integrated or approved** for W62. It consumes only explicitly sampled encoded PNG/JPEG frames with strictly increasing nonnegative `ptsMs` and an upstream `sourceSha256` assertion. The caller must establish source bytes, lineage and sampling. The adapter cannot establish coverage between samples, eye visibility, safe subtitle placement, tracking, or identity. Every unsampled interval remains unknown.
 
 `YunetCpuFaceDetector.detect()` in `src/v2/infrastructure/perception/yunet-cpu-face-detector.ts` runs `yunet_cpu_bridge.py` as one owned child per batch. Input is one JSON request on stdin (`apollo-yunet-cpu-v1`) with model/source SHA-256, up to 30 frames, each encoded bytes plus SHA-256 and PTS. Output is one bounded JSON response with per-frame SHA-256, `observed` or `unknown`, reason for unknown, and up to 128 normalized `[left, top, right, bottom]` **XYXY** face boxes with confidence and clipping flag. `observed` with zero boxes means no face in that sampled frame at score >=0.50; any decode, size, inference or protocol failure is unknown/error, never absence. Inputs are at most 5,000,000 encoded bytes each and 20,000,000 per batch. PNG/JPEG dimensions are inspected before OpenCV decode: each axis <=8192 and <=20,000,000 pixels. The decoded dimensions must equal the header. Frames are decoded and processed sequentially. Response cap is 2,000,000 bytes; process timeout is at most 30 seconds. Abort/timeout kills and awaits child closure. Stderr is discarded; no frame pixels or paths are logged.

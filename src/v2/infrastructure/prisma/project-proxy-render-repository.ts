@@ -169,6 +169,20 @@ function sourceRightsPurpose(link: ProjectSourceLink): Readonly<{
   throw new DomainError('PERSISTENCE_CONFLICT', `Render source ${link.artifactId} has an unsupported project role or media type`)
 }
 
+function referencedRenderArtifactIds(editPlan: EditorialCutEditPlan | DirectedEditPlan): string[] {
+  const clips = editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+  return [...new Set(clips.flatMap((clip) => [clip.sourceArtifactId,
+    clip.audioSourceArtifactId ?? clip.sourceArtifactId]).concat(
+    'audioTracks' in editPlan ? editPlan.audioTracks.map((track) => track.artifactId) : []))].sort()
+}
+
+function isProxySerializationConflict(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false
+  if (error.code === 'P2034') return true
+  return error.code === 'P2010' && 'meta' in error && typeof error.meta === 'object' &&
+    error.meta !== null && 'code' in error.meta && error.meta.code === '40001'
+}
+
 function hydrateSource(
   project: Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>,
   expected?: { sourceArtifactId?: string; sourceManifestId?: string },
@@ -193,11 +207,7 @@ function hydrateSource(
     typeof artifactBody !== 'object' || artifactBody === null || Array.isArray(artifactBody) ||
     typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy source is inconsistent')
-  const clips = editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
-  const referencedArtifactIds = [...new Set(clips.flatMap((clip) => [
-    clip.sourceArtifactId,
-    clip.audioSourceArtifactId ?? clip.sourceArtifactId,
-  ]).concat(('audioTracks' in editPlan ? editPlan.audioTracks.map((track) => track.artifactId) : [])))].sort()
+  const referencedArtifactIds = referencedRenderArtifactIds(editPlan)
   const renderSources = referencedArtifactIds.map((artifactId) => {
     const link = uniqueSourceLink(project.mediaAssets, artifactId)
     const purpose = sourceRightsPurpose(link)
@@ -403,11 +413,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     }, client)
     const version = project?.versions[0]
     if (!project || !version) return null
-    const clips = snapshot.plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
-    const referencedArtifactIds = [...new Set(clips.flatMap((clip) => [
-      clip.sourceArtifactId,
-      clip.audioSourceArtifactId ?? clip.sourceArtifactId,
-    ]).concat(snapshot.plan.audioTracks.map((track) => track.artifactId)))].sort()
+    const referencedArtifactIds = referencedRenderArtifactIds(snapshot.plan)
     const renderSources = referencedArtifactIds.map((artifactId) => {
       const link = uniqueSourceLink(project.mediaAssets, artifactId)
       const purpose = sourceRightsPurpose(link)
@@ -527,6 +533,61 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         !Number.isFinite(new Date(input.lease.now).getTime())) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy completion lost its active worker lease')
     }
+    return observedAt
+  }
+
+  private async lockCompletionSources(
+    transaction: Prisma.TransactionClient,
+    input: Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0] |
+      Parameters<ProjectProxyRenderRepository['attachCompletedSnapshotOutput']>[0],
+    operation: Readonly<{ projectVersionId: string; editPlanSnapshotId: string;
+      sourceArtifactId: string; renderablePlanId?: string | null; renderablePlanHash?: string | null }>,
+  ): Promise<Date> {
+    // The operation fence is already held. Project/head and every authoritative
+    // source pointer must participate: a plain SELECT in SERIALIZABLE can keep
+    // seeing rights from before an operation-lock wait. FOR UPDATE on a changed
+    // row instead raises 40001, requiring a wholly new transaction/snapshot.
+    const projects = await transaction.$queryRaw<readonly { id: string }[]>`
+      SELECT id FROM projects WHERE id = ${input.projectId} AND "workspaceId" = ${input.workspaceId} FOR UPDATE`
+    if (projects.length !== 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy publication project fence is unavailable')
+    let plan: EditorialCutEditPlan | DirectedEditPlan
+    if (operation.renderablePlanHash) {
+      const snapshot = await new PrismaRenderablePlanSnapshotRepository(transaction).readByPlan({
+        workspaceId: input.workspaceId, projectId: input.projectId,
+        planId: operation.renderablePlanId ?? '', planHash: operation.renderablePlanHash,
+      })
+      if (!snapshot || snapshot.plan.projectVersionId !== operation.projectVersionId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy publication snapshot authority is unavailable')
+      }
+      plan = snapshot.plan
+    } else {
+      const project = await this.queryProject({ workspaceId: input.workspaceId,
+        projectId: input.projectId, projectVersionId: operation.projectVersionId,
+        editPlanSnapshotId: operation.editPlanSnapshotId }, transaction)
+      const version = project?.versions[0]
+      if (!project || !version || version.editPlanSnapshot.workspaceId !== input.workspaceId ||
+          version.editPlanSnapshot.projectId !== input.projectId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy publication plan authority is unavailable')
+      }
+      plan = parseRecord(version.editPlanSnapshot.contentJson, 'proxy publication EditPlan') as unknown as EditorialCutEditPlan | DirectedEditPlan
+      if (plan.schemaVersion !== 2 || plan.state !== 'compiled' ||
+          calculateVersionHash(plan) !== version.editPlanSnapshot.contentHash) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy publication plan authority is inconsistent')
+      }
+    }
+    const artifactIds = [...new Set([...referencedRenderArtifactIds(plan),
+      operation.sourceArtifactId, input.outputArtifactId])]
+      .sort((left, right) => Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8')))
+    const artifacts = await transaction.$queryRaw<readonly { id: string }[]>`
+      SELECT id FROM media_artifacts WHERE "workspaceId" = ${input.workspaceId}
+      AND id IN (${Prisma.join(artifactIds)}) ORDER BY id COLLATE "C" FOR UPDATE`
+    if (artifacts.length !== artifactIds.length || artifacts.some((row, index) => row.id !== artifactIds[index])) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy publication artifact fences are unavailable')
+    }
+    // Refresh lease and clock only after every possible lock wait. Rights/source
+    // reads in the caller are repeated under these fences before publication.
+    const observedAt = await this.assertCompletionLease(transaction, input)
+    if (!observedAt) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy completed while acquiring publication fences')
     return observedAt
   }
 
@@ -743,18 +804,19 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         await this.client.$transaction(async (transaction) => {
-      const observedAt = await this.assertCompletionLease(transaction, input)
-      if (!observedAt) return
-      const [operation, artifact, manifest] = await Promise.all([
-        transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
+      const admittedAt = await this.assertCompletionLease(transaction, input)
+      if (!admittedAt) return
+      const operation = await transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
           operationId: input.operationId, workspaceId: input.workspaceId, projectId: input.projectId,
           projectVersionId: input.projectVersionId, outputArtifactId: input.outputArtifactId, outputManifestId: input.outputManifestId,
-        } }),
+        } })
+      if (!operation || operation.renderablePlanHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy context is inconsistent')
+      const observedAt = await this.lockCompletionSources(transaction, input, operation)
+      const [artifact, manifest] = await Promise.all([
         transaction.v2MediaArtifact.findFirst({ where: { id: input.outputArtifactId, workspaceId: input.workspaceId, status: 'available' } }),
         transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.outputManifestId, workspaceId: input.workspaceId, artifactId: input.outputArtifactId } }),
       ])
-      if (!operation || !artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy output is inconsistent')
-      if (operation.renderablePlanHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot cannot use project proxy attachment')
+      if (!artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy output is inconsistent')
       assertSealedProxyRecipe(input, operation, artifact, manifest)
       const project = await this.queryProject({ workspaceId: input.workspaceId,
         projectId: input.projectId, projectVersionId: input.projectVersionId }, transaction)
@@ -852,8 +914,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
         return
       } catch (error) {
-        const serialization = typeof error === 'object' && error !== null &&
-          'code' in error && error.code === 'P2034'
+        const serialization = isProxySerializationConflict(error)
         if (serialization && attempt < 2) continue
         if (serialization) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy attachment serialization conflicted')
         throw error
@@ -865,18 +926,22 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         await this.client.$transaction(async (transaction) => {
-      const observedAt = await this.assertCompletionLease(transaction, input)
-      if (!observedAt) return
-      const [operation, artifact, manifest] = await Promise.all([
-        transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
+      const admittedAt = await this.assertCompletionLease(transaction, input)
+      if (!admittedAt) return
+      const operation = await transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
           operationId: input.operationId, workspaceId: input.workspaceId, projectId: input.projectId,
           renderableVariantId: input.variantId, outputArtifactId: input.outputArtifactId,
           outputManifestId: input.outputManifestId,
-        } }),
+        } })
+      if (!operation || !operation.renderablePlanHash || !operation.renderablePlanId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Completed renderable snapshot proxy context is inconsistent')
+      }
+      const observedAt = await this.lockCompletionSources(transaction, input, operation)
+      const [artifact, manifest] = await Promise.all([
         transaction.v2MediaArtifact.findFirst({ where: { id: input.outputArtifactId, workspaceId: input.workspaceId, status: 'available' } }),
         transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.outputManifestId, workspaceId: input.workspaceId, artifactId: input.outputArtifactId } }),
       ])
-      if (!operation || !artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed renderable snapshot proxy output is inconsistent')
+      if (!artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed renderable snapshot proxy output is inconsistent')
       assertSealedProxyRecipe(input, operation, artifact, manifest)
       if (input.ocrReceipt !== null || input.recipeParameters.ocrReceipt !== null ||
           !operation.renderablePlanId || !operation.renderablePlanHash ||
@@ -910,8 +975,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
         return
       } catch (error) {
-        const serialization = typeof error === 'object' && error !== null &&
-          'code' in error && error.code === 'P2034'
+        const serialization = isProxySerializationConflict(error)
         if (serialization && attempt < 2) continue
         if (serialization) throw new DomainError('PERSISTENCE_CONFLICT', 'Snapshot proxy attachment serialization conflicted')
         throw error

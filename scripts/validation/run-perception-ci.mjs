@@ -54,29 +54,130 @@ export async function readLinuxProcessIdentity(pid) {
   catch (error) { if (['ENOENT', 'ESRCH'].includes(error.code)) return null; throw error }
 }
 
-export async function linuxProcessSnapshot(runId) {
-  assert.equal(process.platform, 'linux')
-  const started = Date.now(), entries = await readdir('/proc'), result = []
+const linuxObservationIo = {
+  entries: () => readdir('/proc'), identity: readLinuxProcessIdentity,
+  owner: (pid) => stat(`/proc/${pid}`), environment: (pid) => readFile(`/proc/${pid}/environ`),
+}
+
+export async function createLinuxObservationContext(ownerPid = process.pid, io = linuxObservationIo) {
+  const ownerIdentity = await io.identity(ownerPid)
+  assert.ok(live(ownerIdentity), 'Supervisor owner identity is unavailable')
+  const owner = await io.owner(ownerPid), verified = await io.identity(ownerPid)
+  assert.ok(verified && identityKey(verified) === identityKey(ownerIdentity), 'Supervisor owner identity changed')
+  assert.ok(Number.isSafeInteger(owner.uid) && owner.uid >= 0, 'Supervisor owner UID is unavailable')
+  return { ownerIdentity: { ...verified }, ownerUid: owner.uid, baseline: new Map(),
+    captureBaseline: true, observed: new Map(), knownMarkers: new Set(), exclusions: new Map(), rootPid: undefined }
+}
+
+function protectedIdentities(entries, context) {
+  const protectedKeys = new Set([identityKey(context.ownerIdentity), ...context.observed.keys(), ...context.knownMarkers])
+  for (const entry of entries) if (entry.pid === context.rootPid || entry.runMarked) protectedKeys.add(identityKey(entry))
+  const children = new Map(), queue = entries.filter((entry) => protectedKeys.has(identityKey(entry)))
+  for (const entry of entries) {
+    const siblings = children.get(entry.ppid) ?? []
+    siblings.push(entry); children.set(entry.ppid, siblings)
+  }
+  for (let index = 0; index < queue.length; index += 1) for (const child of children.get(queue[index].pid) ?? []) {
+    const key = identityKey(child)
+    if (!protectedKeys.has(key)) { protectedKeys.add(key); queue.push(child) }
+  }
+  return protectedKeys
+}
+
+// IO injection is for controlled policy tests. Production always uses /proc.
+export async function observeLinuxProcesses(runId, context, io = linuxObservationIo) {
+  assert.ok(context?.ownerIdentity && context.baseline instanceof Map, 'Missing supervisor observation baseline')
+  const started = Date.now(), entries = await io.entries(), result = [], denied = []
   assert.ok(entries.length <= 16_384, 'Linux process inventory exceeds observation bound')
+  // Metadata first: environment ordering must not hide a later-listed marked
+  // parent or a root/observed descendant from an earlier EACCES candidate.
   for (const name of entries.filter((value) => /^\d+$/.test(value))) {
     assert.ok(Date.now() - started < 3000, 'Linux observation exceeded its deadline')
     try {
-      const entry = await readLinuxProcessIdentity(Number(name))
+      const entry = await io.identity(Number(name))
       if (!entry) continue
-      const owner = await stat(`/proc/${name}`)
-      // Permission denial on an unrelated other-user environ is normal. An
-      // unreadable same-user identity is inconclusive and closes the gate.
-      if (owner.uid === process.getuid() && live(entry)) {
-        const environment = await readFile(`/proc/${name}/environ`)
-        assert.ok(environment.length <= 2 * 1024 * 1024, 'Linux process environment exceeds observation bound')
-        entry.runMarked = environment.toString('utf8').split('\0').includes(`${RUN_MARKER}=${runId}`)
-        const verified = await readLinuxProcessIdentity(entry.pid)
-        if (!verified || verified.starttime !== entry.starttime) continue
-      }
-      result.push(entry)
+      const owner = await io.owner(entry.pid)
+      assert.ok(Number.isSafeInteger(owner.uid) && owner.uid >= 0, 'Linux process UID is unavailable')
+      result.push({ ...entry, uid: owner.uid })
     } catch (error) { if (['ENOENT', 'ESRCH'].includes(error.code)) continue; throw error }
   }
-  return result
+  const ownerIdentity = await io.identity(context.ownerIdentity.pid)
+  const owner = await io.owner(context.ownerIdentity.pid)
+  assert.ok(ownerIdentity && identityKey(ownerIdentity) === identityKey(context.ownerIdentity) &&
+    owner.uid === context.ownerUid, 'Supervisor owner identity or UID changed')
+  if (context.captureBaseline) {
+    assert.equal(context.rootPid, undefined, 'Baseline cannot be established after child spawn')
+    for (const entry of result) context.baseline.set(identityKey(entry), Object.freeze({ ...entry }))
+    context.captureBaseline = false
+    context.baselineCapturedAt = new Date().toISOString()
+  }
+  const absent = new Set()
+  for (const entry of result) {
+    assert.ok(Date.now() - started < 3000, 'Linux observation exceeded its deadline')
+    if (entry.uid !== context.ownerUid || !live(entry)) continue
+    let environment
+    try {
+      environment = await io.environment(entry.pid)
+    } catch (error) {
+      if (['ENOENT', 'ESRCH'].includes(error.code)) { absent.add(identityKey(entry)); continue }
+      if (error.code === 'EACCES') { denied.push({ entry, error }); continue }
+      throw error
+    }
+    try {
+      assert.ok(environment.length <= 2 * 1024 * 1024, 'Linux process environment exceeds observation bound')
+      const variables = environment.toString('utf8').split('\0')
+      entry.runMarked = variables.includes(`${RUN_MARKER}=${runId}`)
+      if (variables.some((value) => value.startsWith(`${RUN_MARKER}=`) && value !== `${RUN_MARKER}=`)) {
+        context.knownMarkers.add(identityKey(entry))
+        assert.ok(context.knownMarkers.size <= 16_384, 'Known marker inventory exceeds observation bound')
+      }
+      const verified = await io.identity(entry.pid)
+      if (!verified) { absent.add(identityKey(entry)); continue }
+      assert.equal(identityKey(verified), identityKey(entry), 'Linux process identity changed during environment read')
+      const currentOwner = await io.owner(entry.pid)
+      assert.equal(currentOwner.uid, entry.uid, 'Linux process UID changed during environment read')
+      Object.assign(entry, verified)
+    } catch (error) {
+      if (['ENOENT', 'ESRCH'].includes(error.code)) { absent.add(identityKey(entry)); continue }
+      throw error
+    }
+  }
+  const present = result.filter((entry) => !absent.has(identityKey(entry)))
+  const protectedKeys = protectedIdentities(present, context)
+  for (const { entry, error } of denied) {
+    assert.ok(Date.now() - started < 3000, 'Linux observation exceeded its deadline')
+    // Only environ EACCES is eligible. A same UID alone establishes no absence
+    // of ownership. PID/starttime/UID and stable parentage must match the frozen
+    // baseline, and the task must predate the supervisor itself (strictly).
+    const prior = context.baseline.get(identityKey(entry))
+    let verified, currentOwner
+    try {
+      verified = await io.identity(entry.pid)
+      if (!verified) { absent.add(identityKey(entry)); continue }
+      currentOwner = await io.owner(entry.pid)
+    } catch (recheckError) {
+      if (['ENOENT', 'ESRCH'].includes(recheckError.code)) { absent.add(identityKey(entry)); continue }
+      throw recheckError
+    }
+    if (!prior || identityKey(verified) !== identityKey(entry) || currentOwner.uid !== entry.uid ||
+        prior.uid !== entry.uid || prior.ppid !== entry.ppid || verified.ppid !== entry.ppid ||
+        BigInt(entry.starttime) >= BigInt(context.ownerIdentity.starttime) ||
+        protectedKeys.has(identityKey(entry)) || context.knownMarkers.has(identityKey(entry))) throw error
+    const key = identityKey(entry), previous = context.exclusions.get(key)
+    context.exclusions.set(key, { pid: entry.pid, starttime: entry.starttime, uid: entry.uid, ppid: entry.ppid,
+      ownerPid: context.ownerIdentity.pid, ownerStarttime: context.ownerIdentity.starttime,
+      reason: 'environ-eacces-preexisting-before-owner-unrelated',
+      baselineCapturedAt: context.baselineCapturedAt,
+      firstObservedAt: previous?.firstObservedAt ?? new Date().toISOString(), lastObservedAt: new Date().toISOString() })
+    assert.ok(context.exclusions.size <= 16_384, 'Excluded peer inventory exceeds observation bound')
+  }
+  return present.filter((entry) => !absent.has(identityKey(entry)))
+}
+
+export async function linuxProcessSnapshot(runId, context) {
+  assert.equal(process.platform, 'linux')
+  assert.equal(context?.ownerUid, process.getuid(), 'Supervisor owner UID does not match its process credentials')
+  return observeLinuxProcesses(runId, context)
 }
 
 export function collectOwnedIdentities(snapshot, observed, rootPid) {
@@ -219,11 +320,14 @@ export async function supervisePerceptionCommand({ command = process.execPath, a
   const report = { runId, ownerPid: process.pid, startedAt: new Date(started).toISOString(),
     deadlineAt: new Date(started + deadlineMs).toISOString(), observationIntervalMs,
     observations: 0, observationComplete: true, signals: [], cleanupErrors: [] }
-  let child, closed = false, processError, primaryError
+  let child, closed = false, processError, primaryError, observationContext
   const observe = async () => {
     try {
-      const entries = await bounded(() => snapshot(runId), 3500, 'Linux process snapshot')
+      assert.ok(observationContext, 'Supervisor owner baseline is unavailable')
+      observationContext.rootPid = child?.pid
+      const entries = await bounded(() => snapshot(runId, observationContext), 3500, 'Linux process snapshot')
       collectOwnedIdentities(entries, observed, child?.pid)
+      report.excludedPreexistingProcesses = [...observationContext.exclusions.values()]
       const entriesByPid = new Map(entries.map((entry) => [entry.pid, entry]))
       report.observations += 1
       report.zombies = entries.filter((entry) => observed.has(identityKey(entry)) && entry.state === 'Z')
@@ -244,6 +348,10 @@ export async function supervisePerceptionCommand({ command = process.execPath, a
   }
   try {
     report.jobDeadlineAt = new Date(requireJobBudget(jobDeadline, deadlineMs)).toISOString()
+    observationContext = await bounded(() => createLinuxObservationContext(), 3500, 'Supervisor owner baseline')
+    assert.equal(observationContext.ownerUid, process.getuid(), 'Supervisor owner UID does not match its process credentials')
+    observationContext.observed = observed
+    report.ownerIdentity = observationContext.ownerIdentity
     checkActive(); await observe(); checkActive()
     requireJobBudget(jobDeadline, deadlineMs)
     child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'],
@@ -322,6 +430,11 @@ export async function supervisePerceptionCommand({ command = process.execPath, a
     report.childClosed = !child || closed
     report.childCloseObserved = Boolean(child && closed)
     report.observedProcesses = [...observed.values()]
+    report.excludedPreexistingProcesses = [...(observationContext?.exclusions.values() ?? [])]
+    report.processBaseline = observationContext ? {
+      ownerIdentity: observationContext.ownerIdentity, ownerUid: observationContext.ownerUid,
+      capturedAt: observationContext.baselineCapturedAt ?? null, identityCount: observationContext.baseline.size,
+    } : null
     report.processTreeTerminal = report.observationComplete && report.childClosed &&
       active.length === 0 && report.cleanupErrors.length === 0
     report.inventoryInconclusive = !report.observationComplete || report.cleanupErrors.length > 0

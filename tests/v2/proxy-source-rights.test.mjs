@@ -67,7 +67,7 @@ function fixture({ role = 'selected-insert', mediaType = 'video', rights = { all
       fps: 30, durationFrames: 60, clipCount: 2, planJson: JSON.stringify(plan),
       planHash: hash, createdAt: new Date(createdAt) } } } }
   const repository = new PrismaProjectProxyRenderRepository(client)
-  return { secondId, project,
+  return { secondId, project, repository,
     projectRead: () => repository.readCurrentSource({ workspaceId, projectId }),
     snapshotRead: () => repository.readRenderableSnapshotSource({ workspaceId, projectId,
       planId: plan.id, planHash: hash, format: '9:16' }) }
@@ -118,3 +118,70 @@ test('project path: music retains its pinned current snapshot branch but never a
   await assert.rejects(fixture({ role: 'source-audio', mediaType: 'audio', music: true,
     ambiguous: true }).projectRead(), (e) => e.code === 'PERSISTENCE_CONFLICT')
 })
+
+test('publication fences lock project then all video/audio/music/output identities in deterministic order before clock refresh', async () => {
+  const { project, repository, secondId } = fixture({ role: 'source-audio', mediaType: 'audio' })
+  const snapshot = project.versions[0].editPlanSnapshot
+  const plan = JSON.parse(snapshot.contentJson)
+  plan.audioTracks = [{ artifactId: 'artifact-rights-music' }]
+  // C collation follows UTF-8 bytes, not JS UTF-16 ordering. No extra ID
+  // prohibition belongs in the publication lock helper.
+  plan.videoTracks[0].clips[0].audioSourceArtifactId = 'artifact-\uE000'
+  plan.videoTracks[0].clips[1].sourceArtifactId = 'artifact-\u{10000}'
+  snapshot.contentJson = JSON.stringify(plan)
+  snapshot.contentHash = calculateVersionHash(plan)
+  const expected = ['artifact-rights-master', 'artifact-rights-music', 'artifact-rights-output', secondId,
+    'artifact-\uE000', 'artifact-\u{10000}'].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+  const order = []
+  const tx = { v2Project: { async findFirst() { return project } }, async $queryRaw(strings, ...values) {
+    const sql = strings.join('?')
+    if (sql.includes('FROM projects')) {
+      order.push('project')
+      assert.deepEqual(values, [projectId, workspaceId])
+      assert.match(sql, /FOR UPDATE/)
+      return [{ id: projectId }]
+    }
+    assert.match(sql, /FROM media_artifacts/)
+    assert.match(sql, /ORDER BY id COLLATE "C" FOR UPDATE/)
+    assert.equal(values[0], workspaceId)
+    assert.deepEqual(values[1].values, expected)
+    order.push('artifacts')
+    return expected.map((id) => ({ id }))
+  } }
+  repository.assertCompletionLease = async () => { order.push('clock-lease'); return new Date(createdAt) }
+  await repository.lockCompletionSources(tx, { workspaceId, projectId, outputArtifactId: 'artifact-rights-output' }, {
+    projectVersionId: project.versions[0].id, editPlanSnapshotId: 'snapshot-proxy-rights',
+    sourceArtifactId: 'artifact-rights-master' })
+  assert.deepEqual(order, ['project', 'artifacts', 'clock-lease'])
+  tx.$queryRaw = async (strings) => strings.join('').includes('FROM projects')
+    ? [{ id: projectId }] : expected.slice(1).map((id) => ({ id }))
+  await assert.rejects(repository.lockCompletionSources(tx, { workspaceId, projectId,
+    outputArtifactId: 'artifact-rights-output' }, { projectVersionId: project.versions[0].id,
+    editPlanSnapshotId: 'snapshot-proxy-rights', sourceArtifactId: 'artifact-rights-master' }),
+  (error) => error.code === 'PERSISTENCE_CONFLICT')
+})
+
+for (const method of ['attachCompletedOutput', 'attachCompletedSnapshotOutput']) {
+  test(`${method}: serialization retries are finite and match only precise Prisma/SQLSTATE codes`, async () => {
+    for (const error of [{ code: 'P2034' }, { code: 'P2010', meta: { code: '40001' } }]) {
+      let attempts = 0
+      const repository = new PrismaProjectProxyRenderRepository({ async $transaction() { attempts += 1; throw error } })
+      await assert.rejects(repository[method]({}), (failure) => failure.code === 'PERSISTENCE_CONFLICT')
+      assert.equal(attempts, 3)
+      attempts = 0
+      const converging = new PrismaProjectProxyRenderRepository({ async $transaction() {
+        if (++attempts === 1) throw error
+      } })
+      await converging[method]({})
+      assert.equal(attempts, 2, 'retry opens a new transaction instead of repeating reads in the old snapshot')
+    }
+    for (const error of [{ code: 'P2010', meta: { code: '40P01' } },
+      { code: 'P2010', meta: { code: 40001 } }, { code: 'P2010', message: '40001 serialization failure' },
+      { code: 'ASSET_RIGHTS_BLOCKED' }, new Error('40001 serialization failure')]) {
+      let attempts = 0
+      const repository = new PrismaProjectProxyRenderRepository({ async $transaction() { attempts += 1; throw error } })
+      await assert.rejects(repository[method]({}), (failure) => failure === error)
+      assert.equal(attempts, 1)
+    }
+  })
+}

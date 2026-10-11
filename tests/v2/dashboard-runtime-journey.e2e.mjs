@@ -3,7 +3,6 @@ import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import net from 'node:net'
 import { dirname, isAbsolute, join } from 'node:path'
 import test from 'node:test'
@@ -17,8 +16,6 @@ import { runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.
 // Public final admission must reject UNKNOWN; a test-only approval port exercises
 // dashboard final mechanics with the real application service and fenced worker.
 const execFileAsync = promisify(execFile)
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static')
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -51,7 +48,9 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
   assert.ok(process.env.V2_DATABASE_URL, 'V2_DATABASE_URL must point to an isolated PostgreSQL database')
   const artifactRoot = process.env.APOLLO_V2_ARTIFACT_ROOT?.trim() ?? ''
   assert.equal(isAbsolute(artifactRoot), true, 'APOLLO_V2_ARTIFACT_ROOT must be absolute')
-  assert.ok(ffmpegStatic, 'ffmpeg-static is required')
+  const { resolveFfmpegBinary } = await import('../../src/v2/infrastructure/media/ffmpeg-binary.ts')
+  const ffmpegBin = resolveFfmpegBinary()
+  assert.equal(isAbsolute(ffmpegBin), true, 'Resolved FFmpeg binary must be absolute')
 
   const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
@@ -96,12 +95,13 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
 
   try {
     await mkdir(dirname(sourcePath), { recursive: true })
-    await execFileAsync(ffmpegStatic, [
+    await execFileAsync(ffmpegBin, [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30',
       '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
       '-t', '4',
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv',
       '-c:a', 'aac', '-b:a', '128k',
       '-movflags', '+faststart',
       sourcePath,
@@ -427,6 +427,7 @@ test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers
     await runDashboardRuntimeJourney({ client, baseUrl, authorization, workspaceId, projectId,
       projectVersionId, projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId,
       sourceSha256, sourceByteSize: sourceBytes.length, sourceManifest, sourcePath, artifactRoot,
+      mechanicalSeed: { transcript, brief: snapshots[0][3], policies: snapshots[1][3], createdAt: createdAt.toISOString() },
       uiUsername, uiPassword, suffix, signal: t.signal })
   } finally {
     if (process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT) {

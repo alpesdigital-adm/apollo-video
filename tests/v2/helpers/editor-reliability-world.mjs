@@ -310,7 +310,8 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
         status: 'approved',
         allowedUses: ['rendering', 'editorial-reuse'],
         prohibitedUses: [],
-        allowedMarkets: ['BRA'],
+        // This generated fixture is unrestricted by territory. Proxy source
+        // hydration supplies the project locale, without a market context.
         allowedLocales: ['pt-BR'],
         consent: { status: 'not-required', allowedUses: [] },
       },

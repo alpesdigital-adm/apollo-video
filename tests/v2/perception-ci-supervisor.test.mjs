@@ -8,6 +8,7 @@ import {
   CLEANUP_BUDGET_MS, attachSupervisorSignals, collectOwnedIdentities, containObservedIdentities, createPerceptionRunId,
   parseLinuxProcessStat, readLinuxProcessIdentity, requireJobBudget, signalObservedIdentity,
   supervisePerceptionCommand,
+  createLinuxObservationContext, observeLinuxProcesses,
 } from '../../scripts/validation/run-perception-ci.mjs'
 
 const entry = (pid, starttime, extra = {}) => ({ pid, starttime, ppid: 1,
@@ -17,6 +18,140 @@ const statText = (overrides = {}) => {
   Object.assign(fields, { 0: 'S', 1: '2', 2: '3', 3: '4', 19: '987654321987654321' }, overrides)
   return `123 (worker ) with ( spaces)) ${fields.join(' ')}`
 }
+
+function observationWorld(extra = []) {
+  const owner = entry(100, '100'), peer = entry(20, '40')
+  const states = new Map([peer, ...extra, owner].map((identity) => [identity.pid, { ...identity, uid: 600 }]))
+  const environments = new Map(), denied = new Map()
+  const io = {
+    entries: async () => [...states.keys()].map(String),
+    identity: async (pid) => states.has(pid) ? { ...states.get(pid) } : null,
+    owner: async (pid) => ({ uid: states.get(pid)?.uid }),
+    environment: async (pid) => {
+      if (denied.has(pid)) throw denied.get(pid)
+      return Buffer.from(environments.get(pid) ?? '')
+    },
+  }
+  const permission = Object.assign(new Error('controlled environ permission denial'), { code: 'EACCES' })
+  return { states, environments, denied, io, permission,
+    context: () => createLinuxObservationContext(owner.pid, io) }
+}
+
+test('Linux EACCES excludes only a rechecked frozen identity predating the supervisor, with receipt evidence', async () => {
+  const world = observationWorld(), context = await world.context()
+  world.denied.set(20, world.permission)
+  const first = await observeLinuxProcesses('controlled-run', context, world.io)
+  assert.ok(first.some((identity) => identity.pid === 20))
+  assert.equal(context.captureBaseline, false)
+  assert.equal(context.exclusions.get('20:40').reason, 'environ-eacces-preexisting-before-owner-unrelated')
+  assert.equal(context.exclusions.get('20:40').ownerStarttime, '100')
+  assert.equal(context.exclusions.get('20:40').uid, 600)
+  const size = context.baseline.size
+  world.states.set(30, { ...entry(30, '30'), uid: 600 })
+  await observeLinuxProcesses('controlled-run', context, world.io)
+  assert.equal(context.baseline.size, size, 'later observations must never expand the admission baseline')
+  world.denied.set(30, world.permission)
+  await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === world.permission)
+})
+
+test('Linux unreadable equal/newer, root, owner, observed and ancestry identities remain inconclusive', async () => {
+  for (const scenario of ['equal', 'newer', 'root', 'owner', 'observed', 'child', 'transitive-child', 'recycled', 'parent-changed']) {
+    const world = observationWorld([entry(21, '45', { ppid: 20 }), entry(31, '48', { ppid: 21 })]), context = await world.context()
+    await observeLinuxProcesses('controlled-run', context, world.io)
+    let candidate = 20
+    if (scenario === 'equal') world.states.get(20).starttime = '100'
+    if (scenario === 'newer') world.states.get(20).starttime = '101'
+    if (scenario === 'root') context.rootPid = 20
+    if (scenario === 'owner') candidate = 100
+    if (scenario === 'observed') context.observed.set('20:40', entry(20, '40'))
+    if (scenario === 'child') world.states.get(20).ppid = 100
+    if (scenario === 'transitive-child') {
+      context.observed.set('20:40', entry(20, '40'))
+      candidate = 31
+    }
+    if (scenario === 'recycled') world.states.get(20).starttime = '41'
+    if (scenario === 'parent-changed') world.states.get(20).ppid = 999
+    world.denied.set(candidate, world.permission)
+    await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === world.permission, scenario)
+  }
+})
+
+test('Linux age guard rejects unchanged equal/newer baseline peers and compares large decimal starttimes exactly', async () => {
+  for (const starttime of ['100', '101']) {
+    const world = observationWorld()
+    world.states.get(20).starttime = starttime
+    world.denied.set(20, world.permission)
+    const context = await world.context()
+    await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === world.permission)
+    assert.equal(context.baseline.get(`20:${starttime}`).starttime, starttime,
+      'age denial must exercise an unchanged identity that is actually in the baseline')
+    assert.equal(context.exclusions.size, 0)
+  }
+  const world = observationWorld()
+  world.states.get(20).starttime = '9007199254740992'
+  world.states.get(100).starttime = '9007199254740993'
+  world.denied.set(20, world.permission)
+  const context = await world.context()
+  await observeLinuxProcesses('controlled-run', context, world.io)
+  assert.equal(context.exclusions.get('20:9007199254740992').ownerStarttime, '9007199254740993')
+})
+
+test('Linux known markers and later-listed marked parents cannot be excluded by environment enumeration order', async () => {
+  const world = observationWorld([entry(30, '50')]), context = await world.context()
+  world.states.get(20).ppid = 30
+  world.denied.set(20, world.permission)
+  world.environments.set(30, 'APOLLO_PERCEPTION_RUN_ID=controlled-run\0')
+  await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === world.permission)
+  assert.equal(context.exclusions.size, 0)
+  world.denied.delete(20)
+  await observeLinuxProcesses('controlled-run', context, world.io)
+  world.environments.set(30, '')
+  world.denied.set(30, world.permission)
+  await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === world.permission)
+})
+
+test('Linux baseline UID, recheck identity/UID/parentage and stat/environment errors cannot grant an exclusion', async () => {
+  for (const scenario of ['baseline-uid', 'recheck-uid', 'recheck-starttime', 'recheck-ppid', 'recheck-eacces', 'environment-eio', 'stat-eacces']) {
+    const world = observationWorld()
+    if (scenario === 'baseline-uid') world.states.get(20).uid = 601
+    const context = await world.context()
+    await observeLinuxProcesses('controlled-run', context, world.io)
+    world.states.get(20).uid = 600
+    const failure = scenario === 'environment-eio'
+      ? Object.assign(new Error('controlled environment IO failure'), { code: 'EIO' }) : world.permission
+    if (scenario !== 'stat-eacces') world.denied.set(20, failure)
+    let identityReads = 0, ownerReads = 0
+    const originalIdentity = world.io.identity, originalOwner = world.io.owner
+    world.io.identity = async (pid) => {
+      const current = await originalIdentity(pid)
+      if (pid === 20 && ++identityReads === 2) {
+        if (scenario === 'recheck-starttime') current.starttime = '41'
+        if (scenario === 'recheck-ppid') current.ppid = 999
+        if (['recheck-eacces', 'stat-eacces'].includes(scenario)) throw world.permission
+      }
+      return current
+    }
+    world.io.owner = async (pid) => {
+      const owner = await originalOwner(pid)
+      if (pid === 20 && ++ownerReads === 2 && scenario === 'recheck-uid') owner.uid = 601
+      return owner
+    }
+    await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === failure, scenario)
+    assert.equal(context.exclusions.size, 0, scenario)
+  }
+})
+
+test('Linux baseline cannot be created after spawn or survive a changed supervisor identity', async () => {
+  const afterSpawn = observationWorld(), lateContext = await afterSpawn.context()
+  lateContext.rootPid = 999
+  await assert.rejects(observeLinuxProcesses('controlled-run', lateContext, afterSpawn.io), /Baseline cannot be established after child spawn/)
+  assert.equal(lateContext.baseline.size, 0)
+  for (const field of ['uid', 'starttime']) {
+    const world = observationWorld(), context = await world.context()
+    world.states.get(100)[field] = field === 'uid' ? 601 : '101'
+    await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), /Supervisor owner identity or UID changed/)
+  }
+})
 
 test('Linux stat identity handles comm parentheses and preserves decimal starttime', () => {
   assert.deepEqual(parseLinuxProcessStat(statText()), entry(123, '987654321987654321', {
@@ -174,9 +309,9 @@ test('Linux owned cleanup proves close and terminal identities for setsid, timeo
 
     let observations = 0
     const { linuxProcessSnapshot } = await import('../../scripts/validation/run-perception-ci.mjs')
-    const inconclusive = await run({ snapshot: async (runId) => {
+    const inconclusive = await run({ snapshot: async (runId, context) => {
       if (++observations === 3) throw new Error('controlled inventory failure')
-      return linuxProcessSnapshot(runId)
+      return linuxProcessSnapshot(runId, context)
     } })
     assert.equal(inconclusive.success, false)
     assert.equal(inconclusive.observationComplete, false)

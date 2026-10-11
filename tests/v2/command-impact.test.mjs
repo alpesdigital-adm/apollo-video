@@ -816,6 +816,7 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
   // The unit checks invalidation writes; its current source is controlled context. PostgreSQL
   // integration separately exercises the real scoped reader and transactional rights check.
   repository.assertCompletionLease = async () => new Date(createdAt)
+  repository.lockCompletionSources = async () => new Date(createdAt)
   repository.completeProxyTransaction = async () => {}
   repository.queryProject = async () => ({ id: projectId, workspaceId, locale: 'pt-BR',
     format: '9:16', currentVersionId: resultVersionId,
@@ -907,6 +908,7 @@ test('W65 renderable snapshot attachment accepts only its own sealed null-OCR re
   })
   // Isolate recipe/source binding here; transaction fencing is covered by PostgreSQL.
   repository.assertCompletionLease = async () => new Date(createdAt)
+  repository.lockCompletionSources = async () => new Date(createdAt)
   repository.completeProxyTransaction = async () => {}
   const attach = (recipeParameters, ocrReceipt) => repository.attachCompletedSnapshotOutput({
     workspaceId, operationId: 'operation-snapshot-proxy-2', projectId,

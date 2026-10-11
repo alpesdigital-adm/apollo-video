@@ -3,11 +3,11 @@ import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { closeOwnedBrowser } from './library-browser-proof.mjs'
 import { createDashboardPipelineObserver } from './dashboard-w36-pipeline-proof.mjs'
+import { seedDashboardControlledExportFixture } from './dashboard-controlled-export-fixture.mjs'
 
 const exec = promisify(execFile)
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -16,6 +16,7 @@ const CARD_EXPECTATIONS = {
   draft: { tone: 'neutral', color: 'text-[#aaa49a]', badge: 'Configuração', action: 'open-result', button: 'Abrir workspace →' },
   'rendering-proxy': { tone: 'info', color: 'text-[#79a5da]', badge: 'Renderizando proxy', action: 'view-progress', button: 'Acompanhar →' },
   'reviewing-proxy': { tone: 'warning', color: 'text-[#ca92d4]', badge: 'Revisar proxy', action: 'review-output', button: 'Revisar agora →' },
+  revising: { tone: 'info', color: 'text-[#79a5da]', badge: 'Aplicando revisão', action: 'view-progress', button: 'Acompanhar →' },
   'rendering-final': { tone: 'info', color: 'text-[#79a5da]', badge: 'Exportando final', action: 'view-progress', button: 'Acompanhar →' },
   completed: { tone: 'success', color: 'text-[#7ec397]', badge: 'Concluído', action: 'open-result', button: 'Abrir workspace →' },
   failed: { tone: 'danger', color: 'text-[#e08b8b]', badge: 'Requer atenção', action: 'inspect-error', button: 'Ver erro →' },
@@ -25,7 +26,7 @@ const CARD_EXPECTATIONS = {
 export async function runDashboardRuntimeJourney(input) {
   const { client, baseUrl, authorization, workspaceId, projectId, projectVersionId,
     projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId, sourceSha256,
-    sourceByteSize, sourceManifest, sourcePath, artifactRoot, uiUsername, uiPassword, suffix, signal } = input
+    sourceByteSize, sourceManifest, sourcePath, artifactRoot, uiUsername, uiPassword, suffix, signal, mechanicalSeed } = input
   const directory = process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT
   assert.ok(directory && isAbsolute(directory), 'Runtime evidence requires an absolute external directory')
   await mkdir(directory, { recursive: true })
@@ -34,9 +35,9 @@ export async function runDashboardRuntimeJourney(input) {
     proofScope: 'controlled-mechanics', editorialAcceptance: false, faceSafety: 'unknown',
     storedQualityStatus: 'review-required',
     controlledInputs: ['FFmpeg synthetic source bytes', 'aligned transcript', 'initial compiled timeline',
-      'source rights', 'source color probe', 'test-only final approval repository port'],
+      'source rights', 'source color probe', 'separate seeded export mechanics project', 'test-only final approval repository port'],
     runtimeProduced: ['public project and proxy admission', 'Director service snapshots/Command/impact/decision log',
-      'real proxy worker review', 'DI final application service and real fenced final worker',
+      'real main-project proxy worker review', 'separate-fixture DI final application service and real fenced final worker',
       'PostgreSQL states/events/artifacts', 'public retry and version fences'],
     governancePolicy: { anomalyRequestMinimum: 400, scope: 'owned E2E server only', productionDefaultChanged: false },
     unmeasuredProgress: { runtimeReachable: false, reason: 'All public operations use a known canonical phase count; historical no-total proof is controlled.' },
@@ -55,6 +56,7 @@ export async function runDashboardRuntimeJourney(input) {
   const { createLocalMediaUploadStorageFromEnvironment } = await import('../../../src/v2/infrastructure/media/local-media-upload-storage.ts')
   const { LocalProjectLutRenderMaterializer } = await import('../../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts')
   const { probeVideo } = await import('../../../src/v2/infrastructure/media/video-probe.ts')
+  const { resolveFfmpegBinary } = await import('../../../src/v2/infrastructure/media/ffmpeg-binary.ts')
   const prototype = PrismaPublicOperationRepository.prototype
   const originals = { claimNext: prototype.claimNext, advancePhase: prototype.advancePhase }
   let server, browser, context, child, primaryError, pipeline, activeObserver, observationError
@@ -71,6 +73,8 @@ export async function runDashboardRuntimeJourney(input) {
     APOLLO_V2_WORKER_RETRY_BASE_MS: '1', APOLLO_V2_WORKER_RETRY_MAX_MS: '1',
     APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'dashboard-runtime-e2e',
     APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url') }
+  const ffmpeg = resolveFfmpegBinary(undefined, environment)
+  assert.equal(isAbsolute(ffmpeg), true, 'Resolved FFmpeg binary must be absolute')
   const post = async (path, body, key, expected) => {
     const response = await fetch(`${baseUrl}${path}`, { method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
@@ -82,7 +86,6 @@ export async function runDashboardRuntimeJourney(input) {
   const annotationScreenshot = async (artifact, name) => {
     const path = join(artifactRoot, ...artifact.artifactKey.split('/'))
     const framePath = join(directory, `${name}.png`)
-    const ffmpeg = createRequire(import.meta.url)('ffmpeg-static')
     await exec(ffmpeg, ['-v', 'error', '-y', '-i', path, '-frames:v', '1', framePath], { windowsHide: true, timeout: 30000 })
     const bytes = await readFile(framePath)
     evidence.screenshots.push({ name: `${name}.png`, origin: 'real-proxy-ffmpeg-frame-0', artifactId: artifact.id, sha256: sha256(bytes) })
@@ -219,19 +222,21 @@ export async function runDashboardRuntimeJourney(input) {
     await observe({ stage: 'proxy-queued', status: 'rendering-proxy', operationId: proxyId, phase: 'queued', completed: 0, eventTypes: ['operation.status.changed'] })
     const proxyWorker = createProjectProxyRenderWorker(environment)
     assert.deepEqual(await runObservedWorker(() => proxyWorker(`runtime-proxy-worker-${suffix}`, { workspaceId, operationId: proxyId, signal })), { operationId: proxyId, status: 'succeeded' })
-    await observe({ stage: 'review', status: 'reviewing-proxy', operationId: proxyId, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    await observe({ stage: 'review', status: 'revising', operationId: proxyId, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     const replay = await post(`/v1/projects/${projectId}/proxy-renders`, undefined, `runtime-proxy-${suffix}`, 202)
-    assert.equal(replay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'reviewing-proxy')
+    assert.equal(replay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'revising')
     const review = await client.v2ProxyReview.findFirstOrThrow({ where: { workspaceId, projectId, operationId: proxyId } })
     assert.equal(review.status, 'blocked')
     assert.equal(review.finalAllowed, false)
     assert.ok(JSON.parse(review.criticIssuesJson).some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
     assert.ok(JSON.parse(review.criticIssuesJson).some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
+    evidence.proxyEditorialState = { projectStatus: 'revising', reviewStatus: review.status,
+      finalAllowed: review.finalAllowed, faceSafety: 'unknown', origin: 'postgres+production-proxy-review-repository' }
     const proxyArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: review.proxyArtifactId } })
     const annotation = await post(`/v1/projects/${projectId}/annotations`, { projectVersionId, proxyArtifactId: proxyArtifact.id,
       proxyHash: proxyArtifact.sha256, frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
       screenshotRef: await annotationScreenshot(proxyArtifact, 'annotation-main-frame-0'), text: 'Controlled runtime inspection; preserve framing.' }, `runtime-annotation-${suffix}`, 201)
-    await pipeline.observe({ stage: 'annotation', projectId, annotationId: annotation.annotation.id, expectedEventTypes: ['annotation.created'], expectedState: 'reviewing-proxy' })
+    await pipeline.observe({ stage: 'annotation', projectId, annotationId: annotation.annotation.id, expectedEventTypes: ['annotation.created'], expectedState: 'revising' })
     const copy = await post(`/v1/projects/${projectId}/duplicates`, { expectedVersionId: projectVersionId,
       expectedVersionHash: projectVersionHash, name: 'Runtime isolated failure' }, `runtime-copy-${suffix}`, 201)
     await pipeline.observe({ stage: 'copy', projectId: copy.project.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
@@ -248,9 +253,58 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId } }), artifactCount)
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'reviewing-proxy')
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'revising')
     evidence.publicFinalAdmission = { status: 422, code: publicRejection.error.code,
-      finalOperations: 0, attempts: 0, catalogRecords: 0, artifactsCreated: 0 }
+      projectId, projectStatus: 'revising', finalOperations: 0, attempts: 0, catalogRecords: 0, artifactsCreated: 0 }
+
+    const reviewSeal = (row) => stableSerialize({ projectVersionId: row.projectVersionId,
+      operationId: row.operationId, proxyArtifactId: row.proxyArtifactId, proxyManifestId: row.proxyManifestId,
+      inputHash: row.inputHash, reviewHash: row.reviewHash, status: row.status,
+      finalAllowed: row.finalAllowed, warningsAcknowledged: row.warningsAcknowledged,
+      technicalIssuesJson: row.technicalIssuesJson, criticIssuesJson: row.criticIssuesJson,
+      formatQualityJson: row.formatQualityJson })
+    const principal = { projectId, projectVersionId, exportBody, qualityId: directed.command.payload.snapshotRefs.quality,
+      qualityJson: stableSerialize(directed.run.qualityReport), reviewId: review.id, reviewSeal: reviewSeal(review) }
+    evidence.mainUpstream = { projectId, resultVersionId: directed.version.id, resultVersionHash: directed.version.baseHash,
+      directorRunId: directed.run.id, directorBaseVersionId: directed.run.baseVersionId,
+      perceptionInputVersionId: directed.run.perception.inputVersionId, perceptionHash: calculateVersionHash(directed.run.perception),
+      transcriptId: directed.command.payload.sourceTranscriptId, editPlanHash: calculateVersionHash(directed.run.editPlan),
+      qualitySnapshotId: principal.qualityId, qualitySnapshotHash: calculateVersionHash(directed.run.qualityReport),
+      sourceArtifactId, sourceManifestId, sourceManifestHash: sourceManifest.manifestHash, sourceSha256, sourceByteSize,
+      sourceObservationScope: 'synthetic media and caller-aligned transcript; no face detector authority' }
+    const mechanical = await seedDashboardControlledExportFixture({ client, workspaceId, actor, artifactRoot, suffix,
+      sourceArtifactId, sourceManifestId, sourcePath, sourceManifest, proxyArtifact, proxyManifestId: review.proxyManifestId,
+      signal, ...mechanicalSeed })
+    assert.notEqual(mechanical.projectId, projectId)
+    assert.notEqual(mechanical.projectVersionId, projectVersionId)
+    assert.notEqual(mechanical.directed.command.id, directed.command.id)
+    assert.notEqual(mechanical.directed.command.payload.snapshotRefs.quality, principal.qualityId)
+    evidence.mechanicalFixture = mechanical.receipt
+    // Color compilation is real, but its source metadata and fixture setup are
+    // controlled. It belongs to the separate project/source identities.
+    const principalCompilation = JSON.parse((await client.v2ColorPipelineCompilation.findFirstOrThrow({ where: { workspaceId, projectId } })).compilationJson)
+    await post(`/v1/projects/${mechanical.projectId}/color-pipeline/compile`, {
+      sourceArtifactId: mechanical.sourceArtifactId, sourceManifestId: mechanical.sourceManifestId,
+      outputMetadata: principalCompilation.pipeline.outputMetadata,
+      stages: principalCompilation.pipeline.stages.map(({ id, kind, version, enabled, output, implementation, lut }) =>
+        ({ id, kind, version, enabled, output, implementation, ...(lut ? { lut } : {}) })),
+    }, `runtime-mechanical-color-${suffix}`, 201)
+    let final
+    {
+    const { projectId, projectVersionId, projectVersionHash, directed, sourceArtifactId, sourceManifestId,
+      sourceSha256, sourceByteSize, sourceManifest, proxyArtifact, review } = mechanical
+    const exportBody = { projectVersionId, projectVersionHash, format: '9:16',
+      approval: { approved: true, note: 'Controlled separate-fixture mechanics only; stored quality remains unknown.' } }
+    const mechanicalPublic = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, { method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `runtime-mechanical-public-final-${suffix}` },
+      body: JSON.stringify(exportBody), signal: AbortSignal.timeout(30000) })
+    const mechanicalPublicBody = await mechanicalPublic.json()
+    assert.equal(mechanicalPublic.status, 422, JSON.stringify(mechanicalPublicBody))
+    assert.equal(mechanicalPublicBody.error.code, 'EDITORIAL_ACCEPTANCE_FAILED')
+    assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, projectId, type: 'project-final-export' } }), 0)
+    evidence.mechanicalPublicFinalAdmission = { projectId, status: 422,
+      code: mechanicalPublicBody.error.code, finalOperations: 0, initialStatus: 'reviewing-proxy',
+      storedQualityStatus: 'review-required', faceSafety: 'unknown', seededProxyReviewStatus: 'blocked' }
 
     // This port changes only the approval claim in its return value. All identity,
     // lineage, source bytes and persisted UNKNOWN quality/review are checked on
@@ -265,20 +319,14 @@ export async function runDashboardRuntimeJourney(input) {
     const sourceReader = new PrismaProjectProxyRenderRepository(client)
     const finalRepository = new PrismaProjectFinalExportRepository(client)
     const qualityJson = stableSerialize(directed.run.qualityReport)
-    evidence.upstream = { directorRunId: directed.run.id, directorBaseVersionId: directed.run.baseVersionId,
+    evidence.controlledUpstream = { projectId, directorRunId: directed.run.id, directorBaseVersionId: directed.run.baseVersionId,
       resultVersionId: directed.version.id, resultVersionHash: directed.version.baseHash,
       perceptionInputVersionId: directed.run.perception.inputVersionId,
       perceptionHash: calculateVersionHash(directed.run.perception),
       transcriptId: directed.command.payload.sourceTranscriptId,
       editPlanHash: calculateVersionHash(directed.run.editPlan), qualitySnapshotHash: identity.qualitySnapshotHash,
       sourceArtifactId, sourceManifestId, sourceManifestHash: sourceManifest.manifestHash, sourceSha256, sourceByteSize,
-      sourceObservationScope: 'synthetic media and caller-aligned transcript; no face detector authority' }
-    const reviewSeal = (row) => stableSerialize({ projectVersionId: row.projectVersionId,
-      operationId: row.operationId, proxyArtifactId: row.proxyArtifactId, proxyManifestId: row.proxyManifestId,
-      inputHash: row.inputHash, reviewHash: row.reviewHash, status: row.status,
-      finalAllowed: row.finalAllowed, warningsAcknowledged: row.warningsAcknowledged,
-      technicalIssuesJson: row.technicalIssuesJson, criticIssuesJson: row.criticIssuesJson,
-      formatQualityJson: row.formatQualityJson })
+      sourceObservationScope: 'separately seeded copied media and aligned transcript; no face detector authority' }
     const sealedReview = reviewSeal(review)
     async function readControlledSource(request, immutable) {
       const required = immutable ? Object.keys(identity) : ['workspaceId', 'projectId', 'projectVersionId', 'projectVersionHash']
@@ -298,7 +346,7 @@ export async function runDashboardRuntimeJourney(input) {
         client.v2Project.findFirst({ where: { id: projectId, workspaceId } }),
         client.v2ProjectVersion.findFirst({ where: { id: projectVersionId, workspaceId, projectId, baseHash: projectVersionHash } }),
         client.v2DirectorRun.findFirst({ where: { id: identity.directorRunId, workspaceId, projectId,
-          resultVersionId: projectVersionId, qualitySnapshotId: identity.qualitySnapshotId, status: 'succeeded' } }),
+          resultVersionId: projectVersionId, qualitySnapshotId: identity.qualitySnapshotId, status: 'planned' } }),
         client.v2ProjectSnapshot.findFirst({ where: { id: identity.qualitySnapshotId, workspaceId, projectId, kind: 'quality-report' } }),
         client.v2ProxyReview.findFirst({ where: { id: review.id, workspaceId, projectId, projectVersionId } }),
         client.v2MediaArtifact.findFirst({ where: { id: sourceArtifactId, workspaceId, sha256: sourceSha256, status: 'available' } }),
@@ -334,7 +382,7 @@ export async function runDashboardRuntimeJourney(input) {
       colorPipelines: factory.createColorPipelineCompilationRepository(), clock: () => new Date(),
       createId: (kind) => `runtime-final-${kind}-${suffix}` })
     const finalRequest = { workspaceId, projectId, ...exportBody, actor, idempotencyKey: `runtime-final-${suffix}` }
-    const final = await enqueueFinal(finalRequest)
+    final = await enqueueFinal(finalRequest)
     assert.equal(final.replayed, false)
     await assert.rejects(enqueueFinal({ ...finalRequest, projectVersionHash: '0'.repeat(64),
       idempotencyKey: `runtime-final-wrong-version-${suffix}` }), (error) => error.code === 'EDITORIAL_ACCEPTANCE_FAILED')
@@ -352,31 +400,42 @@ export async function runDashboardRuntimeJourney(input) {
     evidence.controlledFinalAdmission = { proofScope: 'controlled-mechanics', approval: 'test-only repository return value',
       identity, persistedProxyReview: { status: review.status, finalAllowed: review.finalAllowed },
       persistedQuality: { status: directed.run.qualityReport.status, faceSafety: directed.run.qualityReport.faceSafety.status } }
-    await observe({ stage: 'final-queued', status: 'rendering-final', operationId: final.operation.id, phase: 'queued', completed: 0, eventTypes: ['operation.status.changed'] })
-    activeObserver = async (operation, kind) => observe({ stage: `final-${operation.phase}`, operationId: operation.id,
+    await observe({ stage: 'final-queued', id: projectId, status: 'rendering-final', operationId: final.operation.id, phase: 'queued', completed: 0, eventTypes: ['operation.status.changed'] })
+    activeObserver = async (operation, kind) => observe({ stage: `final-${operation.phase}`, id: projectId, operationId: operation.id,
       status: 'rendering-final', phase: operation.phase, completed: operation.progress.completed,
       eventTypes: [kind === 'claimed' ? 'operation.status.changed' : 'operation.progress.changed'] })
     assert.deepEqual(await runObservedWorker(() => finalWorker(`runtime-final-worker-${suffix}`, signal)), { operationId: final.operation.id, status: 'succeeded' })
-    await observe({ stage: 'completed', status: 'completed', operationId: final.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    await observe({ stage: 'completed', id: projectId, status: 'completed', operationId: final.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     const finalReplay = await enqueueFinal(finalRequest)
     assert.equal(finalReplay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'completed')
     assert.equal(finalReplay.operation.id, final.operation.id)
+    assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, projectId, type: 'project-final-export' } }), 1)
+    assert.equal(await client.v2ProjectFinalExportOperation.count({ where: { workspaceId, projectId } }), 1)
+    assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId, operationId: final.operation.id } }), 1)
     assert.equal((await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: identity.qualitySnapshotId } })).contentJson, qualityJson)
     assert.equal(reviewSeal(await client.v2ProxyReview.findUniqueOrThrow({ where: { id: review.id } })), sealedReview)
     const artifactsAfterControlledRun = await client.v2MediaArtifact.count({ where: { workspaceId } })
-    const rejectedAgain = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, { method: 'POST',
+    const rejectedAgain = await fetch(`${baseUrl}/v1/projects/${principal.projectId}/exports`, { method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `runtime-public-final-after-${suffix}` },
-      body: JSON.stringify(exportBody), signal: AbortSignal.timeout(30000) })
+      body: JSON.stringify(principal.exportBody), signal: AbortSignal.timeout(30000) })
     const rejectedAgainBody = await rejectedAgain.json()
     assert.equal(rejectedAgain.status, 422, JSON.stringify(rejectedAgainBody))
     assert.equal(rejectedAgainBody.error.code, 'EDITORIAL_ACCEPTANCE_FAILED')
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, type: 'project-final-export' } }), 1)
     assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId } }), artifactsAfterControlledRun)
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'completed')
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: principal.projectId } })).status, 'revising')
+    assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, projectId: principal.projectId, type: 'project-final-export' } }), 0)
+    assert.equal(await client.v2ProjectFinalExportOperation.count({ where: { workspaceId, projectId: principal.projectId } }), 0)
+    assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId, operation: { projectId: principal.projectId } } }), 0)
+    assert.equal((await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: principal.qualityId } })).contentJson, principal.qualityJson)
+    assert.equal(reviewSeal(await client.v2ProxyReview.findUniqueOrThrow({ where: { id: principal.reviewId } })), principal.reviewSeal)
     evidence.publicFinalAdmissionAfterControlledRun = { status: 422, code: rejectedAgainBody.error.code,
+      projectId: principal.projectId, projectStatus: 'revising', finalOperationsForMain: 0,
       additionalOperations: 0, additionalArtifacts: 0, storedQualityStatus: 'review-required', faceSafety: 'unknown' }
-    const ffmpeg = createRequire(import.meta.url)('ffmpeg-static')
+    evidence.controlledFinalAdmission.operationCounts = { projectId, finalOperations: 1, finalAttempts: 1,
+      operationId: final.operation.id, mainProjectId: principal.projectId, mainFinalOperations: 0, mainFinalAttempts: 0 }
+    }
     for (const operationId of [proxyId, final.operation.id]) {
       const operation = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId } })
       const outputId = JSON.parse(operation.resultJson).resource.id
@@ -386,7 +445,9 @@ export async function runDashboardRuntimeJourney(input) {
       await exec(ffmpeg, ['-v', 'error', '-xerror', '-i', path, '-f', 'null', '-'], { windowsHide: true, timeout: 60000 })
       const probe = await probeVideo(path); const name = `${operation.type}.mp4`; await copyFile(path, join(directory, name))
       await exec(ffmpeg, ['-v', 'error', '-y', '-ss', '1', '-i', path, '-frames:v', '1', join(directory, `${operation.type}-frame.png`)], { windowsHide: true, timeout: 30000 })
-      evidence.outputs.push({ operationId, artifactId: artifact.id, sha256: artifact.sha256, byteSize: bytes.length, name, probe, fullDecode: true })
+      evidence.outputs.push({ operationId, projectId: operation.projectId, artifactId: artifact.id,
+        proofScope: operation.type === 'project-final-export' ? 'separate-fixture-controlled-mechanics' : 'main-project-runtime-proxy',
+        sha256: artifact.sha256, byteSize: bytes.length, name, probe, fullDecode: true })
     }
     activeObserver = null
     const compilation = JSON.parse((await client.v2ColorPipelineCompilation.findFirstOrThrow({ where: { workspaceId, projectId } })).compilationJson)
@@ -433,8 +494,9 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'rendering-proxy')
     await delay(1100)
     assert.deepEqual(await proxyWorker(`runtime-recovered-worker-${suffix}`, { workspaceId, operationId: failedRow.id, signal }), { operationId: failedRow.id, status: 'succeeded' })
-    await observe({ stage: 'copy-review', id: copy.project.id, status: 'reviewing-proxy', operationId: failedRow.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    await observe({ stage: 'copy-review', id: copy.project.id, status: 'revising', operationId: failedRow.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     const copyReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: failedRow.id } })
+    assert.equal(copyReview.status, 'blocked'); assert.equal(copyReview.finalAllowed, false)
     const copyArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: copyReview.proxyArtifactId } })
     const copyAnnotation = await post(`/v1/projects/${copy.project.id}/annotations`, {
       projectVersionId: selected.version.id, proxyArtifactId: copyArtifact.id, proxyHash: copyArtifact.sha256,
@@ -442,7 +504,7 @@ export async function runDashboardRuntimeJourney(input) {
       screenshotRef: await annotationScreenshot(copyArtifact, 'annotation-copy-frame-0'), text: 'Ajustar enquadramento central.',
     }, `runtime-copy-annotation-${suffix}`, 201)
     await pipeline.observe({ stage: 'copy-annotation', projectId: copy.project.id, annotationId: copyAnnotation.annotation.id,
-      expectedEventTypes: ['annotation.created'], expectedState: 'reviewing-proxy' })
+      expectedEventTypes: ['annotation.created'], expectedState: 'revising' })
     const proposal = await post(`/v1/projects/${copy.project.id}/patch-proposals`, { annotationId: copyAnnotation.annotation.id }, `runtime-proposal-${suffix}`, 201)
     assert.equal(proposal.proposal.status, 'ready')
     const applied = await post(`/v1/projects/${copy.project.id}/patch-proposals/${proposal.proposal.id}/apply`, { confirmed: true }, `runtime-patch-${suffix}`, 201)
@@ -450,7 +512,9 @@ export async function runDashboardRuntimeJourney(input) {
     await pipeline.observe({ stage: 'annotation-resolved', projectId: copy.project.id, annotationId: copyAnnotation.annotation.id,
       expectedEventTypes: ['annotation.resolved'], expectedState: 'rendering-proxy' })
     assert.deepEqual(await proxyWorker(`runtime-patch-worker-${suffix}`, { workspaceId, operationId: applied.operation.id, signal }), { operationId: applied.operation.id, status: 'succeeded' })
-    await observe({ stage: 'patched-review', id: copy.project.id, status: 'reviewing-proxy', operationId: applied.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    const patchedReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: applied.operation.id } })
+    assert.equal(patchedReview.status, 'blocked'); assert.equal(patchedReview.finalAllowed, false)
+    await observe({ stage: 'patched-review', id: copy.project.id, status: 'revising', operationId: applied.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     // Exhaust actual durable claims without any status seed or mutation. Each
     // abandoned claim owns a short lease; the next runtime claim settles it.
     const abandoned = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
@@ -476,7 +540,9 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'rendering-proxy')
     await delay(1100)
     assert.deepEqual(await proxyWorker(`runtime-retry-worker-${suffix}`, { workspaceId, operationId: exhausted.id, signal }), { operationId: exhausted.id, status: 'succeeded' })
-    await observe({ stage: 'retried-review', id: copy.project.id, status: 'reviewing-proxy', operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    const retriedReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: exhausted.id } })
+    assert.equal(retriedReview.status, 'blocked'); assert.equal(retriedReview.finalAllowed, false)
+    await observe({ stage: 'retried-review', id: copy.project.id, status: 'revising', operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     // Advance the version through the real Command service while an older
     // admitted task still owns a lease. No newer admission masks this CAS test.
     const staleVersionJob = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
