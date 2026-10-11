@@ -1741,10 +1741,36 @@ jobs:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-localization-media-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
       - name: Run localization media proxy-backed positive persistence proof
-        run: npm run test:integration:localization-media-proxy
+        id: localization-media-proxy
+        run: |
+          set -euo pipefail
+          ffmpeg="$(node -p 'require("ffmpeg-static")')"
+          ffprobe="$(node -p 'require("ffprobe-static").path')"
+          test -x "$ffmpeg" && test -x "$ffprobe"
+          export APOLLO_V2_FFMPEG_PATH="$ffmpeg" FFPROBE_BIN="$ffprobe"
+          mkdir -p "$APOLLO_WAVE21_EVIDENCE_DIR"
+          printf 'APOLLO_V2_FFMPEG_PATH=%s\nFFPROBE_BIN=%s\n' "$ffmpeg" "$ffprobe" > "$APOLLO_WAVE21_EVIDENCE_DIR/binary-paths.txt"
+          "$ffmpeg" -version > "$APOLLO_WAVE21_EVIDENCE_DIR/ffmpeg-version.txt"
+          "$ffprobe" -version > "$APOLLO_WAVE21_EVIDENCE_DIR/ffprobe-version.txt"
+          sha256sum "$ffmpeg" "$ffprobe" package-lock.json > "$APOLLO_WAVE21_EVIDENCE_DIR/binary-provenance.sha256"
+          sha256sum tests/v2/localization-snapshot-proxy.pg.integration.mjs tests/v2/helpers/localization-pg.mjs tests/v2/helpers/capture-journey.mjs > "$APOLLO_WAVE21_EVIDENCE_DIR/input-provenance.sha256"
+          npm run test:integration:localization-media-proxy
+          manifest="$(find "$APOLLO_WAVE21_EVIDENCE_DIR" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print -quit)"
+          test -n "$manifest" && test -s "$manifest"
+          find "$APOLLO_WAVE21_EVIDENCE_DIR" -type f ! -name evidence-files.sha256 -print0 | sort -z | xargs -0 sha256sum > "$APOLLO_WAVE21_EVIDENCE_DIR/evidence-files.sha256"
         env:
           APOLLO_RUN_LOCALIZATION_MEDIA_PROXY_PG_E2E: "1"
+          APOLLO_WAVE21_EVIDENCE_DIR: ${{ runner.temp }}/localization-proxy-${{ github.run_id }}-${{ github.run_attempt }}
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-localization-media-proxy-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Publish localization proxy media and binary provenance
+        if: always() && steps.localization-media-proxy.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: localization-proxy-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/localization-proxy-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Run localization browser journey against the production build
         run: npm run test:e2e:localization-browser

@@ -3,6 +3,20 @@ import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+// Same domain-to-row contract as project-media-repository.colorProbeData.
+export function dashboardColorProbePersistenceData(probe, stableSerialize) {
+  return { id: probe.id, workspaceId: probe.workspaceId, artifactId: probe.artifactId,
+    manifestId: probe.manifestId, schemaVersion: probe.schemaVersion,
+    state: probe.detection.state,
+    metadataJson: stableSerialize(probe.detection.state === 'ready' ? probe.detection.metadata : null),
+    pixelFormat: probe.detection.pixelFormat ?? null,
+    hdrMode: probe.detection.state === 'ready' ? probe.detection.hdrMode : null,
+    reasonsJson: stableSerialize(probe.detection.state === 'unavailable' ? probe.detection.reasons : []),
+    producerProvider: probe.producer.provider, producerVersion: probe.producer.version,
+    producerBinaryDigest: probe.producer.binaryDigest, probeHash: probe.probeHash,
+    createdAt: new Date(probe.createdAt) }
+}
+
 /** Explicit test seed, not public project/Director/proxy acceptance. The project
  * starts reviewing-proxy; this helper never UPDATEs any project's status.
  * Every copied media object has its own key/manifest and explicit copy lineage.
@@ -115,14 +129,10 @@ export async function seedDashboardControlledExportFixture(input) {
       allowedLocales: ['pt-BR'], consent: { status: 'approved', allowedUses: ['editing', 'rendering', 'editorial-reuse'], allowedLocales: ['pt-BR'] } },
     actor: { type: 'api-client', id: actor.clientId } })
   assert.equal(sourceProbe.color.state, 'ready', 'Mechanical source color must come from the actual copied bytes')
-  const metadata = sourceProbe.color.metadata
   const color = createMediaColorProbe({ id: id('color-probe'), workspaceId, artifactId: sourceArtifactId,
     manifestId: sourceManifestId, detection: sourceProbe.color,
     producer: sourceProbe.producer, createdAt: createdAt.toISOString() })
-  await client.v2MediaColorProbe.create({ data: { id: color.id, workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId,
-    schemaVersion: color.schemaVersion, state: color.state, metadataJson: stableSerialize(metadata), pixelFormat: color.pixelFormat,
-    hdrMode: color.hdrMode, reasonsJson: stableSerialize(color.reasons), producerProvider: color.producer.provider,
-    producerVersion: color.producer.version, producerBinaryDigest: color.producer.binaryDigest, probeHash: color.probeHash, createdAt } })
+  await client.v2MediaColorProbe.create({ data: dashboardColorProbePersistenceData(color, stableSerialize) })
   await client.v2MediaTranscript.create({ data: { id: transcriptId, workspaceId, projectId, sourceArtifactId, sourceManifestId,
     schemaVersion: transcript.schemaVersion, language: transcript.language, provider: transcript.provider, model: transcript.model,
     providerVersion: 'controlled-v1', transcriptHash: transcript.transcriptHash, transcriptJson: stableSerialize(transcript), createdAt } })

@@ -247,6 +247,76 @@ test('W61 perception CI preserves supervised mandatory coverage and its exact fa
   ])
 })
 
+function verifyLocalizationProxyMediaWiring(workflow, gate) {
+  const { steps } = parseWorkflow(workflow)
+  const matches = steps.filter((step) => step.npmScripts.includes('test:integration:localization-media-proxy'))
+  assert.equal(matches.length, 1, 'localized media proxy must have exactly one mandatory CI run')
+  const step = matches[0]
+  assert.equal(step.job.id, 'local-infrastructure')
+  assert.equal(step.attrs.get('id'), 'localization-media-proxy')
+  assert.equal(step.attrs.get('if'), undefined)
+  assert.equal(step.attrs.get('continue-on-error'), undefined)
+  assert.equal(step.job.attrs.get('if'), undefined)
+  assert.equal(step.job.attrs.get('continue-on-error'), undefined)
+  assert.ok(gatesTheBuild(step))
+  assert.ok(isLiteral(step.env.get(gate), '1'), 'the proxy persistence gate must run rather than skip')
+  assert.match(step.env.get('V2_DATABASE_URL'), /127\.0\.0\.1:55432\/apollo_video_v2_e2e.*application_name=apollo-video-e2e-localization-media-proxy-ci.*connection_limit=5.*pool_timeout=10.*connect_timeout=10/)
+  assert.equal(step.env.get('APOLLO_WAVE21_EVIDENCE_DIR'), '${{ runner.temp }}/localization-proxy-${{ github.run_id }}-${{ github.run_attempt }}')
+  for (const required of [
+    'set -euo pipefail',
+    'ffmpeg="$(node -p \'require("ffmpeg-static")\')"',
+    'ffprobe="$(node -p \'require("ffprobe-static").path\')"',
+    'test -x "$ffmpeg" && test -x "$ffprobe"',
+    'export APOLLO_V2_FFMPEG_PATH="$ffmpeg" FFPROBE_BIN="$ffprobe"',
+    '"$ffmpeg" -version > "$APOLLO_WAVE21_EVIDENCE_DIR/ffmpeg-version.txt"',
+    '"$ffprobe" -version > "$APOLLO_WAVE21_EVIDENCE_DIR/ffprobe-version.txt"',
+    'sha256sum "$ffmpeg" "$ffprobe" package-lock.json > "$APOLLO_WAVE21_EVIDENCE_DIR/binary-provenance.sha256"',
+    'sha256sum tests/v2/localization-snapshot-proxy.pg.integration.mjs tests/v2/helpers/localization-pg.mjs tests/v2/helpers/capture-journey.mjs > "$APOLLO_WAVE21_EVIDENCE_DIR/input-provenance.sha256"',
+    'manifest="$(find "$APOLLO_WAVE21_EVIDENCE_DIR" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print -quit)"',
+    'test -n "$manifest" && test -s "$manifest"',
+    'find "$APOLLO_WAVE21_EVIDENCE_DIR" -type f ! -name evidence-files.sha256 -print0 | sort -z | xargs -0 sha256sum > "$APOLLO_WAVE21_EVIDENCE_DIR/evidence-files.sha256"',
+  ]) assert.ok(step.body.includes(required), `localized media proxy lost its executable/evidence contract: ${required}`)
+  const publication = steps.find((entry) => entry.job === step.job && entry.name === 'Publish localization proxy media and binary provenance')
+  assert.ok(publication && gatesTheBuild(publication))
+  assert.equal(publication.attrs.get('uses'), 'actions/upload-artifact@v4')
+  assert.equal(publication.attrs.get('if'), "always() && steps.localization-media-proxy.conclusion != 'skipped'")
+  assert.match(publication.body, /path: \$\{\{ runner\.temp \}\}\/localization-proxy-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/)
+  assert.match(publication.body, /if-no-files-found: error/)
+  return step
+}
+
+test('localization media proxy CI resolves explicit locked media binaries and retains measured evidence', async () => {
+  const [workflow, packageJson, source] = await Promise.all([
+    read('.github/workflows/ci.yml'), read('package.json'), read('tests/v2/localization-snapshot-proxy.pg.integration.mjs'),
+  ])
+  assert.match(JSON.parse(packageJson).scripts['test:integration:localization-media-proxy'], /tests\/v2\/localization-snapshot-proxy\.pg\.integration\.mjs$/)
+  const gate = /const enabled = process\.env\.(APOLLO_[A-Z0-9_]+) === '1'/.exec(source)?.[1]
+  assert.ok(gate)
+  const step = verifyLocalizationProxyMediaWiring(workflow, gate)
+  for (const required of [
+    'require("ffprobe-static").path', 'test -x "$ffprobe"', 'FFPROBE_BIN="$ffprobe"',
+    'ffprobe-version.txt', 'binary-provenance.sha256', 'input-provenance.sha256',
+    'test -n "$manifest" && test -s "$manifest"', 'evidence-files.sha256',
+  ]) {
+    const changed = workflow.replace(step.body, step.body.replaceAll(required, 'removed'))
+    assert.notEqual(changed, workflow)
+    assert.throws(() => verifyLocalizationProxyMediaWiring(changed, gate), undefined, required)
+  }
+  for (const disabled of ['        if: false\n', '        continue-on-error: true\n']) {
+    assert.throws(() => verifyLocalizationProxyMediaWiring(workflow.replace(step.body,
+      step.body.replace('        id:', `${disabled}        id:`)), gate))
+  }
+  assert.throws(() => verifyLocalizationProxyMediaWiring(workflow.replace(step.body,
+    step.body.replace(`${gate}: "1"`, `${gate}: "0"`)), gate))
+  for (const disabled of ['    if: false\n', '    continue-on-error: true\n']) {
+    assert.throws(() => verifyLocalizationProxyMediaWiring(workflow.replace('  local-infrastructure:\n',
+      `  local-infrastructure:\n${disabled}`), gate))
+  }
+  const publication = parseWorkflow(workflow).steps.find((entry) => entry.name === 'Publish localization proxy media and binary provenance')
+  assert.throws(() => verifyLocalizationProxyMediaWiring(workflow.replace(publication.body,
+    publication.body.replace('if-no-files-found: error', 'if-no-files-found: warn')), gate))
+})
+
 const singleTestFileOf = (command) => {
   const files = [...command.matchAll(SUITE_FILE)].map((match) => match[0])
   return files.length === 1 ? files[0] : null

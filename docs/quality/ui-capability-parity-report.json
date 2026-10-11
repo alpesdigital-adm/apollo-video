@@ -4,9 +4,9 @@
     "uiActions": 176,
     "capabilities": 156,
     "endpoints": 156,
-    "registeredCapabilities": 384,
-    "operableCapabilities": 384,
-    "publicContractCapabilities": 384,
+    "registeredCapabilities": 386,
+    "operableCapabilities": 386,
+    "publicContractCapabilities": 386,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3669,7 +3669,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/project-list/v8",
+      "outputSchemaRef": "apollo://schemas/project-list/v9",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4197,7 +4197,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v13",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v14",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4208,7 +4208,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/dead-letter",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v13",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v14",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4219,7 +4219,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/{operationId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v14",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v15",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4241,7 +4241,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/cancel",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v14",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v15",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4252,7 +4252,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/retry",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v14",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v15",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -5859,6 +5859,28 @@
       "endpoint": "GET /v1/projects/{projectId}/temporal-producer-operations/{operationId}",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/temporal-producer-operation-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.face-producer-operations.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/face-producer-operations",
+      "inputSchemaRef": "apollo://schemas/face-producer-run-request/v1",
+      "outputSchemaRef": "apollo://schemas/face-producer-operation-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.face-producer-operations.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/face-producer-operations/{operationId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/face-producer-operation-read/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

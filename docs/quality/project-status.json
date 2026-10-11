@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T22:39:06.749Z",
+  "updatedAt": "2026-10-11T23:10:23.416Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -37,7 +37,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Bloqueio confirmado em rights-proxy-pg-v3-fcf434ce (HEAD a812b807): project-rights-revoke publicou após revogação commitada durante espera no lock da operação. Clock fresco sozinho não renova o snapshot SERIALIZABLE. Correção preparada aplica fences operation/project/fontes e retry integral somente P2034 ou P2010/40001; 32 testes focados passaram, mas os quatro latches PG ainda precisam repetir no novo SHA. Dois latches de expiry avançaram no FAIL histórico, revoke do projeto falhou e revoke do snapshot não executou; cleanup foi limpo. CI 030b: Quality e percepção falharam no observer pre-spawn com EACCES; correção de baseline/recheck estritos preparada, Linux real e oito suítes pendentes. Dashboard encontrou estado editorial revising legítimo, bloqueando final; prova mecânica separada está em preparação. Compose também falhou com ASSET_RIGHTS_BLOCKED em jornadas de proxy/LUT e exige reconciliação própria. Merge permanece bloqueado."
+          "text": "O FAIL histórico rights-proxy-pg-v3-fcf434ce confirmou publicação após revogação durante espera SQL. No commit 1b65dc20, rights-proxy-pg-v4-e663f7e7 passou os quatro latches (dois resolvers vezes expiry/revoke), 2/2 testes sem skips e postflight limpo; a transação agora trava fontes autoritativas e reinicia somente pelos códigos de serialização precisos. CI 1b65 permanece vermelho: dashboard falhou no mapeamento de MediaColorProbe da fixture (detection.*), Quality no relatório de paridade gerado desatualizado, percepção temporal em EACCES de processo novo durante observação. Correções de fixture/relatório estão preparadas; supervisor mantém falha fechada e investiga reobservação terminal estrita sem atribuir o PID histórico a zombie. OCR CI passou; oito suítes completas e novo dashboard ainda pendentes. Merge bloqueado. Compose 1b65 terminou FAIL na prova de localização por FFprobe explícito ausente no runner; corrigir wiring/proveniência, preservando a asserção. Regressão Windows ci-followup-unit-v1-e67296ed interrompida pelo supervisor privado ao observar descendente depth11, sem falha de teste demonstrada e sem conclusão da suíte; cleanup limpo. O limite não será aumentado por hipótese; a nova SHA exige npm test literal inteiro no CI Linux."
         },
         {
           "kind": "implementation",
@@ -176,9 +176,45 @@
           "ref": "Apollo/w61-70-20261008/rights-fences-unit-v1-49bd2d46/result.json",
           "scope": "Regressão literal npm test da fonte staged antes do novo freeze:2801 testes,2794pass,0fail,7skips (PGopt-in1,YuNetprivado5,LinuxemWindows1). Result SHAab87e861470b3de18e0bd4114bb0dcae38efc3f2a7c4c8e3895ab0d7268a245d; fingerprint antes/depois2776c66b85e0a86657e7eb799b4a324778e859e97cd7d766adac173b5c75dc4b,2316arquivos,24/24observações,138identidades terminais,zero backends,scratch removido e postflightErrors vazio. Inclui fences de publicação e baseline estrito do supervisor; não comprova os latches PG nem o teste composto Linux, pendentes.",
           "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/rights-fences-build-v1-83f570f3/result.json",
+          "scope": "Build API/Next webpack no commit 1b65dc20 PASS. SHA256 056a2d6635ca1cc795de8f99d87ee7e81a82a5fd574e528aec7acb7c1dca9902; fingerprint antes/depois 2776c66b85e0a86657e7eb799b4a324778e859e97cd7d766adac173b5c75dc4b, 15 identidades terminais, zero backends e scratch removido. Não equivale a aceite visual.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/rights-proxy-pg-v4-e663f7e7/result.json",
+          "scope": "PG real no commit 1b65dc20: 2/2 sem skips, quatro latches rights (project/snapshot vezes expiry/revoke) exigem ASSET_RIGHTS_BLOCKED e zero publicação. SHA256 3dee3e71062129b4093d7817b9e130734bd993593df0d02eea646c5a2eb12816; fingerprint 2776c66b...dc4b estável, observações 4/4+11/11, 11 identidades terminais, zero backends, cluster/porta limpos, scratch removido. FAIL v3 permanece histórico.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/rights-ocr-http-v1-a6e38a02/result.json",
+          "scope": "OCR worker 3/3 e HTTP Next start 1/1, zero skips no commit 1b65dc20. SHA256 66cf10ac959bfcabf2dc0d4aa43a22a518fd239c90a710b0d3dacd1aa080a93c; fingerprint 2776c66b...dc4b estável, observações 3/3+8/8+4/4 e postflight limpo. Inclui três latches publisher OCR e não concede autoridade facial.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci-1b65-media-38181499847/download-manifest.json",
+          "scope": "Media CI 38181499847 PASS, head 1b65dc20 e merge 3c544f99 com árvore b9ada2901fdabd8666ad86536e4be2e0efb6be8a idêntica. Manifest SHA256 4b79b03bd390f9e899b04d23357c4d5f6729dd1ba20a49527f60e7bd3c5097dc, 12 arquivos autenticados. MP4 f9c3e3191b72ca4611b790eec0287038dc610ce8e2d33de417fab0255ee62f28, 1567530 bytes, decode e browser reais; escopo controlled-mechanics, review-required/face unknown, deployed e ownerAccepted false.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/bailian-review-1b65-denied.json",
+          "scope": "Tentativa consultiva no CLI/skills 2.1.0 reportada pelo root: HTTP403 AccessDenied.Unpurchased para qwen3.8-max no perfil token-plan, sem revisão ou usage recebido. SHA256 c8456f58639099e09044e6f9cceb65af4a1192a4703a1fc1960bab61470a4f73. Não é aprovação de código; nenhum modelo alternativo, plano pago ou credencial alterado.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci-followup-unit-v1-e67296ed/result.json",
+          "scope": "FAIL de supervisão, não prova da suíte: npm test literal interrompido em OWNED_PROCESS_TREE_DEPTH_EXCEEDED, cadeia npm/cmd/Node/Git Bash até tr.exe depth11 durante testes do deploy com Docker fake. SHA256 bbf04ef9957a90070879ebcb1935b173254344583b003bee03cb2884a29cd7db; fingerprint antes/depois 205e56d1755720b4f125a9e238a216c06a1d7b999a04401b5c81cfa19c2c4c91 estável, identidades terminais, databaseNotStarted, zero backends, scratch removido, postflightErrors vazio. Causa exata do aninhamento não comprovada; sem aumento de limite ou seleção de testes para alegar sucesso. Nova regressão obrigatória no CI Linux.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "PR81 aberto, remote030b7ea8. Revisão estática de fences proxy, supervisor Linux e fixtures Compose concluída; dashboard agora separa projeto real revising/422 de fixture mecânica seeded+DI, sem alterar aprovação persistida. Regressão literal2801/2794pass/0fail/7skips e ESLint completo passaram na fonte staged. Congelar SHA após revisão do dashboard/gates; repetir build/PG4latches/producers/HTTP/T-FR/dashboard e novo CI obrigatório, incluindo Compose podcast/runtime-workers e Linux supervisor/8suítes. Provas build/rights-admission/Media030b permanecem daquele commit. W66/W69 seguem isolados, sem promoção TODO/implantação/aceite.",
+      "nextAction": "PR81 aberto em 1b65dc20. Correções posteriores restritas a testes/supervisor/wiring e documentação; runtime, schema, contratos e lockfiles não mudaram. Build/proxy quatro latches/OCR worker+HTTP e Media pertencem ao runtime1b65. Puros supervisor+fixture19pass/1Linuxskip, ESLint/paridade/status/whitespace passaram; regressão Windows completa abortou por depth11 e permanece FAIL histórico. Congelar novo SHA após pin FFprobe do Compose e revisão; exigir npm test literal inteiro, Linux composto, oito suítes percepção, dashboard e Compose no CI da nova SHA. Completar temporal/face PG/HTTP e T-FR/dashboard locais em Next start. Nenhuma implantação, aceite ou promoção TODO.",
       "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch. Registro operacional: persistencia Brain pendente por HTTP 502 / embedding_provider_error:openai:401; nenhuma memoria gravada, credencial alterada ou nova tentativa prevista sem sinal de recuperacao. Evidencias continuam no repositorio e no arquivo privado de cada run. Produtor facial diagnostico passou PG/runner real 4/4 apos corrigir claim retrying via transicao oficial do dominio e audit incompleto dos controles da fixture. Falhas anteriores permanecem arquivadas; HTTP facial proprio passou 1/1 sem skips em build Next fresco, com POST autenticado, replay concorrente, worker diagnostico YuNet em video development licenciado e GET selado; SHA256 do result 1a1ba6d017fe1acab99cddd18c9b3e16e11c96dbc1554114f3cc42015075a5dc. Quatro amostras/quatro caixas, faceSafety unknown e postflight com zero backends/16 PIDs terminais. Isso comprova apenas a mecanica diagnostica; modelos V5/V6/V7 seguem reprovados e holdout fechado. Mesmo patch de claim aplicado a OCR/temporal, com typecheck e gate de arquitetura verdes; este run prova retry facial. Nenhum holdout aberto ou autoridade facial concedida. CI proposto em 11/10: OCR e temporal reais em PostgreSQL isolado terão job dedicado com provenance de binários e supervisão serial; ainda não executado. tests/v2/prisma-face-producer-http.integration.mjs permanece fora do CI por insumos development privados/licenciados/pinados e runtime Python/OpenCV. Prova local face-http-resume-v1-39bfb5da SHA1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 não substitui CI. Face producer PG/runner também local; CI executa somente três casos offline de fixture/audit, sem detector apto ou holdout."
     },
     {

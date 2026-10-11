@@ -97,7 +97,7 @@ test('Linux age guard rejects unchanged equal/newer baseline peers and compares 
 })
 
 test('Linux known markers and later-listed marked parents cannot be excluded by environment enumeration order', async () => {
-  const world = observationWorld([entry(30, '50')]), context = await world.context()
+  const world = observationWorld([entry(30, '30')]), context = await world.context()
   world.states.get(20).ppid = 30
   world.denied.set(20, world.permission)
   world.environments.set(30, 'APOLLO_PERCEPTION_RUN_ID=controlled-run\0')
@@ -150,6 +150,160 @@ test('Linux baseline cannot be created after spawn or survive a changed supervis
     const world = observationWorld(), context = await world.context()
     world.states.get(100)[field] = field === 'uid' ? 601 : '101'
     await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), /Supervisor owner identity or UID changed/)
+  }
+})
+
+test('Linux EACCES terminal rechecks retain identity, current parent and historical ownership closure', async () => {
+  for (const state of ['Z', 'X', 'x']) {
+    const world = observationWorld(), context = await world.context()
+    await observeLinuxProcesses('controlled-run', context, world.io)
+    // The denied child precedes its marked parent in /proc enumeration, and
+    // reparenting happens between captured metadata and the terminal recheck.
+    for (const identity of [entry(31, '131', { ppid: 30 }), entry(32, '132', { ppid: 31 }), entry(30, '130')]) {
+      world.states.set(identity.pid, { ...identity, uid: 600 })
+    }
+    context.rootPid = 30
+    world.environments.set(30, 'APOLLO_PERCEPTION_RUN_ID=controlled-run\0')
+    world.denied.set(31, world.permission)
+    const originalIdentity = world.io.identity
+    let reads = 0
+    world.io.identity = async (pid) => {
+      const identity = await originalIdentity(pid)
+      return pid === 31 && ++reads === 2 ? { ...identity, state, ppid: 1 } : identity
+    }
+    const snapshot = await observeLinuxProcesses('controlled-run', context, world.io)
+    const terminal = snapshot.find((identity) => identity.pid === 31)
+    assert.equal(terminal.state, state)
+    assert.equal(terminal.ppid, 1, 'historical ancestry must not overwrite current PPID')
+    assert.equal(Object.hasOwn(terminal, 'historicalPpids'), false)
+    assert.equal(context.exclusions.size, 0)
+    const receipt = context.terminalEnvironmentRechecks.get('31:131')
+    assert.equal(receipt.observation, 'terminal-state')
+    assert.equal(receipt.before.ppid, 30)
+    assert.equal(receipt.before.state, 'S')
+    assert.equal(receipt.recheck.ppid, 1)
+    assert.equal(receipt.recheck.state, state)
+    assert.equal(receipt.recheck.uid, 600)
+    assert.equal(context.environmentDenials.get('31:131').guardReason, receipt.reason)
+    assert.deepEqual([...context.observed.keys()].sort(), ['30:130', '31:131', '32:132'])
+    assert.equal(context.observed.get('31:131').state, state)
+    assert.deepEqual(context.observed.get('31:131').historicalParentIdentities, [{ pid: 30, starttime: '130' }])
+    assert.equal(context.observed.get('32:132').ownership, 'ancestry')
+  }
+})
+
+test('Linux live denied owned child remains a failure but survives reparenting for bounded containment', async () => {
+  const world = observationWorld(), context = await world.context()
+  await observeLinuxProcesses('controlled-run', context, world.io)
+  world.states.set(31, { ...entry(31, '131', { ppid: 30 }), uid: 600 })
+  world.states.set(30, { ...entry(30, '130'), uid: 600 })
+  context.rootPid = 30
+  world.environments.set(30, 'APOLLO_PERCEPTION_RUN_ID=controlled-run\0')
+  world.denied.set(31, world.permission)
+  const originalIdentity = world.io.identity
+  let reads = 0
+  world.io.identity = async (pid) => {
+    const identity = await originalIdentity(pid)
+    return pid === 31 && ++reads === 2 ? { ...identity, ppid: 1 } : identity
+  }
+  await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === world.permission)
+  assert.deepEqual([...context.observed.keys()].sort(), ['30:130', '31:131'])
+  assert.equal(context.observed.get('31:131').ppid, 1)
+  assert.deepEqual(context.observed.get('31:131').historicalParentIdentities, [{ pid: 30, starttime: '130' }])
+  const receipt = context.environmentDenials.get('31:131')
+  assert.equal(receipt.before.ppid, 30)
+  assert.equal(receipt.recheck.ppid, 1)
+  assert.equal(receipt.guardReason, 'owned-or-marker-protected')
+  assert.equal(context.terminalEnvironmentRechecks.size, 0)
+  const signaled = []
+  const contained = await containObservedIdentities(context.observed.values(), 'SIGTERM', Date.now() + 1000, {
+    pidfdSignal: async (identity) => { signaled.push(identity.pid); return { result: 'signaled' } },
+  })
+  assert.deepEqual(signaled.sort(), [30, 31])
+  assert.ok(contained.signals.every((signal) => signal.result === 'signaled'))
+  assert.deepEqual(contained.errors, [])
+})
+
+test('Linux ancestry refuses a reused numeric parent and a child older than its newly marked parent', async () => {
+  for (const marked of [false, true]) {
+    const observed = new Map()
+    collectOwnedIdentities([entry(30, '130', { runMarked: true })], observed, 30)
+    collectOwnedIdentities([entry(30, '999', { runMarked: marked }), entry(31, '131', { ppid: 30 })], observed, 30)
+    assert.equal(observed.has('31:131'), false)
+    const signaled = []
+    await containObservedIdentities(observed.values(), 'SIGTERM', Date.now() + 1000, {
+      pidfdSignal: async (identity) => { signaled.push(`${identity.pid}:${identity.starttime}`); return { result: 'pid-recycled' } },
+    })
+    assert.equal(signaled.includes('31:131'), false)
+    assert.equal(signaled.includes('30:999'), marked)
+  }
+})
+
+test('Linux terminal permission handling rejects live, reused, uncertain UID and failed metadata rechecks with diagnostics', async () => {
+  for (const scenario of ['live', 'reused', 'uid-changed', 'uid-unavailable', 'stat-eio', 'owner-eacces', 'environment-eio']) {
+    const world = observationWorld(), context = await world.context()
+    await observeLinuxProcesses('controlled-run', context, world.io)
+    world.states.set(30, { ...entry(30, '130'), uid: 600 })
+    const ioFailure = Object.assign(new Error('controlled metadata IO failure'), { code: 'EIO' })
+    world.denied.set(30, scenario === 'environment-eio' ? ioFailure : world.permission)
+    const originalIdentity = world.io.identity, originalOwner = world.io.owner
+    let identityReads = 0, ownerReads = 0
+    world.io.identity = async (pid) => {
+      const identity = await originalIdentity(pid)
+      if (pid !== 30 || ++identityReads !== 2) return identity
+      if (scenario === 'stat-eio') throw ioFailure
+      return { ...identity, state: scenario === 'live' ? 'S' : 'Z',
+        starttime: scenario === 'reused' ? '999' : identity.starttime, ppid: 1 }
+    }
+    world.io.owner = async (pid) => {
+      const owner = await originalOwner(pid)
+      if (pid !== 30 || ++ownerReads !== 2) return owner
+      if (scenario === 'owner-eacces') throw world.permission
+      return { uid: scenario === 'uid-changed' ? 601 : scenario === 'uid-unavailable' ? undefined : owner.uid }
+    }
+    await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io),
+      (error) => error === (['stat-eio', 'environment-eio'].includes(scenario) ? ioFailure : world.permission), scenario)
+    assert.equal(context.terminalEnvironmentRechecks.size, 0, scenario)
+    assert.equal(context.exclusions.size, 0, scenario)
+    assert.equal(context.observed.size, 0, 'rejected metadata must not adopt a process')
+    const receipt = context.environmentDenials.get('30:130')
+    assert.equal(receipt.before.pid, 30)
+    assert.equal(receipt.before.starttime, '130')
+    assert.equal(receipt.before.uid, 600)
+    assert.ok(receipt.guardReason)
+    assert.equal(Object.hasOwn(receipt, 'environment'), false)
+    if (scenario === 'reused') assert.equal(receipt.recheck.starttime, '999')
+    if (scenario === 'uid-unavailable') assert.equal(receipt.recheck.uid, null)
+    if (scenario === 'owner-eacces') assert.equal(receipt.recheck.state, 'Z')
+  }
+})
+
+test('Linux failed inventory preserves independently verified owned identities without granting terminality', async () => {
+  for (const stage of ['metadata', 'environment']) {
+    const world = observationWorld(), context = await world.context()
+    await observeLinuxProcesses('controlled-run', context, world.io)
+    for (const identity of [entry(30, '130'), entry(31, '131', { ppid: 30 }), entry(40, '140')]) {
+      world.states.set(identity.pid, { ...identity, uid: 600 })
+    }
+    context.rootPid = 30
+    world.environments.set(30, 'APOLLO_PERCEPTION_RUN_ID=controlled-run\0')
+    const failure = Object.assign(new Error('controlled unrelated inventory failure'), { code: 'EIO' })
+    if (stage === 'environment') world.denied.set(40, failure)
+    else {
+      const originalIdentity = world.io.identity
+      world.io.identity = async (pid) => { if (pid === 40) throw failure; return originalIdentity(pid) }
+    }
+    await assert.rejects(observeLinuxProcesses('controlled-run', context, world.io), (error) => error === failure)
+    assert.deepEqual([...context.observed.keys()].sort(), ['30:130', '31:131'])
+    assert.equal(context.observed.get('31:131').state, 'S')
+    assert.equal(context.terminalEnvironmentRechecks.size, 0)
+    const signals = []
+    const contained = await containObservedIdentities(context.observed.values(), 'SIGTERM', Date.now() + 1000, {
+      pidfdSignal: async (identity) => { signals.push(identity.pid); return { result: 'signaled' } },
+    })
+    assert.deepEqual(signals.sort(), [30, 31])
+    assert.ok(contained.signals.every((signal) => signal.result === 'signaled'), 'a signal must not claim terminality')
+    assert.deepEqual(contained.errors, [])
   }
 })
 
