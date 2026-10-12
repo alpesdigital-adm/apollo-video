@@ -4122,7 +4122,7 @@ export default function ProjectWorkspacePage() {
               aria-live="polite"
             >
               <p className="font-semibold text-[#e7a59b]">
-                Revisão indisponível{workspaceHasMedia ? ' — a mídia já autorizada continua inspecionável abaixo' : ''}.
+                Não foi possível carregar a revisão solicitada.
               </p>
               <p className="mt-1">{describeReviewFailure(reviewFailure)}</p>
               <p className="mt-1 font-mono text-[10px] text-[#b7857d]" data-testid="review-unavailable-code">
@@ -4143,7 +4143,7 @@ export default function ProjectWorkspacePage() {
           {reviewEntry && !review ? (
             <section ref={reviewEntryTarget} tabIndex={-1} data-testid="review-entry-panel" data-entry-mode="review" aria-label="Mesa de revisão editorial" className="mt-5 scroll-mt-6 border-y border-white/[0.08] py-5">
               <p className="text-sm font-semibold text-[#c9c3b9]">Mesa de revisão</p>
-              <p className="mt-1 text-xs text-[#88847d]">{workspaceHasMedia ? 'A revisão será exibida quando um proxy autorizado estiver disponível.' : 'Este projeto ainda não possui mídia e proxy disponíveis para revisão.'}</p>
+              <p className="mt-1 text-xs text-[#88847d]">{!workspace ? 'Aguardando a disponibilidade de revisão do workspace.' : workspace.reviewAvailability.annotations.state === 'available' ? 'Há um proxy registrado para revisão. A mesa será exibida após uma leitura válida.' : workspace.reviewAvailability.annotations.reason === 'no-version' ? 'Este projeto ainda não possui uma versão para revisão.' : 'O workspace ainda não registra um proxy disponível para revisão desta versão.'}</p>
             </section>
           ) : null}
           {review ? (
