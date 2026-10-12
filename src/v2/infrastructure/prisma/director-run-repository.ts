@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto'
 
-import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
+import { Prisma, type PrismaClient, type V2ProjectSnapshot } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   DirectorRunCommit,
   DirectorRunContext,
   DirectorRunRepository,
   DirectorRunResult,
+  DirectorSnapshotCommitScope,
+  ResolveDirectorSnapshots,
 } from '../../application/ports/director-run-repository.ts'
 import type { EditorialCutEditPlan } from '../../application/apply-editorial-cut-command.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
@@ -23,6 +25,8 @@ import {
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { createProjectSnapshot, type ProjectSnapshot } from '../../domain/project-snapshot.ts'
+import { assertDirectorSnapshotAuthority, assertDirectorSnapshotContent, bindDirectorSnapshotIdentities } from '../../application/director-snapshot-identity.ts'
 import type { StoryPlan } from '../../domain/story-plan.ts'
 import { validateTreatmentPlan, type TreatmentPlan } from '../../domain/treatment-plan.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
@@ -684,7 +688,179 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     })
   }
 
-  async commitOrReplay(bundle: DirectorRunCommit, serializationAttempt = 1): Promise<Readonly<DirectorRunResult>> {
+  async commitWithCanonicalSnapshots(
+    scope: Readonly<DirectorSnapshotCommitScope>,
+    prepare: (resolve: ResolveDirectorSnapshots) => Promise<Readonly<DirectorRunCommit>>,
+  ): Promise<Readonly<DirectorRunResult>> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await this.client.$transaction(async (transaction) => {
+          // Every publisher takes operation before project. No resolver, content
+          // write or snapshot lock may precede these owner locks.
+          if (scope.operationFence) {
+            const operations = await transaction.$queryRaw<readonly { id: string }[]>(Prisma.sql`
+              SELECT "id" FROM "public_operations"
+              WHERE "id" = ${scope.operationFence.operationId}
+                AND "workspaceId" = ${scope.workspaceId} AND "projectId" = ${scope.projectId}
+              FOR UPDATE
+            `)
+            if (operations.length !== 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation owner disappeared')
+          }
+          const projects = await transaction.$queryRaw<readonly { id: string }[]>(Prisma.sql`
+            SELECT "id" FROM "projects"
+            WHERE "id" = ${scope.projectId} AND "workspaceId" = ${scope.workspaceId}
+            FOR UPDATE
+          `)
+          if (projects.length !== 1) throw new DomainError('PROJECT_NOT_FOUND', 'Director project owner disappeared')
+          const replay = await transaction.v2EditCommand.findUnique({
+            where: { workspaceId_projectId_idempotencyKey: {
+              workspaceId: scope.workspaceId, projectId: scope.projectId, idempotencyKey: scope.idempotencyKey,
+            } },
+            include: { directorRun: { include: directorRunInclude } },
+          })
+          if (replay) {
+            if (replay.requestFingerprint !== scope.requestFingerprint ||
+              hydrateEditCommandExternalActorAudit(replay).contextHash !== scope.actorContextHash) {
+              throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Director replay identity changed')
+            }
+            if (!replay.directorRun) throw new DomainError('PERSISTENCE_CONFLICT', 'Director idempotency result is missing')
+            if (scope.operationFence) {
+              const settled = await transaction.v2PublicOperation.findFirst({ where: {
+                id: scope.operationFence.operationId, workspaceId: scope.workspaceId, projectId: scope.projectId,
+                type: 'project-director-run', status: 'succeeded', phase: 'completed',
+                targetType: 'project-version', targetId: replay.directorRun.resultVersionId,
+              } })
+              if (!settled || replay.directorRun.operationId !== settled.id) throw new DomainError(
+                'PERSISTENCE_CONFLICT', 'Director replay is not bound to the settled operation',
+              )
+            }
+            return hydrateStoredRun(replay.directorRun, true)
+          }
+          await this.assertSnapshotOwner(transaction, scope)
+          const resolvedIds = new Set<string>()
+          const resolve: ResolveDirectorSnapshots = async (candidates) => {
+            await this.assertSnapshotOwner(transaction, scope)
+            if (candidates.length < 1 || candidates.length > 6 ||
+              new Set(candidates.map((item) => item.kind)).size !== candidates.length) {
+              throw new DomainError('PERSISTENCE_CONFLICT', 'Director snapshot candidates are incomplete')
+            }
+            const rows: Readonly<ProjectSnapshot>[] = []
+            // Brief is resolved first by the application; each remaining batch
+            // takes canonical rows in UTF-8 kind order under the same project lock.
+            for (const candidate of [...candidates].sort((left, right) =>
+              Buffer.compare(Buffer.from(left.kind, 'utf8'), Buffer.from(right.kind, 'utf8')))) {
+              assertDirectorSnapshotAuthority(candidate)
+              if (candidate.workspaceId !== scope.workspaceId || candidate.projectId !== scope.projectId) {
+                throw new DomainError('PERSISTENCE_CONFLICT', 'Director snapshot candidate is outside owner scope')
+              }
+              const byId = await transaction.v2ProjectSnapshot.findUnique({ where: { id: candidate.id } })
+              if (byId) assertDirectorSnapshotContent(candidate, this.snapshotFromRow(byId))
+              const key = { projectId_kind_contentHash: {
+                projectId: candidate.projectId, kind: candidate.kind, contentHash: candidate.contentHash,
+              } }
+              let row = await transaction.v2ProjectSnapshot.findUnique({ where: key })
+              if (!row) {
+                await transaction.$executeRaw(Prisma.sql`
+                  INSERT INTO "project_snapshots"
+                    ("id", "workspaceId", "projectId", "kind", "schemaVersion", "contentJson", "contentHash", "createdAt")
+                  VALUES (${candidate.id}, ${candidate.workspaceId}, ${candidate.projectId}, ${candidate.kind},
+                    ${candidate.contentSchemaVersion}, ${candidate.contentJson}, ${candidate.contentHash}, ${new Date(candidate.createdAt)})
+                  ON CONFLICT ("projectId", "kind", "contentHash") DO NOTHING
+                `)
+                row = await transaction.v2ProjectSnapshot.findUnique({ where: key })
+              }
+              if (!row) throw new DomainError('PERSISTENCE_CONFLICT', 'Canonical Director snapshot was not resolved')
+              const locked = await transaction.$queryRaw<readonly { id: string }[]>(Prisma.sql`
+                SELECT "id" FROM "project_snapshots"
+                WHERE "id" = ${row.id} AND "workspaceId" = ${scope.workspaceId} AND "projectId" = ${scope.projectId}
+                  AND "kind" = ${candidate.kind} AND "contentHash" = ${candidate.contentHash}
+                FOR SHARE
+              `)
+              row = await transaction.v2ProjectSnapshot.findUnique({ where: key })
+              if (locked.length !== 1 || !row || row.id !== locked[0].id) throw new DomainError(
+                'PERSISTENCE_CONFLICT', 'Canonical Director snapshot changed while acquiring its row lock',
+              )
+              const resolved = this.snapshotFromRow(row)
+              assertDirectorSnapshotContent(candidate, resolved)
+              if (byId && byId.id !== row.id) throw new DomainError('PERSISTENCE_CONFLICT', 'Director snapshot ID belongs to another tuple')
+              resolvedIds.add(resolved.id)
+              rows.push(resolved)
+            }
+            return bindDirectorSnapshotIdentities(candidates, rows)
+          }
+          // This callback only projects fixed planner output and seals it.
+          const bundle = await prepare(resolve)
+          if (new Set(bundle.snapshots.map((item) => item.id)).size !== bundle.snapshots.length ||
+            resolvedIds.size !== bundle.snapshots.length || !bundle.snapshots.every((item) => resolvedIds.has(item.id))) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Director bundle omitted or added resolved snapshot identities')
+          }
+          if (bundle.command.workspaceId !== scope.workspaceId || bundle.command.projectId !== scope.projectId ||
+            bundle.command.baseVersionId !== scope.baseVersionId || bundle.command.baseHash !== scope.baseHash ||
+            bundle.command.idempotencyKey !== scope.idempotencyKey || bundle.requestFingerprint !== scope.requestFingerprint ||
+            bundle.authenticationAudit.contextHash !== scope.actorContextHash || bundle.version.id !== scope.resultVersionId ||
+            (bundle.operationFence === undefined) !== (scope.operationFence === undefined) ||
+            (bundle.operationFence !== undefined && stableSerialize(bundle.operationFence) !== stableSerialize(scope.operationFence))) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Director prepared bundle changed its transaction owner')
+          }
+          const authorityNow = await this.assertSnapshotOwner(transaction, scope)
+          return this.commitBundle(transaction, {
+            ...bundle,
+            ...(bundle.operationFence ? { operationFence: { ...bundle.operationFence, now: authorityNow.toISOString() } } : {}),
+          })
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      } catch (error) {
+        const serialization = isPrismaCode(error, 'P2034') ||
+          isPrismaCode(error, 'P2010') && typeof error === 'object' && error !== null &&
+          'meta' in error && typeof error.meta === 'object' && error.meta !== null &&
+          'code' in error.meta && error.meta.code === '40001'
+        if (!serialization || attempt === 3) throw error
+      }
+    }
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Director snapshot owner retry exhausted')
+  }
+
+  private snapshotFromRow(row: V2ProjectSnapshot): Readonly<ProjectSnapshot> {
+    try {
+      return createProjectSnapshot({ id: row.id, workspaceId: row.workspaceId, projectId: row.projectId,
+        kind: row.kind as ProjectSnapshot['kind'], contentSchemaVersion: row.schemaVersion,
+        contentJson: row.contentJson, contentHash: row.contentHash, createdAt: row.createdAt.toISOString() })
+    } catch {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director canonical snapshot row is invalid')
+    }
+  }
+
+  private async assertSnapshotOwner(
+    transaction: Prisma.TransactionClient, scope: Readonly<DirectorSnapshotCommitScope>,
+  ): Promise<Date> {
+    const project = await transaction.v2Project.findFirst({
+      where: { id: scope.projectId, workspaceId: scope.workspaceId }, include: { currentVersion: true },
+    })
+    const operation = scope.operationFence ? await transaction.v2PublicOperation.findFirst({
+      where: { id: scope.operationFence.operationId, workspaceId: scope.workspaceId, projectId: scope.projectId },
+    }) : null
+    // Queries (and any lock waits) precede the authoritative clock. No caller's
+    // earlier clock is used to accept a lease that expired while waiting.
+    const clocks = await transaction.$queryRaw<readonly { now: Date }[]>(Prisma.sql`SELECT clock_timestamp() AS "now"`)
+    const now = clocks[0]?.now
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new DomainError(
+      'PERSISTENCE_CONFLICT', 'Director transaction clock is unavailable',
+    )
+    if (!project?.currentVersion || project.currentVersion.id !== scope.baseVersionId ||
+      project.currentVersion.baseHash !== scope.baseHash) throw new DomainError(
+        'VERSION_CONFLICT', 'Project version changed before canonical Director snapshot preparation',
+      )
+    if (scope.operationFence && (!operation || operation.type !== 'project-director-run' ||
+      operation.status !== 'running' || operation.phase !== 'directing' ||
+      operation.attempt !== scope.operationFence.attempt || operation.leaseOwner !== scope.operationFence.leaseOwner ||
+      operation.actorContextHash !== scope.actorContextHash || operation.targetType !== 'project-version' ||
+      operation.targetId !== scope.resultVersionId || operation.leaseExpiresAt === null ||
+      operation.leaseExpiresAt.getTime() <= now.getTime())) throw new DomainError(
+        'PERSISTENCE_CONFLICT', 'Director operation lease changed before canonical snapshot preparation',
+      )
+    return now
+  }
+
+  private async commitBundle(transaction: Prisma.TransactionClient, bundle: DirectorRunCommit): Promise<Readonly<DirectorRunResult>> {
     const decisionLog = parseDirectorDecisionLog(bundle.decisionLog)
     if (
       decisionLog.workspaceId !== bundle.run.workspaceId ||
@@ -704,444 +880,439 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       bundle.operationFence.attempt < 1 ||
       !fenceNow || Number.isNaN(fenceNow.getTime())
     )) throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation fence is invalid')
-    try {
-      return await this.client.$transaction(async (transaction) => {
-        const key = {
-          workspaceId_projectId_idempotencyKey: {
-            workspaceId: bundle.command.workspaceId,
-            projectId: bundle.command.projectId,
-            idempotencyKey: bundle.command.idempotencyKey,
-          },
-        }
-        const existing = await transaction.v2EditCommand.findUnique({
-          where: key,
-          include: { directorRun: { include: directorRunInclude } },
-        })
-        if (existing) {
-          if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different Director input')
-          if (
-            hydrateEditCommandExternalActorAudit(existing).contextHash !==
-            bundle.authenticationAudit.contextHash
-          ) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Director replay belongs to another authentication context')
-          if (!existing.directorRun) throw new DomainError('PERSISTENCE_CONFLICT', 'Director idempotency result is missing')
-          if (bundle.operationFence) {
-            const settled = await transaction.v2PublicOperation.findFirst({
-              where: {
-                id: bundle.operationFence.operationId,
-                workspaceId: bundle.command.workspaceId,
-                projectId: bundle.command.projectId,
-                type: 'project-director-run',
-                status: 'succeeded',
-                phase: 'completed',
-                targetType: 'project-version',
-                targetId: existing.directorRun.resultVersionId,
-              },
-              select: { id: true },
-            })
-            if (!settled || existing.directorRun.operationId !== settled.id) {
-              throw new DomainError('PERSISTENCE_CONFLICT', 'Director replay is not bound to the settled operation')
-            }
-          }
-          return hydrateStoredRun(existing.directorRun, true)
-        }
-        if (bundle.operationFence) {
-          const origin = await transaction.v2PublicOperation.findFirst({
-            where: {
-              id: bundle.operationFence.operationId,
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              type: 'project-director-run',
-              status: 'running',
-              phase: 'directing',
-              attempt: bundle.operationFence.attempt,
-              leaseOwner: bundle.operationFence.leaseOwner,
-              leaseExpiresAt: { gt: fenceNow! },
-              targetType: 'project-version',
-              targetId: bundle.version.id,
-            },
-            include: { projectDirectorRun: true },
-          })
-          const originContext = origin?.projectDirectorRun
-          if (
-            !origin ||
-            !originContext ||
-            originContext.baseVersionId !== bundle.command.baseVersionId ||
-            originContext.baseHash !== bundle.command.baseHash ||
-            originContext.baseObjective !== bundle.command.payload.previousObjective ||
-            originContext.objective !== bundle.command.payload.objective ||
-            originContext.objectiveVersion !== bundle.command.payload.objectiveVersion ||
-            originContext.rubricRef !== bundle.command.payload.rubricRef ||
-            (originContext.supersedesRunId ?? undefined) !== bundle.command.payload.supersedesRunId ||
-            hydrateExternalActorAudit(origin, origin.clientId).contextHash !==
-              bundle.authenticationAudit.contextHash
-          ) throw new DomainError(
-            'PERSISTENCE_CONFLICT',
-            'Director worker provenance does not match its originating operation',
-          )
-          const enteredPersisting = await transaction.v2PublicOperation.updateMany({
-            where: {
-              id: bundle.operationFence.operationId,
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              type: 'project-director-run',
-              status: 'running',
-              phase: 'directing',
-              attempt: bundle.operationFence.attempt,
-              leaseOwner: bundle.operationFence.leaseOwner,
-              leaseExpiresAt: { gt: fenceNow! },
-              targetType: 'project-version',
-              targetId: bundle.version.id,
-            },
-            data: {
-              phase: 'persisting',
-              progressCompleted: 1,
-              progressTotal: 2,
-              progressUnit: 'stage',
-              updatedAt: fenceNow!,
-            },
-          })
-          if (enteredPersisting.count !== 1) {
-            throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation lease was lost before commit')
-          }
-        }
-        const [project, transcript, sourceMaster] = await Promise.all([
-          transaction.v2Project.findFirst({
-            where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId },
-            include: {
-              currentVersion: true,
-              directorRuns: {
-                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-                take: 1,
-                include: { qualitySnapshot: true },
-              },
-            },
-          }),
-          transaction.v2MediaTranscript.findFirst({ where: {
-            id: bundle.sourceEvidence.transcriptId,
-            projectId: bundle.command.projectId,
-            workspaceId: bundle.command.workspaceId,
-            sourceArtifactId: bundle.sourceEvidence.sourceArtifactId,
-            transcriptHash: bundle.sourceEvidence.transcriptHash,
-          } }),
-          transaction.v2ProjectMediaAsset.findFirst({ where: {
-            projectId: bundle.command.projectId,
-            workspaceId: bundle.command.workspaceId,
-            artifactId: bundle.sourceEvidence.sourceArtifactId,
-            role: 'source-master',
-          } }),
-        ])
-        if (!project?.currentVersion || !transcript || !sourceMaster) throw new DomainError('PERSISTENCE_CONFLICT', 'Director source evidence disappeared before commit')
-        const latestOcr = await transaction.v2PerceptionProducerEnvelope.findFirst({
-          where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
-            projectVersionId: bundle.command.baseVersionId,
-            sourceArtifactId: bundle.sourceEvidence.sourceArtifactId, modality: 'ocr' },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true },
-        })
-        if ((latestOcr?.id ?? undefined) !== bundle.sourceEvidence.ocrEnvelope?.id) {
-          throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR selection changed before commit')
-        }
-        if (latestOcr) {
-          const resolvedOcr = await readPerceptionProducerEnvelope(transaction, {
-            id: latestOcr.id, workspaceId: bundle.command.workspaceId,
-            projectId: bundle.command.projectId, inputVersionId: bundle.command.baseVersionId,
-            now: this.clock(),
-          })
-          const selected = bundle.sourceEvidence.ocrEnvelope
-          if (!resolvedOcr) throw new DomainError('PERSISTENCE_CONFLICT',
-            'Selected OCR envelope disappeared before Director commit')
-          const expectedOcr = expectedOcrTimeline(resolvedOcr,
-            bundle.run.editPlan.fps, bundle.run.editPlan.durationFrames)
-          if (!selected || resolvedOcr.envelopeHash !== selected.envelopeHash ||
-              resolvedOcr.projectVersionId !== selected.inputVersionId ||
-              resolvedOcr.sourceArtifactId !== selected.sourceArtifactId ||
-              resolvedOcr.timeMapHash !== selected.timeMapHash ||
-              bundle.run.perception.schemaVersion !== 2 ||
-              bundle.run.perception.inputVersionId !== bundle.command.baseVersionId ||
-              stableSerialize(bundle.run.perception.ocrEvidence) !== stableSerialize(ocrSnapshotEvidence(resolvedOcr)) ||
-              !bundle.run.decisions.some((decision) => decision.evidenceRefs.includes(resolvedOcr.id)) ||
-              stableSerialize(bundle.run.perception.timeline.observations
-                .filter((item) => item.kind === 'ocr')) !==
-                stableSerialize(expectedOcr.observations) ||
-              stableSerialize(bundle.run.perception.timeline.coverage.find((entry) =>
-                entry.kind === 'ocr')) !== stableSerialize(expectedOcr.coverage.find((entry) =>
-                entry.kind === 'ocr'))) {
-            throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR evidence is not bound to the sealed input')
-          }
-        } else if (bundle.run.perception.schemaVersion !== 2 ||
-            bundle.run.perception.inputVersionId !== bundle.command.baseVersionId ||
-            bundle.run.perception.ocrEvidence !== undefined ||
-            bundle.run.perception.timeline.coverage.find((item) => item.kind === 'ocr')?.observedMs !== 0) {
-          throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception claims OCR without a sealed envelope')
-        }
-        const targetObjective = resolveStrategicObjective(bundle.command.payload.objective)
-        const latestRun = project.directorRuns[0]
-        const latestQuality = latestRun
-          ? parseRecord(latestRun.qualitySnapshot.contentJson, 'latest Director quality report')
-          : undefined
-        const objectiveBinding = bindDirectorObjective({
-          objective: targetObjective.id,
-          ...(latestRun
-            ? {
-                previous: {
-                  runId: latestRun.id,
-                  objective: resolveStrategicObjective(latestRun.objective).id,
-                  objectiveVersion: latestRun.objectiveVersion,
-                  rubricRef: latestRun.rubricRef,
-                  ...(latestRun.supersedesRunId
-                    ? { supersedesRunId: latestRun.supersedesRunId }
-                    : {}),
-                  approved: ['approved', 'approved-with-warnings'].includes(
-                    String(latestQuality?.status),
-                  ),
-                },
-              }
-            : {}),
-        })
-        const changedObjective = targetObjective.id !== project.objective
-        const briefSnapshotChanged =
-          bundle.command.payload.snapshotRefs.brief !== project.currentVersion.briefSnapshotId
-        const proposedBrief = bundle.snapshots.find(
-          (item) => item.id === bundle.command.payload.snapshotRefs.brief,
-        )
-        if (
-          project.objective !== bundle.command.payload.previousObjective ||
-          bundle.run.objective !== targetObjective.id ||
-          bundle.run.objectiveVersion !== objectiveBinding.objectiveVersion ||
-          bundle.run.rubricRef !== objectiveBinding.rubricRef ||
-          bundle.run.supersedesRunId !== objectiveBinding.supersedesRunId ||
-          (changedObjective && !briefSnapshotChanged) ||
-          (briefSnapshotChanged && proposedBrief?.kind !== 'brief')
-        ) throw new DomainError(
-          'VERSION_CONFLICT',
-          'Project strategic objective changed before Director commit',
-        )
-        if (proposedBrief) {
-          const brief = parseRecord(proposedBrief.contentJson, 'proposed Director brief')
-          if (brief.objective !== targetObjective.id) {
-            throw new DomainError('PERSISTENCE_CONFLICT', 'Director brief objective is inconsistent')
-          }
-        }
-        if (
-          project.currentVersion.id !== bundle.command.baseVersionId ||
-          project.currentVersion.baseHash !== bundle.command.baseHash ||
-          bundle.version.parentVersionId !== project.currentVersion.id ||
-          bundle.version.sequence !== project.currentVersion.sequence + 1
-        ) throw new DomainError('VERSION_CONFLICT', 'Project version changed before Director commit', { currentVersionId: project.currentVersion.id, currentBaseHash: project.currentVersion.baseHash })
-        const [proxyOutputs, finalOutputs] = await Promise.all([
-          transaction.v2ProjectProxyRenderOperation.findMany({
-            where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true },
-          }),
-          transaction.v2ProjectFinalExportOperation.findMany({
-            where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true, outputAspectRatio: true },
-          }),
-        ])
-        const currentOutputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
-          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
-        if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
-          throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before Director impact commit')
-        }
-        await transaction.v2EditCommand.create({
-          data: {
-            id: bundle.command.id,
-            workspaceId: bundle.command.workspaceId,
-            projectId: bundle.command.projectId,
-            baseVersionId: bundle.command.baseVersionId,
-            baseHash: bundle.command.baseHash,
-            type: bundle.command.type,
-            scopeJson: stableSerialize(bundle.command.scope),
-            payloadJson: stableSerialize(bundle.command.payload),
-            reason: bundle.command.reason,
-            actorType: bundle.command.author.type,
-            actorId: bundle.command.author.id,
-            delegatedUserId: bundle.command.author.delegatedUserId,
-            ...editCommandExternalActorAuditData(
-              bundle.authenticationAudit,
-              bundle.command.workspaceId,
-              bundle.command.author,
-            ),
-            idempotencyKey: bundle.command.idempotencyKey,
-            requestFingerprint: bundle.requestFingerprint,
-            createdAt: new Date(bundle.command.createdAt),
-          },
-        })
-        for (const item of bundle.snapshots) {
-          await transaction.v2ProjectSnapshot.create({ data: {
-            id: item.id, workspaceId: item.workspaceId, projectId: item.projectId,
-            kind: item.kind, schemaVersion: item.contentSchemaVersion,
-            contentJson: item.contentJson, contentHash: item.contentHash,
-            createdAt: new Date(item.createdAt),
-          } })
-        }
-        await transaction.v2ProjectVersion.create({ data: {
-          id: bundle.version.id,
-          workspaceId: bundle.version.workspaceId,
-          projectId: bundle.version.projectId,
-          sequence: bundle.version.sequence,
-          parentVersionId: bundle.version.parentVersionId,
-          briefSnapshotId: bundle.version.snapshotRefs.brief!,
-          treatmentSnapshotId: bundle.version.snapshotRefs.treatment!,
-          storySnapshotId: bundle.version.snapshotRefs.story!,
-          editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
-          policiesSnapshotId: bundle.version.snapshotRefs.policies,
-          baseHash: bundle.version.baseHash,
-          createdBy: bundle.version.createdBy,
-          commandId: bundle.command.id,
-          createdAt: new Date(bundle.version.createdAt),
-        } })
-        const refs = bundle.command.payload.snapshotRefs
-        await transaction.v2DirectorRun.create({ data: {
-          id: bundle.run.id,
-          workspaceId: bundle.run.workspaceId,
-          projectId: bundle.run.projectId,
-          commandId: bundle.run.commandId,
-          baseVersionId: bundle.run.baseVersionId,
-          resultVersionId: bundle.run.resultVersionId,
-          status: bundle.run.status,
-          plannerVersion: bundle.run.plannerVersion,
-          criticVersion: bundle.run.criticVersion,
-          objective: bundle.run.objective,
-          objectiveVersion: bundle.run.objectiveVersion,
-          rubricRef: bundle.run.rubricRef,
-          supersedesRunId: bundle.run.supersedesRunId,
-          perceptionSnapshotId: refs.perception,
-          treatmentSnapshotId: refs.treatment,
-          storySnapshotId: refs.story,
-          editPlanSnapshotId: refs.editPlan,
-          qualitySnapshotId: refs.quality,
-          decisionsJson: stableSerialize(bundle.run.decisions),
-          decisionLogJson: stableSerialize(decisionLog),
-          decisionLogHash: decisionLog.logHash,
-          assumptionsJson: stableSerialize(bundle.run.assumptions),
-          initiatedByType: bundle.run.initiatedBy.type,
-          initiatedById: bundle.run.initiatedBy.id,
-          operationId: bundle.operationFence?.operationId,
-          createdAt: new Date(bundle.run.createdAt),
-        } })
-        const invalidations = createDirectorRunInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
-        if (invalidations.length > 0) {
-          await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
-            id: item.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
-            commandId: item.commandId, baseVersionId: item.baseVersionId, resultVersionId: item.resultVersionId,
-            artifactId: item.artifactId, kind: item.kind, variantId: item.variantId, status: item.status,
-            dependencyTypesJson: stableSerialize(item.dependencyTypes), affectedRangesJson: stableSerialize(item.affectedRanges),
-            impactHash: item.impactHash, createdAt: new Date(item.createdAt),
-          })) })
-        }
-        const updated = await transaction.v2Project.updateMany({
+    const key = {
+      workspaceId_projectId_idempotencyKey: {
+        workspaceId: bundle.command.workspaceId,
+        projectId: bundle.command.projectId,
+        idempotencyKey: bundle.command.idempotencyKey,
+      },
+    }
+    const existing = await transaction.v2EditCommand.findUnique({
+      where: key,
+      include: { directorRun: { include: directorRunInclude } },
+    })
+    if (existing) {
+      if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different Director input')
+      if (
+        hydrateEditCommandExternalActorAudit(existing).contextHash !==
+        bundle.authenticationAudit.contextHash
+      ) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Director replay belongs to another authentication context')
+      if (!existing.directorRun) throw new DomainError('PERSISTENCE_CONFLICT', 'Director idempotency result is missing')
+      if (bundle.operationFence) {
+        const settled = await transaction.v2PublicOperation.findFirst({
           where: {
-            id: bundle.command.projectId,
+            id: bundle.operationFence.operationId,
             workspaceId: bundle.command.workspaceId,
-            currentVersionId: bundle.command.baseVersionId,
-            objective: bundle.command.payload.previousObjective,
+            projectId: bundle.command.projectId,
+            type: 'project-director-run',
+            status: 'succeeded',
+            phase: 'completed',
+            targetType: 'project-version',
+            targetId: existing.directorRun.resultVersionId,
           },
-          data: {
-            currentVersionId: bundle.version.id,
-            objective: bundle.command.payload.objective,
-          },
+          select: { id: true },
         })
-        if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project current version changed during Director commit')
-        await transaction.v2PublicEventOutbox.create({ data: {
-          id: bundle.event.id,
-          workspaceId: bundle.event.workspaceId,
-          type: bundle.event.type,
-          version: bundle.event.version,
-          occurredAt: new Date(bundle.event.occurredAt),
-          sequence: bundle.event.sequence,
-          actorClientId: bundle.event.actor?.clientId,
-          actorUserId: bundle.event.actor?.userId,
-          resourceType: bundle.event.resource.type,
-          resourceId: bundle.event.resource.id,
-          dataJson: stableSerialize(bundle.event.data),
-        } })
-        if (bundle.operationFence) {
-          const completedAt = new Date(bundle.operationFence.now)
-          const settled = await transaction.v2PublicOperation.updateMany({
-            where: {
-              id: bundle.operationFence.operationId,
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              type: 'project-director-run',
-              status: 'running',
-              phase: 'persisting',
-              attempt: bundle.operationFence.attempt,
-              leaseOwner: bundle.operationFence.leaseOwner,
-              leaseExpiresAt: { gt: completedAt },
-              targetType: 'project-version',
-              targetId: bundle.version.id,
-            },
-            data: {
-              status: 'succeeded',
-              phase: 'completed',
-              progressCompleted: 2,
-              progressTotal: 2,
-              progressUnit: 'stage',
-              cancelable: false,
-              retryable: false,
-              resultJson: stableSerialize({
-                resource: { type: 'project-version', id: bundle.version.id },
-              }),
-              updatedAt: completedAt,
-              completedAt,
-              leaseOwner: null,
-              leaseExpiresAt: null,
-              heartbeatAt: null,
-              nextAttemptAt: null,
-              deadLetteredAt: null,
-            },
-          })
-          if (settled.count !== 1) {
-            throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation lease was lost during commit')
-          }
-          const settledOperation = await transaction.v2PublicOperation.findUnique({
-            where: { id: bundle.operationFence.operationId },
-            select: { clientId: true },
-          })
-          if (!settledOperation) {
-            throw new DomainError(
-              'PERSISTENCE_CONFLICT',
-              'Settled Director operation disappeared during commit',
-            )
-          }
-          await persistOperationStatusEvents(
-            transaction,
-            'running',
-            {
-              id: bundle.operationFence.operationId,
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              clientId: settledOperation.clientId,
-              type: 'project-director-run',
-              status: 'succeeded',
-              phase: 'completed',
-              attempt: bundle.operationFence.attempt,
-              updatedAt: bundle.operationFence.now,
-            },
-            randomUUID,
-          )
+        if (!settled || existing.directorRun.operationId !== settled.id) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Director replay is not bound to the settled operation')
         }
-        const stored = await transaction.v2DirectorRun.findUniqueOrThrow({ where: { id: bundle.run.id }, include: directorRunInclude })
-        return hydrateStoredRun(stored, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-    } catch (error) {
-      if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(bundle, serializationAttempt + 1)
-      if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentResult({
+      }
+      return hydrateStoredRun(existing.directorRun, true)
+    }
+    if (bundle.operationFence) {
+      const origin = await transaction.v2PublicOperation.findFirst({
+        where: {
+          id: bundle.operationFence.operationId,
           workspaceId: bundle.command.workspaceId,
           projectId: bundle.command.projectId,
-          idempotencyKey: bundle.command.idempotencyKey,
-          actorContextHash: bundle.authenticationAudit.contextHash,
-        })
-        if (existing) {
-          if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different Director input')
-          return Object.freeze({ ...existing.result, replayed: true })
-        }
-        throw new DomainError('PERSISTENCE_CONFLICT', 'Director commit collided with immutable state')
+          type: 'project-director-run',
+          status: 'running',
+          phase: 'directing',
+          attempt: bundle.operationFence.attempt,
+          leaseOwner: bundle.operationFence.leaseOwner,
+          leaseExpiresAt: { gt: fenceNow! },
+          targetType: 'project-version',
+          targetId: bundle.version.id,
+        },
+        include: { projectDirectorRun: true },
+      })
+      const originContext = origin?.projectDirectorRun
+      if (
+        !origin ||
+        !originContext ||
+        originContext.baseVersionId !== bundle.command.baseVersionId ||
+        originContext.baseHash !== bundle.command.baseHash ||
+        originContext.baseObjective !== bundle.command.payload.previousObjective ||
+        originContext.objective !== bundle.command.payload.objective ||
+        originContext.objectiveVersion !== bundle.command.payload.objectiveVersion ||
+        originContext.rubricRef !== bundle.command.payload.rubricRef ||
+        (originContext.supersedesRunId ?? undefined) !== bundle.command.payload.supersedesRunId ||
+        hydrateExternalActorAudit(origin, origin.clientId).contextHash !==
+          bundle.authenticationAudit.contextHash
+      ) throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Director worker provenance does not match its originating operation',
+      )
+      const enteredPersisting = await transaction.v2PublicOperation.updateMany({
+        where: {
+          id: bundle.operationFence.operationId,
+          workspaceId: bundle.command.workspaceId,
+          projectId: bundle.command.projectId,
+          type: 'project-director-run',
+          status: 'running',
+          phase: 'directing',
+          attempt: bundle.operationFence.attempt,
+          leaseOwner: bundle.operationFence.leaseOwner,
+          leaseExpiresAt: { gt: fenceNow! },
+          targetType: 'project-version',
+          targetId: bundle.version.id,
+        },
+        data: {
+          phase: 'persisting',
+          progressCompleted: 1,
+          progressTotal: 2,
+          progressUnit: 'stage',
+          updatedAt: fenceNow!,
+        },
+      })
+      if (enteredPersisting.count !== 1) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation lease was lost before commit')
       }
-      throw error
     }
+    const [project, transcript, sourceMaster] = await Promise.all([
+      transaction.v2Project.findFirst({
+        where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId },
+        include: {
+          currentVersion: true,
+          directorRuns: {
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: 1,
+            include: { qualitySnapshot: true },
+          },
+        },
+      }),
+      transaction.v2MediaTranscript.findFirst({ where: {
+        id: bundle.sourceEvidence.transcriptId,
+        projectId: bundle.command.projectId,
+        workspaceId: bundle.command.workspaceId,
+        sourceArtifactId: bundle.sourceEvidence.sourceArtifactId,
+        transcriptHash: bundle.sourceEvidence.transcriptHash,
+      } }),
+      transaction.v2ProjectMediaAsset.findFirst({ where: {
+        projectId: bundle.command.projectId,
+        workspaceId: bundle.command.workspaceId,
+        artifactId: bundle.sourceEvidence.sourceArtifactId,
+        role: 'source-master',
+      } }),
+    ])
+    if (!project?.currentVersion || !transcript || !sourceMaster) throw new DomainError('PERSISTENCE_CONFLICT', 'Director source evidence disappeared before commit')
+    const latestOcr = await transaction.v2PerceptionProducerEnvelope.findFirst({
+      where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+        projectVersionId: bundle.command.baseVersionId,
+        sourceArtifactId: bundle.sourceEvidence.sourceArtifactId, modality: 'ocr' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true },
+    })
+    if ((latestOcr?.id ?? undefined) !== bundle.sourceEvidence.ocrEnvelope?.id) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR selection changed before commit')
+    }
+    if (latestOcr) {
+      const resolvedOcr = await readPerceptionProducerEnvelope(transaction, {
+        id: latestOcr.id, workspaceId: bundle.command.workspaceId,
+        projectId: bundle.command.projectId, inputVersionId: bundle.command.baseVersionId,
+        now: this.clock(),
+      })
+      const selected = bundle.sourceEvidence.ocrEnvelope
+      if (!resolvedOcr) throw new DomainError('PERSISTENCE_CONFLICT',
+        'Selected OCR envelope disappeared before Director commit')
+      const expectedOcr = expectedOcrTimeline(resolvedOcr,
+        bundle.run.editPlan.fps, bundle.run.editPlan.durationFrames)
+      if (!selected || resolvedOcr.envelopeHash !== selected.envelopeHash ||
+          resolvedOcr.projectVersionId !== selected.inputVersionId ||
+          resolvedOcr.sourceArtifactId !== selected.sourceArtifactId ||
+          resolvedOcr.timeMapHash !== selected.timeMapHash ||
+          bundle.run.perception.schemaVersion !== 2 ||
+          bundle.run.perception.inputVersionId !== bundle.command.baseVersionId ||
+          stableSerialize(bundle.run.perception.ocrEvidence) !== stableSerialize(ocrSnapshotEvidence(resolvedOcr)) ||
+          !bundle.run.decisions.some((decision) => decision.evidenceRefs.includes(resolvedOcr.id)) ||
+          stableSerialize(bundle.run.perception.timeline.observations
+            .filter((item) => item.kind === 'ocr')) !==
+            stableSerialize(expectedOcr.observations) ||
+          stableSerialize(bundle.run.perception.timeline.coverage.find((entry) =>
+            entry.kind === 'ocr')) !== stableSerialize(expectedOcr.coverage.find((entry) =>
+            entry.kind === 'ocr'))) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director OCR evidence is not bound to the sealed input')
+      }
+    } else if (bundle.run.perception.schemaVersion !== 2 ||
+        bundle.run.perception.inputVersionId !== bundle.command.baseVersionId ||
+        bundle.run.perception.ocrEvidence !== undefined ||
+        bundle.run.perception.timeline.coverage.find((item) => item.kind === 'ocr')?.observedMs !== 0) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Director perception claims OCR without a sealed envelope')
+    }
+    const targetObjective = resolveStrategicObjective(bundle.command.payload.objective)
+    const latestRun = project.directorRuns[0]
+    const latestQuality = latestRun
+      ? parseRecord(latestRun.qualitySnapshot.contentJson, 'latest Director quality report')
+      : undefined
+    const objectiveBinding = bindDirectorObjective({
+      objective: targetObjective.id,
+      ...(latestRun
+        ? {
+            previous: {
+              runId: latestRun.id,
+              objective: resolveStrategicObjective(latestRun.objective).id,
+              objectiveVersion: latestRun.objectiveVersion,
+              rubricRef: latestRun.rubricRef,
+              ...(latestRun.supersedesRunId
+                ? { supersedesRunId: latestRun.supersedesRunId }
+                : {}),
+              approved: ['approved', 'approved-with-warnings'].includes(
+                String(latestQuality?.status),
+              ),
+            },
+          }
+        : {}),
+    })
+    const changedObjective = targetObjective.id !== project.objective
+    const briefSnapshotChanged =
+      bundle.command.payload.snapshotRefs.brief !== project.currentVersion.briefSnapshotId
+    const proposedBrief = bundle.snapshots.find(
+      (item) => item.id === bundle.command.payload.snapshotRefs.brief,
+    )
+    if (
+      project.objective !== bundle.command.payload.previousObjective ||
+      bundle.run.objective !== targetObjective.id ||
+      bundle.run.objectiveVersion !== objectiveBinding.objectiveVersion ||
+      bundle.run.rubricRef !== objectiveBinding.rubricRef ||
+      bundle.run.supersedesRunId !== objectiveBinding.supersedesRunId ||
+      (changedObjective && !briefSnapshotChanged) ||
+      (briefSnapshotChanged && proposedBrief?.kind !== 'brief')
+    ) throw new DomainError(
+      'VERSION_CONFLICT',
+      'Project strategic objective changed before Director commit',
+    )
+    if (proposedBrief) {
+      const brief = parseRecord(proposedBrief.contentJson, 'proposed Director brief')
+      if (brief.objective !== targetObjective.id) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director brief objective is inconsistent')
+      }
+    }
+    if (
+      project.currentVersion.id !== bundle.command.baseVersionId ||
+      project.currentVersion.baseHash !== bundle.command.baseHash ||
+      bundle.version.parentVersionId !== project.currentVersion.id ||
+      bundle.version.sequence !== project.currentVersion.sequence + 1
+    ) throw new DomainError('VERSION_CONFLICT', 'Project version changed before Director commit', { currentVersionId: project.currentVersion.id, currentBaseHash: project.currentVersion.baseHash })
+    const [proxyOutputs, finalOutputs] = await Promise.all([
+      transaction.v2ProjectProxyRenderOperation.findMany({
+        where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true },
+      }),
+      transaction.v2ProjectFinalExportOperation.findMany({
+        where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true, outputAspectRatio: true },
+      }),
+    ])
+    const currentOutputs = [
+      ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
+      ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
+    ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+    if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
+      throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before Director impact commit')
+    }
+    // Lock only the rows returned by this owner, in a deterministic order,
+    // then confront IDs and tuples again before any Command/Version seal is stored.
+    for (const item of [...bundle.snapshots].sort((left, right) =>
+      Buffer.compare(Buffer.from(left.id, 'utf8'), Buffer.from(right.id, 'utf8')))) {
+      const locked = await transaction.$queryRaw<readonly { id: string }[]>(Prisma.sql`
+        SELECT "id" FROM "project_snapshots"
+        WHERE "id" = ${item.id} AND "workspaceId" = ${item.workspaceId} AND "projectId" = ${item.projectId}
+        FOR SHARE
+      `)
+      const row = await transaction.v2ProjectSnapshot.findUnique({ where: { id: item.id } })
+      const tuple = await transaction.v2ProjectSnapshot.findUnique({ where: {
+        projectId_kind_contentHash: { projectId: item.projectId, kind: item.kind, contentHash: item.contentHash },
+      } })
+      if (locked.length !== 1 || !row || !tuple || row.id !== tuple.id ||
+        row.createdAt.toISOString() !== item.createdAt) throw new DomainError(
+          'PERSISTENCE_CONFLICT', 'Director canonical snapshot identity changed before commit',
+        )
+      assertDirectorSnapshotContent(item, this.snapshotFromRow(row))
+    }
+    await transaction.v2EditCommand.create({
+      data: {
+        id: bundle.command.id,
+        workspaceId: bundle.command.workspaceId,
+        projectId: bundle.command.projectId,
+        baseVersionId: bundle.command.baseVersionId,
+        baseHash: bundle.command.baseHash,
+        type: bundle.command.type,
+        scopeJson: stableSerialize(bundle.command.scope),
+        payloadJson: stableSerialize(bundle.command.payload),
+        reason: bundle.command.reason,
+        actorType: bundle.command.author.type,
+        actorId: bundle.command.author.id,
+        delegatedUserId: bundle.command.author.delegatedUserId,
+        ...editCommandExternalActorAuditData(
+          bundle.authenticationAudit,
+          bundle.command.workspaceId,
+          bundle.command.author,
+        ),
+        idempotencyKey: bundle.command.idempotencyKey,
+        requestFingerprint: bundle.requestFingerprint,
+        createdAt: new Date(bundle.command.createdAt),
+      },
+    })
+    await transaction.v2ProjectVersion.create({ data: {
+      id: bundle.version.id,
+      workspaceId: bundle.version.workspaceId,
+      projectId: bundle.version.projectId,
+      sequence: bundle.version.sequence,
+      parentVersionId: bundle.version.parentVersionId,
+      briefSnapshotId: bundle.version.snapshotRefs.brief!,
+      treatmentSnapshotId: bundle.version.snapshotRefs.treatment!,
+      storySnapshotId: bundle.version.snapshotRefs.story!,
+      editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
+      policiesSnapshotId: bundle.version.snapshotRefs.policies,
+      baseHash: bundle.version.baseHash,
+      createdBy: bundle.version.createdBy,
+      commandId: bundle.command.id,
+      createdAt: new Date(bundle.version.createdAt),
+    } })
+    const refs = bundle.command.payload.snapshotRefs
+    await transaction.v2DirectorRun.create({ data: {
+      id: bundle.run.id,
+      workspaceId: bundle.run.workspaceId,
+      projectId: bundle.run.projectId,
+      commandId: bundle.run.commandId,
+      baseVersionId: bundle.run.baseVersionId,
+      resultVersionId: bundle.run.resultVersionId,
+      status: bundle.run.status,
+      plannerVersion: bundle.run.plannerVersion,
+      criticVersion: bundle.run.criticVersion,
+      objective: bundle.run.objective,
+      objectiveVersion: bundle.run.objectiveVersion,
+      rubricRef: bundle.run.rubricRef,
+      supersedesRunId: bundle.run.supersedesRunId,
+      perceptionSnapshotId: refs.perception,
+      treatmentSnapshotId: refs.treatment,
+      storySnapshotId: refs.story,
+      editPlanSnapshotId: refs.editPlan,
+      qualitySnapshotId: refs.quality,
+      decisionsJson: stableSerialize(bundle.run.decisions),
+      decisionLogJson: stableSerialize(decisionLog),
+      decisionLogHash: decisionLog.logHash,
+      assumptionsJson: stableSerialize(bundle.run.assumptions),
+      initiatedByType: bundle.run.initiatedBy.type,
+      initiatedById: bundle.run.initiatedBy.id,
+      operationId: bundle.operationFence?.operationId,
+      createdAt: new Date(bundle.run.createdAt),
+    } })
+    const invalidations = createDirectorRunInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
+    if (invalidations.length > 0) {
+      await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
+        id: item.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+        commandId: item.commandId, baseVersionId: item.baseVersionId, resultVersionId: item.resultVersionId,
+        artifactId: item.artifactId, kind: item.kind, variantId: item.variantId, status: item.status,
+        dependencyTypesJson: stableSerialize(item.dependencyTypes), affectedRangesJson: stableSerialize(item.affectedRanges),
+        impactHash: item.impactHash, createdAt: new Date(item.createdAt),
+      })) })
+    }
+    const updated = await transaction.v2Project.updateMany({
+      where: {
+        id: bundle.command.projectId,
+        workspaceId: bundle.command.workspaceId,
+        currentVersionId: bundle.command.baseVersionId,
+        objective: bundle.command.payload.previousObjective,
+      },
+      data: {
+        currentVersionId: bundle.version.id,
+        objective: bundle.command.payload.objective,
+      },
+    })
+    if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project current version changed during Director commit')
+    await transaction.v2PublicEventOutbox.create({ data: {
+      id: bundle.event.id,
+      workspaceId: bundle.event.workspaceId,
+      type: bundle.event.type,
+      version: bundle.event.version,
+      occurredAt: new Date(bundle.event.occurredAt),
+      sequence: bundle.event.sequence,
+      actorClientId: bundle.event.actor?.clientId,
+      actorUserId: bundle.event.actor?.userId,
+      resourceType: bundle.event.resource.type,
+      resourceId: bundle.event.resource.id,
+      dataJson: stableSerialize(bundle.event.data),
+    } })
+    if (bundle.operationFence) {
+      const clocks = await transaction.$queryRaw<readonly { now: Date }[]>(Prisma.sql`SELECT clock_timestamp() AS "now"`)
+      const completedAt = clocks[0]?.now
+      if (!(completedAt instanceof Date) || !Number.isFinite(completedAt.getTime())) throw new DomainError(
+        'PERSISTENCE_CONFLICT', 'Director settlement clock is unavailable',
+      )
+      const settled = await transaction.v2PublicOperation.updateMany({
+        where: {
+          id: bundle.operationFence.operationId,
+          workspaceId: bundle.command.workspaceId,
+          projectId: bundle.command.projectId,
+          type: 'project-director-run',
+          status: 'running',
+          phase: 'persisting',
+          attempt: bundle.operationFence.attempt,
+          leaseOwner: bundle.operationFence.leaseOwner,
+          leaseExpiresAt: { gt: completedAt },
+          targetType: 'project-version',
+          targetId: bundle.version.id,
+        },
+        data: {
+          status: 'succeeded',
+          phase: 'completed',
+          progressCompleted: 2,
+          progressTotal: 2,
+          progressUnit: 'stage',
+          cancelable: false,
+          retryable: false,
+          resultJson: stableSerialize({
+            resource: { type: 'project-version', id: bundle.version.id },
+          }),
+          updatedAt: completedAt,
+          completedAt,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          heartbeatAt: null,
+          nextAttemptAt: null,
+          deadLetteredAt: null,
+        },
+      })
+      if (settled.count !== 1) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation lease was lost during commit')
+      }
+      const settledOperation = await transaction.v2PublicOperation.findUnique({
+        where: { id: bundle.operationFence.operationId },
+        select: { clientId: true },
+      })
+      if (!settledOperation) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Settled Director operation disappeared during commit',
+        )
+      }
+      await persistOperationStatusEvents(
+        transaction,
+        'running',
+        {
+          id: bundle.operationFence.operationId,
+          workspaceId: bundle.command.workspaceId,
+          projectId: bundle.command.projectId,
+          clientId: settledOperation.clientId,
+          type: 'project-director-run',
+          status: 'succeeded',
+          phase: 'completed',
+          attempt: bundle.operationFence.attempt,
+          updatedAt: completedAt.toISOString(),
+        },
+        randomUUID,
+      )
+    }
+    const stored = await transaction.v2DirectorRun.findUniqueOrThrow({ where: { id: bundle.run.id }, include: directorRunInclude })
+    return hydrateStoredRun(stored, false)
   }
 }

@@ -1,4 +1,6 @@
+import { assertDirectorSnapshotContent, bindDirectorSnapshotIdentities } from '../../src/v2/application/director-snapshot-identity.ts'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
@@ -8,6 +10,7 @@ import { enqueueProjectDirectorRunService } from '../../src/v2/application/enque
 import { runNextProjectDirectorOperationService } from '../../src/v2/application/run-project-director-operation-worker.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
@@ -147,6 +150,7 @@ function compiledEditorialPlan(selectedInsert = false, ctaText) {
 
 class InMemoryDirectorRepository {
   constructor(options = {}) {
+    this.snapshotRows = new Map()
     this.projectObjective = options.projectObjective ?? 'discovery'
     this.latestDirectorObjective = options.latestDirectorObjective
     this.selectedInsert = options.selectedInsert ?? false
@@ -227,7 +231,31 @@ class InMemoryDirectorRepository {
     }
   }
 
-  async commitOrReplay(bundle) {
+  async commitWithCanonicalSnapshots(scope, prepare) {
+    // Controlled in-memory transaction: explicit canonical store, no PG claim.
+    const rows = new Map(this.snapshotRows)
+    const resolve = async (candidates) => candidates.map((candidate) => {
+      assert.equal(candidate.workspaceId, scope.workspaceId)
+      assert.equal(candidate.projectId, scope.projectId)
+      const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
+      const stored = rows.get(key)
+      if (stored) {
+        assertDirectorSnapshotContent(candidate, stored)
+        return stored
+      }
+      rows.set(key, candidate)
+      return candidate
+    })
+    const bundle = await prepare(resolve)
+    assert.equal(bundle.command.baseVersionId, scope.baseVersionId)
+    assert.equal(bundle.command.baseHash, scope.baseHash)
+    assert.equal(bundle.requestFingerprint, scope.requestFingerprint)
+    const result = await this.commitPreparedBundle(bundle)
+    this.snapshotRows = rows
+    return result
+  }
+
+  async commitPreparedBundle(bundle) {
     this.lastBundle = bundle
     const impact = parseDirectorRunImpact(bundle.command.payload.impact)
     const invalidations = createDirectorRunInvalidations({ impact, createdAt: bundle.command.createdAt })
@@ -909,8 +937,8 @@ test('Director worker fences the atomic commit and settles the allocated version
     },
     async failOrRetry() { throw new Error('successful worker must not fail') },
   }
-  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
-  directorRuns.commitOrReplay = async (bundle) => {
+  const originalCommit = directorRuns.commitPreparedBundle.bind(directorRuns)
+  directorRuns.commitPreparedBundle = async (bundle) => {
     assert.deepEqual(bundle.operationFence, {
       operationId: operation.id,
       leaseOwner: 'worker-director-1',
@@ -1075,7 +1103,7 @@ test('Director worker retries a transient persistence outage and commits once af
   const harness = createResilientDirectorOperation()
   const directorRuns = new InMemoryDirectorRepository()
   const originalRead = directorRuns.readContext.bind(directorRuns)
-  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
+  const originalCommit = directorRuns.commitPreparedBundle.bind(directorRuns)
   let contextReads = 0
   let commits = 0
   directorRuns.readContext = async (input) => {
@@ -1085,7 +1113,7 @@ test('Director worker retries a transient persistence outage and commits once af
     }
     return originalRead(input)
   }
-  directorRuns.commitOrReplay = async (bundle) => {
+  directorRuns.commitPreparedBundle = async (bundle) => {
     commits += 1
     return harness.settle(bundle, originalCommit)
   }
@@ -1108,7 +1136,7 @@ test('Director worker retries a transient persistence outage and commits once af
 test('Director worker reclaims an expired running attempt without accepting its stale result', async () => {
   const harness = createResilientDirectorOperation()
   const directorRuns = new InMemoryDirectorRepository()
-  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
+  const originalCommit = directorRuns.commitPreparedBundle.bind(directorRuns)
   const staleClaim = await harness.repository.claimNext({
     type: 'project-director-run',
     leaseOwner: 'director-worker-stale-1',
@@ -1116,7 +1144,7 @@ test('Director worker reclaims an expired running attempt without accepting its 
     leaseUntil: '2026-08-03T23:00:00.075Z',
   })
   harness.expireForReclaim()
-  directorRuns.commitOrReplay = (bundle) => harness.settle(bundle, originalCommit)
+  directorRuns.commitPreparedBundle = (bundle) => harness.settle(bundle, originalCommit)
   const runNext = resilientDirectorWorker(
     harness,
     directorRuns,
@@ -1142,7 +1170,7 @@ test('Director cancellation during planning revokes the fence and publishes no v
   const harness = createResilientDirectorOperation()
   const directorRuns = new InMemoryDirectorRepository()
   const originalVersionId = directorRuns.currentVersion.id
-  directorRuns.commitOrReplay = async (bundle) => {
+  directorRuns.commitPreparedBundle = async (bundle) => {
     harness.cancel('2026-08-03T23:00:00.450Z')
     return harness.settle(bundle, async () => {
       throw new Error('canceled Director must not commit')
@@ -1182,4 +1210,121 @@ test('Director transient retry is bounded and dead-letters without publishing a 
   assert.equal(harness.operation.deadLetteredAt, harness.operation.completedAt)
   assert.equal(directorRuns.currentVersion.id, originalVersionId)
   assert.equal(directorRuns.records.size, 0)
+})
+
+test('Director canonical snapshot binding preserves old row time and rejects incompatible resealed rows', () => {
+  const document = { schemaVersion: 1, ownerText: 'Controlled snapshot identity' }
+  const contentJson = stableSerialize(document)
+  const candidate = { schemaVersion: 1, id: 'snapshot-candidate', workspaceId: 'workspace-1', projectId: 'project-1',
+    kind: 'brief', contentSchemaVersion: 1, contentJson,
+    contentHash: createHash('sha256').update(contentJson, 'utf8').digest('hex'),
+    createdAt: '2026-10-12T12:00:00.000Z' }
+  const stored = { ...candidate, id: 'snapshot-canonical', createdAt: '2026-07-18T20:00:00.000Z' }
+  assert.deepEqual(bindDirectorSnapshotIdentities([candidate], [stored]), [stored])
+  for (const [label, mutate] of [
+    ['workspace', (row) => { row.workspaceId = 'workspace-sister' }],
+    ['project', (row) => { row.projectId = 'project-sister' }],
+    ['kind', (row) => { row.kind = 'policies' }],
+    ['content schema', (row) => { row.contentSchemaVersion = 2 }],
+    ['invalid content schema', (row) => { row.contentSchemaVersion = 0 }],
+    ['malformed JSON', (row) => { row.contentJson = '{' }],
+    ['JSON contradicts hash', (row) => { row.contentJson = stableSerialize({ schemaVersion: 1, ownerText: 'changed' }) }],
+    ['rehashed different content', (row) => { row.contentJson = stableSerialize({ schemaVersion: 1, ownerText: 'changed' })
+      row.contentHash = createHash('sha256').update(row.contentJson, 'utf8').digest('hex') }],
+    ['noncanonical raw JSON', (row) => { row.contentJson = JSON.stringify(document, null, 2)
+      assert.notEqual(row.contentJson, stableSerialize(JSON.parse(row.contentJson)), 'raw whitespace must differ from the canonical JSON bytes')
+      row.contentHash = createHash('sha256').update(row.contentJson, 'utf8').digest('hex') }],
+  ]) {
+    const row = structuredClone(stored); mutate(row)
+    assert.throws(() => bindDirectorSnapshotIdentities([candidate], [row]),
+      (error) => error.code === 'PERSISTENCE_CONFLICT', label)
+  }
+  assert.throws(() => bindDirectorSnapshotIdentities([candidate], []),
+    (error) => error.code === 'PERSISTENCE_CONFLICT', 'missing canonical identity')
+})
+
+test('Director pure recomposition preserves IDs/time and reuses planned critic with compiler called once', async () => {
+  const repository = new InMemoryDirectorRepository()
+  const compiled = createEvidenceBoundBriefCompiler()
+  const allocations = []
+  let compilerCalls = 0, clockCalls = 0, eventCalls = 0
+  let first, second, chosenBrief
+  repository.commitWithCanonicalSnapshots = async (scope, prepare) => {
+    const resolve = (reuse) => async (candidates) => candidates.map((candidate) => {
+      if (reuse && candidate.kind === 'brief') {
+        chosenBrief = { ...candidate, id: 'snapshot-canonical-before-owner', createdAt: '2026-07-18T20:00:00.000Z' }
+        return chosenBrief
+      }
+      return candidate
+    })
+    const beforeIds = [...allocations]
+    first = await prepare(resolve(false))
+    second = await prepare(resolve(true))
+    assert.deepEqual(allocations, beforeIds, 'retry callback cannot allocate an identity')
+    assert.equal(first.command.id, second.command.id)
+    assert.equal(first.version.id, second.version.id)
+    assert.equal(first.run.id, second.run.id)
+    assert.equal(first.event.id, second.event.id)
+    assert.equal(first.requestFingerprint, second.requestFingerprint)
+    assert.equal(first.command.createdAt, second.command.createdAt)
+    assert.equal(first.authenticationAudit.contextHash, scope.actorContextHash)
+    assert.equal(second.authenticationAudit.contextHash, scope.actorContextHash)
+    assert.equal(first.run.qualityReport, second.run.qualityReport, 'critic result is reused, not reassessed')
+    assert.match(first.version.baseHash, /^[a-f0-9]{64}$/)
+    assert.match(second.version.baseHash, /^[a-f0-9]{64}$/)
+    assert.notEqual(first.version.baseHash, second.version.baseHash, 'Version authority incorporates the rematerialized EditPlan hash')
+    assert.match(first.decisionLog.logHash, /^[a-f0-9]{64}$/)
+    assert.match(second.decisionLog.logHash, /^[a-f0-9]{64}$/)
+    assert.notEqual(first.decisionLog.logHash, second.decisionLog.logHash, 'decision evidence authority is resealed before persistence')
+    const firstEdit = first.snapshots.find((item) => item.kind === 'edit-plan')
+    const secondEdit = second.snapshots.find((item) => item.kind === 'edit-plan')
+    assert.notEqual(firstEdit.contentJson, secondEdit.contentJson)
+    assert.notEqual(firstEdit.contentHash, secondEdit.contentHash)
+    assert.equal(createHash('sha256').update(secondEdit.contentJson, 'utf8').digest('hex'), secondEdit.contentHash)
+    assert.deepEqual(JSON.parse(secondEdit.contentJson).director.decisions, second.run.decisions)
+    assert.equal(first.snapshots.find((item) => item.kind === 'quality-report').contentHash,
+      second.snapshots.find((item) => item.kind === 'quality-report').contentHash, 'critic evidence remains the original planned result')
+    assert.equal(second.command.payload.snapshotRefs.brief, chosenBrief.id)
+    assert.equal(second.version.snapshotRefs.brief, chosenBrief.id)
+    assert.equal(second.snapshots.find((item) => item.kind === 'brief').createdAt, chosenBrief.createdAt)
+    const oldBrief = first.command.payload.snapshotRefs.brief
+    assert.ok(second.run.decisions.some((decision) => decision.evidenceRefs.includes(chosenBrief.id)))
+    assert.equal(second.run.decisions.some((decision) => decision.evidenceRefs.includes(oldBrief)), false)
+    validateDirectorDecisions(second.run.decisions)
+    return repository.commitPreparedBundle(second)
+  }
+  const service = runProjectDirectorService({ repository,
+    clock: () => { clockCalls += 1; return new Date('2026-07-18T22:00:00.000Z') },
+    createId: (kind) => { const id = `${kind}-pure-${allocations.length + 1}`; allocations.push(id); return id },
+    createEventId: () => { eventCalls += 1; return '00000000-0000-4000-8000-000000000099' },
+    compileBrief: async (input) => { compilerCalls += 1; return compiled(input) },
+  })
+  const result = await service(request())
+  assert.equal(compilerCalls, 1)
+  assert.equal(clockCalls, 1)
+  assert.equal(eventCalls, 1)
+  assert.equal(result.run.qualityReport.status, 'review-required')
+  assert.equal(result.run.qualityReport.faceSafety.status, 'unknown')
+})
+
+test('Director snapshot owner retries only exact serialization codes and exhausts after three transactions', async () => {
+  const scope = { workspaceId: 'workspace-1', projectId: 'project-1', baseVersionId: 'project-version-4',
+    baseHash, resultVersionId: 'project-version-next', idempotencyKey: 'snapshot-owner',
+    requestFingerprint: 'b'.repeat(64), actorContextHash: 'c'.repeat(64) }
+  for (const [label, error, expectedCalls] of [
+    ['Prisma serialization', Object.assign(new Error('controlled'), { code: 'P2034' }), 3],
+    ['raw SQL serialization', Object.assign(new Error('controlled'), { code: 'P2010', meta: { code: '40001' } }), 3],
+    ['different SQLSTATE', Object.assign(new Error('controlled'), { code: 'P2010', meta: { code: '23505' } }), 1],
+    ['wrong serialization spelling', Object.assign(new Error('controlled'), { code: 'P2010', meta: { code: 40001 } }), 1],
+    ['message alone is not authority', Object.assign(new Error('serialization 40001'), { code: 'P2002' }), 1],
+  ]) {
+    let calls = 0, prepared = 0
+    const repository = new PrismaDirectorRunRepository({
+      async $transaction() { calls += 1; throw error },
+    })
+    await assert.rejects(repository.commitWithCanonicalSnapshots(scope, async () => { prepared += 1 }),
+      (caught) => caught === error, label)
+    assert.equal(calls, expectedCalls, label)
+    assert.equal(prepared, 0, label)
+  }
 })

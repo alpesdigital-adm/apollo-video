@@ -164,7 +164,15 @@ export async function seedDashboardControlledExportFixture(input) {
   const realReader = new PrismaDirectorRunRepository(client)
   const controlledRepository = { findIdempotentResult: async () => null,
     readContext: (request) => realReader.readContext(request),
-    commitOrReplay: async (proposed) => {
+    // Explicit controlled metadata identity projection, not PG admission.
+    commitWithCanonicalSnapshots: async (scope, prepare) => {
+      const proposed = await prepare(async (candidates) => {
+        for (const candidate of candidates) {
+          assert.equal(candidate.workspaceId, scope.workspaceId)
+          assert.equal(candidate.projectId, scope.projectId)
+        }
+        return candidates
+      })
       assert.equal(bundle, undefined)
       bundle = proposed
       return { run: proposed.run, command: proposed.command, version: proposed.version,

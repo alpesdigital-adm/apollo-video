@@ -47,6 +47,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { assertMediaArtifactManifest, createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
   const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
+  const { createDesiredAction, parseDesiredAction } = await import('../../src/v2/domain/desired-action.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -158,7 +159,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const brief = {
       schemaVersion: 1,
       objective: 'discovery',
-      desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
+      desiredAction: createDesiredAction({
+        objective: 'discovery',
+        desiredAction: { visualCta: 'Continue assistindo', disclosures: [] },
+      }),
       outputSpec: {
         schemaVersion: 1,
         id: `manual-output-spec-${suffix}`,
@@ -1449,10 +1453,47 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(lutSelectionReplay.data.replayed, true)
     assert.equal(lutSelectionReplay.data.operation.id, lutSelectionApplied.data.operation.id)
 
-    const asyncDirectorKey = `async-director-${suffix}`
-    const enqueueAsyncDirector = () => fetch(`${baseUrl}/v1/projects/${projectId}/director-runs`, {
+    // An unapproved direction cannot be superseded. This negative must not
+    // create an operation, Command, Version, snapshot or outbox event.
+    const asyncDirectorContext = await new PrismaDirectorRunRepository(client).readContext({ workspaceId, projectId })
+    assert.equal(asyncDirectorContext.currentVersion.id, lutSelectionApplied.data.version.id)
+    assert.equal(asyncDirectorContext.currentVersion.baseHash, lutSelectionApplied.data.version.baseHash)
+    assert.equal(asyncDirectorContext.project.objective, 'discovery')
+    assert.equal(asyncDirectorContext.latestDirectorObjective.runId, directorApplied.data.directorRun.id)
+    assert.equal(asyncDirectorContext.latestDirectorObjective.approved, false)
+    const currentDesiredAction = parseDesiredAction(asyncDirectorContext.brief.desiredAction, 'discovery')
+    assert.deepEqual(currentDesiredAction, brief.desiredAction)
+    const currentDesiredActionInput = {
+      ...(currentDesiredAction.destination ? { destination: currentDesiredAction.destination } : {}),
+      ...(currentDesiredAction.verbalCta ? { verbalCta: currentDesiredAction.verbalCta } : {}),
+      ...(currentDesiredAction.visualCta ? { visualCta: currentDesiredAction.visualCta } : {}),
+      disclosures: [...currentDesiredAction.disclosures],
+    }
+    assert.deepEqual(createDesiredAction({
+      objective: 'discovery', desiredAction: currentDesiredActionInput,
+    }), currentDesiredAction)
+    const readDirectionBoundary = async () => ({
+      project: await client.v2Project.findUniqueOrThrow({ where: { id: projectId } }),
+      previousRun: await client.v2DirectorRun.findUniqueOrThrow({
+        where: { id: directorApplied.data.directorRun.id }, include: { qualitySnapshot: true },
+      }),
+      versions: await client.v2ProjectVersion.count({ where: { projectId } }),
+      commands: await client.v2EditCommand.count({ where: { projectId } }),
+      snapshots: await client.v2ProjectSnapshot.count({ where: { projectId } }),
+      directorRuns: await client.v2DirectorRun.count({ where: { projectId } }),
+      operations: await client.v2PublicOperation.count({ where: { workspaceId } }),
+      directorOperations: await client.v2ProjectDirectorOperation.count({ where: { workspaceId } }),
+      proxyOperations: await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId } }),
+      invalidations: await client.v2CommandArtifactInvalidation.count({ where: { workspaceId } }),
+      maps: await client.v2RenderElementMap.findMany({ where: { workspaceId, projectId }, orderBy: { id: 'asc' } }),
+      reviews: await client.v2ProxyReview.findMany({ where: { workspaceId, projectId }, orderBy: { id: 'asc' } }),
+      outbox: await client.v2PublicEventOutbox.count({ where: { workspaceId } }),
+    })
+    const directionBoundaryBefore = await readDirectionBoundary()
+    assert.equal(JSON.parse(directionBoundaryBefore.previousRun.qualitySnapshot.contentJson).status, 'review-required')
+    const rejectedSaleResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/director-runs`, {
       method: 'POST',
-      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': asyncDirectorKey },
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `unapproved-sale-${suffix}` },
       body: JSON.stringify({
         baseVersionId: lutSelectionApplied.data.version.id,
         baseHash: lutSelectionApplied.data.version.baseHash,
@@ -1462,7 +1503,26 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
           visualCta: 'Garanta sua vaga',
           disclosures: ['Oferta sujeita a disponibilidade.'],
         },
-        reason: 'Comprovar enqueue, lease e commit transacional do Diretor assíncrono.',
+        reason: 'Tentar alterar uma direção discovery ainda não aprovada.',
+      }),
+    })
+    const rejectedSale = await rejectedSaleResponse.json()
+    assert.equal(rejectedSaleResponse.status, 428, JSON.stringify(rejectedSale))
+    assert.equal(rejectedSale.error.code, 'PRECONDITION_REQUIRED')
+    assert.deepEqual(await readDirectionBoundary(), directionBoundaryBefore, 'unapproved objective change must preserve prior records, head, status and quality with zero new effects')
+
+    // Exercise the real async worker in the existing direction. Approval and
+    // an objective change remain outside this positive.
+    const asyncDirectorKey = `async-director-${suffix}`
+    const enqueueAsyncDirector = () => fetch(`${baseUrl}/v1/projects/${projectId}/director-runs`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': asyncDirectorKey },
+      body: JSON.stringify({
+        baseVersionId: lutSelectionApplied.data.version.id,
+        baseHash: lutSelectionApplied.data.version.baseHash,
+        objective: 'discovery',
+        desiredAction: currentDesiredActionInput,
+        reason: 'Comprovar enqueue, lease e commit transacional assíncrono na mesma direção discovery.',
       }),
     })
     const asyncDirectorResponse = await enqueueAsyncDirector()
@@ -1476,25 +1536,135 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const { runNextProjectDirectorOperationService } = await import('../../src/v2/application/run-project-director-operation-worker.ts')
     const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const { createEvidenceBoundBriefCompiler } = await import('../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts')
+    // Retrying operations clear error columns. Observe the real port call
+    // before that transition, without changing its input, return or exception.
+    const asyncDirectorDiagnostics = []
+    const diagnosticCode = (value) => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(value)
+      ? value : null
+    const diagnosticMessage = (value) => typeof value === 'string'
+      ? { sha256: createHash('sha256').update(value, 'utf8').digest('hex'), bytes: Buffer.byteLength(value, 'utf8') }
+      : null
+    const diagnosticTargetFields = new Set([
+      'id', 'workspaceId', 'projectId', 'kind', 'contentHash', 'sequence',
+      'idempotencyKey', 'commandId', 'resultVersionId', 'operationId',
+    ])
+    const diagnosticTarget = (value) => {
+      if (value === undefined || value === null) return null
+      if (Array.isArray(value) && value.length <= 16 &&
+        value.every((field) => typeof field === 'string' && diagnosticTargetFields.has(field))) {
+        return { fields: [...value] }
+      }
+      if (typeof value === 'string') return { hash: diagnosticMessage(value) }
+      if (Array.isArray(value) && value.every((field) => typeof field === 'string')) {
+        return { hash: diagnosticMessage(JSON.stringify(value)) }
+      }
+      return { type: typeof value }
+    }
+    const diagnosticError = (error, depth = 0) => {
+      if (depth >= 3) return { truncated: true }
+      if (!error || typeof error !== 'object') return { type: typeof error, message: diagnosticMessage(error) }
+      return {
+        name: diagnosticCode(error.name),
+        code: diagnosticCode(error.code),
+        sqlState: diagnosticCode(error.meta?.code),
+        modelName: diagnosticCode(error.meta?.modelName),
+        target: diagnosticTarget(error.meta?.target),
+        errno: Number.isSafeInteger(error.errno) ? error.errno : null,
+        syscall: diagnosticCode(error.syscall),
+        message: diagnosticMessage(error.message),
+        ...(error.cause === undefined ? {} : { cause: diagnosticError(error.cause, depth + 1) }),
+      }
+    }
+    const observeDirectorCall = async (phase, action, args) => {
+      try {
+        return await action(...args)
+      } catch (error) {
+        asyncDirectorDiagnostics.push({ phase, error: diagnosticError(error) })
+        throw error
+      }
+    }
+    const observeDirectorPort = (port, label) => new Proxy(port, {
+      get(target, property) {
+        const value = Reflect.get(target, property)
+        if (typeof value !== 'function') return value
+        return async (...args) => {
+          if (label === 'operations' && property === 'failOrRetry') {
+            const failure = args[0]
+            asyncDirectorDiagnostics.push({
+              phase: 'operations.failOrRetry',
+              operationId: failure.operationId,
+              attempt: failure.attempt,
+              now: failure.now,
+              nextAttemptAt: failure.nextAttemptAt ?? null,
+              error: {
+                code: diagnosticCode(failure.error.code),
+                retryable: failure.error.retryable,
+                message: diagnosticMessage(failure.error.message),
+              },
+            })
+          }
+          return observeDirectorCall(`${label}.${String(property)}`, value.bind(target), args)
+        }
+      },
+    })
+    // Keep the real transaction callback/options and transaction client
+    // untouched. Observe a rejected Prisma transaction before the repository
+    // converts P2002 to its domain conflict.
+    const diagnosticDirectorClient = new Proxy(client, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target)
+        if (property !== '$transaction') return typeof value === 'function' ? value.bind(target) : value
+        return async (...args) => observeDirectorCall(
+          'directorClient.$transaction', value.bind(target), args,
+        )
+      },
+    })
+    const realBriefCompiler = createEvidenceBoundBriefCompiler()
     const runNextDirector = runNextProjectDirectorOperationService({
-      operations: new PrismaPublicOperationRepository(client),
-      directorRuns: new PrismaDirectorRunRepository(client),
+      operations: observeDirectorPort(new PrismaPublicOperationRepository(client), 'operations'),
+      directorRuns: observeDirectorPort(new PrismaDirectorRunRepository(diagnosticDirectorClient), 'directorRuns'),
       createId: (kind) => `${kind}-async-${suffix}-${randomUUID()}`,
       createEventId: randomUUID,
-      compileBrief: createEvidenceBoundBriefCompiler(),
+      compileBrief: (...args) => observeDirectorCall('compileBrief', realBriefCompiler, args),
     })
     const asyncDirectorOutcome = await runNextDirector(`director-worker-${suffix}`)
     const asyncDirectorSettlement = await client.v2PublicOperation.findUniqueOrThrow({
       where: { id: asyncDirectorEnqueued.data.operation.id },
       select: {
-        status: true, phase: true, errorCode: true,
-        errorMessage: true, errorRetryable: true,
+        id: true, status: true, phase: true, attempt: true, maxAttempts: true,
+        retryable: true, nextAttemptAt: true, startedAt: true, completedAt: true,
+        leaseOwner: true, leaseExpiresAt: true, heartbeatAt: true,
+        errorCode: true, errorMessage: true, errorRetryable: true,
       },
     })
+    const asyncDirectorDiagnosticReceipt = {
+      fixtureScope: 'real-director-worker-diagnostic',
+      operation: {
+        id: asyncDirectorSettlement.id,
+        status: asyncDirectorSettlement.status,
+        phase: asyncDirectorSettlement.phase,
+        attempt: asyncDirectorSettlement.attempt,
+        maxAttempts: asyncDirectorSettlement.maxAttempts,
+        retryable: asyncDirectorSettlement.retryable,
+        nextAttemptAt: asyncDirectorSettlement.nextAttemptAt,
+        startedAt: asyncDirectorSettlement.startedAt,
+        completedAt: asyncDirectorSettlement.completedAt,
+        leaseOwner: asyncDirectorSettlement.leaseOwner,
+        leaseExpiresAt: asyncDirectorSettlement.leaseExpiresAt,
+        heartbeatAt: asyncDirectorSettlement.heartbeatAt,
+        error: {
+          code: diagnosticCode(asyncDirectorSettlement.errorCode),
+          retryable: asyncDirectorSettlement.errorRetryable,
+          message: diagnosticMessage(asyncDirectorSettlement.errorMessage),
+        },
+      },
+      observedCalls: asyncDirectorDiagnostics,
+    }
+    console.log(JSON.stringify(asyncDirectorDiagnosticReceipt))
     assert.deepEqual(asyncDirectorOutcome, {
       operationId: asyncDirectorEnqueued.data.operation.id,
       status: 'succeeded',
-    }, JSON.stringify(asyncDirectorSettlement))
+    }, JSON.stringify(asyncDirectorDiagnosticReceipt))
     const storedAsyncOperation = await client.v2PublicOperation.findUniqueOrThrow({
       where: { id: asyncDirectorEnqueued.data.operation.id },
       include: { projectDirectorRun: { include: { directorRun: true } } },
@@ -1505,18 +1675,11 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(storedAsyncOperation.projectDirectorRun.resultVersionId, allocatedResultVersionId)
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.operationId, storedAsyncOperation.id)
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.resultVersionId, allocatedResultVersionId)
-    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objective, 'sale')
-    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objectiveVersion, 2)
-    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.rubricRef, 'conversion-sale/v1')
-    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.supersedesRunId, directorApplied.data.directorRun.id)
-    const persistedDesiredAction = JSON.parse(storedAsyncOperation.projectDirectorRun.desiredActionJson)
-    assert.deepEqual(persistedDesiredAction, {
-      schemaVersion: 1,
-      kind: 'buy',
-      destination: { type: 'url', value: 'https://example.com/checkout' },
-      visualCta: 'Garanta sua vaga',
-      disclosures: ['Oferta sujeita a disponibilidade.'],
-    })
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objective, 'discovery')
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objectiveVersion, 1)
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.rubricRef, 'awareness-discovery/v1')
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.supersedesRunId, null)
+    assert.equal(storedAsyncOperation.projectDirectorRun.desiredActionJson, null, 'same-direction operation inherits its existing action instead of recording a replacement')
     const [storedStorySnapshot, storedEditPlanSnapshot] = await Promise.all([
       client.v2ProjectSnapshot.findUniqueOrThrow({
         where: { id: storedAsyncOperation.projectDirectorRun.directorRun.storySnapshotId },
@@ -1527,17 +1690,22 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     ])
     const storedStoryPlan = JSON.parse(storedStorySnapshot.contentJson)
     const storedEditPlan = JSON.parse(storedEditPlanSnapshot.contentJson)
+    const persistedDesiredAction = parseDesiredAction(storedStoryPlan.desiredActionRef.action, 'discovery')
+    assert.deepEqual(persistedDesiredAction, currentDesiredAction)
     assert.deepEqual(storedStoryPlan.desiredActionRef.action, persistedDesiredAction)
     assert.equal(storedStoryPlan.desiredActionRef.actionHash.length, 64)
     assert.equal(storedEditPlan.desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
     assert.equal(storedEditPlan.subtitleTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
+    assert.equal(storedEditPlan.overlayTracks.length, 1)
     assert.equal(storedEditPlan.overlayTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
-    assert.equal(storedEditPlan.overlayTracks[0].text, 'Garanta sua vaga')
+    assert.equal(storedEditPlan.overlayTracks[0].text, currentDesiredAction.visualCta)
+    assert.equal(currentDesiredAction.visualCta, 'Continue assistindo')
     const storedAsyncVersion = await client.v2ProjectVersion.findUniqueOrThrow({
       where: { id: allocatedResultVersionId },
       include: { briefSnapshot: true },
     })
     const compiledBriefSnapshot = JSON.parse(storedAsyncVersion.briefSnapshot.contentJson)
+    assert.deepEqual(parseDesiredAction(compiledBriefSnapshot.desiredAction, 'discovery'), persistedDesiredAction)
     assert.equal(storedAsyncVersion.briefSnapshot.schemaVersion, 3)
     assert.equal(compiledBriefSnapshot.briefCompilation.audit.promptVersion, 'brief-compiler/v1')
     assert.equal(compiledBriefSnapshot.briefCompilation.audit.modelId, 'apollo-evidence-bound-brief-compiler')
@@ -1566,9 +1734,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(qualityResponse.status, 200, JSON.stringify(qualityRead))
     assert.equal(qualityRead.data.qualityReport.directorRunId, storedAsyncOperation.projectDirectorRun.directorRun.id)
     assert.equal(qualityRead.data.qualityReport.projectId, projectId)
-    assert.equal(qualityRead.data.qualityReport.objective, 'sale')
-    assert.equal(qualityRead.data.qualityReport.objectiveVersion, 2)
-    assert.equal(qualityRead.data.qualityReport.rubricRef, 'conversion-sale/v1')
+    assert.equal(qualityRead.data.qualityReport.objective, 'discovery')
+    assert.equal(qualityRead.data.qualityReport.objectiveVersion, 1)
+    assert.equal(qualityRead.data.qualityReport.rubricRef, 'awareness-discovery/v1')
     assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 3)
     assert.match(qualityRead.data.qualityReport.qualitySnapshot.contentHash, /^[a-f0-9]{64}$/)
     assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v3')
@@ -1587,16 +1755,26 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       storedStoryPlan.desiredActionRef.id,
     )
     assert.equal(qualityRead.data.qualityReport.report.strategic.schemaVersion, 'strategic-quality-report/v1')
-    assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.objective, 'sale')
+    assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.objective, 'discovery')
     assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.purpose, 'editorial-quality-proxy')
     assert.equal(qualityRead.data.qualityReport.report.strategic.passed, true)
     assert.deepEqual(qualityRead.data.qualityReport.report.strategic.gateFailures, [])
-    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.length, 8)
-    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.some((item) => item.criterionId === 'cta-clarity'), true)
-    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.some((item) => item.criterionId === 'rights-compliance'), true)
-    const projectAfterObjectiveChange = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
-    assert.equal(projectAfterObjectiveChange.currentVersionId, allocatedResultVersionId)
-    assert.equal(projectAfterObjectiveChange.objective, 'sale')
+    assert.deepEqual(
+      qualityRead.data.qualityReport.report.strategic.evidence.map((item) => ({
+        criterionId: item.criterionId, weight: item.weight,
+      })),
+      [
+        { criterionId: 'hook-clarity', weight: .35 },
+        { criterionId: 'problem-recognition', weight: .25 },
+        { criterionId: 'trust-building', weight: .10 },
+        { criterionId: 'narrative-integrity', weight: .15 },
+        { criterionId: 'legibility', weight: .10 },
+        { criterionId: 'rights-compliance', weight: .05 },
+      ],
+    )
+    const projectAfterSameDirection = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
+    assert.equal(projectAfterSameDirection.currentVersionId, allocatedResultVersionId)
+    assert.equal(projectAfterSameDirection.objective, 'discovery')
     const asyncDirectorReplayResponse = await enqueueAsyncDirector()
     const asyncDirectorReplay = await asyncDirectorReplayResponse.json()
     assert.equal(asyncDirectorReplayResponse.status, 202, JSON.stringify(asyncDirectorReplay))

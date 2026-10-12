@@ -92,6 +92,20 @@ export interface DirectorRunResult {
   replayed: boolean
 }
 
+export interface DirectorSnapshotCommitScope {
+  workspaceId: string
+  projectId: string
+  baseVersionId: string
+  baseHash: string
+  resultVersionId: string
+  idempotencyKey: string
+  requestFingerprint: string
+  actorContextHash: string
+  operationFence?: DirectorRunCommit['operationFence']
+}
+export type ResolveDirectorSnapshots = (candidates: readonly Readonly<ProjectSnapshot>[]) =>
+  Promise<readonly Readonly<ProjectSnapshot>[]>
+
 export interface DirectorRunRepository {
   readQualityReport(input: {
     workspaceId: string
@@ -120,5 +134,9 @@ export interface DirectorRunRepository {
     workspaceId: string
     projectId: string
   }): Promise<Readonly<DirectorRunContext> | null>
-  commitOrReplay(input: DirectorRunCommit): Promise<Readonly<DirectorRunResult>>
+  /** Owner transaction may retry this pure reference/seal callback only. */
+  commitWithCanonicalSnapshots(
+    scope: Readonly<DirectorSnapshotCommitScope>,
+    prepare: (resolve: ResolveDirectorSnapshots) => Promise<Readonly<DirectorRunCommit>>,
+  ): Promise<Readonly<DirectorRunResult>>
 }

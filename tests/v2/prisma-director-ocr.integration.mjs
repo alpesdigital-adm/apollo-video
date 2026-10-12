@@ -13,6 +13,7 @@ import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-cont
 import { enqueuePerceptionProducerRunService } from '../../src/v2/application/enqueue-perception-producer-run.ts'
 import { putPerceptionTimelineService } from '../../src/v2/application/perception-timelines.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
+import { enqueueProjectDirectorRunService } from '../../src/v2/application/enqueue-project-director-run.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { PERCEPTION_KINDS } from '../../src/v2/domain/perception-timeline.ts'
@@ -161,6 +162,247 @@ function isolatedDbEndpoint(suffix) {
   url.searchParams.set('application_name', applicationName)
   url.searchParams.set('connection_limit', '1')
   return { url: url.toString(), applicationName }
+}
+
+// Real PG authority tests; no renderer/approval claim. Probe transactions abort
+// deliberately after resolution, preserving the surrounding editorial fixture.
+async function canonicalDirectorSnapshotOwnerPG({ db, workspaceId, projectId, actor }) {
+  const director = new PrismaDirectorRunRepository(db)
+  const context = await director.readContext({ workspaceId, projectId })
+  assert.ok(context)
+  const audit = createApiAccessAuditContext({ ...actor.auditContext, authenticationKind: 'bearer' })
+  const original = await db.v2ProjectSnapshot.findUniqueOrThrow({
+    where: { id: context.currentVersion.snapshotRefs.brief },
+  })
+  const asSnapshot = (row) => ({ schemaVersion: 1, id: row.id, workspaceId: row.workspaceId, projectId: row.projectId,
+    kind: row.kind, contentSchemaVersion: row.schemaVersion, contentJson: row.contentJson,
+    contentHash: row.contentHash, createdAt: row.createdAt.toISOString() })
+  const scopeFor = (label) => ({ workspaceId, projectId, baseVersionId: context.currentVersion.id,
+    baseHash: context.currentVersion.baseHash, resultVersionId: `canonical-version-${randomUUID()}`,
+    idempotencyKey: `canonical-${label}-${randomUUID()}`,
+    requestFingerprint: calculateVersionHash({ kind: 'controlled-canonical-snapshot-probe', label, projectId }),
+    actorContextHash: audit.contextHash })
+  const baseline = async () => ({
+    project: await db.v2Project.findUniqueOrThrow({ where: { id: projectId } }),
+    versions: await db.v2ProjectVersion.count({ where: { projectId } }),
+    commands: await db.v2EditCommand.count({ where: { projectId } }),
+    snapshots: await db.v2ProjectSnapshot.count({ where: { projectId } }),
+    runs: await db.v2DirectorRun.count({ where: { projectId } }),
+    operations: await db.v2PublicOperation.count({ where: { workspaceId } }),
+    outbox: await db.v2PublicEventOutbox.count({ where: { workspaceId } }),
+  })
+  const before = await baseline()
+  const sentinel = new Error('controlled-resolution-rollback')
+  const candidate = { ...asSnapshot(original), id: `canonical-candidate-${randomUUID()}`, createdAt: new Date().toISOString() }
+  await assert.rejects(director.commitWithCanonicalSnapshots(scopeFor('reuse'), async (resolve) => {
+    const rows = await resolve([candidate])
+    assert.deepEqual(rows, [asSnapshot(original)])
+    throw sentinel
+  }), (error) => error === sentinel)
+  assert.deepEqual(await baseline(), before)
+  assert.deepEqual(await db.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: original.id } }), original)
+
+  for (const [label, mutate] of [
+    ['schema', (row) => { row.contentSchemaVersion += 1 }],
+    ['invalid schema', (row) => { row.contentSchemaVersion = 0 }],
+    ['malformed JSON', (row) => { row.contentJson = '{' }],
+    ['JSON/hash', (row) => { row.contentJson = stableSerialize({ schemaVersion: 1, tampered: true }) }],
+    ['resealed ID collision', (row) => { row.contentJson = stableSerialize({ schemaVersion: 1, tampered: true })
+      row.contentHash = calculateCanonicalHash(JSON.parse(row.contentJson)) }],
+    ['workspace', (row) => { row.workspaceId = 'workspace-outside-owner' }],
+    ['project', (row) => { row.projectId = 'project-outside-owner' }],
+  ]) {
+    const wrong = structuredClone(asSnapshot(original)); mutate(wrong)
+    await assert.rejects(director.commitWithCanonicalSnapshots(scopeFor(label), async (resolve) => {
+      await resolve([wrong]); throw sentinel
+    }), (error) => error.code === 'PERSISTENCE_CONFLICT', label)
+    assert.deepEqual(await baseline(), before, label)
+  }
+
+  const holdEndpoint = isolatedDbEndpoint('cH'), readerEndpoint = isolatedDbEndpoint('cR')
+  const holder = new PrismaClient({ datasources: { db: { url: holdEndpoint.url } } })
+  const reader = new PrismaClient({ datasources: { db: { url: readerEndpoint.url } } })
+  let release, readyResolve, readyReject, latch, reading, primary
+  const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject })
+  const released = new Promise((resolve) => { release = resolve })
+  try {
+    latch = holder.$transaction(async (tx) => {
+      await tx.v2ProjectSnapshot.update({ where: { id: original.id }, data: { schemaVersion: original.schemaVersion + 1 } })
+      readyResolve()
+      const deadline = Date.now() + 5000
+      let waited = false
+      while (Date.now() < deadline) {
+        await tx.$queryRaw`SELECT pg_stat_clear_snapshot() IS NULL AS cleared`
+        const rows = await tx.$queryRaw`SELECT wait_event_type AS "waitType" FROM pg_stat_activity
+          WHERE application_name = ${readerEndpoint.applicationName}`
+        waited = rows.some((row) => row.waitType === 'Lock')
+        if (waited) break
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      assert.ok(waited, 'canonical snapshot reader must wait on the real updated row')
+      release()
+    }, { timeout: 8000 }).catch((error) => { readyReject(error); release(); throw error })
+    latch.catch(() => {})
+    await ready
+    reading = new PrismaDirectorRunRepository(reader).commitWithCanonicalSnapshots(scopeFor('concurrent-tamper'), async (resolve) => {
+      await resolve([candidate]); throw sentinel
+    }).then((value) => ({ value }), (error) => ({ error }))
+    await released
+    await latch
+    const result = await reading
+    assert.equal(result.error?.code, 'PERSISTENCE_CONFLICT', 'tampered schema must be reread after the real row-lock wait')
+    assert.deepEqual(await baseline(), before)
+  } catch (error) { primary = error; throw error } finally {
+    release()
+    await Promise.allSettled([latch, reading].filter(Boolean))
+    const errors = []
+    try { await db.v2ProjectSnapshot.update({ where: { id: original.id }, data: { schemaVersion: original.schemaVersion } }) }
+    catch (error) { errors.push(error) }
+    const closed = await Promise.allSettled([holder.$disconnect(), reader.$disconnect()])
+    errors.push(...closed.filter((result) => result.status === 'rejected').map((result) => result.reason))
+    if (errors.length) throw new AggregateError(primary ? [primary, ...errors] : errors, 'Canonical snapshot latch cleanup failed')
+  }
+  assert.deepEqual(await db.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: original.id } }), original)
+
+  // Two real callers plan from the same head with different candidate UUIDs.
+  // The project lock serializes ownership: winner reuses the row, loser is stale.
+  const endpoints = [isolatedDbEndpoint('cA'), isolatedDbEndpoint('cB'), isolatedDbEndpoint('cL')]
+  const clients = endpoints.map((endpoint) => new PrismaClient({ datasources: { db: { url: endpoint.url } } }))
+  let unlock, raceReadyResolve, raceReadyReject, raceLatch, contenders, raceError
+  const raceReady = new Promise((resolve, reject) => { raceReadyResolve = resolve; raceReadyReject = reject })
+  const unlockPromise = new Promise((resolve) => { unlock = resolve })
+  const compilerCalls = [0, 0], allocated = [[], []]
+  const keys = [`canonical-race-A-${randomUUID()}`, `canonical-race-B-${randomUUID()}`]
+  try {
+    raceLatch = clients[2].$transaction(async (tx) => {
+      const locked = await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`
+      assert.equal(locked.length, 1)
+      raceReadyResolve()
+      const deadline = Date.now() + 5000
+      let waited = false
+      while (Date.now() < deadline) {
+        await tx.$queryRaw`SELECT pg_stat_clear_snapshot() IS NULL AS cleared`
+        const rows = await tx.$queryRaw`SELECT application_name AS name, wait_event_type AS "waitType"
+          FROM pg_stat_activity WHERE application_name IN (${endpoints[0].applicationName}, ${endpoints[1].applicationName})`
+        waited = new Set(rows.filter((row) => row.waitType === 'Lock').map((row) => row.name)).size === 2
+        if (waited) break
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      assert.ok(waited, 'both canonical callers must be observed at the real project lock')
+      unlock()
+    }, { timeout: 8000 }).catch((error) => { raceReadyReject(error); unlock(); throw error })
+    raceLatch.catch(() => {})
+    await raceReady
+    contenders = clients.slice(0, 2).map((client, index) => {
+      const compiler = createEvidenceBoundBriefCompiler()
+      const service = runProjectDirectorService({ repository: new PrismaDirectorRunRepository(client),
+        clock: () => new Date(), createEventId: randomUUID,
+        createId: (kind) => { const id = `${kind}-canonical-${randomUUID()}`; allocated[index].push({ kind, id }); return id },
+        compileBrief: async (input) => { compilerCalls[index] += 1; return compiler(input) },
+      })
+      return service({ workspaceId, projectId, baseVersionId: context.currentVersion.id,
+        baseHash: context.currentVersion.baseHash, actor, idempotency: { key: keys[index] },
+        reason: 'Keep the existing discovery direction and reuse canonical immutable snapshots.' })
+        .then((value) => ({ value }), (error) => ({ error }))
+    })
+    await unlockPromise
+    await raceLatch
+    const results = await Promise.all(contenders)
+    assert.equal(results.filter((result) => result.value).length, 1)
+    const winnerIndex = results.findIndex((result) => result.value), loserIndex = 1 - winnerIndex
+    const winner = results[winnerIndex].value
+    assert.equal(results[loserIndex].error?.code, 'VERSION_CONFLICT', 'stale retry cannot recompute the planner or commit another head')
+    assert.deepEqual(compilerCalls, [1, 1])
+    assert.notEqual(allocated[0].find((id) => id.kind === 'project-snapshot').id,
+      allocated[1].find((id) => id.kind === 'project-snapshot').id)
+    assert.equal(winner.version.snapshotRefs.brief, original.id)
+    assert.equal(winner.command.payload.snapshotRefs.brief, original.id)
+    assert.equal(winner.run.qualityReport.status, 'review-required')
+    assert.equal(winner.run.qualityReport.faceSafety.status, 'unknown')
+    assert.equal(await db.v2EditCommand.count({ where: { projectId, idempotencyKey: keys[loserIndex] } }), 0)
+    assert.equal(await db.v2ProjectVersion.count({ where: { id: allocated[loserIndex].find((id) => id.kind === 'project-version').id } }), 0)
+    assert.equal(await db.v2ProjectSnapshot.count({ where: { projectId, kind: original.kind, contentHash: original.contentHash } }), 1)
+    assert.deepEqual(await db.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: original.id } }), original)
+    console.log(JSON.stringify({ scope: 'canonical-director-snapshot-PG', concurrentCallers: 2,
+      succeeded: 1, stale: 1, canonicalBriefId: original.id, originalCreatedAtPreserved: true,
+      compilerCalls, physicalRenderObserved: false, approvalTransferred: false }))
+  } catch (error) { raceError = error; throw error } finally {
+    unlock()
+    await Promise.allSettled([raceLatch, ...(contenders ?? [])].filter(Boolean))
+    const closed = await Promise.allSettled(clients.map((client) => client.$disconnect()))
+    const errors = closed.filter((result) => result.status === 'rejected').map((result) => result.reason)
+    if (errors.length) throw new AggregateError(raceError ? [raceError, ...errors] : errors, 'Canonical caller cleanup failed')
+  }
+  // Admission after a real project-lock wait must use current PostgreSQL time.
+  // The queued operation predates this TX; only new Director effects must stay zero.
+  const leaseContext = await director.readContext({ workspaceId, projectId })
+  const operations = new PrismaPublicOperationRepository(db)
+  const queued = await enqueueProjectDirectorRunService({ directorRuns: director, operations,
+    createId: (kind) => `${kind}-canonical-lease-${randomUUID()}`, clock: () => new Date(),
+  })({ workspaceId, projectId, baseVersionId: leaseContext.currentVersion.id,
+    baseHash: leaseContext.currentVersion.baseHash, actor,
+    idempotencyKey: `canonical-lease-${randomUUID()}` })
+  const claimedAt = new Date(), leaseUntil = new Date(claimedAt.getTime() + 1500)
+  const leaseOwner = `canonical-worker-${randomUUID()}`
+  const claimed = await operations.claimNext({ type: 'project-director-run', leaseOwner,
+    now: claimedAt.toISOString(), leaseUntil: leaseUntil.toISOString() })
+  assert.equal(claimed.operation.id, queued.operation.id)
+  const leaseScope = { ...scopeFor('expired-lease'), baseVersionId: leaseContext.currentVersion.id,
+    baseHash: leaseContext.currentVersion.baseHash, resultVersionId: claimed.operation.target.id,
+    operationFence: { operationId: claimed.operation.id, leaseOwner,
+      attempt: claimed.lease.attempt, now: claimedAt.toISOString() } }
+  const leaseBefore = await baseline()
+  const leaseEndpoints = [isolatedDbEndpoint('cE'), isolatedDbEndpoint('cF')]
+  const leaseClients = leaseEndpoints.map((endpoint) => new PrismaClient({ datasources: { db: { url: endpoint.url } } }))
+  let leaseUnlock, leaseReadyResolve, leaseReadyReject, leaseLatch, leaseAdmission, leasePrimary
+  let prepared = 0
+  const leaseReady = new Promise((resolve, reject) => { leaseReadyResolve = resolve; leaseReadyReject = reject })
+  const leaseReleased = new Promise((resolve) => { leaseUnlock = resolve })
+  try {
+    leaseLatch = leaseClients[0].$transaction(async (tx) => {
+      const locked = await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`
+      assert.equal(locked.length, 1)
+      leaseReadyResolve()
+      const deadline = Date.now() + 5000
+      let waited = false, expired = false, liveWaitObserved = false
+      while (Date.now() < deadline) {
+        await tx.$queryRaw`SELECT pg_stat_clear_snapshot() IS NULL AS cleared`
+        const rows = await tx.$queryRaw`SELECT wait_event_type AS "waitType" FROM pg_stat_activity
+          WHERE application_name = ${leaseEndpoints[1].applicationName}`
+        waited ||= rows.some((row) => row.waitType === 'Lock')
+        const [clock] = await tx.$queryRaw`SELECT clock_timestamp() AS now`
+        expired = clock.now.getTime() >= leaseUntil.getTime()
+        liveWaitObserved ||= waited && !expired
+        if (waited && expired) break
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      assert.ok(waited, 'Director admission must actually wait on the project lock')
+      assert.ok(liveWaitObserved, 'the lease must be live when the SQL wait is first observed')
+      assert.ok(expired, 'lease expiration must be observed on the database clock before release')
+      leaseUnlock()
+    }, { timeout: 8000 }).catch((error) => { leaseReadyReject(error); leaseUnlock(); throw error })
+    leaseLatch.catch(() => {})
+    await leaseReady
+    leaseAdmission = new PrismaDirectorRunRepository(leaseClients[1]).commitWithCanonicalSnapshots(leaseScope, async () => {
+      prepared += 1
+      throw sentinel
+    }).then((value) => ({ value }), (error) => ({ error }))
+    await leaseReleased
+    await leaseLatch
+    const result = await leaseAdmission
+    assert.equal(result.error?.code, 'PERSISTENCE_CONFLICT')
+    assert.equal(prepared, 0, 'expired lease cannot resolve snapshots or reseal a bundle')
+    assert.deepEqual(await baseline(), leaseBefore, 'queue/claim remain; no new Director TX effects')
+    console.log(JSON.stringify({ scope: 'canonical-director-lease-PG', realProjectLockWait: true,
+      expirationObservedByPG: true, preparedCallbacks: prepared, errorCode: result.error.code,
+      precedingQueuedOperationPreserved: true, newDirectorEffects: 0 }))
+  } catch (error) { leasePrimary = error; throw error } finally {
+    leaseUnlock()
+    await Promise.allSettled([leaseLatch, leaseAdmission].filter(Boolean))
+    const closed = await Promise.allSettled(leaseClients.map((client) => client.$disconnect()))
+    const errors = closed.filter((result) => result.status === 'rejected').map((result) => result.reason)
+    if (errors.length) throw new AggregateError(leasePrimary ? [leasePrimary, ...errors] : errors, 'Canonical lease cleanup failed')
+  }
 }
 
 test('W65 controlled proxy fixture hydrates through the production operation parser before PostgreSQL', () => {
@@ -1188,7 +1430,10 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
           baseHash: baseContext.version.baseHash, expectedRevision: baseContext.version.sequence,
           action: 'apply', variantId: '9:16', targetId: clipId, operation: { kind: 'select', clipId },
           actor, idempotencyKey: 'inline-command-' + rightsChange + '-' + suffix })
-        assert.equal(child.impact.requiresNewProxy, false)
+        assert.equal(child.impact.renderSemanticsChanged, false)
+        assert.deepEqual(child.impact.minimalRenders, [])
+        assert.deepEqual(child.impact.affectedVariantIds, [])
+        assert.deepEqual(child.impact.affectedArtifacts, [])
         const candidateId = 'inline-child-' + rightsChange + '-' + suffix
         const candidateTime = new Date().toISOString()
         const candidateOperation = succeedPublicOperation(advancePublicOperationPhase(startPublicOperationAttempt(
@@ -1301,6 +1546,8 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
             'Inline rights latch cleanup failed')
         }
       }
+
+      await canonicalDirectorSnapshotOwnerPG({ db, workspaceId, projectId: world.projectId, actor })
 
     } catch (error) { primaryError = error } finally {
       const cleanupErrors = []

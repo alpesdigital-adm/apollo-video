@@ -1,3 +1,4 @@
+import { assertDirectorSnapshotContent } from '../../src/v2/application/director-snapshot-identity.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -427,6 +428,7 @@ const directorTranscript = transcriptFromFrames('transcript-replacement', [
 
 class DirectorRepository {
   constructor(editPlan, transcriptId, sequence) {
+    this.snapshotRows = new Map()
     this.editPlan = editPlan
     this.transcriptId = transcriptId
     this.currentVersion = createProjectVersion({
@@ -471,7 +473,31 @@ class DirectorRepository {
     }
   }
 
-  async commitOrReplay(bundle) {
+  async commitWithCanonicalSnapshots(scope, prepare) {
+    // Controlled in-memory transaction: explicit canonical store, no PG claim.
+    const rows = new Map(this.snapshotRows)
+    const resolve = async (candidates) => candidates.map((candidate) => {
+      assert.equal(candidate.workspaceId, scope.workspaceId)
+      assert.equal(candidate.projectId, scope.projectId)
+      const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
+      const stored = rows.get(key)
+      if (stored) {
+        assertDirectorSnapshotContent(candidate, stored)
+        return stored
+      }
+      rows.set(key, candidate)
+      return candidate
+    })
+    const bundle = await prepare(resolve)
+    assert.equal(bundle.command.baseVersionId, scope.baseVersionId)
+    assert.equal(bundle.command.baseHash, scope.baseHash)
+    assert.equal(bundle.requestFingerprint, scope.requestFingerprint)
+    const result = await this.commitPreparedBundle(bundle)
+    this.snapshotRows = rows
+    return result
+  }
+
+  async commitPreparedBundle(bundle) {
     this.lastBundle = bundle
     const result = Object.freeze({ run: bundle.run, command: bundle.command, version: bundle.version, replayed: false })
     this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
