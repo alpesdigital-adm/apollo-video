@@ -37,7 +37,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "PR81 permanece aberto e bloqueado. CI dcc0 terminou: central38187207475 FAIL, Compose local/S3 PASS, Quality FAIL no replay do fake de extracao, percepcao FAIL na fixture de rotacao, dashboard38187207482 FAIL na barra do seed; Media38187207444 PASS controlado. Depois desse head, W9 local3/3, W10local2/2, extracao11/11 e temporal1/1 passaram em fontes posteriores fingerprintadas, sem substituir CI. Dashboard v4 passou as assercoes mas registrou GETworkspace409/console por color bindings vazios no seed: correcoes tests-only compilam antes INSERT e exigem workspace200/ledger browser aguardado sem erros; novo build/run ainda pendente. W66 continua isolado36/36puros+16/16PG; W69 fisico FAIL60fps concat frame6, policy nao aprovada. Teste composto Linux/oito suites, regressao da nova SHA e CI integral continuam obrigatorios. FAILs historicos Windows depth11/face79e1/EACCESowned vivo permanecem preservados; namespace Linux isolado ainda sem prova. Nenhum selo editorial/facial/deploy/aceite."
+          "text": "PR81 permanece aberto e bloqueado. CI dcc0 terminou: central38187207475 FAIL, Compose local/S3 PASS, Quality FAIL no replay do fake de extracao, percepcao FAIL na fixture de rotacao, dashboard38187207482 FAIL na barra do seed; Media38187207444 PASS controlado. Depois desse head, W9 local3/3, W10local2/2, extracao11/11 e temporal1/1 passaram em fontes posteriores fingerprintadas, sem substituir CI. Dashboard v4 passou as assercoes mas registrou GETworkspace409/console por color bindings vazios no seed: correcoes tests-only compilam antes INSERT e exigem workspace200/ledger browser aguardado sem erros; build a37 passou; dashboardv5 FAIL antes do primeiro estado por quatro capturas de corpo HTTP200, cleanup conclusivo. Ledger de requests/hidratacao e novo run pendentes. W66 continua isolado36/36puros+16/16PG; W69 fisico FAIL60fps concat frame6, policy nao aprovada. Teste composto Linux/oito suites, regressao da nova SHA e CI integral continuam obrigatorios. FAILs historicos Windows depth11/face79e1/EACCESowned vivo permanecem preservados; namespace Linux isolado ainda sem prova. Nenhum selo editorial/facial/deploy/aceite."
         },
         {
           "kind": "implementation",
@@ -344,6 +344,18 @@
           "ref": "Apollo/w61-70-20261008/ci-dcc0-media-38187207444/download-manifest.json",
           "scope": "Media dcc0 PASS em mecanica controlada; manifestSHA2566c35b86b97b5c687dcc2b192e21ab8f6ff554ea83bb29adc1b270d55d5aa5290,12 arquivos autenticados. MP4 f9c3e3191b72ca4611b790eec0287038dc610ce8e2d33de417fab0255ee62f28/1567530bytes. Face unknown/quality review-required; nao editorial approval/deploy/aceite.",
           "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/build-a37be5-08768a38/result.json",
+          "scope": "Build fresco local a37be5a8bf9dc7f7301c60ce6c744d3f58a95096 PASS API/docs/Next/TypeScript; SHA2561414acff94dce72b18b4fa92d6b245143b6146482872a7d84f600a1164bd307c. Fingerprint edae54a4a7ffd3967b069eb3136bc75963888f1cd4b117c16d359bd13db5bc3e antes/depois igual,13 identidades terminais/noDB/scratch limpo. Manifesto bundle4ffa80f0c13551178f89f1eee754a54d5ca6a2b9a0ca3af76c077bccb4cf0643:1922 arquivos/333404910 bytes sem drift apos dashboard, cache/trace excluidos. Build nao comprova jornada nem deploy.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/dashboard-a37be5-v5-8be9607c/result.json",
+          "scope": "FAIL no SHA a37 antes do primeiro estado e antes de proxy/seed: quatro GET200 JSON proof-needs/proof-integrity-runs/proof-mode-runs/capabilities com erro de captura de corpo227B/SHA09aac9fb62b8c75d5c3d78f02bfc265ba1c23d2f010c594116f75e3a330bb393. ResultSHA8242330efb542cc796a23f565719061e2af21b5353472023d7398f3345035833; fingerprintedae54a4a7ffd3967b069eb3136bc75963888f1cd4b117c16d359bd13db5bc3e igual,36 identidades terminais,4 amostras PG vazias/cluster/porta/scratch limpos. Navegacao durante hidratacao e hipotese, nao causa medida nem erro dispensado. Novo ledger deve correlacionar request/response/finished/failed e bootstrap finito antes de navegar, mantendo gates.",
+          "role": "integration"
         }
       ],
       "nextAction": "Congelar e revisar fonte posterior ao dcc0, gerar/checkar status, executar build/regressao/CI e dashboard corrigido sob supervisor unico. W9/W10 locais provam mecanica/supressao fail-closed, nao captions/faces/sidecars positivos. W69 requer diagnostico PTS e policy demonstrada em pixels; W66 exige origens tipadas/lifecycle e cutover separado. Holdout fechado e faceSafety unknown.",
@@ -21686,7 +21698,7 @@
       "blockers": [
         {
           "kind": "validation",
-          "text": "W35 final positivo permanece pendente: DirectorRun planned/quality review-required/face unknown e ProxyReview blocked/finalAllowedfalse devem negar admissao publica/PG. CI dcc0 dashboard38187207482 falhou barra de seed. Dashboard localv4 concluiu as assercoes mas ledger registrou2erros GETworkspace409+console; nao e browser limpo. Correcao tests-only agora compila source color real antes INSERTop, sela binding exato e exige workspace200 antesGUI, respostas aguardadas/bounded e pageerror/HTTP/409 inexplicado FAIL. Novo build/run pendente. Reviewing-proxy/succeeded do segundo projeto sao seed declarados, nao transicao editorial aprovada. Rendering-final/completed/finalMP4/replay positivos nao comprovados pelo recorte atual."
+          "text": "W35 final positivo permanece pendente: DirectorRun planned/quality review-required/face unknown e ProxyReview blocked/finalAllowedfalse devem negar admissao publica/PG. CI dcc0 dashboard38187207482 falhou barra de seed. Dashboard localv4 concluiu as assercoes mas ledger registrou2erros GETworkspace409+console; nao e browser limpo. Correcao tests-only agora compila source color real antes INSERTop, sela binding exato e exige workspace200 antesGUI, respostas aguardadas/bounded e pageerror/HTTP/409 inexplicado FAIL. Build a37 PASS; dashboardv5 FAIL antes de proxy/seed por quatro corpos HTTP200 nao capturados. Lifecycle request/hidratacao e nova prova pendentes; erros nao dispensados. Reviewing-proxy/succeeded do segundo projeto sao seed declarados, nao transicao editorial aprovada. Rendering-final/completed/finalMP4/replay positivos nao comprovados pelo recorte atual."
         },
         {
           "kind": "deployment",
@@ -21798,6 +21810,18 @@
           "type": "private",
           "ref": "Apollo/w61-70-20261008/ci-dcc0-dashboard-38187207482/download-manifest.json",
           "scope": "FAIL dashboard CI dcc0 na expectativa de barra do seed. ManifestSHA25668f3208d5e26040525955a36dad67bd0b196c83949808c91cecce2641f1d160e,27arquivos; final publico422/zeroefeitos preservado. Seed reviewing-proxy/succeeded declarado e mecanica nao autorizam final.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/build-a37be5-08768a38/result.json",
+          "scope": "Build fresco local a37be5a8bf9dc7f7301c60ce6c744d3f58a95096 PASS API/docs/Next/TypeScript; SHA2561414acff94dce72b18b4fa92d6b245143b6146482872a7d84f600a1164bd307c. Fingerprint edae54a4a7ffd3967b069eb3136bc75963888f1cd4b117c16d359bd13db5bc3e antes/depois igual,13 identidades terminais/noDB/scratch limpo. Manifesto bundle4ffa80f0c13551178f89f1eee754a54d5ca6a2b9a0ca3af76c077bccb4cf0643:1922 arquivos/333404910 bytes sem drift apos dashboard, cache/trace excluidos. Build nao comprova jornada nem deploy.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/dashboard-a37be5-v5-8be9607c/result.json",
+          "scope": "FAIL no SHA a37 antes do primeiro estado e antes de proxy/seed: quatro GET200 JSON proof-needs/proof-integrity-runs/proof-mode-runs/capabilities com erro de captura de corpo227B/SHA09aac9fb62b8c75d5c3d78f02bfc265ba1c23d2f010c594116f75e3a330bb393. ResultSHA8242330efb542cc796a23f565719061e2af21b5353472023d7398f3345035833; fingerprintedae54a4a7ffd3967b069eb3136bc75963888f1cd4b117c16d359bd13db5bc3e igual,36 identidades terminais,4 amostras PG vazias/cluster/porta/scratch limpos. Navegacao durante hidratacao e hipotese, nao causa medida nem erro dispensado. Novo ledger deve correlacionar request/response/finished/failed e bootstrap finito antes de navegar, mantendo gates.",
           "role": "integration"
         }
       ],

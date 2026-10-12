@@ -47,8 +47,26 @@ color API before inserting the seeded operation, hydrates the persisted compilat
 and seals source/manifest/compilation/pipeline hashes in its binding. It requires public
 workspace200 before the seeded GUI observation, awaits bounded response evidence, and
 fails on page errors, HTTP errors or unexplained conflicts, including late errors after
-browser close. This correction awaits a fresh build/run; rendering-final, completed,
-final MP4 and final replay remain outside the current proof.
+browser close. Local commit `a37be5a8bf9dc7f7301c60ce6c744d3f58a95096`
+passed the fresh build (`build-a37be5-08768a38`, result SHA-256
+`1414acff94dce72b18b4fa92d6b245143b6146482872a7d84f600a1164bd307c`).
+Its 1,922 bundle files (333,404,910 bytes, excluding cache and trace files) still
+matched manifest `4ffa80f0c13551178f89f1eee754a54d5ca6a2b9a0ca3af76c077bccb4cf0643`
+after the following run.
+
+Dashboard `dashboard-a37be5-v5-8be9607c` failed before its first recorded state:
+four HTTP200 JSON response bodies could not be captured (`proof-needs`,
+`proof-integrity-runs`, `proof-mode-runs`, `capabilities`). Each error had 227 bytes
+and SHA-256 `09aac9fb62b8c75d5c3d78f02bfc265ba1c23d2f010c594116f75e3a330bb393`.
+Result SHA-256 `8242330efb542cc796a23f565719061e2af21b5353472023d7398f3345035833`;
+source fingerprint `edae54a4a7ffd3967b069eb3136bc75963888f1cd4b117c16d359bd13db5bc3e`
+remained unchanged. All 36 observed identities were terminal, four PostgreSQL
+postflight samples were empty and cluster/scratch cleanup completed. Neither the
+proxy nor the seeded project was exercised in this failed run. The response-only
+ledger does not track requests awaiting headers or later hydration effects;
+navigation-induced loss is a hypothesis requiring request lifecycle evidence,
+not a reason to ignore body failures. Rendering-final, completed, final MP4 and
+final replay remain outside the current proof.
 
 W66 is a separate uncommitted draft on base8428e827. Manifest
 `w66-output-facts-v7.json`, SHA-256

@@ -74,8 +74,12 @@ export async function runDashboardRuntimeJourney(input) {
   assert.equal(isAbsolute(ffmpeg), true, 'Resolved FFmpeg binary must be absolute')
   const safeError = (error) => {
     const message = String(error?.message ?? error ?? '')
+    const errorKind = /No resource with given identifier|body.*evicted/i.test(message) ? 'BODY_RESOURCE_GONE'
+      : /Target page, context or browser has been closed/i.test(message) ? 'TARGET_CLOSED'
+        : /Response body is unavailable/i.test(message) ? 'BODY_UNAVAILABLE'
+          : /Dashboard response evidence deadline exceeded/i.test(message) ? 'EVIDENCE_DEADLINE' : 'UNKNOWN'
     return { name: /^[A-Za-z0-9_]{1,80}$/.test(error?.name ?? '') ? error.name : null,
-      messageSha256: sha256(message), messageBytes: Buffer.byteLength(message) }
+      errorKind, messageSha256: sha256(message), messageBytes: Buffer.byteLength(message) }
   }
   const bounded = async (action, timeoutMs) => {
     let timer
@@ -107,14 +111,70 @@ export async function runDashboardRuntimeJourney(input) {
     return payload.data
   }
   const browserResponseTasks = new Set()
+  const browserRequests = new WeakMap()
+  const activeBrowserRequests = new Set()
+  const browserPages = new WeakMap()
   const browserResponseListeners = []
-  const drainBrowserResponses = async () => {
-    const deadline = Date.now() + 10000
-    while (browserResponseTasks.size) {
-      const remaining = deadline - Date.now()
-      assert.ok(remaining > 0, 'Browser response evidence did not settle within its bound')
-      await bounded(Promise.all([...browserResponseTasks]), remaining)
-    }
+  const browserOrigin = new URL(baseUrl).origin
+  let browserSequence = 0, browserRequestSequence = 0, browserPageSequence = 0, browserActivityAt = performance.now()
+  evidence.browserRequests = []; evidence.browserTimeline = []; evidence.browserBarriers = []
+  const browserEvent = (event, pageState, record, extra = {}) => {
+    browserActivityAt = performance.now()
+    const item = { seq: ++browserSequence, at: Date.now(), monotonicMs: browserActivityAt, event,
+      pageId: pageState.pageId, navigationId: record?.navigationId ?? pageState.navigationId,
+      stage: record?.stage ?? pageState.stage, layout: record?.layout ?? pageState.layout,
+      ...(record ? { requestId: record.requestId } : {}), ...extra }
+    evidence.browserTimeline.push(item)
+    return item.seq
+  }
+  const markBrowserPage = (opened, stage, layout) => {
+    const state = browserPages.get(opened)
+    assert.ok(state, 'Browser page must be tracked before an observation')
+    state.stage = stage; state.layout = layout
+    return state
+  }
+  const beginBrowserNavigation = (opened, stage, layout, targetPath) => {
+    const state = markBrowserPage(opened, stage, layout)
+    state.navigationId = `${state.pageId}:navigation-${++state.navigationCount}`
+    browserEvent('navigation-intent', state, null, { targetPath })
+    return state.navigationId
+  }
+  const drainBrowserResponses = async ({ opened, navigationId, requiredPaths = [], label = 'finite-browser-barrier' } = {}) => {
+    const started = performance.now(), deadline = started + 10000
+    const barrier = { label, pageId: opened ? browserPages.get(opened).pageId : null, navigationId: navigationId ?? null,
+      startedAt: Date.now(), budgetMs: 10000, requiredPaths: [], status: 'pending' }
+    evidence.browserBarriers.push(barrier)
+    try {
+      while (performance.now() < deadline) {
+        const records = evidence.browserRequests.filter((record) => !opened ||
+          (record.pageId === barrier.pageId && record.navigationId === navigationId))
+        barrier.requiredPaths = typeof requiredPaths === 'function' ? requiredPaths(records) : requiredPaths
+        const missing = barrier.requiredPaths.filter((path) => !records.some((record) => record.method === 'GET' &&
+          record.origin === browserOrigin && record.path === path && record.transportState === 'finished' && record.bodyState === 'captured'))
+        barrier.pendingRequestIds = [...activeBrowserRequests].map((request) => browserRequests.get(request).requestId)
+        barrier.pendingBodies = browserResponseTasks.size; barrier.missingPaths = missing
+        if (!barrier.pendingRequestIds.length && !barrier.pendingBodies && !missing.length &&
+          performance.now() - browserActivityAt >= 350) {
+          barrier.status = 'completed'; barrier.completedAt = Date.now(); barrier.completedAtSeq = browserSequence
+          return
+        }
+        const remaining = deadline - performance.now()
+        assert.ok(remaining > 0, 'Browser request lifecycle barrier deadline exhausted')
+        await delay(Math.min(25, remaining))
+      }
+      assert.fail(`Browser finite requests/bootstrap did not settle: ${JSON.stringify(barrier)}`)
+    } catch (error) { barrier.status = 'failed'; barrier.error = safeError(error); throw error }
+  }
+  const drainWorkspaceBootstrap = async (opened, navigationId, id) => {
+    const prefix = `/v1/projects/${id}`
+    const requiredPaths = ['/workspace', '/policy-overrides', '/proof-needs', '/proof-integrity-runs', '/proof-mode-runs']
+      .map((path) => prefix + path)
+    // These three proof reads mount unconditionally. SyntheticPhaseGatePanel
+    // only mounts after the real workspace hydration supplies a version.
+    await drainBrowserResponses({ opened, navigationId, label: 'workspace-bootstrap', requiredPaths: (records) => {
+      const workspace = records.find((record) => record.path === prefix + '/workspace' && record.bodyState === 'captured')
+      return workspace?.workspaceVersionPresent ? [...requiredPaths, prefix + '/synthetic-phase-gates', '/v1/capabilities'] : requiredPaths
+    } })
   }
   const post = async (path, body, key, expected) => {
     const response = await fetch(`${baseUrl}${path}`, { method: 'POST',
@@ -166,45 +226,129 @@ export async function runDashboardRuntimeJourney(input) {
     browser = await chromium.connect(server.wsEndpoint(), { timeout: 20000 })
     context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
     context.on('page', (opened) => {
+      const state = { pageId: `page-${++browserPageSequence}`, navigationId: null, navigationCount: 0,
+        stage: 'page-created', layout: 'unassigned' }
+      browserPages.set(opened, state)
       opened.on('pageerror', (error) => evidence.browserErrors.push({ kind: 'pageerror', ...safeError(error) }))
       opened.on('console', (message) => {
         if (message.type() === 'error') evidence.browserErrors.push({ kind: 'console-error', ...safeError(message.text()) })
       })
-      const onResponse = (response) => {
-        const url = new URL(response.url())
-        if (response.status() < 400 && (url.origin !== new URL(baseUrl).origin || !url.pathname.startsWith('/v1/'))) return
-        const diagnostic = { method: response.request().method(), origin: url.origin, path: url.pathname,
-          status: response.status(), contentType: (response.headers()['content-type'] ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 128),
-          bodyState: 'pending' }
-        evidence.browserResponses.push(diagnostic)
-        if (response.status() >= 400) evidence.browserErrors.push({ kind: 'http-error', response: diagnostic })
-        if (response.status() < 400 && !/^application\/(?:json|[a-z0-9.+-]+\+json)(?:;|$)/i.test(diagnostic.contentType)) {
-          // Successful media bodies are inspected by the existing MP4 checks;
-          // this ledger awaits JSON and every HTTP error, not binary playback.
-          diagnostic.bodyState = 'non-json-success-not-read'
-          return
+      const onRequest = (request) => {
+        const url = new URL(request.url())
+        if (request.isNavigationRequest() && state.navigationId === null) {
+          state.navigationId = `${state.pageId}:navigation-${++state.navigationCount}`
+          browserEvent('automatic-navigation-start', state, null, { path: url.pathname })
         }
+        const record = { requestId: `request-${++browserRequestSequence}`, pageId: state.pageId,
+          navigationId: state.navigationId, stage: state.stage, layout: state.layout,
+          method: request.method(), origin: url.origin,
+          path: ['http:', 'https:'].includes(url.protocol) ? url.pathname : 'non-http',
+          resourceType: request.resourceType(), isNavigationRequest: request.isNavigationRequest(),
+          redirectedFromId: browserRequests.get(request.redirectedFrom())?.requestId ?? null,
+          startedAt: Date.now(), transportState: 'pending', bodyState: 'no-response' }
+        browserRequests.set(request, record); activeBrowserRequests.add(request)
+        evidence.browserRequests.push(record)
+        record.requestAtSeq = browserEvent('request', state, record)
+      }
+      const onFinished = (request) => {
+        const record = browserRequests.get(request)
+        if (!record) { evidence.browserErrors.push({ kind: 'untracked-requestfinished', pageId: state.pageId }); return }
+        record.transportState = 'finished'; record.finishedAt = Date.now()
+        record.finishedAtSeq = browserEvent('requestfinished', state, record,
+          { observedNavigationId: state.navigationId })
+        activeBrowserRequests.delete(request)
+      }
+      const onFailed = (request) => {
+        const record = browserRequests.get(request)
+        if (!record) { evidence.browserErrors.push({ kind: 'untracked-requestfailed', pageId: state.pageId }); return }
+        const errorText = request.failure()?.errorText ?? ''
+        record.transportState = 'failed'; record.failedAt = Date.now()
+        record.networkFailure = { errorCode: /^net::ERR_[A-Z0-9_]{1,80}$/.test(errorText) ? errorText : 'UNKNOWN', ...safeError(errorText) }
+        record.failedAtSeq = browserEvent('requestfailed', state, record,
+          { observedNavigationId: state.navigationId, errorCode: record.networkFailure.errorCode })
+        activeBrowserRequests.delete(request)
+        // ERR_ABORTED is diagnostic, never an automatic exemption.
+        evidence.browserErrors.push({ kind: 'request-failed', request: record })
+      }
+      const onResponse = (response) => {
+        const request = response.request()
+        let record = browserRequests.get(request)
+        if (!record) {
+          evidence.browserErrors.push({ kind: 'response-without-request', pageId: state.pageId })
+          onRequest(request); record = browserRequests.get(request)
+        }
+        record.status = response.status()
+        record.contentType = (response.headers()['content-type'] ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 128)
+        record.headersAtSeq = browserEvent('response', state, record, { observedNavigationId: state.navigationId })
+        const inspect = response.status() >= 400 || (record.origin === browserOrigin && record.path.startsWith('/v1/'))
+        if (inspect) evidence.browserResponses.push(record)
+        if (response.status() >= 400) evidence.browserErrors.push({ kind: 'http-error', response: record })
+        // The event feed in this UI is finite JSON polling. No SSE contract is
+        // mounted here; a new eventsource cannot silently bypass the barrier.
+        if (record.resourceType === 'eventsource' || /^text\/event-stream(?:;|$)/i.test(record.contentType)) {
+          evidence.browserErrors.push({ kind: 'unexpected-stream-contract', request: record })
+        }
+        const readBody = inspect && (response.status() >= 400 ||
+          /^application\/(?:json|[a-z0-9.+-]+\+json)(?:;|$)/i.test(record.contentType))
+        record.bodyState = readBody ? 'pending' : 'non-json-success-not-read'
         const pending = (async () => {
           try {
-            const text = await bounded(response.text(), 5000)
-            Object.assign(diagnostic, responseDiagnostic(text), { bodyState: 'captured' })
+            const finishError = await bounded(response.finished(), 5000)
+            record.responseFinishedAtSeq = browserEvent('response-finished', state, record,
+              { observedNavigationId: state.navigationId, result: finishError ? 'error' : 'completed' })
+            if (finishError) throw finishError
+            record.responseFinishedState = 'completed'
           } catch (error) {
-            diagnostic.bodyState = 'failed'
-            diagnostic.bodyError = safeError(error)
-            evidence.browserErrors.push({ kind: 'response-evidence-error', response: diagnostic })
+            record.responseFinishedState = 'failed'; record.responseFinishedError = safeError(error)
+            record.responseFinishedErrorAtNavigation = state.navigationId
+            record.responseFinishedErrorAtSeq = browserEvent('response-finished-error', state, record,
+              { observedNavigationId: state.navigationId, errorKind: record.responseFinishedError.errorKind })
+            evidence.browserErrors.push({ kind: 'response-finished-error', response: record })
+            return
+          }
+          if (!readBody) return
+          try {
+            record.bodyCaptureAtSeq = browserEvent('body-capture-start', state, record,
+              { observedNavigationId: state.navigationId })
+            const text = await bounded(response.text(), 5000)
+            Object.assign(record, responseDiagnostic(text), { bodyState: 'captured' })
+            if (record.path.endsWith('/workspace')) {
+              const payload = JSON.parse(text)
+              record.workspaceVersionPresent = Boolean(payload.data?.version)
+            }
+            record.bodyCapturedAtSeq = browserEvent('body-captured', state, record,
+              { observedNavigationId: state.navigationId })
+          } catch (error) {
+            record.bodyState = 'failed'; record.bodyError = safeError(error)
+            record.bodyErrorAtNavigation = state.navigationId
+            record.bodyErrorAfterNavigationChange = record.navigationId !== state.navigationId
+            record.bodyErrorAtSeq = browserEvent('body-failed', state, record,
+              { observedNavigationId: state.navigationId, errorKind: record.bodyError.errorKind })
+            evidence.browserErrors.push({ kind: 'response-evidence-error', response: record })
           }
         })()
         browserResponseTasks.add(pending)
         void pending.finally(() => browserResponseTasks.delete(pending))
       }
+      const onNavigation = (frame) => {
+        if (frame !== opened.mainFrame()) return
+        browserEvent('navigation-commit', state, null, { path: new URL(frame.url()).pathname })
+      }
+      const onClose = () => { browserEvent('page-close', state, null) }
+      opened.on('request', onRequest)
       opened.on('response', onResponse)
-      browserResponseListeners.push({ opened, onResponse })
+      opened.on('requestfinished', onFinished); opened.on('requestfailed', onFailed)
+      opened.on('framenavigated', onNavigation); opened.on('close', onClose)
+      browserResponseListeners.push({ opened, handlers: { request: onRequest, response: onResponse,
+        requestfinished: onFinished, requestfailed: onFailed, framenavigated: onNavigation, close: onClose } })
     })
     context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(30000)
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     const page = await context.newPage()
     const navigatedStates = new Set()
-    pipeline = await createDashboardPipelineObserver({ page: await context.newPage(), client, baseUrl, workspaceId, evidenceDir: directory })
+    const pipelinePage = await context.newPage()
+    markBrowserPage(pipelinePage, 'pipeline-bootstrap', 'pipeline')
+    pipeline = await createDashboardPipelineObserver({ page: pipelinePage, client, baseUrl, workspaceId, evidenceDir: directory })
     const observe = async ({ stage, id = projectId, operationId, operationStatus, status, phase, completed, eventTypes = [],
       origin = 'public-api+postgres+factory-worker', seededStatus = false }) => {
       const row = await client.v2Project.findUniqueOrThrow({ where: { id } })
@@ -227,14 +371,20 @@ export async function runDashboardRuntimeJourney(input) {
         assert.equal(projected.dashboard.latestOperation.phase, phase)
         assert.deepEqual(projected.dashboard.latestOperation.progress, { completed, total: 4, unit: 'render' })
       }
-      if (eventTypes.length) await pipeline.observe({ stage, projectId: id, operationId, expectedEventTypes: eventTypes, expectedState: status })
+      if (eventTypes.length) {
+        markBrowserPage(pipelinePage, stage, 'pipeline')
+        await pipeline.observe({ stage, projectId: id, operationId, expectedEventTypes: eventTypes, expectedState: status })
+      }
       for (const [layout, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mobile', { width: 390, height: 844 }]]) {
+        markBrowserPage(page, stage, layout)
+        await drainBrowserResponses({ label: 'before-main-foreground' })
         const visibilityBefore = await page.evaluate(() => document.visibilityState)
         await page.bringToFront()
         await page.waitForFunction(() => document.visibilityState === 'visible')
         evidence.foregroundObservations ??= []
         evidence.foregroundObservations.push({ stage, layout, before: visibilityBefore, after: await page.evaluate(() => document.visibilityState) })
-        await drainBrowserResponses()
+        await drainBrowserResponses({ label: 'before-dashboard-navigation' })
+        const dashboardNavigation = beginBrowserNavigation(page, stage, layout, '/')
         await page.setViewportSize(viewport); await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
         const card = page.locator(`article[data-project-id="${id}"]`)
         try { await card.waitFor({ state: 'visible' }) } catch (error) {
@@ -242,6 +392,8 @@ export async function runDashboardRuntimeJourney(input) {
           await page.screenshot({ path: join(directory, 'w35-dom-failure.png'), fullPage: true })
           throw error
         }
+        await drainBrowserResponses({ opened: page, navigationId: dashboardNavigation,
+          requiredPaths: ['/v1/projects', '/v1/events/feed'], label: 'dashboard-bootstrap' })
         assert.equal(await card.locator('[data-state]').getAttribute('data-state'), status)
         assert.equal(await card.locator('[data-state]').innerText(), expected.badge)
         assert.ok((await card.locator('[data-state]').getAttribute('class')).split(' ').includes(expected.color))
@@ -255,16 +407,20 @@ export async function runDashboardRuntimeJourney(input) {
         evidence.screenshots.push({ name, sha256: sha256(await readFile(join(directory, name))) })
         if (layout === 'desktop' && !navigatedStates.has(status)) {
           const destination = `/projects/${id}${status === 'reviewing-proxy' ? '?mode=review' : ''}`
+          await drainBrowserResponses({ label: 'before-workspace-navigation' })
+          const workspaceNavigation = beginBrowserNavigation(page, stage, layout, `/projects/${id}`)
           const workspaceResponse = page.waitForResponse((candidate) => {
             const url = new URL(candidate.url())
             return candidate.request().method() === 'GET' && url.origin === new URL(baseUrl).origin &&
-              url.pathname === `/v1/projects/${id}/workspace`
+              url.pathname === `/v1/projects/${id}/workspace` &&
+              browserRequests.get(candidate.request())?.navigationId === workspaceNavigation
           }, { timeout: 30000 }).then((response) => ({ response }), (error) => ({ error }))
           await action.click()
           await page.waitForURL(`${baseUrl}${destination}`)
           const hydrated = await workspaceResponse
           assert.ifError(hydrated.error)
           assert.equal(hydrated.response.status(), 200, `${stage}: browser workspace hydration must succeed`)
+          await drainWorkspaceBootstrap(page, workspaceNavigation, id)
           navigatedStates.add(status)
         }
         await drainBrowserResponses()
@@ -726,15 +882,19 @@ export async function runDashboardRuntimeJourney(input) {
     let postflightError
     try { await drainBrowserResponses() }
     catch (error) { evidence.browserEvidencePostflightError = safeError(error); postflightError = error }
-    // Remove these observers only after their bodies have settled, before page
-    // closure can invalidate protocol access to a completed response.
-    for (const { opened, onResponse } of browserResponseListeners) opened.off('response', onResponse)
     if (!primaryError && evidence.browserErrors.length) {
       postflightError ??= new Error('Browser error ledger is nonempty at postflight')
       evidence.outcome = 'failed'
     }
     try { evidence.postflight = await closeOwnedBrowser({ context, browser, server, child }); assert.equal(evidence.postflight.browserTerminal, true) }
     catch (error) { evidence.postflight.cleanupError = safeError(error); postflightError ??= error }
+    // Keep lifecycle and error observers active through closure. An unfinished
+    // request or a late body failure cannot become terminal by closing a page.
+    try { await drainBrowserResponses({ label: 'after-browser-close' }) }
+    catch (error) { evidence.browserEvidenceAfterCloseError = safeError(error); postflightError ??= error }
+    for (const { opened, handlers } of browserResponseListeners) {
+      for (const [event, listener] of Object.entries(handlers)) opened.off(event, listener)
+    }
     // pageerror/console observers remain active through close. A late error must
     // turn the persisted outcome into FAIL while preserving an earlier failure.
     if (evidence.browserErrors.length) postflightError ??= new Error('Browser error ledger is nonempty after browser close')
