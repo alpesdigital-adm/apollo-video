@@ -14,7 +14,22 @@ export interface ProjectWorkspaceMediaRecord {
   createdAt: string
 }
 
+export interface ProjectReviewAvailability {
+  schemaVersion: 'project-review-availability/v1'
+  requestedVersionId: string | null
+  annotations: Readonly<
+    | { state: 'unavailable'; reason: 'no-version' | 'no-proxy' }
+    | { state: 'available'; sourceVersionId: string | null; proxyArtifactId: string; proxyHash: string; stale: boolean }
+  >
+  proxyReview: Readonly<
+    | { state: 'unavailable'; reason: 'no-version' | 'no-report' }
+    | { state: 'available'; sourceVersionId: string; reviewId: string; proxyArtifactId: string; reviewHash: string }
+  >
+}
+
 export interface ProjectWorkspaceRecord {
+  reviewAvailability: Readonly<ProjectReviewAvailability>
+  operations: readonly Readonly<PublicOperation>[]
   project: {
     id: string; workspaceId: string; name: string; status: ProjectStatus; objective?: string;
     format?: string; locale?: string; currentVersionId?: string; createdAt: string
@@ -52,3 +67,4 @@ export interface ProjectWorkspaceQueryRepository {
   read(input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectWorkspaceRecord> | null>
 }
 import type { ProjectStatus } from '../../domain/project.ts'
+import type { PublicOperation } from '../../domain/public-operation.ts'

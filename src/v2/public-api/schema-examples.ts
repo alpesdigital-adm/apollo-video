@@ -12435,6 +12435,55 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+
+    'apollo://schemas/project-workspace/v13': [
+      {
+        data: {
+          project: {
+            currentVersionId: 'project-version-confidence-1',
+            id: projectId, workspaceId, name: 'Anuncio com incerteza calibrada', status: 'reviewing-proxy',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'reviewing-proxy', tone: 'warning',
+              progress: { mode: 'none' }, primaryAction: 'review-output',
+              availableActions: ['review-output'], terminal: false,
+            },
+          },
+          version: {
+            id: 'project-version-confidence-1', sequence: 3,
+            baseHash: '4'.repeat(64), createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          brief: compiledProjectBriefExample,
+          directorRuns: [{
+            id: 'director-run-confidence-1', status: 'succeeded',
+            plannerVersion: 'apollo-director-policy/v1', criticVersion: 'apollo-director-critic/v2',
+            objective: 'discovery', objectiveVersion: 1, rubricRef: 'discovery/v1',
+            baseVersionId: 'project-version-confidence-0', resultVersionId: 'project-version-confidence-1',
+            treatmentSnapshotId: 'project-snapshot-treatment-confidence', storySnapshotId: 'project-snapshot-story-confidence',
+            qualitySnapshotId: 'project-snapshot-quality-confidence', qualityStatus: 'review-required',
+            qualityScore: 0.88, decisionCount: 6, assumptionCount: 1,
+            uncertainties: [{
+              id: 'decision-layout-review', label: 'manual-layout-review', type: 'generation',
+              band: 'review', value: 0.72, reasonCodes: ['DIRECTOR_LAYOUT'],
+              calibrationVersion: 'director-confidence-2026-08-v1', evidenceCount: 2,
+            }],
+            subtitleCueCount: 22, transitionCount: 2, automaticZoom: false, createdAt,
+          }],
+          reviewAvailability: {
+            schemaVersion: 'project-review-availability/v1', requestedVersionId: 'project-version-confidence-1',
+            annotations: { state: 'unavailable', reason: 'no-proxy' },
+            proxyReview: { state: 'unavailable', reason: 'no-report' },
+          },
+          commands: [], media: [], transcripts: [], operationIds: [], operations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-created/v3': [
       {
         data: {

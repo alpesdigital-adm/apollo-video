@@ -12,6 +12,7 @@ import {
   presentProjectV2,
   presentProjectVersionV2,
   presentProjectWorkspaceV7,
+  presentProjectWorkspaceV13,
 } from '../../src/v2/public-api/presenters.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
@@ -265,11 +266,11 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
   for (const [id, version] of [
-    ['apollo.projects.workspace.read', '12.0.0'],
-    ['apollo.projects.workspace.current.read', '11.0.0'],
+    ['apollo.projects.workspace.read', '13.0.0'],
+    ['apollo.projects.workspace.current.read', '12.0.0'],
   ]) {
     assert.equal(capabilities.get(id).version, version)
-    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v12')
+    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v13')
   }
   assert.equal(getPublicSchema('apollo://schemas/project-workspace/v6').ref, 'apollo://schemas/project-workspace/v6')
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
@@ -313,6 +314,11 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
   assert.equal(Object.isFrozen(currentVersion), true)
 
   const repository = new PrismaProjectWorkspaceQueryRepository({
+    async $transaction(action, options) {
+      assert.equal(options.isolationLevel, 'RepeatableRead')
+      assert.equal(options.timeout, 10_000)
+      return action(this)
+    },
     v2Project: {
       async findFirst() {
         return {
@@ -372,4 +378,39 @@ test('workspace v12 exposes Director review-required without promoting it to app
   const inventedApproval = structuredClone(body)
   inventedApproval.data.directorRuns[0].qualityStatus = 'face-safe-approved'
   assert.equal(validate(inventedApproval), false)
+})
+test('workspace v13 compiles strictly, requires explicit review availability and preserves historical v12', () => {
+  const ajv = addFormats(new Ajv2020({ strict: true, allErrors: true }))
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v13').schema)
+  const old = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-workspace/v12'))[0])
+  assert.equal(validate(old), false, 'absence must not hydrate an operational fallback')
+  const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-workspace/v13'))[0])
+  assert.equal(validate(body), true, JSON.stringify(validate.errors))
+  assert.equal(ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v12').schema)(body), false)
+  for (const unavailable of [false, true]) {
+    const sample = structuredClone(body)
+    if (!unavailable) {
+      sample.data.reviewAvailability.annotations = { state: 'available', sourceVersionId: null,
+        proxyArtifactId: 'artifact-editing-proxy-1', proxyHash: 'a'.repeat(64), stale: true }
+      sample.data.reviewAvailability.proxyReview = { state: 'available', sourceVersionId: sample.data.version.id,
+        reviewId: 'review-workspace-1', proxyArtifactId: 'artifact-editorial-proxy-1', reviewHash: 'b'.repeat(64) }
+    }
+    assert.equal(validate(sample), true, JSON.stringify(validate.errors))
+    const projected = presentProjectWorkspaceV13(sample.data)
+    assert.deepEqual(projected.reviewAvailability, sample.data.reviewAvailability)
+    for (const field of ['requestedVersionId', 'annotations', 'proxyReview']) {
+      const missing = structuredClone(sample)
+      delete missing.data.reviewAvailability[field]
+      assert.equal(validate(missing), false, field)
+    }
+    sample.data.reviewAvailability.proxyReview.fakeApproval = true
+    assert.equal(validate(sample), false)
+  }
+  const noVersion = structuredClone(body)
+  delete noVersion.data.version
+  noVersion.data.reviewAvailability = { schemaVersion: 'project-review-availability/v1', requestedVersionId: null,
+    annotations: { state: 'unavailable', reason: 'no-version' }, proxyReview: { state: 'unavailable', reason: 'no-version' } }
+  assert.equal(validate(noVersion), true, JSON.stringify(validate.errors))
+  noVersion.data.reviewAvailability.annotations.reason = 'no-proxy'
+  assert.equal(validate(noVersion), false)
 })

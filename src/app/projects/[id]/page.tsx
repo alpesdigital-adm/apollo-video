@@ -8,7 +8,8 @@ import LogoutButton from '@/components/LogoutButton'
 import SyntheticPhaseGatePanel from '@/components/SyntheticPhaseGatePanel'
 import TransformationReviewPanel from '@/components/TransformationReviewPanel'
 import type { VisibleState } from '@/v2/domain/visible-state'
-import { createEditorReads, createLatestReadFence, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
+import type { ProjectReviewAvailability } from '@/v2/application/ports/project-workspace-query-repository'
+import { createEditorReads, createLatestReadFence, workspaceReviewReadTargets, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
 
 /** What the operator is told about a read that failed — never a stack, a body or a token. */
 function describeReviewFailure(failure: ReadFailure): string {
@@ -610,6 +611,7 @@ interface DirectorRunSummary {
   objective: StrategicObjectiveId; objectiveVersion: number; rubricRef: string; supersedesRunId?: string
 }
 interface WorkspaceData {
+  reviewAvailability: Readonly<ProjectReviewAvailability>
   project: { id: string; name: string; status: string; objective?: string; format?: string; locale?: string; createdAt: string }
   version?: { id: string; sequence: number; baseHash: string; createdAt: string }
   brief?: Record<string, unknown>
@@ -1107,6 +1109,7 @@ export default function ProjectWorkspacePage() {
   const previewSeekSamples = useRef<number[]>([])
   const preservedPreviewTimeMs = useRef<number | null>(null)
   const selectedReviewVersionId = useRef<string | null>(null)
+  const manuallySelectedReviewVersionId = useRef<string | null>(null)
   const sourceCleanupIdempotencyKeys = useRef(new Map<string, string>())
   const validationDecisionIdempotencyKeys =
     useRef(new Map<string, string>())
@@ -1293,6 +1296,8 @@ export default function ProjectWorkspacePage() {
         throw new Error(result.failure.message)
       }
       if (!workspaceRead.ok || !policyRead.ok) return
+      if (workspaceRead.data.project.id !== projectId) throw new Error('O workspace retornou outro projeto.')
+      workspaceReviewReadTargets(workspaceRead.data.version?.id ?? null, workspaceRead.data.reviewAvailability, null)
       setWorkspace(workspaceRead.data)
       setProjectPolicy(policyRead.data)
       const latest = workspaceRead.data.operations[0]
@@ -1316,8 +1321,9 @@ export default function ProjectWorkspacePage() {
         const total = latest.progress?.total ?? 6
         setUploadProgress(80 + Math.round((completed / total) * 20))
       }
+      return workspaceRead.data
     } catch (error) {
-      if (!quiet) setNotice(error instanceof Error ? error.message : 'Não foi possível carregar o workspace.')
+      setNotice(error instanceof Error ? error.message : 'Não foi possível carregar o workspace.')
     } finally {
       if (!quiet) setLoading(false)
     }
@@ -1353,6 +1359,11 @@ export default function ProjectWorkspacePage() {
   useEffect(() => { uploadPhaseRef.current = uploadPhase }, [uploadPhase])
   useEffect(() => {
     reads.setScope({ projectId, sessionEpoch: sessionEpochRef.current })
+    manuallySelectedReviewVersionId.current = null
+    selectedReviewVersionId.current = null
+    setWorkspace(null)
+    setReview(null)
+    setProxyReview(null)
     reviewReadFenceRef.current.invalidate()
     proxyReviewReadFenceRef.current.invalidate()
   }, [projectId, reads])
@@ -1797,16 +1808,6 @@ export default function ProjectWorkspacePage() {
       if (!proxyReviewReadFenceRef.current.isCurrent(readTicket)) return
       if (!result.ok && result.failure.dropped) return
       if (!result.ok && result.failure.kind === 'auth') { router.replace('/login'); return }
-      if (!result.ok && result.failure.kind === 'not-found') {
-        // The API answers PROJECT_NOT_FOUND both for "no proxy review yet" and for a
-        // project this session cannot see, so the code alone cannot tell them apart.
-        // This loader only runs after the workspace read of the same project succeeded
-        // in this session (see the effect below), which is what makes 404 here mean
-        // "no report for this version" rather than "nothing to show".
-        setProxyReview(null)
-        setProxyReviewFailure(null)
-        return
-      }
       if (!result.ok) {
         setProxyReview(null)
         setProxyReviewFailure(result.failure)
@@ -1824,12 +1825,35 @@ export default function ProjectWorkspacePage() {
   }, [projectId, reads, router])
 
   const workspaceVersionId = workspace?.version?.id
-  const workspaceHasMedia = (workspace?.media.length ?? 0) > 0
+  const refreshWorkspaceReviews = useCallback(async (snapshot: WorkspaceData, quiet = true) => {
+    if (snapshot.project.id !== projectId) return
+    const { annotationsVersionId, proxyReviewVersionId: reportVersionId } = workspaceReviewReadTargets(
+      snapshot.version?.id ?? null, snapshot.reviewAvailability, manuallySelectedReviewVersionId.current,
+    )
+    if (!annotationsVersionId) {
+      reviewReadFenceRef.current.invalidate()
+      setReview(null)
+      setReviewLoading(false)
+      setReviewFailure(null)
+    }
+    if (!reportVersionId) {
+      proxyReviewReadFenceRef.current.invalidate()
+      setProxyReview(null)
+      setProxyReviewLoading(false)
+      setProxyReviewFailure(null)
+    }
+    await Promise.all([
+      ...(annotationsVersionId ? [loadReview(quiet, annotationsVersionId)] : []),
+      ...(reportVersionId ? [loadProxyReview(quiet, reportVersionId)] : []),
+    ])
+  }, [loadReview, loadProxyReview, projectId])
+  const reviewAvailabilityKey = JSON.stringify(workspace?.reviewAvailability ?? null)
+  const reviewWorkspaceRef = useRef(workspace)
+  reviewWorkspaceRef.current = workspace
   useEffect(() => {
-    if (!workspaceVersionId || !workspaceHasMedia) return
-    void loadReview(false, workspaceVersionId)
-    void loadProxyReview(true, workspaceVersionId)
-  }, [loadProxyReview, loadReview, workspaceVersionId, workspaceHasMedia])
+    const snapshot = reviewWorkspaceRef.current
+    if (snapshot) void refreshWorkspaceReviews(snapshot, false)
+  }, [refreshWorkspaceReviews, reviewAvailabilityKey])
 
   const activeOperation = workspace?.operations[0]
   const operationActive = Boolean(activeOperation && !activeOperation.visibleState.terminal)
@@ -1842,15 +1866,14 @@ export default function ProjectWorkspacePage() {
     // the previous one settled, so a slow server never stacks rounds, and the
     // coordinator pauses the cycle while the tab is hidden.
     const handle = reads.poll(async () => {
+      const snapshot = await loadWorkspace(true)
       await Promise.all([
-        loadWorkspace(true),
-        loadReview(true, selectedReviewVersionId.current ?? undefined),
-        loadProxyReview(true, workspaceVersionId),
+        ...(snapshot ? [refreshWorkspaceReviews(snapshot)] : []),
         loadSourceCleanups(true),
       ])
     }, { intervalMs: 2500, isTerminal: () => activeOperationTerminalRef.current })
     return () => handle.stop()
-  }, [activeOperationId, activeOperationTerminal, loadProxyReview, loadReview, loadSourceCleanups, loadWorkspace, reads, workspaceVersionId])
+  }, [activeOperationId, activeOperationTerminal, refreshWorkspaceReviews, loadSourceCleanups, loadWorkspace, reads])
 
   const finalOutput = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'final-output'), [workspace])
   const editingProxy = useMemo(() => {
@@ -2223,9 +2246,9 @@ export default function ProjectWorkspacePage() {
           : `${input.action === 'undo' ? 'Undo' : 'Redo'} registrado como versão ${result.version.sequence}.`,
       )
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await loadWorkspace(true)
+      const refreshedWorkspace = await loadWorkspace(true)
       await loadManualTimeline(true)
-      await loadReview(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       preservedPreviewTimeMs.current = null
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar a edição manual.')
@@ -2436,9 +2459,9 @@ export default function ProjectWorkspacePage() {
       setVersionComparison(null)
       setComparePreviews({})
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await loadWorkspace(true)
+      const refreshedWorkspace = await loadWorkspace(true)
       await loadManualTimeline(true)
-      await loadReview(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível registrar a decisão da comparação.')
       await loadManualTimeline(true)
@@ -2521,6 +2544,7 @@ export default function ProjectWorkspacePage() {
     setReviewVersionLoading(true)
     setNotice(null)
     resetReviewElementResolution()
+    manuallySelectedReviewVersionId.current = version.id
     const loaded = await loadReview(false, version.id)
     if (!loaded) preservedPreviewTimeMs.current = null
     setReviewVersionLoading(false)
@@ -2799,7 +2823,8 @@ export default function ProjectWorkspacePage() {
       setReviewPatch(result.proposal)
       setNotice(`Versão ${result.version.sequence} criada. O novo preview entrou na fila de renderização.`)
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await Promise.all([loadWorkspace(true), loadReview(true)])
+      const refreshedWorkspace = await loadWorkspace(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar o ajuste.')
     } finally {
@@ -2879,7 +2904,8 @@ export default function ProjectWorkspacePage() {
       setReviewBatchSelection([])
       setNotice(`Versão ${result.version.sequence} criada com ${result.batch.items.filter((item) => item.status === 'applied').length} ajustes atômicos. O preview entrou na fila.`)
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await Promise.all([loadWorkspace(true), loadReview(true)])
+      const refreshedWorkspace = await loadWorkspace(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar o lote de revisão.')
     } finally {
@@ -4106,7 +4132,7 @@ export default function ProjectWorkspacePage() {
                 type="button"
                 data-testid="review-retry"
                 disabled={reviewRetryWaitMs > 0}
-                onClick={() => { void loadReview(false, workspaceVersionId, true) }}
+                onClick={() => { void loadReview(false, manuallySelectedReviewVersionId.current ?? review?.session.projectVersionId ?? workspaceVersionId, true) }}
                 className="mt-2 rounded-lg border border-[#d46f63]/40 px-3 py-1.5 text-[11px] font-semibold text-[#e7a59b] disabled:opacity-50"
               >
                 {reviewRetryWaitMs > 0 ? `Tentar novamente em ${Math.ceil(reviewRetryWaitMs / 1000)} s` : 'Tentar novamente'}

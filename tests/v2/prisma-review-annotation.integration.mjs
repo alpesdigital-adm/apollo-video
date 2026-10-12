@@ -53,6 +53,7 @@ test('review annotations persist idempotently without mutating the project versi
     '../../src/v2/infrastructure/prisma/render-element-map-repository.ts'
   )
   const { buildRenderElementMap } = await import('../../src/v2/domain/review-system.ts')
+  const { createMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
   )
@@ -150,17 +151,17 @@ test('review annotations persist idempotently without mutating the project versi
         createdAt: new Date(createdAt),
       },
     })
+    // Controlled metadata-only fixture: constructor integrity is not proof of
+    // MP4 bytes, rendering, facial perception or editorial approval.
+    const proxyManifest = createMediaArtifactManifest({ artifactKey: 'review-integration/proxy.mp4',
+      artifactSha256: proxyHash, byteSize: 2048, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'review-proxy', version: 'v1', parameters: { fixture: 'review-annotation' } },
+      probe: { width: 1080, height: 1920, duration: 3, fps: 30 } })
     await client.v2MediaArtifactManifest.create({
       data: {
-        id: 'review-integration-manifest',
-        workspaceId,
-        artifactId,
-        schemaVersion: 'media-artifact-manifest/v1',
-        manifestHash: 'b'.repeat(64),
-        recipeId: 'review-proxy',
-        recipeVersion: 'v1',
-        parametersHash: 'c'.repeat(64),
-        manifestJson: JSON.stringify({ probe: { width: 1080, height: 1920, duration: 3, fps: 30 } }),
+        id: 'review-integration-manifest', workspaceId, artifactId, schemaVersion: proxyManifest.schemaVersion,
+        manifestHash: proxyManifest.manifestHash, recipeId: proxyManifest.recipe.id, recipeVersion: proxyManifest.recipe.version,
+        parametersHash: proxyManifest.recipe.parametersHash, manifestJson: JSON.stringify(proxyManifest),
         createdAt: new Date(createdAt),
       },
     })

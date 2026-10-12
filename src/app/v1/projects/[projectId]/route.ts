@@ -4,11 +4,10 @@ import { requireScope } from '@/v2/application/authenticate-api-client'
 import { readProjectWorkspaceService } from '@/v2/application/read-project-workspace'
 import {
   createProjectWorkspaceQueryRepository,
-  createPublicOperationRepository,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
-import { presentProjectWorkspaceV7, presentSuccess } from '@/v2/public-api/presenters'
+import { presentProjectWorkspaceV13, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,10 +22,9 @@ export async function GET(
     const { projectId } = await context.params
     const workspace = await readProjectWorkspaceService({
       projects: createProjectWorkspaceQueryRepository(),
-      operations: createPublicOperationRepository(),
     })({ workspaceId: actor.workspaceId, projectId })
     return NextResponse.json(
-      presentSuccess(presentProjectWorkspaceV7(workspace)),
+      presentSuccess(presentProjectWorkspaceV13(workspace)),
       { headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { Prisma, PrismaClient, V2ReviewAnnotation } from '../../../../generated/prisma-v2/index.js'
+import type { Prisma, PrismaClient, V2MediaArtifact, V2ReviewAnnotation } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   PersistedReviewAnnotation,
@@ -9,6 +9,7 @@ import type {
   ReviewSceneRecord,
 } from '../../application/ports/review-annotation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { assertMediaArtifactManifest, type MediaArtifactManifest } from '../../domain/media-artifact.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { REVIEW_SCOPE_KINDS, type ReviewScope } from '../../domain/review-system.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
@@ -139,10 +140,195 @@ function scenesFromEditPlan(editPlan: Record<string, unknown>): readonly ReviewS
   }))
 }
 
+type ProjectionManifestRow = Prisma.V2MediaArtifactManifestGetPayload<{
+  include: { recipeParameters: true; renderInput: true }
+}>
+type ProjectionArtifactRow = Pick<V2MediaArtifact,
+  'id' | 'workspaceId' | 'artifactKey' | 'sha256' | 'byteSize' | 'mediaType' | 'container'>
+
+function protectedProjectionMetadata(value: {
+  canonicalByteSize: number; algorithm: string; keyId: string; nonce: string; ciphertext: string; authTag: string
+}, maximumBytes: number): boolean {
+  // Same stored-envelope metadata contract as media-artifact-repository.
+  // No plaintext/storage reads or new authorization are performed here.
+  return Number.isSafeInteger(value.canonicalByteSize) && value.canonicalByteSize > 0 &&
+    value.canonicalByteSize <= maximumBytes && value.algorithm === 'aes-256-gcm' &&
+    /^[a-z0-9][a-z0-9._-]{0,63}$/.test(value.keyId) && /^[A-Za-z0-9_-]{16}$/.test(value.nonce) &&
+    value.ciphertext.length > 0 && /^[A-Za-z0-9_-]{22}$/.test(value.authTag)
+}
+
+/** Shared integrity reader for review/workspace projections. A syntactically
+ * valid resealed document still has to equal the scoped immutable row facts.
+ * This does not authenticate MP4 bytes, decrypt payloads or grant rendering. */
+export function readStoredProjectionManifest(workspaceId: string, artifact: ProjectionArtifactRow,
+  stored: ProjectionManifestRow): Readonly<MediaArtifactManifest> {
+  try {
+    const manifest = JSON.parse(stored.manifestJson) as MediaArtifactManifest
+    assertMediaArtifactManifest(manifest)
+    const identityMatches = artifact.workspaceId === workspaceId && stored.workspaceId === workspaceId &&
+      stored.artifactId === artifact.id && manifest.artifact.artifactKey === artifact.artifactKey &&
+      manifest.artifact.sha256 === artifact.sha256 && BigInt(manifest.artifact.byteSize) === artifact.byteSize &&
+      manifest.artifact.mediaType === artifact.mediaType && manifest.artifact.container === artifact.container
+    const columnsMatch = manifest.schemaVersion === stored.schemaVersion && manifest.manifestHash === stored.manifestHash &&
+      manifest.recipe.id === stored.recipeId && manifest.recipe.version === stored.recipeVersion &&
+      manifest.recipe.parametersHash === stored.parametersHash
+    const recipeParametersMatch = manifest.schemaVersion === 'media-artifact-manifest/v3' ||
+      manifest.schemaVersion === 'media-artifact-manifest/v4'
+      ? stored.recipeParametersRef === manifest.recipe.parametersRef && stored.recipeParameters !== null &&
+        stored.recipeParameters.workspaceId === workspaceId && stored.recipeParameters.ref === manifest.recipe.parametersRef &&
+        stored.recipeParameters.ref === `recipe-parameters/sha256/${manifest.recipe.parametersHash}` &&
+        stored.recipeParameters.parametersHash === manifest.recipe.parametersHash &&
+        protectedProjectionMetadata(stored.recipeParameters, 1024 * 1024)
+      : stored.recipeParametersRef === null && stored.recipeParameters === null
+    const renderInputMatch = manifest.schemaVersion === 'media-artifact-manifest/v4'
+      ? stored.renderInputRef === manifest.renderInput.ref && stored.renderInputHash === manifest.renderInput.inputHash &&
+        stored.renderInput !== null && stored.renderInput.workspaceId === workspaceId &&
+        stored.renderInput.ref === manifest.renderInput.ref && stored.renderInput.ref === `render-input/sha256/${manifest.renderInput.inputHash}` &&
+        stored.renderInput.inputHash === manifest.renderInput.inputHash && protectedProjectionMetadata(stored.renderInput, 4 * 1024 * 1024)
+      : stored.renderInputRef === null && stored.renderInputHash === null && stored.renderInput === null
+    if (!identityMatches || !columnsMatch || !recipeParametersMatch || !renderInputMatch) throw new Error('binding mismatch')
+    return Object.freeze(manifest)
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored projection manifest failed integrity or row binding validation',
+      { manifestId: stored.id })
+  }
+}
+
 interface ProxyCandidate {
   artifactId: string
   projectVersionId?: string
   createdAt: Date
+}
+
+export type ReviewPreviewReader = Pick<Prisma.TransactionClient,
+  'v2Project' | 'v2ProjectFinalExportOperation' | 'v2ProjectProxyRenderOperation' |
+  'v2ProjectMediaAsset' | 'v2MediaArtifact'>
+
+export async function readReviewPreviewContext(
+  client: ReviewPreviewReader,
+  input: { workspaceId: string; projectId: string; projectVersionId?: string },
+): Promise<Readonly<ReviewPreviewContext> | null> {
+  const project = await client.v2Project.findFirst({
+    where: { id: input.projectId, workspaceId: input.workspaceId },
+    select: {
+      id: true,
+      currentVersionId: true,
+      format: true,
+      locale: true,
+      versions: {
+        orderBy: { sequence: 'desc' },
+        select: {
+          id: true,
+          sequence: true,
+          createdAt: true,
+          editPlanSnapshot: { select: { contentJson: true } },
+        },
+      },
+    },
+  })
+  if (!project?.currentVersionId) return null
+  const selectedVersion = input.projectVersionId
+    ? project.versions.find((version) => version.id === input.projectVersionId)
+    : project.versions.find((version) => version.id === project.currentVersionId)
+  if (!selectedVersion) return null
+  const [finalOperations, proxyOperations] = await Promise.all([
+    client.v2ProjectFinalExportOperation.findMany({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
+      orderBy: { createdAt: 'desc' },
+      select: { outputArtifactId: true, projectVersionId: true, createdAt: true, operation: { select: { workspaceId: true, projectId: true } } },
+    }),
+    client.v2ProjectProxyRenderOperation.findMany({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
+      orderBy: { createdAt: 'desc' },
+      select: { outputArtifactId: true, projectVersionId: true, createdAt: true, operation: { select: { workspaceId: true, projectId: true } } },
+    }),
+  ])
+  if ([...finalOperations, ...proxyOperations].some((record) => record.operation.workspaceId !== input.workspaceId ||
+    record.operation.projectId !== input.projectId)) throw new DomainError('PERSISTENCE_CONFLICT', 'Review preview operation belongs to another project')
+  const exactFinal = finalOperations.find((operation) => operation.projectVersionId === selectedVersion.id)
+  const exactProxy = proxyOperations.find((operation) => operation.projectVersionId === selectedVersion.id)
+  let candidate: ProxyCandidate | null = exactFinal
+    ? { artifactId: exactFinal.outputArtifactId, projectVersionId: exactFinal.projectVersionId, createdAt: exactFinal.createdAt }
+    : exactProxy
+      ? { artifactId: exactProxy.outputArtifactId, projectVersionId: exactProxy.projectVersionId, createdAt: exactProxy.createdAt }
+      : null
+  if (!candidate && selectedVersion.id === project.currentVersionId) {
+    const latestFinal = finalOperations[0]
+    const latestProxy = proxyOperations[0]
+    const candidates: ProxyCandidate[] = [
+      ...(latestFinal ? [{ artifactId: latestFinal.outputArtifactId, projectVersionId: latestFinal.projectVersionId, createdAt: latestFinal.createdAt }] : []),
+      ...(latestProxy ? [{ artifactId: latestProxy.outputArtifactId, projectVersionId: latestProxy.projectVersionId, createdAt: latestProxy.createdAt }] : []),
+    ]
+    candidate = candidates.toSorted((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0] ?? null
+  }
+  if (!candidate && selectedVersion.id === project.currentVersionId) {
+    const editingProxy = await client.v2ProjectMediaAsset.findFirst({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, role: 'editing-proxy' },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (editingProxy) candidate = { artifactId: editingProxy.artifactId, createdAt: editingProxy.createdAt }
+  }
+  if (!candidate) return null
+  const artifact = await client.v2MediaArtifact.findFirst({
+    where: { id: candidate.artifactId, workspaceId: input.workspaceId, status: 'available' },
+    include: { manifests: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
+      include: { recipeParameters: true, renderInput: true } } },
+  })
+  if (!artifact?.manifests[0]) throw new DomainError('PERSISTENCE_CONFLICT', 'Review proxy artifact has no manifest')
+  const manifest = readStoredProjectionManifest(input.workspaceId, artifact, artifact.manifests[0])
+  const probe: Partial<NonNullable<MediaArtifactManifest['probe']>> = manifest.probe ?? {}
+  const editPlan = parseObject(selectedVersion.editPlanSnapshot.contentJson, 'review EditPlan')
+  const fps = typeof probe.fps === 'number' && probe.fps > 0
+    ? probe.fps
+    : typeof editPlan.fps === 'number' && editPlan.fps > 0 ? editPlan.fps : 0
+  const durationFrames = typeof editPlan.durationFrames === 'number' && Number.isInteger(editPlan.durationFrames) && editPlan.durationFrames > 0
+    ? editPlan.durationFrames
+    : typeof probe.duration === 'number' && probe.duration > 0 ? Math.round(probe.duration * fps) : 0
+  if (
+    !fps || !durationFrames || typeof probe.width !== 'number' || probe.width <= 0 ||
+    typeof probe.height !== 'number' || probe.height <= 0
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Review proxy metadata is incomplete')
+  const scenes = scenesFromEditPlan(editPlan)
+  const recipeIds = Object.freeze([artifact.manifests[0].recipeId])
+  const previewVersionIds = new Set([
+    ...finalOperations.map((operation) => operation.projectVersionId),
+    ...proxyOperations.map((operation) => operation.projectVersionId),
+  ])
+  previewVersionIds.add(project.currentVersionId)
+  return Object.freeze({
+    currentProjectVersionId: project.currentVersionId,
+    projectVersionId: selectedVersion.id,
+    sourceVersionId: candidate.projectVersionId ?? null,
+    proxyArtifactId: artifact.id,
+    proxyHash: artifact.sha256,
+    fps,
+    width: probe.width,
+    height: probe.height,
+    durationFrames,
+    stale: selectedVersion.id !== project.currentVersionId || candidate.projectVersionId !== selectedVersion.id,
+    formatId: project.format ?? '9:16',
+    localeId: project.locale ?? 'pt-BR',
+    recipeIds,
+    availableScopeCounts: Object.freeze({
+      frame: durationFrames,
+      region: 1,
+      clip: scenes.length,
+      scene: scenes.length,
+      range: 1,
+      project: 1,
+      formats: project.format ? 1 : 0,
+      locales: project.locale ? 1 : 0,
+      recipes: recipeIds.length,
+    }),
+    versions: Object.freeze(project.versions.map((version) => Object.freeze({
+      id: version.id,
+      sequence: version.sequence,
+      createdAt: version.createdAt.toISOString(),
+      current: version.id === project.currentVersionId,
+      previewAvailable: previewVersionIds.has(version.id),
+    }))),
+    scenes,
+  })
 }
 
 export class PrismaReviewAnnotationRepository implements ReviewAnnotationRepository {
@@ -155,125 +341,7 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
   }
 
   async readPreviewContext(input: { workspaceId: string; projectId: string; projectVersionId?: string }): Promise<Readonly<ReviewPreviewContext> | null> {
-    const project = await this.client.v2Project.findFirst({
-      where: { id: input.projectId, workspaceId: input.workspaceId },
-      select: {
-        id: true,
-        currentVersionId: true,
-        format: true,
-        locale: true,
-        versions: {
-          orderBy: { sequence: 'desc' },
-          select: {
-            id: true,
-            sequence: true,
-            createdAt: true,
-            editPlanSnapshot: { select: { contentJson: true } },
-          },
-        },
-      },
-    })
-    if (!project?.currentVersionId) return null
-    const selectedVersion = input.projectVersionId
-      ? project.versions.find((version) => version.id === input.projectVersionId)
-      : project.versions.find((version) => version.id === project.currentVersionId)
-    if (!selectedVersion) return null
-    const [finalOperations, proxyOperations] = await Promise.all([
-      this.client.v2ProjectFinalExportOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
-        orderBy: { createdAt: 'desc' },
-        select: { outputArtifactId: true, projectVersionId: true, createdAt: true },
-      }),
-      this.client.v2ProjectProxyRenderOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
-        orderBy: { createdAt: 'desc' },
-        select: { outputArtifactId: true, projectVersionId: true, createdAt: true },
-      }),
-    ])
-    const exactFinal = finalOperations.find((operation) => operation.projectVersionId === selectedVersion.id)
-    const exactProxy = proxyOperations.find((operation) => operation.projectVersionId === selectedVersion.id)
-    let candidate: ProxyCandidate | null = exactFinal
-      ? { artifactId: exactFinal.outputArtifactId, projectVersionId: exactFinal.projectVersionId, createdAt: exactFinal.createdAt }
-      : exactProxy
-        ? { artifactId: exactProxy.outputArtifactId, projectVersionId: exactProxy.projectVersionId, createdAt: exactProxy.createdAt }
-        : null
-    if (!candidate && selectedVersion.id === project.currentVersionId) {
-      const latestFinal = finalOperations[0]
-      const latestProxy = proxyOperations[0]
-      const candidates: ProxyCandidate[] = [
-        ...(latestFinal ? [{ artifactId: latestFinal.outputArtifactId, projectVersionId: latestFinal.projectVersionId, createdAt: latestFinal.createdAt }] : []),
-        ...(latestProxy ? [{ artifactId: latestProxy.outputArtifactId, projectVersionId: latestProxy.projectVersionId, createdAt: latestProxy.createdAt }] : []),
-      ]
-      candidate = candidates.toSorted((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0] ?? null
-    }
-    if (!candidate && selectedVersion.id === project.currentVersionId) {
-      const editingProxy = await this.client.v2ProjectMediaAsset.findFirst({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, role: 'editing-proxy' },
-        orderBy: { createdAt: 'desc' },
-      })
-      if (editingProxy) candidate = { artifactId: editingProxy.artifactId, createdAt: editingProxy.createdAt }
-    }
-    if (!candidate) return null
-    const artifact = await this.client.v2MediaArtifact.findFirst({
-      where: { id: candidate.artifactId, workspaceId: input.workspaceId, status: 'available' },
-      include: { manifests: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 } },
-    })
-    if (!artifact?.manifests[0]) throw new DomainError('PERSISTENCE_CONFLICT', 'Review proxy artifact has no manifest')
-    const manifest = parseObject(artifact.manifests[0].manifestJson, 'review proxy manifest')
-    const probe = typeof manifest.probe === 'object' && manifest.probe !== null && !Array.isArray(manifest.probe)
-      ? manifest.probe as Record<string, unknown>
-      : {}
-    const editPlan = parseObject(selectedVersion.editPlanSnapshot.contentJson, 'review EditPlan')
-    const fps = typeof probe.fps === 'number' && probe.fps > 0
-      ? probe.fps
-      : typeof editPlan.fps === 'number' && editPlan.fps > 0 ? editPlan.fps : 0
-    const durationFrames = typeof editPlan.durationFrames === 'number' && Number.isInteger(editPlan.durationFrames) && editPlan.durationFrames > 0
-      ? editPlan.durationFrames
-      : typeof probe.duration === 'number' && probe.duration > 0 ? Math.round(probe.duration * fps) : 0
-    if (
-      !fps || !durationFrames || typeof probe.width !== 'number' || probe.width <= 0 ||
-      typeof probe.height !== 'number' || probe.height <= 0
-    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Review proxy metadata is incomplete')
-    const scenes = scenesFromEditPlan(editPlan)
-    const recipeIds = Object.freeze([artifact.manifests[0].recipeId])
-    const previewVersionIds = new Set([
-      ...finalOperations.map((operation) => operation.projectVersionId),
-      ...proxyOperations.map((operation) => operation.projectVersionId),
-    ])
-    previewVersionIds.add(project.currentVersionId)
-    return Object.freeze({
-      currentProjectVersionId: project.currentVersionId,
-      projectVersionId: selectedVersion.id,
-      proxyArtifactId: artifact.id,
-      proxyHash: artifact.sha256,
-      fps,
-      width: probe.width,
-      height: probe.height,
-      durationFrames,
-      stale: selectedVersion.id !== project.currentVersionId || candidate.projectVersionId !== selectedVersion.id,
-      formatId: project.format ?? '9:16',
-      localeId: project.locale ?? 'pt-BR',
-      recipeIds,
-      availableScopeCounts: Object.freeze({
-        frame: durationFrames,
-        region: 1,
-        clip: scenes.length,
-        scene: scenes.length,
-        range: 1,
-        project: 1,
-        formats: project.format ? 1 : 0,
-        locales: project.locale ? 1 : 0,
-        recipes: recipeIds.length,
-      }),
-      versions: Object.freeze(project.versions.map((version) => Object.freeze({
-        id: version.id,
-        sequence: version.sequence,
-        createdAt: version.createdAt.toISOString(),
-        current: version.id === project.currentVersionId,
-        previewAvailable: previewVersionIds.has(version.id),
-      }))),
-      scenes,
-    })
+    return readReviewPreviewContext(this.client, input)
   }
 
   async list(input: { workspaceId: string; projectId: string; projectVersionId?: string; limit: number }) {

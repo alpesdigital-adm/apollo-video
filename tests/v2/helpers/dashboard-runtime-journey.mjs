@@ -112,6 +112,19 @@ export async function runDashboardRuntimeJourney(input) {
   }
   const browserResponseTasks = new Set()
   const browserRequests = new WeakMap()
+  // A transport failure belongs to this exact Playwright Request, even when
+  // response.finished() never settles after a cancelled RSC transfer.
+  const browserRequestFailures = new WeakMap()
+  const headerDiagnostics = (headers, names) => Object.fromEntries(names.map((name) => {
+    const value = headers[name]
+    return [name, value === undefined ? { present: false } : { present: true,
+      token: value === '0' || value === '1' ? value : null,
+      sha256: sha256(value), bytes: Buffer.byteLength(value) }]
+  }))
+  const responseOrRequestFailure = (request, action) => bounded(Promise.race([
+    action.then((value) => ({ via: 'response', value })),
+    browserRequestFailures.get(request).promise,
+  ]), 5000)
   const activeBrowserRequests = new Set()
   const browserPages = new WeakMap()
   const browserResponseListeners = []
@@ -245,7 +258,13 @@ export async function runDashboardRuntimeJourney(input) {
           path: ['http:', 'https:'].includes(url.protocol) ? url.pathname : 'non-http',
           resourceType: request.resourceType(), isNavigationRequest: request.isNavigationRequest(),
           redirectedFromId: browserRequests.get(request.redirectedFrom())?.requestId ?? null,
+          queryClassification: { rscPresent: url.searchParams.has('_rsc') },
+          requestHeaderDiagnostics: headerDiagnostics(request.headers(),
+            ['rsc', 'next-router-prefetch', 'next-router-segment-prefetch']),
           startedAt: Date.now(), transportState: 'pending', bodyState: 'no-response' }
+        let settleFailure
+        const failurePromise = new Promise((resolve) => { settleFailure = resolve })
+        browserRequestFailures.set(request, { promise: failurePromise, settle: settleFailure })
         browserRequests.set(request, record); activeBrowserRequests.add(request)
         evidence.browserRequests.push(record)
         record.requestAtSeq = browserEvent('request', state, record)
@@ -267,6 +286,8 @@ export async function runDashboardRuntimeJourney(input) {
         record.failedAtSeq = browserEvent('requestfailed', state, record,
           { observedNavigationId: state.navigationId, errorCode: record.networkFailure.errorCode })
         activeBrowserRequests.delete(request)
+        browserRequestFailures.get(request).settle({ via: 'requestfailed',
+          diagnostic: record.networkFailure, failedAtSeq: record.failedAtSeq })
         // ERR_ABORTED is diagnostic, never an automatic exemption.
         evidence.browserErrors.push({ kind: 'request-failed', request: record })
       }
@@ -278,7 +299,10 @@ export async function runDashboardRuntimeJourney(input) {
           onRequest(request); record = browserRequests.get(request)
         }
         record.status = response.status()
-        record.contentType = (response.headers()['content-type'] ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 128)
+        const responseHeaders = response.headers()
+        record.contentType = (responseHeaders['content-type'] ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 128)
+        record.responseHeaderDiagnostics = headerDiagnostics(responseHeaders,
+          ['x-nextjs-postponed', 'x-nextjs-prerender'])
         record.headersAtSeq = browserEvent('response', state, record, { observedNavigationId: state.navigationId })
         const inspect = response.status() >= 400 || (record.origin === browserOrigin && record.path.startsWith('/v1/'))
         if (inspect) evidence.browserResponses.push(record)
@@ -293,10 +317,23 @@ export async function runDashboardRuntimeJourney(input) {
         record.bodyState = readBody ? 'pending' : 'non-json-success-not-read'
         const pending = (async () => {
           try {
-            const finishError = await bounded(response.finished(), 5000)
+            const finished = await responseOrRequestFailure(request, response.finished())
+            record.responseFinishedVia = finished.via
+            if (finished.via === 'requestfailed') {
+              record.responseFinishedState = 'failed'; record.responseFinishedError = finished.diagnostic
+              record.responseFinishedRequestFailureSeq = finished.failedAtSeq
+              record.responseFinishedErrorAtNavigation = state.navigationId
+              record.responseFinishedErrorAtSeq = browserEvent('response-finished-requestfailed', state, record,
+                { observedNavigationId: state.navigationId, failedAtSeq: finished.failedAtSeq,
+                  errorCode: finished.diagnostic.errorCode })
+              if (readBody) record.bodyState = 'transport-failed'
+              // onFailed already recorded the real gate failure. This correlation
+              // prevents a second, artificial response-finished deadline error.
+              return
+            }
             record.responseFinishedAtSeq = browserEvent('response-finished', state, record,
-              { observedNavigationId: state.navigationId, result: finishError ? 'error' : 'completed' })
-            if (finishError) throw finishError
+              { observedNavigationId: state.navigationId, result: finished.value ? 'error' : 'completed' })
+            if (finished.value) throw finished.value
             record.responseFinishedState = 'completed'
           } catch (error) {
             record.responseFinishedState = 'failed'; record.responseFinishedError = safeError(error)
@@ -310,7 +347,19 @@ export async function runDashboardRuntimeJourney(input) {
           try {
             record.bodyCaptureAtSeq = browserEvent('body-capture-start', state, record,
               { observedNavigationId: state.navigationId })
-            const text = await bounded(response.text(), 5000)
+            const body = await responseOrRequestFailure(request, response.text())
+            record.bodySettledVia = body.via
+            if (body.via === 'requestfailed') {
+              record.bodyState = 'transport-failed'; record.bodyError = body.diagnostic
+              record.bodyRequestFailureSeq = body.failedAtSeq
+              record.bodyErrorAtNavigation = state.navigationId
+              record.bodyErrorAfterNavigationChange = record.navigationId !== state.navigationId
+              record.bodyErrorAtSeq = browserEvent('body-requestfailed', state, record,
+                { observedNavigationId: state.navigationId, failedAtSeq: body.failedAtSeq,
+                  errorCode: body.diagnostic.errorCode })
+              return
+            }
+            const text = body.value
             Object.assign(record, responseDiagnostic(text), { bodyState: 'captured' })
             if (record.path.endsWith('/workspace')) {
               const payload = JSON.parse(text)
@@ -432,6 +481,10 @@ export async function runDashboardRuntimeJourney(input) {
         presentation: expected, actionDestination: `/projects/${id}${status === 'reviewing-proxy' ? '?mode=review' : ''}` })
     }
     await observe({ stage: 'draft', status: 'draft' })
+    const draftReviewRequests = evidence.browserRequests.filter((record) => record.method === 'GET' &&
+      [`/v1/projects/${projectId}/annotations`, `/v1/projects/${projectId}/proxy-reviews`].includes(record.path))
+    assert.deepEqual(draftReviewRequests, [], 'Source-only draft must not request unavailable annotations or proxy reports')
+    evidence.reviewAvailabilityProof = { projectId, draftRequests: 0, origin: 'browser-request-ledger', afterWorker: 'pending' }
     const created = await post('/v1/projects', { name: 'Runtime event creation', objective: 'discovery', format: '9:16' }, `runtime-event-create-${suffix}`, 201)
     await pipeline.observe({ stage: 'created', projectId: created.project.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
     prototype.claimNext = async function (...args) {
@@ -490,6 +543,13 @@ export async function runDashboardRuntimeJourney(input) {
     assert.deepEqual(firstProxyOutcome, { operationId: proxyId, status: 'succeeded' },
       JSON.stringify(evidence.firstProxyWorkerDiagnostic))
     await observe({ stage: 'review', status: 'revising', operationId: proxyId, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    for (const path of [`/v1/projects/${projectId}/annotations`, `/v1/projects/${projectId}/proxy-reviews`]) {
+      assert.ok(evidence.browserRequests.some((record) => record.method === 'GET' && record.path === path &&
+        record.stage === 'review' && record.status === 200 && record.bodyState === 'captured' && record.transportState === 'finished'),
+      `Published real proxy must expose a completed browser review read: ${path}`)
+    }
+    evidence.reviewAvailabilityProof.afterWorker = { operationId: proxyId, annotationsStatus: 200, proxyReviewStatus: 200,
+      scope: 'availability-only; stored face safety remains unknown and final export blocked' }
     const replay = await post(`/v1/projects/${projectId}/proxy-renders`, undefined, `runtime-proxy-${suffix}`, 202)
     assert.equal(replay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'revising')
     const review = await client.v2ProxyReview.findFirstOrThrow({ where: { workspaceId, projectId, operationId: proxyId } })

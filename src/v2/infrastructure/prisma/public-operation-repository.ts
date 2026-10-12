@@ -1121,6 +1121,18 @@ async function transitionCurrentProxyProject(
   return changed.count === 1
 }
 
+export async function readPublicOperation(
+  client: Pick<Prisma.TransactionClient, 'v2PublicOperation'>,
+  workspaceId: string,
+  operationId: string,
+): Promise<PublicOperationRecord | null> {
+  const stored = await client.v2PublicOperation.findFirst({
+    where: { id: operationId, workspaceId },
+    include: OPERATION_INCLUDE,
+  })
+  return stored ? hydratePublicOperationRecord(stored) : null
+}
+
 export class PrismaPublicOperationRepository implements PublicOperationRepository {
   private readonly client: PrismaClient
   private readonly createEventId: () => string
@@ -1336,8 +1348,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     workspaceId: string,
     operationId: string,
   ): Promise<PublicOperationRecord | null> {
-    const stored = await this.findStoredById(workspaceId, operationId)
-    return stored ? hydratePublicOperationRecord(stored) : null
+    return readPublicOperation(this.client, workspaceId, operationId)
   }
 
   async list(input: PublicOperationListQuery): Promise<readonly PublicOperationRecord[]> {

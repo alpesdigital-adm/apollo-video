@@ -202,6 +202,23 @@ function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
+export async function readCurrentProxyReview(
+  client: Pick<Prisma.TransactionClient, 'v2ProxyReview'>,
+  input: Parameters<ProxyReviewRepository['findCurrent']>[0],
+): Promise<Readonly<PersistedProxyReview> | null> {
+  const row = await client.v2ProxyReview.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      ...(input.projectVersionId
+        ? { projectVersionId: input.projectVersionId }
+        : { projectVersion: { currentForProjects: { some: { id: input.projectId, workspaceId: input.workspaceId } } } }),
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+  })
+  return row ? hydrateProxyReview(row) : null
+}
+
 export class PrismaProxyReviewRepository implements ProxyReviewRepository {
   private readonly client: PrismaClient
 
@@ -373,17 +390,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
   }
 
   async findCurrent(input: Parameters<ProxyReviewRepository['findCurrent']>[0]) {
-    const row = await this.client.v2ProxyReview.findFirst({
-      where: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        ...(input.projectVersionId
-          ? { projectVersionId: input.projectVersionId }
-          : { projectVersion: { currentForProjects: { some: { id: input.projectId, workspaceId: input.workspaceId } } } }),
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    })
-    return row ? hydrateProxyReview(row) : null
+    return readCurrentProxyReview(this.client, input)
   }
 
   private async findDecisionReplay(input: {

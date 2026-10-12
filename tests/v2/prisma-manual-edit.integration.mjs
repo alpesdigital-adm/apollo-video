@@ -36,6 +36,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
+  const { createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
   const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
@@ -281,17 +282,15 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         sha256: calculateVersionHash({ artifactId }), byteSize: 1n,
         mediaType: 'video', container: 'mp4', status: 'available', createdAt,
       } })
+      // Controlled metadata rows; no byte rehash, actual decode or render claim.
+      const sourceManifest = createMediaArtifactManifestV2({ artifactKey,
+        artifactSha256: calculateVersionHash({ artifactId }), byteSize: 1, mediaType: 'video', container: 'mp4',
+        recipe: { id: 'manual-source', version: '1.0.0', parameters: { artifactId, fixture: 'manual-source' } },
+        sources: [], probe: { width: 640, height: 360, duration: 6, fps: 30 } })
       await client.v2MediaArtifactManifest.create({ data: {
-        id: `manifest-${artifactId}`, workspaceId, artifactId,
-        schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateVersionHash({ artifactId, manifest: true }),
-        recipeId: 'manual-source', recipeVersion: '1.0.0',
-        parametersHash: calculateVersionHash({ artifactId, parameters: true }),
-        manifestJson: stableSerialize({
-          artifact: { artifactKey },
-          probe: { width: 640, height: 360, duration: 6, fps: 30 },
-        }),
-        createdAt,
+        id: `manifest-${artifactId}`, workspaceId, artifactId, schemaVersion: sourceManifest.schemaVersion,
+        manifestHash: sourceManifest.manifestHash, recipeId: sourceManifest.recipe.id, recipeVersion: sourceManifest.recipe.version,
+        parametersHash: sourceManifest.recipe.parametersHash, manifestJson: stableSerialize(sourceManifest), createdAt,
       } })
       await client.v2ProjectMediaAsset.create({ data: {
         id: randomUUID(), workspaceId, projectId, artifactId,
@@ -425,14 +424,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       sha256: completedProxyHash, byteSize: 1n,
       mediaType: 'video', container: 'mp4', status: 'available', createdAt,
     } })
+    const completedProxyManifest = createMediaArtifactManifestV2({ artifactKey: `manual/${completedProxyArtifactId}.mp4`,
+      artifactSha256: completedProxyHash, byteSize: 1, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'manual-proxy', version: '1.0.0', parameters: { completedProxyArtifactId, fixture: 'manual-proxy' } },
+      sources: [], probe: { width: 540, height: 960, duration: 6, fps: 30 } })
     await client.v2MediaArtifactManifest.create({ data: {
-      id: completedProxyManifestId, workspaceId, artifactId: completedProxyArtifactId,
-      schemaVersion: 'media-artifact-manifest/v2',
-      manifestHash: calculateVersionHash({ completedProxyArtifactId, manifest: true }),
-      recipeId: 'manual-proxy', recipeVersion: '1.0.0',
-      parametersHash: calculateVersionHash({ completedProxyArtifactId, parameters: true }),
-      manifestJson: stableSerialize({ artifact: { artifactKey: `manual/${completedProxyArtifactId}.mp4` } }),
-      createdAt,
+      id: completedProxyManifestId, workspaceId, artifactId: completedProxyArtifactId, schemaVersion: completedProxyManifest.schemaVersion,
+      manifestHash: completedProxyManifest.manifestHash, recipeId: completedProxyManifest.recipe.id, recipeVersion: completedProxyManifest.recipe.version,
+      parametersHash: completedProxyManifest.recipe.parametersHash, manifestJson: stableSerialize(completedProxyManifest), createdAt,
     } })
     await client.v2PublicOperation.create({ data: {
       id: completedProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
@@ -640,10 +639,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(publicApplied.data.timeline.clips.find((clip) => clip.id === 'clip-2').sourceId, sourceB)
     const { readProjectWorkspaceService } = await import('../../src/v2/application/read-project-workspace.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
-    const { PrismaPublicOperationRepository: PrismaWorkspacePublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const workspaceProjection = await readProjectWorkspaceService({
       projects: new PrismaProjectWorkspaceQueryRepository(client),
-      operations: new PrismaWorkspacePublicOperationRepository(client),
     })({ workspaceId, projectId })
     assert.equal(workspaceProjection.version.id, publicApplied.data.version.id)
 

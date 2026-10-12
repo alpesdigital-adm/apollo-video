@@ -2,6 +2,74 @@
 
 ## Latest controlled checkpoint — 2026-10-12 UTC
 
+The subsequent workspace v13 change derives annotation and report availability
+separately in one PostgreSQL RepeatableRead snapshot, including operations. Stored
+manifests must validate their domain hash and match artifact/manifest rows and
+protected references; GET does not decode media or decrypt payloads. Historical
+schemas remain unchanged. The browser ledger correlates exact-request transport
+failure with body completion and records restricted RSC headers, without exempting
+aborted requests.
+
+Pre-commit checks `workspace-v13-checks-v3-0fa6e0a0` passed 68/68 tests, strict API
+contracts, architecture and status generation/check (result SHA-256
+`850e4939bbe90a7527297a4d893b1fdcb655f92e6e83e7f14bc89904355a3e2d`).
+The first two attempts remain FAIL: a missing closing brace, then strictRequired
+in the new schema. PostgreSQL run `workspace-v13-pg-v3-657ad865` passed 1/1 with
+the real head-change latch, old/new aggregate consistency, manifest/scope
+rejections and rollback/readback (result SHA-256
+`94525aca5f66bb4a62879d3dfc02efdadcadbe5eb97862ae79c915e5f08144ce`).
+Its six observed identities were terminal, four PostgreSQL observations empty,
+cluster/port/scratch clean and source fingerprint unchanged. Earlier PG attempts
+failed during fixture preparation (UUID links, then duplicate immutable snapshots)
+and are retained. These are controlled database facts, not rendered-media or
+editorial approval. Fresh build, annotation/manual regressions and dashboard on
+the next frozen commit remain pending.
+
+Follow-up evidence on local commit `0146d89e31bebb8d8e1884ad677f1e5a9d627a78`
+does not close the checkpoint. Dashboard v6 (`dashboard-0146-v6-447eed01`, result
+SHA-256 `3a4684546b4a076ab5db578d38d29e1419123ab6d66ae75f68e11cdf10bb16f4`)
+failed before its first recorded state. The request barriers completed, but the
+draft project requested annotations and proxy review without an available proxy:
+both returned real `PROJECT_NOT_FOUND` HTTP404 responses. Separately, 22 RSC
+requests failed with `net::ERR_ABORTED`; content type or Next source code containing
+reader cancellation does not establish why these transports aborted. All 34
+observed identities were terminal, four PostgreSQL samples were empty and scratch
+cleanup completed. The authenticated bundle was built from a37; test source was
+0146. The subsequent workspace v13/review-availability v1 implementation is still
+unvalidated working-tree code and requires its own fresh build, PostgreSQL and
+browser evidence. It separates annotation and report availability within one
+RepeatableRead snapshot; it must not turn an available resource's 404 into absence.
+
+W69 differential v5 (`w69-ass-clock-v5-differential-5f07883b`) remains a physical
+FAIL. The original cases retain 22 passes, the first failure at index22 and 19
+not-executed cases. Diagnostic collection completed all 42 entries (24 observed
+controls, eight passes and ten failures), with 73 FFmpeg executions exiting zero.
+At frame803/100fps, ASS [8.02,8.03) changed frames802 and803 in both graphs;
+[8.03,8.04) changed no selected frame with lavfi and frame804 after concat.
+Both subtitle and CTA layers reproduced this result. This is observed pixel
+behavior, not a measurement of libass's internal integer timestamp. Moving the
+boundary earlier would also include frame802. FPS-only policy is therefore not
+approved; a future materialized clock must reject unrepresentable intervals and
+bind the real PTS/time base, graph and executable identities before new pixel proof.
+V4's ENOBUFS and every original expected frame remain preserved.
+
+V5 result SHA-256 `18e3d5e5efcb4074c789f525458e9eeceaa8af14c934a8b01eca2fc2cf117e3a`;
+proof `d3d41f5befabb32b612e621e553163136eb7676d8ac2c6eabb43b57431ed0931`;
+manifest `3805d9f7d22092683c2163b4a08bb16cac304cf8145c3895f6c510245f40cfb6`.
+All 281 files (98,114,774 bytes) were rehashed without differences. The source
+fingerprint `23c29fd756ffe0dae17f489774d5a4075be265591c6d34932144f4083cc6bf2c`
+was stable; all 11 observed identities were terminal, no database started and
+scratch/postflight cleanup completed. No emission policy or runtime was activated.
+
+W66's separate origin scaffold passed six pure tests in
+`w66-origins-v2-32686992`, result SHA-256
+`bda81e13bedfe0eb0e011ea994ca7b49667bd98688758bf0e6de3c313eea74e6`.
+Only create/revise output commands return readiness for the existing isolated
+bundle; the six other origins remain blocked without persistence. The fork
+positive uses an empty plan with a variant, not clips/cues/overlays. V1's failed
+fixture/guard run is retained. This neither reruns the earlier 36 pure/16 PG
+contract tests nor implements the sixteen-writer cutover or deferred-COMMIT proof.
+
 PR81 remains blocked. The reviewed integration base is `dcc0b46b35909c9badb19b2d912f54e25176ded9`;
 the local corrections below are later working-tree sources with their own fingerprints,
 not evidence that this head or the next commit passes all gates. No TODO row, deployment
