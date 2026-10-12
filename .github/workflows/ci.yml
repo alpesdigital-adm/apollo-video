@@ -200,7 +200,7 @@ jobs:
         run: npm run platform:validate
 
       - name: Run unit and contract tests
-        run: node scripts/validation/run-perception-addon-consumer.mjs unit
+        run: node scripts/validation/perception-consumer-cgroup.mjs unit
 
       # Wave 23. The deploy sequence is proven against a Docker that records every
       # verb and answers from a scenario: mutation order, lock, latch, budget refusal
@@ -2114,25 +2114,28 @@ jobs:
       - name: Install locked renderer dependencies for perception build
         run: npm ci --prefix remotion
       - run: npm run build
+      - name: Linux cgroup containment controlled gate
+        timeout-minutes: 3
+        run: node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates
       - name: Linux namespace observer composed gate
-        run: node scripts/validation/run-perception-addon-consumer.mjs gates tests/v2/perception-namespace-observer.integration.mjs
+        run: node scripts/validation/perception-consumer-cgroup.mjs gates tests/v2/perception-namespace-observer.integration.mjs
       - name: Real OCR and temporal media adapters
         run: |
-          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/tesseract-ocr-video-adapter.integration.mjs
-          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/ffmpeg-temporal-video-analyzer.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/tesseract-ocr-video-adapter.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/ffmpeg-temporal-video-analyzer.integration.mjs
       - name: OCR admission, worker, SQL publication fences and HTTP
         run: |
-          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-perception-producer-admission.integration.mjs
-          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-perception-producer-worker.integration.mjs
-          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-perception-producer-http.integration.mjs
-          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-director-ocr.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-perception-producer-admission.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-perception-producer-worker.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-perception-producer-http.integration.mjs
+          node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-director-ocr.integration.mjs
       - name: Temporal worker, SQL publication fences and HTTP
-        run: node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-temporal-producer.integration.mjs
+        run: node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-temporal-producer.integration.mjs
       # Only these three offline assertions run here. Face PG/HTTP and the real
       # failed-gate YuNet runner remain local, with licensed development inputs.
       # No holdout/model acquisition or faceSafety authority is implied.
       - name: Facial fixture and authenticated audit offline only
-        run: node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-face-producer.integration.mjs 'publish-race|face control'
+        run: node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/prisma-face-producer.integration.mjs 'publish-race|face control'
       - name: Require zero orphan perception clients
         if: always()
         run: |

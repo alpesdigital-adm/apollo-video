@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readlinkSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
+import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readlinkSync, realpathSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseLinuxProcessStat, parseLinuxProcessCredentials } from './run-perception-ci.mjs'
@@ -16,6 +16,8 @@ export const CI_PIDFD_SOURCE_PATHS = Object.freeze([
   'scripts/validation/perception-observer-channel.mjs',
   'scripts/validation/perception-outer-host-death.mjs',
   'scripts/validation/perception-namespace-node-bootstrap.mjs',
+  'scripts/validation/perception-consumer-cgroup.py', 'scripts/validation/perception-consumer-cgroup.mjs',
+  'tests/v2/perception-consumer-cgroup.integration.mjs',
 ])
 export const identityKey = (value) => `${value.pid}:${value.starttime}`
 export const liveIdentity = (value) => value && !['Z', 'X', 'x'].includes(value.state)
@@ -126,8 +128,14 @@ export function initializeRegistry(root, runId, env = process.env) {
   assert.match(env.GITHUB_SHA ?? '', /^[a-f0-9]{40}$/)
   const owner = readAuthorityIdentitySync(process.pid)
   assert.ok(liveIdentity(owner)); assert.deepEqual(owner.uids, Array(4).fill(process.getuid()))
+  const cgroupExecutables = ['/usr/bin/sudo', '/usr/bin/python3'].map((path) => {
+    const realpath = realpathSync(path), metadata = lstatSync(realpath)
+    assert.ok(metadata.isFile() && !metadata.isSymbolicLink() && metadata.uid === 0 && !(metadata.mode & 0o022))
+    return { path, realpath, dev: metadata.dev, ino: metadata.ino,
+      sha256: digest(readAdmissionFile(realpath, 256 * 1024 * 1024, Date.now() + 3500)) }
+  })
   const registry = { schemaVersion: 'perception-pidfd-registry/v1', runId, sourceCommit: env.GITHUB_SHA,
-    root: assertOwnedRoot(root, env), creator: owner, admission: 'building', sourceFiles: [],
+    root: assertOwnedRoot(root, env), creator: owner, admission: 'building', sourceFiles: [], cgroups: [], cgroupExecutables,
     createdAt: new Date().toISOString() }
   mkdirSync(join(root, 'owners'), { mode: 0o700 })
   mkdirSync(join(root, 'receipts'), { mode: 0o700 })
@@ -162,11 +170,22 @@ export async function registerAddonConsumer(env = process.env, { deadlineAt = Da
     admissionCheck(deadlineAt, signal)
     assert.ok(liveIdentity(identity)); assert.deepEqual(identity.uids, Array(4).fill(process.getuid()))
     assert.match(env.APOLLO_PERCEPTION_CONSUMER_RUN_ID ?? '', /^pidfd-consumer-[a-z-]+-[a-f0-9-]+$/)
+    let cgroupScope = null
+    if (env.APOLLO_PERCEPTION_CGROUP_SCOPE !== undefined) {
+      assert.ok(Buffer.byteLength(env.APOLLO_PERCEPTION_CGROUP_SCOPE) <= 4096)
+      cgroupScope = JSON.parse(env.APOLLO_PERCEPTION_CGROUP_SCOPE)
+      const groups = registry.cgroups?.filter((value) => value.state === 'open' &&
+        value.runId === cgroupScope.runId && jsonDigest(value.scope) === jsonDigest(cgroupScope)) ?? []
+      assert.equal(groups.length, 1, 'Native consumer has no unique sealed cgroup owner')
+      const membership = readAdmissionFile('/proc/self/cgroup', 65536, deadlineAt, signal).toString('utf8')
+        .split('\n').filter((line) => line.startsWith('0::'))
+      assert.equal(membership.length, 1); assert.equal(membership[0].slice(3), cgroupScope.membership)
+    }
     const entry = { schemaVersion: 'perception-pidfd-consumer/v1', identity, buildRunId: registry.runId,
       consumerRunId: env.APOLLO_PERCEPTION_CONSUMER_RUN_ID,
       observerRunId: env.APOLLO_OBSERVER_RUN_ID ?? env.APOLLO_PERCEPTION_RUN_ID ?? null,
       sourceCommit: env.GITHUB_SHA, addonSha256: registry.addonSha256, provenanceSha256: registry.provenanceSha256,
-      registrationIsNotProcessClose: true }
+      cgroupScope, registrationIsNotProcessClose: true }
     const id = jsonDigest([identity.namespace, identity.pid, identity.starttime])
     const path = join(root, 'owners', `${id}.json`)
     admissionCheck(deadlineAt, signal)
@@ -177,6 +196,7 @@ export async function registerAddonConsumer(env = process.env, { deadlineAt = Da
       for (const key of ['buildRunId', 'consumerRunId', 'observerRunId', 'sourceCommit', 'addonSha256', 'provenanceSha256']) assert.equal(existing[key], entry[key])
       assert.equal(identityKey(existing.identity), identityKey(identity)); assert.equal(existing.identity.namespace, identity.namespace)
       assert.deepEqual(existing.identity.uids, identity.uids)
+      assert.equal(jsonDigest(existing.cgroupScope), jsonDigest(entry.cgroupScope))
     }
     admissionCheck(deadlineAt, signal)
     return Object.freeze({ id, path, entry, registry })

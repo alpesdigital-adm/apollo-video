@@ -107,5 +107,79 @@ class NamespaceConfiguration(unittest.TestCase):
                 self.contract["validate_config"](config)
 
 
+def cgroup_configuration_contract():
+    path = ROOT / "scripts/validation/perception-consumer-cgroup.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    selected = []
+    functions = {"require", "validate_environment", "validate_consumer"}
+    expected_globals = {"require": {"RuntimeError"},
+        "validate_environment": {"require", "type", "dict", "set", "ENV_NAMES", "all", "str", "sum", "len"},
+        "validate_consumer": {"require", "type", "dict", "set", "str", "list", "all", "len"}}
+    found = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "ENV_NAMES":
+            value = node.value
+            if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "frozenset"
+                    and len(value.args) == 1 and not value.keywords):
+                raise AssertionError("cgroup environment must remain literal")
+            ast.literal_eval(value.args[0]); selected.append(node); found.add("ENV_NAMES")
+        elif isinstance(node, ast.FunctionDef) and node.name in functions:
+            if node.decorator_list:
+                raise AssertionError("cgroup validator gained a decorator")
+            bound = {argument.arg for argument in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)}
+            bound |= {item.id for item in ast.walk(node) if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Store)}
+            used = {item.id for item in ast.walk(node) if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load)}
+            if used - bound != expected_globals[node.name]:
+                raise AssertionError("cgroup validator globals changed: " + node.name)
+            selected.append(node); found.add(node.name)
+    if found != functions | {"ENV_NAMES"} or len(selected) != 4:
+        raise AssertionError("cgroup contract declarations changed")
+    namespace = {"__builtins__": {name: value for name, value in (
+        ("frozenset", frozenset), ("RuntimeError", RuntimeError), ("type", type), ("dict", dict),
+        ("set", set), ("all", all), ("str", str), ("list", list), ("len", len), ("sum", sum))}}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(path), "exec"), namespace)
+    return namespace
+
+
+class CgroupConfiguration(unittest.TestCase):
+    def setUp(self):
+        self.contract = cgroup_configuration_contract()
+
+    def test_actual_closed_environment_matches_node_owner(self):
+        source = (ROOT / "scripts/validation/perception-consumer-cgroup.mjs").read_text(encoding="utf-8")
+        match = re.search(r"export const CGROUP_ENVIRONMENT = Object.freeze\(\[([^\]]*)\]\)", source, re.S)
+        self.assertIsNotNone(match)
+        names = re.findall(r"'([A-Z][A-Z0-9_]*)'", match.group(1))
+        self.assertEqual(re.sub(r"'[A-Z][A-Z0-9_]*'|[\s,]", "", match.group(1)), "")
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(frozenset(names), self.contract["ENV_NAMES"])
+        for name in ("APOLLO_PERCEPTION_CGROUP_SCOPE", "APOLLO_PERCEPTION_PIDFD_ROOT", "APOLLO_PERCEPTION_CONSUMER_RUN_ID"):
+            self.assertIn(name, names)
+            self.contract["validate_environment"]({name: "controlled"})
+
+    def test_arbitrary_names_types_nul_and_aggregate_bytes_are_rejected(self):
+        for name in ("NODE_OPTIONS", "LD_PRELOAD", "PYTHONPATH", "ARBITRARY", "APOLLO_PERCEPTION_CGROUP_SCOPE_EXTRA"):
+            with self.assertRaisesRegex(RuntimeError, "invalid normal consumer environment"):
+                self.contract["validate_environment"]({name: "controlled"})
+        for value in (None, True, 1, [], {}, "a\0b"):
+            with self.assertRaisesRegex(RuntimeError, "invalid normal consumer environment"):
+                self.contract["validate_environment"]({"APOLLO_PERCEPTION_CGROUP_SCOPE": value})
+        with self.assertRaisesRegex(RuntimeError, "environment bound"):
+            self.contract["validate_environment"]({"HOME": "x" * 131073})
+
+    def test_consumer_and_faults_are_fixed_not_exec_rpc(self):
+        validate = self.contract["validate_consumer"]
+        validate({"mode": "unit", "args": []})
+        for kind in ("wait", "setsid-reparent", "zombie", "member-exit", "guardian-stop-owner-death"):
+            validate({"mode": "fixture", "args": [kind]})
+        validate({"mode": "namespace", "args": ["tests/v2/prisma-face-producer.integration.mjs", "publish-race|face control"]})
+        for value in ({"mode": "exec", "args": ["sh"]}, {"mode": "unit", "args": ["arbitrary"]},
+                      {"mode": "fixture", "args": ["arbitrary"]}, {"mode": "fixture", "args": ["wait", "extra"]},
+                      {"mode": "namespace", "args": ["tests/v2/prisma-face-producer.integration.mjs"]},
+                      {"mode": "unit", "args": [], "path": "arbitrary"}):
+            with self.assertRaises(RuntimeError):
+                validate(value)
+
+
 if __name__ == "__main__":
     unittest.main()

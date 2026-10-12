@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { assertOwnedRoot, readRegistry, registryLock, writeRegistry, digest, jsonDigest,
   readAuthorityIdentitySync, identityKey, sourceFingerprint, budget } from './perception-addon-registry.mjs'
 import { readLinuxProcessIdentity } from './run-perception-ci.mjs'
+import { prepareCgroupCleanup, removeArchivedCgroups, cgroupControlledCaseAccepted } from './perception-consumer-cgroup.mjs'
 
 export function assertArchivePaths(root, archiveParent, archive, runnerTemp) {
   const paths = [root, archiveParent, archive, runnerTemp].map((value) => {
@@ -77,12 +78,16 @@ export async function cleanupPidfd(env = process.env) {
     sourceCommit: env.GITHUB_SHA, root: authority, cleanupOwner: readAuthorityIdentitySync(process.pid),
     success: false, removed: false, errors: [], owners: [], archivedFiles: [] }
   const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512) })
+  let preparedCgroups = []
   try {
     await registryLock(root, async () => {
       const current = readRegistry(root, env)
       current.admission = 'closed'; writeRegistry(root, current)
     }, { env })
     assert.deepEqual(sourceFingerprint(), registry.sourceFiles, 'Source changed since build')
+    // Containment has its own authenticated scope even when a consumer's FAIL
+    // prevents successful prerequisite deletion. Unknown scopes remain retained.
+    preparedCgroups = await prepareCgroupCleanup(registry, env, deadlineAt, report)
     const receipt = JSON.parse(readFileSync(join(root, 'provenance.json'), 'utf8'))
     assert.equal(digest(readFileSync(join(root, 'provenance.json'))), registry.provenanceSha256)
     assert.equal(receipt.runId, registry.runId); assert.equal(receipt.sourceCommit, env.GITHUB_SHA)
@@ -108,6 +113,7 @@ export async function cleanupPidfd(env = process.env) {
           const relative = item.slice(root.length + 1)
           assert.ok(/^(registry\.json|build-owner\.json|provenance\.json|compiler\.(stdout|stderr|version)|perception-pidfd\.node)$/.test(relative) ||
             /^owners\/[a-f0-9]{64}\.json$/.test(relative) ||
+            /^receipts\/pidfd-consumer-cgroup-gates-[a-f0-9-]+\.cases\.(?:json|sha256)$/.test(relative) ||
             /^receipts\/(?:pidfd-consumer-[a-z-]+-[a-f0-9-]+\.(?:json|sha256)|namespace-perception-namespace-[a-f0-9-]+\.json)$/.test(relative),
           'Unknown file in build root; retain evidence')
           allFiles.push(item)
@@ -130,7 +136,7 @@ export async function cleanupPidfd(env = process.env) {
     for (const identity of receipt.observed) await hostTerminal(identity)
     const owners = allFiles.filter((path) => path.includes('/owners/') && path.endsWith('.json'))
     assert.ok(owners.length > 0, 'No registered consumers')
-    const consumerReceipts = allFiles.filter((path) => path.includes('/receipts/') && /pidfd-consumer-.*\.json$/.test(path))
+    const consumerReceipts = allFiles.filter((path) => path.includes('/receipts/') && /pidfd-consumer-.*\.json$/.test(path) && !path.endsWith('.cases.json'))
       .map((path) => {
         const value = JSON.parse(readFileSync(path, 'utf8'))
         assert.equal(jsonDigest(value), readFileSync(path.replace(/\.json$/, '.sha256'), 'utf8'))
@@ -140,6 +146,27 @@ export async function cleanupPidfd(env = process.env) {
         assert.equal(value.childCloseObserved, true)
         assert.equal(value.terminality.length, value.observed.length)
         assert.ok(value.observed.length && value.terminality.every((entry) => entry.terminal))
+        if (value.schemaVersion === 'perception-cgroup-owner-close/v1') {
+          assert.equal(value.carrierCloseObserved, true); assert.equal(value.guardianCloseObserved, true)
+          assert.ok(value.actors?.length >= 3 && value.actors.every((actor) => actor.closeObserved === true))
+          assert.equal(value.empty?.populated, 0); assert.equal(value.empty?.liveMembershipEmpty, true)
+          assert.equal(value.securitySandboxClaimed, false)
+        }
+        if (value.schemaVersion === 'perception-cgroup-controlled-driver/v1') {
+          assert.deepEqual(value.cases.map((entry) => [entry.kind, entry.expectedFailure]), [
+            ['member-exit', null], ['wait', 'owner-death'],
+            ['guardian-stop-owner-death', 'guardian-stopped-then-owner-death'],
+            ['setsid-reparent', 'owner-death-after-reparent'], ['zombie', 'owner-death-with-zombie'],
+          ])
+          assert.ok(value.cases.every((entry) => entry.assertionsPassed === true && cgroupControlledCaseAccepted(entry)))
+          assert.ok(value.cases.slice(1).every((entry) => entry.innerFinalObserved === false && entry.ownerSignal === 'SIGKILL'))
+          assert.equal(value.cases[0].innerFinalObserved, true)
+          const path = join(root, 'receipts', `${value.runId}.cases.json`), bytes = readFileSync(path)
+          assert.equal(digest(bytes), value.caseLedgerSha256)
+          assert.equal(digest(bytes), readFileSync(path.replace(/\.json$/, '.sha256'), 'utf8'))
+          const ledger = JSON.parse(bytes)
+          assert.deepEqual(ledger.errors, []); assert.deepEqual(ledger.cases, value.cases)
+        }
         return value
       })
     for (const path of owners) {
@@ -210,6 +237,13 @@ export async function cleanupPidfd(env = process.env) {
     archiveWalk(root, archive)
     report.success = report.errors.length === 0
     writeFileSync(join(archive, 'cleanup.json'), JSON.stringify(report, null, 2), { flag: 'wx', mode: 0o600 })
+    if (report.success) {
+      // Root remove is fixed, source-pinned and has no exec/signal RPC. It runs
+      // after the byte-exact archive, and never adopts a replacement cgroup/PID.
+      await removeArchivedCgroups(preparedCgroups, registry, env, deadlineAt, report)
+      report.success = report.errors.length === 0 && preparedCgroups.every(({ facts }) => facts.removed && facts.success)
+      writeFileSync(join(archive, 'cleanup.json'), JSON.stringify(report, null, 2), { mode: 0o600 })
+    }
     if (report.success) {
       assertOwnedRoot(root, env, authority)
       assert.equal(readRegistry(root, env).admission, 'closed')

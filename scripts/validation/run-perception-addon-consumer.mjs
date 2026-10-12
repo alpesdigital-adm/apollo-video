@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { readdir, readFile, readlink } from 'node:fs/promises'
+import { readFile, readlink } from 'node:fs/promises'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,6 +9,7 @@ import { CI_ROOT, budget, identityKey, liveIdentity, readAuthorityIdentitySync, 
 import { loadPidfdBinding, openObservedPidfd } from './perception-pidfd.mjs'
 import { collectOwnedIdentities, parseLinuxProcessStat, parseLinuxProcessCredentials, readLinuxProcessIdentity } from './run-perception-ci.mjs'
 import { assertPerceptionSuite, COMPOSED_SUITE } from './run-perception-ci-namespace.mjs'
+import { assertCgroupScope, parseCgroupMembership, readCgroupSnapshot } from './perception-consumer-cgroup.mjs'
 
 export function fixedConsumer(mode, args) {
   assert.ok(['unit', 'namespace', 'gates'].includes(mode), 'Fixed CI consumers only')
@@ -17,22 +18,10 @@ export function fixedConsumer(mode, args) {
   else assert.deepEqual(args, [])
   return [join(CI_ROOT, 'scripts/validation/perception-ci-child-bootstrap.mjs'), mode, ...args]
 }
-// Metadata-only inventory for the owner's normal children. No environ read,
-// namespace privilege or inferred ownership from UID. Unknown new live peers
-// fail the owner instead of being silently excluded or signaled.
-export async function consumerSnapshot(deadlineAt) {
-  const names = await budget(() => readdir('/proc'), deadlineAt, 1000, 'Consumer inventory')
-  const pids = names.filter((name) => /^\d+$/.test(name))
-  assert.ok(pids.length <= 16384, 'Consumer process inventory bound')
-  const snapshot = []
-  for (const pid of pids) {
-    try {
-      const text = await budget(() => readFile(`/proc/${pid}/stat`, 'utf8'), deadlineAt, 500, 'Consumer stat')
-      assert.ok(text.length <= 65536)
-      snapshot.push(parseLinuxProcessStat(text))
-    } catch (error) { if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error }
-  }
-  return snapshot
+// Kernel-admitted domain only. Processes outside this exact cgroup are outside
+// the run's inventory, not UID/baseline exceptions. Unknown members still fail.
+export async function consumerSnapshot(deadlineAt, scope) {
+  return readCgroupSnapshot(assertCgroupScope(scope), deadlineAt)
 }
 export function consumerTerminalProof(report) {
   return report.childCloseObserved === true && report.observed.length > 0 &&
@@ -175,13 +164,17 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
   const started = Date.now(), configured = Number(env.APOLLO_PERCEPTION_JOB_DEADLINE_MS ?? started + 1200000)
   assert.ok(Number.isSafeInteger(configured) && configured > started + 30000)
   const deadlineAt = configured, workDeadline = deadlineAt - 25000
+  const scope = assertCgroupScope(JSON.parse(env.APOLLO_PERCEPTION_CGROUP_SCOPE ?? 'null'))
+  assert.equal(scope.membership, parseCgroupMembership(await budget(() => readFile(`/proc/${process.pid}/cgroup`,
+    { encoding: 'utf8', signal: AbortSignal.timeout(500) }), workDeadline, 500, 'Consumer kernel admission')),
+  'Consumer kernel admission must already be complete')
   const registration = await registerAddonConsumer(env) // Owner BEFORE native load.
   const { binding } = await loadPidfdBinding(env)
-  const baseline = new Map((await consumerSnapshot(deadlineAt)).map((value) => [identityKey(value), value]))
+  const baseline = new Map((await consumerSnapshot(deadlineAt, scope)).map((value) => [identityKey(value), value]))
   const observed = new Map(), held = new Map()
   const report = { schemaVersion: 'perception-pidfd-consumer-close/v1', runId, mode, args,
     sourceCommit: env.GITHUB_SHA, buildRunId: registration.entry.buildRunId,
-    owner: registration.entry.identity, childCloseObserved: false, success: false, errors: [], observed: [], terminality: [] }
+    owner: registration.entry.identity, scope, childCloseObserved: false, success: false, errors: [], observed: [], terminality: [] }
   const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512) })
   let child, birthToken, closed = false, closePromise, interrupted
   const signals = ['SIGINT', 'SIGTERM'].map((name) => {
@@ -209,7 +202,7 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
     child.stdin.end('G'); report.gateReleased = true
     while (!closed && !interrupted && !report.errors.length) {
       const snapshotStartedAt = Date.now()
-      const snapshot = await consumerSnapshot(workDeadline)
+      const snapshot = await consumerSnapshot(workDeadline, scope)
       const snapshotFinishedAt = Date.now()
       collectOwnedIdentities(snapshot, observed, report.childBirth.pid)
       for (const entry of snapshot) {
@@ -235,7 +228,7 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
   finally {
     const cleanupDeadline = Math.min(deadlineAt, Date.now() + 25000)
     try {
-      const snapshot = await consumerSnapshot(cleanupDeadline)
+      const snapshot = await consumerSnapshot(cleanupDeadline, scope)
       collectOwnedIdentities(snapshot, observed, report.childBirth?.pid)
     } catch (error) { fail(error) }
     // Only known identities. Attach before recheck; no bare-PID fallback.

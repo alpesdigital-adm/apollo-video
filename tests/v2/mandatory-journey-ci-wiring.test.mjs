@@ -202,6 +202,11 @@ function verifyNamespaceConfigurationGuard(workflow) {
 test('namespace Python configuration parity and strict negatives are mandatory in existing CI owners', async () => {
   const workflow = await read('.github/workflows/ci.yml')
   verifyNamespaceConfigurationGuard(workflow)
+  const guards = await read('tests/v2/perception-namespace-config.test.py')
+  assert.match(guards, /class CgroupConfiguration\(unittest\.TestCase\)/)
+  for (const name of ['test_actual_closed_environment_matches_node_owner',
+    'test_arbitrary_names_types_nul_and_aggregate_bytes_are_rejected', 'test_consumer_and_faults_are_fixed_not_exec_rpc'])
+    assert.ok(guards.includes(`def ${name}(`), 'Fixed CI configuration command must include cgroup parity/strict guards')
   const command = '          python3 -I -S -B tests/v2/perception-namespace-config.test.py\n'
   for (const replacement of ['', '          echo parity-removed\n',
     '          python3 -I -S -B tests/v2/perception-namespace-config.test.py || true\n']) {
@@ -239,8 +244,15 @@ function verifyPerceptionWiring(workflow) {
   assert.ok(productionBuild && steps.indexOf(rendererInstall) < steps.indexOf(productionBuild),
     'locked Remotion dependencies must be installed before the unchanged production build')
   const composed = steps.filter((step) => step.job === job &&
-    step.attrs.get('run') === 'node scripts/validation/run-perception-addon-consumer.mjs gates tests/v2/perception-namespace-observer.integration.mjs')
+    step.attrs.get('run') === 'node scripts/validation/perception-consumer-cgroup.mjs gates tests/v2/perception-namespace-observer.integration.mjs')
   assert.equal(composed.length, 1, 'Real Linux namespace observer composed gate is mandatory')
+  const cgroupGate = steps.filter((step) => step.job === job && step.name === 'Linux cgroup containment controlled gate')
+  assert.equal(cgroupGate.length, 1, 'Real Linux cgroup owner-death/containment gate is mandatory')
+  assert.equal(cgroupGate[0].attrs.get('run'), 'node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates')
+  assert.equal(cgroupGate[0].attrs.get('timeout-minutes'), '3')
+  assert.equal(cgroupGate[0].attrs.get('if'), undefined); assert.equal(cgroupGate[0].attrs.get('continue-on-error'), undefined)
+  assert.ok(gatesTheBuild(cgroupGate[0]))
+  assert.ok(steps.indexOf(productionBuild) < steps.indexOf(cgroupGate[0]) && steps.indexOf(cgroupGate[0]) < steps.indexOf(composed[0]))
   assert.equal(composed[0].attrs.get('if'), undefined)
   assert.equal(composed[0].attrs.get('continue-on-error'), undefined)
   assert.ok(gatesTheBuild(composed[0]))
@@ -261,7 +273,7 @@ function verifyPerceptionWiring(workflow) {
     assert.equal(step.attrs.get('if'), undefined)
     assert.equal(step.attrs.get('continue-on-error'), undefined)
     assert.ok(gatesTheBuild(step))
-    const invocation = `node scripts/validation/run-perception-addon-consumer.mjs namespace ${suite}`
+    const invocation = `node scripts/validation/perception-consumer-cgroup.mjs namespace ${suite}`
     assert.ok(step.body.includes(invocation))
     assert.ok(steps.indexOf(composed[0]) < steps.indexOf(step), 'Namespace gate must precede all eight proofs')
     if (name === 'prisma-face-producer') {
@@ -275,21 +287,29 @@ function verifyPerceptionWiring(workflow) {
 test('W61 perception CI preserves supervised mandatory coverage and its exact facial limitation', async () => {
   const workflow = await read('.github/workflows/ci.yml')
   verifyPerceptionWiring(workflow)
+  const cgroupStep = '      - name: Linux cgroup containment controlled gate\n        timeout-minutes: 3\n        run: node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates\n'
+  assert.ok(workflow.includes(cgroupStep))
+  for (const replacement of ['', cgroupStep.replace('        run:', '        if: false\n        run:'),
+    cgroupStep.replace('        run:', '        continue-on-error: true\n        run:'),
+    cgroupStep.replace('timeout-minutes: 3', 'timeout-minutes: 4'),
+    cgroupStep.replace('--controlled-gates', '--arbitrary')]) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(cgroupStep, replacement)))
+  }
   for (const replacement of ['    if: false\n', '    continue-on-error: true\n']) {
     assert.throws(() => verifyPerceptionWiring(workflow.replace('  perception:\n', `  perception:\n${replacement}`)))
   }
   for (const name of PERCEPTION_SUITES) {
-    const invocation = `node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/${name}.integration.mjs`
+    const invocation = `node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/${name}.integration.mjs`
     assert.throws(() => verifyPerceptionWiring(workflow.replace(invocation, 'echo removed')))
     assert.throws(() => verifyPerceptionWiring(workflow.replace(invocation,
-      invocation.replace('run-perception-addon-consumer.mjs namespace', 'run-perception-ci-namespace.mjs'))))
+      invocation.replace('perception-consumer-cgroup.mjs namespace', 'run-perception-ci-namespace.mjs'))))
   }
   for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
     assert.throws(() => verifyPerceptionWiring(workflow.replace('      - name: Real OCR and temporal media adapters\n', `      - name: Real OCR and temporal media adapters\n${replacement}`)))
   }
   assert.throws(() => verifyPerceptionWiring(workflow.replace("APOLLO_TEMPORAL_HTTP_E2E: '1'", "APOLLO_TEMPORAL_HTTP_E2E: '0'")))
   assert.throws(() => verifyPerceptionWiring(workflow.replace(" 'publish-race|face control'", '')))
-  const composedStep = '      - name: Linux namespace observer composed gate\n        run: node scripts/validation/run-perception-addon-consumer.mjs gates tests/v2/perception-namespace-observer.integration.mjs\n'
+  const composedStep = '      - name: Linux namespace observer composed gate\n        run: node scripts/validation/perception-consumer-cgroup.mjs gates tests/v2/perception-namespace-observer.integration.mjs\n'
   assert.ok(workflow.includes(composedStep))
   assert.throws(() => verifyPerceptionWiring(workflow.replace(composedStep, '')))
   for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
@@ -324,7 +344,7 @@ test('CI pidfd prerequisite remains unprivileged and mandatory under Node 22 qua
       assert.equal(build.attrs.get('if'), undefined); assert.equal(build.attrs.get('continue-on-error'), undefined)
       assert.equal(build.attrs.get('timeout-minutes'), '2'); assert.ok(gatesTheBuild(build))
       const consumer = steps.find((step) => step.job.id === job && step.attrs.get('run') ===
-        (job === 'quality' ? 'node scripts/validation/run-perception-addon-consumer.mjs unit' : 'node scripts/validation/run-perception-addon-consumer.mjs gates tests/v2/perception-namespace-observer.integration.mjs'))
+        (job === 'quality' ? 'node scripts/validation/perception-consumer-cgroup.mjs unit' : 'node scripts/validation/perception-consumer-cgroup.mjs gates tests/v2/perception-namespace-observer.integration.mjs'))
       assert.ok(consumer && steps.indexOf(build) < steps.indexOf(consumer))
       const cleanup = steps.filter((step) => step.job.id === job && step.attrs.get('run') === 'node scripts/validation/cleanup-perception-pidfd.mjs')
       assert.equal(cleanup.length, 1); assert.equal(cleanup[0].attrs.get('if'), 'always()')
@@ -347,8 +367,8 @@ test('CI pidfd prerequisite remains unprivileged and mandatory under Node 22 qua
     step.replace('run: bash', 'run: sudo bash')]) {
     assert.throws(() => verify(workflow.replace(step, replacement)))
   }
-  for (const invocation of ['node scripts/validation/run-perception-addon-consumer.mjs unit',
-    'node scripts/validation/run-perception-addon-consumer.mjs gates', 'node scripts/validation/cleanup-perception-pidfd.mjs']) {
+  for (const invocation of ['node scripts/validation/perception-consumer-cgroup.mjs unit',
+    'node scripts/validation/perception-consumer-cgroup.mjs gates', 'node scripts/validation/cleanup-perception-pidfd.mjs']) {
     assert.throws(() => verify(workflow.replace(invocation, 'echo omitted')))
   }
 })
@@ -751,16 +771,62 @@ const listMarkdown = async () => {
  * `npm test` finds `*.test.mjs` on its own; it finds neither `*.integration.mjs`
  * nor `*.e2e.mjs`, which is the whole reason a suite can exist and never run.
  */
-const suiteFilesRunByCi = (steps, scripts) => {
+const suiteFilesRunByCi = (steps, scripts, cgroupSource) => {
   const gating = steps.filter(gatesTheBuild)
   const runByCi = new Set(gating.flatMap((step) => step.npmScripts))
   const files = new Set(gating.flatMap((step) => step.suiteFiles))
+  // This fixed owner chooses a source-pinned suite internally, instead of
+  // taking a test path from argv. Count only its real mandatory invocation and
+  // its actual literal -> fixed file -> spawn -> CLI dispatch bindings.
+  const cgroupOwners = gating.filter((entry) => entry.job.id === 'perception' &&
+    entry.name === 'Linux cgroup containment controlled gate' &&
+    entry.attrs.get('run') === 'node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates' &&
+    entry.attrs.get('timeout-minutes') === '3' && entry.attrs.get('if') === undefined &&
+    entry.attrs.get('continue-on-error') === undefined && entry.job.attrs.get('if') === undefined &&
+    entry.job.attrs.get('continue-on-error') === undefined)
+  if (cgroupOwners.length) {
+    assert.equal(cgroupOwners.length, 1, 'Exactly one fixed cgroup owner may attest this suite')
+    const declaration = /^export const CGROUP_GATE_SUITE = '(tests\/v2\/[A-Za-z0-9._-]+\.integration\.mjs)'$/m.exec(cgroupSource)
+    assert.ok(declaration, 'Fixed cgroup gate suite must be an actual literal')
+    assert.ok(cgroupSource.includes('const file = join(CI_ROOT, CGROUP_GATE_SUITE)'))
+    assert.ok(cgroupSource.includes('spawn(process.execPath, [file],'))
+    assert.ok(cgroupSource.includes("if (mode === '--controlled-gates')"))
+    assert.ok(cgroupSource.includes('await runControlledCgroupGate()).success'))
+    files.add(declaration[1])
+  }
   for (const [name, command] of Object.entries(scripts)) {
     if (!runByCi.has(name)) continue
     for (const match of command.matchAll(SUITE_FILE)) files.add(match[0])
   }
   return { runByCi, files }
 }
+
+test('suite inventory follows the real cgroup owner; removed, bypassed or non-gating calls do not count', async () => {
+  const [workflow, source] = await Promise.all([read('.github/workflows/ci.yml'),
+    read('scripts/validation/perception-consumer-cgroup.mjs')])
+  const suite = 'tests/v2/perception-consumer-cgroup.integration.mjs'
+  const counted = (value, owner = source) => suiteFilesRunByCi(parseWorkflow(value).steps, {}, owner).files.has(suite)
+  assert.equal(counted(workflow), true)
+  const step = '      - name: Linux cgroup containment controlled gate\n        timeout-minutes: 3\n        run: node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates\n'
+  assert.ok(workflow.includes(step))
+  for (const replacement of ['', step.replace('        run:', '        if: false\n        run:'),
+    step.replace('        run:', '        continue-on-error: true\n        run:'),
+    step.replace('--controlled-gates', '--arbitrary'), step.replace('timeout-minutes: 3', 'timeout-minutes: 4')]) {
+    assert.equal(counted(workflow.replace(step, replacement)), false)
+  }
+  for (const attribute of ['    if: false\n', '    continue-on-error: true\n'])
+    assert.equal(counted(workflow.replace('  perception:\n', '  perception:\n' + attribute)), false)
+  for (const [actual, broken] of [
+    ['export const CGROUP_GATE_SUITE =', 'export const UNRELATED_SUITE ='],
+    ['const file = join(CI_ROOT, CGROUP_GATE_SUITE)', 'const file = unrelatedFile'],
+    ['spawn(process.execPath, [file],', 'spawn(process.execPath, [unrelatedFile],'],
+    ["if (mode === '--controlled-gates')", "if (mode === '--arbitrary')"],
+    ['await runControlledCgroupGate()).success', 'await unrelatedGate()).success'],
+  ]) {
+    assert.ok(source.includes(actual))
+    assert.throws(() => counted(workflow, source.replace(actual, broken)))
+  }
+})
 
 async function inventoryCiSteps() {
   const [central, library, dashboard] = await Promise.all([
@@ -778,14 +844,15 @@ async function inventoryCiSteps() {
 }
 
 test('T-F4.016 no integration or e2e suite file goes unrun by CI without being declared', async () => {
-  const [rawPackage, workflow, present] = await Promise.all([
+  const [rawPackage, workflow, present, cgroupSource] = await Promise.all([
     read('package.json'),
     inventoryCiSteps(),
     listSuiteFiles(),
+    read('scripts/validation/perception-consumer-cgroup.mjs'),
   ])
   const { scripts } = JSON.parse(rawPackage)
   const steps = workflow
-  const { files: filesRunByCi } = suiteFilesRunByCi(steps, scripts)
+  const { files: filesRunByCi } = suiteFilesRunByCi(steps, scripts, cgroupSource)
 
   assert.ok(present.length > 0, 'found no integration or e2e suite files under tests/; the glob and the tree have diverged')
 
@@ -818,9 +885,10 @@ test('T-F4.016 no integration or e2e suite file goes unrun by CI without being d
 })
 
 test('T-F4.016 every npm integration or e2e script either runs in CI or runs a declared suite', async () => {
-  const [rawPackage, steps] = await Promise.all([read('package.json'), inventoryCiSteps()])
+  const [rawPackage, steps, cgroupSource] = await Promise.all([read('package.json'), inventoryCiSteps(),
+    read('scripts/validation/perception-consumer-cgroup.mjs')])
   const { scripts } = JSON.parse(rawPackage)
-  const { runByCi, files: filesRunByCi } = suiteFilesRunByCi(steps, scripts)
+  const { runByCi, files: filesRunByCi } = suiteFilesRunByCi(steps, scripts, cgroupSource)
 
   const declared = new Set(KNOWN_UNRUN_SUITES.map((entry) => entry.file))
 

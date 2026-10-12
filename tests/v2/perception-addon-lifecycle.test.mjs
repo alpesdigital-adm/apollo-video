@@ -7,12 +7,148 @@ import { tmpdir } from 'node:os'
 import { buildPublicationAllowed } from '../../scripts/validation/build-perception-pidfd.mjs'
 import { awaitBootstrapGate } from '../../scripts/validation/perception-ci-child-bootstrap.mjs'
 import { fixedConsumer, consumerTerminalProof, unattributedConsumerFacts, recheckUnattributedConsumer } from '../../scripts/validation/run-perception-addon-consumer.mjs'
+import { assertCgroupScope, openCgroupKill, parseCgroupMembership, readCgroupSnapshot, cgroupTerminalProof,
+  cgroupControlledCaseAccepted } from '../../scripts/validation/perception-consumer-cgroup.mjs'
 import { namespaceOwnerClosed, assertArchivePaths, planArchive } from '../../scripts/validation/cleanup-perception-pidfd.mjs'
 import { verifyOuterHostDeath } from '../../scripts/validation/perception-outer-host-death.mjs'
 import { loadPidfdBinding } from '../../scripts/validation/perception-pidfd.mjs'
 import { awaitProductGate, bootstrapReadback } from '../../scripts/validation/perception-namespace-node-bootstrap.mjs'
 import { CI_PIDFD_SOURCE_PATHS, digest, initializeRegistry, readRegistry, registryLock,
   registerAddonConsumer, writeRegistry, sourceFingerprint } from '../../scripts/validation/perception-addon-registry.mjs'
+
+const cgroupScope = { runId: 'pidfd-cgroup-11111111-1111-1111-1111-111111111111',
+  path: '/sys/fs/cgroup/job/apollo-pidfd-cgroup-11111111-1111-1111-1111-111111111111',
+  membership: '/job/apollo-pidfd-cgroup-11111111-1111-1111-1111-111111111111',
+  directory: { dev: 20, ino: 30 }, kill: { dev: 20, ino: 31 } }
+
+function cgroupFdIo() {
+  const closed = [], opened = []
+  const directory = { isDirectory: () => true, isSymbolicLink: () => false, uid: 0, mode: 0o40755, dev: 20, ino: 30 }
+  const kill = { isFile: () => true, uid: 1001, mode: 0o100200, dev: 20, ino: 31 }
+  return { closed, opened, directory, kill, flags: { O_NOFOLLOW: 0x20000, O_WRONLY: 1 },
+    realpath: (path) => path, lstat: () => directory,
+    open: (path, flags) => { opened.push({ path, flags }); return 9 }, fstat: () => kill,
+    readlink: () => cgroupScope.path + '/cgroup.kill', readFile: () => 'flags:\t02000001\n',
+    close: (fd) => closed.push(fd) }
+}
+
+test('cgroup scope binds exact run/path/inodes with no arbitrary scope or migration authority', () => {
+  assert.equal(assertCgroupScope(cgroupScope), cgroupScope)
+  for (const mutation of [
+    (value) => { value.path += '/child' }, (value) => { value.path = '/sys/fs/cgroup/../arbitrary' },
+    (value) => { value.membership = '/other' }, (value) => { value.directory.ino = 0 },
+    (value) => { value.kill.pid = 123 }, (value) => { value.runId = 'arbitrary' },
+    (value) => { value.exec = '/bin/sh' },
+  ]) {
+    const value = structuredClone(cgroupScope); mutation(value); assert.throws(() => assertCgroupScope(value))
+  }
+  assert.equal(parseCgroupMembership('0::' + cgroupScope.membership + '\n'), cgroupScope.membership)
+  assert.throws(() => parseCgroupMembership('0::/one\n0::/two\n'))
+})
+
+test('kill FD verifies O_NOFOLLOW, CLOEXEC and held inode/path; failures close only the acquired descriptor', () => {
+  const io = cgroupFdIo()
+  assert.equal(openCgroupKill(cgroupScope, 1001, io), 9)
+  assert.equal(io.opened[0].path, cgroupScope.path + '/cgroup.kill')
+  assert.ok(io.opened[0].flags & io.flags.O_NOFOLLOW); assert.deepEqual(io.closed, [])
+  for (const mutation of [
+    (value) => { value.kill.ino = 32 }, (value) => { value.kill.uid = 0 },
+    (value) => { value.kill.mode = 0o100222 }, (value) => { value.readlink = () => '/sys/fs/cgroup/other/cgroup.kill' },
+    (value) => { value.readFile = () => 'flags:\t00000001\n' },
+  ]) {
+    const failing = cgroupFdIo(); mutation(failing)
+    assert.throws(() => openCgroupKill(cgroupScope, 1001, failing)); assert.deepEqual(failing.closed, [9])
+  }
+  const link = cgroupFdIo(); link.directory.isSymbolicLink = () => true
+  assert.throws(() => openCgroupKill(cgroupScope, 1001, link)); assert.deepEqual(link.opened, [])
+  const changed = cgroupFdIo(); let calls = 0
+  changed.lstat = () => ++calls === 1 ? changed.directory : { ...changed.directory, ino: 999 }
+  assert.throws(() => openCgroupKill(cgroupScope, 1001, changed)); assert.deepEqual(changed.closed, [9])
+})
+
+function cgroupStat(pid, starttime, ppid = 1, state = 'S') {
+  const fields = Array(50).fill('0')
+  Object.assign(fields, { 0: state, 1: String(ppid), 2: '8', 3: '8', 19: starttime })
+  return `${pid} (controlled (member)) ${fields.join(' ')}`
+}
+
+test('cgroup snapshot reads only kernel members, keeps reparenting facts and rejects PID reuse/membership mismatch', async () => {
+  const reads = []
+  const io = { async readFile(path) {
+    reads.push(path)
+    if (path.endsWith('/cgroup.procs')) return '9\n9\n'
+    if (path.endsWith('/cgroup')) return '0::' + cgroupScope.membership + '\n'
+    return cgroupStat(9, '80', reads.length < 4 ? 8 : 1)
+  } }
+  const result = await readCgroupSnapshot(cgroupScope, Date.now() + 1000, io)
+  assert.equal(result.length, 1); assert.equal(result[0].pid, 9); assert.equal(result[0].starttime, '80')
+  assert.equal(result[0].previousPpid, 8); assert.equal(result[0].ppid, 1)
+  assert.equal(reads[0], cgroupScope.path + '/cgroup.procs')
+  assert.equal(reads.some((value) => value.includes('\\')), false, 'Kernel paths stay POSIX on a Windows test host')
+  assert.equal(reads.some((path) => path === '/proc' || path.includes('/env') || path.includes('/cmdline')), false)
+  for (const kind of ['reuse', 'membership', 'denied']) {
+    let stats = 0
+    const bad = { async readFile(path) {
+      if (path.endsWith('/cgroup.procs')) return '9\n'
+      if (kind === 'denied') throw Object.assign(new Error('controlled denial'), { code: 'EACCES' })
+      if (path.endsWith('/cgroup')) return '0::' + (kind === 'membership' ? '/outside' : cgroupScope.membership) + '\n'
+      return cgroupStat(9, kind === 'reuse' && ++stats === 2 ? '81' : '80')
+    } }
+    await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 1000, bad))
+  }
+})
+
+test('cgroup read deadline starts no later action after delayed IO; empty membership is not a close/reap proof', async () => {
+  let reads = 0
+  await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 10, { readFile: async () => {
+    reads++; await new Promise((done) => setTimeout(done, 30)); return '9\n'
+  } }))
+  assert.equal(reads, 1)
+  const valid = { carrierCloseObserved: true, guardianCloseObserved: true, helpers: [{ closeObserved: true }],
+    empty: { populated: 0, liveMembershipEmpty: true }, observed: [{ pid: 9, starttime: '80' }], terminality: [{ terminal: true, observation: 'Z' }] }
+  assert.equal(cgroupTerminalProof(valid), true)
+  for (const change of [{ carrierCloseObserved: false }, { guardianCloseObserved: false }, { helpers: [] },
+    { observed: [] }, { terminality: [] }, { terminality: [{ terminal: false }] },
+    { empty: { populated: 1, liveMembershipEmpty: false } }]) assert.equal(cgroupTerminalProof({ ...valid, ...change }), false)
+})
+
+test('controlled cgroup gate cannot accept terminal fallback, errors, incomplete protocol or absent primary proof', () => {
+  const identity = { pid: 9, starttime: '80' }
+  const terminal = { ...identity, terminal: true, observation: 'Z' }
+  const empty = { populated: 0, liveMembershipEmpty: true, zombieReapingEstablished: false }
+  const base = { kind: 'member-exit', expectedFailure: null, errors: [], primaryContainmentObserved: true,
+    fallbackRequired: false, protocolComplete: true, ownerCloseObserved: true, containmentConclusive: true,
+    observed: [identity], terminality: [terminal], empty,
+    primaryContainment: { terminality: [terminal], empty }, innerFinalObserved: true,
+    innerFinalSuccess: true, innerFinalErrors: [], ownerCode: 0, ownerSignal: null }
+  assert.equal(cgroupControlledCaseAccepted(base), true)
+  const negative = { ...base, kind: 'guardian-stop-owner-death', expectedFailure: 'guardian-stopped-then-owner-death',
+    guardianStopObserved: true, innerFinalObserved: false, ownerCode: null, ownerSignal: 'SIGKILL' }
+  assert.equal(cgroupControlledCaseAccepted(negative), true)
+  assert.equal(cgroupControlledCaseAccepted({ ...negative, kind: 'wait', expectedFailure: 'owner-death' }), true)
+  for (const valid of [base, negative]) {
+    for (const delta of [{ fallbackRequired: true }, { primaryContainmentObserved: false },
+      { protocolComplete: false }, { errors: [{ code: 'EACCES' }] }, { primaryContainment: null },
+      { observed: [{ pid: '9', starttime: '80' }] },
+      { ownerCloseObserved: false }, { containmentConclusive: false }, { observed: [] },
+      { primaryContainment: { terminality: [], empty } },
+      { primaryContainment: { terminality: [{ ...terminal, starttime: '81' }], empty } },
+      { primaryContainment: { terminality: [terminal], empty: { ...empty, populated: 1 } } },
+      { terminality: [{ ...terminal, terminal: false }] }, { kind: 'arbitrary' }, { expectedFailure: 'arbitrary' }]) {
+      assert.equal(cgroupControlledCaseAccepted({ ...valid, ...delta }), false)
+    }
+  }
+  assert.equal(cgroupControlledCaseAccepted({ ...base, innerFinalErrors: [{ code: 'EIO' }] }), false)
+  assert.equal(cgroupControlledCaseAccepted({ ...negative, guardianStopObserved: false }), false)
+  assert.equal(cgroupControlledCaseAccepted({ ...negative, innerFinalObserved: true }), false)
+  const reparent = { ...negative, kind: 'setsid-reparent', expectedFailure: 'owner-death-after-reparent', reparentedMembershipObserved: true }
+  assert.equal(cgroupControlledCaseAccepted(reparent), true)
+  assert.equal(cgroupControlledCaseAccepted({ ...reparent, reparentedMembershipObserved: false }), false)
+  const zombie = { ...negative, kind: 'zombie', expectedFailure: 'owner-death-with-zombie',
+    zombieExcludedFromLiveMembership: true, descendant: { state: 'Z' } }
+  assert.equal(cgroupControlledCaseAccepted(zombie), true)
+  assert.equal(cgroupControlledCaseAccepted({ ...zombie, descendant: { state: 'S' } }), false)
+})
 
 function unknownMetadataIo(identities) {
   const values = new Map(identities.map((value) => [value.pid, value]))
