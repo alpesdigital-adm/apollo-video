@@ -24,12 +24,13 @@ const CARD_EXPECTATIONS = {
 export async function runDashboardRuntimeJourney(input) {
   const { client, baseUrl, authorization, workspaceId, projectId, projectVersionId,
     projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId, sourceSha256,
-    sourceByteSize, sourceManifest, sourcePath, artifactRoot, uiUsername, uiPassword, suffix, signal, mechanicalSeed } = input
+    sourceByteSize, sourceManifest, sourcePath, sourceColorProbe, artifactRoot, uiUsername, uiPassword, suffix, signal, mechanicalSeed } = input
   const directory = process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT
   assert.ok(directory && isAbsolute(directory), 'Runtime evidence requires an absolute external directory')
   await mkdir(directory, { recursive: true })
   const evidence = { schemaVersion: 'dashboard-real-runtime/v2', runId: suffix, ownerPid: process.pid,
     sourceCommit: process.env.GITHUB_SHA ?? null, states: [], outputs: [], screenshots: [], httpResponses: [],
+    browserErrors: [], browserResponses: [],
     proofScope: 'runtime-proxy-and-negative-final-admission', editorialAcceptance: false, faceSafety: 'unknown',
     storedQualityStatus: 'review-required',
     controlledInputs: ['FFmpeg synthetic source bytes', 'aligned transcript', 'initial compiled timeline',
@@ -71,6 +72,50 @@ export async function runDashboardRuntimeJourney(input) {
     APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url') }
   const ffmpeg = resolveFfmpegBinary(undefined, environment)
   assert.equal(isAbsolute(ffmpeg), true, 'Resolved FFmpeg binary must be absolute')
+  const safeError = (error) => {
+    const message = String(error?.message ?? error ?? '')
+    return { name: /^[A-Za-z0-9_]{1,80}$/.test(error?.name ?? '') ? error.name : null,
+      messageSha256: sha256(message), messageBytes: Buffer.byteLength(message) }
+  }
+  const bounded = async (action, timeoutMs) => {
+    let timer
+    try {
+      return await Promise.race([action, new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Dashboard response evidence deadline exceeded')), timeoutMs)
+      })])
+    } finally { clearTimeout(timer) }
+  }
+  const responseDiagnostic = (text) => {
+    let payload
+    try { payload = JSON.parse(text) } catch { /* Non-JSON remains identifiable by its byte hash. */ }
+    const message = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+    return { bodySha256: sha256(text), bodyBytes: Buffer.byteLength(text),
+      bodyKind: payload === undefined ? 'non-json' : 'json',
+      apiErrorCode: /^[A-Z][A-Z0-9_]+$/.test(payload?.error?.code ?? '') ? payload.error.code : null,
+      apiErrorMessageSha256: sha256(message), apiErrorMessageBytes: Buffer.byteLength(message) }
+  }
+  const readPublicWorkspace = async (id, stage) => {
+    const path = `/v1/projects/${id}/workspace`
+    const response = await fetch(`${baseUrl}${path}`, { headers: { authorization }, signal: AbortSignal.timeout(30000) })
+    const text = await response.text()
+    const diagnostic = { stage, method: 'GET', path, status: response.status, ...responseDiagnostic(text) }
+    evidence.httpResponses.push(diagnostic)
+    assert.equal(response.status, 200, `Public workspace hydration must succeed: ${JSON.stringify(diagnostic)}`)
+    assert.equal(diagnostic.bodyKind, 'json', JSON.stringify(diagnostic))
+    const payload = JSON.parse(text)
+    assert.equal(payload.data.project.id, id)
+    return payload.data
+  }
+  const browserResponseTasks = new Set()
+  const browserResponseListeners = []
+  const drainBrowserResponses = async () => {
+    const deadline = Date.now() + 10000
+    while (browserResponseTasks.size) {
+      const remaining = deadline - Date.now()
+      assert.ok(remaining > 0, 'Browser response evidence did not settle within its bound')
+      await bounded(Promise.all([...browserResponseTasks]), remaining)
+    }
+  }
   const post = async (path, body, key, expected) => {
     const response = await fetch(`${baseUrl}${path}`, { method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
@@ -105,13 +150,9 @@ export async function runDashboardRuntimeJourney(input) {
     return `data:image/png;base64,${bytes.toString('base64')}`
   }
   try {
-    const workspacePreflight = await fetch(`${baseUrl}/v1/projects/${projectId}/workspace`, {
-      headers: { authorization }, signal: AbortSignal.timeout(30000),
-    })
-    const workspacePayload = await workspacePreflight.json()
-    assert.equal(workspacePreflight.status, 200, `Controlled upstream must hydrate through the public workspace API: ${JSON.stringify(workspacePayload)}`)
-    evidence.workspacePreflight = { status: workspacePreflight.status, projectId,
-      currentVersionId: workspacePayload.data.project.currentVersionId }
+    const workspacePayload = await readPublicWorkspace(projectId, 'main-upstream-before-browser')
+    evidence.workspacePreflight = { status: 200, projectId,
+      currentVersionId: workspacePayload.project.currentVersionId }
     const login = await fetch(`${baseUrl}/v1/session`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: uiUsername, password: uiPassword }), signal: AbortSignal.timeout(30000) })
     assert.equal(login.status, 200, await login.text())
@@ -124,23 +165,47 @@ export async function runDashboardRuntimeJourney(input) {
     child = server.process(); evidence.browserPid = child.pid
     browser = await chromium.connect(server.wsEndpoint(), { timeout: 20000 })
     context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
-    evidence.browserErrors = []
     context.on('page', (opened) => {
-      opened.on('pageerror', (error) => evidence.browserErrors.push(String(error)))
-      opened.on('console', (message) => { if (message.type() === 'error') evidence.browserErrors.push(message.text()) })
-      opened.on('response', (response) => {
-        if (response.status() < 400) return
-        evidence.browserErrors.push(`${response.status()} ${response.url()}`)
-        void response.json().then((body) => evidence.browserErrors.push({ status: response.status(), url: response.url(), body }))
-          .catch(() => {})
+      opened.on('pageerror', (error) => evidence.browserErrors.push({ kind: 'pageerror', ...safeError(error) }))
+      opened.on('console', (message) => {
+        if (message.type() === 'error') evidence.browserErrors.push({ kind: 'console-error', ...safeError(message.text()) })
       })
+      const onResponse = (response) => {
+        const url = new URL(response.url())
+        if (response.status() < 400 && (url.origin !== new URL(baseUrl).origin || !url.pathname.startsWith('/v1/'))) return
+        const diagnostic = { method: response.request().method(), origin: url.origin, path: url.pathname,
+          status: response.status(), contentType: (response.headers()['content-type'] ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 128),
+          bodyState: 'pending' }
+        evidence.browserResponses.push(diagnostic)
+        if (response.status() >= 400) evidence.browserErrors.push({ kind: 'http-error', response: diagnostic })
+        if (response.status() < 400 && !/^application\/(?:json|[a-z0-9.+-]+\+json)(?:;|$)/i.test(diagnostic.contentType)) {
+          // Successful media bodies are inspected by the existing MP4 checks;
+          // this ledger awaits JSON and every HTTP error, not binary playback.
+          diagnostic.bodyState = 'non-json-success-not-read'
+          return
+        }
+        const pending = (async () => {
+          try {
+            const text = await bounded(response.text(), 5000)
+            Object.assign(diagnostic, responseDiagnostic(text), { bodyState: 'captured' })
+          } catch (error) {
+            diagnostic.bodyState = 'failed'
+            diagnostic.bodyError = safeError(error)
+            evidence.browserErrors.push({ kind: 'response-evidence-error', response: diagnostic })
+          }
+        })()
+        browserResponseTasks.add(pending)
+        void pending.finally(() => browserResponseTasks.delete(pending))
+      }
+      opened.on('response', onResponse)
+      browserResponseListeners.push({ opened, onResponse })
     })
     context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(30000)
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     const page = await context.newPage()
     const navigatedStates = new Set()
     pipeline = await createDashboardPipelineObserver({ page: await context.newPage(), client, baseUrl, workspaceId, evidenceDir: directory })
-    const observe = async ({ stage, id = projectId, operationId, status, phase, completed, eventTypes = [],
+    const observe = async ({ stage, id = projectId, operationId, operationStatus, status, phase, completed, eventTypes = [],
       origin = 'public-api+postgres+factory-worker', seededStatus = false }) => {
       const row = await client.v2Project.findUniqueOrThrow({ where: { id } })
       assert.equal(row.status, status, `${stage}: authoritative project status`)
@@ -154,9 +219,11 @@ export async function runDashboardRuntimeJourney(input) {
       assert.equal(projected.visibleState.primaryAction, expected.action)
       const operation = operationId ? await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId } }) : null
       if (operation) {
+        if (operationStatus !== undefined) assert.equal(operation.status, operationStatus)
         assert.equal(operation.phase, phase); assert.equal(operation.progressCompleted, completed)
         assert.equal(operation.progressTotal, 4); assert.equal(operation.progressUnit, 'render')
         assert.equal(projected.dashboard.latestOperation.id, operationId)
+        assert.equal(projected.dashboard.latestOperation.status, operation.status)
         assert.equal(projected.dashboard.latestOperation.phase, phase)
         assert.deepEqual(projected.dashboard.latestOperation.progress, { completed, total: 4, unit: 'render' })
       }
@@ -167,6 +234,7 @@ export async function runDashboardRuntimeJourney(input) {
         await page.waitForFunction(() => document.visibilityState === 'visible')
         evidence.foregroundObservations ??= []
         evidence.foregroundObservations.push({ stage, layout, before: visibilityBefore, after: await page.evaluate(() => document.visibilityState) })
+        await drainBrowserResponses()
         await page.setViewportSize(viewport); await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
         const card = page.locator(`article[data-project-id="${id}"]`)
         try { await card.waitFor({ state: 'visible' }) } catch (error) {
@@ -187,13 +255,23 @@ export async function runDashboardRuntimeJourney(input) {
         evidence.screenshots.push({ name, sha256: sha256(await readFile(join(directory, name))) })
         if (layout === 'desktop' && !navigatedStates.has(status)) {
           const destination = `/projects/${id}${status === 'reviewing-proxy' ? '?mode=review' : ''}`
+          const workspaceResponse = page.waitForResponse((candidate) => {
+            const url = new URL(candidate.url())
+            return candidate.request().method() === 'GET' && url.origin === new URL(baseUrl).origin &&
+              url.pathname === `/v1/projects/${id}/workspace`
+          }, { timeout: 30000 }).then((response) => ({ response }), (error) => ({ error }))
           await action.click()
           await page.waitForURL(`${baseUrl}${destination}`)
+          const hydrated = await workspaceResponse
+          assert.ifError(hydrated.error)
+          assert.equal(hydrated.response.status(), 200, `${stage}: browser workspace hydration must succeed`)
           navigatedStates.add(status)
         }
+        await drainBrowserResponses()
+        assert.deepEqual(evidence.browserErrors, [], `${stage}: browser errors are not acceptable`)
       }
       evidence.states.push({ stage, projectId: id, status, operationId, phase, completed,
-        total: operation ? 4 : undefined,
+        total: operation ? 4 : undefined, operationStatus: operation?.status,
         origin, seededStatus, visibleState: projected.visibleState,
         presentation: expected, actionDestination: `/projects/${id}${status === 'reviewing-proxy' ? '?mode=review' : ''}` })
     }
@@ -233,8 +311,28 @@ export async function runDashboardRuntimeJourney(input) {
     const proxy = await post(`/v1/projects/${projectId}/proxy-renders`, undefined, `runtime-proxy-${suffix}`, 202)
     const proxyId = proxy.operation.id
     await observe({ stage: 'proxy-queued', status: 'rendering-proxy', operationId: proxyId, phase: 'queued', completed: 0, eventTypes: ['operation.status.changed'] })
-    const proxyWorker = createProjectProxyRenderWorker(environment)
-    assert.deepEqual(await runObservedWorker(() => proxyWorker(`runtime-proxy-worker-${suffix}`, { workspaceId, operationId: proxyId, signal })), { operationId: proxyId, status: 'succeeded' })
+    const portableDiagnostic = (value) => typeof value === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(value) ? value : null
+    const proxyWorker = createProjectProxyRenderWorker(environment, undefined, ({ operationId, error }) => {
+      const message = typeof error?.message === 'string' ? error.message : ''
+      const syscall = typeof error?.syscall === 'string' ? error.syscall.split(' ')[0] : null
+      evidence.proxyWorkerFailures ??= []
+      evidence.proxyWorkerFailures.push({ operationId, name: portableDiagnostic(error?.name),
+        code: portableDiagnostic(error?.code), errno: Number.isSafeInteger(error?.errno) ? error.errno : portableDiagnostic(error?.errno),
+        syscall: ['spawn', 'open', 'stat', 'lstat', 'read', 'write', 'access', 'rename', 'unlink', 'connect'].includes(syscall) ? syscall : null,
+        messageSha256: sha256(message), messageBytes: Buffer.byteLength(message) })
+    })
+    const firstProxyOutcome = await runObservedWorker(() => proxyWorker(`runtime-proxy-worker-${suffix}`, { workspaceId, operationId: proxyId, signal }))
+    const firstProxyRow = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: proxyId },
+      select: { id: true, projectId: true, attempt: true, status: true, phase: true,
+        errorCode: true, errorMessage: true, errorRetryable: true } })
+    evidence.firstProxyWorkerDiagnostic = { operationId: firstProxyRow.id, projectId: firstProxyRow.projectId,
+      attempt: firstProxyRow.attempt, operationAttemptKey: `${firstProxyRow.id}:${firstProxyRow.attempt}`,
+      status: firstProxyRow.status, phase: firstProxyRow.phase, outcome: firstProxyOutcome,
+      error: { code: firstProxyRow.errorCode, retryable: firstProxyRow.errorRetryable,
+        messageSha256: firstProxyRow.errorMessage === null ? null : sha256(firstProxyRow.errorMessage),
+        messageBytes: firstProxyRow.errorMessage === null ? 0 : Buffer.byteLength(firstProxyRow.errorMessage) } }
+    assert.deepEqual(firstProxyOutcome, { operationId: proxyId, status: 'succeeded' },
+      JSON.stringify(evidence.firstProxyWorkerDiagnostic))
     await observe({ stage: 'review', status: 'revising', operationId: proxyId, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     const replay = await post(`/v1/projects/${projectId}/proxy-renders`, undefined, `runtime-proxy-${suffix}`, 202)
     assert.equal(replay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'revising')
@@ -284,30 +382,46 @@ export async function runDashboardRuntimeJourney(input) {
       transcriptId: directed.command.payload.sourceTranscriptId, editPlanHash: calculateVersionHash(directed.run.editPlan),
       qualitySnapshotId: principal.qualityId, qualitySnapshotHash: calculateVersionHash(directed.run.qualityReport),
       sourceArtifactId, sourceManifestId, sourceManifestHash: sourceManifest.manifestHash, sourceSha256, sourceByteSize,
+      observedSourceColorProbe: { id: sourceColorProbe.id, hash: sourceColorProbe.probeHash,
+        detection: sourceColorProbe.detection, producer: sourceColorProbe.producer },
       sourceObservationScope: 'synthetic media and caller-aligned transcript; no face detector authority' }
+    const principalCompilation = JSON.parse((await client.v2ColorPipelineCompilation.findFirstOrThrow({ where: { workspaceId, projectId } })).compilationJson)
     const mechanical = await seedDashboardControlledExportFixture({ client, workspaceId, actor, artifactRoot, suffix,
       sourceArtifactId, sourceManifestId, sourcePath, sourceManifest, proxyArtifact, proxyManifestId: review.proxyManifestId,
-      signal, ...mechanicalSeed })
+      signal, ...mechanicalSeed,
+      // Same public compilation as before, now completed before the seed INSERT.
+      compileColorPipeline: ({ projectId: seedProjectId, sourceArtifactId: seedArtifactId, sourceManifestId: seedManifestId }) =>
+        post(`/v1/projects/${seedProjectId}/color-pipeline-compilations`, {
+          sourceArtifactId: seedArtifactId, sourceManifestId: seedManifestId,
+          outputMetadata: principalCompilation.pipeline.outputMetadata,
+          stages: principalCompilation.pipeline.stages.map(({ id, kind, version, enabled, output, implementation, lut }) =>
+            ({ id, kind, version, enabled, output, implementation, ...(lut ? { lut } : {}) })),
+        }, `runtime-mechanical-color-${suffix}`, 201),
+    })
     assert.notEqual(mechanical.projectId, projectId)
     assert.notEqual(mechanical.projectVersionId, projectVersionId)
     assert.notEqual(mechanical.directed.command.id, directed.command.id)
     assert.notEqual(mechanical.directed.command.payload.snapshotRefs.quality, principal.qualityId)
     evidence.mechanicalFixture = mechanical.receipt
-    // Color compilation is real, but its source metadata and fixture setup are
-    // controlled. It belongs to the separate project/source identities.
-    const principalCompilation = JSON.parse((await client.v2ColorPipelineCompilation.findFirstOrThrow({ where: { workspaceId, projectId } })).compilationJson)
-    await post(`/v1/projects/${mechanical.projectId}/color-pipeline-compilations`, {
-      sourceArtifactId: mechanical.sourceArtifactId, sourceManifestId: mechanical.sourceManifestId,
-      outputMetadata: principalCompilation.pipeline.outputMetadata,
-      stages: principalCompilation.pipeline.stages.map(({ id, kind, version, enabled, output, implementation, lut }) =>
-        ({ id, kind, version, enabled, output, implementation, ...(lut ? { lut } : {}) })),
-    }, `runtime-mechanical-color-${suffix}`, 201)
+    const seededWorkspace = await readPublicWorkspace(mechanical.projectId, 'seeded-blocked-review-before-browser')
+    assert.equal(seededWorkspace.project.currentVersionId, mechanical.projectVersionId)
+
     {
     const { projectId, projectVersionId, projectVersionHash, directed, sourceArtifactId, sourceManifestId,
       sourceSha256, sourceByteSize, sourceManifest, proxyArtifact, review } = mechanical
     const exportBody = { projectVersionId, projectVersionHash, format: '9:16',
       approval: { approved: true, note: 'Negative admission proof only; stored quality remains unknown.' } }
+    const seededOperation = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: review.operationId } })
+    assert.equal(seededOperation.workspaceId, workspaceId)
+    assert.equal(seededOperation.projectId, projectId)
+    assert.equal(seededOperation.type, 'project-proxy-render')
+    assert.equal(seededOperation.status, 'succeeded')
+    assert.equal(seededOperation.phase, 'completed')
+    assert.equal(seededOperation.progressCompleted, 4)
+    assert.equal(seededOperation.progressTotal, 4)
+    assert.equal(seededOperation.progressUnit, 'render')
     await observe({ stage: 'seeded-blocked-review', id: projectId, status: 'reviewing-proxy',
+      operationId: seededOperation.id, operationStatus: 'succeeded', phase: 'completed', completed: 4,
       origin: 'controlled-pg-seed+real-api-projection+native-browser', seededStatus: true })
     const projectBefore = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
     const runBefore = await client.v2DirectorRun.findUniqueOrThrow({ where: { id: directed.run.id } })
@@ -603,12 +717,30 @@ export async function runDashboardRuntimeJourney(input) {
     evidence.states.push({ stage: 'current-version-cas-rejected', projectId: copy.project.id, operationId: staleClaim.operation.id,
       currentVersionId: changed.version.id, operationVersionId: staleClaim.context.projectVersionId,
       status: afterVersionFailure.status, origin: 'real-command-service+fenced-repository' })
+    await drainBrowserResponses()
+    assert.deepEqual(evidence.browserErrors, [], 'No page errors, HTTP errors or unexplained browser conflicts are accepted')
     evidence.pipeline = await pipeline.finish(); evidence.outcome = 'passed'
   } catch (error) { primaryError = error; evidence.outcome = 'failed'; evidence.failure = { name: error.name, message: error.message }; throw error }
   finally {
     prototype.claimNext = originals.claimNext; prototype.advancePhase = originals.advancePhase
+    let postflightError
+    try { await drainBrowserResponses() }
+    catch (error) { evidence.browserEvidencePostflightError = safeError(error); postflightError = error }
+    // Remove these observers only after their bodies have settled, before page
+    // closure can invalidate protocol access to a completed response.
+    for (const { opened, onResponse } of browserResponseListeners) opened.off('response', onResponse)
+    if (!primaryError && evidence.browserErrors.length) {
+      postflightError ??= new Error('Browser error ledger is nonempty at postflight')
+      evidence.outcome = 'failed'
+    }
     try { evidence.postflight = await closeOwnedBrowser({ context, browser, server, child }); assert.equal(evidence.postflight.browserTerminal, true) }
-    catch (error) { if (!primaryError) throw error; evidence.postflight.cleanupError = String(error) }
-    finally { await writeFile(join(directory, 'w35-runtime.json'), JSON.stringify(evidence, (_, value) => typeof value === 'bigint' ? value.toString() : value, 2)) }
+    catch (error) { evidence.postflight.cleanupError = safeError(error); postflightError ??= error }
+    // pageerror/console observers remain active through close. A late error must
+    // turn the persisted outcome into FAIL while preserving an earlier failure.
+    if (evidence.browserErrors.length) postflightError ??= new Error('Browser error ledger is nonempty after browser close')
+    if (postflightError) evidence.outcome = 'failed'
+    try { await writeFile(join(directory, 'w35-runtime.json'), JSON.stringify(evidence, (_, value) => typeof value === 'bigint' ? value.toString() : value, 2)) }
+    catch (error) { postflightError ??= error }
+    if (!primaryError && postflightError) throw postflightError
   }
 }

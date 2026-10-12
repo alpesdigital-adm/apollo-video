@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T23:10:23.416Z",
+  "updatedAt": "2026-10-12T01:11:27.000Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -37,7 +37,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "PR81 permanece aberto e bloqueado. Freeze53df: build local, face PG6/6, HTTP1/1, T-FR controlado2/2 e localizacao PG2/2 passaram com fingerprints estaveis e postflight limpo. CI53df passou npm test literal2809/2803pass/0fail/6skips e media7/7; Media workflow passou. Quality falhou posteriormente nos2casos transcript-rate (fixture ainda nao conclui operacao no attach atomico); dashboard falhou ao tentar admitir final com DirectorRun planned e review blocked; percepcao passou OCR e falhou fixture de rotacao FFV1/MKV sem metadata, com inventario terminal completo nesta corrida. Correcoes tests-only em preparo; oito suites supervisionadas e CI integral permanecem pendentes. Observer namespace isolado em implementacao para a falha EACCES viva anterior, sem atribuir a nova falha temporal a ele. FAILs historicos Windows depth11/face79e1/postflight continuam preservados; nenhuma prova concede autoridade facial ou aceite."
+          "text": "PR81 permanece aberto e bloqueado. CI dcc0 terminou: central38187207475 FAIL, Compose local/S3 PASS, Quality FAIL no replay do fake de extracao, percepcao FAIL na fixture de rotacao, dashboard38187207482 FAIL na barra do seed; Media38187207444 PASS controlado. Depois desse head, W9 local3/3, W10local2/2, extracao11/11 e temporal1/1 passaram em fontes posteriores fingerprintadas, sem substituir CI. Dashboard v4 passou as assercoes mas registrou GETworkspace409/console por color bindings vazios no seed: correcoes tests-only compilam antes INSERT e exigem workspace200/ledger browser aguardado sem erros; novo build/run ainda pendente. W66 continua isolado36/36puros+16/16PG; W69 fisico FAIL60fps concat frame6, policy nao aprovada. Teste composto Linux/oito suites, regressao da nova SHA e CI integral continuam obrigatorios. FAILs historicos Windows depth11/face79e1/EACCESowned vivo permanecem preservados; namespace Linux isolado ainda sem prova. Nenhum selo editorial/facial/deploy/aceite."
         },
         {
           "kind": "implementation",
@@ -302,9 +302,51 @@
           "ref": "Apollo/w61-70-20261008/ci-53df-dashboard-38185264381/download-manifest.json",
           "scope": "27 arquivos preservam FAIL real da admissao final PG: DirectorRun planned/review blocked. Nao e exportacao positiva nem flake.",
           "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave9-controlled-dcc0-v3-6900ce4d/result.json",
+          "scope": "W9 local posterior ao head dcc0: PASS3/3, zero skips; worker e FFmpeg reais, attach/review/succeed atomicos em memoria. Tracks conservam seus cues e preset efetivo, hash do documento/snapshot proprios e Director original intacto; negativo track/resolution totalmente selado antes enqueue exige INVALID_RENDER_INPUT, zero renderer/artefacts/review. Timing/audio/cor, variantes, modos/revert/repro e quatro negativos stale hashes/placement preservados. Face unknown suprime cues e bloqueia final; nao prova glyphs positivos nem admission/publication PG. SHA256 c092603796009807cab625f607da400ca503f9f423da5086e2fd368d561f8ae7; fingerprint e9a8b188fa187acfba1eba7df348a64a4893e2db2ea7788b2d095c55f632bf0a estavel,13 identidades terminais/10 snapshots/noDB/scratch limpo. FAILs W9v1/v2 preservados.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave10-controlled-dcc0-v1-c62a0210/result.json",
+          "scope": "W10 local posterior ao head dcc0: PASS2/2, zero skips; Commands/presets/overrides planejados, MP4/timing/audio/cor, integridade/replay e negativos de preset/perception/map preservados. Port attach/review/succeed atomico em memoria; quality review-required/face unknown, cues suprimidos/review blocked. Sidecar exige SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH e zero stages/promotions/persistence/rows; caller perception nao autoriza face. Nao prova captions, faces ou SRT/VTT positivos. SHA256 f043356919743df6b82f1c82488fb7127addbfa882d82952f9b0d4947f4c575e; fingerprint47b012735e0e2a81cb7e06285c7af16168539d735114f981f5b18d84a20e9706 estavel,9 identidades terminais/noDB/scratch limpo.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/extraction-controlled-dcc0-v1-64e3d689/result.json",
+          "scope": "Golden de extracao local posterior ao head dcc0: PASS11/11, zero skips; FFmpeg real, frames/timing e replay/render1 preservados, attach/review/succeed atomicos em memoria. Corrige fake obsoleto sem aprovar legendas/face ou publication PG. SHA2569332a33ba334bffdfcd1de4df97f0dbf2e0dad5a280d2315f5e829271e5ce664; fingerprint47b012735e0e2a81cb7e06285c7af16168539d735114f981f5b18d84a20e9706 estavel,9 identidades terminais/noDB/scratch limpo.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/temporal-adapter-dcc0-v2-f26dca46/result.json",
+          "scope": "Temporal adapter local posterior ao head dcc0: PASS1/1, zero skips. Fixture H264/MP4 aplica display_rotation90 antes do input remux, confirma metadata estrutural90 com ffprobe e rejeicao antes decode; demais FFV1/static/pan/cut/PTS/abort/deadline preservados. SHA25675db92872d7b30b9bc171e0ef919ee149e908bd839d9d838c2769a8af78d8bcb; fingerprint54dca4db0ffd31029b229c1d9f9dc73b0302588e2e2bf5da488f778b79d408ee estavel,3 identidades terminais/noDB/scratch limpo. FAIL v1 e CI de rotacao continuam historicos, novo CI pendente.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci-dcc0-central-38187207475/download-manifest.json",
+          "scope": "CI central dcc0 terminal FAIL38187207475. Compose local/S3 terminou PASS; Quality falhou no fake de replay do golden, percepcao falhou rotacao estrutural ausente. ManifestSHA25663c2c3f9d1943fbc7233778bdd54691708f18f0f061fda00120ef752e55441db; head dcc0b46b35909c9badb19b2d912f54e25176ded9, merge bff2f0adf8c9cadab7b410cfc5ef80d292dbb1c2/tree e3ca19e14f462021e196ef14f068ae1dee37466e. Postflight oficial Compose zero backends e containers encerrados; tres backends proprios no JSON interno anterior ao disconnect nao sao postflight. Patches locais posteriores exigem nova SHA/CI.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci-dcc0-perception-38187207475/download-manifest.json",
+          "scope": "FAIL temporal de rotacao estrutural no CI dcc0; OCR anterior passou. ManifestSHA2567381ae1553d3a1840e6efe52d70b44a6a7902ab034d04010417c719655db63c0. Preserva logs/proveniencia binaria e FAIL; nao falha atribuida ao supervisor ou detector.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci-dcc0-media-38187207444/download-manifest.json",
+          "scope": "Media dcc0 PASS em mecanica controlada; manifestSHA2566c35b86b97b5c687dcc2b192e21ab8f6ff554ea83bb29adc1b270d55d5aa5290,12 arquivos autenticados. MP4 f9c3e3191b72ca4611b790eec0287038dc610ce8e2d33de417fab0255ee62f28/1567530bytes. Face unknown/quality review-required; nao editorial approval/deploy/aceite.",
+          "role": "controlled-e2e"
         }
       ],
-      "nextAction": "Concluir fixtures dashboard/retiming/rotacao sem relaxar autoridade, validar namespace observer Linux e repetir CI obrigatorio no novo SHA. Integrar PR81 somente com gates aplicaveis verdes; continuar W66/W69 e qualificacao facial/corpus sem abrir holdout ou promover unknown.",
+      "nextAction": "Congelar e revisar fonte posterior ao dcc0, gerar/checkar status, executar build/regressao/CI e dashboard corrigido sob supervisor unico. W9/W10 locais provam mecanica/supressao fail-closed, nao captions/faces/sidecars positivos. W69 requer diagnostico PTS e policy demonstrada em pixels; W66 exige origens tipadas/lifecycle e cutover separado. Holdout fechado e faceSafety unknown.",
       "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch. Registro operacional: persistencia Brain pendente por HTTP 502 / embedding_provider_error:openai:401; nenhuma memoria gravada, credencial alterada ou nova tentativa prevista sem sinal de recuperacao. Evidencias continuam no repositorio e no arquivo privado de cada run. Produtor facial diagnostico passou PG/runner real 4/4 apos corrigir claim retrying via transicao oficial do dominio e audit incompleto dos controles da fixture. Falhas anteriores permanecem arquivadas; HTTP facial proprio passou 1/1 sem skips em build Next fresco, com POST autenticado, replay concorrente, worker diagnostico YuNet em video development licenciado e GET selado; SHA256 do result 1a1ba6d017fe1acab99cddd18c9b3e16e11c96dbc1554114f3cc42015075a5dc. Quatro amostras/quatro caixas, faceSafety unknown e postflight com zero backends/16 PIDs terminais. Isso comprova apenas a mecanica diagnostica; modelos V5/V6/V7 seguem reprovados e holdout fechado. Mesmo patch de claim aplicado a OCR/temporal, com typecheck e gate de arquitetura verdes; este run prova retry facial. Nenhum holdout aberto ou autoridade facial concedida. CI proposto em 11/10: OCR e temporal reais em PostgreSQL isolado terão job dedicado com provenance de binários e supervisão serial; ainda não executado. tests/v2/prisma-face-producer-http.integration.mjs permanece fora do CI por insumos development privados/licenciados/pinados e runtime Python/OpenCV. Prova local face-http-resume-v1-39bfb5da SHA1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 não substitui CI. Face producer PG/runner também local; CI executa somente três casos offline de fixture/audit, sem detector apto ou holdout."
     },
     {
@@ -589,13 +631,13 @@
       "state": "em-construcao",
       "construction": "in-progress",
       "integration": "not-integrated",
-      "validation": "none",
+      "validation": "isolated",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Request v2 retorna review-required/plan:null sem aceitar observação do caller; domínio de override manual por variante existe isoladamente. Persistência atômica Command/versão, RenderInput, ROI real avaliada e trajetória automática ainda pendentes."
+          "text": "Draft W66 isolado:36/36puros e contrato PostgreSQL16/16zero skips passaram no manifesto privado2f391bf3e00845cd05e2fb428a208eaf6820b68f657b759bad966628b6d2d0bb,14paths ancorados. Nova policy canônica e autoridade historica preservam hashes antigos; State/Version resultVersion exato, crop-only, siblings/plan semantics/overlays/issues preservados para create/revise, non-output snapshot facts/scopes/hashes/schema1 e author/time vs Command selados. Esses arquivos nao estao integrados neste checkout/PR. Falta fork-with-content/ingest/director/inherit/restore com fatos tipados, rights/lifecycle transacionais, COMMIT diferido observavel e cutover15builders/16writers/hydrators/consumers/API. Contract0 e audit-only, upgrade historico nao implementado. CreationCommandv1 nao sela intencao original de brief/policies; fatos persistidos nao suprem caller intent. Sem fallback formato/ancestor/Stateemptyautomatic."
         },
         {
           "kind": "validation",
@@ -658,10 +700,16 @@
           "ref": "Apollo/w61-70-20261008/w66-state-pg-v5-8891b567/result.json",
           "scope": "PASS12/12zero skips(11subcases+suite): bootstrap completo, State/Version/CreationCommand, duas variantes do mesmo formato, revise exata, rollback/CAS, autoridades/scopes,10forgeries reseladas, permutacao, geometry, append-only e dois latches snapshot.6 identidades terminais,4amostrasPGzero,cluster/porta/scratchlimpos. SQL0edc003d6e7931ec5854131d13cd57ae6eac5e68b8dc3c5d262693a0b1947365,test9e7baf2d1184fa65b83a0f47f3bc934cae91286a9714b8cbd82921d77862e8bd,schema d9ab640f75e34f72ce41a4e2c01e4b9a823f588ee0eb8e2484d233ca21b904e3. Checkoutbase8428+draftfingerprint6129ce936be150899533a9cb30a85c3a5f3bdbfe6656616f75347a6285cd2a17antes/depoisigual. Ingest/lifecycle/historico/producerfacts/non-outputrefs/16writers continuam pendentes; nao ativado. ResultSHA256 329c6062ff25d6cab7d3636be602bf5d63c1e2bd9cdd8969553338d336f7a563.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-output-facts-v7.json",
+          "scope": "Manifesto isolado14paths SHA2562f391bf3e00845cd05e2fb428a208eaf6820b68f657b759bad966628b6d2d0bb,base8428e827 e draft nao comitado. Puros36/36 SHAa351daa61b0369fa330f97b48c162e651fd5fe9fc113d0492b39d169bb7486a4; PG16/16 SHAc48dfa6ba67cef24926a1115716f05d5c3d604ec0c219649a76f248ca0319a5c; fingerprint ae75a3174608552ad25a0f32528927d9463d7bed051b9f83845cf73f0c40792e antes/depois igual. PG6identidades terminais/zero clientes/clusterporta/scratchlimpos; puros terminaram antes primeiro snapshot, sem inventario descendente alegado. Golden novo independente receipt4dad69c2195ec565f0fa519ef76dee7775cf8d9bf1bad6f96f41f04d500c02c7, antigos f19d/7c0b preservados. Bootstrap/constraints isolados, nao runtime cutover/deploy/aceite.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Fechar snapshotRefs nao output (brief/policies/treatment/story) e author/time vs Command, fatos root autoritativos e ingest/lifecycle/historico; depois cutover coerente de15builders/16writers/hydrators/consumers. Primeiro contrato PG isolado passou12/12zero skips apos correcoes sintaticas/alias e matcher NOTNULL exato. Isso nao ativa runtime nem prova a wave completa. Writer futuro deve tornar rejeicao deferred observavel antes de relatar sucesso, com readback/rollback comprovados.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: contrato versionado de revisão obrigatória, sem geometria autorizada; autenticação, base, source e rights preservados. Validação de contratos e 10 testes unitários passaram. Set v2/projeção geométrica são apenas especificados: falta schema/Command/RenderInput/PG, e o overlay puro não comprova runtime nem conclusão da capability. Em 11/10, schema isolado SHA3ad3b21d6ca5d6fc0f8988bc6175154eeb4657c38aaba7c325d30904ef61fedc e SQL SHAa41baf5c5871d90e59adaad0309f19636fc31cf737d4c012933fe22924f38ac6 passaram revisão estrutural inicial e Prisma validate 5.22; oito testes de domínio passaram. São provas estáticas/isoladas, não migration executada. Permanecem ajustes de ordem canônica/normalização e todo o cutover; guards append-only exigem substituir resets destrutivos de fixtures sem relaxar integridade. Checkpoint11/10 atual:31/31 puros e golden anteriores preservados no recibo v4; cliente Prisma5.22 gerado no checkout isolado com autoinstall proibido. Primeira migration falhou por sintaxe; nenhum teste PG executado. Notas de8/10 testes acima sao historicas, nao estado atual. A tentativa v5 posterior aplicou migration e passou12/12 no contrato isolado; FAILs v1-v4 permanecem historicos e nenhum implica ativacao dos writers."
+      "nextAction": "Revisar o manifesto isolado e especificar origens tipadas antes cutover: fork-with-content preserva conteudo/novas identidades+lineage sem transferir critic; createProject exige Command de variante explicito antes ingest. Fechar ingest/lifecycle/historical e diagnostico COMMIT diferido, depois migrar15builders/16writers/hydrators/consumers/API atomicamente.16/16PG isolados nao ativam runtime nem comprovam wave completa.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: contrato versionado de revisão obrigatória, sem geometria autorizada; autenticação, base, source e rights preservados. Validação de contratos e 10 testes unitários passaram. Set v2/projeção geométrica são apenas especificados: falta schema/Command/RenderInput/PG, e o overlay puro não comprova runtime nem conclusão da capability. Em 11/10, schema isolado SHA3ad3b21d6ca5d6fc0f8988bc6175154eeb4657c38aaba7c325d30904ef61fedc e SQL SHAa41baf5c5871d90e59adaad0309f19636fc31cf737d4c012933fe22924f38ac6 passaram revisão estrutural inicial e Prisma validate 5.22; oito testes de domínio passaram. São provas estáticas/isoladas, não migration executada. Permanecem ajustes de ordem canônica/normalização e todo o cutover; guards append-only exigem substituir resets destrutivos de fixtures sem relaxar integridade. Checkpoint11/10 atual:31/31 puros e golden anteriores preservados no recibo v4; cliente Prisma5.22 gerado no checkout isolado com autoinstall proibido. Primeira migration falhou por sintaxe; nenhum teste PG executado. Notas de8/10 testes acima sao historicas, nao estado atual. A tentativa v5 posterior aplicou migration e passou12/12 no contrato isolado; FAILs v1-v4 permanecem historicos e nenhum implica ativacao dos writers. Checkpoint atual substitui apenas o estado do draft isolado: manifesto v7 fecha36puros/16PG e non-outputfacts/autor-time; resultados v1-v6 permanecem historicos. Pendencias de origens/lifecycle/cutover e caller intent continuam abertas, sem promocao do TODO."
     },
     {
       "id": "W67",
@@ -819,7 +867,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "Receipt de cues/ASS existe somente no domínio e passou 3 testes, que não comprovam clock ou OutputSpec corretos: Math.round ainda produz janela ASS divergente (30 fps [1,2) vira .03–.07 e inclui frame 2), e a validação aceita dimensões positivas incompatíveis com aspectRatio. Renderer, persistência, contratos, sidecars e critic final não o consomem ainda. W66 precisa remover identidades por formato e prover variante/revisão/estado reais. Publicação final ainda separa catálogo, attachment e succeed; W69 exige commit atômico de receipt/manifests/catalog/outbox/success sob fences de head/rights/attempt/lease/cancel. Timing ASS precisa correção e prova independente nos pixels, incluindo cue curta/adjacente e fragmento rebaseado. Dependências W68 e output final continuam abertas."
+          "text": "W69 nao integrado. Scaffold no checkout de integracao conserva receipt/clock e OutputSpec insuficientes; correcoes clock/encoding/receipt/spec permanecem isoladas. Prova fisica pinada W69v2 FAIL:60fps trim/setpts/fps/concat layer0[6,7) changedFrames[] esperado[6], enquanto lavfi60frame6 passou. FFmpeg8.1.1 SHA09948d4cdd0650da6ff5a87577469f2a218dc2615ae379f8f734d24c49de0f73, libass0.17.4/Arial pinados; floorCS/ceil racional nao autorizam clock real. A corrida parou no caso23;111/803/adjacentes/fragmento posteriores nao foram validados. Diagnostico v3 showinfo pre-libass/raw RGB executado e repetiu o mesmo FAIL: time_base1/1000000, frame5PTS83333/frame6PTS100000/frame7PTS116667; pts_timeText0.1 no frame6. Conversao double para inteiroms recebida por libass permanece inferencia nao medida, sem alegacao PTS99999. Nenhuma policy/seal/reuse aprovado; futura ativacao exige payload materializado e cold render para entradas sem seal, sem retrofit do cachev2. W66 identidades/revisoes/State reais e publication final atomica receipt/manifests/catalog/outbox/success sob head/rights/attempt/lease/cancel continuam pendentes. W10 comprova apenas sidecar negativo com zero efeitos."
         },
         {
           "kind": "validation",
@@ -846,9 +894,27 @@
           "ref": "src/v2/domain/rendered-subtitle-receipt.ts",
           "scope": "Receipt isolado vincula variante/OutputSpec, operação/attempt, ASS UTF-8 e eventos bijetivos, texto pós-wrap, MP4/RenderInput/mapa e SHA real do binário. Testes focados 3/3 e TSC passaram. Não integrado; consistência estrutural não comprova pixels ou bounds temporais efetivos.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w69-ass-clock-v2-ec9c135a/result.json",
+          "scope": "FAIL fisico pinado, resultadoSHA256713856214d8f395dac8ff693f16b6bc9f687cd99d6953b363313e8e8f10d7217. ProofSHA1985c12400160be6a388f43362c6a6e07197f5d069e17480cd0e15ce40cee005; manifesto ASS/logs/configSHA0d51387d176f787a02bb5c566a85269cdfd449fbdb5a2d27d29dd959e5381472. Caso23(ordinal)60fps concat[6,7) sem pixels,baseline e rendered rawSHA56aad8d01f93dc3ed8f764187771dd881666d55ee82ee47dab5b93e328566c3a; erroERR_ASSERTION preservado.5identidades terminais/noDB/scratchlimpo/fingerprintddd2ee8a0ad8b9e36b1b3b90ac6b4c2e617bab9ddd2a0844fb6c6b607fea8b28estavel.111/803 e casos posteriores nao executados nesta tentativa. Nao aprova policy, face, produto ou transferencia Linux/Windows.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave10-controlled-dcc0-v1-c62a0210/result.json",
+          "scope": "W10 local posterior ao head dcc0: PASS2/2, zero skips; Commands/presets/overrides planejados, MP4/timing/audio/cor, integridade/replay e negativos de preset/perception/map preservados. Port attach/review/succeed atomico em memoria; quality review-required/face unknown, cues suprimidos/review blocked. Sidecar exige SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH e zero stages/promotions/persistence/rows; caller perception nao autoriza face. Nao prova captions, faces ou SRT/VTT positivos. SHA256 f043356919743df6b82f1c82488fb7127addbfa882d82952f9b0d4947f4c575e; fingerprint47b012735e0e2a81cb7e06285c7af16168539d735114f981f5b18d84a20e9706 estavel,9 identidades terminais/noDB/scratch limpo.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w69-ass-clock-v3-diagnostic-bd4b5624/result.json",
+          "scope": "FAIL diagnostico fisico preservado, resultadoSHA256189184844042196db77bf534379d1b3e65828f883fe4a6d94751418f055981bb; manifest ASS/log/clock/raw RGB SHA2ce1f0f6e9bc77e9b07d5bbf981808b5618ef1b4e8dcc1b4c5fe1ac85d19e60b. Caso23 repete60fps concat layer0[6,7) changedFrames[]; showinfo real pre-libass time_base1/1000000, frames5/6/7PTS83333/100000/116667, frame6pts_timeText0.1. Buffersbaseline/rendered iguaisSHA56aad8d01f93dc3ed8f764187771dd881666d55ee82ee47dab5b93e328566c3a. Conversao double para inteiro ms do libass nao medida;111/803/adjacentes/fragmento posteriores naoalcancados. Fonte ed822e67d3e89fa0926e1d03d9457897d161504f366d0de98799049cab0274de, fp e4c78ef455bed8dc2cfb1897cef91666b3dfd81ed242fae8e1d7e1b83246d489 antes/depois igual;5identidades terminais/noDB/scratchlimpo. Nao aprova policy nem transferencia entre plataformas.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Após o checkpoint diagnóstico, implementar clock/encoding/serializer e provas independentes de pixels/VTT; integrar receipt emitido somente após o cutover W66 com identidade real e publicação atômica, sem aliases de formato. Provar latches SQL após espera, rollback e sidecar stale/revoked/cancelled.",
+      "nextAction": "Manter policy congelada e propor clock/emission materializados com diagnostico do timestamp efetivamente recebido por libass; showinfo pre-libass e raw RGB v3 repetem FAIL60fps concat apesar PTS100000/time_base1/1000000. Resolver o gate sem mudar expected/casos e provar boundaries111/803, adjacentes e clip/rebase em pixels independentes. Depois revisar seal/manifest novo, integrar receipt aos fatos W66 e publication atomica final; SRT/VTT positivos e browser encoding nativo permanecem pendentes.",
       "notes": "Estimativa 4–6 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
     },
     {
@@ -12924,6 +12990,10 @@
         {
           "kind": "owner-acceptance",
           "text": "No owner acceptance is claimed for the open scope."
+        },
+        {
+          "kind": "validation",
+          "text": "Reconciliacao atual W9/W10: renders controlados preservam presets, Commands/modos/override/revert, timing/audio/cor e negativos, mas face unknown suprime todos os cues. Pixels positivos/glyph coverage/collision avoidance e sidecars SRT/VTT positivos continuam pendentes. Fixture nao comprova materializacao subtitleResolution pelo adapter Prisma nem variante W66 real; nenhum TODO promovido."
         }
       ],
       "evidence": [
@@ -12950,6 +13020,18 @@
           "ref": "tests/v2/subtitle-style-visual-goldens.integration.mjs",
           "role": "integration",
           "scope": "Existing source/test/document artifact; existence cited for scope only, not claiming execution in this audit."
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave9-controlled-dcc0-v3-6900ce4d/result.json",
+          "scope": "W9 local posterior ao head dcc0: PASS3/3, zero skips; worker e FFmpeg reais, attach/review/succeed atomicos em memoria. Tracks conservam seus cues e preset efetivo, hash do documento/snapshot proprios e Director original intacto; negativo track/resolution totalmente selado antes enqueue exige INVALID_RENDER_INPUT, zero renderer/artefacts/review. Timing/audio/cor, variantes, modos/revert/repro e quatro negativos stale hashes/placement preservados. Face unknown suprime cues e bloqueia final; nao prova glyphs positivos nem admission/publication PG. SHA256 c092603796009807cab625f607da400ca503f9f423da5086e2fd368d561f8ae7; fingerprint e9a8b188fa187acfba1eba7df348a64a4893e2db2ea7788b2d095c55f632bf0a estavel,13 identidades terminais/10 snapshots/noDB/scratch limpo. FAILs W9v1/v2 preservados.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave10-controlled-dcc0-v1-c62a0210/result.json",
+          "scope": "W10 local posterior ao head dcc0: PASS2/2, zero skips; Commands/presets/overrides planejados, MP4/timing/audio/cor, integridade/replay e negativos de preset/perception/map preservados. Port attach/review/succeed atomico em memoria; quality review-required/face unknown, cues suprimidos/review blocked. Sidecar exige SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH e zero stages/promotions/persistence/rows; caller perception nao autoriza face. Nao prova captions, faces ou SRT/VTT positivos. SHA256 f043356919743df6b82f1c82488fb7127addbfa882d82952f9b0d4947f4c575e; fingerprint47b012735e0e2a81cb7e06285c7af16168539d735114f981f5b18d84a20e9706 estavel,9 identidades terminais/noDB/scratch limpo.",
+          "role": "implementation"
         }
       ],
       "nextAction": "Close the exact open TODO rows above against the referenced V2 code, then run the corresponding database/API/browser or media journey where required; preserve separate deployment and owner-acceptance gates.",
@@ -12990,6 +13072,10 @@
         {
           "kind": "owner-acceptance",
           "text": "No owner acceptance is claimed for the open scope."
+        },
+        {
+          "kind": "validation",
+          "text": "Reconciliacao atual W9/W10: renders controlados preservam presets, Commands/modos/override/revert, timing/audio/cor e negativos, mas face unknown suprime todos os cues. Pixels positivos/glyph coverage/collision avoidance e sidecars SRT/VTT positivos continuam pendentes. Fixture nao comprova materializacao subtitleResolution pelo adapter Prisma nem variante W66 real; nenhum TODO promovido."
         }
       ],
       "evidence": [
@@ -13016,6 +13102,18 @@
           "ref": "src/v2/application/project-subtitle-configurations.ts",
           "role": "implementation",
           "scope": "Existing source/test/document artifact; existence cited for scope only, not claiming execution in this audit."
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave9-controlled-dcc0-v3-6900ce4d/result.json",
+          "scope": "W9 local posterior ao head dcc0: PASS3/3, zero skips; worker e FFmpeg reais, attach/review/succeed atomicos em memoria. Tracks conservam seus cues e preset efetivo, hash do documento/snapshot proprios e Director original intacto; negativo track/resolution totalmente selado antes enqueue exige INVALID_RENDER_INPUT, zero renderer/artefacts/review. Timing/audio/cor, variantes, modos/revert/repro e quatro negativos stale hashes/placement preservados. Face unknown suprime cues e bloqueia final; nao prova glyphs positivos nem admission/publication PG. SHA256 c092603796009807cab625f607da400ca503f9f423da5086e2fd368d561f8ae7; fingerprint e9a8b188fa187acfba1eba7df348a64a4893e2db2ea7788b2d095c55f632bf0a estavel,13 identidades terminais/10 snapshots/noDB/scratch limpo. FAILs W9v1/v2 preservados.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave10-controlled-dcc0-v1-c62a0210/result.json",
+          "scope": "W10 local posterior ao head dcc0: PASS2/2, zero skips; Commands/presets/overrides planejados, MP4/timing/audio/cor, integridade/replay e negativos de preset/perception/map preservados. Port attach/review/succeed atomico em memoria; quality review-required/face unknown, cues suprimidos/review blocked. Sidecar exige SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH e zero stages/promotions/persistence/rows; caller perception nao autoriza face. Nao prova captions, faces ou SRT/VTT positivos. SHA256 f043356919743df6b82f1c82488fb7127addbfa882d82952f9b0d4947f4c575e; fingerprint47b012735e0e2a81cb7e06285c7af16168539d735114f981f5b18d84a20e9706 estavel,9 identidades terminais/noDB/scratch limpo.",
+          "role": "implementation"
         }
       ],
       "nextAction": "Close the exact open TODO rows above against the referenced V2 code, then run the corresponding database/API/browser or media journey where required; preserve separate deployment and owner-acceptance gates.",
@@ -13056,6 +13154,10 @@
         {
           "kind": "owner-acceptance",
           "text": "No owner acceptance is claimed for the open scope."
+        },
+        {
+          "kind": "validation",
+          "text": "Reconciliacao atual W9/W10: renders controlados preservam presets, Commands/modos/override/revert, timing/audio/cor e negativos, mas face unknown suprime todos os cues. Pixels positivos/glyph coverage/collision avoidance e sidecars SRT/VTT positivos continuam pendentes. Fixture nao comprova materializacao subtitleResolution pelo adapter Prisma nem variante W66 real; nenhum TODO promovido."
         }
       ],
       "evidence": [
@@ -13082,6 +13184,18 @@
           "ref": "tests/v2/subtitle-style-visual-goldens.integration.mjs",
           "role": "integration",
           "scope": "Existing source/test/document artifact; existence cited for scope only, not claiming execution in this audit."
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave9-controlled-dcc0-v3-6900ce4d/result.json",
+          "scope": "W9 local posterior ao head dcc0: PASS3/3, zero skips; worker e FFmpeg reais, attach/review/succeed atomicos em memoria. Tracks conservam seus cues e preset efetivo, hash do documento/snapshot proprios e Director original intacto; negativo track/resolution totalmente selado antes enqueue exige INVALID_RENDER_INPUT, zero renderer/artefacts/review. Timing/audio/cor, variantes, modos/revert/repro e quatro negativos stale hashes/placement preservados. Face unknown suprime cues e bloqueia final; nao prova glyphs positivos nem admission/publication PG. SHA256 c092603796009807cab625f607da400ca503f9f423da5086e2fd368d561f8ae7; fingerprint e9a8b188fa187acfba1eba7df348a64a4893e2db2ea7788b2d095c55f632bf0a estavel,13 identidades terminais/10 snapshots/noDB/scratch limpo. FAILs W9v1/v2 preservados.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/wave10-controlled-dcc0-v1-c62a0210/result.json",
+          "scope": "W10 local posterior ao head dcc0: PASS2/2, zero skips; Commands/presets/overrides planejados, MP4/timing/audio/cor, integridade/replay e negativos de preset/perception/map preservados. Port attach/review/succeed atomico em memoria; quality review-required/face unknown, cues suprimidos/review blocked. Sidecar exige SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH e zero stages/promotions/persistence/rows; caller perception nao autoriza face. Nao prova captions, faces ou SRT/VTT positivos. SHA256 f043356919743df6b82f1c82488fb7127addbfa882d82952f9b0d4947f4c575e; fingerprint47b012735e0e2a81cb7e06285c7af16168539d735114f981f5b18d84a20e9706 estavel,9 identidades terminais/noDB/scratch limpo.",
+          "role": "implementation"
         }
       ],
       "nextAction": "Close the exact open TODO rows above against the referenced V2 code, then run the corresponding database/API/browser or media journey where required; preserve separate deployment and owner-acceptance gates.",
@@ -21572,7 +21686,7 @@
       "blockers": [
         {
           "kind": "validation",
-          "text": "Exportacao final positiva atual permanece pendente: CI53df nega admissao PostgreSQL com DirectorRun planned/quality review-required/face unknown e ProxyReview blocked. A jornada corrigida comprovara proxy/retry e negativos finais; reviewing-proxy do segundo projeto e seed declarado, nunca transicao editorial aprovada. Rendering-final/completed/MP4 final/replay nao estao comprovados pelo recorte atual."
+          "text": "W35 final positivo permanece pendente: DirectorRun planned/quality review-required/face unknown e ProxyReview blocked/finalAllowedfalse devem negar admissao publica/PG. CI dcc0 dashboard38187207482 falhou barra de seed. Dashboard localv4 concluiu as assercoes mas ledger registrou2erros GETworkspace409+console; nao e browser limpo. Correcao tests-only agora compila source color real antes INSERTop, sela binding exato e exige workspace200 antesGUI, respostas aguardadas/bounded e pageerror/HTTP/409 inexplicado FAIL. Novo build/run pendente. Reviewing-proxy/succeeded do segundo projeto sao seed declarados, nao transicao editorial aprovada. Rendering-final/completed/finalMP4/replay positivos nao comprovados pelo recorte atual."
         },
         {
           "kind": "deployment",
@@ -21678,6 +21792,12 @@
           "type": "private",
           "ref": "Apollo/w61-70-20261008/ci-53df-dashboard-38185264381/download-manifest.json",
           "scope": "FAIL atual: a autoridade PG rejeita a aprovacao devolvida por port controlado porque DirectorRun/review persistidos nao autorizam final. Correcao tests-only reduz a alegacao para negativos reais e proxy; nova execucao pendente.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci-dcc0-dashboard-38187207482/download-manifest.json",
+          "scope": "FAIL dashboard CI dcc0 na expectativa de barra do seed. ManifestSHA25668f3208d5e26040525955a36dad67bd0b196c83949808c91cecce2641f1d160e,27arquivos; final publico422/zeroefeitos preservado. Seed reviewing-proxy/succeeded declarado e mecanica nao autorizam final.",
           "role": "integration"
         }
       ],

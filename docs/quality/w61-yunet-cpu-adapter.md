@@ -1,6 +1,109 @@
 # W61 isolated YuNet CPU adapter candidate
 
-## Controlled integration checkpoint — 2026-10-11
+## Latest controlled checkpoint — 2026-10-12 UTC
+
+PR81 remains blocked. The reviewed integration base is `dcc0b46b35909c9badb19b2d912f54e25176ded9`;
+the local corrections below are later working-tree sources with their own fingerprints,
+not evidence that this head or the next commit passes all gates. No TODO row, deployment
+or owner acceptance is promoted. Diagnostic face evidence remains unknown and all
+failed model gates and the closed holdout remain unchanged.
+
+CI dcc0 is terminal: central `38187207475` failed after Compose local/S3 passed;
+Quality failed the extraction fake's replay and perception failed the rotation fixture.
+Dashboard `38187207482` failed the seeded operation's progress-bar expectation.
+Media `38187207444` passed controlled mechanics. The respective download manifests
+are retained privately; central manifest SHA-256 is
+`63c2c3f9d1943fbc7233778bdd54691708f18f0f061fda00120ef752e55441db`.
+The official Compose postflight recorded zero backends and terminal containers;
+the three owned backends in an earlier internal JSON precede disconnect and are
+not the postflight. A new reviewed SHA still needs the complete mandatory CI.
+
+| Later local source | Result | Exact proof boundary |
+| --- | --- | --- |
+| W9 `wave9-controlled-dcc0-v3-6900ce4d` | 3/3, zero skips | Real worker/FFmpeg, atomic attachment/review/success in memory; each track owns its effective preset and cues, content hash and fixture snapshot seal; original Director unchanged. Timing/audio/color, modes/revert/replay and tamper negatives remain. Unknown face coverage suppresses cues and blocks final. |
+| W10 `wave10-controlled-dcc0-v1-c62a0210` | 2/2, zero skips | Planned Commands/presets/overrides, physical timing/audio/color and integrity negatives; atomic port in memory. Unknown face coverage suppresses cues. Sidecars reject with exact `SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH` and zero effects. |
+| Extraction `extraction-controlled-dcc0-v1-64e3d689` | 11/11, zero skips | Real FFmpeg pixels/timing and replay without a second render; corrected atomic in-memory port. |
+| Temporal `temporal-adapter-dcc0-v2-f26dca46` | 1/1, zero skips | H264/MP4 input rotation set by `-display_rotation:v:0 90` before remux input; ffprobe structural 90-degree assertion and rejection before decode preserved, with the other FFV1/PTS/cut/pan/abort/deadline cases. |
+
+Result SHA-256 values, respectively:
+`c092603796009807cab625f607da400ca503f9f423da5086e2fd368d561f8ae7`,
+`f043356919743df6b82f1c82488fb7127addbfa882d82952f9b0d4947f4c575e`,
+`9332a33ba334bffdfcd1de4df97f0dbf2e0dad5a280d2315f5e829271e5ce664`,
+`75db92872d7b30b9bc171e0ef919ee149e908bd839d9d838c2769a8af78d8bcb`.
+Each has a stable before/after source fingerprint, terminal observed processes and
+clean scratch postflight; these runs did not start PostgreSQL. W9v1/v2 and the earlier
+rotation failure remain failed historical runs. These results establish neither
+positive caption pixels, facial safety, positive SRT/VTT, PostgreSQL publication of
+the in-memory ports nor editorial/final acceptance. The present Prisma source adapter
+still does not materialize subtitleResolution; W9's fixture is not that missing runtime.
+
+W35 positive final admission remains pending. The real project stays revising with
+review-required/unknown quality and blocked review; public and PostgreSQL admission
+must reject final with zero effects. Reviewing-proxy and the succeeded proxy operation
+in the second project are explicit seeds. Dashboard localv4 passed its assertions but
+recorded two browser errors (workspace GET409 and console); it is not a clean-browser
+proof. The new test-only correction compiles the actual copied source through the public
+color API before inserting the seeded operation, hydrates the persisted compilation,
+and seals source/manifest/compilation/pipeline hashes in its binding. It requires public
+workspace200 before the seeded GUI observation, awaits bounded response evidence, and
+fails on page errors, HTTP errors or unexplained conflicts, including late errors after
+browser close. This correction awaits a fresh build/run; rendering-final, completed,
+final MP4 and final replay remain outside the current proof.
+
+W66 is a separate uncommitted draft on base8428e827. Manifest
+`w66-output-facts-v7.json`, SHA-256
+`2f391bf3e00845cd05e2fb428a208eaf6820b68f657b759bad966628b6d2d0bb`,
+anchors fourteen files, 36/36 pure tests and 16/16 isolated PostgreSQL tests, all without
+skips. Pure result SHA-256:
+`a351daa61b0369fa330f97b48c162e651fd5fe9fc113d0492b39d169bb7486a4`;
+PG result SHA-256:
+`c48dfa6ba67cef24926a1115716f05d5c3d604ec0c219649a76f248ca0319a5c`.
+The PG cluster, port and clients are terminal and scratch is clean; the subsecond pure
+run has no descendant inventory claim. New canonical seals preserve historical hashes.
+The slice covers State/Version binding, explicit variants, crop-only dependencies,
+create/revise preservation of siblings/plans/overlays/issues, authoritative persisted
+non-output snapshot facts and Command author/time. It does not implement the sixteen
+writer/hydrator/consumer cutover, ingest/fork-with-content/director/inherit/restore
+origins, lifecycle/rights races, historical contract0 upgrade or observable deferred
+COMMIT failure. CreationCommandv1 does not seal original caller intent for brief/policies.
+Its current rate1, matching source/plan fps and single base-video limits must not become
+a runtime cutover that rejects retiming/multitrack behavior already supported by the
+product; those origins need explicit normalization, clock/rate and geometry facts.
+
+W69 physical timing is blocked. `w69-ass-clock-v2-ec9c135a` failed at ordinal case23:
+60fps, trim/setpts/fps/concat, subtitle layer0 interval[6,7) changed no pixels where
+frame6 was required; lavfi60fps/frame6 passed. Result SHA-256:
+`713856214d8f395dac8ff693f16b6bc9f687cd99d6953b363313e8e8f10d7217`;
+ASS/log/config manifest SHA-256:
+`0d51387d176f787a02bb5c566a85269cdfd449fbdb5a2d27d29dd959e5381472`.
+This uses pinned FFmpeg8.1.1/Windows, libass0.17.4 and the explicitly pinned Arial file.
+The primary FAIL and configuration are archived outside the checkout before scratch
+cleanup. Later111/803, adjacent-cue and clipped/rebased cases were not reached in that
+run. The follow-up `w69-ass-clock-v3-diagnostic-bd4b5624` repeated the same FAIL.
+Result SHA-256 `189184844042196db77bf534379d1b3e65828f883fe4a6d94751418f055981bb`;
+ASS/log/clock/raw-RGB manifest SHA-256
+`2ce1f0f6e9bc77e9b07d5bbf981808b5618ef1b4e8dcc1b4c5fe1ac85d19e60b`.
+Real pre-libass showinfo measured time_base 1/1000000 and frames 5/6/7 integer PTS
+83333/100000/116667; frame 6's printed pts_time is 0.1. The retained baseline and
+rendered RGB buffers are byte-identical (SHA-256
+`56aad8d01f93dc3ed8f764187771dd881666d55ee82ee47dab5b93e328566c3a`).
+The double-to-integer millisecond value received inside libass is not measured;
+that conversion remains an inference, not a claim that observed PTS was 99999.
+The source fingerprint remained e4c78ef455bed8dc2cfb1897cef91666b3dfd81ed242fae8e1d7e1b83246d489,
+five identities were terminal, no database started and scratch was clean.
+Later 111/803, adjacent and fragment cases still were not reached. No policy seal is
+approved and no Linux/Windows equivalence is inferred. W69 clock,
+encoding, receipt/OutputSpec corrections remain isolated; integration still needs W66
+identities and atomic receipt/manifests/catalog/outbox/success under head/rights/attempt/
+lease/cancel fences. Future activation must reject unsealed reuse with a new materialized
+payload; current cachev2 does not assert that policy. No positive sidecar/caption claim.
+
+The live-owned EACCES failure, interrupted Windows depth11 run and failed model results
+remain preserved. The isolated namespace supervisor and eight Linux supervised suites
+remain separate execution gates. W67 independent final pixels/corpus, W70 master,
+DigitalOcean deployment and owner acceptance remain pending.
+
+## Historical controlled integration checkpoint — 2026-10-11
 
 The diagnostic producer now has local PostgreSQL/HTTP proofs while all evaluated
 models remain failed-gate and faceSafety remains unknown. The proposed CI job

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { copyFile, mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import test from 'node:test'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
@@ -36,6 +36,7 @@ import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain
 import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import {
   LocalArtifactSourceMaterializer,
   LocalMediaUploadStorage,
@@ -53,11 +54,19 @@ import {
 // Only persistence is in-memory. No `EditorialRenderInput` is hand-built: the
 // worker derives it, decides the OutputSpec/placement geometry per variant, and
 // hands the rendered element map to the real format critic.
+// These controlled ports prove mechanics, not PostgreSQL publication or final
+// approval. Facial coverage stays unknown; enabled cues are suppressed. Positive
+// caption/face acceptance remains pending independent authoritative evidence.
 // ---------------------------------------------------------------------------
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
-const ffprobePath = require('ffprobe-static').path
+const ffmpegPath = resolveFfmpegBinary(process.env.FFMPEG_BIN)
+const ffprobePath = resolveFfprobeBinaryPath(require('ffprobe-static').path, process.env.FFPROBE_BIN, process.env, undefined, null)
+assert.ok(isAbsolute(ffmpegPath) && isAbsolute(ffprobePath), 'Controlled render proof requires explicit resolved media binaries')
+console.info(JSON.stringify({ schemaVersion: 'wave9-render-binaries/v1',
+  ffmpeg: { path: ffmpegPath, sha256: createHash('sha256').update(await readFile(ffmpegPath)).digest('hex') },
+  ffprobe: { path: ffprobePath, sha256: createHash('sha256').update(await readFile(ffprobePath)).digest('hex') },
+}))
 
 const FPS = 30
 const WORKSPACE_ID = 'workspace-wave9-combined'
@@ -113,7 +122,7 @@ const EXPECTED_CUES = Object.freeze([
  * variant's canvas. The same two subjects therefore carry different rectangles
  * in 9:16 and 16:9 — that is the whole point of the per-variant evidence.
  *
- * 9:16 (540x960): `subject-lower` sits on the burned caption band and
+ * 9:16 (540x960): `subject-lower` sits on the reserved caption band and
  * `subject-face` sits in the top strip the pillarboxed presenter never covers
  * (presenter = y 328..632 of 960).
  * 16:9 (960x540): the presenter fills the canvas and both subjects sit far above
@@ -469,23 +478,27 @@ const subtitleResolutionFor = (presetId) => presetId === null
 // --------------------------------------------------------------------------
 
 /**
- * Builds the immutable render source a repository would persist for ONE variant.
- * The subtitle policy is materialized with the production domain function, so a
- * disabled resolution really removes the cues instead of the test pretending to.
+ * Controlled materialization of ONE variant's effective subtitle configuration.
+ * This is a fixture snapshot, not proof of the Prisma adapter's materialization.
+ * The original directed document is retained; each track keeps its own cues.
  */
 function renderSourceFor(input) {
   const resolution = input.subtitleResolution
-  const cues = input.directedPlan.subtitleTracks.flatMap((track) => track.cues ?? [])
-  const materialized = resolution.enabled ? cues : []
   const editPlan = {
     ...input.directedPlan,
-    subtitleTracks: input.directedPlan.subtitleTracks.map((track) => ({ ...track, cues: materialized })),
+    subtitleTracks: input.directedPlan.subtitleTracks.map((track) => ({
+      ...track,
+      ...(resolution.enabled ? { presetId: resolution.presetId } : {}),
+      cues: resolution.enabled ? (track.cues ?? []).map((cue) => ({ ...cue })) : [],
+    })),
   }
+  const editPlanHash = calculateVersionHash(editPlan)
+  const snapshotSeal = calculateCanonicalHash({ editPlanHash, subtitleResolution: resolution })
   return Object.freeze({
     projectId: PROJECT_ID,
     projectVersionId: input.projectVersionId,
-    editPlanSnapshotId: input.editPlanSnapshotId,
-    editPlanHash: input.editPlanHash,
+    editPlanSnapshotId: `wave9-materialized-plan-${snapshotSeal}`,
+    editPlanHash,
     editPlan,
     format: input.format,
     sourceArtifactId: MASTER_ARTIFACT_ID,
@@ -562,12 +575,7 @@ async function renderThroughRealWorker(input) {
       phases.push(command.phase)
       return true
     },
-    async succeed(command) {
-      if (!matches(command)) return null
-      operation = succeedPublicOperation(operation, command.now)
-      lease = undefined
-      return record()
-    },
+    async succeed() { assert.fail('Proxy completion must atomically publish review and success through the project port') },
     async failOrRetry(command) {
       if (!matches(command)) return null
       failure = command.error
@@ -600,8 +608,19 @@ async function renderThroughRealWorker(input) {
   const workRoot = join(input.root, `work-${input.suffix}`)
   const renderer = new FfmpegEditorialProxyRenderer({ workRoot, ffmpegPath })
   const realStorage = new LocalMediaUploadStorage(artifactRoot)
-  const captured = { lutCleaned: 0, rendererCleaned: 0, renderCalls: 0 }
+  const captured = { lutCleaned: 0, rendererCleaned: 0, renderCalls: 0, atomicCompletions: 0 }
   const deps = {
+    onFailureDiagnostic({ operationId, error }) {
+      const message = String(error?.message ?? '')
+      const portable = (value) => typeof value === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(value) ? value : null
+      captured.originalFailureDiagnostic = {
+        operationId, phase: phases.at(-1) ?? null,
+        name: portable(error?.name), code: portable(error?.code),
+        expectedType: typeof error?.expected, actualType: typeof error?.actual,
+        messageSha256: createHash('sha256').update(message).digest('hex'),
+        messageBytes: Buffer.byteLength(message, 'utf8'),
+      }
+    },
     async catalogOutput() {},
     operations,
     colorPipelines,
@@ -620,7 +639,37 @@ async function renderThroughRealWorker(input) {
         assert.equal(query.editPlanSnapshotId, source.editPlanSnapshotId)
         return immutableSource
       },
-      async attachCompletedOutput(attached) { captured.attached = attached },
+      async attachCompletedOutput(attached) {
+        // Controlled persistence semantics only; no PostgreSQL publication claim.
+        assert.equal(operation.status, 'running')
+        assert.ok(matches({ leaseOwner: attached.lease.owner, attempt: attached.lease.attempt, now: attached.lease.now }))
+        assert.equal(attached.workspaceId, WORKSPACE_ID)
+        assert.equal(attached.operationId, operation.id)
+        assert.equal(attached.projectId, context.projectId)
+        assert.equal(attached.projectVersionId, context.projectVersionId)
+        assert.equal(attached.variantId, source.format)
+        assert.equal(attached.originalFileName, context.originalFileName)
+        assert.equal(attached.createdAt, attached.review.renderCompletedAt)
+        assert.equal(attached.outputArtifactId, context.outputArtifactId)
+        assert.equal(attached.outputManifestId, context.outputManifestId)
+        assert.equal(attached.review.projectVersionId, context.projectVersionId)
+        assert.equal(attached.review.proxyArtifactId, context.outputArtifactId)
+        assert.equal(attached.review.proxyManifestId, context.outputManifestId)
+        assert.equal(attached.review.inputHash, context.inputHash)
+        assert.equal(attached.recipeParameters.inputHash, context.inputHash)
+        assert.equal(captured.manifest.recipe.parametersHash, calculateCanonicalHash(attached.recipeParameters))
+        assert.equal(captured.elementMap.proxyHash, captured.stored.sha256)
+        assert.equal(captured.manifest.artifact.sha256, captured.stored.sha256)
+        const { reviewHash, ...reviewDocument } = attached.review
+        assert.equal(reviewHash, calculateCanonicalHash(reviewDocument))
+        assert.equal(attached.ocrReceipt, null)
+        const completed = succeedPublicOperation(operation, attached.lease.now)
+        captured.attached = attached
+        captured.review = attached.review
+        captured.atomicCompletions += 1
+        operation = completed
+        lease = undefined
+      },
     },
     artifacts: {
       async persistOrReplay(persist) {
@@ -639,27 +688,26 @@ async function renderThroughRealWorker(input) {
       async render(renderInput) {
         captured.renderCalls += 1
         captured.renderInput = renderInput
-        return renderer.render(renderInput)
+        const previousProbePath = process.env.APOLLO_V2_FFPROBE_PATH
+        process.env.APOLLO_V2_FFPROBE_PATH = ffprobePath
+        try { return await renderer.render(renderInput) }
+        finally {
+          if (previousProbePath === undefined) delete process.env.APOLLO_V2_FFPROBE_PATH
+          else process.env.APOLLO_V2_FFPROBE_PATH = previousProbePath
+        }
       },
       async cleanup(operationId) {
         captured.rendererCleaned += 1
         return renderer.cleanup(operationId)
       },
     },
-    // No perception persisted for these journeys: the F1.036 anchor then has nothing to consult and
-    // the cues keep the reserved bottom band.
+    // This caller-controlled perception port cannot authorize facial coverage.
     perceptionTimelines: { async findLatest() { return null } },
     renderElementMaps: {
       async persistOrReplay(persist) {
         captured.elementMap = persist.map
         captured.elementMapTarget = persist
         return { record: {}, replayed: false }
-      },
-    },
-    proxyReviews: {
-      async persistGenerated(persist) {
-        captured.review = persist.review
-        return { ...persist.review, id: persist.id }
       },
     },
     sources: new LocalArtifactSourceMaterializer(artifactRoot),
@@ -671,7 +719,7 @@ async function renderThroughRealWorker(input) {
   const outcome = await runNextProjectProxyRenderOperationService(deps)(`worker-${input.suffix}`)
   return {
     ...captured, outcome, phases, failure, source, compilation, artifactRoot, workRoot,
-    enqueuedContext: enqueued.context, operation, renderer,
+    enqueuedContext: enqueued.context, operation, lease, renderer,
     expectedInputHash: projectProxyRenderInputHash({
       source,
       colorPipelineBindings: [{
@@ -686,8 +734,31 @@ async function renderThroughRealWorker(input) {
 /** Everything a variant render must satisfy regardless of its format verdict. */
 function assertRenderedVariant(rendered, expected) {
   const canvas = CANVAS[expected.format]
-  assert.deepEqual(rendered.outcome, { operationId: expected.operationId, status: 'succeeded' })
+  const failureMessage = String(rendered.failure?.message ?? '')
+  const failureDiagnostic = {
+    operationId: expected.operationId, outcome: rendered.outcome, phases: rendered.phases,
+    originalFailureDiagnostic: rendered.originalFailureDiagnostic ?? null,
+    failure: rendered.failure ? {
+      code: rendered.failure.code ?? null, retryable: rendered.failure.retryable ?? null,
+      messageSha256: createHash('sha256').update(failureMessage).digest('hex'),
+      messageBytes: Buffer.byteLength(failureMessage, 'utf8'),
+    } : null,
+  }
+  assert.deepEqual(rendered.outcome, { operationId: expected.operationId, status: 'succeeded' },
+    JSON.stringify(failureDiagnostic))
   assert.equal(rendered.operation.status, 'succeeded')
+  assert.equal(rendered.atomicCompletions, 1)
+  assert.equal(rendered.lease, undefined)
+  if (rendered.renderInput.subtitleCues.length) {
+    const anchor = rendered.renderInput.placementPlan.subtitleAnchorPlan
+    assert.equal(anchor.schemaVersion, 'subtitle-anchor-plan/v2')
+    assert.deepEqual(anchor.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' })
+    assert.deepEqual(anchor.decisions.map((item) => [item.cueId, item.startFrame, item.endFrame, item.anchor, item.bounds, item.suppressed]),
+      rendered.renderInput.subtitleCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, null, null, true]))
+    assert.equal(rendered.review.status, 'blocked')
+    assert.equal(rendered.review.finalAllowed, false)
+    assert.equal(rendered.elementMap.elements.some((element) => element.type === 'subtitle'), false)
+  }
   assert.deepEqual(rendered.phases, ['rendering', 'verifying', 'persisting'])
   assert.equal(rendered.enqueuedContext.inputHash, rendered.expectedInputHash)
   assert.equal(rendered.renderInput.format, expected.format)
@@ -707,18 +778,26 @@ function assertRenderedVariant(rendered, expected) {
 /** Renders one variant of the single directed snapshot. */
 async function renderVariant(options) {
   const journey = await directOnce()
+  const directedBefore = structuredClone(journey.directedPlan)
+  const snapshotBefore = structuredClone(journey.editPlanSnapshot)
+  assert.equal(journey.directed.run.qualityReport.status, 'review-required')
+  assert.equal(journey.directed.run.qualityReport.faceSafety.status, 'unknown')
   const masterBytes = await readFile(options.masterPath)
   const source = renderSourceFor({
     format: options.format,
     directedPlan: journey.directedPlan,
     projectVersionId: journey.directed.version.id,
-    editPlanSnapshotId: journey.editPlanSnapshot.id,
-    editPlanHash: journey.editPlanSnapshot.contentHash,
     masterSha256: createHash('sha256').update(masterBytes).digest('hex'),
     masterByteSize: masterBytes.byteLength,
     subtitleResolution: options.subtitleResolution ?? subtitleResolutionFor('clean-color'),
     reframePlan: reframePlanFor(options.format),
   })
+  assert.deepEqual(journey.directedPlan, directedBefore, 'fixture materialization must not mutate the Director document')
+  assert.deepEqual(journey.editPlanSnapshot, snapshotBefore, 'the original persisted Director snapshot remains unchanged')
+  assert.equal(source.editPlanHash, calculateVersionHash(source.editPlan))
+  assert.notEqual(source.editPlanSnapshotId, journey.editPlanSnapshot.id)
+  assert.deepEqual(source.editPlan.subtitleTracks.map((track) => track.cues.map((cue) => cue.id)),
+    journey.directedPlan.subtitleTracks.map((track) => source.subtitleResolution.enabled ? track.cues.map((cue) => cue.id) : []))
   return renderThroughRealWorker({
     root: options.root, masterPath: options.masterPath, suffix: options.suffix,
     source, ...(options.tamper ? { tamper: options.tamper } : {}),
@@ -784,9 +863,9 @@ const resolutionOf = (configuration) => Object.freeze(configuration.resolved.ena
   : { presetId: 'clean-color', presetHash: subtitlePresetHash('clean-color'), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: false })
 
 // ---------------------------------------------------------------------------
-// Journeys 1-5: one StoryPlan, two variants, one blocked and one exportable.
+// Journeys 1-5: one StoryPlan, two variants, unknown coverage blocks enabled cues.
 // ---------------------------------------------------------------------------
-test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 9:16 is blocked', { timeout: 15 * 60_000 }, async () => {
+test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face coverage blocks enabled captions', { timeout: 15 * 60_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-wave9-variants-'))
   const masterPath = join(root, 'wave9-master.mp4')
   try {
@@ -805,13 +884,14 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
     const portrait = await renderVariant({ root, masterPath, suffix: 'portrait', format: '9:16' })
     const landscape = await renderVariant({ root, masterPath, suffix: 'landscape', format: '16:9' })
 
-    // Same snapshot identity, same transcript identity, same source master.
+    // Same effective fixture snapshot, same transcript identity and source master.
     for (const rendered of [portrait, landscape]) {
-      assert.equal(rendered.source.editPlanSnapshotId, journey.editPlanSnapshot.id)
-      assert.equal(rendered.source.editPlanHash, journey.editPlanSnapshot.contentHash)
+      assert.notEqual(rendered.source.editPlanSnapshotId, journey.editPlanSnapshot.id)
+      assert.equal(rendered.source.editPlanHash, calculateVersionHash(rendered.source.editPlan))
       assert.equal(rendered.source.editPlan.retimedTranscript.sourceTranscriptHash, replacementTranscript.transcriptHash)
       assert.equal(rendered.source.sourceArtifactId, MASTER_ARTIFACT_ID)
     }
+    assert.equal(portrait.source.editPlanSnapshotId, landscape.source.editPlanSnapshotId)
     assert.equal(portrait.source.editPlanHash, landscape.source.editPlanHash)
     assert.equal(portrait.renderInput.audioTimelineHash, landscape.renderInput.audioTimelineHash)
     assert.deepEqual(
@@ -851,19 +931,14 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
     const portraitIssues = portrait.review.criticIssues
     console.log(`journey 3 9:16 reason codes: ${JSON.stringify(portraitIssues.map((issue) => [issue.code, issue.severity, issue.evidenceRange?.startFrame ?? null, issue.evidenceRange?.endFrame ?? null]))}`)
     console.log(`journey 3 16:9 reason codes: ${JSON.stringify(landscape.review.criticIssues.map((issue) => [issue.code, issue.severity]))}`)
-    const collision = portraitIssues.find((issue) => issue.code === 'SUBTITLE_SUBJECT_COLLISION')
-    assert.ok(collision, 'the 9:16 subtitle band overlaps subject-lower and must raise a hard reason code')
-    assert.equal(collision.severity, 'hard')
-    assert.equal(collision.outputSpecId, portraitPreset.spec.id)
-    assert.equal(collision.outputPresetHash, portraitPreset.presetHash)
-    assert.equal(collision.placementPlanHash, portraitPlacement.placementPlanHash)
-    assert.equal(collision.reframePlanHash, portraitReframe.reframePlanHash)
-    assert.equal(collision.format, '9:16')
-    // Half-open evidence range, exactly the frames the first cue occupies.
-    assert.deepEqual({ ...collision.evidenceRange }, { startFrame: 6, endFrame: 40 })
-    assert.deepEqual([...collision.rangeMs], [200, 1_333])
-    assert.deepEqual([...collision.elementIds], ['subtitle:subtitle-cue-1'])
-    assert.ok(collision.evidenceIds.includes('subject-lower'))
+    assert.equal(portraitIssues.some((issue) => issue.code === 'SUBTITLE_SUBJECT_COLLISION'), false,
+      'Suppressed captions cannot claim a measured glyph collision')
+    const unavailable = portraitIssues.filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE')
+    assert.deepEqual(unavailable.map((issue) => [issue.severity, issue.outputSpecId, issue.placementPlanHash,
+      issue.reframePlanHash, issue.format, issue.evidenceRange.startFrame, issue.evidenceRange.endFrame, issue.elementIds[0]]),
+    EXPECTED_CUES.map(([id, startFrame, endFrame]) => ['hard', portraitPreset.spec.id, portraitPlacement.placementPlanHash,
+      portraitReframe.reframePlanHash, '9:16', startFrame, endFrame, `subtitle:${id}`]))
+    assert.deepEqual([...unavailable[0].rangeMs], [200, 1_333])
     const notVisible = portraitIssues.find((issue) => issue.code === 'SUBJECT_NOT_VISIBLE')
     assert.ok(notVisible, 'the pillarboxed 9:16 presenter never covers subject-face')
     assert.equal(notVisible.severity, 'hard')
@@ -875,17 +950,17 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
     assert.equal(portrait.review.formatQuality.exportAllowed, false)
     assert.equal(portrait.review.status, 'blocked')
     assert.equal(portrait.review.finalAllowed, false)
-    assert.equal(landscape.review.formatQuality.status, 'passed')
-    assert.equal(landscape.review.formatQuality.exportAllowed, true)
-    assert.deepEqual(landscape.review.criticIssues, [])
-    assert.equal(landscape.review.status, 'ready-for-final')
-    assert.equal(landscape.review.finalAllowed, true)
-    // Both operations succeeded: a blocked format is an editorial verdict on one
-    // variant, never a worker failure that would take the sibling down with it.
+    assert.equal(landscape.review.formatQuality.status, 'blocked')
+    assert.equal(landscape.review.formatQuality.exportAllowed, false)
+    assert.ok(landscape.review.criticIssues.every((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
+    assert.equal(landscape.review.status, 'blocked')
+    assert.equal(landscape.review.finalAllowed, false)
+    // Both renders succeed while each output retains its blocked editorial
+    // verdict. Technical execution does not establish final approval.
     assert.equal(portrait.operation.status, 'succeeded')
     assert.equal(landscape.operation.status, 'succeeded')
 
-    // --- Journey 5: the 16:9 variant is a real, exportable MP4 --------------
+    // --- Journey 5: real decodable proxy; editorial export remains blocked --
     const landscapePath = landscape.stored.path
     const landscapeBytes = await readFile(landscapePath)
     assert.equal(createHash('sha256').update(landscapeBytes).digest('hex'), landscape.manifest.artifact.sha256)
@@ -921,21 +996,24 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
       placementPlanHash: rendered.renderInput.placementPlan.placementPlanHash,
       reframePlanHash: rendered.renderInput.reframePlan.reframePlanHash,
       subjects: SUBJECTS[rendered.renderInput.format],
+      subtitleAnchorPlan: rendered.renderInput.placementPlan.subtitleAnchorPlan,
     }))
     assert.equal(reports[0].reportHash, portrait.review.formatQuality.reportHash)
     assert.equal(reports[1].reportHash, landscape.review.formatQuality.reportHash)
     const decision = selectExportableVariants(reports)
-    assert.deepEqual([...decision.approvedOutputSpecIds], [landscapePreset.spec.id])
-    assert.deepEqual([...decision.blockedOutputSpecIds], [portraitPreset.spec.id])
+    assert.deepEqual([...decision.approvedOutputSpecIds], [])
+    assert.deepEqual([...decision.blockedOutputSpecIds], [landscapePreset.spec.id, portraitPreset.spec.id])
     assert.deepEqual(
       decision.decisions.map((item) => [item.format, item.status, item.exportAllowed, [...item.blockingCodes]]),
       // `selectExportableVariants` returns decisions in canonical outputSpecId
       // order, so 16:9 precedes 9:16 regardless of the input order.
       [
-        ['16:9', 'passed', true, []],
-        ['9:16', 'blocked', false, ['SUBJECT_NOT_VISIBLE', 'SUBTITLE_SUBJECT_COLLISION']],
+        ['16:9', 'blocked', false, ['FACE_PERCEPTION_UNAVAILABLE']],
+        ['9:16', 'blocked', false, ['FACE_PERCEPTION_UNAVAILABLE', 'SUBJECT_NOT_VISIBLE']],
       ],
     )
+    t.diagnostic(JSON.stringify({ proofScope: 'controlled-worker-render-mechanics', faceSafety: 'unknown',
+      editorialAcceptance: false, pending: ['authoritative face/caption evidence', 'positive final admission'] }))
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -1022,7 +1100,10 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
       withCleanColor.source.editPlan.retimedTranscript.sourceTranscriptHash,
       withKinetic.source.editPlan.retimedTranscript.sourceTranscriptHash,
     )
-    assert.equal(withCleanColor.expectedInputHash, withKinetic.expectedInputHash)
+    assert.notEqual(withCleanColor.expectedInputHash, withKinetic.expectedInputHash,
+      'effective track preset and snapshot identity must participate in the input hash')
+    assert.notEqual(withCleanColor.source.editPlanSnapshotId, withKinetic.source.editPlanSnapshotId)
+    assert.notEqual(withCleanColor.source.editPlanHash, withKinetic.source.editPlanHash)
     assert.equal(withCleanColor.renderInput.audioTimelineHash, withKinetic.renderInput.audioTimelineHash)
     assert.deepEqual(
       withCleanColor.renderInput.subtitleCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, cue.text]),
@@ -1073,12 +1154,12 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
     assert.ok(peaks.length >= 1, 'a soundless file would produce no true-peak summary')
     assert.ok(Number(peaks.at(-1)[1]) > -70, `the sine bed must still be audible, true peak ${peaks.at(-1)?.[1]}`)
     assert.ok(Number(peaks.at(-1)[1]) <= -1, `rendered audio true peak must stay at or below -1 dBTP: ${peaks.at(-1)[1]}`)
-    // Zero ink where the cues used to burn, measured against a drawn baseline.
+    // Both enabled-but-unknown and explicitly disabled captions emit zero ink.
     for (const [second, cueId] of [[0.5, 'subtitle-cue-1'], [2.7, 'subtitle-cue-2'], [4.7, 'subtitle-cue-3']]) {
       const drawn = captionBandWhitePixels(withKinetic.stored.path, second, '16:9')
       const suppressed = captionBandWhitePixels(nonePath, second, '16:9')
       console.log(`journey 7 caption band at ${second}s (${cueId}): kinetic=${drawn} none=${suppressed}`)
-      assert.ok(drawn > 100, `${cueId} must be burned when subtitles are enabled, counted ${drawn}`)
+      assert.equal(drawn, 0, `${cueId} must be suppressed with unknown facial coverage, counted ${drawn}`)
       assert.equal(suppressed, 0, `${cueId} must leave zero ink when resolved to none, counted ${suppressed}`)
     }
 
@@ -1088,6 +1169,9 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
       subtitleResolution: resolutionOf(chain[3]),
     })
     assertRenderedVariant(afterRevert, { operationId: 'operation-revert', format: '16:9' })
+    assert.equal(afterRevert.source.editPlanSnapshotId, withKinetic.source.editPlanSnapshotId)
+    assert.equal(afterRevert.source.editPlanHash, withKinetic.source.editPlanHash)
+    assert.equal(afterRevert.expectedInputHash, withKinetic.expectedInputHash)
     assert.equal(afterRevert.manifest.recipe.parametersHash, withKinetic.manifest.recipe.parametersHash)
     assert.equal(
       afterRevert.renderInput.placementPlan.placementPlanHash,
@@ -1153,6 +1237,35 @@ test('T-WAVE9-E tampered hashes never reach the renderer and a clean rerun repro
       )
     }
     console.log(`journey 10 rerun: inputHash=${first.expectedInputHash.slice(0, 12)}, parametersHash=${first.manifest.recipe.parametersHash.slice(0, 12)}, ${firstFrames} frames both runs, byte-identical MP4=${second.stored.sha256 === first.stored.sha256}`)
+
+    // Seal the contradictory fixture BEFORE enqueue. Otherwise a stale input
+    // hash could reject it before the persisted track/resolution check is reached.
+    const mismatchedPlan = {
+      ...first.source.editPlan,
+      subtitleTracks: first.source.editPlan.subtitleTracks.map((track) => ({ ...track, presetId: 'kinetic' })),
+    }
+    assert.ok(mismatchedPlan.subtitleTracks.some((track) => track.cues.length > 0))
+    const mismatchedPlanHash = calculateVersionHash(mismatchedPlan)
+    const mismatchedSeal = calculateCanonicalHash({ editPlanHash: mismatchedPlanHash,
+      subtitleResolution: first.source.subtitleResolution })
+    const mismatched = await renderThroughRealWorker({ root, masterPath, suffix: 'track-resolution-mismatch',
+      source: { ...first.source, editPlan: mismatchedPlan, editPlanHash: mismatchedPlanHash,
+        editPlanSnapshotId: `wave9-materialized-plan-${mismatchedSeal}` },
+    })
+    assert.deepEqual(mismatched.outcome, { operationId: 'operation-track-resolution-mismatch', status: 'failed' })
+    assert.equal(mismatched.operation.status, 'failed')
+    assert.deepEqual(mismatched.failure, {
+      code: 'invalid_render_input', message: 'Project proxy render could not be completed', retryable: false,
+    })
+    assert.equal(mismatched.originalFailureDiagnostic.code, 'INVALID_RENDER_INPUT')
+    assert.equal(mismatched.originalFailureDiagnostic.messageSha256,
+      createHash('sha256').update('Subtitle cues require one consistent persisted preset').digest('hex'))
+    assert.deepEqual(mismatched.phases, [])
+    assert.equal(mismatched.renderCalls, 0)
+    assert.equal(mismatched.atomicCompletions, 0)
+    assert.equal(mismatched.stored, undefined)
+    assert.equal(mismatched.manifest, undefined)
+    assert.equal(mismatched.review, undefined)
 
     // --- Journey 9: four tampered hashes, four closed doors ----------------
     // Each run differs from the clean `repro-a` run above by EXACTLY one field,

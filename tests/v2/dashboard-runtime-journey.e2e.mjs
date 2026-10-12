@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.mjs'
+import { dashboardColorProbePersistenceData } from './helpers/dashboard-controlled-export-fixture.mjs'
 
 // Source bytes, aligned transcript, initial timeline, rights and color probe are
 // controlled inputs. The real Director service materializes canonical snapshots.
@@ -98,10 +99,12 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
     await mkdir(dirname(sourcePath), { recursive: true })
     await execFileAsync(ffmpegBin, [
       '-hide_banner', '-loglevel', 'error', '-y',
-      '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30',
+      '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=30',
       '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
       '-t', '4',
+      '-vf', 'format=gbrp,zscale=matrixin=gbr:primariesin=709:transferin=linear:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p',
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      '-x264-params', 'colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off',
       '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv',
       '-c:a', 'aac', '-b:a', '128k',
       '-movflags', '+faststart',
@@ -310,6 +313,8 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
       },
     })
     const sourceProbe = await probeVideo(sourcePath)
+    assert.deepEqual(sourceProbe.color, { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+      'Controlled RGB source must be measured as limited BT.709 before fixture persistence')
     const sourceManifest = createMediaArtifactManifestV2({ artifactKey: sourceArtifactKey,
       artifactSha256: sourceSha256, byteSize: sourceBytes.length, mediaType: 'video', container: 'mp4',
       recipe: { id: 'source-master', version: '1.0.0', parameters: { controlled: true, durationSeconds: 4 } },
@@ -334,17 +339,11 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
       workspaceId,
       artifactId: sourceArtifactId,
       manifestId: sourceManifestId,
-      detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
-      producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha256('final-export-ffprobe') },
+      detection: sourceProbe.color,
+      producer: sourceProbe.producer,
       createdAt: createdAt.toISOString(),
     })
-    await client.v2MediaColorProbe.create({ data: {
-      id: colorProbe.id, workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId,
-      schemaVersion: colorProbe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata),
-      pixelFormat: 'yuv420p', hdrMode: 'sdr', reasonsJson: stableSerialize([]), producerProvider: 'ffprobe',
-      producerVersion: colorProbe.producer.version, producerBinaryDigest: colorProbe.producer.binaryDigest,
-      createdAt, probeHash: colorProbe.probeHash,
-    } })
+    await client.v2MediaColorProbe.create({ data: dashboardColorProbePersistenceData(colorProbe, stableSerialize) })
     await client.v2ProjectMediaAsset.create({
       data: {
         id: randomUUID(),
@@ -428,6 +427,7 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
     await runDashboardRuntimeJourney({ client, baseUrl, authorization, workspaceId, projectId,
       projectVersionId, projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId,
       sourceSha256, sourceByteSize: sourceBytes.length, sourceManifest, sourcePath, artifactRoot,
+      sourceColorProbe: colorProbe,
       mechanicalSeed: { transcript, brief: snapshots[0][3], policies: snapshots[1][3], createdAt: createdAt.toISOString() },
       uiUsername, uiPassword, suffix, signal: t.signal })
   } finally {

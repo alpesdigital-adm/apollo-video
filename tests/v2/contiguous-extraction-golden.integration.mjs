@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 
@@ -43,6 +44,7 @@ import {
 } from '../../src/v2/infrastructure/analysis/transcript-contiguous-evidence-analyzers.ts'
 import { VisualContiguousEvidenceAnalyzer } from '../../src/v2/infrastructure/analysis/visual-contiguous-evidence-analyzer.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import { calculateFileSha256 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
 import {
   LocalArtifactSourceMaterializer,
@@ -73,7 +75,13 @@ import { authenticationAudit } from './helpers/authentication-audit.mjs'
 // ---------------------------------------------------------------------------
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
+const ffmpegPath = resolveFfmpegBinary(process.env.FFMPEG_BIN)
+const ffprobePath = resolveFfprobeBinaryPath(require('ffprobe-static').path, process.env.FFPROBE_BIN, process.env, undefined, null)
+assert.ok(isAbsolute(ffmpegPath) && isAbsolute(ffprobePath), 'Controlled render proof requires explicit resolved media binaries')
+console.info(JSON.stringify({ schemaVersion: 'contiguous-render-binaries/v1',
+  ffmpeg: { path: ffmpegPath, sha256: createHash('sha256').update(await readFile(ffmpegPath)).digest('hex') },
+  ffprobe: { path: ffprobePath, sha256: createHash('sha256').update(await readFile(ffprobePath)).digest('hex') },
+}))
 const execFileAsync = promisify(execFile)
 
 // Three frames per second keeps the master cheap while staying above the
@@ -620,12 +628,7 @@ function renderHarness(input) {
       phases.push(command.phase)
       return true
     },
-    async succeed(command) {
-      if (!matches(command)) return null
-      operation = succeedPublicOperation(operation, command.now)
-      lease = undefined
-      return record()
-    },
+    async succeed() { assert.fail('Proxy completion must atomically publish review and success through the project port') },
     async failOrRetry(command) {
       if (!matches(command)) return null
       operation = retryOrFailPublicOperation(
@@ -652,7 +655,7 @@ function renderHarness(input) {
     workRoot: join(input.root, 'render-work'), ffmpegPath,
   })
   const realStorage = new LocalMediaUploadStorage(input.artifactRoot)
-  const captured = { rendererCleaned: 0 }
+  const captured = { rendererCleaned: 0, atomicCompletions: 0 }
   const worker = runNextProjectProxyRenderOperationService({
     async catalogOutput() {},
     operations,
@@ -676,7 +679,38 @@ function renderHarness(input) {
         assert.equal(query.editPlanSnapshotId, input.editPlanSnapshotId)
         return source
       },
-      async attachCompletedOutput(attached) { captured.attached = attached },
+      async attachCompletedOutput(attached) {
+        // Controlled persistence semantics only; no PostgreSQL publication claim.
+        assert.equal(operation.status, 'running')
+        assert.ok(matches({ leaseOwner: attached.lease.owner, attempt: attached.lease.attempt, now: attached.lease.now }))
+        assert.equal(attached.workspaceId, WORKSPACE_ID)
+        assert.equal(attached.operationId, operation.id)
+        assert.equal(attached.projectId, context.projectId)
+        assert.equal(attached.projectVersionId, context.projectVersionId)
+        assert.equal(attached.variantId, source.format)
+        assert.equal(attached.originalFileName, context.originalFileName)
+        assert.equal(attached.createdAt, attached.review.renderCompletedAt)
+        assert.equal(attached.outputArtifactId, context.outputArtifactId)
+        assert.equal(attached.outputManifestId, context.outputManifestId)
+        assert.equal(attached.review.projectVersionId, context.projectVersionId)
+        assert.equal(attached.review.proxyArtifactId, context.outputArtifactId)
+        assert.equal(attached.review.proxyManifestId, context.outputManifestId)
+        assert.equal(attached.review.inputHash, context.inputHash)
+        assert.equal(attached.recipeParameters.inputHash, context.inputHash)
+        assert.equal(captured.manifest.recipe.parametersHash, calculateCanonicalHash(attached.recipeParameters))
+        assert.equal(captured.elementMap.proxyHash, captured.stored.sha256)
+        assert.equal(captured.manifest.artifact.sha256, captured.stored.sha256)
+        const { reviewHash, ...reviewDocument } = attached.review
+        assert.equal(reviewHash, calculateCanonicalHash(reviewDocument))
+        assert.equal(attached.ocrReceipt, null)
+        const completed = succeedPublicOperation(operation, attached.lease.now)
+        captured.attached = attached
+        captured.review = attached.review
+        captured.atomicCompletions += 1
+        operation = completed
+        lease = undefined
+        replayValue = { ...replayValue, operation, context }
+      },
     },
     artifacts: {
       async persistOrReplay(persist) {
@@ -699,7 +733,13 @@ function renderHarness(input) {
       async render(renderInput) {
         renders.count += 1
         captured.renderInput = renderInput
-        return renderer.render(renderInput)
+        const previousProbePath = process.env.APOLLO_V2_FFPROBE_PATH
+        process.env.APOLLO_V2_FFPROBE_PATH = ffprobePath
+        try { return await renderer.render(renderInput) }
+        finally {
+          if (previousProbePath === undefined) delete process.env.APOLLO_V2_FFPROBE_PATH
+          else process.env.APOLLO_V2_FFPROBE_PATH = previousProbePath
+        }
       },
       async cleanup(operationId) {
         captured.rendererCleaned += 1
@@ -712,12 +752,6 @@ function renderHarness(input) {
         return { record: {}, replayed: false }
       },
     },
-    proxyReviews: {
-      async persistGenerated(persist) {
-        captured.review = persist.review
-        return { ...persist.review, id: persist.id }
-      },
-    },
     sources: new LocalArtifactSourceMaterializer(input.artifactRoot),
     clock: sequentialClock('2026-08-02T12:30:00.000Z'),
     leaseDurationMs: 600_000,
@@ -727,6 +761,7 @@ function renderHarness(input) {
   return {
     enqueue, worker, captured, phases, renders, source, compilation,
     operation: () => operation,
+    lease: () => lease,
     cleanup: () => renderer.cleanup('operation-two-hour-golden-proxy'),
     expectedInputHash: () => projectProxyRenderInputHash({
       source,
@@ -794,6 +829,8 @@ test(
     const masterPath = join(artifactRoot, ...MASTER_ARTIFACT_KEY.split('/'))
     await mkdir(join(masterPath, '..'), { recursive: true })
     let harness
+    const previousProbePath = process.env.APOLLO_V2_FFPROBE_PATH
+    process.env.APOLLO_V2_FFPROBE_PATH = ffprobePath
     try {
       // ---------------------------------------------------------------- master
       await writeTwoHourMaster(masterPath)
@@ -1229,6 +1266,8 @@ test(
         })
         assert.deepEqual(harness.phases, ['rendering', 'verifying', 'persisting'])
         assert.equal(harness.renders.count, 1)
+        assert.equal(harness.captured.atomicCompletions, 1)
+        assert.equal(harness.lease(), undefined)
 
         // The worker built the render input itself, from the persisted plan.
         const renderInput = harness.captured.renderInput
@@ -1283,6 +1322,8 @@ test(
         assert.equal(harness.operation().status, 'succeeded')
       })
     } finally {
+      if (previousProbePath === undefined) delete process.env.APOLLO_V2_FFPROBE_PATH
+      else process.env.APOLLO_V2_FFPROBE_PATH = previousProbePath
       if (harness) await harness.cleanup().catch(() => {})
       await rm(root, { recursive: true, force: true })
     }

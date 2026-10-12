@@ -25,8 +25,9 @@ export async function seedDashboardControlledExportFixture(input) {
   const { client, workspaceId, actor, artifactRoot, suffix, transcript, sourcePath,
     sourceArtifactId: originalSourceId, sourceManifestId: originalSourceManifestId, sourceManifest,
     proxyArtifact: originalProxy, proxyManifestId: originalProxyManifestId,
-    brief: originalBrief, policies, signal } = input
+    brief: originalBrief, policies, signal, compileColorPipeline } = input
   assert.equal(signal?.aborted ?? false, false)
+  assert.equal(typeof compileColorPipeline, 'function', 'Seed must compile its actual color pipeline before inserting operation details')
   const { calculateVersionHash, stableSerialize } = await import('../../../src/v2/application/version-hash.ts')
   const { compileInitialSourceEditPlan } = await import('../../../src/v2/application/apply-editorial-cut-command.ts')
   const { createProjectVersion } = await import('../../../src/v2/domain/project-version.ts')
@@ -35,6 +36,7 @@ export async function seedDashboardControlledExportFixture(input) {
   const { assetRightsRevision } = await import('../../../src/v2/domain/asset-rights.ts')
   const { setAssetRightsService } = await import('../../../src/v2/application/set-asset-rights.ts')
   const { PrismaAssetRightsRepository } = await import('../../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
+  const { PrismaColorPipelineCompilationRepository } = await import('../../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
   const { setProjectLutSelectionService } = await import('../../../src/v2/application/project-lut-selections.ts')
   const { PrismaProjectLutSelectionRepository } = await import('../../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
   const { runProjectDirectorService } = await import('../../../src/v2/application/run-project-director.ts')
@@ -204,9 +206,31 @@ export async function seedDashboardControlledExportFixture(input) {
     await transaction.v2Project.update({ where: { id: projectId }, data: { currentVersionId: version.id } })
   })
   const projectVersionId = directed.version.id, projectVersionHash = directed.version.baseHash
-  const inputHash = calculateVersionHash({ schemaVersion: 'controlled-dashboard-proxy-seed/v1', workspaceId, projectId,
+  // This callback uses the public compilation API and the actual copied source
+  // probe. Read it through the same integrity hydrator as runtime before INSERT.
+  await compileColorPipeline({ projectId, sourceArtifactId, sourceManifestId })
+  const compilationRows = await client.v2ColorPipelineCompilation.findMany({
+    where: { workspaceId, projectId, sourceArtifactId, sourceManifestId }, select: { id: true },
+  })
+  assert.equal(compilationRows.length, 1, 'The owned seed must have exactly one source color compilation')
+  const persistedCompilation = await new PrismaColorPipelineCompilationRepository(client).read({
+    workspaceId, projectId, compilationId: compilationRows[0].id,
+  })
+  assert.ok(persistedCompilation)
+  const compilation = persistedCompilation.compilation
+  assert.equal(compilation.workspaceId, workspaceId)
+  assert.equal(compilation.projectId, projectId)
+  assert.equal(compilation.sourceArtifactId, sourceArtifactId)
+  assert.equal(compilation.sourceManifestId, sourceManifestId)
+  assert.equal(compilation.colorProbeId, color.id)
+  assert.equal(compilation.colorProbeHash, color.probeHash)
+  const colorPipelineBindings = [{ sourceArtifactId, sourceManifestId,
+    compilationId: compilation.id, compilationHash: compilation.compilationHash,
+    pipelineHash: compilation.pipeline.pipelineHash }]
+  const inputHash = calculateVersionHash({ schemaVersion: 'controlled-dashboard-proxy-seed/v2', workspaceId, projectId,
     projectVersionId, projectVersionHash, editPlanHash: calculateVersionHash(directed.run.editPlan),
-    sourceManifestHash: sourceManifestOwn.manifestHash, proxyManifestHash: proxyManifestOwn.manifestHash })
+    sourceManifestHash: sourceManifestOwn.manifestHash, proxyManifestHash: proxyManifestOwn.manifestHash,
+    colorPipelineBindings })
   await client.v2PublicOperation.create({ data: { id: proxyOperationId, workspaceId, projectId, clientId: actor.clientId,
     type: 'project-proxy-render', status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: proxyArtifactId,
     progressCompleted: 4, progressTotal: 4, progressUnit: 'render', cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
@@ -216,7 +240,7 @@ export async function seedDashboardControlledExportFixture(input) {
     idempotencyKey: id('proxy-seed-request'), requestFingerprint: inputHash, createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt } })
   await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId,
     editPlanSnapshotId: directed.version.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, inputHash,
-    colorPipelineBindingsJson: stableSerialize([]), outputArtifactId: proxyArtifactId, outputManifestId: proxyManifestId,
+    colorPipelineBindingsJson: stableSerialize(colorPipelineBindings), outputArtifactId: proxyArtifactId, outputManifestId: proxyManifestId,
     originalFileName: 'mechanical-proxy.mp4', createdAt } })
   const reviewDocument = { schemaVersion: 'proxy-review/v1', projectVersionId, proxyArtifactId, proxyManifestId,
     inputHash, outputSpecId: brief.outputSpec.id, rangeCacheKey: calculateVersionHash({ inputHash, seeded: true }),
@@ -248,6 +272,9 @@ export async function seedDashboardControlledExportFixture(input) {
         { sourceArtifactId: originalProxy.id, sourceManifestId: originalProxyManifestId,
           artifactId: proxyArtifactId, manifestId: proxyManifestId, manifestHash: proxyManifestOwn.manifestHash, sha256: originalProxy.sha256 }],
       observedColorProbe: { id: color.id, hash: color.probeHash, producer: color.producer },
+      observedColorCompilation: { id: compilation.id, hash: compilation.compilationHash,
+        probeId: compilation.colorProbeId, probeHash: compilation.colorProbeHash, pipelineHash: compilation.pipeline.pipelineHash,
+        colorPipelineBindings, origin: 'public-api+postgres-integrity-hydrator-before-operation-insert' },
       controlled: ['initial project status', 'owned copied master/proxy bytes', 'aligned transcript', 'rights',
         'Director commit port and proxy operation/review seed'], notProven: ['public editorial approval', 'face safety', 'proxy render for seeded version'] } }
 }

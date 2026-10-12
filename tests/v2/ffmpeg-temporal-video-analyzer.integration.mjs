@@ -54,8 +54,9 @@ test('real pinned temporal adapter measures static, pan and cut without semantic
     await exec(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', staticPath,
       '-map', '0:v:0', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', rotationInputPath],
     { windowsHide: true, timeout: 30_000 })
-    await exec(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', rotationInputPath,
-      '-map', '0:v:0', '-c:v', 'copy', '-metadata:s:v:0', 'rotate=90', rotatedPath],
+    await exec(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y',
+      '-display_rotation:v:0', '90', '-i', rotationInputPath,
+      '-map', '0:v:0', '-c:v', 'copy', rotatedPath],
     { windowsHide: true, timeout: 30_000 })
     const runtime = { ffmpegBinary: ffmpeg, ffprobeBinary: ffprobe,
       expectedFFmpegSha256: digest(await readFile(ffmpeg)),
