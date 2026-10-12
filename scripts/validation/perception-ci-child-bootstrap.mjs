@@ -10,7 +10,11 @@ export async function awaitBootstrapGate(input = process.stdin, milliseconds = 5
   try {
     await new Promise((done, reject) => {
       const cleanup = () => { input.removeListener('data', data); input.removeListener('end', eof); input.removeListener('error', error) }
-      const data = (bytes) => { cleanup(); bytes.length === 1 && bytes[0] === 71 ? done() : reject(new Error('Invalid fixed bootstrap ACK')) }
+      const data = (bytes) => {
+        cleanup()
+        if (bytes.length === 1 && bytes[0] === 71) done()
+        else reject(new Error('Invalid fixed bootstrap ACK'))
+      }
       const eof = () => { cleanup(); reject(new Error('Fixed bootstrap EOF before ACK')) }
       const error = (value) => { cleanup(); reject(value) }
       input.once('data', data); input.once('end', eof); input.once('error', error)

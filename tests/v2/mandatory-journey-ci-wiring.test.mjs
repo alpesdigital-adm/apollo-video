@@ -174,6 +174,46 @@ const PERCEPTION_SUITES = [
   'prisma-temporal-producer', 'prisma-face-producer',
 ]
 
+function verifyNamespaceConfigurationGuard(workflow) {
+  const { jobs, steps } = parseWorkflow(workflow)
+  const command = 'python3 -I -S -B tests/v2/perception-namespace-config.test.py'
+  for (const [jobId, stepName] of [
+    ['quality', 'Require Python 3.12 or newer for disposable operations tests'],
+    ['perception', 'Prepare owned PostgreSQL and OCR dependencies'],
+  ]) {
+    const job = jobs.find((entry) => entry.id === jobId)
+    assert.ok(job, `${jobId} is required for namespace configuration parity`)
+    assert.equal(job.attrs.get('if'), undefined)
+    assert.equal(job.attrs.get('continue-on-error'), undefined)
+    const matches = steps.filter((step) => step.job === job && step.name === stepName)
+    assert.equal(matches.length, 1)
+    const step = matches[0]
+    assert.equal(step.attrs.get('if'), undefined)
+    assert.equal(step.attrs.get('continue-on-error'), undefined)
+    assert.ok(gatesTheBuild(step))
+    const lines = step.body.split('\n').map((line) => line.trim())
+    assert.equal(lines.filter((line) => line === command).length, 1, 'Pure Python parity/negative gate cannot be removed, guarded or swallowed')
+    const prerequisite = jobId === 'quality' ? lines.indexOf('fi')
+      : lines.indexOf('sudo apt-get install -y tesseract-ocr tesseract-ocr-eng postgresql-client python3')
+    assert.ok(prerequisite >= 0 && prerequisite < lines.indexOf(command), 'Existing Python prerequisite must precede pure guard')
+  }
+}
+
+test('namespace Python configuration parity and strict negatives are mandatory in existing CI owners', async () => {
+  const workflow = await read('.github/workflows/ci.yml')
+  verifyNamespaceConfigurationGuard(workflow)
+  const command = '          python3 -I -S -B tests/v2/perception-namespace-config.test.py\n'
+  for (const replacement of ['', '          echo parity-removed\n',
+    '          python3 -I -S -B tests/v2/perception-namespace-config.test.py || true\n']) {
+    assert.throws(() => verifyNamespaceConfigurationGuard(workflow.replace(command, replacement)))
+  }
+  for (const name of ['Require Python 3.12 or newer for disposable operations tests', 'Prepare owned PostgreSQL and OCR dependencies']) {
+    for (const modifier of ['        if: false\n', '        continue-on-error: true\n']) {
+      assert.throws(() => verifyNamespaceConfigurationGuard(workflow.replace(`      - name: ${name}\n`, `      - name: ${name}\n${modifier}`)))
+    }
+  }
+})
+
 function verifyPerceptionWiring(workflow) {
   const { jobs, steps } = parseWorkflow(workflow)
   const job = jobs.find((entry) => entry.id === 'perception')

@@ -119,6 +119,7 @@ jobs:
             printf 'Python 3.12+ is required for disposable operations tests.\n' >&2
             exit 1
           fi
+          python3 -I -S -B tests/v2/perception-namespace-config.test.py
 
       - name: Install isolated pinned Python dependencies for disposable operations
         run: |
@@ -2088,6 +2089,7 @@ jobs:
           echo "APOLLO_PERCEPTION_JOB_DEADLINE_MS=$(( $(date +%s%3N) + 18 * 60 * 1000 ))" >> "$GITHUB_ENV"
           sudo apt-get update -qq
           sudo apt-get install -y tesseract-ocr tesseract-ocr-eng postgresql-client python3
+          python3 -I -S -B tests/v2/perception-namespace-config.test.py
           mkdir -p "$APOLLO_LIBRARY_EVIDENCE_ROOT" "$APOLLO_V2_ARTIFACT_ROOT" "$APOLLO_OCR_TESSDATA"
           data="$(dpkg -L tesseract-ocr-eng | awk '/\/eng.traineddata$/ { print; exit }')"
           test -f "$data"

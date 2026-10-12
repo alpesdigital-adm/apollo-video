@@ -54,7 +54,8 @@ async function main() {
     await new Promise((done, reject) => {
       const cleanup = () => { gate.removeAllListeners('data'); gate.removeAllListeners('end'); gate.removeAllListeners('error') }
       gate.once('data', (bytes) => { cleanup(); gate.pause()
-        bytes.length === 1 && bytes[0] === 71 ? done() : reject(new Error('Invalid product gate ACK')) })
+        if (bytes.length === 1 && bytes[0] === 71) done()
+        else reject(new Error('Invalid product gate ACK')) })
       gate.once('end', () => { cleanup(); reject(new Error('Product gate EOF before ACK')) })
       gate.once('error', (error) => { cleanup(); reject(error) })
       timer = setTimeout(() => { cleanup(); gate.pause(); reject(new Error('Product gate total 5s deadline')) }, 5000)
