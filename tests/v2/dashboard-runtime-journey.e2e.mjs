@@ -13,8 +13,9 @@ import { runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.
 
 // Source bytes, aligned transcript, initial timeline, rights and color probe are
 // controlled inputs. The real Director service materializes canonical snapshots.
-// Public final admission must reject UNKNOWN; a test-only approval port exercises
-// dashboard final mechanics with the real application service and fenced worker.
+// Public final admission must reject UNKNOWN. PostgreSQL must also reject a
+// test-only approval claim; a separate blocked review GUI state is explicitly
+// seeded. Positive final admission, worker, MP4 and completed GUI remain pending.
 const execFileAsync = promisify(execFile)
 
 async function getFreePort() {
@@ -41,7 +42,7 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
-test('W35 real dashboard transitions originate in APIs and fenced FFmpeg workers', {
+test('W35 real dashboard proxy/retry transitions and negative final admission; seeded review GUI', {
   skip: process.env.APOLLO_DASHBOARD_RUNTIME_E2E !== '1' && 'set APOLLO_DASHBOARD_RUNTIME_E2E=1 and use an isolated V2 database',
   timeout: process.env.APOLLO_DASHBOARD_RUNTIME_SERVER_MODE === 'dev' ? 480_000 : 360_000,
 }, async (t) => {

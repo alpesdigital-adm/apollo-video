@@ -37,7 +37,7 @@
       "blockers": [
         {
           "kind": "implementation",
-          "text": "PR81 permanece aberto e bloqueado. Head79e1e2c6: build local e temporal PG passaram; Media CI passou em escopo controlado. CI central38183727405 ainda falhou: percepcao por EACCES de filho vivo owned (identidade reobservada S/R), Quality por dois inputs antigos FFmpeg sem plano facial unknown completo, dashboard por rota inexistente da fixture (/color-pipeline/compile). Tres correcoes de fixtures foram preparadas/revisadas e lint passou; execucao nova pendente. Supervisao Linux com observador isolado e autoridade de leitura adequada esta em desenho, sem ignorar live-denial. Localizacao PG v2 falhou ASSET_RIGHTS_BLOCKED pois master sintetico nao tinha rendering; patch concede esse uso explicitamente e confere readback. Face PG79e1 teve6/6asserts, mas resultado final FAIL por uma entrada PG de tipo nao registrado; cluster e14identidades encerrados, scratch retido. Nao inferir cliente orfao/autovacuum. Postflight privado sera detalhado antes repetir. Regressao Windows anterior depth11 continua FAIL incompleto; npm test literal Linux e oito suites supervisionadas permanecem gates obrigatorios. Nenhum resultado promove detector ou aceite. CI Linux79e1 concluiu npm test literal:2809total/2803pass/0fail/6skips; Quality falhou posteriormente na integracao media. A cor BT709/VUI do insumo sintetico foi explicitada e a suite media local nova passou7/7zero skips; nova SHA ainda exige CI proprio."
+          "text": "PR81 permanece aberto e bloqueado. Freeze53df: build local, face PG6/6, HTTP1/1, T-FR controlado2/2 e localizacao PG2/2 passaram com fingerprints estaveis e postflight limpo. CI53df passou npm test literal2809/2803pass/0fail/6skips e media7/7; Media workflow passou. Quality falhou posteriormente nos2casos transcript-rate (fixture ainda nao conclui operacao no attach atomico); dashboard falhou ao tentar admitir final com DirectorRun planned e review blocked; percepcao passou OCR e falhou fixture de rotacao FFV1/MKV sem metadata, com inventario terminal completo nesta corrida. Correcoes tests-only em preparo; oito suites supervisionadas e CI integral permanecem pendentes. Observer namespace isolado em implementacao para a falha EACCES viva anterior, sem atribuir a nova falha temporal a ele. FAILs historicos Windows depth11/face79e1/postflight continuam preservados; nenhuma prova concede autoridade facial ou aceite."
         },
         {
           "kind": "implementation",
@@ -260,9 +260,51 @@
           "ref": "Apollo/w61-70-20261008/media-fixtures-v3-c27c1375/result.json",
           "scope": "Suite literal npm run test:integration:media na fonteprecommit:7/7zero skips, resultSHA76aa92656e3a326bfe7e8cbab9af833e66f320b01734e01314679640af7ba799; fingerprint961803080ba760bdb81f7788cb44d7c476a67972d18bf7873f983202cc3cc395 antes/depois igual,11identidades terminais/scratchremovido/errorsvazio. Supervisorprivado4c36ed9505754cf746be8d6bb06f2ad8fd7249bcd43dd84a8bd286d79730fbef. Doiscasos comprovam supressao captions faceunknown; nao pixelspositivoslegendas/aceite. FAIL6/7anterior metadataVUI preservado.",
           "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/fixtures-build-53df-v1-11f1dd22/result.json",
+          "scope": "Build Next fresco PASS;14 identidades terminais, sem banco. Fonte53df7fdb; result SHA256 132d5b0ea20650e4d8bedb0bb9ce03eddc60ea2978733c3f0d63a8bcc379a610; fingerprint961803080ba760bdb81f7788cb44d7c476a67972d18bf7873f983202cc3cc395 antes/depois igual. Runs PG com quatro amostras clients/background/unknown zero; cleanup terminal e scratch removido. Sem deploy/aceite.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/localization-proxy-53df-v1-4cca4570/result.json",
+          "scope": "PG/FFmpeg2/2 sem skips;6 identidades terminais. MP4 SHA1e483d5ae506417149851d39816d1937ab3dba4edc412326c3cfa867e65c0227,147410bytes; caption unknown suprimida, nao legenda positiva. Fonte53df7fdb; result SHA256 82465786045889903baee63fb15793655d76eef40a0154b7222cbf23eaa78c82; fingerprint961803080ba760bdb81f7788cb44d7c476a67972d18bf7873f983202cc3cc395 antes/depois igual. Runs PG com quatro amostras clients/background/unknown zero; cleanup terminal e scratch removido. Sem deploy/aceite.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/face-producer-53df-v1-8361d8fd/result.json",
+          "scope": "6/6 sem skips:3 offline+3PG e tres latches de publicacao;14 identidades terminais. Modelo reprovado/faceSafety unknown. Fonte53df7fdb; result SHA256 e7354297be9d406a54e515667a1772253552cf5cc620f521a35097f906a8b0e2; fingerprint961803080ba760bdb81f7788cb44d7c476a67972d18bf7873f983202cc3cc395 antes/depois igual. Runs PG com quatro amostras clients/background/unknown zero; cleanup terminal e scratch removido. Sem deploy/aceite.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/face-http-53df-v1-920ead9b/result.json",
+          "scope": "HTTP facial1/1 sem skips em Next start;14 identidades terminais; diagnostico unknown. Fonte53df7fdb; result SHA256 5e35c975e57dfc2d4582098bf4bd18d1eb2a2863cbdbddcbc1c048cad9c1f055; fingerprint961803080ba760bdb81f7788cb44d7c476a67972d18bf7873f983202cc3cc395 antes/depois igual. Runs PG com quatro amostras clients/background/unknown zero; cleanup terminal e scratch removido. Sem deploy/aceite.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/tfr-53df-v1-9690838e/result.json",
+          "scope": "T-FR2/2 sem skips, API rejeita unknown e DI mecanica isolada;31 identidades terminais. MP4 SHA3e90493b0c4c1ae214fa53a2ee82e2be1efe89435c218a11be96b19f9882778c,1576936bytes; full decode e browser/catalogo reais. Screenshot c16dbd739105c93dd637d44ec22615fbd78eae56e1678f1866437f12ce2c663e inspecionado. Nao comprova aceite editorial. Fonte53df7fdb; result SHA256 758f350bc2a361eeeee3541b95b4e5f1fc051c9359da322fc5a471087067a479; fingerprint961803080ba760bdb81f7788cb44d7c476a67972d18bf7873f983202cc3cc395 antes/depois igual. Runs PG com quatro amostras clients/background/unknown zero; cleanup terminal e scratch removido. Sem deploy/aceite.",
+          "role": "controlled-e2e"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/38185264259",
+          "scope": "CI53df/merge3ed02bb6 arvore3e764889 igual: npm test literal2809total/2803pass/0fail/6skips; media7/7; FAIL posterior transcript-rate2/2. Perception OCR1/1 passou, temporal fixture rotation falhou com observer completo/terminal; suites seguintes nao executadas. Compose ainda em execucao neste checkpoint.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci-53df-dashboard-38185264381/download-manifest.json",
+          "scope": "27 arquivos preservam FAIL real da admissao final PG: DirectorRun planned/review blocked. Nao e exportacao positiva nem flake.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Validar as tres fixtures corrigidas; fechar supervisao Linux isolada sem live-denial bypass; repetir face PG/HTTP com postflight detalhado, T-FR/dashboard no freeze definitivo e exigir gates CI completos antes merge. Continuar W66/W69 isoladas sem promover o pacote.",
+      "nextAction": "Concluir fixtures dashboard/retiming/rotacao sem relaxar autoridade, validar namespace observer Linux e repetir CI obrigatorio no novo SHA. Integrar PR81 somente com gates aplicaveis verdes; continuar W66/W69 e qualificacao facial/corpus sem abrir holdout ou promover unknown.",
       "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch. Registro operacional: persistencia Brain pendente por HTTP 502 / embedding_provider_error:openai:401; nenhuma memoria gravada, credencial alterada ou nova tentativa prevista sem sinal de recuperacao. Evidencias continuam no repositorio e no arquivo privado de cada run. Produtor facial diagnostico passou PG/runner real 4/4 apos corrigir claim retrying via transicao oficial do dominio e audit incompleto dos controles da fixture. Falhas anteriores permanecem arquivadas; HTTP facial proprio passou 1/1 sem skips em build Next fresco, com POST autenticado, replay concorrente, worker diagnostico YuNet em video development licenciado e GET selado; SHA256 do result 1a1ba6d017fe1acab99cddd18c9b3e16e11c96dbc1554114f3cc42015075a5dc. Quatro amostras/quatro caixas, faceSafety unknown e postflight com zero backends/16 PIDs terminais. Isso comprova apenas a mecanica diagnostica; modelos V5/V6/V7 seguem reprovados e holdout fechado. Mesmo patch de claim aplicado a OCR/temporal, com typecheck e gate de arquitetura verdes; este run prova retry facial. Nenhum holdout aberto ou autoridade facial concedida. CI proposto em 11/10: OCR e temporal reais em PostgreSQL isolado terão job dedicado com provenance de binários e supervisão serial; ainda não executado. tests/v2/prisma-face-producer-http.integration.mjs permanece fora do CI por insumos development privados/licenciados/pinados e runtime Python/OpenCV. Prova local face-http-resume-v1-39bfb5da SHA1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 não substitui CI. Face producer PG/runner também local; CI executa somente três casos offline de fixture/audit, sem detector apto ou holdout."
     },
     {
@@ -586,10 +628,40 @@
           "ref": "Apollo/w61-70-20261008/w66-domain-bundle-v4.json",
           "scope": "31/31puroszero skips emcheckout isolado; SHA574916a7d6384e24a1e5c8eb65ec34e49ef5a9f1cb4e8f3e91c4d7e8f7103b57,11arquivos. Golden baseHash7c0b73d7ae76611de4583c5464688e3e0b9f53a1adca3628801983df2e593e44 preservado; rootsemvariantesimplicitas, State/Version exatos. Prisma validate schema d9ab640f passou. Nenhuma migration/PG/cutover; root producer facts,16writers/hydrators,ingest/lifecycle/historical e isolacao/reset de testes pendentes.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-state-pg-v1-cac8324a/result.json",
+          "scope": "Primeiro bootstrap PG isolado FAIL antes dos testes: P3018/SQL42601 na comparacao IF...CASE da migration. Result SHA67aace756d9d7c60fbe767fe14162c6f30501538a82c8a1aec9e500cc984710d; postflight limpo, cluster/porta encerrados. Nao comprova migration/constraints nem cutover.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-state-pg-v2-c2539d5d/result.json",
+          "scope": "Migration aplicada, contrato FAIL: root readback ausente apos callback de transacao retornar;12 falhas incluem cascata dependente, nao12invariantes distintas. ResultSHA256 853b4d20368dce6afe7abc7a4003ff93fd644ee26f5b00b9200819e8465c6763.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-state-pg-v3-b61bf10e/result.json",
+          "scope": "SET CONSTRAINTS ALL IMMEDIATE no helper expos SQL55000: variavel record e colidia com aliasSQL;12 falhas incluem cascata. Runtime continua DEFERRABLE, sem trigger removido. ResultSHA256 9507db03411cd00a93a6b5fe60f1211e4f151cdc85f01b8dc88a4526a9920034.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-state-pg-v4-02c81a5c/result.json",
+          "scope": "10pass/2fail(suite+subtest): unico negativo nullable-edit-authority recebeuP2010/meta23502 real, mas matcher textual nao reconheceu mensagem do driver. Demais casos passaram; nao suiteverde. ResultSHA256 ac6b702f6ee493a8ec7763cad2819dfa9e3fc01e33b9c8e17dc4f8031ac6c25a.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-state-pg-v5-8891b567/result.json",
+          "scope": "PASS12/12zero skips(11subcases+suite): bootstrap completo, State/Version/CreationCommand, duas variantes do mesmo formato, revise exata, rollback/CAS, autoridades/scopes,10forgeries reseladas, permutacao, geometry, append-only e dois latches snapshot.6 identidades terminais,4amostrasPGzero,cluster/porta/scratchlimpos. SQL0edc003d6e7931ec5854131d13cd57ae6eac5e68b8dc3c5d262693a0b1947365,test9e7baf2d1184fa65b83a0f47f3bc934cae91286a9714b8cbd82921d77862e8bd,schema d9ab640f75e34f72ce41a4e2c01e4b9a823f588ee0eb8e2484d233ca21b904e3. Checkoutbase8428+draftfingerprint6129ce936be150899533a9cb30a85c3a5f3bdbfe6656616f75347a6285cd2a17antes/depoisigual. Ingest/lifecycle/historico/producerfacts/non-outputrefs/16writers continuam pendentes; nao ativado. ResultSHA256 329c6062ff25d6cab7d3636be602bf5d63c1e2bd9cdd8969553338d336f7a563.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Preparar autoridade específica do hash renderable compartilhada no domínio e vínculo exato de Version, preservando hashes históricos; novos selos W66 exigem política canônica explícita, e overlays operáveis serão crop-only até W68. Schema estático e10testes puros passaram, mas os testes atuais não cobrem ainda plano renderable real. Provar migration/constraints PG e executar cutover coerente de15builders/16writers/hydrators/consumers, com isolamento/reset de fixtures sem relaxar append-only.",
-      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: contrato versionado de revisão obrigatória, sem geometria autorizada; autenticação, base, source e rights preservados. Validação de contratos e 10 testes unitários passaram. Set v2/projeção geométrica são apenas especificados: falta schema/Command/RenderInput/PG, e o overlay puro não comprova runtime nem conclusão da capability. Em 11/10, schema isolado SHA3ad3b21d6ca5d6fc0f8988bc6175154eeb4657c38aaba7c325d30904ef61fedc e SQL SHAa41baf5c5871d90e59adaad0309f19636fc31cf737d4c012933fe22924f38ac6 passaram revisão estrutural inicial e Prisma validate 5.22; oito testes de domínio passaram. São provas estáticas/isoladas, não migration executada. Permanecem ajustes de ordem canônica/normalização e todo o cutover; guards append-only exigem substituir resets destrutivos de fixtures sem relaxar integridade."
+      "nextAction": "Fechar snapshotRefs nao output (brief/policies/treatment/story) e author/time vs Command, fatos root autoritativos e ingest/lifecycle/historico; depois cutover coerente de15builders/16writers/hydrators/consumers. Primeiro contrato PG isolado passou12/12zero skips apos correcoes sintaticas/alias e matcher NOTNULL exato. Isso nao ativa runtime nem prova a wave completa. Writer futuro deve tornar rejeicao deferred observavel antes de relatar sucesso, com readback/rollback comprovados.",
+      "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Construção iniciada: contrato versionado de revisão obrigatória, sem geometria autorizada; autenticação, base, source e rights preservados. Validação de contratos e 10 testes unitários passaram. Set v2/projeção geométrica são apenas especificados: falta schema/Command/RenderInput/PG, e o overlay puro não comprova runtime nem conclusão da capability. Em 11/10, schema isolado SHA3ad3b21d6ca5d6fc0f8988bc6175154eeb4657c38aaba7c325d30904ef61fedc e SQL SHAa41baf5c5871d90e59adaad0309f19636fc31cf737d4c012933fe22924f38ac6 passaram revisão estrutural inicial e Prisma validate 5.22; oito testes de domínio passaram. São provas estáticas/isoladas, não migration executada. Permanecem ajustes de ordem canônica/normalização e todo o cutover; guards append-only exigem substituir resets destrutivos de fixtures sem relaxar integridade. Checkpoint11/10 atual:31/31 puros e golden anteriores preservados no recibo v4; cliente Prisma5.22 gerado no checkout isolado com autoinstall proibido. Primeira migration falhou por sintaxe; nenhum teste PG executado. Notas de8/10 testes acima sao historicas, nao estado atual. A tentativa v5 posterior aplicou migration e passou12/12 no contrato isolado; FAILs v1-v4 permanecem historicos e nenhum implica ativacao dos writers."
     },
     {
       "id": "W67",
@@ -21491,13 +21563,17 @@
         "0944e64350b1-1",
         "ba0e03c8f7d9-1"
       ],
-      "state": "validado",
-      "construction": "implemented",
+      "state": "em-construcao",
+      "construction": "in-progress",
       "integration": "main",
       "validation": "controlled-e2e",
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
+        {
+          "kind": "validation",
+          "text": "Exportacao final positiva atual permanece pendente: CI53df nega admissao PostgreSQL com DirectorRun planned/quality review-required/face unknown e ProxyReview blocked. A jornada corrigida comprovara proxy/retry e negativos finais; reviewing-proxy do segundo projeto e seed declarado, nunca transicao editorial aprovada. Rendering-final/completed/MP4 final/replay nao estao comprovados pelo recorte atual."
+        },
         {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
@@ -21542,7 +21618,7 @@
           "type": "repo",
           "ref": "tests/v2/dashboard-runtime-journey.e2e.mjs",
           "role": "implementation",
-          "scope": "Jornada PostgreSQL/API/Next de produção/Chromium/FFmpeg; upstream editorial e mídia controlados, sem seed de operação/review/output/status para afirmar transições."
+          "scope": "Jornada atual de proxy/retry/CAS/outbox/API/browser reais e rejeicao final publica/PG; fonte e upstream controlados. Estado reviewing-proxy do segundo projeto e seed explicito bloqueado. Final positivo/worker/MP4/completed/replay ficam pendentes; recibos historicos preservados por SHA."
         },
         {
           "type": "repo",
@@ -21597,10 +21673,16 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37342962848",
           "role": "controlled-e2e",
           "scope": "CI verde do SHA final da PR #76, antes do merge; escopo técnico controlado. O readback dos artifacts e CI do main final ficam também no corpo da PR."
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/ci-53df-dashboard-38185264381/download-manifest.json",
+          "scope": "FAIL atual: a autoridade PG rejeita a aprovacao devolvida por port controlado porque DirectorRun/review persistidos nao autorizam final. Correcao tests-only reduz a alegacao para negativos reais e proxy; nova execucao pendente.",
+          "role": "integration"
         }
       ],
-      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; a validação técnica não promove TODO.",
-      "notes": "Lacuna de estados apenas semeados fechada no escopo runtime controlado: estados de proxy/final, falha e retries vêm de APIs/serviços/workers novos. Mídia e upstream editorial controlados; ramo sem total, vazio e arquivado preservam suas provas históricas. Mesmo input com outra chave dá 409, sem duplicação; guard da mesma versão tem prova PG separada. Não é implantação ou aceite; TODO intacto."
+      "nextAction": "Validar a jornada delimitada de proxy/retry/negativos finais no novo SHA; concluir separadamente admissao editorial final real, worker, MP4 e estados rendering-final/completed/replay. Implantacao e aceite continuam pendentes; TODO intacto.",
+      "notes": "As provas antigas de cards e runtime controlado permanecem historicas nos SHAs citados. O gate facial atual revelou que aquela preparacao nao prova admissao final positiva: W35 retorna em-construcao para essa lacuna. Jornada atual distingue proxy real, seed de review bloqueado e rejeicao da autoridade PostgreSQL; nenhuma aprovacao e gravada para tornar teste verde. T-FR/Media controlados sao provas mecanicas separadas, sem transferencia de autoridade editorial."
     },
     {
       "id": "W36",

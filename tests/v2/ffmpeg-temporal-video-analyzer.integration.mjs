@@ -34,7 +34,7 @@ test('real pinned temporal adapter measures static, pan and cut without semantic
     await sharp(raw, { raw: { width, height, channels: 3 } }).png().toFile(imagePath)
     const staticPath = join(root, 'static.mkv'), panPath = join(root, 'pan.mkv')
     const cutPath = join(root, 'cut.mkv'), irregularPath = join(root, 'irregular.mkv')
-    const rotatedPath = join(root, 'rotated.mkv')
+    const rotationInputPath = join(root, 'rotation-input.mp4'), rotatedPath = join(root, 'rotated.mp4')
     for (const [path, crop] of [[staticPath, '0'], [panPath, 'n*4']]) {
       await exec(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-loop', '1',
         '-framerate', '30', '-t', '1', '-i', imagePath,
@@ -49,8 +49,13 @@ test('real pinned temporal adapter measures static, pan and cut without semantic
     await exec(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', staticPath,
       '-vf', 'setpts=PTS+0.5/TB*gte(N\\,15)', '-fps_mode', 'passthrough',
       '-c:v', 'ffv1', irregularPath], { windowsHide: true, timeout: 30_000 })
-    await exec(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y',
-      '-display_rotation:v:0', '90', '-i', staticPath, '-c', 'copy', rotatedPath],
+    // MP4 carries display-matrix rotation on stream-copy remux. Keep the
+    // lossless FFV1 fixtures above for all temporal/pixel measurements.
+    await exec(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', staticPath,
+      '-map', '0:v:0', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', rotationInputPath],
+    { windowsHide: true, timeout: 30_000 })
+    await exec(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', rotationInputPath,
+      '-map', '0:v:0', '-c:v', 'copy', '-metadata:s:v:0', 'rotate=90', rotatedPath],
     { windowsHide: true, timeout: 30_000 })
     const runtime = { ffmpegBinary: ffmpeg, ffprobeBinary: ffprobe,
       expectedFFmpegSha256: digest(await readFile(ffmpeg)),
@@ -98,8 +103,27 @@ test('real pinned temporal adapter measures static, pan and cut without semantic
     await assert.rejects(request(irregularPath), /PTS.*non-CFR|PTS.*reordered/i)
     const rotationMetadata = await exec(ffprobe, ['-v', 'error', '-select_streams', 'v:0',
       '-show_streams', '-of', 'json', rotatedPath], { windowsHide: true, timeout: 30_000 })
-    assert.match(rotationMetadata.stdout, /rotation|rotate/)
-    await assert.rejects(request(rotatedPath), /display rotation is unsupported/i)
+    const [rotationStream] = JSON.parse(rotationMetadata.stdout).streams
+    assert.equal(rotationStream.codec_name, 'h264')
+    const rotations = [
+      ...(rotationStream.side_data_list ?? []).filter((item) => item.side_data_type === 'Display Matrix')
+        .map((item) => item.rotation),
+      ...(rotationStream.tags?.rotate === undefined ? [] : [rotationStream.tags.rotate]),
+    ]
+    assert.ok(rotations.length > 0 && rotations.every((angle) =>
+      angle !== null && String(angle).trim() !== '' && Number.isFinite(Number(angle)) && Math.abs(Number(angle)) === 90),
+    `Remuxed H264/MP4 fixture must carry structural 90-degree rotation before adapter rejection: ${JSON.stringify(rotations)}`)
+    let rotationProbed = false, rotationDecoded = false
+    const rotationAdapter = new FfmpegTemporalVideoAnalyzer(runtime, {
+      onProcessStarted: (kind) => {
+        if (kind === 'probe') rotationProbed = true
+        if (kind === 'decode') rotationDecoded = true
+      },
+    })
+    await assert.rejects(rotationAdapter.analyze({ sourcePath: rotatedPath,
+      expectedSourceSha256: digest(await readFile(rotatedPath)) }), /display rotation is unsupported/i)
+    assert.equal(rotationProbed, true)
+    assert.equal(rotationDecoded, false, 'Unsupported display rotation must be rejected before decoder launch')
     const abort = new AbortController()
     abort.abort()
     await assert.rejects(request(staticPath, abort.signal), /aborted/i)

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -35,11 +35,18 @@ import {
 } from '../../src/v2/domain/public-operation.ts'
 import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain/source-transcript-replacement.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
-const ffprobePath = require('ffprobe-static').path
+const ffmpegPath = resolveFfmpegBinary(process.env.FFMPEG_BIN)
+const ffprobePath = resolveFfprobeBinaryPath(require('ffprobe-static').path,
+  process.env.FFPROBE_BIN, process.env, undefined, null)
+assert.ok(isAbsolute(ffmpegPath) && isAbsolute(ffprobePath), 'Render integration requires resolved absolute media binaries')
+console.info(JSON.stringify({ schemaVersion: 'transcript-rate-render-binaries/v1',
+  ffmpeg: { path: ffmpegPath, sha256: createHash('sha256').update(await readFile(ffmpegPath)).digest('hex') },
+  ffprobe: { path: ffprobePath, sha256: createHash('sha256').update(await readFile(ffprobePath)).digest('hex') },
+}))
 
 function proxyActor() {
   const auditContext = createExternalAuditContext({
@@ -54,7 +61,7 @@ function proxyActor() {
 }
 
 // ---------------------------------------------------------------------------
-// F0.027 slice 3 — two journeys, no fixtures in the middle:
+// F0.027 slice 3 — two journeys with controlled in-memory persistence ports:
 //
 //   lavfi colour master (real media)
 //     -> immutable replacement transcript
@@ -69,7 +76,10 @@ function proxyActor() {
 // Nothing here hand-builds an `EditorialRenderInput`: the render input is the
 // one the worker derives from the persisted directed snapshot, and every proof
 // below is taken from the PROMOTED artifact and from the records the worker
-// persisted (manifest, render element map, proxy review).
+// persisted through those ports (manifest, render element map, proxy review).
+// This proves real worker/FFmpeg mechanics, not PostgreSQL atomic publication.
+// Facial coverage is unknown: planned cues are suppressed, and positive burned
+// subtitle timing remains pending authoritative facial evidence.
 //
 // Every number below comes from the canonical arithmetic in
 // `src/v2/domain/clip-timing.ts`:
@@ -455,6 +465,10 @@ async function directRetimedPlan(options) {
   const editPlanSnapshot = directed.snapshots.find((item) => item.kind === 'edit-plan')
   const directedPlan = JSON.parse(editPlanSnapshot.contentJson)
   assert.equal(editPlanSnapshot.contentHash, calculateVersionHash(directedPlan))
+  assert.equal(directed.run.qualityReport.status, 'review-required')
+  assert.deepEqual(directed.run.qualityReport.faceSafety, {
+    status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [],
+  })
   return { replacement, persisted, directed, directedPlan, editPlanSnapshot }
 }
 
@@ -546,12 +560,7 @@ async function renderThroughRealWorker(input) {
       phases.push(command.phase)
       return true
     },
-    async succeed(command) {
-      if (!matches(command)) return null
-      operation = succeedPublicOperation(operation, command.now)
-      lease = undefined
-      return record()
-    },
+    async succeed() { assert.fail('Proxy completion must publish review and success through the atomic project port') },
     async failOrRetry(command) {
       if (!matches(command)) return null
       operation = retryOrFailPublicOperation(operation, command.error, command.now, command.nextAttemptAt)
@@ -581,7 +590,7 @@ async function renderThroughRealWorker(input) {
     workRoot: join(input.root, `work-${input.suffix}`), ffmpegPath,
   })
   const realStorage = new LocalMediaUploadStorage(artifactRoot)
-  const captured = { lutCleaned: 0, rendererCleaned: 0 }
+  const captured = { lutCleaned: 0, rendererCleaned: 0, atomicCompletions: 0 }
   const deps = {
     async catalogOutput() {},
     operations,
@@ -603,7 +612,32 @@ async function renderThroughRealWorker(input) {
         assert.equal(query.sourceManifestId, MASTER_MANIFEST_ID)
         return source
       },
-      async attachCompletedOutput(attached) { captured.attached = attached },
+      async attachCompletedOutput(attached) {
+        // Model the new atomic completion port, rather than returning success
+        // while leaving the durable-operation fixture running. No PG claim.
+        assert.equal(operation.status, 'running')
+        assert.ok(matches({ leaseOwner: attached.lease.owner, attempt: attached.lease.attempt, now: attached.lease.now }))
+        assert.equal(attached.workspaceId, WORKSPACE_ID)
+        assert.equal(attached.operationId, operation.id)
+        assert.equal(attached.projectId, context.projectId)
+        assert.equal(attached.projectVersionId, context.projectVersionId)
+        assert.equal(attached.outputArtifactId, context.outputArtifactId)
+        assert.equal(attached.outputManifestId, context.outputManifestId)
+        assert.equal(attached.review.projectVersionId, context.projectVersionId)
+        assert.equal(attached.review.proxyArtifactId, context.outputArtifactId)
+        assert.equal(attached.review.proxyManifestId, context.outputManifestId)
+        assert.equal(attached.review.inputHash, context.inputHash)
+        assert.equal(attached.recipeParameters.inputHash, context.inputHash)
+        assert.equal(captured.manifest.recipe.parametersHash, calculateCanonicalHash(attached.recipeParameters))
+        assert.equal(captured.elementMap.proxyHash, captured.stored.sha256)
+        assert.equal(attached.ocrReceipt, null)
+        const completed = succeedPublicOperation(operation, attached.lease.now)
+        captured.attached = attached
+        captured.review = attached.review
+        captured.atomicCompletions += 1
+        operation = completed
+        lease = undefined
+      },
     },
     artifacts: {
       async persistOrReplay(persist) {
@@ -621,7 +655,15 @@ async function renderThroughRealWorker(input) {
     renderer: {
       async render(renderInput) {
         captured.renderInput = renderInput
-        return renderer.render(renderInput)
+        // Renderer probes use the runtime environment resolver. Scope the same
+        // explicitly selected ffprobe to this controlled render and restore it.
+        const previousProbePath = process.env.APOLLO_V2_FFPROBE_PATH
+        process.env.APOLLO_V2_FFPROBE_PATH = ffprobePath
+        try { return await renderer.render(renderInput) }
+        finally {
+          if (previousProbePath === undefined) delete process.env.APOLLO_V2_FFPROBE_PATH
+          else process.env.APOLLO_V2_FFPROBE_PATH = previousProbePath
+        }
       },
       async cleanup(operationId) {
         captured.rendererCleaned += 1
@@ -636,12 +678,6 @@ async function renderThroughRealWorker(input) {
         return { record: {}, replayed: false }
       },
     },
-    proxyReviews: {
-      async persistGenerated(persist) {
-        captured.review = persist.review
-        return { ...persist.review, id: persist.id }
-      },
-    },
     sources: new LocalArtifactSourceMaterializer(artifactRoot),
     clock: sequentialClock('2026-07-31T09:30:00.000Z'),
     leaseDurationMs: 120_000,
@@ -651,7 +687,7 @@ async function renderThroughRealWorker(input) {
   const outcome = await runNextProjectProxyRenderOperationService(deps)(`worker-${input.suffix}`)
   return {
     ...captured, outcome, phases, source, compilation, masterSha256,
-    enqueuedContext: enqueued.context, operation, artifactRoot,
+    enqueuedContext: enqueued.context, operation, lease, artifactRoot,
     expectedInputHash: projectProxyRenderInputHash({
       source,
       colorPipelineBindings: [{
@@ -687,8 +723,8 @@ const assertDominantChannel = (path, second, dominant, label) => {
   }
 }
 
-// The caption band is a flat colour, so white pixels there can only be glyphs.
-// Measured on this machine: 1337 white pixels inside a cue, 0 outside one.
+// The synthetic caption band is flat colour. Unknown facial coverage must
+// suppress glyphs both during planned cue spans and in the gaps.
 const captionBandWhitePixels = (path, second) => {
   const raw = execFileSync(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', path,
@@ -726,6 +762,8 @@ function assertWorkerContract(rendered, expected) {
   // executed, and its input hash is reproducible from the immutable source.
   assert.deepEqual(rendered.outcome, { operationId: expected.operationId, status: 'succeeded' })
   assert.equal(rendered.operation.status, 'succeeded')
+  assert.equal(rendered.atomicCompletions, 1)
+  assert.equal(rendered.lease, undefined)
   assert.deepEqual(rendered.phases, ['rendering', 'verifying', 'persisting'])
   assert.equal(rendered.enqueuedContext.kind, 'project-proxy-render')
   assert.equal(rendered.enqueuedContext.inputHash, rendered.expectedInputHash)
@@ -761,19 +799,35 @@ function assertWorkerContract(rendered, expected) {
   // Manifest: recipe identity, content-addressed parameters and lineage.
   assert.equal(rendered.manifest.recipe.id, 'editorial-proxy')
   assert.equal(rendered.manifest.recipe.version, EDITORIAL_PROXY_RECIPE_VERSION)
-  // The recipe also content-addresses the materialized geometry: the placement plan the
-  // worker solves before rendering (recomputed here from the same builder — neither fixture
-  // sets a CTA overlay or a subtitle preset, so it solves against zero elements), plus the
-  // reframe-plan and subtitle-registry hashes, both `null` because nothing in this codebase
-  // yet persists a reframe plan or a subtitle resolution onto the render source.
+  // The planned cues reserve the clean-color band even without a style
+  // resolution. The runtime v2 anchor plan records unknown face coverage and
+  // suppresses every cue. Geometry hashing is structural evidence; pixels below
+  // independently establish that no caption was emitted.
   const outputPreset = readOutputFormatPreset('9:16')
   const placementPlan = createRenderPlacementPlan({
     format: '9:16',
     canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
     durationFrames: expected.durationFrames,
-    subtitlePresetId: null,
+    subtitlePresetId: 'clean-color',
     elements: [],
+    subtitleAnchor: {
+      fps: FPS,
+      cues: expected.cues.map(([id, startFrame, endFrame]) => ({ id, startFrame, endFrame })),
+      faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
+    },
   })
+  assert.deepEqual(rendered.renderInput.placementPlan, placementPlan)
+  const anchor = rendered.renderInput.placementPlan.subtitleAnchorPlan
+  assert.equal(anchor.schemaVersion, 'subtitle-anchor-plan/v2')
+  assert.deepEqual(anchor.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' })
+  assert.deepEqual(
+    anchor.decisions.map((item) => [item.cueId, item.startFrame, item.endFrame, item.anchor, item.bounds, item.suppressed]),
+    expected.cues.map(([id, startFrame, endFrame]) => [id, startFrame, endFrame, null, null, true]),
+  )
+  assert.deepEqual(
+    anchor.issues.map((item) => [item.code, item.severity, item.cueId, item.evidenceRange.startFrame, item.evidenceRange.endFrame]),
+    expected.cues.map(([id, startFrame, endFrame]) => ['FACE_PERCEPTION_UNAVAILABLE', 'hard', id, startFrame, endFrame]),
+  )
   assert.equal(rendered.manifest.recipe.parametersHash, calculateCanonicalHash({
     inputHash: rendered.expectedInputHash,
     projectVersionId: expected.projectVersionId,
@@ -796,10 +850,9 @@ function assertWorkerContract(rendered, expected) {
     subtitlePresetVersion: null,
     subtitlePresetHash: null,
     subtitlePresetSnapshotHash: null,
-    // F1.036: no subtitle resolution on this source, so no anchor was decided and no perception was
-    // consulted. Both identities are still recorded, because "nothing was consulted" is evidence.
-    subtitleAnchorPlanHash: null,
-    perceptionTimelineHash: null,
+    subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan.anchorPlanHash,
+    perceptionTimelineHash: placementPlan.subtitleAnchorPlan.perceptionTimelineHash,
+    ocrReceipt: null,
   }))
   assert.equal(rendered.manifest.artifact.artifactKey, rendered.stored.key)
   assert.equal(rendered.manifest.artifact.sha256, rendered.stored.sha256)
@@ -824,14 +877,23 @@ function assertWorkerContract(rendered, expected) {
   assert.equal(rendered.review.spec.width, 540)
   assert.equal(rendered.review.spec.height, 960)
   assert.deepEqual(rendered.review.technicalIssues, [])
-  assert.equal(rendered.review.status, 'ready-for-final')
-  assert.equal(rendered.review.finalAllowed, true)
+  assert.equal(rendered.review.status, 'blocked')
+  assert.equal(rendered.review.finalAllowed, false)
+  const faceIssues = rendered.review.criticIssues.filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE')
+  assert.deepEqual(faceIssues.map((issue) => [issue.severity, issue.targetId, ...issue.rangeMs]),
+    expected.cues.map(([id, startFrame, endFrame]) => ['hard', `subtitle:${id}`,
+      Math.round(startFrame / FPS * 1000), Math.round(endFrame / FPS * 1000)]))
+  assert.equal(rendered.review.formatQuality.status, 'blocked')
+  assert.equal(rendered.review.formatQuality.exportAllowed, false)
+  assert.equal(rendered.elementMap.elements.some((item) => item.type === 'subtitle'), false)
   assert.equal(rendered.review.timeToFirstProxyMs >= 1_800_000, true)
   assert.deepEqual(rendered.attached, {
     workspaceId: WORKSPACE_ID, operationId: expected.operationId, projectId: PROJECT_ID,
     projectVersionId: expected.projectVersionId, variantId: '9:16',
     outputArtifactId: expected.outputArtifactId, outputManifestId: expected.outputManifestId,
     originalFileName: 'rate-master-editorial.mp4', createdAt: rendered.attached.createdAt,
+    lease: { owner: `worker-${expected.operationId.slice('operation-'.length)}`, attempt: 1, now: rendered.attached.lease.now },
+    review: rendered.review, recipeParameters: rendered.attached.recipeParameters, ocrReceipt: null,
   })
   // The worker always releases the renderer scratch space and the LUT selection.
   assert.equal(rendered.rendererCleaned, 1)
@@ -922,7 +984,7 @@ test('T-FR-233 retimed transcript drives the Director, the real V2 worker and th
       EXPECTED_CUES.map((entry) => [...entry]),
     )
     assert.ok(cues.every((cue) => cue.anchor === 'bottom'))
-    assert.notEqual(directed.run.qualityReport.status, 'blocked')
+    assert.equal(directed.run.qualityReport.status, 'review-required')
 
     // -----------------------------------------------------------------------
     // 4. The REAL V2 worker renders that persisted snapshot end to end.
@@ -1002,14 +1064,14 @@ test('T-FR-233 retimed transcript drives the Director, the real V2 worker and th
     ]) assertDominantChannel(proxyPath, second, dominant, label)
 
     // -----------------------------------------------------------------------
-    // 6. Visual proof that the Director's cues — derived from the retimed
-    // words — are burned into the caption band at the retimed instants.
+    // 6. Visual proof that UNKNOWN face coverage suppresses the Director's
+    // retimed cues. Planned spans remain exact; this is not burned-cue timing.
     // -----------------------------------------------------------------------
     // subtitle-cue-1 covers frames 6..40 (0.20s-1.33s) over the red segment;
     // subtitle-cue-4 covers frames 132..156 (4.40s-5.20s) over the green one.
     for (const [second, label] of [[0.5, 'subtitle-cue-1'], [4.8, 'subtitle-cue-4']]) {
       const white = captionBandWhitePixels(proxyPath, second)
-      assert.ok(white >= 100, `${label} must be burned at ${second}s, only ${white} white pixels`)
+      assert.ok(white <= 10, `${label} must be suppressed at ${second}s with unknown face coverage, found ${white} white pixels`)
     }
     // Frames 40..63 (1.33s-2.10s) and 156..192 (5.20s-6.40s) carry no cue.
     for (const [second, label] of [[1.7, 'gap after subtitle-cue-1'], [5.7, 'gap after subtitle-cue-4']]) {
@@ -1017,8 +1079,8 @@ test('T-FR-233 retimed transcript drives the Director, the real V2 worker and th
       assert.ok(white <= 10, `${label} at ${second}s must stay clean, found ${white} white pixels`)
     }
     // Structural mirror of the same fact inside the reviewable element map.
-    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 15), ['subtitle:subtitle-cue-1'])
-    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 140), ['subtitle:subtitle-cue-4'])
+    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 15), [])
+    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 140), [])
     assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 51), [])
     assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 171), [])
   } finally {
@@ -1127,28 +1189,24 @@ test('T-FR-233 a repeated and reordered timeline keeps every occurrence of the s
       [5.5, 1, 'clip-echo-b green still on screen'],
     ]) assertDominantChannel(proxyPath, second, dominant, label)
 
-    // `eco` is burned at BOTH occurrences (frames 6..30 = 0.20s-1.00s and
-    // 126..150 = 4.20s-5.00s). Before fix 8a494ff the second one did not exist.
+    // BOTH planned `eco` occurrences (frames 6..30 and 126..150) remain
+    // suppressed with unknown face coverage. The plan/anchor assertions above
+    // independently keep both retimed occurrences; pixels cannot prove speech.
     for (const [second, label] of [[0.5, 'subtitle-cue-1 eco'], [4.5, 'subtitle-cue-3 eco repeated']]) {
       const white = captionBandWhitePixels(proxyPath, second)
-      assert.ok(white >= 100, `${label} must be burned at ${second}s, only ${white} white pixels`)
+      assert.ok(white <= 10, `${label} must be suppressed at ${second}s with unknown face coverage, found ${white} white pixels`)
     }
     // Frames 30..70 (1.00s-2.33s) and 100..126 (3.33s-4.20s) carry no cue.
     for (const [second, label] of [[1.8, 'gap after subtitle-cue-1'], [3.8, 'gap after subtitle-cue-2']]) {
       const white = captionBandWhitePixels(proxyPath, second)
       assert.ok(white <= 10, `${label} at ${second}s must stay clean, found ${white} white pixels`)
     }
-    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 15), ['subtitle:subtitle-cue-1'])
-    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 85), ['subtitle:subtitle-cue-2'])
-    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 135), ['subtitle:subtitle-cue-3'])
+    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 15), [])
+    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 85), [])
+    assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 135), [])
     assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 55), [])
     assert.deepEqual(subtitlesAtFrame(rendered.elementMap, 110), [])
-    // The two `eco` cues are distinct elements at distinct frames: the burned
-    // caption band is not one long cue stretched over the middle word.
-    const echoFrames = rendered.elementMap.elements
-      .filter((item) => item.type === 'subtitle' && item.elementId !== 'subtitle:subtitle-cue-2')
-      .map((item) => item.frame)
-    assert.equal(echoFrames.some((frame) => frame >= 30 && frame < 126), false)
+    assert.equal(rendered.elementMap.elements.some((item) => item.type === 'subtitle'), false)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
