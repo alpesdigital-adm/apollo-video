@@ -715,6 +715,21 @@ imutáveis apenas como contexto histórico, sem executar resolução ou renderer
 Ausência ou drift do proxy-base falha fechado. Replays convergem para a mesma
 operação e nenhum worker pode reivindicá-la porque ela já nasce terminal.
 
+Checkpoint de 12/10/2026: o reuso também precisa copiar o RenderElementMap para
+a versão filha na mesma transação, com identidade nova e sem transferir revisão
+ou aceite. O hash histórico do mapa usa `JSON.stringify`; reordenar as chaves
+dos elementos invalida esse selo, mesmo que o JSON tenha significado equivalente.
+O teste focal passou com mapa não vazio, cópia e reidratação pelo repository Prisma
+com dados controlados em memória;
+a jornada PostgreSQL/API permanece pendente após as falhas de preparação e
+serialização registradas. O reuso deve revalidar os direitos vigentes de todas as
+fontes sob os mesmos fences de publicação, inclusive após espera por locks e
+antes do retorno. Essa correção está em implementação e ainda não foi validada
+por latches PostgreSQL. A transação de enqueue não reverte o Command e a versão
+já comitados pelo serviço anterior: uma recusa preserva esses fatos e não cria
+novos efeitos de reuso. O enqueue da edição manual deve exigir exatamente a
+versão retornada pelo serviço, recusando head concorrente.
+
 O caso integrado de crop usa o mesmo executor: o Command tipado materializa o
 retângulo no EditPlan, o impacto restringe a variante e o range do clip, e o
 renderer preserva crop ao fatiar o input parcial. O golden audiovisual cria

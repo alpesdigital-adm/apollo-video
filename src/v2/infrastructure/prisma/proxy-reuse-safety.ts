@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
+import { lockProxySourceArtifacts } from './proxy-source-authority.ts'
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../application/ports/editorial-proxy-renderer.ts'
-import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
+import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { validateRenderElementMap, renderElementMapHash, type RenderElement, type RenderElementMap } from '../../domain/review-system.ts'
 
 type Database = PrismaClient | Prisma.TransactionClient
@@ -94,13 +95,16 @@ async function readReusableProxyReceipt(database: Database, input: ReusableProxy
       schemaVersion: map.schemaVersion, proxyHash: map.proxyHash, mapHash: mapRow.mapHash,
       fps: map.fps, durationFrames: map.durationFrames,
       canvasWidth: map.canvas.width, canvasHeight: map.canvas.height,
-      elementsJson: stableSerialize(map.elements),
+      // Keep the historical JSON.stringify map seal and producer property order.
+      elementsJson: JSON.stringify(map.elements),
     }) })
 }
 
 /** Copy admission locks follow publisher order in the same Serializable
  * transaction. A join never determines lock order. */
-export async function readSafeReusableProxyReceipt(transaction: Prisma.TransactionClient, input: ReusableProxyInput) {
+export async function readSafeReusableProxyReceipt(transaction: Prisma.TransactionClient, input: ReusableProxyInput & {
+  plan: Parameters<typeof lockProxySourceArtifacts>[1]['plan']; sourceArtifactId: string
+}) {
   const operation = await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "public_operations"
     WHERE "id" = ${input.operationId} AND "workspaceId" = ${input.workspaceId} AND "projectId" = ${input.projectId}
       AND "status" = 'succeeded' AND "phase" = 'completed' FOR UPDATE`)
@@ -113,9 +117,8 @@ export async function readSafeReusableProxyReceipt(transaction: Prisma.Transacti
   const project = await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "projects"
     WHERE "id" = ${input.projectId} AND "workspaceId" = ${input.workspaceId} FOR UPDATE`)
   if (project.length !== 1) return null
-  const artifact = await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "media_artifacts"
-    WHERE "id" = ${input.artifactId} AND "workspaceId" = ${input.workspaceId} AND "status" = 'available' FOR UPDATE`)
-  if (artifact.length !== 1) return null
+  await lockProxySourceArtifacts(transaction, { workspaceId: input.workspaceId, plan: input.plan,
+    sourceArtifactId: input.sourceArtifactId, outputArtifactId: input.artifactId })
   const manifest = await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "media_artifact_manifests"
     WHERE "id" = ${input.manifestId} AND "workspaceId" = ${input.workspaceId} AND "artifactId" = ${input.artifactId} FOR SHARE`)
   if (manifest.length !== 1) return null

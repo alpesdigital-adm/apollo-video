@@ -59,6 +59,7 @@ import { parseDesiredAction } from '../../domain/desired-action.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { materializeManualEditPlan } from '../../domain/manual-editing.ts'
 import { readSafeReusableProxyReceipt } from './proxy-reuse-safety.ts'
+import { assertInlineProxySourceAuthority, lockProxySourceArtifacts } from './proxy-source-authority.ts'
 import { editPlanReferencesSource } from './perception-producer-request-context-repository.ts'
 import { lockProducerPublishProject, lockProducerPublishSource, producerPublishClock } from './producer-publish-fence.ts'
 import {
@@ -263,7 +264,10 @@ function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
 }
 
 function isSerializationConflict(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false
+  if (error.code === 'P2034') return true
+  return error.code === 'P2010' && 'meta' in error && typeof error.meta === 'object' &&
+    error.meta !== null && 'code' in error.meta && error.meta.code === '40001'
 }
 
 function parseResult(value: string | null): PublicOperationResult | undefined {
@@ -1684,6 +1688,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
 
         let reusedColorPipelineBindingsJson: string | undefined
         let reusedRenderMap: NonNullable<Awaited<ReturnType<typeof readSafeReusableProxyReceipt>>>['map'] | undefined
+        let revalidateInlineReuseContext: (() => Promise<void>) | undefined
         let ingestUploadKind: 'video' | 'audio' | 'image' | undefined
         let persistedSyntheticRenderContext: SyntheticProductionRenderContext | undefined
         if (syntheticRenderContext) {
@@ -1963,6 +1968,39 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse child changed render content')
           }
           parseColorPipelineBindings(reusedOperation.colorPipelineBindingsJson)
+          revalidateInlineReuseContext = async () => {
+            const [childNow, baseNow, detailNow] = await Promise.all([
+              transaction.v2ProjectVersion.findFirst({ where: {
+                id: projectReuseContext.projectVersionId, workspaceId: input.operation.workspaceId,
+                projectId: projectReuseContext.projectId, editPlanSnapshotId: projectReuseContext.editPlanSnapshotId,
+                currentForProjects: { some: { id: projectReuseContext.projectId, workspaceId: input.operation.workspaceId } },
+              }, include: { command: true, editPlanSnapshot: true } }),
+              transaction.v2ProjectVersion.findFirst({ where: { id: projectReuseContext.baseVersionId,
+                workspaceId: input.operation.workspaceId, projectId: projectReuseContext.projectId },
+              include: { editPlanSnapshot: true } }),
+              transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
+                operationId: projectReuseContext.reusedFromOperationId, workspaceId: input.operation.workspaceId,
+                projectId: projectReuseContext.projectId, projectVersionId: projectReuseContext.baseVersionId,
+                sourceArtifactId: projectReuseContext.sourceArtifactId, sourceManifestId: projectReuseContext.sourceManifestId,
+                outputArtifactId: projectReuseContext.outputArtifactId, outputManifestId: projectReuseContext.outputManifestId,
+                operation: { status: 'succeeded', phase: 'completed' },
+              }, select: { colorPipelineBindingsJson: true } }),
+            ])
+            if (!childNow?.command || !baseNow || !detailNow ||
+                childNow.parentVersionId !== version.parentVersionId || childNow.sequence !== version.sequence ||
+                childNow.createdAt.getTime() !== version.createdAt.getTime() ||
+                childNow.command.id !== version.command!.id || childNow.command.type !== version.command!.type ||
+                childNow.command.baseVersionId !== version.command!.baseVersionId ||
+                childNow.command.baseHash !== version.command!.baseHash || childNow.command.payloadJson !== version.command!.payloadJson ||
+                childNow.editPlanSnapshot.contentHash !== version.editPlanSnapshot.contentHash ||
+                childNow.editPlanSnapshot.contentJson !== version.editPlanSnapshot.contentJson ||
+                baseNow.baseHash !== baseVersion.baseHash || baseNow.sequence !== baseVersion.sequence ||
+                baseNow.editPlanSnapshot.contentHash !== baseVersion.editPlanSnapshot.contentHash ||
+                baseNow.editPlanSnapshot.contentJson !== baseVersion.editPlanSnapshot.contentJson ||
+                detailNow.colorPipelineBindingsJson !== reusedOperation.colorPipelineBindingsJson) {
+              throw new DomainError('PERSISTENCE_CONFLICT', 'Inline reuse Command or source context changed')
+            }
+          }
           const safeReuse = await readSafeReusableProxyReceipt(transaction, {
             workspaceId: input.operation.workspaceId,
             projectId: projectReuseContext.projectId,
@@ -1970,12 +2008,16 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             operationId: projectReuseContext.reusedFromOperationId,
             artifactId: projectReuseContext.outputArtifactId,
             manifestId: projectReuseContext.outputManifestId,
+            sourceArtifactId: projectReuseContext.sourceArtifactId,
+            plan: basePlan as unknown as Parameters<typeof lockProxySourceArtifacts>[1]['plan'],
           })
           if (!safeReuse) throw new DomainError('PERSISTENCE_CONFLICT',
             'Project proxy reuse has no compatible subtitle-suppression receipt')
           if (safeReuse.map.fps !== childPlan.fps || safeReuse.map.durationFrames !== childPlan.durationFrames) {
             throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse map clock differs from unchanged plan')
           }
+          await revalidateInlineReuseContext()
+          await assertInlineProxySourceAuthority(transaction, { workspaceId: input.operation.workspaceId, ...projectReuseContext })
           reusedColorPipelineBindingsJson = reusedOperation.colorPipelineBindingsJson
           reusedRenderMap = safeReuse.map
         }
@@ -2467,6 +2509,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           record.operation,
           this.createEventId,
         )
+        if (projectReuseContext) {
+          if (!revalidateInlineReuseContext) throw new DomainError('PERSISTENCE_CONFLICT', 'Inline reuse context fence is absent')
+          await revalidateInlineReuseContext()
+          await assertInlineProxySourceAuthority(transaction, { workspaceId: input.operation.workspaceId, ...projectReuseContext })
+        }
         return { ...record, replayed: false }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {

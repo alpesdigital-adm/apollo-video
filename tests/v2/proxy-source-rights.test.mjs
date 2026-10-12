@@ -3,6 +3,8 @@ import test from 'node:test'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { assembleDirectedEditPlan, calculateRenderablePlanHash } from '../../src/v2/application/renderable-edit-plan.ts'
+import { assertInlineProxySourceAuthority } from '../../src/v2/infrastructure/prisma/proxy-source-authority.ts'
+import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 
 const workspaceId = 'workspace-proxy-rights', projectId = 'project-proxy-rights'
@@ -60,20 +62,27 @@ function fixture({ role = 'selected-insert', mediaType = 'video', rights = { all
       editPlanSnapshot: { workspaceId, projectId, contentJson: JSON.stringify(plan),
         contentHash: calculateVersionHash(plan) }, command: null, directorRunAsResult: null }] }
   const hash = calculateRenderablePlanHash(plan)
-  const client = { v2Project: { async findFirst() { return project } },
+  const client = { async $queryRaw() { return [{ now: new Date() }] },
+    v2MediaArtifactManifest: { async findFirst() { return { manifestJson: JSON.stringify({ sources: links.map((link) => ({
+      artifactKey: link.artifactId + '.mp4', sha256: link.artifact.sha256,
+      role: music && link.artifactId === secondId ? 'approved-music' : link.role === 'selected-insert' ? 'selected-insert' : 'source-master' })) }) } } },
+    v2Project: { async findFirst() { return project } },
     v2RenderablePlanSnapshot: { async findFirst() { return { workspaceId, projectId,
       projectVersionId: plan.projectVersionId, planId: plan.id, origin: 'react-playback',
       sourceId: 'playback-proxy-rights', sourceHash: 'a'.repeat(64), sourceVersion: null,
       fps: 30, durationFrames: 60, clipCount: 2, planJson: JSON.stringify(plan),
       planHash: hash, createdAt: new Date(createdAt) } } } }
   const repository = new PrismaProjectProxyRenderRepository(client)
-  return { secondId, project, repository,
+  return { secondId, project, repository, client,
+    inlineRead: () => assertInlineProxySourceAuthority(client, { workspaceId, projectId, projectVersionId: plan.projectVersionId,
+      editPlanSnapshotId: 'snapshot-proxy-rights', sourceArtifactId: masterId, sourceManifestId: 'manifest-' + masterId,
+      outputArtifactId: 'output-inline-rights', outputManifestId: 'manifest-inline-rights' }),
     projectRead: () => repository.readCurrentSource({ workspaceId, projectId }),
     snapshotRead: () => repository.readRenderableSnapshotSource({ workspaceId, projectId,
       planId: plan.id, planHash: hash, format: '9:16' }) }
 }
 
-for (const path of ['projectRead', 'snapshotRead']) {
+for (const path of ['projectRead', 'snapshotRead', 'inlineRead']) {
   test(`${path}: direct video/audio require rendering and selected inserts require editorial reuse`, async () => {
     for (const [role, mediaType, use, expectedRole] of [
       ['source-master', 'video', 'rendering', 'source-master'],
@@ -185,3 +194,49 @@ for (const method of ['attachCompletedOutput', 'attachCompletedSnapshotOutput'])
     }
   })
 }
+
+// Admission retries open a new Serializable transaction, never reinterpret an error message.
+test('inline admission retries only P2034/raw 40001 and exhausts after three attempts', async () => {
+  const { createQueuedPublicOperation, startPublicOperationAttempt, advancePublicOperationPhase, succeedPublicOperation } =
+    await import('../../src/v2/domain/public-operation.ts')
+  const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
+  const now = new Date().toISOString()
+  const queued = createQueuedPublicOperation({ id: 'inline-retry-operation', workspaceId, projectId,
+    clientId: 'inline-client', type: 'project-proxy-render', target: { type: 'media-artifact', id: 'inline-output', manifestId: 'inline-manifest' }, createdAt: now })
+  const operation = succeedPublicOperation(advancePublicOperationPhase(startPublicOperationAttempt(queued, now), 'persisting', now), now)
+  const audit = createApiAccessAuditContext({ workspaceId, clientId: 'inline-client', credentialId: 'inline-credential',
+    environment: 'production', authenticationKind: 'bearer' })
+  const input = { operation, authenticationAudit: audit, idempotencyKey: 'inline-retry-key', requestFingerprint: 'a'.repeat(64),
+    context: { kind: 'project-proxy-reuse', projectId, projectVersionId: 'inline-child', editPlanSnapshotId: 'inline-snapshot',
+      commandId: 'inline-command', impactHash: 'b'.repeat(64), baseVersionId: 'inline-base', reusedFromOperationId: 'inline-parent-operation',
+      sourceArtifactId: 'inline-source', sourceManifestId: 'inline-source-manifest', inputHash: 'c'.repeat(64),
+      outputArtifactId: 'inline-output', outputManifestId: 'inline-manifest', originalFileName: 'controlled.mp4' } }
+  for (const error of [{ code: 'P2034' }, { code: 'P2010', meta: { code: '40001' } },
+    { code: 'P2010', meta: { code: '40P01' } }, { code: 'P2010', meta: { code: 40001 } },
+    { code: 'P2010', message: '40001' }]) {
+    let attempts = 0
+    const repo = new PrismaPublicOperationRepository({ async $transaction() { attempts++; throw error } })
+    const retriable = error.code === 'P2034' || error.meta?.code === '40001'
+    await assert.rejects(repo.createOrReplay(input), (failure) => retriable ? failure.code === 'PERSISTENCE_CONFLICT' : failure === error)
+    assert.equal(attempts, retriable ? 3 : 1)
+  }
+})
+
+test('inline expiry uses the clock after project and manifest reads, including the final admission check', async () => {
+  const subject = fixture({ role: 'source-master', rights: { expiresAt: '2026-10-02T00:00:00.000Z' } })
+  const reads = []
+  const projectRead = subject.client.v2Project.findFirst
+  const manifestRead = subject.client.v2MediaArtifactManifest.findFirst
+  subject.client.v2Project.findFirst = async (...args) => { reads.push('project'); return projectRead(...args) }
+  subject.client.v2MediaArtifactManifest.findFirst = async (...args) => { reads.push('manifest'); return manifestRead(...args) }
+  subject.client.$queryRaw = async () => { reads.push('clock'); return [{ now: new Date('2026-10-02T00:00:00.000Z') }] }
+  await assert.rejects(subject.inlineRead(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+  assert.deepEqual(reads, ['project', 'manifest', 'clock'])
+})
+
+test('inline music keeps its exact current rights snapshot and source lineage branch', async () => {
+  const good = fixture({ role: 'source-audio', mediaType: 'audio', music: true })
+  assert.equal((await good.inlineRead()).renderSources.find((source) => source.artifactId === good.secondId).role, 'approved-music')
+  good.project.mediaAssets[1].artifact.currentRightsSnapshot.id = 'wrong-current-music-rights'
+  await assert.rejects(good.inlineRead(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+})

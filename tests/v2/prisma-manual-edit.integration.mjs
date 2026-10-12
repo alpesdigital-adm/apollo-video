@@ -577,7 +577,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         const storedMap = await transaction.v2RenderElementMap.findFirst({ where: { workspaceId, projectVersionId, proxyArtifactId: outputArtifactId } })
         const mapData = { workspaceId, projectId, projectVersionId, proxyArtifactId: outputArtifactId, proxyHash, mapHash,
           schemaVersion: map.schemaVersion, fps: map.fps, durationFrames: map.durationFrames,
-          canvasWidth: map.canvas.width, canvasHeight: map.canvas.height, elementsJson: stableSerialize(map.elements) }
+          canvasWidth: map.canvas.width, canvasHeight: map.canvas.height, elementsJson: JSON.stringify(map.elements) }
         if (storedMap) for (const [key, value] of Object.entries(mapData)) assert.equal(storedMap[key], value)
         else await transaction.v2RenderElementMap.create({ data: { id: randomUUID(), ...mapData, createdAt: now } })
         if (existing) {

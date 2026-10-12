@@ -19,14 +19,19 @@ import { PERCEPTION_KINDS } from '../../src/v2/domain/perception-timeline.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
-import { advancePublicOperationPhase, cancelPublicOperation, createQueuedPublicOperation, startPublicOperationAttempt,
+import { advancePublicOperationPhase, cancelPublicOperation, createQueuedPublicOperation, startPublicOperationAttempt, succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
-import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { calculateProxyReviewHash, evaluateRenderedProxy } from '../../src/v2/application/render-workflow.ts'
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
 import { PrismaPerceptionProducerRequestContextRepository } from '../../src/v2/infrastructure/prisma/perception-producer-request-context-repository.ts'
 import { PrismaPerceptionTimelineRepository } from '../../src/v2/infrastructure/prisma/perception-timeline-repository.ts'
 import { hydratePublicOperationRecord, PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+import { applyManualEditService } from '../../src/v2/application/manual-edit.ts'
+import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
+import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
+import { queryProxySourceProject, hydrateProxySource } from '../../src/v2/infrastructure/prisma/proxy-source-authority.ts'
+import { buildRenderElementMap, renderElementMapHash } from '../../src/v2/domain/review-system.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 import { PrismaAutomaticCatalogRepository } from '../../src/v2/infrastructure/prisma/automatic-catalog-repository.ts'
 import { externalActorAuditData } from '../../src/v2/infrastructure/prisma/external-actor-audit.ts'
@@ -1103,6 +1108,200 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
             `W65 ${scenario} PostgreSQL clients did not disconnect cleanly`)
         }
       }
+
+      // Inline reuse completes without a worker. Its rights fence is a separate
+      // transaction from the already committed manual Command/Version below.
+      const manualRepository = new PrismaManualEditRepository(db)
+      for (const rightsChange of ['allow', 'revoke', 'expiry']) {
+        await installRights(world.sourceId)
+        const previousContext = await manualRepository.readContext({ workspaceId, projectId: world.projectId })
+        assert.ok(previousContext)
+        const ownBaseClip = previousContext.editPlan.videoTracks.find((track) => track.kind === 'base-video').clips[0].id
+        // A real selection Command allocates this fixture's own immutable base.
+        // Its input hash is unchanged semantics under a NEW version identity, never salted to evade uniqueness.
+        const ownBase = await applyManualEditService({ repository: manualRepository, clock: () => new Date(),
+          createId: (kind) => kind + '-' + randomUUID(), createEventId: randomUUID })({
+          workspaceId, projectId: world.projectId, baseVersionId: previousContext.version.id,
+          baseHash: previousContext.version.baseHash, expectedRevision: previousContext.version.sequence,
+          action: 'apply', variantId: '9:16', targetId: ownBaseClip, operation: { kind: 'select', clipId: ownBaseClip },
+          actor, idempotencyKey: 'inline-owned-base-command-' + rightsChange + '-' + suffix })
+        const baseContext = await manualRepository.readContext({ workspaceId, projectId: world.projectId })
+        assert.equal(baseContext?.version.id, ownBase.version.id)
+        assert.equal(await db.v2ProjectProxyRenderOperation.count({ where: { workspaceId, projectVersionId: ownBase.version.id } }), 0)
+        assert.ok(baseContext)
+        const baseSource = hydrateProxySource(await queryProxySourceProject(db, {
+          workspaceId, projectId: world.projectId, projectVersionId: baseContext.version.id,
+          editPlanSnapshotId: baseContext.version.snapshotRefs.editPlan }))
+        assert.ok(baseSource)
+        const id = 'inline-base-' + rightsChange + '-' + suffix
+        const artifactId = id + '-output', manifestId = id + '-manifest'
+        const key = workspaceId + '/metadata-only-' + id + '.mp4'
+        const proxyHash = sha(Buffer.from('metadata-only:' + id))
+        const bindings = JSON.parse(detailData.colorPipelineBindingsJson)
+        const baseInputHash = projectProxyRenderInputHash({ source: baseSource, colorPipelineBindings: bindings })
+        assert.equal(await db.v2ProjectProxyRenderOperation.count({ where: { workspaceId,
+          projectVersionId: baseContext.version.id, inputHash: baseInputHash } }), 0,
+        'the owned base has no existing canonical detail; content/input hashes are not salted')
+        const rendererDigest = sha(Buffer.from('apollo-v2-ffmpeg-editorial/' + FFMPEG_EDITORIAL_RENDERER_VERSION))
+        const manifest = createMediaArtifactManifestV2({
+          artifactKey: key, artifactSha256: proxyHash, byteSize: 1024, mediaType: 'video', container: 'mp4',
+          recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+            parameters: { inputHash: baseInputHash, fixtureScope: 'metadata-only-inline-rights-fence' } },
+          sources: baseSource.renderSources.map((source) => ({ artifactKey: source.artifactKey,
+            sha256: source.sha256, role: source.role,
+            execution: { tool: { id: 'ffmpeg', version: 'declared-controlled', digest: rendererDigest } } })),
+        })
+        const map = buildRenderElementMap({ proxyHash, fps: baseSource.editPlan.fps,
+          durationFrames: baseSource.editPlan.durationFrames, canvas: { width: 540, height: 960 },
+          source: { width: 640, height: 360 },
+          clips: baseSource.editPlan.videoTracks.filter((track) => track.kind === 'base-video').flatMap((track) => track.clips),
+          subtitleCues: [], ctaOverlays: [] })
+        const now = new Date().toISOString()
+        const baseCompleted = succeedPublicOperation(controlledRunningProxyOperation({ id, workspaceId,
+          projectId: world.projectId, clientId: world.clientId, artifactId, manifestId, now: Date.now() }), now)
+        await db.v2MediaArtifact.create({ data: { id: artifactId, workspaceId, artifactKey: key,
+          sha256: proxyHash, byteSize: 1024n, mediaType: 'video', container: 'mp4', status: 'available' } })
+        await db.v2MediaArtifactManifest.create({ data: { id: manifestId, workspaceId, artifactId,
+          schemaVersion: manifest.schemaVersion, manifestHash: manifest.manifestHash,
+          recipeId: manifest.recipe.id, recipeVersion: manifest.recipe.version,
+          parametersHash: manifest.recipe.parametersHash, manifestJson: stableSerialize(manifest) } })
+        await db.v2PublicOperation.create({ data: { ...operationData, id, status: baseCompleted.status,
+          phase: baseCompleted.phase, targetId: artifactId, progressCompleted: baseCompleted.progress.completed,
+          progressTotal: baseCompleted.progress.total, progressUnit: baseCompleted.progress.unit,
+          cancelable: baseCompleted.cancelable, retryable: baseCompleted.retryable,
+          resultJson: stableSerialize(baseCompleted.result), idempotencyKey: id, requestFingerprint: baseInputHash,
+          createdAt: new Date(baseCompleted.createdAt), startedAt: new Date(baseCompleted.startedAt),
+          updatedAt: new Date(baseCompleted.updatedAt), completedAt: new Date(baseCompleted.completedAt),
+          leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null } })
+        await db.v2ProjectProxyRenderOperation.create({ data: { ...detailData, operationId: id,
+          projectVersionId: baseContext.version.id, editPlanSnapshotId: baseContext.version.snapshotRefs.editPlan,
+          inputHash: baseInputHash, outputArtifactId: artifactId, outputManifestId: manifestId } })
+        await db.v2RenderElementMap.create({ data: { id: randomUUID(), workspaceId, projectId: world.projectId,
+          projectVersionId: baseContext.version.id, proxyArtifactId: artifactId, schemaVersion: map.schemaVersion,
+          proxyHash, mapHash: renderElementMapHash(map), fps: map.fps, durationFrames: map.durationFrames,
+          canvasWidth: map.canvas.width, canvasHeight: map.canvas.height,
+          elementsJson: JSON.stringify(map.elements), createdAt: new Date(now) } })
+        const clipId = baseSource.editPlan.videoTracks.find((track) => track.kind === 'base-video').clips[0].id
+        const child = await applyManualEditService({ repository: manualRepository, clock: () => new Date(),
+          createId: (kind) => kind + '-' + randomUUID(), createEventId: randomUUID })({
+          workspaceId, projectId: world.projectId, baseVersionId: baseContext.version.id,
+          baseHash: baseContext.version.baseHash, expectedRevision: baseContext.version.sequence,
+          action: 'apply', variantId: '9:16', targetId: clipId, operation: { kind: 'select', clipId },
+          actor, idempotencyKey: 'inline-command-' + rightsChange + '-' + suffix })
+        assert.equal(child.impact.requiresNewProxy, false)
+        const candidateId = 'inline-child-' + rightsChange + '-' + suffix
+        const candidateTime = new Date().toISOString()
+        const candidateOperation = succeedPublicOperation(advancePublicOperationPhase(startPublicOperationAttempt(
+          createQueuedPublicOperation({ id: candidateId, workspaceId, projectId: world.projectId, clientId: world.clientId,
+            type: 'project-proxy-render', target: { type: 'media-artifact', id: artifactId, manifestId },
+            createdAt: candidateTime }), candidateTime), 'persisting', candidateTime), candidateTime)
+        const candidateInput = { operation: candidateOperation, authenticationAudit: proxyAudit,
+          idempotencyKey: candidateId, requestFingerprint: sha(Buffer.from(candidateId)),
+          context: { kind: 'project-proxy-reuse', projectId: world.projectId,
+            projectVersionId: child.version.id, editPlanSnapshotId: child.version.snapshotRefs.editPlan,
+            commandId: child.command.id, impactHash: child.impact.impactHash,
+            baseVersionId: baseContext.version.id, reusedFromOperationId: id,
+            sourceArtifactId: baseSource.sourceArtifactId, sourceManifestId: baseSource.sourceManifestId,
+            inputHash: projectProxyRenderInputHash({ source: hydrateProxySource(await queryProxySourceProject(db, {
+              workspaceId, projectId: world.projectId, projectVersionId: child.version.id,
+              editPlanSnapshotId: child.version.snapshotRefs.editPlan })), colorPipelineBindings: [] }),
+            outputArtifactId: artifactId, outputManifestId: manifestId, originalFileName: 'metadata-only-inline.mp4' } }
+        const baseline = async () => ({
+          project: await db.v2Project.findUniqueOrThrow({ where: { id: world.projectId },
+            select: { currentVersionId: true, status: true } }),
+          operations: await db.v2PublicOperation.count({ where: { workspaceId } }),
+          details: await db.v2ProjectProxyRenderOperation.count({ where: { workspaceId } }),
+          maps: await db.v2RenderElementMap.count({ where: { workspaceId } }),
+          outbox: await db.v2PublicEventOutbox.count({ where: { workspaceId } }),
+        })
+        const before = await baseline()
+        assert.equal(before.project.currentVersionId, child.version.id)
+        if (rightsChange === 'allow') {
+          const admitted = await new PrismaPublicOperationRepository(db).createOrReplay(candidateInput)
+          assert.equal(admitted.operation.status, 'succeeded')
+          const copied = await db.v2RenderElementMap.findFirstOrThrow({ where: { workspaceId,
+            projectVersionId: child.version.id, proxyArtifactId: artifactId } })
+          assert.equal(copied.mapHash, renderElementMapHash(map))
+          assert.equal(copied.elementsJson, JSON.stringify(map.elements))
+          const after = await baseline()
+          assert.equal((await new PrismaPublicOperationRepository(db).createOrReplay(candidateInput)).replayed, true)
+          assert.deepEqual(await baseline(), after, 'inline replay cannot duplicate operations or maps')
+          assert.equal(await db.v2ProxyReview.count({ where: { workspaceId, operationId: candidateId } }), 0,
+            'inline reuse cannot copy a critic decision or approval')
+          console.log(JSON.stringify({ scope: 'inline-rights-TX-only', rightsChange, physicalRenderObserved: false,
+            fixtureOutputs: 'controlled-metadata-only', replayObserved: true, approvalTransferred: false }))
+          continue
+        }
+        const latchEndpoint = isolatedDbEndpoint('inline-latch-' + rightsChange + '-' + suffix)
+        const inlineEndpoint = isolatedDbEndpoint('inline-admit-' + rightsChange + '-' + suffix)
+        const latchClient = new PrismaClient({ datasources: { db: { url: latchEndpoint.url } } })
+        const inlineClient = new PrismaClient({ datasources: { db: { url: inlineEndpoint.url } } })
+        let resolveReady, rejectReady, release, latch, admission, failure
+        const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
+        const released = new Promise((resolve) => { release = resolve })
+        try {
+          await Promise.all([latchClient.$connect(), inlineClient.$connect()])
+          const [clock] = await db.$queryRaw`SELECT clock_timestamp() AS now`
+          const grant = await installRights(world.sourceId, rightsChange === 'expiry'
+            ? { expiresAt: new Date(clock.now.getTime() + 2000).toISOString() } : {})
+          latch = latchClient.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM public_operations WHERE id = ${id} FOR UPDATE`
+            resolveReady()
+            const deadline = Date.now() + 5000
+            let waited = false, changed = false
+            while (Date.now() < deadline) {
+              await tx.$queryRaw`SELECT pg_stat_clear_snapshot() IS NULL AS cleared`
+              const rows = await tx.$queryRaw`SELECT wait_event_type AS "waitType" FROM pg_stat_activity
+                WHERE application_name = ${inlineEndpoint.applicationName}`
+              waited ||= rows.some((row) => row.waitType === 'Lock')
+              if (rightsChange === 'expiry') {
+                const [at] = await tx.$queryRaw`SELECT clock_timestamp() AS now`
+                changed = at.now.getTime() >= Date.parse(grant.expiresAt)
+              } else if (waited && !changed) {
+                const revoked = await installRights(world.sourceId, { status: 'revoked' })
+                changed = (await db.v2MediaArtifact.findUniqueOrThrow({ where: { id: world.sourceId } }))
+                  .currentRightsSnapshotId === revoked.id
+              }
+              if (waited && changed) break
+              await new Promise((resolve) => setTimeout(resolve, 25))
+            }
+            assert.ok(waited, 'inline admission must be observed at a real SQL lock wait')
+            assert.ok(changed, 'rights change must commit/be observed before inline release')
+            release()
+          }, { timeout: 8000 }).catch((error) => { rejectReady(error); release(); throw error })
+          latch.catch(() => {})
+          await ready
+          admission = new PrismaPublicOperationRepository(inlineClient).createOrReplay(candidateInput)
+            .then((value) => ({ value }), (error) => ({ error }))
+          await released
+          await latch
+          const outcome = await admission
+          const messageBytes = typeof outcome.error?.message === 'string' ? Buffer.from(outcome.error.message) : null
+          const diagnostic = JSON.stringify({ scope: 'inline-rights-TX-only', rightsChange,
+            unexpectedPublication: !outcome.error, name: outcome.error?.name ?? null, code: outcome.error?.code ?? null,
+            sqlState: outcome.error?.meta?.code ?? null, messageSha256: messageBytes ? sha(messageBytes) : null,
+            messageBytes: messageBytes?.length ?? 0 })
+          assert.ok(outcome.error, diagnostic)
+          assert.equal(outcome.error.code, 'ASSET_RIGHTS_BLOCKED', diagnostic)
+          assert.deepEqual(await baseline(), before, 'only inline TX writes roll back; committed child head/status stay unchanged')
+          assert.ok(await db.v2ProjectVersion.findUnique({ where: { id: child.version.id } }))
+          assert.ok(await db.v2EditCommand.findUnique({ where: { id: child.command.id } }),
+            'the earlier Command transaction remains committed after enqueue denial')
+          console.log(JSON.stringify({ scope: 'inline-rights-TX-only', rightsChange, errorCode: outcome.error.code,
+            priorCommandAndVersionPreserved: true, newInlineEffects: 0, physicalRenderObserved: false }))
+        } catch (error) { failure = error; throw error } finally {
+          release()
+          await Promise.allSettled([latch, admission].filter(Boolean))
+          const failures = []
+          try { await db.v2MediaArtifact.update({ where: { id: world.sourceId },
+            data: { currentRightsSnapshotId: world.rightsId } }) } catch (error) { failures.push(error) }
+          const disconnected = await Promise.allSettled([latchClient.$disconnect(), inlineClient.$disconnect()])
+          failures.push(...disconnected.filter((result) => result.status === 'rejected').map((result) => result.reason))
+          if (failures.length) throw new AggregateError(failure ? [failure, ...failures] : failures,
+            'Inline rights latch cleanup failed')
+        }
+      }
+
     } catch (error) { primaryError = error } finally {
       const cleanupErrors = []
       try { await stopRunner(runner) } catch (error) { cleanupErrors.push(error) }

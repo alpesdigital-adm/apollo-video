@@ -7,11 +7,9 @@ import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../application/ports/editorial-proxy-renderer.ts'
 import { catalogApprovedOutputService } from '../../application/catalog-approved-output.ts'
-import type { ProxyQualityIssue } from '../../application/render-workflow.ts'
 import { calculateVersionHash } from '../../application/version-hash.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
-import { evaluateAssetUse } from '../../domain/asset-rights.ts'
-import { hydrateAssetRights, PrismaAssetRightsRepository } from './asset-rights-repository.ts'
+import { PrismaAssetRightsRepository } from './asset-rights-repository.ts'
 import { expectedOcrTimeline } from '../../domain/projected-ocr-timeline.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
@@ -21,65 +19,13 @@ import {
 import { editCommandRenderPolicy } from '../../domain/edit-command-registry.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './renderable-plan-snapshot-repository.ts'
 import { readSafeReusableProxy } from './proxy-reuse-safety.ts'
+import { queryProxySourceProject, hydrateProxySource, hydrateProxyRenderSources, uniqueSourceLink,
+  parseProxySourceRecord, parseProxySourceCriticIssues, assertProxySourceLineage, lockProxySourceArtifacts } from './proxy-source-authority.ts'
 import { parseDirectorPerceptionSnapshotUnchecked } from './director-run-repository.ts'
 import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
 import { PrismaAutomaticCatalogRepository } from './automatic-catalog-repository.ts'
 import { PrismaProxyReviewRepository } from './proxy-review-repository.ts'
 import { PrismaPublicOperationRepository } from './public-operation-repository.ts'
-
-function parseRecord(value: string, field: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid')
-    return parsed as Record<string, unknown>
-  } catch {
-    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
-  }
-}
-
-function parseCriticIssues(value: string | undefined): readonly Readonly<ProxyQualityIssue>[] {
-  if (!value) return Object.freeze([])
-  const quality = parseRecord(value, 'project proxy QualityReport')
-  if (!Array.isArray(quality.issues)) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport is invalid')
-  return Object.freeze(quality.issues.map((candidate) => {
-    if (
-      typeof candidate !== 'object' || candidate === null || Array.isArray(candidate) ||
-      typeof candidate.code !== 'string' ||
-      !['hard', 'warning'].includes(String(candidate.severity)) ||
-      !['technical', 'policy', 'integrity', 'editorial'].includes(String(candidate.category)) ||
-      typeof candidate.message !== 'string' ||
-      typeof candidate.correctable !== 'boolean'
-    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport issue is invalid')
-    const range = candidate.rangeMs
-    const evidenceRange = candidate.evidenceRange
-    if (
-      range !== undefined &&
-      (!Array.isArray(range) || range.length !== 2 || range.some((item) => !Number.isSafeInteger(item) || item < 0))
-    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport range is invalid')
-    if (evidenceRange !== undefined && (
-      typeof evidenceRange !== 'object' || evidenceRange === null || Array.isArray(evidenceRange) ||
-      !Number.isSafeInteger((evidenceRange as Record<string, unknown>).startFrame) ||
-      !Number.isSafeInteger((evidenceRange as Record<string, unknown>).endFrame) ||
-      Number((evidenceRange as Record<string, unknown>).startFrame) < 0 ||
-      Number((evidenceRange as Record<string, unknown>).endFrame) <= Number((evidenceRange as Record<string, unknown>).startFrame)
-    )) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport evidence range is invalid')
-    return Object.freeze({
-      code: candidate.code,
-      severity: candidate.severity as 'hard' | 'warning',
-      category: candidate.category as ProxyQualityIssue['category'],
-      message: candidate.message,
-      ...(range ? { rangeMs: Object.freeze([range[0], range[1]] as [number, number]) } : {}),
-      ...(typeof candidate.targetId === 'string' ? { targetId: candidate.targetId } : {}),
-      ...(typeof candidate.outputSpecId === 'string' ? { outputSpecId: candidate.outputSpecId } : {}),
-      ...(evidenceRange
-        ? { evidenceRange: Object.freeze({ startFrame: Number((evidenceRange as Record<string, unknown>).startFrame), endFrame: Number((evidenceRange as Record<string, unknown>).endFrame) }) }
-        : {}),
-      ...(Array.isArray(candidate.elementIds) ? { elementIds: Object.freeze(candidate.elementIds.map(String)) } : {}),
-      ...(Array.isArray(candidate.evidenceIds) ? { evidenceIds: Object.freeze(candidate.evidenceIds.map(String)) } : {}),
-      correctable: candidate.correctable,
-    })
-  }))
-}
 
 function parseArray(value: string, field: string): readonly unknown[] {
   try {
@@ -100,7 +46,7 @@ function assertSealedProxyRecipe(input: Readonly<{
   renderableFormat?: string | null }>,
 artifact: Readonly<{ artifactKey: string; sha256: string; byteSize: bigint; mediaType: string; container: string }>,
 manifest: Readonly<{ manifestJson: string; manifestHash: string }>): void {
-  const manifestBody = parseRecord(manifest.manifestJson, 'project proxy output manifest')
+  const manifestBody = parseProxySourceRecord(manifest.manifestJson, 'project proxy output manifest')
   const { manifestHash, ...unsignedManifest } = manifestBody
   const recipe = manifestBody.recipe
   const manifestArtifact = manifestBody.artifact
@@ -130,52 +76,6 @@ manifest: Readonly<{ manifestJson: string; manifestHash: string }>): void {
   }
 }
 
-function assertProxySourceLineage(manifestJson: string,
-  source: Readonly<ProjectProxyRenderSource>): void {
-  const manifest = parseRecord(manifestJson, 'project proxy output manifest')
-  const sources: readonly unknown[] | null = Array.isArray(manifest.sources) ? manifest.sources : null
-  if (!sources || source.renderSources.some((asset) =>
-    !sources.some((candidate: unknown) => typeof candidate === 'object' && candidate !== null &&
-      !Array.isArray(candidate) && (candidate as Record<string, unknown>).artifactKey === asset.artifactKey &&
-      (candidate as Record<string, unknown>).sha256 === asset.sha256 &&
-      (candidate as Record<string, unknown>).role === asset.role))) {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy source bytes are not sealed by output lineage')
-  }
-}
-
-type ProjectSourceLink = NonNullable<Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>>['mediaAssets'][number]
-
-function uniqueSourceLink(links: readonly ProjectSourceLink[], artifactId: string): ProjectSourceLink {
-  const matches = links.filter((item) => item.artifactId === artifactId)
-  if (matches.length !== 1) throw new DomainError('PERSISTENCE_CONFLICT',
-    `Render source ${artifactId} has no unambiguous project association`)
-  return matches[0]!
-}
-
-function sourceRightsPurpose(link: ProjectSourceLink): Readonly<{
-  use: 'rendering' | 'editorial-reuse'; role: 'source-master' | 'selected-insert'
-}> {
-  // Project uploads and referenced library inserts have different authorized uses.
-  // Unknown roles cannot acquire insert authority through ordering or a default.
-  if (link.role === 'source-master' && link.artifact.mediaType === 'video') {
-    return { use: 'rendering', role: 'source-master' }
-  }
-  if (link.role === 'source-audio' && link.artifact.mediaType === 'audio') {
-    return { use: 'rendering', role: 'source-master' }
-  }
-  if (link.role === 'selected-insert' && ['video', 'audio'].includes(link.artifact.mediaType)) {
-    return { use: 'editorial-reuse', role: 'selected-insert' }
-  }
-  throw new DomainError('PERSISTENCE_CONFLICT', `Render source ${link.artifactId} has an unsupported project role or media type`)
-}
-
-function referencedRenderArtifactIds(editPlan: EditorialCutEditPlan | DirectedEditPlan): string[] {
-  const clips = editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
-  return [...new Set(clips.flatMap((clip) => [clip.sourceArtifactId,
-    clip.audioSourceArtifactId ?? clip.sourceArtifactId]).concat(
-    'audioTracks' in editPlan ? editPlan.audioTracks.map((track) => track.artifactId) : []))].sort()
-}
-
 function isProxySerializationConflict(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) return false
   if (error.code === 'P2034') return true
@@ -183,100 +83,6 @@ function isProxySerializationConflict(error: unknown): boolean {
     error.meta !== null && 'code' in error.meta && error.meta.code === '40001'
 }
 
-function hydrateSource(
-  project: Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>,
-  expected?: { sourceArtifactId?: string; sourceManifestId?: string },
-  evaluatedAt: Date = new Date(),
-): Readonly<ProjectProxyRenderSource> | null {
-  const version = project?.versions[0]
-  const media = project?.mediaAssets.find((item) =>
-    item.role === 'source-master' &&
-    (!expected?.sourceArtifactId || item.artifactId === expected.sourceArtifactId))
-  const manifest = expected?.sourceManifestId
-    ? media?.artifact.manifests.find((item) => item.id === expected.sourceManifestId)
-    : media?.artifact.manifests[0]
-  if (!project || !version || !media || !manifest) return null
-  const editPlan = parseRecord(version.editPlanSnapshot.contentJson, 'project proxy EditPlan') as unknown as EditorialCutEditPlan | DirectedEditPlan
-  const manifestBody = parseRecord(manifest.manifestJson, 'project proxy source manifest')
-  const artifactBody = manifestBody.artifact
-  if (
-    editPlan.schemaVersion !== 2 || editPlan.state !== 'compiled' ||
-    version.editPlanSnapshot.workspaceId !== project.workspaceId ||
-    version.editPlanSnapshot.projectId !== project.id ||
-    calculateVersionHash(editPlan) !== version.editPlanSnapshot.contentHash ||
-    typeof artifactBody !== 'object' || artifactBody === null || Array.isArray(artifactBody) ||
-    typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
-  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy source is inconsistent')
-  const referencedArtifactIds = referencedRenderArtifactIds(editPlan)
-  const renderSources = referencedArtifactIds.map((artifactId) => {
-    const link = uniqueSourceLink(project.mediaAssets, artifactId)
-    const purpose = sourceRightsPurpose(link)
-    const sourceManifest = link?.artifact.manifests[0]
-    const sourceBody = sourceManifest
-      ? parseRecord(sourceManifest.manifestJson, `project render source manifest ${sourceManifest.id}`)
-      : null
-    const sourceArtifact = sourceBody?.artifact
-    if (
-      !link ||
-      !sourceManifest ||
-      link.artifact.status !== 'available' ||
-      !['video', 'audio'].includes(link.artifact.mediaType) ||
-      typeof sourceArtifact !== 'object' ||
-      sourceArtifact === null ||
-      Array.isArray(sourceArtifact) ||
-      typeof (sourceArtifact as Record<string, unknown>).artifactKey !== 'string'
-    ) {
-      throw new DomainError(
-        'PERSISTENCE_CONFLICT',
-        `Referenced render source ${artifactId} is unavailable`,
-      )
-    }
-    const musicTrack = 'audioTracks' in editPlan ? editPlan.audioTracks.find((track) => track.artifactId === artifactId) : undefined
-    if (musicTrack) {
-      const rights = link.artifact.currentRightsSnapshot
-      if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= evaluatedAt)) throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
-    } else {
-      const rights = link.artifact.currentRightsSnapshot
-        ? hydrateAssetRights(link.artifact.currentRightsSnapshot) : null
-      if (evaluateAssetUse(rights, { workspaceId: project.workspaceId,
-        use: purpose.use, locale: project.locale ?? 'und' }, evaluatedAt).outcome !== 'allow') {
-        throw new DomainError('ASSET_RIGHTS_BLOCKED', `Render source ${artifactId} no longer has approved current rights`)
-      }
-    }
-    return Object.freeze({
-      artifactId,
-      manifestId: sourceManifest.id,
-      artifactKey: (sourceArtifact as Record<string, unknown>).artifactKey as string,
-      sha256: link.artifact.sha256,
-      byteSize: Number(link.artifact.byteSize),
-      mediaType: link.artifact.mediaType as 'video' | 'audio',
-      container: link.artifact.container,
-      role: musicTrack ? 'approved-music' as const : purpose.role,
-    })
-  })
-  if (!renderSources.some((item) => item.artifactId === media.artifactId)) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Compiled EditPlan no longer references its source master audio or video',
-    )
-  }
-  return Object.freeze({
-    projectId: project.id,
-    projectVersionId: version.id,
-    editPlanSnapshotId: version.editPlanSnapshotId,
-    editPlanHash: version.editPlanSnapshot.contentHash,
-    editPlan: Object.freeze(editPlan),
-    format: project.format ?? '9:16',
-    sourceArtifactId: media.artifactId,
-    sourceManifestId: manifest.id,
-    sourceArtifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,
-    sourceSha256: media.artifact.sha256,
-    renderSources: Object.freeze(renderSources),
-    originalFileName: media.originalFileName,
-    uploadReceivedAt: (media.upload?.createdAt ?? media.createdAt).toISOString(),
-    criticIssues: parseCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
-  })
-}
 
 export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRepository {
   private readonly client: PrismaClient
@@ -285,65 +91,19 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     this.client = client
   }
 
-  queryProject(input: {
-    workspaceId: string
-    projectId: string
-    projectVersionId?: string
-    editPlanSnapshotId?: string
-    sourceArtifactId?: string
-    sourceManifestId?: string
-  }, client: PrismaClient | Prisma.TransactionClient = this.client) {
-    return client.v2Project.findFirst({
-      where: { id: input.projectId, workspaceId: input.workspaceId },
-      select: {
-        id: true,
-        workspaceId: true,
-        locale: true,
-        format: true,
-        currentVersionId: true,
-        versions: {
-          where: input.projectVersionId
-            ? { id: input.projectVersionId, ...(input.editPlanSnapshotId ? { editPlanSnapshotId: input.editPlanSnapshotId } : {}) }
-            : { currentForProjects: { some: { id: input.projectId, workspaceId: input.workspaceId } } },
-          orderBy: { sequence: 'desc' as const },
-          take: 1,
-          include: {
-            editPlanSnapshot: true,
-            directorRunAsResult: { include: { qualitySnapshot: true, perceptionSnapshot: true } },
-            command: {
-              include: {
-                artifactInvalidations: {
-                  include: { resolutions: { include: { operation: { select: { status: true } } } } },
-                },
-              },
-            },
-          },
-        },
-        mediaAssets: {
-          orderBy: [{ role: 'asc' as const }, { createdAt: 'desc' as const }],
-          include: { upload: { select: { createdAt: true } }, artifact: {
-            include: {
-              currentRightsSnapshot: true,
-              manifests: {
-                orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
-                take: 8,
-              },
-            },
-          } },
-        },
-      },
-    })
+  queryProject(input: Parameters<typeof queryProxySourceProject>[1], client: PrismaClient | Prisma.TransactionClient = this.client) {
+    return queryProxySourceProject(client, input)
   }
 
   async readCurrentSource(input: { workspaceId: string; projectId: string }) {
     const project = await this.queryProject(input)
-    const source = hydrateSource(project)
+    const source = hydrateProxySource(project)
     return source ? this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)) : null
   }
 
   async readImmutableSource(input: { workspaceId: string; projectId: string; projectVersionId: string; editPlanSnapshotId: string; sourceArtifactId: string; sourceManifestId: string }) {
     const project = await this.queryProject(input)
-    const source = hydrateSource(project, input)
+    const source = hydrateProxySource(project, input)
     return source ? this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)) : null
   }
 
@@ -413,41 +173,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     }, client)
     const version = project?.versions[0]
     if (!project || !version) return null
-    const referencedArtifactIds = referencedRenderArtifactIds(snapshot.plan)
-    const renderSources = referencedArtifactIds.map((artifactId) => {
-      const link = uniqueSourceLink(project.mediaAssets, artifactId)
-      const purpose = sourceRightsPurpose(link)
-      const manifest = link?.artifact.manifests[0]
-      const body = manifest ? parseRecord(manifest.manifestJson, `renderable snapshot source manifest ${manifest.id}`) : null
-      const artifact = body?.artifact
-      if (!link || !manifest || link.artifact.status !== 'available' || typeof artifact !== 'object' || artifact === null || Array.isArray(artifact) || typeof (artifact as Record<string, unknown>).artifactKey !== 'string') {
-        throw new DomainError('PERSISTENCE_CONFLICT', `Renderable snapshot source ${artifactId} is unavailable`)
-      }
-      const musicTrack = snapshot.plan.audioTracks.find((track) => track.artifactId === artifactId)
-      if (musicTrack) {
-        const rights = link.artifact.currentRightsSnapshot
-        if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= evaluatedAt)) {
-          throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
-        }
-      } else {
-        const rights = link.artifact.currentRightsSnapshot
-          ? hydrateAssetRights(link.artifact.currentRightsSnapshot) : null
-        if (evaluateAssetUse(rights, { workspaceId: project.workspaceId,
-          use: purpose.use, locale: project.locale ?? 'und' }, evaluatedAt).outcome !== 'allow') {
-          throw new DomainError('ASSET_RIGHTS_BLOCKED', `Renderable source ${artifactId} no longer has approved current rights`)
-        }
-      }
-      return Object.freeze({
-        artifactId,
-        manifestId: manifest.id,
-        artifactKey: (artifact as Record<string, unknown>).artifactKey as string,
-        sha256: link.artifact.sha256,
-        byteSize: Number(link.artifact.byteSize),
-        mediaType: link.artifact.mediaType as 'video' | 'audio',
-        container: link.artifact.container,
-        role: musicTrack ? 'approved-music' as const : purpose.role,
-      })
-    })
+    const renderSources = hydrateProxyRenderSources(project, snapshot.plan, evaluatedAt)
     const primary = renderSources.find((asset) => asset.mediaType === 'video') ?? renderSources[0]
     const primaryLink = primary ? uniqueSourceLink(project.mediaAssets, primary.artifactId) : undefined
     if (!primary || !primaryLink) throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot has no source media')
@@ -467,7 +193,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       renderSources: Object.freeze(renderSources),
       originalFileName: primaryLink.originalFileName,
       uploadReceivedAt: (primaryLink.upload?.createdAt ?? primaryLink.createdAt).toISOString(),
-      criticIssues: parseCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
+      criticIssues: parseProxySourceCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
     })
   }
 
@@ -492,7 +218,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         transaction.v2MediaArtifact.findUnique({ where: { id: input.outputArtifactId } }),
         transaction.v2MediaArtifactManifest.findUnique({ where: { id: input.outputManifestId } }),
       ])
-      const result = operation.resultJson ? parseRecord(operation.resultJson, 'completed proxy result') : null
+      const result = operation.resultJson ? parseProxySourceRecord(operation.resultJson, 'completed proxy result') : null
       const resource = result?.resource
       if (!detail || !review || !association || !artifact || !manifest ||
           operation.type !== 'project-proxy-render' ||
@@ -569,21 +295,14 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           version.editPlanSnapshot.projectId !== input.projectId) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy publication plan authority is unavailable')
       }
-      plan = parseRecord(version.editPlanSnapshot.contentJson, 'proxy publication EditPlan') as unknown as EditorialCutEditPlan | DirectedEditPlan
+      plan = parseProxySourceRecord(version.editPlanSnapshot.contentJson, 'proxy publication EditPlan') as unknown as EditorialCutEditPlan | DirectedEditPlan
       if (plan.schemaVersion !== 2 || plan.state !== 'compiled' ||
           calculateVersionHash(plan) !== version.editPlanSnapshot.contentHash) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy publication plan authority is inconsistent')
       }
     }
-    const artifactIds = [...new Set([...referencedRenderArtifactIds(plan),
-      operation.sourceArtifactId, input.outputArtifactId])]
-      .sort((left, right) => Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8')))
-    const artifacts = await transaction.$queryRaw<readonly { id: string }[]>`
-      SELECT id FROM media_artifacts WHERE "workspaceId" = ${input.workspaceId}
-      AND id IN (${Prisma.join(artifactIds)}) ORDER BY id COLLATE "C" FOR UPDATE`
-    if (artifacts.length !== artifactIds.length || artifacts.some((row, index) => row.id !== artifactIds[index])) {
-      throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy publication artifact fences are unavailable')
-    }
+    await lockProxySourceArtifacts(transaction, { workspaceId: input.workspaceId, plan,
+      sourceArtifactId: operation.sourceArtifactId, outputArtifactId: input.outputArtifactId })
     // Refresh lease and clock only after every possible lock wait. Rights/source
     // reads in the caller are repeated under these fences before publication.
     const observedAt = await this.assertCompletionLease(transaction, input)
@@ -644,7 +363,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     } else {
       const project = await this.queryProject({ workspaceId: input.workspaceId,
         projectId: input.projectId, projectVersionId: detail.projectVersionId }, transaction)
-      const source = hydrateSource(project, { sourceArtifactId: detail.sourceArtifactId,
+      const source = hydrateProxySource(project, { sourceArtifactId: detail.sourceArtifactId,
         sourceManifestId: detail.sourceManifestId }, completedAt)
       if (!project || project.currentVersionId !== detail.projectVersionId ||
           !source || source.editPlanSnapshotId !== detail.editPlanSnapshotId) {
@@ -694,7 +413,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     // Range reuse is derived from the canonical registry: only Command types whose
     // declared policy is partial-range may narrow a render to stale ranges.
     if (!version || !command || editCommandRenderPolicy(command.type) !== 'partial-range') return source
-    const payload = parseRecord(command.payloadJson, 'project proxy Command payload')
+    const payload = parseProxySourceRecord(command.payloadJson, 'project proxy Command payload')
     if (!payload.impact) return source
     const impact = parseCommandImpact(payload.impact)
     if (
@@ -823,7 +542,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       if (!project || project.currentVersionId !== input.projectVersionId) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy result version is no longer current')
       }
-      const source = hydrateSource(project, { sourceArtifactId: operation.sourceArtifactId,
+      const source = hydrateProxySource(project, { sourceArtifactId: operation.sourceArtifactId,
         sourceManifestId: operation.sourceManifestId }, observedAt)
       if (!source || source.editPlanSnapshotId !== operation.editPlanSnapshotId ||
           source.sourceArtifactId !== operation.sourceArtifactId ||
