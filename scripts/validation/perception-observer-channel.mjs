@@ -79,7 +79,8 @@ export function validateObserverAuthority(authority, uid, gid) {
   assert.match(authority.namespace.pid, /^pid:\[\d+\]$/)
   assert.match(authority.namespace.mount, /^mnt:\[\d+\]$/)
   assert.deepEqual(authority.order, ['private-propagation-and-proc-mounted', 'normal-bootstrap-dropped-and-measured',
-    'init-minimal-capabilities-measured', 'guardian-minimal-capabilities-measured', 'normal-node-exec-released'])
+    'init-minimal-capabilities-measured', 'guardian-minimal-capabilities-measured',
+    'normal-node-bootstrap-exec-observed', 'normal-node-product-main-released'])
   return authority
 }
 

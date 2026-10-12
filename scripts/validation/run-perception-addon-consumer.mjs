@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, readlink } from 'node:fs/promises'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CI_ROOT, budget, identityKey, liveIdentity, readAuthorityIdentitySync, registerAddonConsumer, jsonDigest } from './perception-addon-registry.mjs'
 import { loadPidfdBinding, openObservedPidfd } from './perception-pidfd.mjs'
-import { collectOwnedIdentities, parseLinuxProcessStat, readLinuxProcessIdentity } from './run-perception-ci.mjs'
+import { collectOwnedIdentities, parseLinuxProcessStat, parseLinuxProcessCredentials, readLinuxProcessIdentity } from './run-perception-ci.mjs'
 import { assertPerceptionSuite, COMPOSED_SUITE } from './run-perception-ci-namespace.mjs'
 
 export function fixedConsumer(mode, args) {
@@ -55,7 +55,71 @@ export function unattributedConsumerFacts(entry, snapshot, baseline, observed, i
     parentsFromBaseline: parents(baseline.values()), parentsFromObserved: parents(observed.values()),
     recheck: [], errors: [], completed: false }
 }
-export async function recheckUnattributedConsumer(facts, deadlineAt, readIdentity = readLinuxProcessIdentity) {
+async function unknownProcessDetails(expected, role, end, io) {
+  const detail = { role, expected: { ...expected }, scope: 'metadata-only-not-ownership', consistent: false, errors: [] }
+  let phase = 'stat-before'
+  const bounded = async (action) => {
+    const remaining = end - Date.now()
+    assert.ok(remaining > 0, 'Unknown process detail deadline exhausted before read')
+    const value = await budget(action, end, Math.min(250, remaining), 'Unknown process detail')
+    assert.ok(Date.now() < end, 'Unknown process detail expired before accepting read')
+    return value
+  }
+  const text = async (name) => {
+    const value = await bounded(() => {
+      const remaining = end - Date.now()
+      assert.ok(remaining > 0, 'Unknown process detail expired before file action')
+      return io.readFile(`/proc/${expected.pid}/${name}`,
+        { encoding: 'utf8', signal: AbortSignal.timeout(Math.min(250, remaining)) })
+    })
+    assert.ok(typeof value === 'string' && Buffer.byteLength(value) <= 65536, 'Unknown process metadata byte limit')
+    return value
+  }
+  const statusFacts = (value) => {
+    for (const field of ['Uid', 'Gid', 'NSpid'])
+      assert.equal(value.split('\n').filter((line) => line.startsWith(field + ':')).length, 1)
+    const credentials = parseLinuxProcessCredentials(value)
+    const matched = /^NSpid:[\t ]+([0-9]+(?:[\t ]+[0-9]+)*)[\t ]*$/m.exec(value)
+    assert.ok(matched, 'Unknown process namespace PID metadata missing')
+    const nspids = matched[1].split(/[\t ]+/).map(Number)
+    assert.ok(nspids.length <= 32 && nspids[0] === expected.pid &&
+      nspids.every((pid) => Number.isSafeInteger(pid) && pid > 0))
+    return { ...credentials, nspids }
+  }
+  const namespace = async () => {
+    const value = await bounded(() => io.readlink(`/proc/${expected.pid}/ns/pid`))
+    assert.ok(typeof value === 'string' && value.length <= 64 && /^pid:\[\d+\]$/.test(value))
+    return value
+  }
+  const matches = (value) => identityKey(value) === identityKey(expected) && value.ppid === expected.ppid
+  try {
+    const raw = await text('stat')
+    detail.before = parseLinuxProcessStat(raw)
+    assert.ok(matches(detail.before), 'Unknown process identity changed before metadata')
+    const comm = raw.slice(raw.indexOf('(') + 1, raw.lastIndexOf(')'))
+    assert.ok(Buffer.byteLength(comm) > 0 && Buffer.byteLength(comm) <= 128, 'Unknown process comm exceeds bound')
+    detail.comm = comm
+    phase = 'status-before'; detail.statusBefore = statusFacts(await text('status'))
+    phase = 'namespace-before'; detail.namespaceBefore = await namespace()
+    phase = 'status-after'; detail.statusAfter = statusFacts(await text('status'))
+    phase = 'namespace-after'; detail.namespaceAfter = await namespace()
+    phase = 'stat-after'; detail.after = parseLinuxProcessStat(await text('stat'))
+    detail.mismatches = []
+    if (!matches(detail.after)) detail.mismatches.push('identity-or-parent')
+    for (const field of ['uids', 'gids', 'nspids']) {
+      if (JSON.stringify(detail.statusBefore[field]) !== JSON.stringify(detail.statusAfter[field])) detail.mismatches.push(field)
+    }
+    if (detail.namespaceBefore !== detail.namespaceAfter) detail.mismatches.push('namespace')
+    detail.consistent = detail.mismatches.length === 0
+  } catch (error) {
+    const message = String(error?.message ?? '')
+    detail.errors.push({ phase, name: error.name, code: error.code ?? null,
+      messageSha256: createHash('sha256').update(message).digest('hex'), messageBytes: Buffer.byteLength(message) })
+  }
+  return detail
+}
+export async function recheckUnattributedConsumer(facts, deadlineAt, readIdentity = readLinuxProcessIdentity,
+  io = { readFile, readlink }) {
   const started = Date.now(), end = Math.min(deadlineAt, started + 1000)
   facts.recheckStartedAt = started; facts.recheckDeadlineAt = end
   const read = async (pid) => {
@@ -71,6 +135,7 @@ export async function recheckUnattributedConsumer(facts, deadlineAt, readIdentit
       facts.selectedIdentityMatches = false; facts.completed = true; return facts
     }
     facts.selectedIdentityMatches = true
+    facts.processDetails = [await unknownProcessDetails(current, 'selected', end, io)]
     const seen = new Set()
     for (let depth = 0; current.ppid > 0 && depth < 16 && !seen.has(identityKey(current)); depth += 1) {
       seen.add(identityKey(current))
@@ -81,6 +146,7 @@ export async function recheckUnattributedConsumer(facts, deadlineAt, readIdentit
       const parentStartedAfterChild = parent ? BigInt(parent.starttime) > BigInt(current.starttime) : null
       facts.recheck.push({ childBefore: current, childAfter, parentBefore: parent, parentAfter,
         stableIdentityEdge: stable, parentStartedAfterChild })
+      if (depth === 0 && parent) facts.processDetails.push(await unknownProcessDetails(parent, 'immediate-parent', end, io))
       if (!stable || parentStartedAfterChild) break
       current = parentAfter
     }
@@ -92,7 +158,12 @@ export async function recheckUnattributedConsumer(facts, deadlineAt, readIdentit
     const message = String(error?.message ?? '')
     facts.errors.push({ name: error.name, code: error.code ?? null,
       messageSha256: createHash('sha256').update(message).digest('hex'), messageBytes: Buffer.byteLength(message) })
-  } finally { facts.recheckFinishedAt = Date.now() }
+  } finally {
+    facts.recheckFinishedAt = Date.now()
+    if (facts.processDetails) facts.processDetailsComplete =
+      facts.processDetails.length === (facts.selectedRecheck.ppid > 0 ? 2 : 1) &&
+      facts.processDetails.every((value) => value.consistent && !value.errors.length)
+  }
   return facts
 }
 export async function runAddonConsumer(mode, args = [], env = process.env) {

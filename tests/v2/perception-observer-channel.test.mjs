@@ -3,7 +3,7 @@ import test from 'node:test'
 import { EventEmitter } from 'node:events'
 import {
   OBSERVER_ABI, createObserverClient, decodeObserverFrames, encodeObserverFrame,
-  validateMarkerAttestation, validateObserverIdentity,
+  validateMarkerAttestation, validateObserverIdentity, validateObserverAuthority,
 } from '../../scripts/validation/perception-observer-channel.mjs'
 import { decodeRootPackets, namespaceLaunchConfig, NAMESPACE_BUDGET_MS } from '../../scripts/validation/run-perception-ci-namespace.mjs'
 import { parseLinuxProcessCredentials } from '../../scripts/validation/run-perception-ci.mjs'
@@ -23,6 +23,50 @@ class Channel extends EventEmitter {
     this.emit('data', encodeObserverFrame({ abi: OBSERVER_ABI, runId, seq: this.lastRequest.seq, ok: true, result, ...overrides }))
   }
 }
+
+const authority = () => ({
+  init: { ...metadata(), pid: 1, ppid: 0, uid: 0, gid: 0, uids: [0, 0, 0, 0], gids: [0, 0, 0, 0],
+    CapEff: '0000000000080024', CapPrm: '0000000000080024', CapBnd: '0000000000080024' },
+  guardian: { ...metadata(), pid: 77, CapEff: '0000000000000020',
+    CapPrm: '0000000000000020', CapBnd: '0000000000000020' },
+  initParentDeathSignal: 9, guardianFlags: { keepCaps: 0, parentDeathSignal: 9 },
+  namespace: { pid: 'pid:[4026533000]', mount: 'mnt:[4026533001]' },
+  order: ['private-propagation-and-proc-mounted', 'normal-bootstrap-dropped-and-measured',
+    'init-minimal-capabilities-measured', 'guardian-minimal-capabilities-measured',
+    'normal-node-bootstrap-exec-observed', 'normal-node-product-main-released'],
+})
+
+test('observer controlled hello validates six authority stages through the ABI/run/sequence frame contract', async () => {
+  const socket = new Channel(), client = createObserverClient({ socket, runId, deadlineAt: Date.now() + 5000 })
+  try {
+    const pending = client.request('hello')
+    const result = { abi: OBSERVER_ABI, owner: metadata(), authority: authority() }
+    socket.answer(result)
+    const hello = await pending
+    assert.equal(validateObserverAuthority(hello.authority, 600, 700), hello.authority)
+    assert.deepEqual(hello.authority, result.authority)
+  } finally { client.close() }
+})
+
+test('observer authority rejects missing, exchanged, duplicated or legacy release stages', () => {
+  const original = authority()
+  for (let index = 0; index < original.order.length; index++) {
+    const missing = structuredClone(original)
+    missing.order.splice(index, 1)
+    assert.throws(() => validateObserverAuthority(missing, 600, 700))
+  }
+  for (let index = 0; index < original.order.length - 1; index++) {
+    const exchanged = structuredClone(original)
+    ;[exchanged.order[index], exchanged.order[index + 1]] = [exchanged.order[index + 1], exchanged.order[index]]
+    assert.throws(() => validateObserverAuthority(exchanged, 600, 700))
+  }
+  const legacy = structuredClone(original)
+  legacy.order.splice(4, 2, 'normal-node-exec-released')
+  assert.throws(() => validateObserverAuthority(legacy, 600, 700))
+  const duplicated = structuredClone(original)
+  duplicated.order.push(duplicated.order.at(-1))
+  assert.throws(() => validateObserverAuthority(duplicated, 600, 700))
+})
 
 test('observer rejects invalid UTF-8, oversized/pipelined frames and incomplete final frames', () => {
   const invalid = Buffer.from([0, 0, 0, 2, 0xc0, 0x80])

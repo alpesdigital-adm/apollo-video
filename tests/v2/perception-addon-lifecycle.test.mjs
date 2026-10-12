@@ -14,6 +14,23 @@ import { awaitProductGate, bootstrapReadback } from '../../scripts/validation/pe
 import { CI_PIDFD_SOURCE_PATHS, digest, initializeRegistry, readRegistry, registryLock,
   registerAddonConsumer, writeRegistry, sourceFingerprint } from '../../scripts/validation/perception-addon-registry.mjs'
 
+function unknownMetadataIo(identities) {
+  const values = new Map(identities.map((value) => [value.pid, value]))
+  return {
+    async readFile(path) {
+      const [, pid, name] = /^\/proc\/(\d+)\/(stat|status)$/.exec(path)
+      const identity = values.get(Number(pid))
+      assert.ok(identity)
+      if (name === 'status') return `Uid:\t1001\t1001\t1001\t1001\nGid:\t1001\t1001\t1001\t1001\nNSpid:\t${pid}\n`
+      const fields = Array(50).fill('0')
+      Object.assign(fields, { 0: identity.state, 1: String(identity.ppid), 2: String(identity.processGroupId ?? 3),
+        3: String(identity.sessionId ?? 3), 19: identity.starttime })
+      return `${pid} (controlled (peer)) ${fields.join(' ')}`
+    },
+    async readlink(path) { assert.match(path, /^\/proc\/\d+\/ns\/pid$/); return 'pid:[900]' },
+  }
+}
+
 test('fixed CI consumer permits literal npm test, eight named namespaces and infrastructure gate only', () => {
   assert.equal(fixedConsumer('unit', []).at(-1), 'unit')
   assert.equal(fixedConsumer('gates', ['tests/v2/perception-namespace-observer.integration.mjs']).at(-2), 'gates')
@@ -45,7 +62,8 @@ test('unknown metadata retains snapshot gap and later parent facts without adopt
   const facts = unattributedConsumerFacts(child, [child], baseline, observed, { snapshotStartedAt: 1, snapshotFinishedAt: 2 })
   assert.deepEqual(facts.before, child); assert.equal(facts.parentFromSnapshot, null)
   assert.deepEqual(facts.parentsFromObserved, [parent])
-  await recheckUnattributedConsumer(facts, Date.now() + 1000, async (pid) => pid === 9 ? child : parent)
+  await recheckUnattributedConsumer(facts, Date.now() + 1000, async (pid) => pid === 9 ? child : parent,
+    unknownMetadataIo([child, parent]))
   assert.equal(facts.recheck[0].stableIdentityEdge, true); assert.equal(facts.completed, true)
   assert.deepEqual([...observed], [['7:70', parent]]); assert.equal(baseline.size, 0)
   assert.equal(facts.membership.observed, false)
@@ -55,11 +73,12 @@ test('unknown metadata never treats child or parent PID reuse as ownership evide
   const child = { pid: 9, starttime: '90', ppid: 7, state: 'R', processGroupId: 3, sessionId: 3 }
   const facts = () => unattributedConsumerFacts(child, [child], new Map(), new Map(), {})
   const reused = facts()
-  await recheckUnattributedConsumer(reused, Date.now() + 1000, async () => ({ ...child, starttime: '91' }))
+  await recheckUnattributedConsumer(reused, Date.now() + 1000, async () => ({ ...child, starttime: '91' }), unknownMetadataIo([]))
   assert.equal(reused.selectedIdentityMatches, false); assert.deepEqual(reused.recheck, [])
   const parentReuse = facts()
+  const parent = { pid: 7, starttime: '100', ppid: 0, state: 'R' }
   await recheckUnattributedConsumer(parentReuse, Date.now() + 1000,
-    async (pid) => pid === 9 ? child : { pid: 7, starttime: '100', ppid: 0, state: 'R' })
+    async (pid) => pid === 9 ? child : parent, unknownMetadataIo([child, parent]))
   assert.equal(parentReuse.recheck[0].parentStartedAfterChild, true)
   assert.equal(parentReuse.scope, 'metadata-diagnostic-not-ownership-authority')
 })
@@ -68,16 +87,95 @@ test('unknown metadata read failure and expired budget remain diagnostic without
   const child = { pid: 9, starttime: '90', ppid: 7, state: 'R' }
   const facts = () => unattributedConsumerFacts(child, [child], new Map(), new Map(), {})
   const unreadable = facts()
-  await recheckUnattributedConsumer(unreadable, Date.now() + 1000, async () => { throw Object.assign(new Error('controlled denied'), { code: 'EACCES' }) })
+  await recheckUnattributedConsumer(unreadable, Date.now() + 1000,
+    async () => { throw Object.assign(new Error('controlled denied'), { code: 'EACCES' }) }, unknownMetadataIo([]))
   assert.equal(unreadable.completed, false); assert.equal(unreadable.errors[0].code, 'EACCES')
   let reads = 0
   const expired = facts()
-  await recheckUnattributedConsumer(expired, Date.now() - 1, async () => { reads += 1 })
+  await recheckUnattributedConsumer(expired, Date.now() - 1, async () => { reads += 1 }, unknownMetadataIo([]))
   assert.equal(reads, 0); assert.equal(expired.completed, false); assert.equal(expired.errors.length, 1)
   const timed = facts()
-  await recheckUnattributedConsumer(timed, Date.now() + 20, () => new Promise(() => {}))
+  await recheckUnattributedConsumer(timed, Date.now() + 20, () => new Promise(() => {}), unknownMetadataIo([]))
   assert.equal(timed.completed, false); assert.equal(timed.errors.length, 1)
   assert.ok(timed.recheckDeadlineAt - timed.recheckStartedAt <= 1000)
+})
+
+test('unknown selected process and immediate baseline parent retain bounded comm credentials and namespace without adoption', async () => {
+  const child = { pid: 9, starttime: '90', ppid: 7, state: 'S' }
+  const parent = { pid: 7, starttime: '70', ppid: 0, state: 'S' }
+  const baseline = new Map([['7:70', parent]]), observed = new Map()
+  const facts = unattributedConsumerFacts(child, [child, parent], baseline, observed, {})
+  await recheckUnattributedConsumer(facts, Date.now() + 1000, async (pid) => pid === 9 ? child : parent,
+    unknownMetadataIo([child, parent]))
+  assert.deepEqual(facts.processDetails.map((value) => value.role), ['selected', 'immediate-parent'])
+  for (const detail of facts.processDetails) {
+    assert.equal(detail.consistent, true); assert.deepEqual(detail.errors, [])
+    assert.equal(detail.comm, 'controlled (peer)'); assert.equal(detail.namespaceBefore, 'pid:[900]')
+    assert.deepEqual(detail.statusBefore.uids, [1001, 1001, 1001, 1001])
+    assert.deepEqual(detail.statusBefore.gids, [1001, 1001, 1001, 1001])
+    assert.deepEqual(detail.statusBefore.nspids, [detail.expected.pid])
+    assert.equal(Object.hasOwn(detail, 'raw'), false); assert.equal(Object.hasOwn(detail, 'environ'), false)
+  }
+  assert.equal(observed.size, 0); assert.deepEqual([...baseline], [['7:70', parent]])
+  assert.equal(facts.membership.observed, false)
+  assert.equal(facts.processDetailsComplete, true)
+})
+
+test('unknown detail EACCES remains explicit and still attempts the valid immediate parent within the same budget', async () => {
+  const child = { pid: 9, starttime: '90', ppid: 7, state: 'S' }
+  const parent = { pid: 7, starttime: '70', ppid: 0, state: 'S' }
+  const io = unknownMetadataIo([child, parent]), original = io.readlink
+  io.readlink = async (path) => {
+    if (path === '/proc/9/ns/pid') throw Object.assign(new Error('controlled denied'), { code: 'EACCES' })
+    return original(path)
+  }
+  const facts = unattributedConsumerFacts(child, [child], new Map(), new Map(), {})
+  await recheckUnattributedConsumer(facts, Date.now() + 1000, async (pid) => pid === 9 ? child : parent, io)
+  assert.equal(facts.processDetails[0].consistent, false)
+  assert.equal(facts.processDetails[0].errors[0].code, 'EACCES')
+  assert.equal(facts.processDetails[0].errors[0].phase, 'namespace-before')
+  assert.equal(facts.processDetails[1].consistent, true)
+  assert.equal(facts.processDetailsComplete, false)
+})
+
+test('unknown detail rejects PID parent credentials and namespace changes after metadata reads without adopting reused identities', async () => {
+  const child = { pid: 9, starttime: '90', ppid: 0, state: 'S' }
+  for (const changed of ['pid-reuse', 'parent', 'credentials', 'namespace', 'oversize-status', 'nspid']) {
+    const io = unknownMetadataIo([child]), read = io.readFile
+    let statReads = 0, statusReads = 0, namespaceReads = 0
+    io.readFile = async (path) => {
+      let text = await read(path)
+      if (path.endsWith('/stat') && ++statReads === 2) {
+        if (changed === 'pid-reuse') text = text.replace(' 90 ', ' 91 ')
+        if (changed === 'parent') text = text.replace(') S 0 ', ') S 7 ')
+      }
+      if (path.endsWith('/status')) {
+        if (++statusReads === 2 && changed === 'credentials') text = text.replaceAll('1001', '1002')
+        if (changed === 'oversize-status') text += 'x'.repeat(65537)
+        if (changed === 'nspid') text = text.replace('NSpid:\t9', 'NSpid:\t8')
+      }
+      return text
+    }
+    io.readlink = async () => ++namespaceReads === 2 && changed === 'namespace' ? 'pid:[901]' : 'pid:[900]'
+    const observed = new Map(), facts = unattributedConsumerFacts(child, [child], new Map(), observed, {})
+    await recheckUnattributedConsumer(facts, Date.now() + 1000, async () => child, io)
+    assert.equal(facts.processDetails[0].consistent, false, changed)
+    assert.ok(facts.processDetails[0].mismatches?.length || facts.processDetails[0].errors.length, changed)
+    assert.equal(facts.processDetailsComplete, false)
+    assert.equal(observed.size, 0)
+  }
+})
+
+test('unknown detail delayed read consumes the existing absolute deadline and starts no later metadata action', async () => {
+  const child = { pid: 9, starttime: '90', ppid: 0, state: 'S' }
+  let reads = 0
+  const io = { readFile() { reads++; return new Promise(() => {}) }, readlink() { assert.fail('no later read') } }
+  const facts = unattributedConsumerFacts(child, [child], new Map(), new Map(), {})
+  await recheckUnattributedConsumer(facts, Date.now() + 20, async () => child, io)
+  assert.equal(reads, 1); assert.equal(facts.processDetails[0].consistent, false)
+  assert.equal(facts.processDetails[0].errors.length, 1)
+  assert.ok(facts.recheckFinishedAt - facts.recheckStartedAt < 1000)
+  assert.ok(facts.recheckDeadlineAt - facts.recheckStartedAt <= 20)
 })
 
 test('fixed bootstrap denies EOF, malformed ACK and total deadline before workload release', async () => {
