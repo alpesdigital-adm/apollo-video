@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { existsSync } from 'node:fs'
 import net from 'node:net'
@@ -39,7 +39,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
-  const { createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
+  const { buildRenderElementMap, renderElementMapHash } = await import('../../src/v2/domain/review-system.ts')
+  const { projectProxyRenderInputHash } = await import('../../src/v2/application/project-render-sources.ts')
+  const { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } = await import('../../src/v2/application/ports/editorial-proxy-renderer.ts')
+  const { PrismaRenderElementMapRepository } = await import('../../src/v2/infrastructure/prisma/render-element-map-repository.ts')
+  const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
+  const { assertMediaArtifactManifest, createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
   const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
@@ -111,6 +116,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await client.v2MediaTranscript.deleteMany({ where: { workspaceId } })
     await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
     await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
+    await client.v2RenderElementMap.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
     await client.v2AssetUseDecision.deleteMany({ where: { workspaceId } })
     await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
@@ -425,17 +431,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         use: allowedUse === 'rendering' ? 'editorial-reuse' : 'rendering',
       }, createdAt).outcome, 'deny')
     }
-    const renderColorBindings = (...artifactIds) => stableSerialize(artifactIds.map((artifactId) => {
-      const compilation = colorCompilations.get(artifactId)
-      assert.ok(compilation)
-      return {
-        sourceArtifactId: artifactId,
-        sourceManifestId: `manifest-${artifactId}`,
-        compilationId: compilation.id,
-        compilationHash: compilation.compilationHash,
-        pipelineHash: compilation.pipeline.pipelineHash,
-      }
-    }))
     const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
     const currentTranscript = createMediaTranscript({
       language: 'pt-BR', text: 'Primeira frase Segunda', provider: 'groq', model: 'whisper-large-v3',
@@ -474,15 +469,63 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       sha256: completedProxyHash, byteSize: 1n,
       mediaType: 'video', container: 'mp4', status: 'available', createdAt,
     } })
-    const completedProxyManifest = createMediaArtifactManifestV2({ artifactKey: `manual/${completedProxyArtifactId}.mp4`,
-      artifactSha256: completedProxyHash, byteSize: 1, mediaType: 'video', container: 'mp4',
-      recipe: { id: 'manual-proxy', version: '1.0.0', parameters: { completedProxyArtifactId, fixture: 'manual-proxy' } },
-      sources: [], probe: { width: 540, height: 960, duration: 6, fps: 30 } })
-    await client.v2MediaArtifactManifest.create({ data: {
-      id: completedProxyManifestId, workspaceId, artifactId: completedProxyArtifactId, schemaVersion: completedProxyManifest.schemaVersion,
-      manifestHash: completedProxyManifest.manifestHash, recipeId: completedProxyManifest.recipe.id, recipeVersion: completedProxyManifest.recipe.version,
-      parametersHash: completedProxyManifest.recipe.parametersHash, manifestJson: stableSerialize(completedProxyManifest), createdAt,
-    } })
+
+    // Metadata-only mechanical seeds. The declared implementation digest is
+    // the runtime recipe identity, NOT an observed FFmpeg binary/pixel receipt.
+    const proxyMaps = new PrismaRenderElementMapRepository(client)
+    const seedControlledProxyMetadata = async ({ operationId, projectVersionId, editPlanSnapshotId, manifestId }) => {
+      const source = await new PrismaProjectProxyRenderRepository(client).readImmutableSource({
+        workspaceId, projectId, projectVersionId, editPlanSnapshotId,
+        sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+      })
+      const colorPipelineBindings = source.renderSources.filter((asset) => asset.mediaType === 'video').map((asset) => {
+        const compilation = colorCompilations.get(asset.artifactId)
+        assert.ok(compilation)
+        return { sourceArtifactId: asset.artifactId, sourceManifestId: asset.manifestId,
+          compilationId: compilation.id, compilationHash: compilation.compilationHash,
+          pipelineHash: compilation.pipeline.pipelineHash }
+      })
+      const inputHash = projectProxyRenderInputHash({ source, colorPipelineBindings })
+      const dimensions = {}
+      for (const asset of source.renderSources.filter((asset) => asset.mediaType === 'video')) {
+        const row = await client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: asset.manifestId } })
+        const body = JSON.parse(row.manifestJson)
+        assertMediaArtifactManifest(body)
+        assert.equal(body.manifestHash, row.manifestHash)
+        assert.ok(body.probe)
+        dimensions[asset.artifactId] = { width: body.probe.width, height: body.probe.height }
+      }
+      const map = buildRenderElementMap({ proxyHash: completedProxyHash,
+        fps: source.editPlan.fps, durationFrames: source.editPlan.durationFrames,
+        canvas: { width: 540, height: 960 }, source: dimensions[sourceA], sourceDimensions: dimensions,
+        clips: source.editPlan.videoTracks.filter((track) => track.kind === 'base-video').flatMap((track) => track.clips),
+        composition: source.editPlan.composition, subtitleCues: [], ctaOverlays: [] })
+      const digest = createHash('sha256').update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex')
+      const manifest = createMediaArtifactManifestV2({ artifactKey: `manual/${completedProxyArtifactId}.mp4`,
+        artifactSha256: completedProxyHash, byteSize: 1, mediaType: 'video', container: 'mp4',
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: {
+          fixtureScope: 'metadata-only-manual-edit-mechanics', operationId, projectVersionId, editPlanSnapshotId,
+          editPlanHash: source.editPlanHash, inputHash, renderElementMapHash: renderElementMapHash(map),
+          captionPolicy: 'unknown-face-suppressed', colorPipelineBindings,
+        } },
+        sources: source.renderSources.map((asset) => ({ artifactKey: asset.artifactKey, sha256: asset.sha256, role: asset.role,
+          execution: { tool: { id: 'ffmpeg', version: 'static', digest } } })),
+        probe: { width: 540, height: 960, duration: map.durationFrames / map.fps, fps: map.fps } })
+      await client.v2MediaArtifactManifest.create({ data: {
+        id: manifestId, workspaceId, artifactId: completedProxyArtifactId, schemaVersion: manifest.schemaVersion,
+        manifestHash: manifest.manifestHash, recipeId: manifest.recipe.id, recipeVersion: manifest.recipe.version,
+        parametersHash: manifest.recipe.parametersHash, manifestJson: stableSerialize(manifest), createdAt,
+      } })
+      const persisted = await proxyMaps.persistOrReplay({ workspaceId, projectId, projectVersionId,
+        proxyArtifactId: completedProxyArtifactId, map, createdAt: createdAt.toISOString() })
+      const readback = await proxyMaps.findExact({ workspaceId, projectId, projectVersionId, proxyArtifactId: completedProxyArtifactId })
+      assert.deepEqual(readback, persisted.record)
+      assert.equal(readback.mapHash, renderElementMapHash(map))
+      assert.equal(readback.map.elements.some((element) => element.type === 'subtitle'), false)
+      return { manifestId, inputHash, colorBindingsJson: stableSerialize(colorPipelineBindings), map: readback }
+    }
+    const initialProxyMetadata = await seedControlledProxyMetadata({ operationId: completedProxyOperationId,
+      projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId, manifestId: completedProxyManifestId })
     await client.v2PublicOperation.create({ data: {
       id: completedProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       ...operationActorAudit,
@@ -502,7 +545,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       operationId: completedProxyOperationId, workspaceId, projectId,
       projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId,
       sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: renderColorBindings(sourceA), inputHash: calculateVersionHash({ completedProxyOperationId }),
+      colorPipelineBindingsJson: initialProxyMetadata.colorBindingsJson, inputHash: initialProxyMetadata.inputHash,
       outputArtifactId: completedProxyArtifactId,
       outputManifestId: completedProxyManifestId,
       originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
@@ -1013,7 +1056,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selectionClipId, 'clip-1:a')
     const selectionBaseOperationId = `manual-selection-base-proxy-${suffix}`
     const selectionBaseFingerprint = calculateVersionHash({ selectionBaseOperationId })
-    const selectionColorBindings = renderColorBindings(sourceA, sourceB)
+    const selectionProxyMetadata = await seedControlledProxyMetadata({ operationId: selectionBaseOperationId,
+      projectVersionId: selectionBaseVersion.id, editPlanSnapshotId: selectionBaseVersion.editPlanSnapshotId, manifestId: `manifest-${selectionBaseOperationId}` })
     await client.v2PublicOperation.create({ data: {
       id: selectionBaseOperationId, workspaceId, projectId, clientId: issued.client.id,
       ...operationActorAudit,
@@ -1023,7 +1067,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
       resultJson: stableSerialize({ resource: {
         type: 'media-artifact', id: completedProxyArtifactId,
-        manifestId: completedProxyManifestId,
+        manifestId: selectionProxyMetadata.manifestId,
       } }),
       idempotencyKey: `manual-selection-base-proxy-${suffix}`,
       requestFingerprint: selectionBaseFingerprint,
@@ -1034,10 +1078,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       projectVersionId: selectionBaseVersion.id,
       editPlanSnapshotId: selectionBaseVersion.editPlanSnapshotId,
       sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: selectionColorBindings,
-      inputHash: selectionBaseFingerprint,
+      colorPipelineBindingsJson: selectionProxyMetadata.colorBindingsJson,
+      inputHash: selectionProxyMetadata.inputHash,
       outputArtifactId: completedProxyArtifactId,
-      outputManifestId: completedProxyManifestId,
+      outputManifestId: selectionProxyMetadata.manifestId,
       originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
     } })
     const artifactCountBeforeSelection = await client.v2MediaArtifact.count({ where: { workspaceId } })
@@ -1075,6 +1119,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selectionOperation.reuseImpactHash, selected.data.command.payload.impact.impactHash)
     assert.equal(selectionOperation.reuseBaseVersionId, selectionBaseVersion.id)
     assert.equal(selectionOperation.outputArtifactId, completedProxyArtifactId)
+    const selectedMap = await proxyMaps.findExact({ workspaceId, projectId,
+      projectVersionId: selected.data.version.id, proxyArtifactId: completedProxyArtifactId })
+    assert.ok(selectedMap, 'runtime must atomically preserve the map for the reused child')
+    assert.notEqual(selectedMap.id, selectionProxyMetadata.map.id)
+    assert.equal(selectedMap.mapHash, selectionProxyMetadata.map.mapHash)
+    assert.deepEqual(selectedMap.map, selectionProxyMetadata.map.map)
     assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId } }), artifactCountBeforeSelection)
     assert.equal(await client.v2CommandArtifactInvalidation.count({
       where: { commandId: selected.data.command.id },
@@ -1084,6 +1134,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selectedReplayResponse.status, 200)
     assert.equal(selectedReplay.data.replayed, true)
     assert.equal(selectedReplay.data.operation.id, selected.data.operation.id)
+
+    assert.equal(await client.v2RenderElementMap.count({ where: { workspaceId, projectVersionId: selected.data.version.id, proxyArtifactId: completedProxyArtifactId } }), 1, 'replay must not duplicate the runtime child map')
 
     const cropKey = `manual-crop-range-${suffix}`
     const cropResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
@@ -1131,9 +1183,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const cropOperation = await client.v2ProjectProxyRenderOperation.findUnique({
       where: { operationId: cropped.data.operation.id },
     })
-    const { PrismaProjectProxyRenderRepository } = await import(
-      '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
-    )
     const cropSource = await new PrismaProjectProxyRenderRepository(client).readImmutableSource({
       workspaceId,
       projectId,
@@ -1151,6 +1200,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       cropped.data.command.payload.impact.minimalRenders[0].ranges,
     )
     const transcriptBaseProxyOperationId = `manual-transcript-base-proxy-${suffix}`
+    const transcriptProxyMetadata = await seedControlledProxyMetadata({ operationId: transcriptBaseProxyOperationId,
+      projectVersionId: cropped.data.version.id, editPlanSnapshotId: cropVersion.editPlanSnapshotId, manifestId: `manifest-${transcriptBaseProxyOperationId}` })
     await client.v2PublicOperation.create({ data: {
       id: transcriptBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       ...operationActorAudit,
@@ -1158,7 +1209,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
+      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: transcriptProxyMetadata.manifestId } }),
       idempotencyKey: `manual-transcript-base-proxy-${suffix}`,
       requestFingerprint: calculateVersionHash({ transcriptBaseProxyOperationId }),
       createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
@@ -1167,8 +1218,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       operationId: transcriptBaseProxyOperationId, workspaceId, projectId,
       projectVersionId: cropped.data.version.id, editPlanSnapshotId: cropVersion.editPlanSnapshotId,
       sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: renderColorBindings(sourceA, sourceB), inputHash: calculateVersionHash({ transcriptBaseProxyOperationId, input: true }),
-      outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
+      colorPipelineBindingsJson: transcriptProxyMetadata.colorBindingsJson, inputHash: transcriptProxyMetadata.inputHash,
+      outputArtifactId: completedProxyArtifactId, outputManifestId: transcriptProxyMetadata.manifestId,
       originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
     } })
     const editorialKey = `remove-spoken-content-${suffix}`
@@ -1287,6 +1338,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorContext.proxyVariantId, '9:16')
     assert.deepEqual(directorContext.outputReferences, [])
     const directorBaseProxyOperationId = `manual-director-base-proxy-${suffix}`
+    const directorProxyMetadata = await seedControlledProxyMetadata({ operationId: directorBaseProxyOperationId,
+      projectVersionId: transcriptApplied.data.version.id, editPlanSnapshotId: replacementVersion.editPlanSnapshotId, manifestId: `manifest-${directorBaseProxyOperationId}` })
     await client.v2PublicOperation.create({ data: {
       id: directorBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       ...operationActorAudit,
@@ -1294,7 +1347,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
+      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: directorProxyMetadata.manifestId } }),
       idempotencyKey: `manual-director-base-proxy-${suffix}`,
       requestFingerprint: calculateVersionHash({ directorBaseProxyOperationId }),
       createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
@@ -1304,8 +1357,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       projectVersionId: transcriptApplied.data.version.id,
       editPlanSnapshotId: replacementVersion.editPlanSnapshotId,
       sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: renderColorBindings(sourceA, sourceB), inputHash: calculateVersionHash({ directorBaseProxyOperationId, input: true }),
-      outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
+      colorPipelineBindingsJson: directorProxyMetadata.colorBindingsJson, inputHash: directorProxyMetadata.inputHash,
+      outputArtifactId: completedProxyArtifactId, outputManifestId: directorProxyMetadata.manifestId,
       originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
     } })
     const directorKey = `run-director-impact-${suffix}`

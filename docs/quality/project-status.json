@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T12:03:46.8209981Z",
+  "updatedAt": "2026-10-12T13:15:06.861Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -398,9 +398,51 @@
           "ref": "Apollo/w61-70-20261008/workspace-v13-pg-v3-657ad865/result.json",
           "scope": "PASS1/1zero skips em PostgreSQL local novo: unavailable/current/stale/no-report, snapshot RepeatableRead com latch de mudanca de head e operations, negativos de manifest adulterado/reselado, artifact/publication/operation scope e rollback/readback. Dados controlados, sem render/worker/crypto plaintext/aceite. SHA25694525aca5f66bb4a62879d3dfc02efdadcadbe5eb97862ae79c915e5f08144ce; fingerprinta53f30766e3567fa2031046578382310d1e74c85b887563f71daf9ca87b8a18c igual,6 identidades terminais/4PGzero/cluster55591/porta/scratch limpos. FixtureSHA089373978b8c969b0639d6515ec5ef73daf42eacc45cd2f1c2288456141cf527. Build/browser no commit seguinte ainda pendentes.",
           "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/build-4ac0e90-4807b961/result.json",
+          "scope": "Build4ac PASS API/docs/Next/TypeScript; bundle1923arquivos/333468568B autenticado, separado das fixtures posteriores48c/c9d. Nao cobre novo runtime de reuso em preparacao; build novo obrigatorio. Sem deploy/aceite SHA256 135d56d5a9bf1f1793c2402163ee4ac758527186b75429a04939cb92c94dbf04.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/annotations-48c207-v2-70a1d3dc/result.json",
+          "scope": "Annotation PG/API controlada1/1zero skips PASS, fonte48c207/bundle4ac sem drift runtime; fixture clock/TTL/color/progresso/audit canonicos. Sete identidades observadas terminais,4PGzero/cluster/porta/scratch limpos. Metadata-only: nao comprova render fisico SHA256 26f02fe532ea07edd6e153a8317319cde94a4d58b2770ef0ab991230256b586f.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/manual-48c207-v1-eaa3ceea/result.json",
+          "scope": "Manual v1 FAIL409 em fixture de direitos: hash fabricado/insert sem grant. Cleanup conclusivo; c9d53 corrigiu pelo service/repositorio real, grants rendering/editorial-reuse distintos, readback e audit sem relaxar guard SHA256 28466cd8a073d9fdee36bdf6aa522432249e8ea74f72e54013006e836c87845e.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/manual-c9d53d-v2-1417286d/result.json",
+          "scope": "Manual v2 FAIL428 na selecao render-free depois da API/UI e restoreV10. FP2ac8e662f1169b6fcc1fdad3c357f6f7e939ce1f205e8d7f154172fd4bddd5a2 igual,PGzero/cluster/porta/scratch limpos. Fixture sem mapa/recipe adequado; leitura confirmou que runtime nao propagava mapa a V11, impedindo proximo rangeReuse. Correcao pendente; nunca semear V11 apos API para ocultar SHA256 636861a54f0ee9b26018e92a11ace633e877f333c4a2ae24b250283f6ac8f428.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/namespace-static-v1-5a0df835/result.json",
+          "scope": "Namespace Windows FAIL48total40pass1fail7Linux-onlyskip preservado: outcome mock tardio aceito apos prazo. Cleanup conclusivo; nenhum addon compilado/namespace Linux executado SHA256 6034d15c46fccb22f8b93047d3b5028b1d10fafea65e404bcae3ed0cdb4f716b.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/namespace-static-v2-1d3b625a/result.json",
+          "scope": "Namespace Windows PASS51total44pass0fail7Linux-onlyskip,18MJS syntax/PythonAST/bash-n; FP7c92b29e452ce37914ae0098640f2016d5e4062f9aa88df129668ce324d3fae5 igual,21steps0/noDB/scratch limpo. Etapas terminaram antes primeiro snapshot; nao prova inventario de descendentes.23paths integrados badc130a com bytes iguais; ABI/compiler/composed/oito suites Linux pendentes SHA256 1e739f84880d5af226b69eee8faeb587c935ac3b6daa929b7e12f2afed93e524.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/namespace-integrated-badc130a-freeze-v1.json",
+          "scope": "Freeze integrado badc130aa32ca939081c2e49dd7259cc8ae38aa9,23paths iguais ao freezev3; nenhuma transferencia do PASS Windows para Linux SHA256 faaf6af9240e1723cd118c1797a1da42b0bfef8061cbd772e1164eaab4c89f97.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Congelar commit da disponibilidade workspacev13 e integridade de manifestos; build fresco, regressao annotation/manual e dashboard supervisionado. PG controlado passou; RSC transport abort continua erro sem excecao. Final positivo editorial/face/legendas/sidecars, W66 cutover16 e W69 clock materializado permanecem pendentes; nenhuma implantacao ou aceite.",
+      "nextAction": "Concluir mapa atomico do reuso inline V10→V11→rangeReuse, preservando fixture metadata-only e rejeicoes; rodar focados, build fresco do runtime, manual e dashboard serialmente. Namespace integrado localmente exige ABI22/24, composto e oito suites reais no CI. Workspacev13 PG e annotation passaram no escopo controlado; RSC abort continua erro. Final editorial/facial/legendas/sidecars positivos, W66 cutover16, W69 clock real, implantacao e aceite continuam pendentes.",
       "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch. Registro operacional: persistencia Brain pendente por HTTP 502 / embedding_provider_error:openai:401; nenhuma memoria gravada, credencial alterada ou nova tentativa prevista sem sinal de recuperacao. Evidencias continuam no repositorio e no arquivo privado de cada run. Produtor facial diagnostico passou PG/runner real 4/4 apos corrigir claim retrying via transicao oficial do dominio e audit incompleto dos controles da fixture. Falhas anteriores permanecem arquivadas; HTTP facial proprio passou 1/1 sem skips em build Next fresco, com POST autenticado, replay concorrente, worker diagnostico YuNet em video development licenciado e GET selado; SHA256 do result 1a1ba6d017fe1acab99cddd18c9b3e16e11c96dbc1554114f3cc42015075a5dc. Quatro amostras/quatro caixas, faceSafety unknown e postflight com zero backends/16 PIDs terminais. Isso comprova apenas a mecanica diagnostica; modelos V5/V6/V7 seguem reprovados e holdout fechado. Mesmo patch de claim aplicado a OCR/temporal, com typecheck e gate de arquitetura verdes; este run prova retry facial. Nenhum holdout aberto ou autoridade facial concedida. CI proposto em 11/10: OCR e temporal reais em PostgreSQL isolado terão job dedicado com provenance de binários e supervisão serial; ainda não executado. tests/v2/prisma-face-producer-http.integration.mjs permanece fora do CI por insumos development privados/licenciados/pinados e runtime Python/OpenCV. Prova local face-http-resume-v1-39bfb5da SHA1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 não substitui CI. Face producer PG/runner também local; CI executa somente três casos offline de fixture/audit, sem detector apto ou holdout."
     },
     {
@@ -472,9 +514,21 @@
           "ref": "Apollo/w61-70-20261008/w62-v8-contract-v1-558903d2/result.json",
           "scope": "V8 detector-free isolado:16/16 testes stdlib e contract-check passaram sob Python3.14.0 -I -B, sem view/corpus/pixels/modelo/download/native/inferencia. Receipt bdb7d429186c6de96967df3dc4960fba80ac5c8a1dc9622438224500af0723ef; addendum f2a7cd49a1bd5f0d6e29903592656c7baeb3382a17957f7cd470545e69bd3169 vincula sources09a41b211c478c9c64bfc20b1645ccd6c947d4fa3d52364150827edd9027f7f6/a86f84d124e99abfd9b405b21c89ecb9e3e21783507db669068c1f3d1dfe32b2 rehashados antes/depois; fingerprint herdado6626 cobre apenas tracked e nao esses2novos arquivos. Tres filhos diretos fecharam antes primeiro snapshot, sem inventario descendente alegado; noDB/scratch/postflightlimpos. candidateAptfalse/faceSafetyunknown/inferenceCount0; nao qualifica detector/preprocess/performance nem runtime. Contrato448BGRfloat32/200slotslabel0 e metricas historicas fixos; view+binder owner, aquisicao/licenca/pins, preprocessing real e watchdog/inferencia development continuam pendentes. Calibration/holdout fechados.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-binder-unit-v1-230a1939/result.json",
+          "scope": "Binder12/12 sinteticos PASS, sem native/rede/pixels; preparo isolado, nao qualificacao SHA256 db97f7a5b5f2f30e185250c15eb3f1d2a80e8315fdf236c7b2fb8d1a85b5ac1d.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-development-view-v1-ea252b05/result.json",
+          "scope": "Extracao development-only60IDs/20negativeLabel joins humanos autenticados/60auditmatches PASS. Evaluator nao recebe calibration/holdout, inferencia0 e pixels nao decodificados. Manifestbf9b3253ea11523d81d6d94699a7e992bdb7ee0f23fc4f9733eb6f09ef9ff08e. Preparo isolado, sem direitos atuais renovados/modelo aprovado SHA256 afb18db0bbdf526758ac23f00ae3848adb1c9d101f5e1a6c25188622f416c017.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Integrar produtor facial diagnóstico sem autoridade de segurança; estudar geometria de proteção separadamente sem alterar GT/IoU nem abrir holdout.",
+      "nextAction": "Fechar owner Windows JOB_LIST atomico/HANDLE_LIST/KILL_ON_CLOSE e negativos de lifecycle antes de modelo/pixels. Evaluator/binder/dev-view preparados, nao qualificados. Aquisição/licenca/pins/native/benchmark requerem freeze proprio; calibration/holdout fechados, faceSafety unknown.",
       "notes": "Estimativa 8–12 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Scripts, adapter e protocolos de aquisição preservados em f8a6ba07. V1–V4 falhas históricas mantidas; V5 run2/run3 encerraram por prazo e retomaram mesmos critérios/IDs com PIDs terminais, sem tuning por modelo. CPU/RAM passaram no spike local; qualidade não. Os cinco negativos com FP foram inspecionados qualitativamente como animais (macaco, papagaio, dois gatos e cachorro), sem mudar GT/seleção. Relatório documenta limites do derivado CVDF, 36/180 comparações com original e ausência de GT de vídeo/olhos. Inspeção qualitativa pós-hoc de seis misses grandes revelou truncamento/oclusão/perfil e diferenças de extensão de caixas; resultado original permanece reprovado. Não confundir caixa ampla/IoU com segurança dos pixels. Nova pesquisa de modelos suspensa durante integração diagnóstica."
     },
     {
@@ -862,9 +916,21 @@
           "ref": "Apollo/w61-70-20261008/w67-official-derivative-eligibility-v2-r2.json",
           "scope": "Inventário final metadata-only SHA256 ddd50b1a597a0ce7c07158a9406977796711d60e37286b9a8e54578c34e7374d: 26/27 elegíveis; ID 491b80ed0e159494 excluído por nome de autor divergente, sem equiparar alias. Quotas múltiplas falham nos dois splits; manifesto de seleção v2 não foi criado.",
           "role": "planned-not-started"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w67-allowlist-unit-v1-5e0d0579/result.json",
+          "scope": "Dez unidades stdlib sinteticas PASS, sem native/rede/GTreal/pixels; noDB/scratch/postflight limpos SHA256 992a813d5220b5be4dfb8d2980582374195e9c2ec4da4674298c7487a53ad22b.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w67-id-extraction-v1-d4bbde1b/result.json",
+          "scope": "IDs-only188excluidos/allowlist922metadata PASS. FPd6ff17c5799d0264d936055cae9f81b1a0b2ff2be0cd12efc5f86129420de1cb igual,Python/conhost observados terminais/noDB/scratch limpo; version terminou antes primeiro snapshot. Allowlist7ec2470d254de05b19f597a227258c8d4249d7f928de68243cc9da60c78b2510 nao e selecao, GTvisual ou direitos atuais SHA256 dde0b6a73f3de21a472142c1cf60357b0d6110d016be13fea232d73c6da1f63a.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Resolver falta de candidatos multiple elegíveis por novo protocolo e inventário aprovados antes de qualquer aquisição; manter a seleção v2 encerrada. Depois cumprir dependências W65–W66 e provar critic independente sobre pixels finais por formato.",
+      "nextAction": "Congelar lote provisorio pelo ranking inalterado da allowlist922/GT humanos metadata, revalidar direitos individuais e rubrica antes de aquisicao autorizada. Leitura independente encontrou365candidatos com2eyeGT limpos porface, sem adjudicar pixels/completude/head. Corpus exige os MESMOS casos passarem quotas/dimensoes; STOP sem substituicao. V2preservado.",
       "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Inventário local de partida SHA256 4d273863096f75a6aa3c86944657496359b757e7c9d78c5f6c6389f69c935b2d. A checagem de direitos usa HTML preservado, não consulta atual ao Flickr. Tentativa v2 parou corretamente por quotas antes de criar seleção ou obter pixels; nenhuma tarefa de produto foi promovida."
     },
     {
@@ -998,7 +1064,7 @@
           "role": "implementation"
         }
       ],
-      "nextAction": "Especificar contrato versionado de clock materializado com PTS/time_base reais anteslibass, graph/binario/libass/recipe e conversao inferida explicitamente, validada por pixels. Derivar boundaries legais e rejeitar intervalos nao representaveis sem reduzir FPS global, epsilon ou alterar expected. Preservar v2-v5FAIL; integrar apenas depois identidades W66 reais, emission seal e publicacao final atomica. SRT/VTT positivos e browser nativo pendentes.",
+      "nextAction": "Implementar clock versionado: preparar prefixo REAL ate libass, vincular PTS/time_base/fontes/graph/executavel/libass/spec revision, conferir trace antes publicacao e medir clockMP4 separado. Boundaries legais/rejeicao apenas de intervalos irrepresentaveis, sem reduzirFPSglobal/epsilon/expectedtuning. FAILv2-v5 preservados; integrar com variantesW66/emissionseal/recipe novo/publicacao atomica. Legendas/sidecars positivos pendentes.",
       "notes": "Estimativa 4–6 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes."
     },
     {
@@ -21937,9 +22003,33 @@
           "ref": "Apollo/w61-70-20261008/workspace-v13-pg-v3-657ad865/result.json",
           "scope": "PASS1/1zero skips em PostgreSQL local novo: unavailable/current/stale/no-report, snapshot RepeatableRead com latch de mudanca de head e operations, negativos de manifest adulterado/reselado, artifact/publication/operation scope e rollback/readback. Dados controlados, sem render/worker/crypto plaintext/aceite. SHA25694525aca5f66bb4a62879d3dfc02efdadcadbe5eb97862ae79c915e5f08144ce; fingerprinta53f30766e3567fa2031046578382310d1e74c85b887563f71daf9ca87b8a18c igual,6 identidades terminais/4PGzero/cluster55591/porta/scratch limpos. FixtureSHA089373978b8c969b0639d6515ec5ef73daf42eacc45cd2f1c2288456141cf527. Build/browser no commit seguinte ainda pendentes.",
           "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/build-4ac0e90-4807b961/result.json",
+          "scope": "Build4ac PASS API/docs/Next/TypeScript; bundle1923arquivos/333468568B autenticado, separado das fixtures posteriores48c/c9d. Nao cobre novo runtime de reuso em preparacao; build novo obrigatorio. Sem deploy/aceite SHA256 135d56d5a9bf1f1793c2402163ee4ac758527186b75429a04939cb92c94dbf04.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/annotations-48c207-v2-70a1d3dc/result.json",
+          "scope": "Annotation PG/API controlada1/1zero skips PASS, fonte48c207/bundle4ac sem drift runtime; fixture clock/TTL/color/progresso/audit canonicos. Sete identidades observadas terminais,4PGzero/cluster/porta/scratch limpos. Metadata-only: nao comprova render fisico SHA256 26f02fe532ea07edd6e153a8317319cde94a4d58b2770ef0ab991230256b586f.",
+          "role": "integration"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/manual-48c207-v1-eaa3ceea/result.json",
+          "scope": "Manual v1 FAIL409 em fixture de direitos: hash fabricado/insert sem grant. Cleanup conclusivo; c9d53 corrigiu pelo service/repositorio real, grants rendering/editorial-reuse distintos, readback e audit sem relaxar guard SHA256 28466cd8a073d9fdee36bdf6aa522432249e8ea74f72e54013006e836c87845e.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/manual-c9d53d-v2-1417286d/result.json",
+          "scope": "Manual v2 FAIL428 na selecao render-free depois da API/UI e restoreV10. FP2ac8e662f1169b6fcc1fdad3c357f6f7e939ce1f205e8d7f154172fd4bddd5a2 igual,PGzero/cluster/porta/scratch limpos. Fixture sem mapa/recipe adequado; leitura confirmou que runtime nao propagava mapa a V11, impedindo proximo rangeReuse. Correcao pendente; nunca semear V11 apos API para ocultar SHA256 636861a54f0ee9b26018e92a11ace633e877f333c4a2ae24b250283f6ac8f428.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Congelar commit da disponibilidade workspacev13 e integridade de manifestos; build fresco, regressao annotation/manual e dashboard supervisionado. PG controlado passou; RSC transport abort continua erro sem excecao. Final positivo editorial/face/legendas/sidecars, W66 cutover16 e W69 clock materializado permanecem pendentes; nenhuma implantacao ou aceite.",
+      "nextAction": "Concluir mapa atomico do reuso inline V10→V11→rangeReuse, preservando fixture metadata-only e rejeicoes; rodar focados, build fresco do runtime, manual e dashboard serialmente. Namespace integrado localmente exige ABI22/24, composto e oito suites reais no CI. Workspacev13 PG e annotation passaram no escopo controlado; RSC abort continua erro. Final editorial/facial/legendas/sidecars positivos, W66 cutover16, W69 clock real, implantacao e aceite continuam pendentes.",
       "notes": "As provas antigas de cards e runtime controlado permanecem historicas nos SHAs citados. O gate facial atual revelou que aquela preparacao nao prova admissao final positiva: W35 retorna em-construcao para essa lacuna. Jornada atual distingue proxy real, seed de review bloqueado e rejeicao da autoridade PostgreSQL; nenhuma aprovacao e gravada para tornar teste verde. T-FR/Media controlados sao provas mecanicas separadas, sem transferencia de autoridade editorial."
     },
     {

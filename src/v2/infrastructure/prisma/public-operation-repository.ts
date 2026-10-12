@@ -14,7 +14,7 @@ import type {
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { evaluatePerceptionSourceAnalysisRights } from '../../domain/perception-source-rights.ts'
-import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { createRenderInputPayload } from '../../domain/render-input-payload.ts'
 import type { RecipeParameterCipher } from '../../application/ports/recipe-parameter-cipher.ts'
 import {
@@ -57,7 +57,8 @@ import { resolveStrategicObjective } from '../../domain/strategic-objective.ts'
 import { bindDirectorObjective } from '../../domain/strategic-objective.ts'
 import { parseDesiredAction } from '../../domain/desired-action.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
-import { readSafeReusableProxy } from './proxy-reuse-safety.ts'
+import { materializeManualEditPlan } from '../../domain/manual-editing.ts'
+import { readSafeReusableProxyReceipt } from './proxy-reuse-safety.ts'
 import { editPlanReferencesSource } from './perception-producer-request-context-repository.ts'
 import { lockProducerPublishProject, lockProducerPublishSource, producerPublishClock } from './producer-publish-fence.ts'
 import {
@@ -1682,6 +1683,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         }
 
         let reusedColorPipelineBindingsJson: string | undefined
+        let reusedRenderMap: NonNullable<Awaited<ReturnType<typeof readSafeReusableProxyReceipt>>>['map'] | undefined
         let ingestUploadKind: 'video' | 'audio' | 'image' | undefined
         let persistedSyntheticRenderContext: SyntheticProductionRenderContext | undefined
         if (syntheticRenderContext) {
@@ -1850,7 +1852,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         }
         if (projectReuseContext) {
-          const [version, reusedOperation, artifact, manifest] = await Promise.all([
+          const [version, baseVersion, reusedOperation, artifact, manifest] = await Promise.all([
             transaction.v2ProjectVersion.findFirst({
               where: {
                 id: projectReuseContext.projectVersionId,
@@ -1864,7 +1866,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                   },
                 },
               },
-              include: { command: true },
+              include: { command: true, editPlanSnapshot: true },
+            }),
+            transaction.v2ProjectVersion.findFirst({
+              where: { id: projectReuseContext.baseVersionId, workspaceId: input.operation.workspaceId, projectId: projectReuseContext.projectId },
+              include: { editPlanSnapshot: true },
             }),
             transaction.v2ProjectProxyRenderOperation.findFirst({
               where: {
@@ -1919,8 +1925,45 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               'Project proxy reuse is not bound to an unchanged immutable Command and completed base proxy',
             )
           }
+
+          // Reconstruct the only admitted no-render edit from the actual base
+          // snapshot. Impact booleans alone cannot certify unchanged geometry.
+          if (!baseVersion?.editPlanSnapshot || !version.editPlanSnapshot ||
+              version.command.baseHash !== baseVersion.baseHash || version.sequence !== baseVersion.sequence + 1) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse requires exact base and child plans')
+          }
+          const payload = parseStoredRecord(version.command.payloadJson, 'proxy reuse Command payload')
+          const gesture = payload.operation as Record<string, unknown> | undefined
+          if (payload.action !== 'apply' || !gesture || gesture.kind !== 'select' ||
+              typeof gesture.clipId !== 'string' || typeof payload.variantId !== 'string' ||
+              payload.targetId !== gesture.clipId || payload.expectedRevision !== baseVersion.sequence) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse requires the actual selection Command')
+          }
+          const planFromRow = (row: typeof version.editPlanSnapshot, versionId: string) => {
+            const plan = parseStoredRecord(row.contentJson, 'proxy reuse EditPlan')
+            if (row.workspaceId !== input.operation.workspaceId || row.projectId !== projectReuseContext.projectId ||
+                row.kind !== 'edit-plan' || row.schemaVersion !== 2 || plan.projectVersionId !== versionId ||
+                calculateCanonicalHash(plan) !== row.contentHash) {
+              throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse plan scope or seal mismatch')
+            }
+            return plan
+          }
+          const basePlan = planFromRow(baseVersion.editPlanSnapshot, projectReuseContext.baseVersionId)
+          const childPlan = planFromRow(version.editPlanSnapshot, projectReuseContext.projectVersionId)
+          let expectedPlan: Readonly<Record<string, unknown>>
+          try {
+            expectedPlan = materializeManualEditPlan({ editPlan: basePlan,
+              operation: { kind: 'select', clipId: gesture.clipId },
+              newVersionId: projectReuseContext.projectVersionId, createdAt: version.createdAt.toISOString(),
+              availableAssetIds: [], variantId: payload.variantId })
+          } catch {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse selection cannot materialize its actual base')
+          }
+          if (stableSerialize(expectedPlan) !== stableSerialize(childPlan)) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse child changed render content')
+          }
           parseColorPipelineBindings(reusedOperation.colorPipelineBindingsJson)
-          const safeReuse = await readSafeReusableProxy(transaction, {
+          const safeReuse = await readSafeReusableProxyReceipt(transaction, {
             workspaceId: input.operation.workspaceId,
             projectId: projectReuseContext.projectId,
             baseVersionId: projectReuseContext.baseVersionId,
@@ -1930,7 +1973,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           })
           if (!safeReuse) throw new DomainError('PERSISTENCE_CONFLICT',
             'Project proxy reuse has no compatible subtitle-suppression receipt')
+          if (safeReuse.map.fps !== childPlan.fps || safeReuse.map.durationFrames !== childPlan.durationFrames) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse map clock differs from unchanged plan')
+          }
           reusedColorPipelineBindingsJson = reusedOperation.colorPipelineBindingsJson
+          reusedRenderMap = safeReuse.map
         }
         if (finalExportContext) {
           const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
@@ -2277,6 +2324,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               } : {}),
             },
           })
+
+          if (projectReuseContext) {
+            if (!reusedRenderMap) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse lost its validated map')
+            // A new scoped identity carries the SAME validated map content. This
+            // is part of operation/detail/CAS/outbox admission, never a review.
+            await transaction.v2RenderElementMap.create({ data: {
+              id: randomUUID(), workspaceId: input.operation.workspaceId,
+              projectId: context.projectId, projectVersionId: context.projectVersionId,
+              proxyArtifactId: context.outputArtifactId, ...reusedRenderMap,
+              createdAt: new Date(input.operation.createdAt),
+            } })
+          }
         } else if (finalExportContext) {
           await transaction.v2ProjectFinalExportOperation.create({
             data: {

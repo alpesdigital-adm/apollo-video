@@ -16,7 +16,7 @@ import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { enqueueProjectProxyRenderService, enqueueRenderableSnapshotProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createManualCommandImpact } from '../../src/v2/domain/command-impact.ts'
-import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaRenderablePlanSnapshotRepository } from '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
@@ -729,7 +729,7 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   const baseVersionId = 'project-version-proxy-base'
   const resultVersionId = 'project-version-proxy-selection'
   const commandId = 'command-selection-proxy-test'
-  const editPlan = source().editPlan
+  const editPlan = { ...source().editPlan, id: `edit-plan-${baseVersionId}`, projectVersionId: baseVersionId, createdAt: '2026-07-31T22:44:00.000Z' }
   const impact = createManualCommandImpact({
     commandId,
     baseVersionId,
@@ -778,6 +778,13 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   let publicReadCount = 0
   let operationData
   let detailData
+  let mapData, mapOverride, manifestOverride, childPlanOverride, lockFailureTable, injectedFailure
+  let mapCreates = 0, sourceMapLookups = 0
+  const lockReads = []
+  const childPlan = { ...editPlan, id: `edit-plan-${resultVersionId}`, projectVersionId: resultVersionId, createdAt: now,
+    manualEditing: { schemaVersion: 1, action: 'apply', operation: { kind: 'select', clipId: 'clip-1' }, variantId: '9:16' } }
+  const snapshotRow = (id, document) => ({ id, workspaceId: operation.workspaceId, projectId: operation.projectId,
+    kind: 'edit-plan', schemaVersion: 2, contentJson: stableSerialize(document), contentHash: calculateCanonicalHash(document) })
   let projectCasCount = 0
   let projectCasAccepted = true
   const bindingsJson = stableSerialize(colorPipelineBindings)
@@ -792,10 +799,22 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
       role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest: rendererDigest } } }],
   })
   const safeMap = { schemaVersion: 'render-element-map/v1', proxyHash: 'a'.repeat(64),
-    fps: 30, durationFrames: 60, canvas: { width: 540, height: 960 }, elements: [] }
+    fps: 30, durationFrames: 300, canvas: { width: 540, height: 960 }, elements: [] }
+  const sourceMapRow = { id: '35b80bd0-77af-4a34-bd5c-d9a6566db1b1',
+    workspaceId: operation.workspaceId, projectId: operation.projectId, projectVersionId: baseVersionId,
+    proxyArtifactId: context.outputArtifactId, schemaVersion: safeMap.schemaVersion, proxyHash: safeMap.proxyHash,
+    fps: safeMap.fps, durationFrames: safeMap.durationFrames, canvasWidth: safeMap.canvas.width, canvasHeight: safeMap.canvas.height,
+    elementsJson: '[]', mapHash: renderElementMapHash(safeMap) }
   const repository = new PrismaPublicOperationRepository({
     async $transaction(callback) {
-      return callback({
+      const before = { operationData, detailData, mapData, mapCreates }
+      try { return await callback({
+        async $queryRaw(query) {
+          const sql = query.strings.join('?'), table = /FROM "([^"]+)"/.exec(sql)?.[1]
+          lockReads.push(table)
+          assert.ok(sql.includes('FOR UPDATE') || sql.includes('FOR SHARE'))
+          return table === lockFailureTable ? [] : [{ id: table === 'render_element_maps' ? sourceMapRow.id : 'locked', operationId: context.reusedFromOperationId }]
+        },
         v2PublicOperation: {
           async findUnique() {
             publicReadCount += 1
@@ -814,7 +833,9 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           },
           async create({ data }) { operationData = data },
         },
-        v2PublicEventOutbox: { async createMany() { return { count: 2 } } },
+        v2PublicEventOutbox: { async createMany() {
+          if (injectedFailure === 'outbox') throw Object.assign(new Error('controlled outbox failure'), { code: 'CONTROLLED_TRANSACTION_FAILURE' })
+          return { count: 2 } } },
         v2Project: { async updateMany({ where, data }) {
           projectCasCount += 1
           assert.equal(where.currentVersionId, resultVersionId)
@@ -823,14 +844,18 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           assert.equal(where.status.in.includes('archived'), false)
           return { count: projectCasAccepted ? 1 : 0 }
         } },
-        v2ProjectVersion: { async findFirst() { return {
+        v2ProjectVersion: { async findFirst({ where }) {
+          if (where.id === baseVersionId) return { id: baseVersionId, sequence: 10, baseHash: '5'.repeat(64),
+            editPlanSnapshot: snapshotRow('snapshot-base', editPlan) }
+          return {
           id: resultVersionId,
-          parentVersionId: baseVersionId,
+          parentVersionId: baseVersionId, sequence: 11, createdAt: new Date(now),
+          editPlanSnapshot: snapshotRow(context.editPlanSnapshotId, childPlanOverride ?? childPlan),
           command: {
             id: commandId,
             type: 'manual-edit',
-            baseVersionId,
-            payloadJson: JSON.stringify({ impact }),
+            baseVersionId, baseHash: '5'.repeat(64),
+            payloadJson: JSON.stringify({ schemaVersion: 2, action: 'apply', expectedRevision: 10, targetId: 'clip-1', operation: { kind: 'select', clipId: 'clip-1' }, variantId: '9:16', impact }),
           },
         } } },
         v2ProjectProxyRenderOperation: {
@@ -843,18 +868,21 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           artifactKey: 'editorial-proxies/base-selection.mp4', sha256: 'a'.repeat(64),
           byteSize: 4096n, manifests: [{ id: context.outputManifestId,
             workspaceId: operation.workspaceId, artifactId: context.outputArtifactId,
-            manifestHash: safeManifest.manifestHash, manifestJson: stableSerialize(safeManifest) }],
+            manifestHash: (manifestOverride ?? safeManifest).manifestHash, manifestJson: stableSerialize(manifestOverride ?? safeManifest) }],
         } } },
         v2MediaArtifactManifest: { async findFirst() { return { id: context.outputManifestId } } },
-        v2RenderElementMap: { async findFirst() { return {
-          workspaceId: operation.workspaceId, projectId: operation.projectId,
-          projectVersionId: baseVersionId, proxyArtifactId: context.outputArtifactId,
-          schemaVersion: safeMap.schemaVersion, proxyHash: safeMap.proxyHash,
-          fps: safeMap.fps, durationFrames: safeMap.durationFrames,
-          canvasWidth: safeMap.canvas.width, canvasHeight: safeMap.canvas.height,
-          elementsJson: '[]', mapHash: renderElementMapHash(safeMap),
-        } } },
-      })
+        v2RenderElementMap: {
+          async findFirst() { sourceMapLookups += 1; return mapOverride ?? sourceMapRow },
+          async create({ data }) {
+            if (injectedFailure === 'map') throw Object.assign(new Error('controlled map failure'), { code: 'CONTROLLED_TRANSACTION_FAILURE' })
+            mapData = data; mapCreates += 1; return data
+          },
+        },
+      }) } catch (error) {
+        operationData = before.operationData; detailData = before.detailData
+        mapData = before.mapData; mapCreates = before.mapCreates
+        throw error
+      }
     },
   })
   const persisted = await repository.createOrReplay({
@@ -864,6 +892,8 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
     idempotencyKey: 'selection-proxy-persistence-test',
     requestFingerprint: '7'.repeat(64),
   })
+  assert.deepEqual(lockReads, ['public_operations', 'project_proxy_render_operations', 'projects', 'media_artifacts', 'media_artifact_manifests', 'render_element_maps'])
+  assert.equal(sourceMapLookups, 1, 'copy validates one exact source map and never reads a second row')
   assert.equal(persisted.operation.status, 'succeeded')
   assert.equal(persisted.context.kind, 'project-proxy-reuse')
   assert.equal(persisted.context.reusedFromOperationId, context.reusedFromOperationId)
@@ -879,6 +909,8 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
     authenticationAudit: materializeActorAuditContext(proxyActor()), context,
     idempotencyKey: 'selection-proxy-persistence-test', requestFingerprint: '7'.repeat(64) })
   assert.equal(replay.replayed, true)
+  assert.equal(mapCreates, 1, 'replay cannot duplicate the child map')
+  assert.equal(sourceMapLookups, 1, 'replay does not load or recopy a source map')
   assert.equal(projectCasCount, 1, 'replay cannot rewrite a project that advanced after the inline cache hit')
   publicReadCount = 0
   await assert.rejects(repository.createOrReplay({ operation,
@@ -900,6 +932,77 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
     }),
     (error) => error.code === 'PERSISTENCE_CONFLICT' && /unchanged immutable Command/.test(error.message),
   )
+  const positiveMap = mapData
+  assert.match(positiveMap.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  assert.notEqual(positiveMap.id, sourceMapRow.id)
+  assert.equal(positiveMap.projectVersionId, resultVersionId)
+  assert.equal(positiveMap.mapHash, sourceMapRow.mapHash)
+  assert.equal(positiveMap.elementsJson, stableSerialize(safeMap.elements))
+  assert.equal(mapCreates, 1)
+  assert.equal('review' in positiveMap, false)
+
+  for (const [label, mutate] of [
+    ['base map scope', () => { mapOverride = { ...sourceMapRow, projectVersionId: 'version-sister' } }],
+    ['map seal', () => { mapOverride = { ...sourceMapRow, mapHash: 'b'.repeat(64) } }],
+    ['map JSON', () => { mapOverride = { ...sourceMapRow, elementsJson: '{' } }],
+    ['map clock', () => {
+      const wrong = { ...safeMap, durationFrames: 60 }
+      mapOverride = { ...sourceMapRow, durationFrames: 60, mapHash: renderElementMapHash(wrong) }
+    }],
+    ['manifest seal', () => { manifestOverride = { ...safeManifest, manifestHash: 'b'.repeat(64) } }],
+    ['valid manifest but wrong artifact', () => {
+      const body = { ...safeManifest }; delete body.manifestHash
+      body.artifact = { ...body.artifact, sha256: 'b'.repeat(64) }
+      manifestOverride = { ...body, manifestHash: calculateCanonicalHash(body) }
+    }],
+    ['old recipe', () => {
+      const body = { ...safeManifest }; delete body.manifestHash
+      body.recipe = { ...body.recipe, version: '0.0.0' }
+      manifestOverride = { ...body, manifestHash: calculateCanonicalHash(body) }
+    }],
+    ['wrong declared renderer', () => {
+      const body = structuredClone(safeManifest); delete body.manifestHash
+      body.sources[0].execution.tool.digest = 'b'.repeat(64)
+      manifestOverride = { ...body, manifestHash: calculateCanonicalHash(body) }
+    }],
+    ['subtitle present', () => {
+      const caption = { elementId: 'subtitle:cue-1', type: 'subtitle', clipId: 'clip-1', sceneId: 'scene:clip-1',
+        sourceId: 'artifact-project-proxy-source', frame: 0, bounds: { x: 0, y: 0, width: 10, height: 10 },
+        zIndex: 20, opacity: 1, priority: 300 }
+      const wrong = { ...safeMap, elements: [caption] }
+      mapOverride = { ...sourceMapRow, elementsJson: JSON.stringify([caption]), mapHash: renderElementMapHash(wrong) }
+    }],
+    ['child geometry changed despite selection impact', () => {
+      childPlanOverride = structuredClone(childPlan)
+      childPlanOverride.videoTracks[0].clips[0].crop = { x: .1, y: .1, width: .8, height: .8 }
+    }],
+    ['source map lock lost', () => { lockFailureTable = 'render_element_maps' }],
+  ]) {
+    publicReadCount = 0; operationData = undefined; detailData = undefined
+    mapData = undefined; mapCreates = 0; lockReads.length = 0
+    mapOverride = undefined; manifestOverride = undefined; childPlanOverride = undefined; lockFailureTable = undefined
+    mutate()
+    await assert.rejects(repository.createOrReplay({ operation,
+      authenticationAudit: materializeActorAuditContext(proxyActor()), context,
+      idempotencyKey: `selection-negative-${label}`, requestFingerprint: '7'.repeat(64) }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT', label)
+    assert.equal(operationData, undefined, label + ': transaction rolls back operation')
+    assert.equal(detailData, undefined, label + ': transaction rolls back detail')
+    assert.equal(mapCreates, 0, label + ': no committed map')
+  }
+  for (const failure of ['map', 'outbox']) {
+    publicReadCount = 0; operationData = undefined; detailData = undefined
+    mapData = undefined; mapCreates = 0; lockReads.length = 0
+    mapOverride = undefined; manifestOverride = undefined; childPlanOverride = undefined; lockFailureTable = undefined
+    injectedFailure = failure
+    await assert.rejects(repository.createOrReplay({ operation,
+      authenticationAudit: materializeActorAuditContext(proxyActor()), context,
+      idempotencyKey: `selection-rollback-${failure}`, requestFingerprint: '7'.repeat(64) }),
+      (error) => error.code === 'CONTROLLED_TRANSACTION_FAILURE')
+    assert.equal(operationData, undefined); assert.equal(detailData, undefined)
+    assert.equal(mapData, undefined); assert.equal(mapCreates, 0)
+  }
+
 })
 
 async function runWithStaleRanges(ranges) {
