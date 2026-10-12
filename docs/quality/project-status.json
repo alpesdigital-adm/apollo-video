@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T14:29:41.303Z",
+  "updatedAt": "2026-10-12T15:20:22.807Z",
   "audit": {
     "delivered": 380,
     "total": 1259,
@@ -476,9 +476,27 @@
           "ref": "Apollo/w61-70-20261008/inline-reuse-head-unit-v2-72e22cc5/result.json",
           "scope": "Tres testes focados PASS apos corrigir spy de admissao no teste head: esperado e o ID da Version realmente commitada, recusa VERSION_CONFLICT antes persistencia; base proxy ausente e route binding preservados. FPb76641b9f3e17e3a83423b30f8a3f6f685953538f9f971e4e83f6c07ef86a6c8 igual/umaidentidade observada terminal/noDB/scratch/postflight limpos. Fonte posterior ao61/61 somente nesse teste; nao PG/UI. SHA256 e0142cc2723f5b8c93ebd8a236823a9e51949ba7c504b70ce4e0557da38798e0.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/build-50d11ae-5571f872/result.json",
+          "scope": "Build50d11 PASS API/docs/Next; bundle1922files333900558B rehash sem diferencas. Receipt SHA256 e17a963a70cd1aa73884775cacab28eb6f7a1294285d7f6af0c896fb2c760fc9; manifest c6c54e8518e22d415650d7d18fd93cd203c5031ea8cf362c905950bfb408bbe0. FPb76641b9 igual,14observados terminais/noDB/scratch/postflight limpos. Nao comprova jornada manual nem cobre runtime posterior.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/inline-rights-pg-50d11-v2-21a0fe22/result.json",
+          "scope": "PG controlado inline rights PASS2/2 zero skips: allow+replay, revoke/expiry apos lock, novos operation/map/outbox zero na negacao; Command/Version previamente comitados preservados. Receipt b1ba07a0c7d6795df0e8c8df10831fde1fb2f92207748ed78271b60f04684650; FP7fef2bde igual,10observados terminais/PG0/cluster/porta/scratch limpos. v1 FAIL7463ac7a preservado por assert de campo inexistente CommandImpact; v2 corrige somente teste e nao cria render/aceite.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/manual-50d11-v8-49a3a88e/result.json",
+          "scope": "Manual50d11 v5 FAIL428 no supersede discovery-sale sem objetivo aprovado. v6/v7/v8 preservam negativo publico428/zero efeitos e tentam discovery sem supersede; worker retrying. v8 mede PrismaP2002/V2ProjectSnapshot/(projectId,kind,contentHash) antes conversao PERSISTENCE_CONFLICT: colisao canonica real no commit do Diretor. Receipt78811fdd205d54df0d5b12e037382a896970b1ab6993f3a5e6bf9377cfe4ed5a; FPe29a7e93 igual,15observados terminais/PG0/cluster/porta/scratch/postflight limpos. Fonte50d11+fixtures fingerprintadas, bundle50d11. Mudanca discovery-sale apos aprovacao, final positivo W35 e dashboard novo continuam NAO comprovados; nenhuma aprovacao fabricada.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Revalidacao de direitos inline e binding head implementados em fonte congelada,61unidades+3focadas e arquitetura locais verdes. Fazer commit coerente/build fresco, provar revogacao/expiracao e rollback dos novos efeitos em PG; Command/Version anteriores preservados. Depois manual/dashboard e nova CI integral incluindo namespace ABI22/24/composto/oito suites. W66 cutover16, W69 clock/pixels, qualidade facial/editorial e aceite continuam pendentes.",
+      "nextAction": "Corrigir identidade canonica dos snapshots do Diretor antes de selar Command/Run/Version, preservar unique/bytes e revalidar na TX; provar repeated-run/rollback/concorrencia. Build50d11 e PG inline rights verdes delimitados; manual ainda FAILP2002. Depois novo build/manual/dashboard/CI completa incluindo namespace ABI22/24/composto/oito suites. Sem objetivo aprovado/supersede positivo, final W35 ou aceite.",
       "notes": "Checkpoint 08/10: percepção manual 2/2 PG e negativo API final-export review-required→422 passaram. Run perception-combined-v2-a63b87a4: 5/5 PG com bootstrap, runner Tesseract real, replay/isolamento/rights/retry/tamper; postflight confirmou processos encerrados, zero backends e cluster local parado. Um caso retry duplicado foi removido depois; alteração da restauração do hash para HTTP aguarda novo run. O recorte aceita apenas source único, CFR/fps iguais e orientação zero. Parser canônico e resolvedor de autoridade rejeitam OCR como prova facial; positivo antigo de exportação permanece pendente e não foi pulado. Diagnóstico sanitizado por etapa implementado e testes isolados passaram; causa histórica do retry não foi estabelecida. PR78 segurança integrado em main 12b928c379ee2b59c1bb99ee29ca5aa0cec83f46. CI main 37854671199 cancelado por limite35m após API12/12; PR79 ajusta orçamento40m, checks pendentes. Runtime ainda fora de main; nenhuma promoção TODO, implantação ou aceite. Novo run perception-http-16d5050c passou bootstrap, worker 3/3 e HTTP 1/1 sem skips em build fresco: POST concorrente/replay/mismatch, GET queued e envelope OCR real, isolamento/cancel/retry e schemas Ajv. Postflight confirmou zero backends, PIDs terminais, cluster parado e scratch removido. Commit runtime 32ad0b13; prova cobre este recorte, não a wave inteira. PR79 passou4/4 e foi integrado em main54dd897f2b5af6b889a09f456ab6f01289d7dd72; mainCI37862692874, dashboard37862692784 e media37862692701 estão em execução. Branch pacote incorporou workflow em70a37426. Brain não gravou nova decisão por HTTP502/embedding401; documentação versionada preserva o checkpoint. Corpus V5 auditado 180/180; avaliação YuNet 640 em 120 imagens de desenvolvimento/calibração não atingiu qualidade, com holdout fechado. Dashboard e Media CI do main passaram; Quality ainda em execução na última consulta. CI merged-main 37862692874 concluiu success no SHA 54dd897f: Quality e Compose, além Dashboard/Media verdes. Esse main contém segurança/timeout; runtime W61–W64 permanece no branch. Estágio de prova controlada refere-se somente aos recortes runner/PG/HTTP citados, não à totalidade da wave, implantação ou aceite. Construção permanece parcial no branch. Registro operacional: persistencia Brain pendente por HTTP 502 / embedding_provider_error:openai:401; nenhuma memoria gravada, credencial alterada ou nova tentativa prevista sem sinal de recuperacao. Evidencias continuam no repositorio e no arquivo privado de cada run. Produtor facial diagnostico passou PG/runner real 4/4 apos corrigir claim retrying via transicao oficial do dominio e audit incompleto dos controles da fixture. Falhas anteriores permanecem arquivadas; HTTP facial proprio passou 1/1 sem skips em build Next fresco, com POST autenticado, replay concorrente, worker diagnostico YuNet em video development licenciado e GET selado; SHA256 do result 1a1ba6d017fe1acab99cddd18c9b3e16e11c96dbc1554114f3cc42015075a5dc. Quatro amostras/quatro caixas, faceSafety unknown e postflight com zero backends/16 PIDs terminais. Isso comprova apenas a mecanica diagnostica; modelos V5/V6/V7 seguem reprovados e holdout fechado. Mesmo patch de claim aplicado a OCR/temporal, com typecheck e gate de arquitetura verdes; este run prova retry facial. Nenhum holdout aberto ou autoridade facial concedida. CI proposto em 11/10: OCR e temporal reais em PostgreSQL isolado terão job dedicado com provenance de binários e supervisão serial; ainda não executado. tests/v2/prisma-face-producer-http.integration.mjs permanece fora do CI por insumos development privados/licenciados/pinados e runtime Python/OpenCV. Prova local face-http-resume-v1-39bfb5da SHA1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 não substitui CI. Face producer PG/runner também local; CI executa somente três casos offline de fixture/audit, sem detector apto ou holdout."
     },
     {
@@ -579,6 +597,12 @@
           "type": "private",
           "ref": "Apollo/w61-70-20261008/w62-kernel-v2-2957f078/result.json",
           "scope": "Prova isolada mecanica Windows Job/HANDLE PASS apos pathPOSIX e runId explicitos:4bootstrap gates+ownerdeath com2descendentes+5faults unicos; quatrosteps0,9/9snapshots,10archives vinculados e autenticados,10identidades observadas terminais/noDB/scratchRemoved/postflight[]. FPf4e1f498ff68bce46884634fdfdd54064aa8b6f0e903ecb63fc0db4a448f3f2d igual, fontes no checkout w62-candidate-evaluator freeze17cdd; nenhum modelo/pixels/nativeinference executados. SHA256 5adac82d1c62dbda5cd5b5c7eb64b5277779067a8480902ff785e6125b6b01cb.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w62-v8-development-execution-plan-v1.json",
+          "scope": "Plano somente preparado SHA3bab509a0650afdc46a5516498a2510bf97b681d4bd9683f2806bbc6b1d62847; inventory existente e8a0cc97f525c2541175053d72a4eaaca9c543e69488d0b5b8feff9b9fbe1fbf 2541files422398258B, sem import nativo. Acquisitionowner fixo em implementacao isolada: licenca preservada/pinned/live antes pesos,30s por request/120total com Job, sem download executado. Direitos de imagens nao renovados; development view nao e qualificacao, calibration/holdout fechados.",
           "role": "implementation"
         }
       ],
@@ -886,6 +910,12 @@
           "ref": "Apollo/w61-70-20261008/w66-origins-v2-32686992/result.json",
           "scope": "PASS6/6 puros zero skips no scaffold isolado, receiptSHA256bda81e13bedfe0eb0e011ea994ca7b49667bd98688758bf0e6de3c313eea74e6; source48bd1a0ab283d1510bbacff255b1a6dfa2ca23a95369f592f80f2ed8b512f14c/test79eddd9e30439440a71fa8d52524fc8680dabffcf1c47acc57ffe091b683f0bd, fingerprintee33d54842d71b35e186e43b6f3e21baae048dcc266b36cd020acb2dee8b9ada estavel. So create/revise output revalidados retornam readiness para bundle existente; seis origens seguem blocked sem produtor/State/persistence. Fork positivo tem plano vazio+variante, sem clips/cues/overlays. Subsegundo antes do primeiro snapshot, sem inventario de descendentes alegado; semDB/scratchlimpo. Nao equivale a nova corrida36puros/16PG ou cutover.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w66-creation-v2-origins-pure-v3-decf2db0/result.json",
+          "scope": "CreationV2/origins PASS14/14 puros isolados, receipt10964da1ba54c54166099b9ee981c8e0a859e6851f700a2fab336f5d195197a6; freeze61aa42cc8a1deb07350f9ebad41a2a4d69971b5a73835b73c7914665e0dc1b39, FP0ad87fe6 igual,1observado terminal/noDB/scratch/postflight limpos. v1 FAIL3 por anchor planId ausente e v2 FAIL2 por expectativa errada de audio hash preservados; algoritmo historico nao alterado. Fonte0a6e/f424/test7d396 no checkout isolado. Compiled clip/cue/crop intent e fatos reais separados, mas derivacao target persistida/remap tipado/16writers/COMMIT ainda pendentes; nenhum runtime ativado.",
+          "role": "implementation"
         }
       ],
       "nextAction": "Completar origens tipadas realmente persistidas: CreationCommandv2 com payload explicito preservando fingerprint/idempotencia historicos, fork com conteudo/novas identidades/decisoes auditadas, ingest/director/inherit/restore e rights/lifecycle. Provar COMMIT diferido observavel e depois cutover coerente dos16writers/hydrators/consumers/API. Scaffold6/6 e contrato36puros/16PG permanecem isolados.",
@@ -982,9 +1012,15 @@
           "ref": "Apollo/w61-70-20261008/w67-id-extraction-v1-d4bbde1b/result.json",
           "scope": "IDs-only188excluidos/allowlist922metadata PASS. FPd6ff17c5799d0264d936055cae9f81b1a0b2ff2be0cd12efc5f86129420de1cb igual,Python/conhost observados terminais/noDB/scratch limpo; version terminou antes primeiro snapshot. Allowlist7ec2470d254de05b19f597a227258c8d4249d7f928de68243cc9da60c78b2510 nao e selecao, GTvisual ou direitos atuais SHA256 dde0b6a73f3de21a472142c1cf60357b0d6110d016be13fea232d73c6da1f63a.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w67-v3-metadata-lot-v1-3c4870df/result.json",
+          "role": "implementation",
+          "scope": "Metadata-only W67v3 PASS:14sinteticos receipt6f598837a8b0eddf28a03e6bea24e39d45c7b06a5f1f1055b4e245b8bf3cc320; extracao922IDs permitidos receipt184abdd768cc95c91f4696150a5910fc71975509e450cf0365ac13cc2febb6d8, FP44c0c4910c26f068630c9b576ace09baf4feaa807cd392f65c1fce4ff28e1a21 igual somente4dependencias explicitas, nao checkout inteiro. Lote418bcfd484b63316740885182b985566a1292a6a2fdc7d0777af63157daadd9d/4962863B, manifest4b81fc0cdb665c4a60e9b1f1a1d38507a835b5fab5b689a5a870b095eee0762b.365candidatos177devsingle/15devmultiple/147evalsingle/26evalmultiple;8selecionados porrank fixo,557rejeitados com motivos. Rawrefs/flags/headextras preservados, rightsCurrentunverified/eyesKnownfalse/completudeunknown; nenhum GT fora922 desserializado, nenhuma aquisicao/rede/decode/inferencia.2identidades observadas terminais/noDB/scratch/postflight limpos. Isso e preparo anterior a direitos e adjudicacao humana, nao corpus qualificado."
         }
       ],
-      "nextAction": "Congelar lote provisorio pelo ranking inalterado da allowlist922/GT humanos metadata, revalidar direitos individuais e rubrica antes de aquisicao autorizada. Leitura independente encontrou365candidatos com2eyeGT limpos porface, sem adjudicar pixels/completude/head. Corpus exige os MESMOS casos passarem quotas/dimensoes; STOP sem substituicao. V2preservado.",
+      "nextAction": "Autenticar lote v3 metadata-only e verificar direitos individuais atuais dos8rankados; adquirir somente apos owner/pins/licencas/gates, preservar hashes/derivative correspondence e obter adjudicacao humana identificada. Quotas originais/splits/IoU imutaveis; headextras/olhos incompletos nao podem ser ocultados. Lotes anteriores STOP e holdout W62 fechado preservados; nenhum corpus/pixels qualificados.",
       "notes": "Estimativa 6–10 h de desenvolvimento; CI/revisão fora. IDs compartilhados são cumulativos e não duplicam tarefas. Código existente deve ser inspecionado antes de ampliar; a fila desta wave não reclassifica capabilities existentes. Inventário local de partida SHA256 4d273863096f75a6aa3c86944657496359b757e7c9d78c5f6c6389f69c935b2d. A checagem de direitos usa HTML preservado, não consulta atual ao Flickr. Tentativa v2 parou corretamente por quotas antes de criar seleção ou obter pixels; nenhuma tarefa de produto foi promovida."
     },
     {
@@ -1115,6 +1151,12 @@
           "type": "private",
           "ref": "Apollo/w61-70-20261008/w69-ass-clock-v5-differential-5f07883b/result.json",
           "scope": "FAIL fisico original22pass/1fail/index22/19naoexecutados. Diagnostico42entries completo:24controles observados/8pass/10fail/0naoexecutados,73FFmpegexecs exit0. Frame803@100: ASS8.02-8.03 acende802+803 em ambosgraphs;8.03-8.04 acende nenhum selecionado emlavfi e804 aposconcat, ambaslayers. Isso mede pixels, nao inteiro now interno do libass. Receipt18e3d5e5efcb4074c789f525458e9eeceaa8af14c934a8b01eca2fc2cf117e3a; proofd3d41f5befabb32b612e621e553163136eb7676d8ac2c6eabb43b57431ed0931; manifest3805d9f7d22092683c2163b4a08bb16cac304cf8145c3895f6c510245f40cfb6,281arquivos98114774B autenticados. Fonte7620f54c21d8a9f32fad813cf821a93a82e7b9cbe4ee6d04cf77dd4b2bef8151; fingerprint23c29fd756ffe0dae17f489774d5a4075be265591c6d34932144f4083cc6bf2c estavel;11identidades terminais/5snapshots completos/noDB/scratchlimpo. Nenhuma policy ativada; todos FAILs anteriores preservados.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/w69-materialized-clock-pure-v2-cf6e8990/result.json",
+          "scope": "Contrato materialized clock/ASS isolado PASS13/13, receiptbdae7d394a74a00d3f6b74cb79b00d2af40a8a84f25d1d77e9a286b929df5215, FPffddf79a igual; terminal-before-first-snapshot/no inventario descendente alegado/noDB/scratch/postflight limpos. v1 FAIL por mutacao de fixture congelada preservado. Replay exige runs distintos/semantica completa, hashes por captura e intervalo legal. Nao autentica state/trace/binario por si, sem collector/renderer/recipe/PG e sem pixels novos; FAILfisico v5 continua bloqueando ativacao.",
           "role": "implementation"
         }
       ],
@@ -22117,9 +22159,27 @@
           "ref": "Apollo/w61-70-20261008/inline-reuse-head-unit-v2-72e22cc5/result.json",
           "scope": "Tres testes focados PASS apos corrigir spy de admissao no teste head: esperado e o ID da Version realmente commitada, recusa VERSION_CONFLICT antes persistencia; base proxy ausente e route binding preservados. FPb76641b9f3e17e3a83423b30f8a3f6f685953538f9f971e4e83f6c07ef86a6c8 igual/umaidentidade observada terminal/noDB/scratch/postflight limpos. Fonte posterior ao61/61 somente nesse teste; nao PG/UI. SHA256 e0142cc2723f5b8c93ebd8a236823a9e51949ba7c504b70ce4e0557da38798e0.",
           "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/build-50d11ae-5571f872/result.json",
+          "scope": "Build50d11 PASS API/docs/Next; bundle1922files333900558B rehash sem diferencas. Receipt SHA256 e17a963a70cd1aa73884775cacab28eb6f7a1294285d7f6af0c896fb2c760fc9; manifest c6c54e8518e22d415650d7d18fd93cd203c5031ea8cf362c905950bfb408bbe0. FPb76641b9 igual,14observados terminais/noDB/scratch/postflight limpos. Nao comprova jornada manual nem cobre runtime posterior.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/inline-rights-pg-50d11-v2-21a0fe22/result.json",
+          "scope": "PG controlado inline rights PASS2/2 zero skips: allow+replay, revoke/expiry apos lock, novos operation/map/outbox zero na negacao; Command/Version previamente comitados preservados. Receipt b1ba07a0c7d6795df0e8c8df10831fde1fb2f92207748ed78271b60f04684650; FP7fef2bde igual,10observados terminais/PG0/cluster/porta/scratch limpos. v1 FAIL7463ac7a preservado por assert de campo inexistente CommandImpact; v2 corrige somente teste e nao cria render/aceite.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
+          "ref": "Apollo/w61-70-20261008/manual-50d11-v8-49a3a88e/result.json",
+          "scope": "Manual50d11 v5 FAIL428 no supersede discovery-sale sem objetivo aprovado. v6/v7/v8 preservam negativo publico428/zero efeitos e tentam discovery sem supersede; worker retrying. v8 mede PrismaP2002/V2ProjectSnapshot/(projectId,kind,contentHash) antes conversao PERSISTENCE_CONFLICT: colisao canonica real no commit do Diretor. Receipt78811fdd205d54df0d5b12e037382a896970b1ab6993f3a5e6bf9377cfe4ed5a; FPe29a7e93 igual,15observados terminais/PG0/cluster/porta/scratch/postflight limpos. Fonte50d11+fixtures fingerprintadas, bundle50d11. Mudanca discovery-sale apos aprovacao, final positivo W35 e dashboard novo continuam NAO comprovados; nenhuma aprovacao fabricada.",
+          "role": "implementation"
         }
       ],
-      "nextAction": "Revalidacao de direitos inline e binding head implementados em fonte congelada,61unidades+3focadas e arquitetura locais verdes. Fazer commit coerente/build fresco, provar revogacao/expiracao e rollback dos novos efeitos em PG; Command/Version anteriores preservados. Depois manual/dashboard e nova CI integral incluindo namespace ABI22/24/composto/oito suites. W66 cutover16, W69 clock/pixels, qualidade facial/editorial e aceite continuam pendentes.",
+      "nextAction": "Corrigir identidade canonica dos snapshots do Diretor antes de selar Command/Run/Version, preservar unique/bytes e revalidar na TX; provar repeated-run/rollback/concorrencia. Build50d11 e PG inline rights verdes delimitados; manual ainda FAILP2002. Depois novo build/manual/dashboard/CI completa incluindo namespace ABI22/24/composto/oito suites. Sem objetivo aprovado/supersede positivo, final W35 ou aceite.",
       "notes": "As provas antigas de cards e runtime controlado permanecem historicas nos SHAs citados. O gate facial atual revelou que aquela preparacao nao prova admissao final positiva: W35 retorna em-construcao para essa lacuna. Jornada atual distingue proxy real, seed de review bloqueado e rejeicao da autoridade PostgreSQL; nenhuma aprovacao e gravada para tornar teste verde. T-FR/Media controlados sao provas mecanicas separadas, sem transferencia de autoridade editorial."
     },
     {

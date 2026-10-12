@@ -961,3 +961,20 @@ carregamento, evitando fallback silencioso no primeiro frame.
 - Semântica de rebase automático.
 - Persistência/consulta eficiente do dependency graph.
 - Granularidade de versions em batch edits.
+
+## 33. Limite de comprovação — Diretor e objetivo (12/10/2026)
+
+A jornada manual atual exige que uma mudança de `discovery` para `sale` sem
+aprovação do objetivo anterior retorne `428 PRECONDITION_REQUIRED`, sem novos
+Commands, versões, snapshots, operações ou outbox. O positivo de mudança de
+objetivo **após aprovação** continua pendente; repetir `discovery` não comprova
+`supersedesRunId` nem uma segunda versão do objetivo.
+
+O diagnóstico local `manual-50d11-v8-49a3a88e` observou `P2002` na unicidade
+`ProjectSnapshot(projectId, kind, contentHash)` durante o commit do Diretor.
+Essa unicidade permanece obrigatória. Uma identidade canônica já existente
+precisa ser resolvida e validada antes de selar Command, DirectorRun e Version;
+não se pode trocar referências depois dos hashes nem alterar conteúdo para
+evitar a colisão. O commit deve revalidar os fatos imutáveis dentro da transação.
+Este registro descreve uma falha comprovada e o contrato da correção, ainda
+sem afirmar que a jornada manual, o supersede positivo ou a W35 foram concluídos.
