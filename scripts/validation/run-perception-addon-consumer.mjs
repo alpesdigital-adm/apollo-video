@@ -1,0 +1,151 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { readdir, readFile } from 'node:fs/promises'
+import { writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { CI_ROOT, budget, identityKey, liveIdentity, readAuthorityIdentitySync, registerAddonConsumer, jsonDigest } from './perception-addon-registry.mjs'
+import { loadPidfdBinding, openObservedPidfd } from './perception-pidfd.mjs'
+import { collectOwnedIdentities, parseLinuxProcessStat, readLinuxProcessIdentity } from './run-perception-ci.mjs'
+import { assertPerceptionSuite, COMPOSED_SUITE } from './run-perception-ci-namespace.mjs'
+
+export function fixedConsumer(mode, args) {
+  assert.ok(['unit', 'namespace', 'gates'].includes(mode), 'Fixed CI consumers only')
+  if (mode === 'namespace') { assert.ok(args.length >= 1 && args.length <= 2); assertPerceptionSuite(args[0], args[1] ?? null) }
+  else if (mode === 'gates') assert.deepEqual(args, [COMPOSED_SUITE])
+  else assert.deepEqual(args, [])
+  return [join(CI_ROOT, 'scripts/validation/perception-ci-child-bootstrap.mjs'), mode, ...args]
+}
+// Metadata-only inventory for the owner's normal children. No environ read,
+// namespace privilege or inferred ownership from UID. Unknown new live peers
+// fail the owner instead of being silently excluded or signaled.
+export async function consumerSnapshot(deadlineAt) {
+  const names = await budget(() => readdir('/proc'), deadlineAt, 1000, 'Consumer inventory')
+  const pids = names.filter((name) => /^\d+$/.test(name))
+  assert.ok(pids.length <= 16384, 'Consumer process inventory bound')
+  const snapshot = []
+  for (const pid of pids) {
+    try {
+      const text = await budget(() => readFile(`/proc/${pid}/stat`, 'utf8'), deadlineAt, 500, 'Consumer stat')
+      assert.ok(text.length <= 65536)
+      snapshot.push(parseLinuxProcessStat(text))
+    } catch (error) { if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error }
+  }
+  return snapshot
+}
+export function consumerTerminalProof(report) {
+  return report.childCloseObserved === true && report.observed.length > 0 &&
+    report.terminality.length === report.observed.length && report.terminality.every((value) => value.terminal)
+}
+export async function runAddonConsumer(mode, args = [], env = process.env) {
+  const command = fixedConsumer(mode, args)
+  assert.equal(process.platform, 'linux'); assert.ok(process.getuid() > 0 && process.getgid() > 0)
+  const runId = `pidfd-consumer-${mode}-${randomUUID()}`
+  env = { ...env, APOLLO_PERCEPTION_CONSUMER_RUN_ID: runId }
+  process.env.APOLLO_PERCEPTION_CONSUMER_RUN_ID = runId
+  const started = Date.now(), configured = Number(env.APOLLO_PERCEPTION_JOB_DEADLINE_MS ?? started + 1200000)
+  assert.ok(Number.isSafeInteger(configured) && configured > started + 30000)
+  const deadlineAt = configured, workDeadline = deadlineAt - 25000
+  const registration = await registerAddonConsumer(env) // Owner BEFORE native load.
+  const { binding } = await loadPidfdBinding(env)
+  const baseline = new Map((await consumerSnapshot(deadlineAt)).map((value) => [identityKey(value), value]))
+  const observed = new Map(), held = new Map()
+  const report = { schemaVersion: 'perception-pidfd-consumer-close/v1', runId, mode, args,
+    sourceCommit: env.GITHUB_SHA, buildRunId: registration.entry.buildRunId,
+    owner: registration.entry.identity, childCloseObserved: false, success: false, errors: [], observed: [], terminality: [] }
+  const fail = (error) => report.errors.push({ name: error.name, code: error.code ?? null, message: String(error.message).slice(0, 512) })
+  let child, birthToken, closed = false, closePromise, interrupted
+  const signals = ['SIGINT', 'SIGTERM'].map((name) => {
+    const handler = () => { interrupted ??= name; child?.stdin.end() }; process.on(name, handler); return [name, handler]
+  })
+  try {
+    child = spawn(process.execPath, command, { cwd: CI_ROOT, env, stdio: ['pipe', 'inherit', 'inherit'] })
+    // Binding loaded first. Birth token and stat are synchronous before libuv
+    // can reap this DIRECT child; no later PID adoption if either fails.
+    try {
+      assert.ok(Number.isSafeInteger(child.pid) && child.pid > 0)
+      birthToken = binding.open(child.pid)
+      const birth = readAuthorityIdentitySync(child.pid)
+      assert.equal(birth.ppid, process.pid); assert.ok(liveIdentity(birth))
+      assert.deepEqual(birth.uids, Array(4).fill(process.getuid()))
+      report.childBirth = birth; observed.set(identityKey(birth), { ...birth, runMarked: true })
+    } finally {
+      closePromise = new Promise((done) => child.once('close', (code, signal) => {
+        closed = true; report.childCloseObserved = true; report.code = code; report.signal = signal; done()
+      }))
+      child.once('error', fail); child.stdin.on('error', (error) => { if (!closed) fail(error) })
+    }
+    const recheck = await budget(() => readLinuxProcessIdentity(report.childBirth.pid), workDeadline, 1000, 'Consumer gated birth recheck')
+    assert.equal(identityKey(recheck), identityKey(report.childBirth)); assert.equal(recheck.ppid, process.pid); assert.ok(liveIdentity(recheck))
+    child.stdin.end('G'); report.gateReleased = true
+    while (!closed && !interrupted && !report.errors.length) {
+      const snapshot = await consumerSnapshot(workDeadline)
+      collectOwnedIdentities(snapshot, observed, report.childBirth.pid)
+      for (const entry of snapshot) {
+        if (baseline.has(identityKey(entry)) || observed.has(identityKey(entry)) || entry.pid === process.pid || !liveIdentity(entry)) continue
+        assert.fail(`Unattributed new live process ${entry.pid}:${entry.starttime}; retained root`)
+      }
+      await budget(() => Promise.race([closePromise, new Promise((done) => setTimeout(done, 20))]), workDeadline, 1000, 'Consumer close poll')
+    }
+    assert.ok(closed && report.code === 0 && report.signal === null && !interrupted, 'Fixed consumer did not close successfully')
+  } catch (error) { fail(error); child?.stdin.end() }
+  finally {
+    const cleanupDeadline = Math.min(deadlineAt, Date.now() + 25000)
+    try {
+      const snapshot = await consumerSnapshot(cleanupDeadline)
+      collectOwnedIdentities(snapshot, observed, report.childBirth?.pid)
+    } catch (error) { fail(error) }
+    // Only known identities. Attach before recheck; no bare-PID fallback.
+    for (const expected of [...observed.values()].reverse()) {
+      try {
+        const current = await budget(() => readLinuxProcessIdentity(expected.pid), cleanupDeadline, 500, 'Consumer containment precheck')
+        if (!current || identityKey(current) !== identityKey(expected) || !liveIdentity(current)) continue
+        const owned = await openObservedPidfd(expected, { binding, readIdentity: readLinuxProcessIdentity,
+          deadlineAt: cleanupDeadline, verifyDeadlineAt: Math.min(cleanupDeadline, Date.now() + 500) })
+        held.set(identityKey(expected), owned)
+        if (!owned.terminal) { owned.signal('SIGKILL'); report.containmentRequired = true }
+      } catch (error) {
+        if (['ESRCH', 'ENOENT'].includes(error.code)) {
+          try {
+            const current = await budget(() => readLinuxProcessIdentity(expected.pid), cleanupDeadline, 500, 'Consumer pidfd race recheck')
+            assert.ok(!current || identityKey(current) !== identityKey(expected) || !liveIdentity(current), 'Pidfd failure did not prove terminality')
+          } catch (recheckError) { fail(recheckError) }
+        } else fail(error)
+      }
+    }
+    if (birthToken && !closed) {
+      try { binding.signal(birthToken, 'SIGKILL'); report.containmentRequired = true } catch (error) { fail(error) }
+    }
+    if (child && !closed) { try { await budget(() => closePromise, cleanupDeadline, 5000, 'Consumer child close') } catch (error) { fail(error) } }
+    for (const expected of observed.values()) {
+      try {
+        let current
+        do {
+          current = await budget(() => readLinuxProcessIdentity(expected.pid), cleanupDeadline, 500, 'Consumer terminality')
+          if (!current || identityKey(current) !== identityKey(expected) || !liveIdentity(current)) break
+          await budget(() => new Promise((done) => setTimeout(done, 10)), cleanupDeadline, 20, 'Consumer terminal poll')
+        } while (Date.now() < cleanupDeadline)
+        report.terminality.push({ ...expected, terminal: !current || identityKey(current) !== identityKey(expected) || !liveIdentity(current),
+          observation: !current ? 'absent' : identityKey(current) !== identityKey(expected) ? 'pid-recycled' : current.state })
+      } catch (error) { fail(error) }
+    }
+    for (const token of held.values()) { try { token.close() } catch (error) { fail(error) } }
+    if (birthToken) { try { binding.close(birthToken) } catch (error) { fail(error) } }
+    for (const [name, handler] of signals) process.removeListener(name, handler)
+    report.observed = [...observed.values()]; report.interruptedBy = interrupted ?? null
+    report.success = report.errors.length === 0 && report.code === 0 && report.signal === null &&
+      !report.interruptedBy && !report.containmentRequired && consumerTerminalProof(report)
+    report.completedAt = new Date().toISOString()
+    report.receiptPath = join(env.APOLLO_PERCEPTION_PIDFD_ROOT, 'receipts', `${runId}.json`)
+    try { writeFileSync(report.receiptPath, JSON.stringify(report, null, 2), { flag: 'wx', mode: 0o600 })
+      writeFileSync(join(env.APOLLO_PERCEPTION_PIDFD_ROOT, 'receipts', `${runId}.sha256`), jsonDigest(report), { flag: 'wx', mode: 0o600 })
+    } catch (error) { fail(error); report.success = false }
+    if (!report.success) process.stderr.write(`${JSON.stringify(report)}\n`)
+  }
+  return report
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { const [mode, ...args] = process.argv.slice(2); if (!(await runAddonConsumer(mode, args)).success) process.exitCode = 1 }
+  catch (error) { process.stderr.write(`Fixed consumer admission failed: ${error.message}\n`); process.exitCode = 1 }
+}

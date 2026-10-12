@@ -198,6 +198,21 @@ function verifyPerceptionWiring(workflow) {
   const productionBuild = steps.find((step) => step.job === job && step.attrs.get('run') === 'npm run build')
   assert.ok(productionBuild && steps.indexOf(rendererInstall) < steps.indexOf(productionBuild),
     'locked Remotion dependencies must be installed before the unchanged production build')
+  const composed = steps.filter((step) => step.job === job &&
+    step.attrs.get('run') === 'node scripts/validation/run-perception-addon-consumer.mjs gates tests/v2/perception-namespace-observer.integration.mjs')
+  assert.equal(composed.length, 1, 'Real Linux namespace observer composed gate is mandatory')
+  assert.equal(composed[0].attrs.get('if'), undefined)
+  assert.equal(composed[0].attrs.get('continue-on-error'), undefined)
+  assert.ok(gatesTheBuild(composed[0]))
+  assert.ok(steps.indexOf(productionBuild) < steps.indexOf(composed[0]))
+  const addonBuilds = steps.filter((step) => step.job === job && step.name === 'Build unprivileged CI pidfd addon')
+  assert.equal(addonBuilds.length, 1, 'Perception namespace requires its normal UID native pidfd prerequisite')
+  assert.equal(addonBuilds[0].attrs.get('run'), 'bash scripts/validation/build-perception-pidfd.sh')
+  assert.equal(addonBuilds[0].attrs.get('timeout-minutes'), '2')
+  assert.equal(addonBuilds[0].attrs.get('if'), undefined)
+  assert.equal(addonBuilds[0].attrs.get('continue-on-error'), undefined)
+  assert.ok(steps.indexOf(addonBuilds[0]) < steps.indexOf(composed[0]))
+  assert.doesNotMatch(block, /setcap|sudo\s+(?:npm|node)\b|sudoers|sysctl/)
   for (const name of PERCEPTION_SUITES) {
     const suite = `tests/v2/${name}.integration.mjs`
     const matches = steps.filter((step) => step.job === job && step.suiteFiles.includes(suite))
@@ -206,8 +221,9 @@ function verifyPerceptionWiring(workflow) {
     assert.equal(step.attrs.get('if'), undefined)
     assert.equal(step.attrs.get('continue-on-error'), undefined)
     assert.ok(gatesTheBuild(step))
-    const invocation = `node scripts/validation/run-perception-ci.mjs ${suite}`
+    const invocation = `node scripts/validation/run-perception-addon-consumer.mjs namespace ${suite}`
     assert.ok(step.body.includes(invocation))
+    assert.ok(steps.indexOf(composed[0]) < steps.indexOf(step), 'Namespace gate must precede all eight proofs')
     if (name === 'prisma-face-producer') {
       assert.ok(step.body.includes(`${invocation} 'publish-race|face control'`))
     } else {
@@ -223,14 +239,23 @@ test('W61 perception CI preserves supervised mandatory coverage and its exact fa
     assert.throws(() => verifyPerceptionWiring(workflow.replace('  perception:\n', `  perception:\n${replacement}`)))
   }
   for (const name of PERCEPTION_SUITES) {
-    const invocation = `node scripts/validation/run-perception-ci.mjs tests/v2/${name}.integration.mjs`
+    const invocation = `node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/${name}.integration.mjs`
     assert.throws(() => verifyPerceptionWiring(workflow.replace(invocation, 'echo removed')))
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(invocation,
+      invocation.replace('run-perception-addon-consumer.mjs namespace', 'run-perception-ci-namespace.mjs'))))
   }
   for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
     assert.throws(() => verifyPerceptionWiring(workflow.replace('      - name: Real OCR and temporal media adapters\n', `      - name: Real OCR and temporal media adapters\n${replacement}`)))
   }
   assert.throws(() => verifyPerceptionWiring(workflow.replace("APOLLO_TEMPORAL_HTTP_E2E: '1'", "APOLLO_TEMPORAL_HTTP_E2E: '0'")))
   assert.throws(() => verifyPerceptionWiring(workflow.replace(" 'publish-race|face control'", '')))
+  const composedStep = '      - name: Linux namespace observer composed gate\n        run: node scripts/validation/run-perception-addon-consumer.mjs gates tests/v2/perception-namespace-observer.integration.mjs\n'
+  assert.ok(workflow.includes(composedStep))
+  assert.throws(() => verifyPerceptionWiring(workflow.replace(composedStep, '')))
+  for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(composedStep,
+      composedStep.replace('        run:', `${replacement}        run:`))))
+  }
   const rendererStep = '      - name: Install locked renderer dependencies for perception build\n        run: npm ci --prefix remotion\n'
   assert.ok(workflow.includes(rendererStep))
   assert.throws(() => verifyPerceptionWiring(workflow.replace(rendererStep, '')))
@@ -245,6 +270,47 @@ test('W61 perception CI preserves supervised mandatory coverage and its exact fa
     'W61 publish-race matcher checks typed codes, not error prose',
     'W61 face control uses scoped canonical audit before the repository transaction',
   ])
+})
+
+test('CI pidfd prerequisite remains unprivileged and mandatory under Node 22 quality and Node 24 perception', async () => {
+  const workflow = await read('.github/workflows/ci.yml')
+  const verify = (source) => {
+    const { steps } = parseWorkflow(source)
+    for (const job of ['quality', 'perception']) {
+      const builds = steps.filter((step) => step.job.id === job && step.name === 'Build unprivileged CI pidfd addon')
+      assert.equal(builds.length, 1)
+      const build = builds[0]
+      assert.equal(build.attrs.get('run'), 'bash scripts/validation/build-perception-pidfd.sh')
+      assert.equal(build.attrs.get('if'), undefined); assert.equal(build.attrs.get('continue-on-error'), undefined)
+      assert.equal(build.attrs.get('timeout-minutes'), '2'); assert.ok(gatesTheBuild(build))
+      const consumer = steps.find((step) => step.job.id === job && step.attrs.get('run') ===
+        (job === 'quality' ? 'node scripts/validation/run-perception-addon-consumer.mjs unit' : 'node scripts/validation/run-perception-addon-consumer.mjs gates tests/v2/perception-namespace-observer.integration.mjs'))
+      assert.ok(consumer && steps.indexOf(build) < steps.indexOf(consumer))
+      const cleanup = steps.filter((step) => step.job.id === job && step.attrs.get('run') === 'node scripts/validation/cleanup-perception-pidfd.mjs')
+      assert.equal(cleanup.length, 1); assert.equal(cleanup[0].attrs.get('if'), 'always()')
+      assert.equal(cleanup[0].attrs.get('continue-on-error'), undefined)
+      assert.ok(steps.indexOf(consumer) < steps.indexOf(cleanup[0]))
+      const archives = steps.filter((step) => step.job.id === job && step.name === 'Publish pidfd prerequisite and consumer lifecycle evidence')
+      assert.equal(archives.length, 1); assert.equal(archives[0].attrs.get('if'), 'always()')
+      assert.equal(archives[0].attrs.get('continue-on-error'), undefined)
+      assert.ok(steps.indexOf(cleanup[0]) < steps.indexOf(archives[0]))
+    }
+    const quality = source.split(/^  quality:\s*$/m)[1]?.split(/^  [a-zA-Z][\w-]*:\s*$/m)[0]
+    const perception = source.split(/^  perception:\s*$/m)[1]?.split(/^  [a-zA-Z][\w-]*:\s*$/m)[0]
+    assert.match(quality, /node-version: 22/); assert.match(perception, /node-version: 24/)
+  }
+  verify(workflow)
+  const step = '      - name: Build unprivileged CI pidfd addon\n        timeout-minutes: 2\n        run: bash scripts/validation/build-perception-pidfd.sh\n'
+  assert.equal(workflow.split(step).length - 1, 2)
+  for (const replacement of ['', step.replace('        run:', '        if: false\n        run:'),
+    step.replace('        run:', '        continue-on-error: true\n        run:'),
+    step.replace('run: bash', 'run: sudo bash')]) {
+    assert.throws(() => verify(workflow.replace(step, replacement)))
+  }
+  for (const invocation of ['node scripts/validation/run-perception-addon-consumer.mjs unit',
+    'node scripts/validation/run-perception-addon-consumer.mjs gates', 'node scripts/validation/cleanup-perception-pidfd.mjs']) {
+    assert.throws(() => verify(workflow.replace(invocation, 'echo omitted')))
+  }
 })
 
 function verifyLocalizationProxyMediaWiring(workflow, gate) {

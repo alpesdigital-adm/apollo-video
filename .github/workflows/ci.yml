@@ -106,6 +106,10 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Build unprivileged CI pidfd addon
+        timeout-minutes: 2
+        run: bash scripts/validation/build-perception-pidfd.sh
+
       - name: Verify project status coverage and generated dashboard
         run: npm run project:status:check
 
@@ -195,7 +199,7 @@ jobs:
         run: npm run platform:validate
 
       - name: Run unit and contract tests
-        run: npm test
+        run: node scripts/validation/run-perception-addon-consumer.mjs unit
 
       # Wave 23. The deploy sequence is proven against a Docker that records every
       # verb and answers from a scenario: mutation order, lock, latch, budget refusal
@@ -1218,6 +1222,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Close pidfd admission and archive verified prerequisite ownership
+        if: always()
+        run: node scripts/validation/cleanup-perception-pidfd.mjs
+      - name: Publish pidfd prerequisite and consumer lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pidfd-quality-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pidfd-archive
+          if-no-files-found: error
+          retention-days: 14
+
   local-infrastructure:
     name: Isolated Compose infrastructure
     runs-on: ubuntu-latest
@@ -2080,6 +2096,9 @@ jobs:
           dpkg-query -W tesseract-ocr tesseract-ocr-eng > "$APOLLO_LIBRARY_EVIDENCE_ROOT/ocr-packages.txt"
           PGPASSWORD=perception-ci psql -h 127.0.0.1 -U apollo_admin -d apollo_v2_perception -v ON_ERROR_STOP=1 -c "CREATE ROLE apollo LOGIN PASSWORD 'perception-ci' CONNECTION LIMIT 5; ALTER DATABASE apollo_v2_perception OWNER TO apollo; CREATE EXTENSION IF NOT EXISTS vector; ALTER ROLE apollo SET idle_in_transaction_session_timeout='30s'; ALTER ROLE apollo SET statement_timeout='120s';"
       - run: npm ci
+      - name: Build unprivileged CI pidfd addon
+        timeout-minutes: 2
+        run: bash scripts/validation/build-perception-pidfd.sh
       - name: Resolve and record exact CI media executables
         run: |
           set -euo pipefail
@@ -2093,29 +2112,42 @@ jobs:
       - name: Install locked renderer dependencies for perception build
         run: npm ci --prefix remotion
       - run: npm run build
+      - name: Linux namespace observer composed gate
+        run: node scripts/validation/run-perception-addon-consumer.mjs gates tests/v2/perception-namespace-observer.integration.mjs
       - name: Real OCR and temporal media adapters
         run: |
-          node scripts/validation/run-perception-ci.mjs tests/v2/tesseract-ocr-video-adapter.integration.mjs
-          node scripts/validation/run-perception-ci.mjs tests/v2/ffmpeg-temporal-video-analyzer.integration.mjs
+          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/tesseract-ocr-video-adapter.integration.mjs
+          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/ffmpeg-temporal-video-analyzer.integration.mjs
       - name: OCR admission, worker, SQL publication fences and HTTP
         run: |
-          node scripts/validation/run-perception-ci.mjs tests/v2/prisma-perception-producer-admission.integration.mjs
-          node scripts/validation/run-perception-ci.mjs tests/v2/prisma-perception-producer-worker.integration.mjs
-          node scripts/validation/run-perception-ci.mjs tests/v2/prisma-perception-producer-http.integration.mjs
-          node scripts/validation/run-perception-ci.mjs tests/v2/prisma-director-ocr.integration.mjs
+          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-perception-producer-admission.integration.mjs
+          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-perception-producer-worker.integration.mjs
+          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-perception-producer-http.integration.mjs
+          node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-director-ocr.integration.mjs
       - name: Temporal worker, SQL publication fences and HTTP
-        run: node scripts/validation/run-perception-ci.mjs tests/v2/prisma-temporal-producer.integration.mjs
+        run: node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-temporal-producer.integration.mjs
       # Only these three offline assertions run here. Face PG/HTTP and the real
       # failed-gate YuNet runner remain local, with licensed development inputs.
       # No holdout/model acquisition or faceSafety authority is implied.
       - name: Facial fixture and authenticated audit offline only
-        run: node scripts/validation/run-perception-ci.mjs tests/v2/prisma-face-producer.integration.mjs 'publish-race|face control'
+        run: node scripts/validation/run-perception-addon-consumer.mjs namespace tests/v2/prisma-face-producer.integration.mjs 'publish-race|face control'
       - name: Require zero orphan perception clients
         if: always()
         run: |
           set -euo pipefail
           count="$(PGPASSWORD=perception-ci psql -h 127.0.0.1 -U apollo_admin -d apollo_v2_perception -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()")"
           test "$count" = 0
+      - name: Close pidfd admission and archive verified prerequisite ownership
+        if: always()
+        run: node scripts/validation/cleanup-perception-pidfd.mjs
+      - name: Publish pidfd prerequisite and consumer lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pidfd-perception-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pidfd-archive
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish scoped perception proof and binary provenance
         if: always()
         uses: actions/upload-artifact@v4

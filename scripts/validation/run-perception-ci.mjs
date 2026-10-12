@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { connectNamespaceObserver } from './perception-observer-channel.mjs'
+import { loadPidfdBinding, signalViaPidfd } from './perception-pidfd.mjs'
 
 // Disposable Linux CI only. Ownership follows PID/starttime and an inherited
 // unique run marker, even across setsid/reparenting. Containment is not success.
@@ -54,9 +56,33 @@ export async function readLinuxProcessIdentity(pid) {
   catch (error) { if (['ENOENT', 'ESRCH'].includes(error.code)) return null; throw error }
 }
 
+export function parseLinuxProcessCredentials(text) {
+  assert.ok(typeof text === 'string' && Buffer.byteLength(text) <= 65_536, 'Invalid Linux status document')
+  const fields = new Map(text.split('\n').filter((line) => line.includes(':')).map((line) => {
+    const index = line.indexOf(':'); return [line.slice(0, index), line.slice(index + 1).trim()]
+  }))
+  const credentials = {}
+  for (const name of ['Uid', 'Gid']) {
+    const values = (fields.get(name) ?? '').split(/\s+/)
+    assert.ok(values.length === 4 && values.every((value) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value))),
+      'Linux process credentials are unavailable')
+    credentials[`${name.toLowerCase()}s`] = values.map(Number)
+  }
+  return { ...credentials, uid: credentials.uids[0], gid: credentials.gids[0] }
+}
+
+async function readMarkerFacts(pid, runId) {
+  const environment = await readFile(`/proc/${pid}/environ`)
+  assert.ok(environment.length <= 2 * 1024 * 1024, 'Linux process environment exceeds observation bound')
+  const variables = environment.toString('utf8').split('\0')
+  return { runMarked: variables.includes(`${RUN_MARKER}=${runId}`),
+    knownMarker: variables.some((value) => value.startsWith(`${RUN_MARKER}=`) && value !== `${RUN_MARKER}=`) }
+}
+
 const linuxObservationIo = {
   entries: () => readdir('/proc'), identity: readLinuxProcessIdentity,
-  owner: (pid) => stat(`/proc/${pid}`), environment: (pid) => readFile(`/proc/${pid}/environ`),
+  owner: async (pid) => ({ ...parseLinuxProcessCredentials(await readFile(`/proc/${pid}/status`, 'utf8')),
+    inodeUid: (await stat(`/proc/${pid}`)).uid }), markerFacts: readMarkerFacts,
 }
 
 export async function createLinuxObservationContext(ownerPid = process.pid, io = linuxObservationIo) {
@@ -67,7 +93,7 @@ export async function createLinuxObservationContext(ownerPid = process.pid, io =
   assert.ok(Number.isSafeInteger(owner.uid) && owner.uid >= 0, 'Supervisor owner UID is unavailable')
   return { ownerIdentity: { ...verified }, ownerUid: owner.uid, baseline: new Map(),
     captureBaseline: true, observed: new Map(), knownMarkers: new Set(), exclusions: new Map(),
-    environmentDenials: new Map(), terminalEnvironmentRechecks: new Map(), rootPid: undefined }
+    environmentDenials: new Map(), terminalEnvironmentRechecks: new Map(), rootPid: undefined, observationIo: io }
 }
 
 function snapshotParentIdentities(entry, entriesByPid, prior) {
@@ -107,7 +133,8 @@ function protectedIdentities(entries, context) {
   return protectedKeys
 }
 
-// IO injection is for controlled policy tests. Production always uses /proc.
+// Both authority backends read real /proc; the privileged ABI returns facts,
+// never an invented environment Buffer. Raw environment IO injection is test-only.
 export async function observeLinuxProcesses(runId, context, io = linuxObservationIo) {
   assert.ok(context?.ownerIdentity && context.baseline instanceof Map, 'Missing supervisor observation baseline')
   const started = Date.now(), entries = await io.entries(), result = [], denied = [], failures = []
@@ -146,9 +173,16 @@ export async function observeLinuxProcesses(runId, context, io = linuxObservatio
   for (const entry of result) {
     assert.ok(Date.now() - started < 3000, 'Linux observation exceeded its deadline')
     if (entry.uid !== context.ownerUid || !live(entry)) continue
-    let environment
+    let facts
     try {
-      environment = await io.environment(entry.pid)
+      if (io.markerFacts) facts = await io.markerFacts(entry.pid, runId)
+      else {
+        const environment = await io.environment(entry.pid)
+        assert.ok(environment.length <= 2 * 1024 * 1024, 'Linux process environment exceeds observation bound')
+        const variables = environment.toString('utf8').split('\0')
+        facts = { runMarked: variables.includes(`${RUN_MARKER}=${runId}`),
+          knownMarker: variables.some((value) => value.startsWith(`${RUN_MARKER}=`) && value !== `${RUN_MARKER}=`) }
+      }
     } catch (error) {
       if (['ENOENT', 'ESRCH'].includes(error.code)) { absent.add(identityKey(entry)); continue }
       if (error.code === 'EACCES') { denied.push({ entry, error }); continue }
@@ -156,10 +190,8 @@ export async function observeLinuxProcesses(runId, context, io = linuxObservatio
       failures.push(error); continue
     }
     try {
-      assert.ok(environment.length <= 2 * 1024 * 1024, 'Linux process environment exceeds observation bound')
-      const variables = environment.toString('utf8').split('\0')
-      const runMarked = variables.includes(`${RUN_MARKER}=${runId}`)
-      const knownMarker = variables.some((value) => value.startsWith(`${RUN_MARKER}=`) && value !== `${RUN_MARKER}=`)
+      assert.equal(typeof facts.runMarked, 'boolean'); assert.equal(typeof facts.knownMarker, 'boolean')
+      const { runMarked, knownMarker } = facts
       const verified = await io.identity(entry.pid)
       if (!verified) { absent.add(identityKey(entry)); continue }
       assert.equal(identityKey(verified), identityKey(entry), 'Linux process identity changed during environment read')
@@ -245,7 +277,7 @@ export async function observeLinuxProcesses(runId, context, io = linuxObservatio
 export async function linuxProcessSnapshot(runId, context) {
   assert.equal(process.platform, 'linux')
   assert.equal(context?.ownerUid, process.getuid(), 'Supervisor owner UID does not match its process credentials')
-  return observeLinuxProcesses(runId, context)
+  return observeLinuxProcesses(runId, context, context.observationIo ?? linuxObservationIo)
 }
 
 export function collectOwnedIdentities(snapshot, observed, rootPid) {
@@ -281,75 +313,20 @@ export function collectOwnedIdentities(snapshot, observed, rootPid) {
   }
 }
 
-// The fd reserves the task identity before validation. Re-reading stat followed
-// by kill(pid) would still race PID reuse; there is deliberately no such fallback.
-const PIDFD_SIGNAL_PYTHON = String.raw`
-import os, sys, signal, json, time
-def deadline(signum, frame):
-    raise TimeoutError('pidfd helper deadline')
-signal.signal(signal.SIGALRM, deadline)
-pid, expected, requested, deadline_ms = int(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
-remaining = deadline_ms / 1000 - time.time()
-if remaining <= 0:
-    raise TimeoutError('aggregate cleanup deadline')
-signal.setitimer(signal.ITIMER_REAL, min(2, remaining))
-fd = None
-try:
-    if not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
-        raise RuntimeError('pidfd APIs unavailable')
-    fd = os.pidfd_open(pid, 0)
-    with open('/proc/%d/stat' % pid) as source:
-        raw = source.read()
-    end = raw.rfind(')')
-    fields = raw[end + 2:].split()
-    if end < 0 or len(fields) < 50 or not fields[19].isdigit() or int(raw.split(' ', 1)[0]) != pid:
-        raise RuntimeError('incomplete pidfd identity')
-    if fields[19] != expected:
-        outcome = 'pid-recycled'
-    elif fields[0] in ('Z', 'X', 'x'):
-        outcome = 'terminal-state'
-    else:
-        if time.time() * 1000 >= deadline_ms:
-            raise TimeoutError('aggregate cleanup deadline before signal')
-        signal.pidfd_send_signal(fd, getattr(signal, requested), None, 0)
-        outcome = 'signaled'
-    print(json.dumps({'result': outcome}))
-except ProcessLookupError:
-    print(json.dumps({'result': 'lookup-race'}))
-except FileNotFoundError:
-    print(json.dumps({'result': 'lookup-race'}))
-finally:
-    if fd is not None:
-        os.close(fd)
-    signal.setitimer(signal.ITIMER_REAL, 0)
-`
-
-async function sendPidfdSignal(identity, signal, runId, deadlineAt = Date.now() + 2500) {
-  assert.ok(deadlineAt > Date.now(), 'Aggregate cleanup deadline exhausted before pidfd helper')
-  const helper = spawn('python3', ['-c', PIDFD_SIGNAL_PYTHON, String(identity.pid), identity.starttime, signal, String(deadlineAt)], {
-    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, [RUN_MARKER]: runId ?? '' },
-  })
-  let stdout = '', stderr = ''
-  let oversized = false
-  helper.stdout.on('data', (chunk) => { stdout += chunk; if (stdout.length > 8192) { oversized = true; stdout = stdout.slice(0, 8192) } })
-  helper.stderr.on('data', (chunk) => { stderr += chunk; if (stderr.length > 8192) { oversized = true; stderr = stderr.slice(0, 8192) } })
-  return bounded(() => new Promise((done, reject) => {
-    helper.once('error', reject)
-    helper.once('close', (code) => {
-      if (oversized || code !== 0) reject(new Error(`pidfd helper failed (${code}): ${stderr}`))
-      else { try { done(JSON.parse(stdout)) } catch (error) { reject(error) } }
-    })
-  }), Math.max(1, Math.min(2500, deadlineAt - Date.now())), 'pidfd helper close')
-}
-
 export async function signalObservedIdentity(identity, signal, {
-  readIdentity = readLinuxProcessIdentity, pidfdSignal = sendPidfdSignal, runId, deadlineAt = Date.now() + 3500,
+  readIdentity = readLinuxProcessIdentity, pidfdSignal, runId, deadlineAt = Date.now() + 3500,
 } = {}) {
   assert.ok(['SIGTERM', 'SIGKILL'].includes(signal))
+  pidfdSignal ??= (value, requested, _runId, limit) => signalViaPidfd(value, requested, { readIdentity, deadlineAt: limit })
+  assert.ok(deadlineAt > Date.now(), 'Pidfd signal deadline exhausted before action')
   const outcome = await pidfdSignal(identity, signal, runId, deadlineAt)
+  assert.ok(deadlineAt > Date.now(), 'Pidfd signal deadline exhausted before accepting outcome')
   assert.ok(['signaled', 'pid-recycled', 'terminal-state', 'lookup-race'].includes(outcome.result), 'Invalid pidfd result')
   if (outcome.result === 'signaled' || outcome.result === 'pid-recycled') return { ...identity, signal, ...outcome }
-  const current = await bounded(() => readIdentity(identity.pid), Math.max(1, Math.min(1000, deadlineAt - Date.now())), 'Terminal identity verification')
+  const remaining = deadlineAt - Date.now()
+  assert.ok(remaining > 0, 'Terminal verification budget exhausted before read')
+  const current = await bounded(() => readIdentity(identity.pid), Math.min(1000, remaining), 'Terminal identity verification')
+  assert.ok(deadlineAt > Date.now(), 'Terminal identity verification deadline exhausted')
   if (!current) return { ...identity, signal, result: 'absent' }
   if (current.starttime !== identity.starttime) return { ...identity, signal, result: 'pid-recycled' }
   assert.ok(!live(current), 'pidfd lookup failure did not prove terminality')
@@ -362,9 +339,10 @@ export async function containObservedIdentities(identities, terminationSignal, d
     const remaining = deadlineAt - Date.now()
     if (remaining <= 0) { errors.push('Aggregate cleanup deadline exhausted'); break }
     try {
-      signals.push(await bounded(() => signalObservedIdentity(identity, terminationSignal, { ...options, deadlineAt }),
-        Math.min(3500, remaining), 'Identity containment'))
+      signals.push(await signalObservedIdentity(identity, terminationSignal, { ...options,
+        deadlineAt: Math.min(deadlineAt, Date.now() + 3500) }))
     } catch (error) { errors.push(diagnostic(error)) }
+    if (Date.now() >= deadlineAt) { errors.push('Aggregate cleanup deadline exhausted'); break }
   }
   return { signals, errors }
 }
@@ -388,11 +366,14 @@ export function attachSupervisorSignals(controller, report, emitter = process) {
 
 export async function supervisePerceptionCommand({ command = process.execPath, args, cwd = process.cwd(),
   env = process.env, log, signal, deadlineMs = 300_000, observationIntervalMs = 100,
-  snapshot = linuxProcessSnapshot, readIdentity = readLinuxProcessIdentity, jobDeadline = env.APOLLO_PERCEPTION_JOB_DEADLINE_MS }) {
+  snapshot = linuxProcessSnapshot, readIdentity = readLinuxProcessIdentity, observer,
+  jobDeadline = env.APOLLO_PERCEPTION_JOB_DEADLINE_MS }) {
   assert.equal(process.platform, 'linux')
   assert.ok(Number.isSafeInteger(deadlineMs) && deadlineMs > 0 && deadlineMs <= 300_000)
   assert.ok(Number.isSafeInteger(observationIntervalMs) && observationIntervalMs >= 20 && observationIntervalMs <= 1000)
-  const runId = createPerceptionRunId(), started = Date.now(), observed = new Map()
+  const runId = observer?.runId ?? createPerceptionRunId(), started = Date.now(), observed = new Map()
+  const observationIo = observer?.io ?? linuxObservationIo
+  if (observer) readIdentity = observer.readIdentity
   const report = { runId, ownerPid: process.pid, startedAt: new Date(started).toISOString(),
     deadlineAt: new Date(started + deadlineMs).toISOString(), observationIntervalMs,
     observations: 0, observationComplete: true, signals: [], cleanupErrors: [] }
@@ -424,14 +405,20 @@ export async function supervisePerceptionCommand({ command = process.execPath, a
   }
   try {
     report.jobDeadlineAt = new Date(requireJobBudget(jobDeadline, deadlineMs)).toISOString()
-    observationContext = await bounded(() => createLinuxObservationContext(), 3500, 'Supervisor owner baseline')
+    report.pidfdAuthority = (await loadPidfdBinding(env)).provenance
+    observationContext = await bounded(() => createLinuxObservationContext(process.pid, observationIo), 3500, 'Supervisor owner baseline')
     assert.equal(observationContext.ownerUid, process.getuid(), 'Supervisor owner UID does not match its process credentials')
     observationContext.observed = observed
     report.ownerIdentity = observationContext.ownerIdentity
     checkActive(); await observe(); checkActive()
     requireJobBudget(jobDeadline, deadlineMs)
-    child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...env, [RUN_MARKER]: runId } })
+    const childEnv = { ...env, [RUN_MARKER]: runId }
+    // Product descendants have no observer API. Kernel SCM_CREDENTIALS also
+    // rejects a leaked descriptor from any PID other than the minted owner.
+    delete childEnv.APOLLO_OBSERVER_FD; delete childEnv.APOLLO_OBSERVER_RUN_ID
+    delete childEnv.APOLLO_PERCEPTION_NAMESPACE_REQUIRED
+    delete childEnv.APOLLO_PERCEPTION_NAMESPACE_FAULT
+    child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: childEnv })
     report.rootPid = child.pid
     if (log) { child.stdout.pipe(log, { end: false }); child.stderr.pipe(log, { end: false }) }
     else { child.stdout.resume(); child.stderr.resume() }
@@ -473,10 +460,9 @@ export async function supervisePerceptionCommand({ command = process.execPath, a
         try {
           const identity = await bounded(() => readIdentity(child.pid), Math.min(3000, remaining()), 'Root identity')
           if (identity) {
-            const environment = await bounded(() => readFile(`/proc/${child.pid}/environ`), Math.min(3000, remaining()), 'Root run marker')
-            assert.ok(environment.length <= 2 * 1024 * 1024, 'Root environment exceeds observation bound')
+            const facts = await bounded(() => observationIo.markerFacts(child.pid, runId), Math.min(3000, remaining()), 'Root run marker facts')
             const verified = await bounded(() => readIdentity(child.pid), Math.min(3000, remaining()), 'Root identity recheck')
-            if (verified?.starttime === identity.starttime && environment.toString('utf8').split('\0').includes(`${RUN_MARKER}=${runId}`)) {
+            if (verified?.starttime === identity.starttime && facts.runMarked === true) {
               observed.set(identityKey(identity), { ...identity, ownership: 'spawn+run-id', firstObservedAt: new Date().toISOString() })
             }
           }
@@ -522,9 +508,9 @@ export async function supervisePerceptionCommand({ command = process.execPath, a
   return report
 }
 
-async function main() {
+export async function main(args = process.argv.slice(2)) {
 assert.equal(process.platform, 'linux')
-const [suite, pattern] = process.argv.slice(2)
+const [suite, pattern] = args
 assert.match(suite ?? '', /^tests\/v2\/[a-z0-9-]+\.integration\.mjs$/)
 const root = process.env.APOLLO_LIBRARY_EVIDENCE_ROOT
 assert.ok(root?.startsWith('/tmp/') || (process.env.RUNNER_TEMP && root?.startsWith(process.env.RUNNER_TEMP + '/')))
@@ -539,7 +525,7 @@ const report = { suite, pattern: pattern ?? null, sourceCommit: process.env.GITH
 const controller = new AbortController()
 const removeSignalHandlers = attachSupervisorSignals(controller, report)
 log.on('error', (error) => controller.abort(error))
-let primaryError
+let primaryError, observer
 let finalCleanupDeadline
 const cleanupWait = (action, limit, label, reserved = 5000) => {
   const remaining = finalCleanupDeadline - reserved - Date.now()
@@ -566,10 +552,29 @@ async function requireEmptyDatabase(cleanup = false) {
 }
 try {
   report.jobDeadlineAt = new Date(requireJobBudget(process.env.APOLLO_PERCEPTION_JOB_DEADLINE_MS, 300_000)).toISOString()
+  if (process.env.APOLLO_PERCEPTION_NAMESPACE_REQUIRED === '1') {
+    observer = await connectNamespaceObserver()
+    report.observerAuthority = observer.attestation
+  } else assert.equal(process.env.APOLLO_OBSERVER_FD, undefined, 'Inherited observer cannot silently fall back to direct /proc')
+  const fault = process.env.APOLLO_PERCEPTION_NAMESPACE_FAULT
+  if (fault !== undefined) {
+    assert.equal(suite, 'tests/v2/perception-namespace-observer.integration.mjs')
+    assert.ok(observer, 'Controlled faults require the real namespace observer')
+    assert.ok(['node-owner-death', 'ipc-death', 'ipc-truncated', 'ipc-oversized', 'deadline'].includes(fault))
+    report.controlledFault = fault
+    if (fault === 'node-owner-death') {
+      await signalViaPidfd(observer.attestation.owner, 'SIGKILL', { readIdentity: observer.readIdentity,
+        deadlineAt: Date.now() + 2000 })
+      assert.fail('Controlled owner death did not terminate this Node')
+    }
+    if (fault.startsWith('ipc-')) await observer.client.controlledFailure(fault)
+  }
   report.preflight = await requireEmptyDatabase()
+  if (fault === 'deadline') report.controlledDeadlineMs = 2000
   Object.assign(report, await supervisePerceptionCommand({ args: ['--experimental-transform-types',
     '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--test', '--test-reporter=spec',
-    ...(pattern ? [`--test-name-pattern=${pattern}`] : []), suite], log, signal: controller.signal }))
+    ...(pattern ? [`--test-name-pattern=${pattern}`] : []), suite], log, signal: controller.signal, observer,
+    ...(fault === 'deadline' ? { deadlineMs: report.controlledDeadlineMs } : {}) }))
 } catch (error) {
   primaryError = error
   report.error = String(error.stack ?? error)
@@ -606,11 +611,15 @@ try {
   report.success = !primaryError && !controller.signal.aborted && report.passed > 0 && report.skipped === 0 &&
     report.processTreeTerminal && report.success === true && !report.containmentRequired
   report.completedAt = new Date().toISOString()
+  if (observer) {
+    try { await cleanupWait(() => observer.client.request('finish'), 3000, 'Observer finish') }
+    catch (error) { report.success = false; report.observerFinishError = diagnostic(error); primaryError ??= error }
+  }
   } catch (error) { report.success = false; report.evidenceError = diagnostic(error); primaryError ??= error }
   report.completedAt = new Date().toISOString()
   try { await cleanupWait(() => writeFile(join(root, `${name}.json`), JSON.stringify(report, null, 2)), 5000, 'Receipt write', 0) }
   catch (error) { report.success = false; report.receiptWriteError = diagnostic(error); process.stderr.write(`Perception receipt write failed: ${diagnostic(error)}\n${JSON.stringify(report)}\n`); primaryError ??= error }
-  finally { removeSignalHandlers() }
+  finally { observer?.client.close(); removeSignalHandlers() }
 }
 if (!report.success) process.exitCode = 1
 }
