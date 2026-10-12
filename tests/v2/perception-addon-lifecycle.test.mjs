@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { PassThrough } from 'node:stream'
 import { chmodSync, createReadStream, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -20,6 +22,29 @@ const cgroupScope = { runId: 'pidfd-cgroup-11111111-1111-1111-1111-111111111111'
   path: '/sys/fs/cgroup/job/apollo-pidfd-cgroup-11111111-1111-1111-1111-111111111111',
   membership: '/job/apollo-pidfd-cgroup-11111111-1111-1111-1111-111111111111',
   directory: { dev: 20, ino: 30 }, kill: { dev: 20, ino: 31 } }
+
+test('real bootstrap module evaluation reaches both fixed-mode guards without an await import cycle', (t) => {
+  const bootstrap = new URL('../../scripts/validation/perception-ci-child-bootstrap.mjs', import.meta.url)
+  for (const [mode, message] of [['cgroup-consumer', 'Fixed CI consumers only'], ['cgroup-fixture', 'Literal cgroup fixture enum only']]) {
+    // Loader-only fixture: platform/UID facts are deliberately controlled so
+    // Windows also evaluates the actual entrypoint's import graph. The invalid
+    // enum must reject BEFORE /proc, native addon, cgroup or privileged work.
+    const code = `Object.defineProperty(process, 'platform', { value: 'linux' });
+      process.getuid = () => 1001;
+      process.argv = [process.execPath, ${JSON.stringify(fileURLToPath(bootstrap))}, ${JSON.stringify(mode)}, 'invalid-loader-contract'];
+      await import(${JSON.stringify(bootstrap.href)});`
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', code], {
+      windowsHide: true, timeout: 3000, maxBuffer: 65536, encoding: 'utf8',
+      env: { ...process.env, NODE_OPTIONS: '', APOLLO_PERCEPTION_CGROUP_SCOPE: 'null' },
+    })
+    t.diagnostic(JSON.stringify({ scope: 'module-loader-only-controlled-platform', mode, pid: result.pid,
+      status: result.status, signal: result.signal, synchronousReturnObserved: true }))
+    assert.equal(result.error, undefined); assert.equal(result.signal, null)
+    assert.equal(result.status, 1); assert.equal(result.stdout, '')
+    assert.ok(result.stderr.includes('Fixed bootstrap failed: ' + message), result.stderr)
+    assert.equal(result.stderr.includes('unsettled top-level await'), false)
+  }
+})
 
 function cgroupFdIo() {
   const closed = [], opened = []

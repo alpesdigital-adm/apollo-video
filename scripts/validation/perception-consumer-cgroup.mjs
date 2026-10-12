@@ -10,7 +10,6 @@ import { CI_ROOT, budget, digest, identityKey, liveIdentity, readAuthorityIdenti
 import { loadPidfdBinding, openObservedPidfd } from './perception-pidfd.mjs'
 import { parseLinuxProcessStat, readLinuxProcessIdentity } from './run-perception-ci.mjs'
 import { fixedConsumer } from './run-perception-addon-consumer.mjs'
-import { awaitBootstrapGate } from './perception-ci-child-bootstrap.mjs'
 
 export const CGROUP_ABI = 'perception-consumer-cgroup/v1'
 export const CGROUP_HELPER = join(CI_ROOT, 'scripts/validation/perception-consumer-cgroup.py')
@@ -319,6 +318,10 @@ export async function runCgroupConsumer(mode, args = [], env = process.env) {
     report.consumerExecObserved = normal
     report.normalNodeReady = nodeReady
     if (fixture) {
+      // Only the independent fixture-owner reaches this branch. A bootstrap
+      // loading this module must not statically wait on its own top-level main.
+      const { awaitBootstrapGate } = await import('./perception-ci-child-bootstrap.mjs')
+      assert.ok(Date.now() < bootstrapEnd, 'Fixture gate import exceeded bootstrap deadline')
       // An independent normal driver opens its OWN tokens from these facts and
       // rereads the kernel before ACK. No native handle is serialized.
       process.stdout.write(JSON.stringify({ abi: CGROUP_ABI, stage: 'fixture-owner-ready', runId,
