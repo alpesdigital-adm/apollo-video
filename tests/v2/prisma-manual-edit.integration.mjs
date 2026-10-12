@@ -33,6 +33,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
 }, async () => {
   const { applyManualEditService, readManualTimelineService } = await import('../../src/v2/application/manual-edit.ts')
   const { createColorPipelineCompilationService } = await import('../../src/v2/application/color-pipeline-compilations.ts')
+  const { setExternalAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+  const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
+  const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
@@ -63,7 +66,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const replacementTranscriptId = `manual-transcript-replacement-${suffix}`
   const completedProxyArtifactId = `manual-proxy-initial-${suffix}`
   const initialVersionId = `manual-version-${suffix}`
-  const createdAt = new Date('2026-07-26T17:30:00.000Z')
+  // Observe this run's clock; service TTLs must follow current PostgreSQL time.
+  const createdAt = new Date()
   const uiUsername = `manual-user-${suffix}`
   const uiPassword = `Manual-E2E-${suffix}-secure`
   const uiSessionSecret = `manual-session-secret-${suffix}-at-least-32-characters`
@@ -108,6 +112,13 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
     await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
+    await client.v2AssetUseDecision.deleteMany({ where: { workspaceId } })
+    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
+    await client.v2MediaArtifact.updateMany({
+      where: { workspaceId, currentRightsSnapshotId: { not: null } },
+      data: { currentRightsSnapshotId: null },
+    })
+    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
@@ -228,7 +239,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       workspaceId,
       name: 'Manual editing E2E',
       environment: 'production',
-      scopes: ['projects:read', 'projects:write'],
+      scopes: ['projects:read', 'projects:write', 'artifacts:rights'],
     })
     const auditContext = createExternalAuditContext({
       clientId: issued.client.id,
@@ -238,7 +249,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     authenticatedActor = Object.freeze({
       ...auditContext,
-      scopes: new Set(['projects:read', 'projects:write']),
+      scopes: new Set(['projects:read', 'projects:write', 'artifacts:rights']),
       authenticationKind: 'bearer',
       clientKillSwitchEngaged: false,
       workspaceKillSwitchEngaged: false,
@@ -357,23 +368,62 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         idempotencyKey: `manual-color-${artifactId}`,
       })
       colorCompilations.set(artifactId, colorCompilation.value.compilation)
-      if (artifactId === sourceA) {
-        const rightsSnapshotId = `rights-${sourceA}`
-        await client.v2AssetRightsSnapshot.create({ data: {
-          id: rightsSnapshotId, workspaceId, artifactId, sequence: 1,
-          schemaVersion: 'asset-rights/v1',
-          snapshotHash: calculateVersionHash({ artifactId, rights: 'approved' }),
-          owner: 'Apollo E2E', license: 'test-owned', status: 'approved',
-          allowedUsesJson: stableSerialize(['rendering']), prohibitedUsesJson: '[]',
-          allowedWorkspaceIdsJson: stableSerialize([workspaceId]),
-          consentStatus: 'not-required', consentAllowedUsesJson: '[]',
-          createdByType: 'api-client', createdById: issued.client.id, createdAt,
-        } })
-        await client.v2MediaArtifact.update({
-          where: { id: artifactId },
-          data: { currentRightsSnapshotId: rightsSnapshotId, rightsRevision: 1 },
-        })
-      }
+      // These are synthetic fixture sources, with grants for their exact roles.
+      // Persist the real snapshot and external actor audit; a row alone is no grant.
+      const rightsRepository = new PrismaAssetRightsRepository(client)
+      const allowedUse = artifactId === sourceA ? 'rendering' : 'editorial-reuse'
+      const rightsSnapshotId = `rights-${artifactId}`
+      const baseRevision = assetRightsRevision(artifactId, 0)
+      const granted = await setExternalAssetRightsService({
+        repository: rightsRepository,
+        clock: () => createdAt,
+        createId: () => rightsSnapshotId,
+      })({
+        workspaceId, artifactId, baseRevision, actor: authenticatedActor,
+        draft: {
+          owner: 'Apollo synthetic manual-edit fixture', license: 'test-owned',
+          status: 'approved', allowedUses: [allowedUse], prohibitedUses: [],
+          allowedLocales: ['pt-BR'],
+          consent: { status: 'not-required', allowedUses: [] },
+          sourceNote: 'Controlled metadata-only source for manual-edit invariants; no media acceptance claim',
+        },
+      })
+      const rightsReadback = await rightsRepository.findCurrent(workspaceId, artifactId)
+      assert.deepEqual(rightsReadback, {
+        artifactId, revision: assetRightsRevision(artifactId, 1), snapshot: granted.snapshot,
+      })
+      assert.equal(granted.replayed, false)
+      assert.equal(rightsReadback.snapshot.id, rightsSnapshotId)
+      assert.deepEqual(rightsReadback.snapshot.allowedUses, [allowedUse])
+      assert.deepEqual(rightsReadback.snapshot.allowedWorkspaceIds, [workspaceId])
+      assert.deepEqual(rightsReadback.snapshot.allowedLocales, ['pt-BR'])
+      const rightsArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } })
+      assert.equal(rightsArtifact.currentRightsSnapshotId, rightsSnapshotId)
+      assert.equal(rightsArtifact.rightsRevision, 1)
+      const rightsAudit = await client.v2AssetRightsChange.findUniqueOrThrow({
+        where: { artifactId_sequence: { artifactId, sequence: 1 } },
+      })
+      assert.equal(rightsAudit.workspaceId, workspaceId)
+      assert.equal(rightsAudit.snapshotId, rightsSnapshotId)
+      assert.equal(rightsAudit.snapshotHash, granted.snapshot.snapshotHash)
+      assert.equal(rightsAudit.baseRevision, baseRevision)
+      assert.equal(rightsAudit.resultRevision, granted.revision)
+      assert.equal(rightsAudit.actorKind, 'external')
+      assert.equal(rightsAudit.actorType, 'api-client')
+      assert.equal(rightsAudit.actorId, issued.client.id)
+      assert.equal(rightsAudit.actorClientId, issued.client.id)
+      assert.equal(rightsAudit.actorCredentialId, issued.credential.id)
+      assert.equal(rightsAudit.actorContextHash, operationAuditContext.contextHash)
+      assert.equal(rightsAudit.actorAuthenticationKind, 'bearer')
+      assert.equal(rightsAudit.actorEnvironment, 'production')
+      assert.equal(rightsAudit.changedAt.toISOString(), createdAt.toISOString())
+      assert.equal(evaluateAssetUse(rightsReadback.snapshot, {
+        workspaceId, locale: 'pt-BR', use: allowedUse,
+      }, createdAt).outcome, 'allow')
+      assert.equal(evaluateAssetUse(rightsReadback.snapshot, {
+        workspaceId, locale: 'pt-BR',
+        use: allowedUse === 'rendering' ? 'editorial-reuse' : 'rendering',
+      }, createdAt).outcome, 'deny')
     }
     const renderColorBindings = (...artifactIds) => stableSerialize(artifactIds.map((artifactId) => {
       const compilation = colorCompilations.get(artifactId)
