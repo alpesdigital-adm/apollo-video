@@ -45,6 +45,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { PrismaRenderElementMapRepository } = await import('../../src/v2/infrastructure/prisma/render-element-map-repository.ts')
   const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
   const { assertMediaArtifactManifest, createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
+  const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
   const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
@@ -470,10 +471,15 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       mediaType: 'video', container: 'mp4', status: 'available', createdAt,
     } })
 
-    // Metadata-only mechanical seeds. The declared implementation digest is
-    // the runtime recipe identity, NOT an observed FFmpeg binary/pixel receipt.
+
+    // These explicit completions are metadata-only fixture preparation, not
+    // worker execution, FFmpeg provenance, critic approval or rendered pixels.
     const proxyMaps = new PrismaRenderElementMapRepository(client)
-    const seedControlledProxyMetadata = async ({ operationId, projectVersionId, editPlanSnapshotId, manifestId }) => {
+    const prepareControlledProxyMetadata = async ({
+      mode, operationId, projectVersionId, editPlanSnapshotId,
+      outputArtifactId: newArtifactId, manifestId: newManifestId, expectedOperation,
+    }) => {
+      assert.ok(['new-controlled-base', 'complete-api-operation'].includes(mode))
       const source = await new PrismaProjectProxyRenderRepository(client).readImmutableSource({
         workspaceId, projectId, projectVersionId, editPlanSnapshotId,
         sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
@@ -482,75 +488,150 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         const compilation = colorCompilations.get(asset.artifactId)
         assert.ok(compilation)
         return { sourceArtifactId: asset.artifactId, sourceManifestId: asset.manifestId,
-          compilationId: compilation.id, compilationHash: compilation.compilationHash,
-          pipelineHash: compilation.pipeline.pipelineHash }
+          compilationId: compilation.id, compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }
       })
       const inputHash = projectProxyRenderInputHash({ source, colorPipelineBindings })
+      const colorBindingsJson = stableSerialize(colorPipelineBindings)
+      const existing = await client.v2PublicOperation.findUnique({ where: { id: operationId }, include: { projectProxyRender: true } })
+      let outputArtifactId = newArtifactId, manifestId = newManifestId
+      if (mode === 'complete-api-operation') {
+        assert.ok(existing?.projectProxyRender, 'the API must have allocated this exact proxy operation')
+        const detail = existing.projectProxyRender
+        assert.deepEqual({ workspaceId: detail.workspaceId, projectId: detail.projectId,
+          projectVersionId: detail.projectVersionId, editPlanSnapshotId: detail.editPlanSnapshotId,
+          sourceArtifactId: detail.sourceArtifactId, sourceManifestId: detail.sourceManifestId,
+          inputHash: detail.inputHash, colorBindingsJson: detail.colorPipelineBindingsJson },
+        { workspaceId, projectId, projectVersionId, editPlanSnapshotId,
+          sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`, inputHash, colorBindingsJson })
+        assert.equal(existing.workspaceId, workspaceId); assert.equal(existing.projectId, projectId)
+        assert.equal(existing.type, 'project-proxy-render'); assert.equal(existing.clientId, issued.client.id)
+        const auditInput = { workspaceId, clientId: existing.clientId, credentialId: existing.actorCredentialId,
+          environment: existing.actorEnvironment, authenticationKind: existing.actorAuthenticationKind,
+          ...(existing.delegatedUserId ? { delegatedUserId: existing.delegatedUserId } : {}),
+          ...(existing.delegatedIdentityId ? { delegatedIdentityId: existing.delegatedIdentityId } : {}),
+          ...(existing.workspaceRole ? { workspaceRole: existing.workspaceRole } : {}) }
+        const persistedAudit = createApiAccessAuditContext(auditInput)
+        assert.equal(persistedAudit.contextHash, existing.actorContextHash)
+        assert.equal(persistedAudit.environment, 'production')
+        if (persistedAudit.authenticationKind === 'bearer') {
+          assert.equal(persistedAudit.credentialId, issued.credential.id)
+          assert.equal(persistedAudit.contextHash, operationAuditContext.contextHash)
+        } else {
+          assert.match(persistedAudit.credentialId, /^ui-session:[a-f0-9]{64}$/)
+          const member = await client.v2WorkspaceMember.findUniqueOrThrow({ where: { id: persistedAudit.delegatedUserId } })
+          assert.equal(member.workspaceId, workspaceId); assert.equal(member.identityId, persistedAudit.delegatedIdentityId)
+          assert.equal(member.role, persistedAudit.workspaceRole); assert.equal(member.status, 'active')
+        }
+        assert.equal(existing.targetType, 'media-artifact'); assert.equal(existing.targetId, detail.outputArtifactId)
+        assert.equal(existing.leaseOwner, null)
+        assert.equal(existing.leaseExpiresAt, null)
+        assert.ok(['queued', 'succeeded'].includes(existing.status), 'fixture must never adopt a live, failed or canceled attempt')
+        assert.equal(expectedOperation.id, existing.id)
+        assert.equal(expectedOperation.target.id, detail.outputArtifactId)
+        assert.equal(expectedOperation.target.manifestId, detail.outputManifestId)
+        outputArtifactId = detail.outputArtifactId; manifestId = detail.outputManifestId
+      } else {
+        assert.equal(existing, null, 'a new controlled base cannot duplicate any allocated operation')
+        assert.equal(await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId, projectVersionId, inputHash } }), 0)
+        assert.ok(outputArtifactId && manifestId)
+      }
+      const proxyHash = outputArtifactId === completedProxyArtifactId ? completedProxyHash
+        : calculateVersionHash({ fixtureScope: 'metadata-only-manual-edit-mechanics', operationId, outputArtifactId })
+      const artifactKey = `manual/${outputArtifactId}.mp4`
       const dimensions = {}
       for (const asset of source.renderSources.filter((asset) => asset.mediaType === 'video')) {
         const row = await client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: asset.manifestId } })
-        const body = JSON.parse(row.manifestJson)
-        assertMediaArtifactManifest(body)
-        assert.equal(body.manifestHash, row.manifestHash)
-        assert.ok(body.probe)
+        const body = JSON.parse(row.manifestJson); assertMediaArtifactManifest(body)
+        assert.equal(body.manifestHash, row.manifestHash); assert.ok(body.probe)
         dimensions[asset.artifactId] = { width: body.probe.width, height: body.probe.height }
       }
-      const map = buildRenderElementMap({ proxyHash: completedProxyHash,
-        fps: source.editPlan.fps, durationFrames: source.editPlan.durationFrames,
+      const map = buildRenderElementMap({ proxyHash, fps: source.editPlan.fps, durationFrames: source.editPlan.durationFrames,
         canvas: { width: 540, height: 960 }, source: dimensions[sourceA], sourceDimensions: dimensions,
         clips: source.editPlan.videoTracks.filter((track) => track.kind === 'base-video').flatMap((track) => track.clips),
         composition: source.editPlan.composition, subtitleCues: [], ctaOverlays: [] })
+      const mapHash = renderElementMapHash(map)
       const digest = createHash('sha256').update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex')
-      const manifest = createMediaArtifactManifestV2({ artifactKey: `manual/${completedProxyArtifactId}.mp4`,
-        artifactSha256: completedProxyHash, byteSize: 1, mediaType: 'video', container: 'mp4',
+      const manifest = createMediaArtifactManifestV2({ artifactKey, artifactSha256: proxyHash, byteSize: 1, mediaType: 'video', container: 'mp4',
         recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: {
           fixtureScope: 'metadata-only-manual-edit-mechanics', operationId, projectVersionId, editPlanSnapshotId,
-          editPlanHash: source.editPlanHash, inputHash, renderElementMapHash: renderElementMapHash(map),
-          captionPolicy: 'unknown-face-suppressed', colorPipelineBindings,
-        } },
+          editPlanHash: source.editPlanHash, inputHash, renderElementMapHash: mapHash,
+          captionPolicy: 'unknown-face-suppressed', colorPipelineBindings } },
         sources: source.renderSources.map((asset) => ({ artifactKey: asset.artifactKey, sha256: asset.sha256, role: asset.role,
           execution: { tool: { id: 'ffmpeg', version: 'static', digest } } })),
         probe: { width: 540, height: 960, duration: map.durationFrames / map.fps, fps: map.fps } })
-      await client.v2MediaArtifactManifest.create({ data: {
-        id: manifestId, workspaceId, artifactId: completedProxyArtifactId, schemaVersion: manifest.schemaVersion,
-        manifestHash: manifest.manifestHash, recipeId: manifest.recipe.id, recipeVersion: manifest.recipe.version,
-        parametersHash: manifest.recipe.parametersHash, manifestJson: stableSerialize(manifest), createdAt,
-      } })
-      const persisted = await proxyMaps.persistOrReplay({ workspaceId, projectId, projectVersionId,
-        proxyArtifactId: completedProxyArtifactId, map, createdAt: createdAt.toISOString() })
-      const readback = await proxyMaps.findExact({ workspaceId, projectId, projectVersionId, proxyArtifactId: completedProxyArtifactId })
-      assert.deepEqual(readback, persisted.record)
-      assert.equal(readback.mapHash, renderElementMapHash(map))
+      const now = new Date()
+      const resultJson = stableSerialize({ resource: { type: 'media-artifact', id: outputArtifactId, manifestId } })
+      await client.$transaction(async (transaction) => {
+        const artifact = await transaction.v2MediaArtifact.findUnique({ where: { id: outputArtifactId } })
+        if (artifact) assert.deepEqual({ workspaceId: artifact.workspaceId, artifactKey: artifact.artifactKey, sha256: artifact.sha256,
+          byteSize: artifact.byteSize, mediaType: artifact.mediaType, container: artifact.container, status: artifact.status },
+        { workspaceId, artifactKey, sha256: proxyHash, byteSize: 1n, mediaType: 'video', container: 'mp4', status: 'available' })
+        else await transaction.v2MediaArtifact.create({ data: { id: outputArtifactId, workspaceId, artifactKey, sha256: proxyHash,
+          byteSize: 1n, mediaType: 'video', container: 'mp4', status: 'available', createdAt: now } })
+        const storedManifest = await transaction.v2MediaArtifactManifest.findUnique({ where: { id: manifestId } })
+        const manifestData = { id: manifestId, workspaceId, artifactId: outputArtifactId, schemaVersion: manifest.schemaVersion,
+          manifestHash: manifest.manifestHash, recipeId: manifest.recipe.id, recipeVersion: manifest.recipe.version,
+          parametersHash: manifest.recipe.parametersHash, manifestJson: stableSerialize(manifest) }
+        if (storedManifest) for (const [key, value] of Object.entries(manifestData)) assert.equal(storedManifest[key], value)
+        else await transaction.v2MediaArtifactManifest.create({ data: { ...manifestData, createdAt: now } })
+        const storedMap = await transaction.v2RenderElementMap.findFirst({ where: { workspaceId, projectVersionId, proxyArtifactId: outputArtifactId } })
+        const mapData = { workspaceId, projectId, projectVersionId, proxyArtifactId: outputArtifactId, proxyHash, mapHash,
+          schemaVersion: map.schemaVersion, fps: map.fps, durationFrames: map.durationFrames,
+          canvasWidth: map.canvas.width, canvasHeight: map.canvas.height, elementsJson: stableSerialize(map.elements) }
+        if (storedMap) for (const [key, value] of Object.entries(mapData)) assert.equal(storedMap[key], value)
+        else await transaction.v2RenderElementMap.create({ data: { id: randomUUID(), ...mapData, createdAt: now } })
+        if (existing) {
+          const current = await transaction.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId }, include: { projectProxyRender: true } })
+          assert.deepEqual(current.projectProxyRender, existing.projectProxyRender, 'reserved output/source/detail identity cannot change during fixture preparation')
+          assert.equal(current.status, existing.status); assert.equal(current.leaseOwner, null)
+          for (const key of ['clientId', 'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind', 'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole']) assert.equal(current[key], existing[key])
+          if (current.status === 'succeeded') {
+            assert.equal(current.phase, 'completed'); assert.equal(current.resultJson, resultJson)
+          } else {
+            const changed = await transaction.v2PublicOperation.updateMany({ where: { id: operationId, workspaceId, projectId,
+              status: 'queued', attempt: existing.attempt, leaseOwner: null, targetId: outputArtifactId },
+            data: { status: 'succeeded', phase: 'completed', progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
+              cancelable: false, retryable: false, attempt: 1, resultJson, startedAt: now, completedAt: now, updatedAt: now } })
+            assert.equal(changed.count, 1, 'metadata-only completion must own the unchanged queued identity')
+          }
+        } else {
+          await transaction.v2PublicOperation.create({ data: { id: operationId, workspaceId, projectId, clientId: issued.client.id,
+            ...operationActorAudit, type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
+            targetType: 'media-artifact', targetId: outputArtifactId, progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
+            cancelable: false, retryable: false, attempt: 1, maxAttempts: 3, resultJson, idempotencyKey: `controlled-${operationId}`,
+            requestFingerprint: calculateVersionHash({ fixtureScope: 'metadata-only', operationId, inputHash }),
+            createdAt: now, updatedAt: now, startedAt: now, completedAt: now } })
+          await transaction.v2ProjectProxyRenderOperation.create({ data: { operationId, workspaceId, projectId, projectVersionId,
+            editPlanSnapshotId, sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+            colorPipelineBindingsJson: colorBindingsJson, inputHash, outputArtifactId, outputManifestId: manifestId,
+            originalFileName: `${outputArtifactId}.mp4`, createdAt: now } })
+        }
+      }, { isolationLevel: 'Serializable' })
+      const record = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId }, include: { projectProxyRender: true } })
+      assert.equal(record.status, 'succeeded'); assert.equal(record.phase, 'completed'); assert.equal(record.resultJson, resultJson)
+      assert.equal(record.projectProxyRender.inputHash, inputHash)
+      assert.equal(record.projectProxyRender.outputArtifactId, outputArtifactId)
+      assert.equal(record.projectProxyRender.outputManifestId, manifestId)
+      const artifactReadback = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: outputArtifactId } })
+      assert.equal(artifactReadback.workspaceId, workspaceId); assert.equal(artifactReadback.artifactKey, artifactKey)
+      assert.equal(artifactReadback.sha256, proxyHash); assert.equal(artifactReadback.byteSize, 1n)
+      const manifestReadback = await client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: manifestId } })
+      assert.equal(manifestReadback.workspaceId, workspaceId); assert.equal(manifestReadback.artifactId, outputArtifactId)
+      assert.equal(manifestReadback.manifestHash, manifest.manifestHash)
+      assert.deepEqual(JSON.parse(manifestReadback.manifestJson), manifest)
+      assertMediaArtifactManifest(JSON.parse(manifestReadback.manifestJson))
+      const readback = await proxyMaps.findExact({ workspaceId, projectId, projectVersionId, proxyArtifactId: outputArtifactId })
+      assert.equal(readback.mapHash, mapHash); assert.deepEqual(readback.map, map)
       assert.equal(readback.map.elements.some((element) => element.type === 'subtitle'), false)
-      return { manifestId, inputHash, colorBindingsJson: stableSerialize(colorPipelineBindings), map: readback }
+      console.log(JSON.stringify({ fixtureScope: 'metadata-only-manual-edit-mechanics', mode, operationId, projectVersionId,
+        originalStatus: existing?.status ?? null, outputArtifactId, manifestId, inputHash, mapHash,
+        physicalRenderObserved: false, approvalTransferred: false }))
+      return { operationId, outputArtifactId, manifestId, inputHash, map: readback }
     }
-    const initialProxyMetadata = await seedControlledProxyMetadata({ operationId: completedProxyOperationId,
-      projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId, manifestId: completedProxyManifestId })
-    await client.v2PublicOperation.create({ data: {
-      id: completedProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
-      ...operationActorAudit,
-      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-      targetType: 'media-artifact', targetId: completedProxyArtifactId,
-      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: {
-        type: 'media-artifact', id: completedProxyArtifactId,
-        manifestId: completedProxyManifestId,
-      } }),
-      idempotencyKey: `manual-proxy-initial-${suffix}`,
-      requestFingerprint: completedProxyHash,
-      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
-    } })
-    await client.v2ProjectProxyRenderOperation.create({ data: {
-      operationId: completedProxyOperationId, workspaceId, projectId,
-      projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: initialProxyMetadata.colorBindingsJson, inputHash: initialProxyMetadata.inputHash,
-      outputArtifactId: completedProxyArtifactId,
-      outputManifestId: completedProxyManifestId,
-      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
-    } })
+    const initialProxyMetadata = await prepareControlledProxyMetadata({ mode: 'new-controlled-base', operationId: completedProxyOperationId,
+      projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId, outputArtifactId: completedProxyArtifactId, manifestId: completedProxyManifestId })
 
+    assert.equal(initialProxyMetadata.outputArtifactId, completedProxyArtifactId)
     const initial = await readManualTimelineService({ repository })({ workspaceId, projectId })
     assert.equal(initial.timeline.clips.length, 2)
     assert.deepEqual(initial.timeline.snapPointsMs, [0, 3000, 6000])
@@ -1032,7 +1113,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       && response.request().method() === 'POST',
     )
     await page.getByTestId('compare-restore').click()
-    assert.equal((await restoredResponse).status(), 201)
+    const restoredHttp = await restoredResponse
+    const restoredPayload = await restoredHttp.json()
+    assert.equal(restoredHttp.status(), 201, JSON.stringify(restoredPayload))
+    assert.ok(restoredPayload.data.operation?.id)
     await page.getByText(/restaurada como V10/).waitFor({ state: 'visible' })
     const persistedVersions = await client.v2ProjectVersion.findMany({
       where: { projectId },
@@ -1054,36 +1138,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const selectionBasePlan = JSON.parse(selectionBaseSnapshot.contentJson)
     const selectionClipId = selectionBasePlan.videoTracks[0].clips[0].id
     assert.equal(selectionClipId, 'clip-1:a')
-    const selectionBaseOperationId = `manual-selection-base-proxy-${suffix}`
-    const selectionBaseFingerprint = calculateVersionHash({ selectionBaseOperationId })
-    const selectionProxyMetadata = await seedControlledProxyMetadata({ operationId: selectionBaseOperationId,
-      projectVersionId: selectionBaseVersion.id, editPlanSnapshotId: selectionBaseVersion.editPlanSnapshotId, manifestId: `manifest-${selectionBaseOperationId}` })
-    await client.v2PublicOperation.create({ data: {
-      id: selectionBaseOperationId, workspaceId, projectId, clientId: issued.client.id,
-      ...operationActorAudit,
-      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-      targetType: 'media-artifact', targetId: completedProxyArtifactId,
-      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: {
-        type: 'media-artifact', id: completedProxyArtifactId,
-        manifestId: selectionProxyMetadata.manifestId,
-      } }),
-      idempotencyKey: `manual-selection-base-proxy-${suffix}`,
-      requestFingerprint: selectionBaseFingerprint,
-      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
-    } })
-    await client.v2ProjectProxyRenderOperation.create({ data: {
-      operationId: selectionBaseOperationId, workspaceId, projectId,
-      projectVersionId: selectionBaseVersion.id,
-      editPlanSnapshotId: selectionBaseVersion.editPlanSnapshotId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: selectionProxyMetadata.colorBindingsJson,
-      inputHash: selectionProxyMetadata.inputHash,
-      outputArtifactId: completedProxyArtifactId,
-      outputManifestId: selectionProxyMetadata.manifestId,
-      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
-    } })
+    const selectionBaseOperationId = restoredPayload.data.operation.id
+    const selectionProxyMetadata = await prepareControlledProxyMetadata({ mode: 'complete-api-operation',
+      operationId: selectionBaseOperationId, projectVersionId: selectionBaseVersion.id,
+      editPlanSnapshotId: selectionBaseVersion.editPlanSnapshotId, expectedOperation: restoredPayload.data.operation })
     const artifactCountBeforeSelection = await client.v2MediaArtifact.count({ where: { workspaceId } })
     const selectionKey = `manual-selection-reuse-${suffix}`
     const select = () => fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
@@ -1109,7 +1167,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selected.data.version.sequence, 11)
     assert.equal(selected.data.operation.status, 'succeeded')
     assert.equal(selected.data.operation.phase, 'completed')
-    assert.equal(selected.data.operation.target.id, completedProxyArtifactId)
+    assert.equal(selected.data.operation.target.id, selectionProxyMetadata.outputArtifactId)
     const selectionOperation = await client.v2ProjectProxyRenderOperation.findUnique({
       where: { operationId: selected.data.operation.id },
     })
@@ -1118,9 +1176,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selectionOperation.reuseCommandId, selected.data.command.id)
     assert.equal(selectionOperation.reuseImpactHash, selected.data.command.payload.impact.impactHash)
     assert.equal(selectionOperation.reuseBaseVersionId, selectionBaseVersion.id)
-    assert.equal(selectionOperation.outputArtifactId, completedProxyArtifactId)
+    assert.equal(selectionOperation.outputArtifactId, selectionProxyMetadata.outputArtifactId)
     const selectedMap = await proxyMaps.findExact({ workspaceId, projectId,
-      projectVersionId: selected.data.version.id, proxyArtifactId: completedProxyArtifactId })
+      projectVersionId: selected.data.version.id, proxyArtifactId: selectionProxyMetadata.outputArtifactId })
     assert.ok(selectedMap, 'runtime must atomically preserve the map for the reused child')
     assert.notEqual(selectedMap.id, selectionProxyMetadata.map.id)
     assert.equal(selectedMap.mapHash, selectionProxyMetadata.map.mapHash)
@@ -1135,7 +1193,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selectedReplay.data.replayed, true)
     assert.equal(selectedReplay.data.operation.id, selected.data.operation.id)
 
-    assert.equal(await client.v2RenderElementMap.count({ where: { workspaceId, projectVersionId: selected.data.version.id, proxyArtifactId: completedProxyArtifactId } }), 1, 'replay must not duplicate the runtime child map')
+    assert.equal(await client.v2RenderElementMap.count({ where: { workspaceId, projectVersionId: selected.data.version.id, proxyArtifactId: selectionProxyMetadata.outputArtifactId } }), 1, 'replay must not duplicate the runtime child map')
 
     const cropKey = `manual-crop-range-${suffix}`
     const cropResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
@@ -1194,34 +1252,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(cropSource.rangeReuse.commandId, cropped.data.command.id)
     assert.equal(cropSource.rangeReuse.impactHash, cropped.data.command.payload.impact.impactHash)
     assert.equal(cropSource.rangeReuse.baseVersionId, selected.data.version.id)
-    assert.equal(cropSource.rangeReuse.artifactId, completedProxyArtifactId)
+    assert.equal(cropSource.rangeReuse.artifactId, selectionProxyMetadata.outputArtifactId)
     assert.deepEqual(
       cropSource.rangeReuse.ranges,
       cropped.data.command.payload.impact.minimalRenders[0].ranges,
     )
-    const transcriptBaseProxyOperationId = `manual-transcript-base-proxy-${suffix}`
-    const transcriptProxyMetadata = await seedControlledProxyMetadata({ operationId: transcriptBaseProxyOperationId,
-      projectVersionId: cropped.data.version.id, editPlanSnapshotId: cropVersion.editPlanSnapshotId, manifestId: `manifest-${transcriptBaseProxyOperationId}` })
-    await client.v2PublicOperation.create({ data: {
-      id: transcriptBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
-      ...operationActorAudit,
-      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-      targetType: 'media-artifact', targetId: completedProxyArtifactId,
-      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: transcriptProxyMetadata.manifestId } }),
-      idempotencyKey: `manual-transcript-base-proxy-${suffix}`,
-      requestFingerprint: calculateVersionHash({ transcriptBaseProxyOperationId }),
-      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
-    } })
-    await client.v2ProjectProxyRenderOperation.create({ data: {
-      operationId: transcriptBaseProxyOperationId, workspaceId, projectId,
-      projectVersionId: cropped.data.version.id, editPlanSnapshotId: cropVersion.editPlanSnapshotId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: transcriptProxyMetadata.colorBindingsJson, inputHash: transcriptProxyMetadata.inputHash,
-      outputArtifactId: completedProxyArtifactId, outputManifestId: transcriptProxyMetadata.manifestId,
-      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
-    } })
+    const transcriptProxyMetadata = await prepareControlledProxyMetadata({ mode: 'complete-api-operation',
+      operationId: cropped.data.operation.id, projectVersionId: cropped.data.version.id,
+      editPlanSnapshotId: cropVersion.editPlanSnapshotId, expectedOperation: cropped.data.operation })
     const editorialKey = `remove-spoken-content-${suffix}`
     const applyEditorialCut = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
       method: 'POST',
@@ -1253,30 +1291,15 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       where: { commandId: editorialApplied.data.command.id },
     })
     assert.equal(editorialInvalidations.length, 1)
-    assert.equal(editorialInvalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(editorialInvalidations[0].artifactId, transcriptProxyMetadata.outputArtifactId)
     assert.deepEqual(JSON.parse(editorialInvalidations[0].dependencyTypesJson), ['audio', 'content', 'timing', 'visual'])
     const editorialReplayResponse = await applyEditorialCut()
     assert.equal(editorialReplayResponse.status, 200)
     assert.equal((await editorialReplayResponse.json()).data.replayed, true)
-    const editorialOperationCreatedAt = (await client.v2PublicOperation.findUniqueOrThrow({
-      where: { id: editorialApplied.data.operation.id }, select: { createdAt: true },
-    })).createdAt
-    await client.v2PublicOperation.update({
-      where: { id: editorialApplied.data.operation.id },
-      data: {
-        status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
-        progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-        cancelable: false, retryable: false, attempt: 1,
-        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
-        startedAt: editorialOperationCreatedAt,
-        completedAt: editorialOperationCreatedAt,
-        updatedAt: editorialOperationCreatedAt,
-      },
-    })
-    await client.v2ProjectProxyRenderOperation.update({
-      where: { operationId: editorialApplied.data.operation.id },
-      data: { outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId },
-    })
+    const editorialProxyMetadata = await prepareControlledProxyMetadata({ mode: 'complete-api-operation',
+      operationId: editorialApplied.data.operation.id, projectVersionId: editorialApplied.data.version.id,
+      editPlanSnapshotId: (await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: editorialApplied.data.version.id } })).editPlanSnapshotId,
+      expectedOperation: editorialApplied.data.operation })
     const transcriptKey = `replace-source-transcript-${suffix}`
     const replaceTranscript = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
       method: 'POST',
@@ -1338,29 +1361,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorContext.proxyVariantId, '9:16')
     assert.deepEqual(directorContext.outputReferences, [])
     const directorBaseProxyOperationId = `manual-director-base-proxy-${suffix}`
-    const directorProxyMetadata = await seedControlledProxyMetadata({ operationId: directorBaseProxyOperationId,
-      projectVersionId: transcriptApplied.data.version.id, editPlanSnapshotId: replacementVersion.editPlanSnapshotId, manifestId: `manifest-${directorBaseProxyOperationId}` })
-    await client.v2PublicOperation.create({ data: {
-      id: directorBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
-      ...operationActorAudit,
-      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
-      targetType: 'media-artifact', targetId: completedProxyArtifactId,
-      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
-      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: directorProxyMetadata.manifestId } }),
-      idempotencyKey: `manual-director-base-proxy-${suffix}`,
-      requestFingerprint: calculateVersionHash({ directorBaseProxyOperationId }),
-      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
-    } })
-    await client.v2ProjectProxyRenderOperation.create({ data: {
-      operationId: directorBaseProxyOperationId, workspaceId, projectId,
-      projectVersionId: transcriptApplied.data.version.id,
-      editPlanSnapshotId: replacementVersion.editPlanSnapshotId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: directorProxyMetadata.colorBindingsJson, inputHash: directorProxyMetadata.inputHash,
-      outputArtifactId: completedProxyArtifactId, outputManifestId: directorProxyMetadata.manifestId,
-      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
-    } })
+    const directorProxyMetadata = await prepareControlledProxyMetadata({ mode: 'new-controlled-base',
+      operationId: directorBaseProxyOperationId, projectVersionId: transcriptApplied.data.version.id,
+      editPlanSnapshotId: replacementVersion.editPlanSnapshotId, outputArtifactId: `manual-proxy-director-base-${suffix}`,
+      manifestId: `manifest-${directorBaseProxyOperationId}` })
     const directorKey = `run-director-impact-${suffix}`
     const runDirector = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
       method: 'POST',
@@ -1380,7 +1384,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorApplied.data.directorRun.impact.schemaVersion, 'director-run-impact/v1')
     assert.equal(directorApplied.data.directorRun.impact.sourceTranscriptId, replacementTranscriptId)
     assert.deepEqual(directorApplied.data.directorRun.impact.affectedArtifacts, [{
-      artifactId: completedProxyArtifactId, kind: 'proxy',
+      artifactId: directorProxyMetadata.outputArtifactId, kind: 'proxy',
       sourceVersionId: transcriptApplied.data.version.id, variantId: '9:16',
     }])
     assert.equal(directorApplied.data.directorRun.invalidations.length, 1)
@@ -1388,7 +1392,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorApplied.data.directorRun.objectiveVersion, 1)
     assert.equal(directorApplied.data.directorRun.rubricRef, 'awareness-discovery/v1')
     assert.equal(directorApplied.data.directorRun.supersedesRunId, undefined)
-    assert.equal(directorApplied.data.directorRun.invalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(directorApplied.data.directorRun.invalidations[0].artifactId, directorProxyMetadata.outputArtifactId)
     assert.equal(directorApplied.data.operation.status, 'queued')
     const storedDirectorCommand = await client.v2EditCommand.findUniqueOrThrow({
       where: { id: directorApplied.data.command.id }, include: { artifactInvalidations: true },
@@ -1401,25 +1405,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorReplayResponse.status, 200, JSON.stringify(directorReplay))
     assert.equal(directorReplay.data.replayed, true)
     assert.equal(directorReplay.data.operation.id, directorApplied.data.operation.id)
-    const directorOperationCreatedAt = (await client.v2PublicOperation.findUniqueOrThrow({
-      where: { id: directorApplied.data.operation.id }, select: { createdAt: true },
-    })).createdAt
-    await client.v2PublicOperation.update({
-      where: { id: directorApplied.data.operation.id },
-      data: {
-        status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
-        progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
-        cancelable: false, retryable: false, attempt: 1,
-        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
-        startedAt: directorOperationCreatedAt,
-        completedAt: directorOperationCreatedAt,
-        updatedAt: directorOperationCreatedAt,
-      },
-    })
-    await client.v2ProjectProxyRenderOperation.update({
-      where: { operationId: directorApplied.data.operation.id },
-      data: { outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId },
-    })
+    const completedDirectorProxyMetadata = await prepareControlledProxyMetadata({ mode: 'complete-api-operation',
+      operationId: directorApplied.data.operation.id, projectVersionId: directorApplied.data.version.id,
+      editPlanSnapshotId: (await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: directorApplied.data.version.id } })).editPlanSnapshotId,
+      expectedOperation: directorApplied.data.operation })
     const lutSelectionKey = `set-project-lut-impact-${suffix}`
     const setProjectLut = () => fetch(`${baseUrl}/v1/projects/${projectId}/lut-selection`, {
       method: 'POST',
@@ -1440,12 +1429,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.deepEqual(lutSelectionApplied.data.impact.dependencyTypes, ['visual'])
     assert.deepEqual(lutSelectionApplied.data.impact.affectedRanges, directorApplied.data.directorRun.impact.affectedRanges)
     assert.deepEqual(lutSelectionApplied.data.impact.affectedArtifacts, [{
-      artifactId: completedProxyArtifactId, kind: 'proxy',
+      artifactId: completedDirectorProxyMetadata.outputArtifactId, kind: 'proxy',
       sourceVersionId: directorApplied.data.version.id, variantId: '9:16',
     }])
     assert.equal(lutSelectionApplied.data.impact.minimalRenders.length, 1)
     assert.equal(lutSelectionApplied.data.invalidations.length, 1)
-    assert.equal(lutSelectionApplied.data.invalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(lutSelectionApplied.data.invalidations[0].artifactId, completedDirectorProxyMetadata.outputArtifactId)
     assert.equal(lutSelectionApplied.data.operation.status, 'queued')
     const storedLutSelectionCommand = await client.v2EditCommand.findUniqueOrThrow({
       where: { id: lutSelectionApplied.data.command.id }, include: { artifactInvalidations: true },
