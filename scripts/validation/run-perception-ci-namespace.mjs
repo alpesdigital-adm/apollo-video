@@ -119,6 +119,40 @@ export async function confirmTerminalIdentity(expected) {
     terminal: !current || key(current) !== key(expected) || ['Z', 'X', 'x'].includes(current.state) }
 }
 
+export async function containStoppedCarrierAfterCascade({ carrier, cascade, token, binding, deadlineAt, evidence,
+  readIdentity = readLinuxProcessIdentity }) {
+  assert.ok(token && carrier && carrier.ppid === process.pid, 'Carrier must be our retained direct-child birth')
+  assert.deepEqual(Object.keys(cascade).sort(), ['guardian', 'init', 'node', 'unshare'])
+  assert.equal(new Set([carrier, ...Object.values(cascade)].map(key)).size, 5, 'Distinct minted identities required')
+  evidence.cascade = []
+  for (const [role, expected] of Object.entries(cascade)) {
+    assert.ok(expected && Number.isSafeInteger(expected.pid) && expected.pid > 0)
+    assert.match(expected.starttime, /^\d+$/)
+    const observation = { role, pid: expected.pid, starttime: expected.starttime, terminal: false }
+    evidence.cascade.push(observation)
+    do {
+      const current = await bounded(() => readIdentity(expected.pid), deadlineAt, 500, 'Pre-carrier cascade observation')
+      observation.terminal = !current || key(current) !== key(expected) || ['Z', 'X', 'x'].includes(current.state)
+      observation.observation = !current ? 'absent' : key(current) !== key(expected) ? 'pid-recycled' : current.state
+      observation.firstObservation ??= observation.observation
+      if (observation.terminal) break
+      assert.ok(deadlineAt - Date.now() > 20, 'Carrier containment must not manufacture the namespace death cascade')
+      await new Promise((done) => setTimeout(done, 20))
+    } while (Date.now() < deadlineAt)
+    assert.ok(observation.terminal, 'Carrier containment must not manufacture the namespace death cascade')
+  }
+  const current = await bounded(() => readIdentity(carrier.pid), deadlineAt, 500, 'Stopped carrier revalidation')
+  assert.ok(current && key(current) === key(carrier) && current.ppid === process.pid, 'Carrier birth identity changed')
+  assert.ok(['T', 't'].includes(current.state), 'Only the observed stopped carrier qualifies')
+  evidence.carrier = { pid: current.pid, starttime: current.starttime, state: current.state, ppid: current.ppid }
+  assert.ok(Date.now() < deadlineAt, 'Carrier signal admission deadline exhausted')
+  binding.signal(token, 'SIGKILL')
+  evidence.signal = 'SIGKILL'; evidence.result = 'signaled'
+  // Acceptance is not terminality. The caller must still observe close and all
+  // external identities; the original controlled failure remains a failure.
+  assert.ok(Date.now() < deadlineAt, 'Carrier signal returned after its deadline')
+}
+
 async function verifyGuardianAncestry(guardian, sudoIdentity) {
   const current = await readLinuxProcessIdentity(guardian.pid)
   assert.ok(current && key(current) === key(guardian), 'Guardian identity changed before receipt verification')
@@ -321,6 +355,17 @@ export async function runNamespaceSuite({ suite, pattern = null, env = process.e
           assert.ok(held, 'Guardian pidfd was not retained')
           held.signal('SIGKILL')
           report.guardianContainment = { pid: guardian.pid, starttime: guardian.starttime, signal: 'SIGKILL', result: 'signaled' }
+        } catch (error) { report.errors.push(errorFact(error)) }
+      }
+      if (controlledFault === 'guardian-stop' && report.guardianStoppedObserved &&
+          report.guardianContainment?.result === 'signaled' && sudoBirthToken) {
+        const ready = report.rootReceipts.find((packet) => packet.stage === 'guardian-ready')
+        report.stoppedCarrierContainment = {}
+        try {
+          await containStoppedCarrierAfterCascade({ carrier: sudoIdentity, token: sudoBirthToken, binding,
+            cascade: { guardian: ready.guardianIdentity, unshare: ready.unshareIdentity,
+              init: ready.initIdentity, node: ready.nodeHostIdentity },
+            deadlineAt: Math.min(deadlineAt - 15_000, Date.now() + 3000), evidence: report.stoppedCarrierContainment })
         } catch (error) { report.errors.push(errorFact(error)) }
       }
       try { await bounded(() => closePromise, deadlineAt - 15_000, 30_000, 'Guardian abort close') }

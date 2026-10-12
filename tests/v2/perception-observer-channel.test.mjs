@@ -5,10 +5,48 @@ import {
   OBSERVER_ABI, createObserverClient, decodeObserverFrames, encodeObserverFrame,
   validateMarkerAttestation, validateObserverIdentity, validateObserverAuthority,
 } from '../../scripts/validation/perception-observer-channel.mjs'
-import { decodeRootPackets, namespaceLaunchConfig, NAMESPACE_BUDGET_MS } from '../../scripts/validation/run-perception-ci-namespace.mjs'
+import { containStoppedCarrierAfterCascade, decodeRootPackets, namespaceLaunchConfig, NAMESPACE_BUDGET_MS } from '../../scripts/validation/run-perception-ci-namespace.mjs'
 import { parseLinuxProcessCredentials } from '../../scripts/validation/run-perception-ci.mjs'
 
 const runId = 'perception-namespace-controlled-boundary'
+
+test('stopped carrier containment requires the completed cascade and its retained birth, never a new PID', async () => {
+  const carrier = { pid: 71, starttime: '701', ppid: process.pid, state: 'T' }
+  const cascade = Object.fromEntries(['guardian', 'unshare', 'init', 'node'].map((role, index) =>
+    [role, { pid: 72 + index, starttime: String(702 + index) }]))
+  const token = Object.freeze({ controlledBirth: true })
+  const calls = [], evidence = {}
+  await containStoppedCarrierAfterCascade({ carrier, cascade, token, deadlineAt: Date.now() + 1000, evidence,
+    readIdentity: async (pid) => {
+      calls.push(['read', pid])
+      return pid === carrier.pid ? carrier : pid === cascade.guardian.pid ? { ...cascade.guardian, state: 'Z' } : null
+    }, binding: { signal(actual, signal) { assert.equal(actual, token); calls.push(['signal', signal]) } } })
+  assert.deepEqual(calls, [['read', 72], ['read', 73], ['read', 74], ['read', 75], ['read', 71], ['signal', 'SIGKILL']])
+  assert.equal(evidence.cascade[0].observation, 'Z')
+  assert.ok(evidence.cascade.every((value) => value.terminal))
+  assert.equal(evidence.result, 'signaled')
+  assert.equal(evidence.childCloseObserved, undefined, 'Signal acceptance cannot invent close or reaping')
+
+  for (const fault of ['missing-cascade', 'live-cascade', 'recycled-carrier', 'wrong-parent', 'live-carrier', 'expired', 'late-read', 'eperm']) {
+    let signals = 0
+    const denied = {}
+    await assert.rejects(() => containStoppedCarrierAfterCascade({ carrier,
+      cascade: fault === 'missing-cascade' ? { guardian: cascade.guardian } : cascade,
+      token, evidence: denied, deadlineAt: Date.now() + (fault === 'expired' ? -1 : fault === 'live-cascade' || fault === 'late-read' ? 35 : 1000),
+      readIdentity: async (pid) => {
+        if (fault === 'late-read') await new Promise((done) => setTimeout(done, 60))
+        if (pid !== carrier.pid) return fault === 'live-cascade' ? { ...cascade.guardian, pid, state: 'S' } : null
+        if (fault === 'recycled-carrier') return { ...carrier, starttime: '999' }
+        if (fault === 'wrong-parent') return { ...carrier, ppid: process.pid + 1 }
+        if (fault === 'live-carrier') return { ...carrier, state: 'S' }
+        return carrier
+      }, binding: { signal() { signals += 1; throw Object.assign(new Error('controlled EPERM'), { code: 'EPERM' }) } } }),
+    fault === 'eperm' ? { code: 'EPERM' } : undefined, fault)
+    assert.equal(signals, fault === 'eperm' ? 1 : 0, `${fault} must not signal a carrier prematurely`)
+    assert.equal(denied.result, undefined)
+  }
+})
+
 const metadata = () => ({ pid: 7, starttime: '9007199254740993', state: 'S', ppid: 2,
   processGroupId: 7, sessionId: 7, uid: 600, gid: 700, uids: [600, 600, 600, 600], gids: [700, 700, 700, 700],
   groups: [], CapEff: '0000000000000000', CapPrm: '0000000000000000', CapInh: '0000000000000000',

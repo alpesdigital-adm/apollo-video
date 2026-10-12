@@ -1284,6 +1284,28 @@ jobs:
       - name: Migrate clean Compose PostgreSQL
         run: npm run db:v2:migrate:deploy
 
+      - name: Run workspace review availability snapshot and integrity PostgreSQL proof
+        timeout-minutes: 3
+        env:
+          APOLLO_WORKSPACE_REVIEW_AVAILABILITY_PG: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_review_availability?schema=public&application_name=apollo-video-e2e-review-availability-${{ github.run_id }}-${{ github.run_attempt }}&connection_limit=2&pool_timeout=10&connect_timeout=10
+        run: |
+          set -euo pipefail
+          administer() {
+            timeout --signal=TERM --kill-after=2s 5s docker compose -f infra/postgres/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" -e PGOPTIONS="-c statement_timeout=2000" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "$1"
+          }
+          test "$(administer "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-%'")" = 0
+          administer "create database apollo_v2_review_availability"
+          status=0
+          timeout --signal=TERM --kill-after=5s 60s npm run db:v2:migrate:deploy || status=$?
+          if test "$status" = 0; then
+            timeout --signal=TERM --kill-after=5s 90s node --experimental-transform-types --test tests/v2/prisma-workspace-review-availability.integration.mjs || status=$?
+          fi
+          orphans="$(administer "select count(*) from pg_stat_activity where datname = 'apollo_v2_review_availability'")"
+          printf 'review availability postflight backends: %s\n' "$orphans"
+          if test "$status" != 0; then exit "$status"; fi
+          test "$orphans" = 0
+
       - name: Create the isolated proof integrity E2E database
         run: |
           exists="$(docker compose -f infra/postgres/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select 1 from pg_database where datname = 'apollo_video_v2_e2e'")"

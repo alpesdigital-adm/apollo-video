@@ -828,6 +828,46 @@ test('suite inventory follows the real cgroup owner; removed, bypassed or non-ga
   }
 })
 
+test('workspace review availability PG proof is admitted, bounded and cannot be waived', async () => {
+  const workflow = await read('.github/workflows/ci.yml')
+  const name = 'Run workspace review availability snapshot and integrity PostgreSQL proof'
+  const suite = 'tests/v2/prisma-workspace-review-availability.integration.mjs'
+  const verify = (candidate) => {
+    const matches = parseWorkflow(candidate).steps.filter((step) => step.name === name)
+    assert.equal(matches.length, 1)
+    const step = matches[0]
+    assert.ok(gatesTheBuild(step))
+    assert.equal(step.attrs.get('if'), undefined)
+    assert.equal(step.attrs.get('continue-on-error'), undefined)
+    assert.equal(step.attrs.get('timeout-minutes'), '3')
+    assert.ok(isLiteral(step.env.get('APOLLO_WORKSPACE_REVIEW_AVAILABILITY_PG'), '1'))
+    assert.match(step.env.get('V2_DATABASE_URL'), /\/apollo_v2_review_availability\?schema=public&application_name=apollo-video-e2e-review-availability-.*&connection_limit=2&pool_timeout=10&connect_timeout=10$/)
+    const lines = step.body.split('\n').map((line) => line.trim())
+    const migrate = 'timeout --signal=TERM --kill-after=5s 60s npm run db:v2:migrate:deploy || status=$?'
+    const execute = `timeout --signal=TERM --kill-after=5s 90s node --experimental-transform-types --test ${suite} || status=$?`
+    assert.equal(lines.filter((line) => line === execute).length, 1)
+    assert.ok(lines.indexOf(migrate) >= 0 && lines.indexOf(migrate) < lines.indexOf(execute))
+    assert.ok(lines.includes('administer "create database apollo_v2_review_availability"'))
+    assert.ok(lines.includes('if test "$status" = 0; then'))
+    assert.ok(lines.includes('if test "$status" != 0; then exit "$status"; fi'))
+    assert.ok(lines.includes('test "$orphans" = 0'))
+    assert.match(step.body, /select count\(\*\) from pg_stat_activity where datname = 'apollo_v2_review_availability'/)
+    return step
+  }
+  const step = verify(workflow)
+  for (const replacement of [
+    '', step.body.replace('        run:', '        if: false\n        run:'),
+    step.body.replace('        run:', '        continue-on-error: true\n        run:'),
+    step.body.replace('APOLLO_WORKSPACE_REVIEW_AVAILABILITY_PG: "1"', 'APOLLO_WORKSPACE_REVIEW_AVAILABILITY_PG: "0"'),
+    step.body.replace(suite, 'tests/v2/unrelated.integration.mjs'),
+    step.body.replace('connection_limit=2', 'connection_limit=6'),
+    step.body.replace('timeout-minutes: 3', 'timeout-minutes: 4'),
+    step.body.replace('if test "$status" != 0; then exit "$status"; fi', 'true'),
+    step.body.replace('test "$orphans" = 0', 'true'),
+    step.body.replace('npm run db:v2:migrate:deploy', 'true'),
+  ]) assert.throws(() => verify(workflow.replace(step.body, replacement)))
+})
+
 async function inventoryCiSteps() {
   const [central, library, dashboard] = await Promise.all([
     read('.github/workflows/ci.yml'),
