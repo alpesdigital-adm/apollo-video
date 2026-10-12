@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -24,7 +24,9 @@ const CARD_EXPECTATIONS = {
 export async function runDashboardRuntimeJourney(input) {
   const { client, baseUrl, authorization, workspaceId, projectId, projectVersionId,
     projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId, sourceSha256,
-    sourceByteSize, sourceManifest, sourcePath, sourceColorProbe, artifactRoot, uiUsername, uiPassword, suffix, signal, mechanicalSeed } = input
+    sourceByteSize, sourceManifest, sourcePath, sourceColorProbe, artifactRoot, uiUsername, uiPassword, suffix, signal, mechanicalSeed,
+    observeOwnedServer } = input
+  assert.equal(typeof observeOwnedServer, 'function', 'Owned test server lifecycle observer is required')
   const directory = process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT
   assert.ok(directory && isAbsolute(directory), 'Runtime evidence requires an absolute external directory')
   await mkdir(directory, { recursive: true })
@@ -100,15 +102,40 @@ export async function runDashboardRuntimeJourney(input) {
   }
   const readPublicWorkspace = async (id, stage) => {
     const path = `/v1/projects/${id}/workspace`
-    const response = await fetch(`${baseUrl}${path}`, { headers: { authorization }, signal: AbortSignal.timeout(30000) })
-    const text = await response.text()
-    const diagnostic = { stage, method: 'GET', path, status: response.status, ...responseDiagnostic(text) }
+    const started = performance.now()
+    const diagnostic = { stage, method: 'GET', path, startedAt: Date.now(), startedMonotonicMs: started,
+      phase: 'headers', status: null, serverBefore: observeOwnedServer() }
     evidence.httpResponses.push(diagnostic)
-    assert.equal(response.status, 200, `Public workspace hydration must succeed: ${JSON.stringify(diagnostic)}`)
-    assert.equal(diagnostic.bodyKind, 'json', JSON.stringify(diagnostic))
-    const payload = JSON.parse(text)
-    assert.equal(payload.data.project.id, id)
-    return payload.data
+    try {
+      const response = await fetch(`${baseUrl}${path}`, { headers: { authorization }, signal: AbortSignal.timeout(30000) })
+      diagnostic.status = response.status; diagnostic.headersElapsedMs = performance.now() - started
+      diagnostic.phase = 'body'
+      const text = await response.text()
+      diagnostic.bodyElapsedMs = performance.now() - started
+      Object.assign(diagnostic, responseDiagnostic(text)); diagnostic.phase = 'validation'
+      assert.equal(response.status, 200, `Public workspace hydration must succeed: ${JSON.stringify(diagnostic)}`)
+      assert.equal(diagnostic.bodyKind, 'json', JSON.stringify(diagnostic))
+      const payload = JSON.parse(text)
+      assert.equal(payload.data.project.id, id)
+      diagnostic.phase = 'completed'
+      return payload.data
+    } catch (error) {
+      const networkError = (value) => {
+        const message = String(value?.message ?? '')
+        return { name: /^[A-Za-z0-9_]{1,80}$/.test(value?.name ?? '') ? value.name : null,
+          code: /^[A-Z][A-Z0-9_]{0,79}$/.test(value?.code ?? '') ? value.code : null,
+          errno: Number.isSafeInteger(value?.errno) ? value.errno : null,
+          syscall: ['read', 'write', 'connect', 'getaddrinfo', 'recv', 'send'].includes(value?.syscall) ? value.syscall : null,
+          messageSha256: sha256(message), messageBytes: Buffer.byteLength(message) }
+      }
+      diagnostic.failedPhase = diagnostic.phase; diagnostic.phase = 'failed'
+      diagnostic.error = networkError(error)
+      diagnostic.cause = error?.cause ? networkError(error.cause) : null
+      throw error
+    } finally {
+      diagnostic.elapsedMs = performance.now() - started; diagnostic.finishedAt = Date.now()
+      diagnostic.serverAfter = observeOwnedServer()
+    }
   }
   const browserResponseTasks = new Set()
   const browserRequests = new WeakMap()
@@ -129,6 +156,193 @@ export async function runDashboardRuntimeJourney(input) {
   const browserPages = new WeakMap()
   const browserResponseListeners = []
   const browserOrigin = new URL(baseUrl).origin
+  const cdpPaths = new Set(['/', '/batches', '/localization', '/library', '/presenters', '/capture-sessions', '/brand', '/workspace-settings', `/projects/${projectId}`])
+  const cdpSessions = [], cdpScriptHashes = new Map()
+  evidence.cdp = { proofScope: 'passive-transport-diagnostics', canceledDoesNotIdentifyAuthor: true,
+    bounds: { requestsPerPage: 256, eventsPerPage: 2048, stackFrames: 8, joinWindowMs: 50 }, pages: [],
+    scriptManifest: { state: 'not-provided', buildSourceCommit: null, testSourceCommit: process.env.GITHUB_SHA ?? null } }
+  const loadCdpScriptManifest = () => {
+    const path = process.env.APOLLO_DASHBOARD_RUNTIME_BUNDLE_MANIFEST
+    const pin = process.env.APOLLO_DASHBOARD_RUNTIME_BUNDLE_MANIFEST_SHA256
+    if (path === undefined && pin === undefined) return
+    assert.ok(path && isAbsolute(path)); assert.match(pin ?? '', /^[a-f0-9]{64}$/)
+    const deadline = performance.now() + 10000, limit = 1024 * 1024, bytes = Buffer.alloc(limit + 1)
+    let fd, size = 0
+    try {
+      fd = openSync(path, 'r')
+      const stat = fstatSync(fd)
+      assert.ok(stat.isFile() && stat.size > 0 && stat.size <= limit, 'Frozen CDP manifest must be a bounded regular file')
+      while (size <= limit) {
+        assert.ok(performance.now() < deadline, 'Frozen CDP manifest read deadline')
+        const count = readSync(fd, bytes, size, Math.min(65536, bytes.length - size), null)
+        if (!count) break
+        size += count
+      }
+      assert.ok(size > 0 && size <= limit)
+    } finally { if (fd !== undefined) closeSync(fd) }
+    const raw = bytes.subarray(0, size)
+    assert.equal(sha256(raw), pin, 'Frozen CDP manifest external pin mismatch')
+    const manifest = JSON.parse(raw.toString('utf8'))
+    assert.equal(manifest.schemaVersion, 1); assert.match(manifest.sourceCommit ?? '', /^[a-f0-9]{40}$/)
+    assert.ok(Array.isArray(manifest.files) && manifest.files.length > 0 && manifest.files.length <= 4096)
+    assert.equal(manifest.fileCount, manifest.files.length)
+    const paths = new Set(); let totalBytes = 0
+    for (const row of manifest.files) {
+      assert.ok(performance.now() < deadline, 'Frozen CDP manifest validation deadline')
+      assert.ok(typeof row.path === 'string' && row.path.startsWith('.next/') && !/[\\\0?#]/.test(row.path) &&
+        row.path.split('/').every((part) => part && part !== '.' && part !== '..') && !paths.has(row.path))
+      assert.match(row.sha256 ?? '', /^[a-f0-9]{64}$/); assert.ok(Number.isSafeInteger(row.bytes) && row.bytes >= 0)
+      paths.add(row.path); totalBytes += row.bytes
+      if (row.path.startsWith('.next/static/') && row.path.endsWith('.js')) {
+        cdpScriptHashes.set('/_next/static/' + row.path.slice('.next/static/'.length), row.sha256)
+      }
+    }
+    assert.equal(manifest.totalBytes, totalBytes)
+    // Build provenance is distinct from this diagnostic test's source SHA.
+    // No script URL is converted to a filesystem path or opened.
+    evidence.cdp.scriptManifest = { state: 'externally-pinned', sha256: pin, buildSourceCommit: manifest.sourceCommit,
+      testSourceCommit: process.env.GITHUB_SHA ?? null, fileCount: manifest.fileCount, scriptCount: cdpScriptHashes.size }
+  }
+  const attachCdp = async (opened) => {
+    const state = browserPages.get(opened), started = performance.now(), deadline = started + 10000
+    const send = async (session, method, params) => {
+      const remaining = deadline - performance.now()
+      assert.ok(remaining > 0, 'Passive CDP setup deadline')
+      return bounded(session.send(method, params), remaining)
+    }
+    const session = await bounded(context.newCDPSession(opened), deadline - performance.now())
+    const page = { pageId: state.pageId, requests: [], events: [], setupStartedAt: Date.now(), closedObserved: false }
+    const owned = { session, page, handlers: new Map(), requests: new Map(), failed: false }
+    cdpSessions.push(owned); evidence.cdp.pages.push(page)
+    const fail = (error) => {
+      if (!owned.failed) {
+        owned.failed = true; page.failure = safeError(error)
+        evidence.browserErrors.push({ kind: 'cdp-diagnostic-failed', pageId: page.pageId, ...page.failure })
+      }
+    }
+    const pathOf = (value) => {
+      const url = new URL(value)
+      return url.origin === browserOrigin && cdpPaths.has(url.pathname) ? url.pathname : null
+    }
+    const event = (kind, details) => {
+      assert.ok(page.events.length < 2048, 'Passive CDP event bound exceeded')
+      assert.ok(Object.values(details).every((value) => typeof value !== 'string' || value.length <= 1024), 'Passive CDP metadata bound exceeded')
+      page.events.push({ seq: page.events.length + 1, kind, at: Date.now(), observedMonotonicMs: performance.now(),
+        stage: state.stage, layout: state.layout, navigationId: state.navigationId, ...details })
+    }
+    const listen = (name, action) => {
+      const handler = (payload) => { if (!owned.failed) { try { action(payload) } catch (error) { fail(error) } } }
+      owned.handlers.set(name, handler); session.on(name, handler)
+    }
+    const stackFrames = (stack) => {
+      const frames = []
+      for (let depth = 0; stack && depth < 3 && frames.length < 8; depth += 1, stack = stack.parent) {
+        for (const frame of stack.callFrames ?? []) {
+          if (frames.length === 8) break
+          let scriptPath = null
+          try {
+            const url = new URL(frame.url)
+            if (url.origin === browserOrigin && url.pathname.length <= 1024) scriptPath = url.pathname
+          } catch { /* No raw URL is retained. */ }
+          frames.push({ functionName: /^[A-Za-z_$][A-Za-z0-9_$ .<>-]{0,100}$/.test(frame.functionName ?? '') ? frame.functionName : null,
+            scriptPath, lineNumber: Number.isSafeInteger(frame.lineNumber) && frame.lineNumber >= 0 ? frame.lineNumber : null,
+            columnNumber: Number.isSafeInteger(frame.columnNumber) && frame.columnNumber >= 0 ? frame.columnNumber : null,
+            scriptSha256: scriptPath ? cdpScriptHashes.get(scriptPath) ?? null : null,
+            sourceBinding: scriptPath && cdpScriptHashes.has(scriptPath) ? 'exact-frozen-manifest-path' : 'unmapped' })
+        }
+      }
+      return frames
+    }
+    listen('Network.requestWillBeSent', (payload) => {
+      const path = pathOf(payload.request.url)
+      if (!path) return
+      assert.ok(page.requests.length < 256, 'Passive CDP request bound exceeded')
+      assert.ok(typeof payload.requestId === 'string' && payload.requestId.length <= 128)
+      assert.ok(typeof payload.loaderId === 'string' && payload.loaderId.length <= 128 &&
+        (payload.frameId === undefined || (typeof payload.frameId === 'string' && payload.frameId.length <= 128)))
+      assert.ok(['GET', 'POST', 'HEAD', 'OPTIONS'].includes(payload.request.method))
+      assert.ok(['script', 'parser', 'preload', 'preflight', 'SignedExchange', 'FedCM', 'other'].includes(payload.initiator.type))
+      assert.ok(Number.isFinite(payload.timestamp) && Number.isFinite(payload.wallTime))
+      const record = { cdpRequestId: payload.requestId, loaderId: payload.loaderId, frameId: payload.frameId ?? null,
+        path, method: payload.request.method, timestamp: payload.timestamp, wallTimeMs: payload.wallTime * 1000,
+        initiatorType: payload.initiator.type, callerFrames: stackFrames(payload.initiator.stack),
+        state: 'pending', encodedDataBytes: 0, decodedDataBytes: 0 }
+      // Redirect hops share the browser's real CDP request ID. Keep every hop;
+      // correlation cannot silently select among them.
+      page.requests.push(record); owned.requests.set(payload.requestId, record)
+      event('request', { cdpRequestId: payload.requestId, loaderId: record.loaderId, frameId: record.frameId, path })
+    })
+    listen('Network.responseReceived', (payload) => {
+      const record = owned.requests.get(payload.requestId); if (!record) return
+      assert.ok(Number.isSafeInteger(payload.response.status) && payload.response.status >= 100 && payload.response.status <= 599)
+      assert.ok(typeof payload.response.mimeType === 'string' && payload.response.mimeType.length <= 128)
+      record.status = payload.response.status; record.mimeType = payload.response.mimeType
+      event('response', { cdpRequestId: payload.requestId, timestamp: payload.timestamp, status: record.status })
+    })
+    listen('Network.dataReceived', (payload) => {
+      const record = owned.requests.get(payload.requestId); if (!record) return
+      assert.ok(Number.isSafeInteger(payload.dataLength) && payload.dataLength >= 0 &&
+        Number.isSafeInteger(payload.encodedDataLength) && payload.encodedDataLength >= 0)
+      record.decodedDataBytes += payload.dataLength; record.encodedDataBytes += payload.encodedDataLength
+      assert.ok(Number.isSafeInteger(record.decodedDataBytes) && Number.isSafeInteger(record.encodedDataBytes))
+      event('data', { cdpRequestId: payload.requestId, timestamp: payload.timestamp,
+        decodedBytes: payload.dataLength, encodedBytes: payload.encodedDataLength })
+    })
+    listen('Network.loadingFinished', (payload) => {
+      const record = owned.requests.get(payload.requestId); if (!record) return
+      assert.ok(Number.isFinite(payload.timestamp) && Number.isFinite(payload.encodedDataLength) && payload.encodedDataLength >= 0)
+      record.state = 'finished'; record.finishedTimestamp = payload.timestamp; record.totalEncodedBytes = payload.encodedDataLength
+      event('finished', { cdpRequestId: payload.requestId, timestamp: payload.timestamp, totalEncodedBytes: payload.encodedDataLength })
+    })
+    listen('Network.loadingFailed', (payload) => {
+      const record = owned.requests.get(payload.requestId); if (!record) return
+      assert.ok(Number.isFinite(payload.timestamp) && (payload.canceled === undefined || typeof payload.canceled === 'boolean'))
+      const message = String(payload.errorText ?? '')
+      record.state = 'failed'; record.failedTimestamp = payload.timestamp
+      record.failure = { canceled: payload.canceled ?? null,
+        errorCode: /^net::ERR_[A-Z0-9_]{1,80}$/.test(message) ? message : 'UNKNOWN',
+        messageSha256: sha256(message), messageBytes: Buffer.byteLength(message),
+        blockedReason: /^[a-z-]{1,80}$/.test(payload.blockedReason ?? '') ? payload.blockedReason : null }
+      event('failed', { cdpRequestId: payload.requestId, timestamp: payload.timestamp, ...record.failure })
+    })
+    listen('Page.frameNavigated', ({ frame }) => {
+      if (frame.parentId) return
+      const path = pathOf(frame.url); if (path) event('document-navigation', { frameId: frame.id, loaderId: frame.loaderId, path })
+    })
+    listen('Page.navigatedWithinDocument', (payload) => {
+      const path = pathOf(payload.url); if (path) event('same-document-navigation', { frameId: payload.frameId, path,
+        navigationType: ['fragment', 'historyApi', 'other'].includes(payload.navigationType) ? payload.navigationType : null })
+    })
+    listen('Page.lifecycleEvent', (payload) => {
+      if (['init', 'DOMContentLoaded', 'load'].includes(payload.name)) event('document-lifecycle', {
+        frameId: payload.frameId, loaderId: payload.loaderId, name: payload.name, timestamp: payload.timestamp })
+    })
+    const closed = () => { page.closedObserved = true; page.closedAt = Date.now() }
+    owned.handlers.set('close', closed); session.once('close', closed)
+    await send(session, 'Page.enable'); await send(session, 'Page.setLifecycleEventsEnabled', { enabled: true })
+    await send(session, 'Network.enable')
+    page.setupCompletedAt = Date.now(); page.setupElapsedMs = performance.now() - started
+  }
+  const correlateCdp = () => {
+    for (const { page } of cdpSessions) {
+      const browserRecords = evidence.browserRequests.filter((record) => record.pageId === page.pageId && record.origin === browserOrigin)
+      const candidates = new Map(), reciprocalCounts = new Map()
+      for (const network of page.requests) {
+        const found = browserRecords.filter((record) => record.path === network.path && record.method === network.method &&
+          Number.isFinite(record.networkStartTimeMs) && Math.abs(record.networkStartTimeMs - network.wallTimeMs) <= 50)
+        candidates.set(network, found)
+        for (const record of found) reciprocalCounts.set(record.requestId, (reciprocalCounts.get(record.requestId) ?? 0) + 1)
+      }
+      for (const network of page.requests) {
+        const found = candidates.get(network)
+        const unique = found.length === 1 && reciprocalCounts.get(found[0].requestId) === 1
+        network.join = { policy: 'same-page-path-method-public-timing-candidates/v1', windowMs: 50,
+          state: unique ? 'unique-candidate' : found.length ? 'ambiguous' : 'unmatched',
+          requestId: unique ? found[0].requestId : null,
+          candidateRequestIds: found.slice(0, 8).map((record) => record.requestId), candidateCount: found.length }
+      }
+    }
+  }
   let browserSequence = 0, browserRequestSequence = 0, browserPageSequence = 0, browserActivityAt = performance.now()
   evidence.browserRequests = []; evidence.browserTimeline = []; evidence.browserBarriers = []
   const browserEvent = (event, pageState, record, extra = {}) => {
@@ -147,6 +361,7 @@ export async function runDashboardRuntimeJourney(input) {
     return state
   }
   const beginBrowserNavigation = (opened, stage, layout, targetPath) => {
+    cdpPaths.add(targetPath)
     const state = markBrowserPage(opened, stage, layout)
     state.navigationId = `${state.pageId}:navigation-${++state.navigationCount}`
     browserEvent('navigation-intent', state, null, { targetPath })
@@ -231,6 +446,7 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal(login.status, 200, await login.text())
     const cookie = /apollo_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')?.[1]
     assert.ok(cookie)
+    loadCdpScriptManifest()
     const { chromium } = await import('playwright-core')
     const executablePath = [process.env.PLAYWRIGHT_CHROME_EXECUTABLE, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].find((path) => path && existsSync(path))
     assert.ok(executablePath)
@@ -299,6 +515,8 @@ export async function runDashboardRuntimeJourney(input) {
           onRequest(request); record = browserRequests.get(request)
         }
         record.status = response.status()
+        const networkStart = request.timing().startTime
+        record.networkStartTimeMs = Number.isFinite(networkStart) && networkStart >= 0 ? networkStart : null
         const responseHeaders = response.headers()
         record.contentType = (responseHeaders['content-type'] ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 128)
         record.responseHeaderDiagnostics = headerDiagnostics(responseHeaders,
@@ -394,8 +612,10 @@ export async function runDashboardRuntimeJourney(input) {
     context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(30000)
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     const page = await context.newPage()
+    await attachCdp(page)
     const navigatedStates = new Set()
     const pipelinePage = await context.newPage()
+    await attachCdp(pipelinePage)
     markBrowserPage(pipelinePage, 'pipeline-bootstrap', 'pipeline')
     pipeline = await createDashboardPipelineObserver({ page: pipelinePage, client, baseUrl, workspaceId, evidenceDir: directory })
     const observe = async ({ stage, id = projectId, operationId, operationStatus, status, phase, completed, eventTypes = [],
@@ -940,6 +1160,7 @@ export async function runDashboardRuntimeJourney(input) {
   finally {
     prototype.claimNext = originals.claimNext; prototype.advancePhase = originals.advancePhase
     let postflightError
+    const cdpCleanupDeadline = performance.now() + 10000
     try { await drainBrowserResponses() }
     catch (error) { evidence.browserEvidencePostflightError = safeError(error); postflightError = error }
     if (!primaryError && evidence.browserErrors.length) {
@@ -955,10 +1176,24 @@ export async function runDashboardRuntimeJourney(input) {
     for (const { opened, handlers } of browserResponseListeners) {
       for (const [event, listener] of Object.entries(handlers)) opened.off(event, listener)
     }
+    try { correlateCdp() }
+    catch (error) { evidence.cdp.correlationError = safeError(error); postflightError ??= error }
+    for (const owned of cdpSessions) {
+      try {
+        if (!owned.page.closedObserved) {
+          const remaining = cdpCleanupDeadline - performance.now()
+          assert.ok(remaining > 0, 'Passive CDP cleanup deadline exhausted')
+          await bounded(owned.session.detach(), remaining)
+          assert.equal(owned.page.closedObserved, true, 'CDP session close must be observed')
+        }
+      } catch (error) { owned.page.cleanupError = safeError(error); postflightError ??= error }
+      finally { for (const [event, listener] of owned.handlers) owned.session.off(event, listener) }
+    }
     // pageerror/console observers remain active through close. A late error must
     // turn the persisted outcome into FAIL while preserving an earlier failure.
     if (evidence.browserErrors.length) postflightError ??= new Error('Browser error ledger is nonempty after browser close')
     if (postflightError) evidence.outcome = 'failed'
+    evidence.ownedServerAtHelperPostflight = observeOwnedServer()
     try { await writeFile(join(directory, 'w35-runtime.json'), JSON.stringify(evidence, (_, value) => typeof value === 'bigint' ? value.toString() : value, 2)) }
     catch (error) { postflightError ??= error }
     if (!primaryError && postflightError) throw postflightError

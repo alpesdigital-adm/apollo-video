@@ -976,5 +976,14 @@ Essa unicidade permanece obrigatória. Uma identidade canônica já existente
 precisa ser resolvida e validada antes de selar Command, DirectorRun e Version;
 não se pode trocar referências depois dos hashes nem alterar conteúdo para
 evitar a colisão. O commit deve revalidar os fatos imutáveis dentro da transação.
-Este registro descreve uma falha comprovada e o contrato da correção, ainda
-sem afirmar que a jornada manual, o supersede positivo ou a W35 foram concluídos.
+O commit `693233668b06da7ec2f0af6e080ffd4fdb78f1a6` resolve essas identidades
+na transação antes dos selos, preserva o `createdAt` da row reaproveitada e
+recompõe somente o bundle puro em retry serializável; não reexecuta o Diretor.
+Os testes PostgreSQL locais passaram 2/2, incluindo colisão concorrente,
+rollback e expiração de lease após espera SQL. A jornada manual passou 1/1
+no build desse commit e o worker real concluiu na primeira tentativa.
+As preparações de outputs/mapas dessa jornada são metadados controlados,
+sem render físico. Os recibos e seus hashes constam no registro canônico.
+O supersede após aprovação e o final positivo W35 continuam pendentes; o
+dashboard desse commit falhou no GET inicial do workspace com `ECONNRESET`,
+antes do browser, com causa ainda não determinada e cleanup concluído.

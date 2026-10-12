@@ -94,6 +94,15 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
   const uiPassword = `Catalog-${suffix}-controlled-password`
   let server
   let serverLogs = ''
+  let journeyPrimaryError
+  const serverLifecycle = { schemaVersion: 'dashboard-owned-next-lifecycle/v1', runId: suffix,
+    ownerPid: process.pid, pid: null, creationRequestedAt: null, spawnReturnedAt: null,
+    spawnObservedAt: null, exitObservedAt: null, closeObservedAt: null, events: [] }
+  const observeOwnedServer = () => ({ ...serverLifecycle, observedAt: Date.now(), monotonicMs: performance.now(),
+    exitCode: server?.exitCode ?? null, signalCode: server?.signalCode ?? null,
+    events: serverLifecycle.events.map((event) => ({ ...event })) })
+  const serverEvent = (event, fields = {}) => serverLifecycle.events.push({ event, at: Date.now(),
+    monotonicMs: performance.now(), ...fields })
 
   try {
     await mkdir(dirname(sourcePath), { recursive: true })
@@ -152,6 +161,7 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
     assert.match(authenticationAudit.contextHash, /^[a-f0-9]{64}$/)
     const port = await getFreePort()
     const baseUrl = `http://localhost:${port}`
+    serverLifecycle.creationRequestedAt = Date.now()
     server = spawn(process.execPath, ['node_modules/next/dist/bin/next', ...(process.env.APOLLO_DASHBOARD_RUNTIME_SERVER_MODE === 'dev' ? ['dev', '--webpack'] : ['start']), '-p', String(port)], {
       cwd: process.cwd(),
       env: {
@@ -170,6 +180,24 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
         APOLLO_MEDIA_DOWNLOAD_SIGNING_SECRET: `final-export-download-${suffix}`.padEnd(48, 'x'),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    // These are observations of this ChildProcess; null exit fields alone do
+    // not prove liveness, and creationRequestedAt is not an OS creation time.
+    serverLifecycle.pid = server.pid ?? null; serverLifecycle.spawnReturnedAt = Date.now()
+    serverEvent('spawn-returned', { pid: serverLifecycle.pid })
+    server.once('spawn', () => {
+      serverLifecycle.spawnObservedAt = Date.now(); serverEvent('spawn', { pid: server.pid })
+    })
+    server.once('exit', (code, signal) => {
+      serverLifecycle.exitObservedAt = Date.now(); serverEvent('exit', { code, signal })
+    })
+    server.once('close', (code, signal) => {
+      serverLifecycle.closeObservedAt = Date.now(); serverEvent('close', { code, signal })
+    })
+    server.once('error', (error) => {
+      const message = String(error.message ?? '')
+      serverEvent('error', { code: /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code ?? '') ? error.code : null,
+        messageSha256: sha256(message), messageBytes: Buffer.byteLength(message) })
     })
     server.stdout.on('data', (chunk) => { serverLogs += String(chunk); process.stdout.write(chunk) })
     server.stderr.on('data', (chunk) => { serverLogs += String(chunk); process.stderr.write(chunk) })
@@ -429,24 +457,64 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
       sourceSha256, sourceByteSize: sourceBytes.length, sourceManifest, sourcePath, artifactRoot,
       sourceColorProbe: colorProbe,
       mechanicalSeed: { transcript, brief: snapshots[0][3], policies: snapshots[1][3], createdAt: createdAt.toISOString() },
-      uiUsername, uiPassword, suffix, signal: t.signal })
+      uiUsername, uiPassword, suffix, signal: t.signal, observeOwnedServer })
+  } catch (error) {
+    journeyPrimaryError = error
+    throw error
   } finally {
-    if (process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT) {
-      await mkdir(process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT, { recursive: true })
-      await writeFile(join(process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT, 'owned-next.log'), serverLogs)
-    }
-    if (server && server.exitCode === null) {
-      server.kill()
-      await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
-      if (server.exitCode === null && server.signalCode === null) {
-        server.kill('SIGKILL')
-        await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+    const cleanupErrors = []
+    const cleanupStage = async (stage, action) => {
+      try { await action(); return true } catch (error) {
+        cleanupErrors.push({ stage, error }); return false
       }
     }
-    assert.ok(!server || server.exitCode !== null || server.signalCode !== null, 'Owned export Next server must terminate')
-    const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
-    await disconnectV2PostgresClient()
-    await client.$disconnect()
-    await rm(join(artifactRoot, `workspaces/final-export-e2e-${suffix}`), { recursive: true, force: true })
+    const evidenceRoot = process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT
+    await cleanupStage('next-log-write', async () => {
+      if (evidenceRoot) {
+        await mkdir(evidenceRoot, { recursive: true })
+        await writeFile(join(evidenceRoot, 'owned-next.log'), serverLogs)
+      }
+    })
+    const serverTerminal = await cleanupStage('next-containment', async () => {
+      if (server && server.exitCode === null) {
+        server.kill()
+        await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+        if (server.exitCode === null && server.signalCode === null) {
+          server.kill('SIGKILL')
+          await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
+        }
+      }
+      assert.ok(!server || server.exitCode !== null || server.signalCode !== null, 'Owned export Next server must terminate')
+    })
+    // Either disconnect must still run after an evidence/containment failure.
+    const disconnects = await Promise.allSettled([
+      (async () => {
+        const { disconnectV2PostgresClient } = await import('../../src/v2/infrastructure/prisma-postgres/client.ts')
+        await disconnectV2PostgresClient()
+      })(),
+      (async () => { await client.$disconnect() })(),
+    ])
+    disconnects.forEach((result, index) => {
+      if (result.status === 'rejected') cleanupErrors.push({ stage: index === 0 ? 'app-client-disconnect' : 'fixture-client-disconnect', error: result.reason })
+    })
+    if (serverTerminal && disconnects.every((result) => result.status === 'fulfilled')) {
+      await cleanupStage('artifact-scratch-remove', () => rm(join(artifactRoot, `workspaces/final-export-e2e-${suffix}`), { recursive: true, force: true }))
+    }
+    const errorDiagnostics = () => cleanupErrors.map(({ stage, error }) => {
+      const message = String(error?.message ?? '')
+      return { stage, messageSha256: sha256(message), messageBytes: Buffer.byteLength(message) }
+    })
+    await cleanupStage('next-lifecycle-write', async () => {
+      if (evidenceRoot) {
+        await mkdir(evidenceRoot, { recursive: true })
+        await writeFile(join(evidenceRoot, 'owned-next-lifecycle.json'), JSON.stringify({ ...observeOwnedServer(),
+          cleanupErrors: errorDiagnostics(), disconnects: disconnects.map((result) => result.status) }, null, 2))
+      }
+    })
+    if (cleanupErrors.length) {
+      process.stderr.write(`${JSON.stringify({ kind: 'dashboard-cleanup-failed', errors: errorDiagnostics(),
+        originalJourneyFailurePreserved: journeyPrimaryError !== undefined })}\n`)
+      if (!journeyPrimaryError) throw cleanupErrors[0].error
+    }
   }
 })
