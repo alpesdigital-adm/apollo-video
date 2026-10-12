@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -37,6 +37,63 @@ export async function consumerSnapshot(deadlineAt) {
 export function consumerTerminalProof(report) {
   return report.childCloseObserved === true && report.observed.length > 0 &&
     report.terminality.length === report.observed.length && report.terminality.every((value) => value.terminal)
+}
+export function unattributedConsumerFacts(entry, snapshot, baseline, observed, interval) {
+  const membership = (value) => ({ baseline: baseline.has(identityKey(value)), observed: observed.has(identityKey(value)) })
+  const byPid = new Map(snapshot.map((value) => [value.pid, value]))
+  const ancestry = [], seen = new Set()
+  let current = entry
+  for (let depth = 0; current && depth < 16 && !seen.has(identityKey(current)); depth += 1) {
+    seen.add(identityKey(current)); ancestry.push({ ...current, membership: membership(current) })
+    current = byPid.get(current.ppid)
+  }
+  const parents = (values) => [...values].filter((value) => value.pid === entry.ppid).slice(0, 4).map((value) => ({ ...value }))
+  return { scope: 'metadata-diagnostic-not-ownership-authority', before: { ...entry }, membership: membership(entry),
+    snapshotInterval: interval, snapshotSize: snapshot.length, snapshotAncestry: ancestry,
+    snapshotAncestryTruncated: current !== undefined && current !== null,
+    parentFromSnapshot: byPid.get(entry.ppid) ?? null,
+    parentsFromBaseline: parents(baseline.values()), parentsFromObserved: parents(observed.values()),
+    recheck: [], errors: [], completed: false }
+}
+export async function recheckUnattributedConsumer(facts, deadlineAt, readIdentity = readLinuxProcessIdentity) {
+  const started = Date.now(), end = Math.min(deadlineAt, started + 1000)
+  facts.recheckStartedAt = started; facts.recheckDeadlineAt = end
+  const read = async (pid) => {
+    assert.ok(Date.now() < end, 'Unknown identity metadata deadline exhausted before read')
+    const value = await budget(() => readIdentity(pid), end, Math.min(250, end - Date.now()), 'Unknown identity metadata')
+    assert.ok(Date.now() < end, 'Unknown identity metadata expired before accepting read')
+    return value
+  }
+  try {
+    let current = await read(facts.before.pid)
+    facts.selectedRecheck = current
+    if (!current || identityKey(current) !== identityKey(facts.before)) {
+      facts.selectedIdentityMatches = false; facts.completed = true; return facts
+    }
+    facts.selectedIdentityMatches = true
+    const seen = new Set()
+    for (let depth = 0; current.ppid > 0 && depth < 16 && !seen.has(identityKey(current)); depth += 1) {
+      seen.add(identityKey(current))
+      const parent = await read(current.ppid), childAfter = await read(current.pid)
+      const parentAfter = parent ? await read(parent.pid) : null
+      const stable = Boolean(parent && parentAfter && childAfter && identityKey(current) === identityKey(childAfter) &&
+        current.ppid === childAfter.ppid && parent.pid === childAfter.ppid && identityKey(parent) === identityKey(parentAfter))
+      const parentStartedAfterChild = parent ? BigInt(parent.starttime) > BigInt(current.starttime) : null
+      facts.recheck.push({ childBefore: current, childAfter, parentBefore: parent, parentAfter,
+        stableIdentityEdge: stable, parentStartedAfterChild })
+      if (!stable || parentStartedAfterChild) break
+      current = parentAfter
+    }
+    facts.recheckTruncated = facts.recheck.length === 16 && current.ppid > 0
+    facts.recheckCycleDetected = Boolean(seen.has(identityKey(current)) && facts.recheck.at(-1)?.parentAfter &&
+      identityKey(facts.recheck.at(-1).parentAfter) === identityKey(current))
+    facts.completed = true
+  } catch (error) {
+    const message = String(error?.message ?? '')
+    facts.errors.push({ name: error.name, code: error.code ?? null,
+      messageSha256: createHash('sha256').update(message).digest('hex'), messageBytes: Buffer.byteLength(message) })
+  } finally { facts.recheckFinishedAt = Date.now() }
+  return facts
 }
 export async function runAddonConsumer(mode, args = [], env = process.env) {
   const command = fixedConsumer(mode, args)
@@ -80,11 +137,25 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
     assert.equal(identityKey(recheck), identityKey(report.childBirth)); assert.equal(recheck.ppid, process.pid); assert.ok(liveIdentity(recheck))
     child.stdin.end('G'); report.gateReleased = true
     while (!closed && !interrupted && !report.errors.length) {
+      const snapshotStartedAt = Date.now()
       const snapshot = await consumerSnapshot(workDeadline)
+      const snapshotFinishedAt = Date.now()
       collectOwnedIdentities(snapshot, observed, report.childBirth.pid)
       for (const entry of snapshot) {
         if (baseline.has(identityKey(entry)) || observed.has(identityKey(entry)) || entry.pid === process.pid || !liveIdentity(entry)) continue
-        assert.fail(`Unattributed new live process ${entry.pid}:${entry.starttime}; retained root`)
+        // Preserve this exact selected entry BEFORE creating the original
+        // failure. Diagnostic rechecks never update observed or open pidfds.
+        report.unattributed = unattributedConsumerFacts(entry, snapshot, baseline, observed, { snapshotStartedAt, snapshotFinishedAt })
+        let original
+        try { assert.fail(`Unattributed new live process ${entry.pid}:${entry.starttime}; retained root`) } catch (error) { original = error }
+        try { await recheckUnattributedConsumer(report.unattributed, workDeadline) }
+        catch (error) { report.unattributed.errors.push({ name: error.name, code: error.code ?? null }) }
+        try {
+          // The existing owned CI log survives containment. No new artifact
+          // name bypasses the closed prerequisite-root receipt allowlist.
+          process.stderr.write(`${JSON.stringify({ kind: 'unattributed-consumer-metadata', runId, facts: report.unattributed })}\n`)
+        } catch (error) { report.unattributed.errors.push({ name: error.name, code: error.code ?? null, phase: 'diagnostic-write' }) }
+        throw original
       }
       await budget(() => Promise.race([closePromise, new Promise((done) => setTimeout(done, 20))]), workDeadline, 1000, 'Consumer close poll')
     }

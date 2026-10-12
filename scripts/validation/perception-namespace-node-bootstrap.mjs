@@ -29,6 +29,58 @@ export function bootstrapReadback({ status, stat, pid, uid, gid, namespace }) {
     uids: credentials('Uid', uid), gids: credentials('Gid', gid), caps, noNewPrivs: 1, groups: [], namespace }
 }
 
+export function awaitProductGate(gate, milliseconds = 5000) {
+  assert.ok(Number.isSafeInteger(milliseconds) && milliseconds > 0 && milliseconds <= 5000)
+  assert.equal(gate.autoClose, true, 'ReadStream must be the sole gate descriptor owner')
+  const started = performance.now(), deadline = started + milliseconds
+  const lifecycle = { owner: 'ReadStream', acknowledged: false, closeObserved: false,
+    deadlineMonotonicMs: deadline, budgetMs: milliseconds, errors: [] }
+  const pending = new Promise((done, reject) => {
+    let timer, primary
+    const record = (error, phase) => {
+      primary ??= error
+      const message = String(error?.message ?? '')
+      if (lifecycle.errors.length < 8) lifecycle.errors.push({ phase,
+        code: /^[A-Z][A-Z0-9_]{0,79}$/.test(error?.code ?? '') ? error.code : null,
+        errno: Number.isSafeInteger(error?.errno) ? error.errno : null,
+        syscall: ['read', 'close'].includes(error?.syscall) ? error.syscall : null,
+        messageSha256: createHash('sha256').update(message).digest('hex'), messageBytes: Buffer.byteLength(message) })
+    }
+    const stop = () => {
+      gate.removeListener('data', data); gate.removeListener('end', eof); gate.pause()
+      try { gate.destroy() } catch (error) { record(error, 'destroy') }
+    }
+    const data = (bytes) => {
+      if (bytes.length === 1 && bytes[0] === 71) lifecycle.acknowledged = true
+      else record(new Error('Invalid product gate ACK'), 'ack')
+      stop() // destroy is idempotent; there is no second raw-FD closer.
+    }
+    const eof = () => { record(new Error('Product gate EOF before ACK'), 'eof'); stop() }
+    const error = (value) => { record(value, 'stream-error'); stop() }
+    const close = () => {
+      lifecycle.closeObserved = true; lifecycle.elapsedMs = performance.now() - started
+      clearTimeout(timer)
+      gate.removeListener('data', data); gate.removeListener('end', eof)
+      gate.removeListener('error', error); gate.removeListener('close', close)
+      if (performance.now() >= deadline && !primary) record(new Error('Product gate total 5s deadline'), 'close-deadline')
+      if ((!gate.closed || gate.fd !== null) && !primary) record(new Error('Product gate descriptor close inconclusive'), 'close')
+      if (!lifecycle.acknowledged && !primary) record(new Error('Product gate closed before ACK'), 'close')
+      if (primary) reject(primary)
+      else done({ acknowledged: true, closeObserved: true })
+    }
+    // Keep error observation through asynchronous destroy/close, including
+    // late closure after deadline. Timeout never proves descriptor closure.
+    gate.once('data', data); gate.once('end', eof); gate.on('error', error); gate.once('close', close)
+    timer = setTimeout(() => {
+      if (!primary) record(new Error('Product gate total 5s deadline'), 'deadline')
+      lifecycle.elapsedMs = performance.now() - started; stop(); reject(primary)
+    }, Math.max(0, deadline - performance.now()))
+    gate.resume()
+  })
+  pending.lifecycle = lifecycle
+  return pending
+}
+
 async function main() {
   assert.equal(process.platform, 'linux')
   assert.equal(process.env.APOLLO_OBSERVER_FD, '3')
@@ -48,19 +100,20 @@ async function main() {
   assert.ok(body.length <= 4096)
   const frame = Buffer.alloc(4 + body.length); frame.writeUInt32BE(body.length); body.copy(frame, 4)
   assert.equal(writeSync(5, frame), frame.length); closeSync(5)
-  const gate = createReadStream(null, { fd: 4, autoClose: false, highWaterMark: 2 })
-  let timer
+  const gate = createReadStream(null, { fd: 4, autoClose: true, emitClose: true, highWaterMark: 2 })
+  const productGate = awaitProductGate(gate)
+  let gatePrimaryError
   try {
-    await new Promise((done, reject) => {
-      const cleanup = () => { gate.removeAllListeners('data'); gate.removeAllListeners('end'); gate.removeAllListeners('error') }
-      gate.once('data', (bytes) => { cleanup(); gate.pause()
-        if (bytes.length === 1 && bytes[0] === 71) done()
-        else reject(new Error('Invalid product gate ACK')) })
-      gate.once('end', () => { cleanup(); reject(new Error('Product gate EOF before ACK')) })
-      gate.once('error', (error) => { cleanup(); reject(error) })
-      timer = setTimeout(() => { cleanup(); gate.pause(); reject(new Error('Product gate total 5s deadline')) }, 5000)
-    })
-  } finally { clearTimeout(timer); gate.destroy(); closeSync(4) }
+    await productGate // ACK and successful stream close precede product import.
+  } catch (error) {
+    gatePrimaryError = error
+    throw error
+  } finally {
+    try {
+      process.stderr.write(`${JSON.stringify({ kind: 'namespace-product-gate-lifecycle',
+        runId: process.env.APOLLO_OBSERVER_RUN_ID, descriptor: 4, ...productGate.lifecycle })}\n`)
+    } catch (error) { if (!gatePrimaryError) throw error }
+  }
   for (const name of ['APOLLO_NAMESPACE_GATE_FD', 'APOLLO_NAMESPACE_READY_FD', 'APOLLO_NAMESPACE_UID', 'APOLLO_NAMESPACE_GID']) delete process.env[name]
   const { main: runInner } = await import('./run-perception-ci.mjs') // FIXED import AFTER G.
   await runInner(process.argv.slice(2)) // Same PID/starttime, no product subprocess substitution.

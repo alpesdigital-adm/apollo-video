@@ -186,7 +186,7 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
     await import('../../src/v2/domain/canonical-hash.ts')
   const { createMediaTranscript } =
     await import('../../src/v2/domain/media-transcript.ts')
-  const { createMediaArtifactManifestV2 } =
+  const { createMediaArtifactManifestV2, assertMediaArtifactManifest } =
     await import('../../src/v2/domain/media-artifact.ts')
   const {
     assetRightsRevision,
@@ -516,11 +516,24 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
       }
     })
     for (const fixture of sourceFixtures) {
-      const manifestJson = stableSerialize({
-        schemaVersion: 'media-artifact-manifest/v2',
-        artifactId: fixture.artifactId,
+      // Controlled metadata only; these declared hashes/bytes do not prove a render.
+      const artifactKey = `fixtures/${fixture.artifactId}.mp4`
+      const artifactSha256 = calculateCanonicalHash({ artifactId: fixture.artifactId })
+      const manifest = createMediaArtifactManifestV2({
+        artifactKey,
+        artifactSha256,
+        byteSize: 1,
         mediaType: 'video',
         container: 'mp4',
+        recipe: {
+          id: 'fixture.source',
+          version: '1',
+          parameters: {
+            parameters: 'fixture',
+            sourceIndex: fixture.sourceIndex,
+          },
+        },
+        sources: [],
         probe: {
           width: 1080,
           height: 1920,
@@ -532,10 +545,8 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
         data: {
           id: fixture.artifactId,
           workspaceId,
-          artifactKey: `fixtures/${fixture.artifactId}.mp4`,
-          sha256: calculateCanonicalHash({
-            artifactId: fixture.artifactId,
-          }),
+          artifactKey,
+          sha256: artifactSha256,
           byteSize: 1n,
           mediaType: 'video',
           container: 'mp4',
@@ -548,18 +559,36 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
           id: fixture.manifestId,
           workspaceId,
           artifactId: fixture.artifactId,
-          schemaVersion: 'media-artifact-manifest/v2',
-          manifestHash: calculateCanonicalHash({ manifestJson }),
-          recipeId: 'fixture.source',
-          recipeVersion: '1',
-          parametersHash: calculateCanonicalHash({
-            parameters: 'fixture',
-            sourceIndex: fixture.sourceIndex,
-          }),
-          manifestJson,
+          schemaVersion: manifest.schemaVersion,
+          manifestHash: manifest.manifestHash,
+          recipeId: manifest.recipe.id,
+          recipeVersion: manifest.recipe.version,
+          parametersHash: manifest.recipe.parametersHash,
+          manifestJson: stableSerialize(manifest),
           createdAt,
         },
       })
+      const [storedArtifact, storedManifest] = await Promise.all([
+        client.v2MediaArtifact.findUniqueOrThrow({ where: { id: fixture.artifactId } }),
+        client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: fixture.manifestId } }),
+      ])
+      assert.deepEqual([
+        storedArtifact.id, storedArtifact.workspaceId, storedArtifact.artifactKey,
+        storedArtifact.sha256, storedArtifact.byteSize, storedArtifact.mediaType,
+        storedArtifact.container, storedArtifact.status,
+      ], [fixture.artifactId, workspaceId, artifactKey, artifactSha256, 1n, 'video', 'mp4', 'available'])
+      assert.deepEqual([
+        storedManifest.id, storedManifest.workspaceId, storedManifest.artifactId,
+        storedManifest.schemaVersion, storedManifest.manifestHash,
+        storedManifest.recipeId, storedManifest.recipeVersion, storedManifest.parametersHash,
+      ], [
+        fixture.manifestId, workspaceId, fixture.artifactId,
+        manifest.schemaVersion, manifest.manifestHash,
+        manifest.recipe.id, manifest.recipe.version, manifest.recipe.parametersHash,
+      ])
+      const persistedManifest = JSON.parse(storedManifest.manifestJson)
+      assertMediaArtifactManifest(persistedManifest)
+      assert.deepEqual(persistedManifest, manifest)
       await client.v2ProjectMediaAsset.create({
         data: {
           id: randomUUID(),

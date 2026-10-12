@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { PassThrough } from 'node:stream'
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, createReadStream, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { buildPublicationAllowed } from '../../scripts/validation/build-perception-pidfd.mjs'
 import { awaitBootstrapGate } from '../../scripts/validation/perception-ci-child-bootstrap.mjs'
-import { fixedConsumer, consumerTerminalProof } from '../../scripts/validation/run-perception-addon-consumer.mjs'
+import { fixedConsumer, consumerTerminalProof, unattributedConsumerFacts, recheckUnattributedConsumer } from '../../scripts/validation/run-perception-addon-consumer.mjs'
 import { namespaceOwnerClosed, assertArchivePaths, planArchive } from '../../scripts/validation/cleanup-perception-pidfd.mjs'
 import { verifyOuterHostDeath } from '../../scripts/validation/perception-outer-host-death.mjs'
 import { loadPidfdBinding } from '../../scripts/validation/perception-pidfd.mjs'
-import { bootstrapReadback } from '../../scripts/validation/perception-namespace-node-bootstrap.mjs'
+import { awaitProductGate, bootstrapReadback } from '../../scripts/validation/perception-namespace-node-bootstrap.mjs'
 import { CI_PIDFD_SOURCE_PATHS, digest, initializeRegistry, readRegistry, registryLock,
   registerAddonConsumer, writeRegistry, sourceFingerprint } from '../../scripts/validation/perception-addon-registry.mjs'
 
@@ -38,6 +38,48 @@ test('build publication requires compiler success, actual close and every observ
   assert.equal(consumerTerminalProof({ childCloseObserved: false, observed: valid.observed, terminality: valid.terminality }), false)
 })
 
+test('unknown metadata retains snapshot gap and later parent facts without adopting identities', async () => {
+  const child = { pid: 9, starttime: '90', ppid: 7, state: 'R', processGroupId: 3, sessionId: 3 }
+  const parent = { pid: 7, starttime: '70', ppid: 0, state: 'S', processGroupId: 3, sessionId: 3 }
+  const observed = new Map([['7:70', parent]]), baseline = new Map()
+  const facts = unattributedConsumerFacts(child, [child], baseline, observed, { snapshotStartedAt: 1, snapshotFinishedAt: 2 })
+  assert.deepEqual(facts.before, child); assert.equal(facts.parentFromSnapshot, null)
+  assert.deepEqual(facts.parentsFromObserved, [parent])
+  await recheckUnattributedConsumer(facts, Date.now() + 1000, async (pid) => pid === 9 ? child : parent)
+  assert.equal(facts.recheck[0].stableIdentityEdge, true); assert.equal(facts.completed, true)
+  assert.deepEqual([...observed], [['7:70', parent]]); assert.equal(baseline.size, 0)
+  assert.equal(facts.membership.observed, false)
+})
+
+test('unknown metadata never treats child or parent PID reuse as ownership evidence', async () => {
+  const child = { pid: 9, starttime: '90', ppid: 7, state: 'R', processGroupId: 3, sessionId: 3 }
+  const facts = () => unattributedConsumerFacts(child, [child], new Map(), new Map(), {})
+  const reused = facts()
+  await recheckUnattributedConsumer(reused, Date.now() + 1000, async () => ({ ...child, starttime: '91' }))
+  assert.equal(reused.selectedIdentityMatches, false); assert.deepEqual(reused.recheck, [])
+  const parentReuse = facts()
+  await recheckUnattributedConsumer(parentReuse, Date.now() + 1000,
+    async (pid) => pid === 9 ? child : { pid: 7, starttime: '100', ppid: 0, state: 'R' })
+  assert.equal(parentReuse.recheck[0].parentStartedAfterChild, true)
+  assert.equal(parentReuse.scope, 'metadata-diagnostic-not-ownership-authority')
+})
+
+test('unknown metadata read failure and expired budget remain diagnostic without additional reads', async () => {
+  const child = { pid: 9, starttime: '90', ppid: 7, state: 'R' }
+  const facts = () => unattributedConsumerFacts(child, [child], new Map(), new Map(), {})
+  const unreadable = facts()
+  await recheckUnattributedConsumer(unreadable, Date.now() + 1000, async () => { throw Object.assign(new Error('controlled denied'), { code: 'EACCES' }) })
+  assert.equal(unreadable.completed, false); assert.equal(unreadable.errors[0].code, 'EACCES')
+  let reads = 0
+  const expired = facts()
+  await recheckUnattributedConsumer(expired, Date.now() - 1, async () => { reads += 1 })
+  assert.equal(reads, 0); assert.equal(expired.completed, false); assert.equal(expired.errors.length, 1)
+  const timed = facts()
+  await recheckUnattributedConsumer(timed, Date.now() + 20, () => new Promise(() => {}))
+  assert.equal(timed.completed, false); assert.equal(timed.errors.length, 1)
+  assert.ok(timed.recheckDeadlineAt - timed.recheckStartedAt <= 1000)
+})
+
 test('fixed bootstrap denies EOF, malformed ACK and total deadline before workload release', async () => {
   const good = new PassThrough(), success = awaitBootstrapGate(good, 100); good.end('G'); await success
   const eof = new PassThrough(), missing = awaitBootstrapGate(eof, 100); eof.end()
@@ -46,6 +88,97 @@ test('fixed bootstrap denies EOF, malformed ACK and total deadline before worklo
   await assert.rejects(invalid, /Invalid/)
   const silent = new PassThrough()
   await assert.rejects(awaitBootstrapGate(silent, 10), /deadline/); silent.destroy()
+})
+
+// Actual Node ReadStream with controlled fs callbacks: no native descriptor is
+// opened/closed, and this does not claim a real FIFO/namespace kernel proof.
+function controlledProductGate({ bytes = 'G', readError = null, closeError = null, stall = false, holdClose = false } = {}) {
+  const state = { closeCalls: 0, pendingRead: null, pendingClose: null, readDone: false }
+  const stream = createReadStream(null, { fd: 41, autoClose: true, emitClose: true, highWaterMark: 2, fs: {
+    read(_fd, buffer, offset, _length, _position, callback) {
+      const complete = () => {
+        if (readError) callback(readError)
+        else if (state.readDone) callback(null, 0, buffer)
+        else {
+          state.readDone = true; const data = Buffer.from(bytes); data.copy(buffer, offset)
+          callback(null, data.length, buffer)
+        }
+      }
+      if (stall) state.pendingRead = () => callback(null, 0, buffer)
+      else setImmediate(complete)
+    },
+    close(_fd, callback) {
+      state.closeCalls += 1
+      const complete = () => { state.pendingClose = null; callback(closeError) }
+      if (holdClose) state.pendingClose = complete
+      else queueMicrotask(complete)
+    },
+  } })
+  return { stream, state }
+}
+
+test('product ACK does not release workload before sole ReadStream owner observes close', async () => {
+  const { stream, state } = controlledProductGate({ holdClose: true })
+  const pending = awaitProductGate(stream, 200)
+  let released = false; void pending.then(() => { released = true }, () => {})
+  try {
+    while (!state.pendingClose) {
+      assert.ok(performance.now() < pending.lifecycle.deadlineMonotonicMs, 'Controlled close callback must arrive within the same gate deadline')
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    assert.equal(released, false); assert.equal(pending.lifecycle.acknowledged, true)
+    assert.equal(pending.lifecycle.closeObserved, false); assert.equal(stream.listenerCount('error'), 1)
+    state.pendingClose()
+    assert.deepEqual(await pending, { acknowledged: true, closeObserved: true })
+    assert.equal(state.closeCalls, 1); assert.equal(stream.fd, null); assert.equal(stream.listenerCount('error'), 0)
+  } finally {
+    if (state.pendingClose) state.pendingClose()
+    await pending.catch(() => {}) // Original assertion/rejection remains primary.
+  }
+})
+
+test('product gate EOF, invalid ACK and read error close once and remain failures', async () => {
+  for (const options of [{ bytes: '' }, { bytes: 'GG' }, { readError: Object.assign(new Error('controlled read'), { code: 'EIO', syscall: 'read' }) }]) {
+    const { stream, state } = controlledProductGate(options)
+    const pending = awaitProductGate(stream, 200)
+    await assert.rejects(pending, options.readError ? (error) => error === options.readError : /EOF|Invalid/)
+    assert.equal(state.closeCalls, 1); assert.equal(pending.lifecycle.closeObserved, true)
+    assert.equal(pending.lifecycle.acknowledged, false); assert.equal(stream.listenerCount('error'), 0)
+  }
+})
+
+test('close EBADF after ACK is preserved exactly instead of unhandled or accepted', async () => {
+  const original = Object.assign(new Error('controlled close'), { code: 'EBADF', errno: -9, syscall: 'close' })
+  const { stream, state } = controlledProductGate({ closeError: original })
+  const pending = awaitProductGate(stream, 200)
+  await assert.rejects(pending, (error) => error === original)
+  assert.equal(state.closeCalls, 1); assert.equal(pending.lifecycle.acknowledged, true)
+  assert.equal(pending.lifecycle.closeObserved, true)
+  assert.equal(pending.lifecycle.errors[0].code, 'EBADF'); assert.equal(pending.lifecycle.errors[0].syscall, 'close')
+})
+
+test('gate primary EOF remains primary when descriptor close also fails', async () => {
+  const secondary = Object.assign(new Error('controlled close'), { code: 'EBADF', syscall: 'close' })
+  const { stream, state } = controlledProductGate({ bytes: '', closeError: secondary })
+  const pending = awaitProductGate(stream, 200)
+  await assert.rejects(pending, /EOF/)
+  assert.equal(state.closeCalls, 1)
+  assert.deepEqual(pending.lifecycle.errors.map((error) => error.phase), ['eof', 'stream-error'])
+  assert.equal(pending.lifecycle.errors[1].code, 'EBADF')
+})
+
+test('gate total deadline does not restart for pending IO closure or remove late error observation', async () => {
+  const secondary = Object.assign(new Error('controlled late close'), { code: 'EBADF', syscall: 'close' })
+  const { stream, state } = controlledProductGate({ stall: true, closeError: secondary })
+  const pending = awaitProductGate(stream, 15)
+  await assert.rejects(pending, /deadline/)
+  assert.equal(pending.lifecycle.closeObserved, false); assert.equal(stream.listenerCount('error'), 1)
+  assert.equal(state.closeCalls, 0)
+  const closed = new Promise((resolve) => stream.once('close', resolve))
+  state.pendingRead(); await closed
+  assert.equal(state.closeCalls, 1); assert.equal(pending.lifecycle.closeObserved, true)
+  assert.equal(pending.lifecycle.errors[0].phase, 'deadline'); assert.equal(pending.lifecycle.errors.at(-1).code, 'EBADF')
+  assert.equal(stream.listenerCount('error'), 0)
 })
 
 test('normal namespace bootstrap refuses incomplete or elevated readback before product import', () => {
