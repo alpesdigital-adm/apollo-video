@@ -157,6 +157,16 @@ test('Linux cgroup real membership/containment and independent driver owner-deat
               assert.equal(members.some((value) => value.pid === current.pid), false)
               facts.zombieExcludedFromLiveMembership = true
             } else {
+              assert.equal(identityKey(descendant.kernelMember), identityKey(current))
+              assert.notEqual(descendant.kernelMember.ppid, descendant.creator.pid)
+              assert.equal(descendant.kernelMember.ownership, 'kernel-cgroup-membership')
+              assert.equal(descendant.kernelMember.ownershipAuthority, 'kernel-cgroup-membership')
+              assert.deepEqual(descendant.kernelMember.kernelCgroupProof.scope, scope)
+              assert.equal(descendant.kernelMember.kernelCgroupProof.pidfdRetained, true)
+              assert.equal(descendant.kernelMember.kernelCgroupProof.runMarkedAttested, false)
+              assert.equal(Object.hasOwn(descendant.kernelMember, 'runMarked'), false)
+              assert.equal(descendant.retainedPidfdObserved, true)
+              facts.reparentedKernelOwnershipObserved = true
               assert.equal(parseCgroupMembership(await budget(() => readFile(`/proc/${current.pid}/cgroup`,
                 { encoding: 'utf8', signal: AbortSignal.timeout(500) }), caseWorkEnd, 500, 'Reparented membership read')), scope.membership)
               facts.reparentedMembershipObserved = true

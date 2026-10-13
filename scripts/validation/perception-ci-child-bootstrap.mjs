@@ -63,11 +63,17 @@ async function main() {
       return
     }
     const { loadPidfdBinding } = await import('./perception-pidfd.mjs')
-    const { readAuthorityIdentitySync, identityKey, liveIdentity } = await import('./perception-addon-registry.mjs')
+    const { readAuthorityIdentitySync, identityKey, liveIdentity, registerAddonConsumer, budget } = await import('./perception-addon-registry.mjs')
     const { readLinuxProcessIdentity } = await import('./run-perception-ci.mjs')
-    const { CGROUP_ABI } = await import('./perception-consumer-cgroup.mjs')
+    const { CGROUP_ABI, readCgroupSnapshot } = await import('./perception-consumer-cgroup.mjs')
+    const { adoptKernelCgroupMember } = await import('./run-perception-addon-consumer.mjs')
     const scope = JSON.parse(process.env.APOLLO_PERCEPTION_CGROUP_SCOPE)
     const { binding } = await loadPidfdBinding() // BEFORE creating the direct fixture child.
+    const registration = await registerAddonConsumer()
+    const fixtureWorkEnd = Number(process.env.APOLLO_PERCEPTION_JOB_DEADLINE_MS) - 25000
+    assert.ok(Number.isSafeInteger(fixtureWorkEnd) && fixtureWorkEnd > Date.now())
+    const baseline = new Map((await readCgroupSnapshot(scope, fixtureWorkEnd)).map((entry) => [identityKey(entry), entry]))
+    const observed = new Map(), held = new Map()
     const program = `import os,sys,time,select,json,signal
 signal.alarm(25)
 if not select.select([0],[],[],5)[0] or os.read(0,2)!=b'G': sys.exit(1)
@@ -91,7 +97,7 @@ if kind=='zombie': time.sleep(20)
 `
     const child = spawn('/usr/bin/python3', ['-I', '-S', '-c', program, args[0]],
       { cwd: ROOT, env: { LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }, stdio: ['pipe', 'pipe', 'pipe'] })
-    let token, identity, closed = false, closePromise, primary, text = '', bytes = 0
+    let token, identity, closed = false, closePromise, primary, text = '', bytes = 0, descendantPacket
     try {
       try {
         assert.ok(Number.isSafeInteger(child.pid) && child.pid > 0)
@@ -108,13 +114,36 @@ if kind=='zombie': time.sleep(20)
             if (!text.endsWith('\n')) return
             const packet = JSON.parse(text)
             assert.equal(packet.kind, args[0]); assert.equal(identityKey(packet.creator), identityKey(identity))
-            process.stdout.write(JSON.stringify({ abi: CGROUP_ABI, runId: scope.runId, stage: 'fixture-descendant', ...packet }) + '\n')
+            assert.equal(descendantPacket, undefined, 'Fixture descendant packet must be unique')
+            descendantPacket = packet
+            if (args[0] !== 'setsid-reparent') process.stdout.write(JSON.stringify({ abi: CGROUP_ABI,
+              runId: scope.runId, stage: 'fixture-descendant', ...packet }) + '\n')
           } catch (error) { primary ??= error }
         })
       }
       const recheck = await readLinuxProcessIdentity(identity.pid)
       assert.equal(identityKey(recheck), identityKey(identity)); assert.equal(recheck.ppid, process.pid)
       child.stdin.end('G')
+      if (args[0] === 'setsid-reparent') {
+        const preparationEnd = Math.min(fixtureWorkEnd, Date.now() + 2000)
+        let candidate
+        while (!primary) {
+          if (descendantPacket) {
+            const members = await readCgroupSnapshot(scope, preparationEnd)
+            candidate = members.find((entry) => identityKey(entry) === identityKey(descendantPacket.victim))
+            assert.ok(candidate && liveIdentity(candidate), 'Real reparented member identity is unavailable')
+            if (candidate.ppid !== descendantPacket.creator.pid) break
+          }
+          await budget(() => new Promise((done) => setTimeout(done, 10)), preparationEnd, 20, 'Reparented fixture preparation')
+        }
+        if (primary) throw primary
+        const member = await adoptKernelCgroupMember(candidate, { scope, registration, baseline, observed, held, binding,
+          deadlineAt: Number(process.env.APOLLO_PERCEPTION_JOB_DEADLINE_MS), verifyDeadlineAt: Math.min(preparationEnd, Date.now() + 500) })
+        assert.equal(member.ownershipAuthority, 'kernel-cgroup-membership'); assert.equal(held.size, 1)
+        assert.equal(Object.hasOwn(member, 'runMarked'), false)
+        process.stdout.write(JSON.stringify({ abi: CGROUP_ABI, runId: scope.runId, stage: 'fixture-descendant',
+          ...descendantPacket, kernelMember: member, retainedPidfdObserved: true }) + '\n')
+      }
       await new Promise((done) => setTimeout(done, 20000))
       if (primary) throw primary
     } finally {
@@ -130,7 +159,17 @@ if kind=='zombie': time.sleep(20)
         try { await Promise.race([closePromise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Cgroup fixture creator close deadline')), 5000) })]) }
         catch (error) { primary ??= error } finally { clearTimeout(timer) }
       }
-      if (token) binding.close(token)
+      if (token) { try { binding.close(token) } catch (error) { primary ??= error } }
+      for (const owned of held.values()) {
+        try { owned.signal('SIGKILL') }
+        catch (error) {
+          try {
+            const current = await budget(() => readLinuxProcessIdentity(owned.expected.pid),
+              Number(process.env.APOLLO_PERCEPTION_JOB_DEADLINE_MS), 500, 'Fixture held member terminality')
+            assert.ok(!current || identityKey(current) !== identityKey(owned.expected) || !liveIdentity(current))
+          } catch { primary ??= error }
+        } finally { try { owned.close() } catch (error) { primary ??= error } }
+      }
       if (primary) throw primary
     }
   } else if (mode === 'cgroup-consumer') {

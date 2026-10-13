@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, readlink } from 'node:fs/promises'
+import { lstat, readFile, readlink, realpath } from 'node:fs/promises'
 import { writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CI_ROOT, budget, identityKey, liveIdentity, readAuthorityIdentitySync, registerAddonConsumer, jsonDigest } from './perception-addon-registry.mjs'
+import { CI_ROOT, budget, identityKey, liveIdentity, readAuthorityIdentitySync, registerAddonConsumer, readRegistry, jsonDigest } from './perception-addon-registry.mjs'
 import { loadPidfdBinding, openObservedPidfd } from './perception-pidfd.mjs'
 import { collectOwnedIdentities, parseLinuxProcessStat, parseLinuxProcessCredentials, readLinuxProcessIdentity } from './run-perception-ci.mjs'
 import { assertPerceptionSuite, COMPOSED_SUITE } from './run-perception-ci-namespace.mjs'
@@ -35,6 +35,82 @@ export async function consumerSnapshot(deadlineAt, scope) {
 export function consumerTerminalProof(report) {
   return report.childCloseObserved === true && report.observed.length > 0 &&
     report.terminality.length === report.observed.length && report.terminality.every((value) => value.terminal)
+}
+export function collectConsumerIdentities(snapshot, observed, rootPid, baseline = new Map()) {
+  const kernelProofs = [...observed].filter(([, entry]) => entry.ownershipAuthority === 'kernel-cgroup-membership')
+  collectOwnedIdentities(snapshot.filter((entry) => !baseline.has(identityKey(entry)) || observed.has(identityKey(entry))), observed, rootPid)
+  for (const [key, prior] of kernelProofs) {
+    const current = observed.get(key)
+    if (current) observed.set(key, { ...current, ownership: 'kernel-cgroup-membership',
+      ownershipAuthority: prior.ownershipAuthority, kernelCgroupProof: prior.kernelCgroupProof })
+  }
+}
+// The registered kernel domain can contain members whose original parent has
+// already exited. A fresh scope proof, never a name/UID/baseline exception,
+// must bind their PID/starttime to a retained native token before adoption.
+export async function adoptKernelCgroupMember(expected, { scope, registration, env = process.env,
+  baseline, observed, held, binding, deadlineAt, verifyDeadlineAt = deadlineAt,
+  io = { lstat, realpath, readFile, readRegistry } }) {
+  assertCgroupScope(scope)
+  assert.ok(observed.size < 4096 && held.size < 4096, 'Kernel member inventory exceeds observation bound')
+  const key = identityKey(expected)
+  assert.ok(!baseline.has(key) && !observed.has(key) && !held.has(key), 'Kernel admission cannot adopt a baseline or existing identity')
+  assert.ok(Number.isSafeInteger(expected.pid) && expected.pid > 0 && liveIdentity(expected))
+  assert.match(expected.starttime, /^[0-9]+$/)
+  assert.equal(expected.cgroupMembership, scope.membership)
+  assert.deepEqual(registration.entry.cgroupScope, scope, 'Kernel authority differs from admitted consumer scope')
+  const end = Math.min(deadlineAt, verifyDeadlineAt, Date.now() + 500)
+  const monotonicEnd = performance.now() + Math.max(0, end - Date.now())
+  const check = () => assert.ok(Date.now() < end && performance.now() < monotonicEnd, 'Kernel member verification deadline exhausted')
+  const action = async (operation) => { check(); const value = await operation(); check(); return value }
+  const authority = async () => {
+    const registry = await action(() => io.readRegistry(env.APOLLO_PERCEPTION_PIDFD_ROOT, env, { deadlineAt: end }))
+    assert.equal(registry.admission, 'open'); assert.equal(registry.runId, registration.entry.buildRunId)
+    assert.equal(registry.sourceCommit, registration.entry.sourceCommit); assert.equal(registry.sourceCommit, env.GITHUB_SHA)
+    assert.equal(registry.cgroups?.filter((entry) => entry.state === 'open' && entry.runId === scope.runId &&
+      jsonDigest(entry.scope) === jsonDigest(scope)).length, 1, 'Unique registered kernel domain required')
+    assert.equal(await action(() => io.realpath(scope.path)), scope.path)
+    const directory = await action(() => io.lstat(scope.path))
+    assert.ok(directory.isDirectory() && !directory.isSymbolicLink() && directory.uid === 0 && !(directory.mode & 0o022))
+    assert.equal(directory.dev, scope.directory.dev); assert.equal(directory.ino, scope.directory.ino)
+    const kill = await action(() => io.lstat(posix.join(scope.path, 'cgroup.kill')))
+    assert.ok(kill.isFile() && !kill.isSymbolicLink())
+    assert.equal(kill.dev, scope.kill.dev); assert.equal(kill.ino, scope.kill.ino)
+  }
+  const text = async (path) => {
+    const value = await action(() => io.readFile(path, { encoding: 'utf8', signal: AbortSignal.timeout(Math.max(1, end - Date.now())) }))
+    assert.ok(typeof value === 'string' && Buffer.byteLength(value) <= 65536, 'Kernel member metadata exceeds bound')
+    return value
+  }
+  const recheck = async () => {
+    const before = parseLinuxProcessStat(await text(`/proc/${expected.pid}/stat`))
+    assert.equal(identityKey(before), key); assert.ok(liveIdentity(before))
+    assert.equal(parseCgroupMembership(await text(`/proc/${expected.pid}/cgroup`)), scope.membership)
+    const after = parseLinuxProcessStat(await text(`/proc/${expected.pid}/stat`))
+    assert.equal(identityKey(after), key); assert.ok(liveIdentity(after))
+    return { ...after, cgroupMembership: scope.membership }
+  }
+  let owned, committed = false
+  try {
+    await authority()
+    check()
+    owned = await openObservedPidfd(expected, { binding, readIdentity: recheck,
+      deadlineAt, verifyDeadlineAt: end })
+    check(); assert.equal(owned.terminal, false, 'Kernel member identity became unavailable during admission')
+    await authority()
+    // Revalidate membership after the scope readback, while the same token is
+    // held. Disappearance/recycle/denial is a failed admission, never terminal
+    // proof or authority to acquire a replacement PID.
+    const current = await recheck()
+    check()
+    const member = { ...current, ownership: 'kernel-cgroup-membership', ownershipAuthority: 'kernel-cgroup-membership', kernelCgroupProof: {
+      schemaVersion: 'perception-kernel-cgroup-member/v1', scope: structuredClone(scope),
+      buildRunId: registration.entry.buildRunId, consumerRunId: registration.entry.consumerRunId,
+      verifiedAt: Date.now(), pidfdRetained: true, runMarkedAttested: false } }
+    assert.ok(!baseline.has(key) && !observed.has(key) && !held.has(key))
+    held.set(key, owned); observed.set(key, member); committed = true
+    return member
+  } finally { if (!committed) owned?.close() }
 }
 export function unattributedConsumerFacts(entry, snapshot, baseline, observed, interval) {
   const membership = (value) => ({ baseline: baseline.has(identityKey(value)), observed: observed.has(identityKey(value)) })
@@ -213,9 +289,17 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
       const snapshotStartedAt = Date.now()
       const snapshot = await consumerSnapshot(workDeadline, scope)
       const snapshotFinishedAt = Date.now()
-      collectOwnedIdentities(snapshot, observed, report.childBirth.pid)
+      collectConsumerIdentities(snapshot, observed, report.childBirth.pid, baseline)
       for (const entry of snapshot) {
         if (baseline.has(identityKey(entry)) || observed.has(identityKey(entry)) || entry.pid === process.pid || !liveIdentity(entry)) continue
+        try {
+          await adoptKernelCgroupMember(entry, { scope, registration, env, baseline, observed, held, binding,
+            deadlineAt, verifyDeadlineAt: Math.min(workDeadline, Date.now() + 500) })
+          continue
+        } catch (error) {
+          report.kernelMemberAdmissionError = { name: error.name, code: error.code ?? null,
+            messageSha256: createHash('sha256').update(String(error.message)).digest('hex') }
+        }
         // Preserve this exact selected entry BEFORE creating the original
         // failure. Diagnostic rechecks never update observed or open pidfds.
         report.unattributed = unattributedConsumerFacts(entry, snapshot, baseline, observed, { snapshotStartedAt, snapshotFinishedAt })
@@ -238,16 +322,22 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
     const cleanupDeadline = Math.min(deadlineAt, Date.now() + 25000)
     try {
       const snapshot = await consumerSnapshot(cleanupDeadline, scope)
-      collectOwnedIdentities(snapshot, observed, report.childBirth?.pid)
+      collectConsumerIdentities(snapshot, observed, report.childBirth?.pid, baseline)
+      for (const entry of snapshot) {
+        if (baseline.has(identityKey(entry)) || observed.has(identityKey(entry)) || entry.pid === process.pid || !liveIdentity(entry)) continue
+        try { await adoptKernelCgroupMember(entry, { scope, registration, env, baseline, observed, held, binding,
+          deadlineAt, verifyDeadlineAt: Math.min(cleanupDeadline, Date.now() + 500) }) }
+        catch (error) { fail(error) }
+      }
     } catch (error) { fail(error) }
     // Only known identities. Attach before recheck; no bare-PID fallback.
     for (const expected of [...observed.values()].reverse()) {
       try {
         const current = await budget(() => readLinuxProcessIdentity(expected.pid), cleanupDeadline, 500, 'Consumer containment precheck')
         if (!current || identityKey(current) !== identityKey(expected) || !liveIdentity(current)) continue
-        const owned = await openObservedPidfd(expected, { binding, readIdentity: readLinuxProcessIdentity,
+        const owned = held.get(identityKey(expected)) ?? await openObservedPidfd(expected, { binding, readIdentity: readLinuxProcessIdentity,
           deadlineAt: cleanupDeadline, verifyDeadlineAt: Math.min(cleanupDeadline, Date.now() + 500) })
-        held.set(identityKey(expected), owned)
+        if (!held.has(identityKey(expected))) held.set(identityKey(expected), owned)
         if (!owned.terminal) { owned.signal('SIGKILL'); report.containmentRequired = true }
       } catch (error) {
         if (['ESRCH', 'ENOENT'].includes(error.code)) {

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { buildPublicationAllowed, buildEnvironmentEvidence } from '../../scripts/validation/build-perception-pidfd.mjs'
 import { awaitBootstrapGate } from '../../scripts/validation/perception-ci-child-bootstrap.mjs'
-import { fixedConsumer, fixedDashboardDeadline, DASHBOARD_CI_ARGV, consumerTerminalProof, unattributedConsumerFacts, recheckUnattributedConsumer } from '../../scripts/validation/run-perception-addon-consumer.mjs'
+import { fixedConsumer, fixedDashboardDeadline, DASHBOARD_CI_ARGV, consumerTerminalProof, unattributedConsumerFacts, recheckUnattributedConsumer, adoptKernelCgroupMember, collectConsumerIdentities } from '../../scripts/validation/run-perception-addon-consumer.mjs'
 import { assertCgroupScope, openCgroupKill, parseCgroupMembership, readCgroupSnapshot, cgroupTerminalProof,
   cgroupControlledCaseAccepted } from '../../scripts/validation/perception-consumer-cgroup.mjs'
 import { namespaceOwnerClosed, assertArchivePaths, planArchive } from '../../scripts/validation/cleanup-perception-pidfd.mjs'
@@ -97,6 +97,100 @@ function cgroupStat(pid, starttime, ppid = 1, state = 'S') {
   Object.assign(fields, { 0: state, 1: String(ppid), 2: '8', 3: '8', 19: starttime })
   return `${pid} (controlled (member)) ${fields.join(' ')}`
 }
+
+function kernelAdmissionFixture() {
+  const scope = structuredClone(cgroupScope), opened = [], closed = [], signaled = [], reads = []
+  const sourceCommit = 'a'.repeat(40), buildRunId = 'pidfd-build-controlled', consumerRunId = 'pidfd-consumer-unit-controlled'
+  const registration = { entry: { cgroupScope: structuredClone(scope), buildRunId, sourceCommit, consumerRunId } }
+  const registry = { runId: buildRunId, sourceCommit, admission: 'open',
+    cgroups: [{ state: 'open', runId: scope.runId, scope: structuredClone(scope) }] }
+  const directory = { dev: 20, ino: 30, uid: 0, mode: 0o40755, isDirectory: () => true, isSymbolicLink: () => false }
+  const kill = { dev: 20, ino: 31, isFile: () => true, isSymbolicLink: () => false }
+  const expected = { ...parseLinuxProcessStat(cgroupStat(9, '80', 1)), cgroupMembership: scope.membership }
+  const tokens = new Set()
+  const binding = { open(pid) { const token = Object.freeze({ pid }); opened.push(token); tokens.add(token); return token },
+    close(token) { if (!tokens.delete(token)) return false; closed.push(token); return true },
+    signal(token, signal) { assert.ok(tokens.has(token)); signaled.push({ token, signal }); return true } }
+  const io = { async realpath(path) { return path }, async lstat(path) { return path.endsWith('/cgroup.kill') ? kill : directory },
+    readRegistry() { return registry }, async readFile(path) { reads.push(path)
+      return path.endsWith('/cgroup') ? '0::' + scope.membership + '\n' : cgroupStat(9, '80', 1) } }
+  return { expected, scope, registration, registry, directory, kill, binding, io, opened, closed, signaled, reads,
+    env: { APOLLO_PERCEPTION_PIDFD_ROOT: '/controlled/registry', GITHUB_SHA: sourceCommit },
+    baseline: new Map(), observed: new Map(), held: new Map(), deadlineAt: Date.now() + 1000 }
+}
+
+test('kernel scope admits a reparented member only after exact inode registry identity and membership proofs, retaining its token', async () => {
+  const fixture = kernelAdmissionFixture()
+  const member = await adoptKernelCgroupMember(fixture.expected, fixture)
+  assert.equal(member.ppid, 1); assert.equal(member.ownershipAuthority, 'kernel-cgroup-membership')
+  assert.equal(Object.hasOwn(member, 'runMarked'), false); assert.equal(member.kernelCgroupProof.runMarkedAttested, false)
+  assert.deepEqual(member.kernelCgroupProof.scope, fixture.scope)
+  assert.equal(fixture.observed.get('9:80'), member); assert.equal(fixture.held.size, 1)
+  assert.equal(fixture.opened.length, 1); assert.equal(fixture.closed.length, 0)
+  assert.deepEqual(fixture.reads, ['/proc/9/stat', '/proc/9/cgroup', '/proc/9/stat',
+    '/proc/9/stat', '/proc/9/cgroup', '/proc/9/stat'])
+  collectConsumerIdentities([{ ...fixture.expected, ppid: 2 }], fixture.observed, 7)
+  assert.equal(fixture.observed.get('9:80').ownership, 'kernel-cgroup-membership')
+  assert.equal(fixture.observed.get('9:80').kernelCgroupProof, member.kernelCgroupProof)
+  const priorMember = { ...parseLinuxProcessStat(cgroupStat(10, '90', 9)), cgroupMembership: fixture.scope.membership }
+  fixture.baseline.set('10:90', priorMember)
+  collectConsumerIdentities([fixture.expected, priorMember], fixture.observed, 7, fixture.baseline)
+  assert.equal(fixture.observed.has('10:90'), false, 'Baseline member is not adopted through kernel or ancestry collection')
+  const held = fixture.held.get('9:80')
+  held.signal('SIGKILL'); assert.equal(fixture.opened.length, 1, 'Cleanup uses the retained token without reopening')
+  assert.equal(fixture.signaled.length, 1)
+  assert.equal(held.close(), true); assert.equal(held.close(), false); assert.equal(fixture.closed.length, 1)
+  assert.throws(() => held.signal('SIGKILL'), /closed/)
+})
+
+test('kernel adoption rejects forged scope registry inode baseline and outside membership without observation or signals', async () => {
+  for (const change of [
+    (v) => { v.scope.directory.ino = 99 },
+    (v) => { v.expected.cgroupMembership = '/outside' },
+    (v) => { v.env.GITHUB_SHA = 'b'.repeat(40) },
+    (v) => { v.registration.entry.cgroupScope = null },
+    (v) => { v.registry.admission = 'closed' },
+    (v) => { v.registry.cgroups[0].scope.kill.ino = 99 },
+    (v) => { v.registry.cgroups.push(structuredClone(v.registry.cgroups[0])) },
+    (v) => { v.directory.ino = 99 }, (v) => { v.kill.ino = 99 },
+    (v) => { v.io.realpath = async () => '/sys/fs/cgroup/other' },
+    (v) => { v.baseline.set('9:80', v.expected) },
+    (v) => { v.io.readFile = async (path) => path.endsWith('/cgroup') ? '0::/outside\n' : cgroupStat(9, '80') },
+  ]) {
+    const fixture = kernelAdmissionFixture(); change(fixture)
+    await assert.rejects(adoptKernelCgroupMember(fixture.expected, fixture))
+    assert.equal(fixture.observed.size, 0); assert.equal(fixture.held.size, 0); assert.equal(fixture.signaled.length, 0)
+    assert.equal(fixture.closed.length, fixture.opened.length)
+  }
+})
+
+test('kernel adoption denies disappearance reuse EACCES changed scope or late read and closes every provisional token', async () => {
+  for (const change of [
+    (v) => { v.io.readFile = async () => { throw Object.assign(new Error('controlled gone'), { code: 'ENOENT' }) } },
+    (v) => { v.io.readFile = async () => { throw Object.assign(new Error('controlled denial'), { code: 'EACCES' }) } },
+    (v) => { v.io.readFile = async () => cgroupStat(9, '81') },
+    (v) => { v.io.readFile = async () => cgroupStat(10, '80') },
+    (v) => { v.io.readFile = async () => cgroupStat(9, '80', 1, 'Z') },
+    (v) => { let reads = 0; const read = v.io.readFile
+      v.io.readFile = async (path) => ++reads === 6 ? cgroupStat(9, '81') : read(path) },
+    (v) => { let reads = 0; const read = v.io.readFile
+      v.io.readFile = async (path) => ++reads === 5 ? '0::/outside\n' : read(path) },
+    (v) => { let reads = 0; const read = v.io.readRegistry
+      v.io.readRegistry = (...args) => ++reads === 2 ? { ...read(...args), admission: 'closed' } : read(...args) },
+    (v) => { let calls = 0; v.io.lstat = async (path) => path.endsWith('/cgroup.kill') ? v.kill
+      : ++calls === 1 ? v.directory : { ...v.directory, ino: 99 } },
+    (v) => { const read = v.io.readFile; v.verifyDeadlineAt = Date.now() + 10
+      v.io.readFile = async (path) => { const value = await read(path); await new Promise((done) => setTimeout(done, 20)); return value } },
+    (v) => { v.deadlineAt = Date.now() - 1 },
+  ]) {
+    const fixture = kernelAdmissionFixture(); change(fixture)
+    await assert.rejects(adoptKernelCgroupMember(fixture.expected, fixture))
+    assert.equal(fixture.observed.size, 0); assert.equal(fixture.held.size, 0); assert.equal(fixture.signaled.length, 0)
+    assert.equal(fixture.closed.length, fixture.opened.length)
+    await new Promise((done) => setTimeout(done, 25))
+    assert.equal(fixture.observed.size, 0); assert.equal(fixture.signaled.length, 0, 'No late admission or signal')
+  }
+})
 
 test('cgroup snapshot reads only kernel members, keeps reparenting facts and rejects PID reuse/membership mismatch', async () => {
   const reads = []
