@@ -944,39 +944,126 @@ def trustworthy_binary(path):
         require(not capability, "privileged prerequisite has file capabilities")
 
 
-def capture_sudo_carrier_birth(creator, config, deadline, descriptors):
+CARRIER_GUARD_CODES = {
+    "guardian creator identity unavailable": "CREATOR_IDENTITY_UNAVAILABLE",
+    "parent-death signal or parent PID mismatch": "PARENT_DEATH_BIND_MISMATCH",
+    "minted parent is no longer live": "PARENT_NOT_LIVE",
+    "aggregate warden deadline exhausted": "DEADLINE_EXHAUSTED",
+    "proc document exceeds observation bound": "PROC_DOCUMENT_BOUND",
+    "malformed proc stat delimiter": "PROC_STAT_DELIMITER",
+    "incomplete proc identity": "PROC_IDENTITY_INCOMPLETE",
+    "invalid proc PID": "PROC_PID_INVALID",
+    "proc PID mismatch": "PROC_PID_MISMATCH",
+    "missing proc credentials": "PROC_CREDENTIALS_MISSING",
+    "invalid supplementary groups": "PROC_GROUPS_INVALID",
+    "missing proc capability measurement": "PROC_CAPABILITIES_MISSING",
+    "missing NoNewPrivs measurement": "PROC_NNP_MISSING",
+    "identity changed during status read": "PROC_STATUS_IDENTITY_CHANGED",
+    "sudo carrier birth changed": "CARRIER_BIRTH_CHANGED",
+    "sudo carrier UID role mismatch": "CARRIER_UID_ROLE_MISMATCH",
+    "sudo carrier GID role mismatch": "CARRIER_GID_ROLE_MISMATCH",
+    "sudo carrier creator chain mismatch": "CARRIER_CREATOR_CHAIN_MISMATCH",
+    "sudo carrier host namespace mismatch": "CARRIER_NAMESPACE_MISMATCH",
+    "sudo carrier executable mismatch": "CARRIER_EXECUTABLE_MISMATCH",
+    "sudo carrier executable authority mismatch": "CARRIER_EXECUTABLE_AUTHORITY_MISMATCH",
+    "sudo carrier executable grew": "CARRIER_EXECUTABLE_GREW",
+    "sudo carrier executable changed during authentication": "CARRIER_EXECUTABLE_CHANGED",
+    "sudo carrier facts changed before publication": "CARRIER_PUBLICATION_FACTS_CHANGED",
+}
+
+
+def carrier_diagnostic_fact(value):
+    # Copy ONLY previously measured fields. Never fill a missing tuple from config.
+    if value is None:
+        return None
+    result = {}
+    for name in ("pid", "ppid", "processGroupId", "sessionId"):
+        if type(value.get(name)) is int and value[name] >= 0:
+            result[name] = value[name]
+    if type(value.get("starttime")) is str and re.fullmatch(r"[0-9]{1,32}", value["starttime"]):
+        result["starttime"] = value["starttime"]
+    if type(value.get("state")) is str and re.fullmatch(r"[RSDZTtWXxIKP]", value["state"]):
+        result["state"] = value["state"]
+    for name in ("uids", "gids"):
+        if type(value.get(name)) is list and len(value[name]) == 4 and all(type(item) is int and item >= 0 for item in value[name]):
+            result[name] = list(value[name])
+    return result
+
+
+def carrier_diagnostic_link(diagnostic, role, path, namespace):
+    value = os.readlink(path)  # EXACT existing read, at its existing short-circuit position.
+    if namespace and re.fullmatch(r"pid:\[[0-9]+\]", value):
+        fact = {"value": value}
+    elif not namespace and value == "/usr/bin/sudo":
+        fact = {"value": value}
+    else:
+        encoded = value.encode("utf-8", "surrogatepass")
+        fact = {"value": None, "classification": "unrecognized", "bytes": len(encoded),
+                "sha256": hashlib.sha256(encoded).hexdigest()}
+    diagnostic["facts"][role] = fact
+    return value
+
+
+def carrier_diagnostic_error(error):
+    allowed_types = ("RuntimeError", "OSError", "PermissionError", "FileNotFoundError", "ProcessLookupError",
+                     "TimeoutError", "UnicodeDecodeError", "KeyError", "TypeError", "ValueError")
+    name = type(error).__name__
+    code = CARRIER_GUARD_CODES.get(str(error), "UNCLASSIFIED_GUARD") if type(error) is RuntimeError else "OS_OR_PARSE_FAILURE"
+    number = getattr(error, "errno", None)
+    return {"type": name if name in allowed_types else "OtherError", "guardCode": code,
+            "errno": number if type(number) is int and 0 <= number <= 4095 else None}
+
+
+def capture_sudo_carrier_birth(creator, config, deadline, descriptors, diagnostic):
     # Observe before dropping privilege, on the existing authenticated FD.
+    diagnostic["stage"] = "carrier-metadata"
     remaining(deadline)
     carrier = verified_metadata(creator["pid"])
+    diagnostic["facts"]["carrier"] = carrier_diagnostic_fact(carrier)
+    diagnostic["stage"] = "carrier-birth-identity"
     require(carrier is not None and key(carrier) == key(creator) and carrier["ppid"] == creator["ppid"]
             and carrier["state"] not in TERMINAL, "sudo carrier birth changed")
+    diagnostic["stage"] = "carrier-uid-role"
     require(carrier["uids"] == [config["uid"], 0, 0, 0], "sudo carrier UID role mismatch")
     gids = carrier["gids"]
+    diagnostic["stage"] = "carrier-gid-role"
     require(gids[0] == config["gid"] and gids[1] == gids[2] == gids[3]
             and gids[1] in (config["gid"], 0), "sudo carrier GID role mismatch")
     gid_role = "owner-group" if gids[1] == config["gid"] else "root-group"
+    diagnostic["stage"] = "launcher-metadata"
     launcher = verified_metadata(carrier["ppid"])
+    diagnostic["facts"]["launcher"] = carrier_diagnostic_fact(launcher)
+    diagnostic["stage"] = "guardian-identity"
     guardian = identity(os.getpid())
+    diagnostic["facts"]["guardian"] = carrier_diagnostic_fact(guardian)
+    diagnostic["stage"] = "creator-chain"
     require(launcher is not None and launcher["state"] not in TERMINAL
             and launcher["uids"] == [config["uid"]] * 4 and launcher["gids"] == [config["gid"]] * 4
             and guardian is not None and guardian["ppid"] == carrier["pid"], "sudo carrier creator chain mismatch")
-    namespace = os.readlink("/proc/%d/ns/pid" % carrier["pid"])
+    diagnostic["stage"] = "host-namespace"
+    namespace = carrier_diagnostic_link(diagnostic, "carrierNamespace", "/proc/%d/ns/pid" % carrier["pid"], True)
     require(re.fullmatch(r"pid:\[[0-9]+\]", namespace)
-            and namespace == os.readlink("/proc/%d/ns/pid" % launcher["pid"])
-            and namespace == os.readlink("/proc/self/ns/pid"), "sudo carrier host namespace mismatch")
-    executable = os.readlink("/proc/%d/exe" % carrier["pid"])
+            and namespace == carrier_diagnostic_link(diagnostic, "launcherNamespace", "/proc/%d/ns/pid" % launcher["pid"], True)
+            and namespace == carrier_diagnostic_link(diagnostic, "guardianNamespace", "/proc/self/ns/pid", True), "sudo carrier host namespace mismatch")
+    diagnostic["stage"] = "executable-link"
+    executable = carrier_diagnostic_link(diagnostic, "carrierExecutable", "/proc/%d/exe" % carrier["pid"], False)
+    diagnostic["stage"] = "executable-role"
     require(executable == "/usr/bin/sudo", "sudo carrier executable mismatch")
+    diagnostic["stage"] = "executable-open"
     descriptor = os.open("/usr/bin/sudo", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     descriptors.append(descriptor)  # Register before validation can throw.
     try:
+        diagnostic["stage"] = "executable-metadata"
         metadata = os.fstat(descriptor)
         active_executable = os.stat("/proc/%d/exe" % carrier["pid"])
+        diagnostic["stage"] = "executable-authority"
         require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0 and metadata.st_gid == 0
                 and metadata.st_mode & 0o4000 and not metadata.st_mode & 0o2022
                 and metadata.st_mode & 0o111 and 0 < metadata.st_size <= 16 * 1024 * 1024
                 and (metadata.st_dev, metadata.st_ino) == (active_executable.st_dev, active_executable.st_ino),
                 "sudo carrier executable authority mismatch")
         digest, size = hashlib.sha256(), 0
+        diagnostic["stage"] = "executable-hash"
         while True:
             remaining(deadline)
             chunk = os.read(descriptor, min(65536, metadata.st_size - size + 1))
@@ -985,6 +1072,7 @@ def capture_sudo_carrier_birth(creator, config, deadline, descriptors):
             size += len(chunk)
             require(size <= metadata.st_size, "sudo carrier executable grew")
             digest.update(chunk)
+        diagnostic["stage"] = "executable-readback"
         after = os.fstat(descriptor)
         require(size == metadata.st_size and (after.st_dev, after.st_ino, after.st_size, after.st_mode,
                 after.st_uid, after.st_gid, after.st_mtime_ns, after.st_ctime_ns) == (metadata.st_dev, metadata.st_ino,
@@ -996,18 +1084,22 @@ def capture_sudo_carrier_birth(creator, config, deadline, descriptors):
     finally:
         os.close(descriptor)
         descriptors.remove(descriptor)
+    diagnostic["stage"] = "publication-recheck"
     remaining(deadline)
     active_executable = os.stat("/proc/%d/exe" % carrier["pid"])
     verified = verified_metadata(carrier["pid"])
+    diagnostic["facts"]["carrierRecheck"] = carrier_diagnostic_fact(verified)
     require(verified is not None and key(verified) == key(carrier) and verified["ppid"] == launcher["pid"]
             and verified["state"] not in TERMINAL and verified["uids"] == carrier["uids"]
             and verified["gids"] == carrier["gids"]
-            and os.readlink("/proc/%d/exe" % carrier["pid"]) == executable
+            and carrier_diagnostic_link(diagnostic, "carrierExecutableRecheck", "/proc/%d/exe" % carrier["pid"], False) == executable
             and (active_executable.st_dev, active_executable.st_ino)
                 == (file_fact["dev"], file_fact["ino"])
-            and os.readlink("/proc/%d/ns/pid" % carrier["pid"]) == namespace
+            and carrier_diagnostic_link(diagnostic, "carrierNamespaceRecheck", "/proc/%d/ns/pid" % carrier["pid"], True) == namespace
             and key(identity(launcher["pid"])) == key(launcher)
             and key(identity(os.getpid())) == key(guardian), "sudo carrier facts changed before publication")
+    diagnostic["stage"] = "complete"
+    diagnostic["completed"] = True
     return {"schemaVersion": "perception-sudo-carrier-birth/v1", "sourceSha256": SCRIPT_SHA256,
             "measurement": "privileged-before-drop", "carrierIdentity": verified,
             "launcherIdentity": launcher, "guardianIdentity": guardian, "hostNamespace": namespace,
@@ -1035,10 +1127,15 @@ def host_main():
     for name in (signal.SIGINT, signal.SIGTERM):
         signal.signal(name, lambda signum, _frame: interrupted.append(signum))
     try:
+        report["carrierBirthDiagnostic"] = {"schemaVersion": "perception-sudo-carrier-diagnostic/v1",
+                                            "stage": "creator-identity", "completed": False, "facts": {}}
         creator = identity(os.getppid())
+        report["carrierBirthDiagnostic"]["facts"]["creator"] = carrier_diagnostic_fact(creator)
         require(creator is not None and creator["pid"] > 1, "guardian creator identity unavailable")
+        report["carrierBirthDiagnostic"]["stage"] = "parent-death-bind"
         bind_parent_death(creator)
-        report["carrierBirthFacts"] = capture_sudo_carrier_birth(creator, config, execution_deadline, descriptors)
+        report["carrierBirthFacts"] = capture_sudo_carrier_birth(creator, config, execution_deadline, descriptors,
+                                                              report["carrierBirthDiagnostic"])
         for binary in ("/usr/bin/unshare", "/usr/bin/python3"):
             trustworthy_binary(binary)
         prctl(36, 1)  # PR_SET_CHILD_SUBREAPER; only our forked namespace children.
@@ -1205,6 +1302,8 @@ def host_main():
             require(not os.read(receipt_read, FRAME_LIMIT + 4), "extra root frame after init close")
         require(report["unshareExitCode"] == 0 and init_final.get("success") is True, "inner or init failed")
     except BaseException as error:
+        if report.get("carrierBirthDiagnostic", {}).get("completed") is False:
+            report["carrierBirthDiagnostic"]["error"] = carrier_diagnostic_error(error)
         report["errors"].append({"type": type(error).__name__, "code": getattr(error, "errno", None)})
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)

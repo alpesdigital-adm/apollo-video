@@ -11,6 +11,7 @@ from copy import deepcopy
 import os
 from pathlib import Path
 import re
+import stat
 from types import SimpleNamespace
 import unittest
 
@@ -453,6 +454,153 @@ class NamespaceInitStop(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unsupported containment signal"):
             world.contract["pidfd_signal"](world.init, 19, 50)
         self.assertFalse(any(item[0] == "signal" for item in world.events))
+
+
+def carrier_diagnostic_contract(world):
+    tree = ast.parse(WARDEN.read_text(encoding="utf-8"), filename=str(WARDEN))
+    constants = {"CARRIER_GUARD_CODES", "TERMINAL"}
+    functions = {"require", "remaining", "key", "carrier_diagnostic_fact", "carrier_diagnostic_link",
+                 "carrier_diagnostic_error", "capture_sudo_carrier_birth"}
+    selected, found = [], set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            if node.targets[0].id in constants:
+                ast.literal_eval(node.value)
+                selected.append(node); found.add(node.targets[0].id)
+        elif isinstance(node, ast.FunctionDef) and node.name in functions:
+            if node.decorator_list:
+                raise AssertionError("carrier diagnostic function gained a decorator")
+            selected.append(node); found.add(node.name)
+    if found != constants | functions:
+        raise AssertionError("carrier diagnostic declarations changed")
+    environment = {"re": re, "hashlib": hashlib, "stat": stat, "os": world.os,
+                   "time": SimpleNamespace(monotonic=lambda: world.now),
+                   "verified_metadata": world.metadata, "identity": world.identity,
+                   "SCRIPT_SHA256": "c" * 64}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(WARDEN), "exec"), environment)
+    capture = next(node for node in selected if isinstance(node, ast.FunctionDef) and node.name == "capture_sudo_carrier_birth")
+    guards = [node for node in ast.walk(capture) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "require"]
+    for guard in guards:
+        if len(guard.args) != 2 or not isinstance(guard.args[1], ast.Constant) or guard.args[1].value not in environment["CARRIER_GUARD_CODES"]:
+            raise AssertionError("every actual carrier guard needs its own fixed diagnostic code")
+    return environment
+
+
+class CarrierDiagnosticWorld:
+    def __init__(self):
+        self.now = 0
+        self.carrier = {"pid": 10, "starttime": "100", "ppid": 9, "state": "S",
+                        "uids": [1001, 0, 0, 0], "gids": [1001, 0, 0, 0], "secret": "NOT_FOR_RECEIPT"}
+        self.launcher = {"pid": 9, "starttime": "80", "ppid": 1, "state": "S", "uids": [1001] * 4, "gids": [1001] * 4}
+        self.guardian = {"pid": 11, "starttime": "110", "ppid": 10, "state": "R"}
+        self.links = {"/proc/10/ns/pid": "pid:[42]", "/proc/9/ns/pid": "pid:[42]",
+                      "/proc/self/ns/pid": "pid:[42]", "/proc/10/exe": "/usr/bin/sudo"}
+        self.link_calls, self.closed, self.opened = [], [], []
+        self.link_error = None
+        self.data = b"sudo"
+        self.offset = 0
+        self.file = SimpleNamespace(st_mode=stat.S_IFREG | 0o4755, st_uid=0, st_gid=0,
+                                    st_dev=1, st_ino=2, st_size=4, st_mtime_ns=3, st_ctime_ns=4)
+        self.os = SimpleNamespace(getpid=lambda: 11, readlink=self.readlink, open=self.open,
+                                  read=self.read, fstat=lambda _fd: self.file, stat=lambda _path: self.file,
+                                  close=self.closed.append, O_RDONLY=0, O_CLOEXEC=1, O_NOFOLLOW=2)
+
+    def identity(self, pid):
+        return deepcopy({9: self.launcher, 10: self.carrier, 11: self.guardian}[pid])
+
+    def metadata(self, pid):
+        return self.identity(pid)
+
+    def readlink(self, path):
+        self.link_calls.append(path)
+        if self.link_error is not None and path == "/proc/10/exe":
+            raise self.link_error
+        return self.links[path]
+
+    def open(self, path, flags):
+        if path != "/usr/bin/sudo" or flags != 3:
+            raise AssertionError("diagnostic must not add a new path or open mode")
+        self.opened.append(17)
+        return 17
+
+    def read(self, _fd, maximum):
+        result = self.data[self.offset:self.offset + maximum]
+        self.offset += len(result)
+        return result
+
+
+class CarrierDiagnosticContracts(unittest.TestCase):
+    def call(self, world, creator=None):
+        contract = carrier_diagnostic_contract(world)
+        diagnostic = {"stage": "creator-identity", "completed": False, "facts": {}}
+        descriptors = []
+        try:
+            result = contract["capture_sudo_carrier_birth"](creator or deepcopy(world.carrier),
+                {"uid": 1001, "gid": 1001}, 50, descriptors, diagnostic)
+            return result, diagnostic, descriptors
+        except BaseException as error:
+            diagnostic["error"] = contract["carrier_diagnostic_error"](error)
+            self.last_diagnostic, self.last_descriptors = diagnostic, descriptors
+            raise
+
+    def test_real_AST_capture_preserves_reads_tuple_and_closes_fd(self):
+        world = CarrierDiagnosticWorld()
+        result, diagnostic, descriptors = self.call(world)
+        self.assertEqual(result["carrierIdentity"]["uids"], [1001, 0, 0, 0])
+        self.assertTrue(diagnostic["completed"]); self.assertEqual(diagnostic["stage"], "complete")
+        self.assertEqual(diagnostic["facts"]["carrier"]["pid"], 10)
+        self.assertEqual(diagnostic["facts"]["launcherNamespace"], {"value": "pid:[42]"})
+        self.assertNotIn("NOT_FOR_RECEIPT", repr(diagnostic))
+        self.assertEqual(world.link_calls, ["/proc/10/ns/pid", "/proc/9/ns/pid", "/proc/self/ns/pid",
+                                            "/proc/10/exe", "/proc/10/exe", "/proc/10/ns/pid"])
+        self.assertEqual(world.closed, [17]); self.assertEqual(descriptors, [])
+
+    def test_guard_failure_records_specific_stage_and_code_without_default_tuple(self):
+        for kind, stage, code in (("uid", "carrier-uid-role", "CARRIER_UID_ROLE_MISMATCH"),
+                                  ("birth", "carrier-birth-identity", "CARRIER_BIRTH_CHANGED"),
+                                  ("namespace", "host-namespace", "CARRIER_NAMESPACE_MISMATCH")):
+            with self.subTest(kind=kind):
+                world = CarrierDiagnosticWorld(); creator = deepcopy(world.carrier)
+                if kind == "uid": world.carrier["uids"] = [0] * 4
+                elif kind == "birth": world.carrier["starttime"] = "101"
+                else: world.links["/proc/9/ns/pid"] = "pid:[43]"
+                with self.assertRaises(RuntimeError): self.call(world, creator)
+                self.assertEqual(self.last_diagnostic["stage"], stage)
+                self.assertEqual(self.last_diagnostic["error"]["guardCode"], code)
+                self.assertFalse(self.last_diagnostic["completed"]); self.assertEqual(world.opened, [])
+                if kind == "uid": self.assertEqual(self.last_diagnostic["facts"]["carrier"]["uids"], [0] * 4)
+
+    def test_os_error_is_original_and_has_no_message_path_or_environment(self):
+        world = CarrierDiagnosticWorld()
+        original = PermissionError(errno.EACCES, "PRIVATE_ERROR", "/private/path")
+        world.link_error = original
+        with self.assertRaises(PermissionError) as failure: self.call(world)
+        self.assertIs(failure.exception, original)
+        self.assertEqual(self.last_diagnostic["stage"], "executable-link")
+        self.assertEqual(self.last_diagnostic["error"], {"type": "PermissionError", "guardCode": "OS_OR_PARSE_FAILURE", "errno": errno.EACCES})
+        self.assertNotIn("PRIVATE_ERROR", repr(self.last_diagnostic)); self.assertNotIn("/private/path", repr(self.last_diagnostic))
+        self.assertEqual(world.opened, [])
+
+    def test_executable_authority_failure_still_closes_registered_fd(self):
+        world = CarrierDiagnosticWorld(); world.file.st_mode = stat.S_IFREG | 0o755
+        with self.assertRaisesRegex(RuntimeError, "sudo carrier executable authority mismatch"): self.call(world)
+        self.assertEqual(self.last_diagnostic["stage"], "executable-authority")
+        self.assertEqual(self.last_diagnostic["error"]["guardCode"], "CARRIER_EXECUTABLE_AUTHORITY_MISMATCH")
+        self.assertEqual(world.closed, [17]); self.assertEqual(self.last_descriptors, [])
+
+    def test_unknown_path_and_message_are_hash_or_enum_only_deadline_unchanged(self):
+        world = CarrierDiagnosticWorld(); world.links["/proc/10/exe"] = "/private/executable?secret"
+        with self.assertRaises(RuntimeError): self.call(world)
+        fact = self.last_diagnostic["facts"]["carrierExecutable"]
+        self.assertIsNone(fact["value"]); self.assertEqual(fact["classification"], "unrecognized")
+        self.assertEqual(fact["sha256"], hashlib.sha256(b"/private/executable?secret").hexdigest())
+        self.assertNotIn("/private/executable", repr(self.last_diagnostic))
+        contract = carrier_diagnostic_contract(world)
+        self.assertEqual(contract["carrier_diagnostic_error"](RuntimeError("PRIVATE_ERROR"))["guardCode"], "UNCLASSIFIED_GUARD")
+        world = CarrierDiagnosticWorld(); world.now = 51
+        with self.assertRaisesRegex(RuntimeError, "aggregate warden deadline exhausted"): self.call(world)
+        self.assertEqual(self.last_diagnostic["error"]["guardCode"], "DEADLINE_EXHAUSTED")
+        self.assertEqual(world.opened, [])
 
 
 if __name__ == "__main__":
