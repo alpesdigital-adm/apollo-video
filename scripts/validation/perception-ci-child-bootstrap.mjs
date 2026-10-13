@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { isAbsolute, join, dirname, resolve } from 'node:path'
-import { readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs'
+import { readFileSync, readdirSync, readlinkSync, realpathSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const MODES = new Set(['compile', 'unit', 'namespace', 'gates', 'outer-launcher', 'cgroup-consumer', 'cgroup-fixture'])
+const MODES = new Set(['compile', 'unit', 'namespace', 'gates', 'outer-launcher', 'cgroup-consumer', 'cgroup-fixture', 'dashboard', 'acquisition'])
 export async function awaitBootstrapGate(input = process.stdin, milliseconds = 5000) {
   let timer
   try {
@@ -151,6 +151,51 @@ if kind=='zombie': time.sleep(20)
     })
     if (primary) throw primary
     process.exitCode = outcome.code === 0 && outcome.signal === null ? 0 : 1
+  } else if (mode === 'dashboard' || mode === 'acquisition') {
+    const { fixedConsumer, DASHBOARD_CI_ARGV } = await import('./run-perception-addon-consumer.mjs')
+    const { readRegistry, readAuthorityIdentitySync } = await import('./perception-addon-registry.mjs')
+    fixedConsumer(mode, args)
+    const registry = readRegistry(process.env.APOLLO_PERCEPTION_PIDFD_ROOT, process.env)
+    const end = Number(process.env.APOLLO_PERCEPTION_JOB_DEADLINE_MS) - 25000
+    assert.ok(Number.isSafeInteger(end) && Date.now() < end, 'Fixed dashboard work deadline')
+    const sourcePath = mode === 'acquisition' ? 'scripts/validation/acquire-dashboard-cft157-linux.py' : 'tests/v2/dashboard-runtime-journey.e2e.mjs'
+    const source = join(ROOT, sourcePath), pin = registry.sourceFiles.find((row) => row.path === sourcePath)
+    assert.ok(pin); assert.equal(createHash('sha256').update(readFileSync(source)).digest('hex'), pin.sha256)
+    const processEnv = { ...process.env }
+    for (const name of ['NODE_OPTIONS', 'LD_PRELOAD', 'PYTHONPATH', 'PYTHONHOME', 'APOLLO_DASHBOARD_CANCEL_DIAGNOSTICS',
+      'APOLLO_DASHBOARD_HTTP_CONNECTION_DIAGNOSTICS', 'APOLLO_DASHBOARD_HTTP_DIAGNOSTICS_PRELOAD']) delete processEnv[name]
+    let executable = process.execPath, argv = [...DASHBOARD_CI_ARGV]
+    if (mode === 'acquisition') {
+      const python = registry.cgroupExecutables.find((row) => row.path === '/usr/bin/python3')
+      assert.ok(python); assert.equal(realpathSync('/usr/bin/python3'), python.realpath)
+      assert.equal(createHash('sha256').update(readFileSync(python.realpath)).digest('hex'), python.sha256)
+      executable = '/usr/bin/python3'
+      argv = ['-I', '-S', '-B', source, '--root', processEnv.APOLLO_DASHBOARD_CFT157_LINUX_ROOT,
+        '--deadline-ms', String(Math.min(end, Date.now() + 240000)), '--source-sha256', pin.sha256,
+        '--run-id', processEnv.APOLLO_PERCEPTION_CONSUMER_RUN_ID]
+    } else {
+      assert.equal(processEnv.APOLLO_DASHBOARD_RUNTIME_E2E, '1')
+      assert.ok(processEnv.APOLLO_DASHBOARD_CFT157_LINUX_ROOT, 'No host-Chrome fallback')
+    }
+    assert.ok(Date.now() < end, 'Fixed dashboard preparation exceeded work deadline')
+    const child = spawn(executable, argv, { cwd: ROOT, env: processEnv, stdio: ['ignore', 'inherit', 'inherit'] })
+    let primary, birth, close
+    try { birth = readAuthorityIdentitySync(child.pid); assert.equal(birth.ppid, process.pid) }
+    catch (error) { primary = error }
+    finally {
+      close = new Promise((done) => {
+        child.once('error', (error) => { primary ??= error }); child.once('close', (code, signal) => done({ code, signal }))
+      })
+    }
+    const result = await close
+    if (mode === 'acquisition' && !primary && Date.now() < end && result.code === 0 && result.signal === null) {
+      writeFileSync(join(processEnv.APOLLO_DASHBOARD_CFT157_LINUX_ROOT, 'actor-process.json'),
+        JSON.stringify({ schemaVersion: 'dashboard-cft157-linux-child-close/v1', runId: processEnv.APOLLO_PERCEPTION_CONSUMER_RUN_ID,
+          birth, code: result.code, signal: result.signal, closeObserved: true, closedAt: Date.now() }), { flag: 'wx', mode: 0o600 })
+    }
+    if (primary) throw primary
+    assert.ok(Date.now() < end, 'Fixed dashboard child closed after work deadline')
+    process.exitCode = result.code === 0 && result.signal === null ? 0 : 1
   } else if (mode === 'unit') {
     assert.equal(args.length, 0)
     const npm = realpathSync(join(dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js'))

@@ -173,10 +173,13 @@ class CgroupConfiguration(unittest.TestCase):
     def test_consumer_and_faults_are_fixed_not_exec_rpc(self):
         validate = self.contract["validate_consumer"]
         validate({"mode": "unit", "args": []})
+        validate({"mode": "dashboard", "args": []})
+        validate({"mode": "acquisition", "args": []})
         for kind in ("wait", "setsid-reparent", "zombie", "member-exit", "guardian-stop-owner-death"):
             validate({"mode": "fixture", "args": [kind]})
         validate({"mode": "namespace", "args": ["tests/v2/prisma-face-producer.integration.mjs", "publish-race|face control"]})
         for value in ({"mode": "exec", "args": ["sh"]}, {"mode": "unit", "args": ["arbitrary"]},
+                      {"mode": "dashboard", "args": ["arbitrary"]}, {"mode": "acquisition", "args": ["https://arbitrary.invalid"]},
                       {"mode": "fixture", "args": ["arbitrary"]}, {"mode": "fixture", "args": ["wait", "extra"]},
                       {"mode": "namespace", "args": ["tests/v2/prisma-face-producer.integration.mjs"]},
                       {"mode": "unit", "args": [], "path": "arbitrary"}):

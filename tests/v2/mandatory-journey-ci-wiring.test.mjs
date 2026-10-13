@@ -448,17 +448,77 @@ const singleTestFileOf = (command) => {
   return files.length === 1 ? files[0] : null
 }
 
+function verifyDashboardCftWiring(workflow, consumer, bootstrap) {
+  const { steps } = parseWorkflow(workflow)
+  const required = [
+    ['Build unprivileged CI pidfd addon', 'bash scripts/validation/build-perception-pidfd.sh', '2'],
+    ['Acquire official CfT 157 Linux under owned cgroup', 'node scripts/validation/perception-consumer-cgroup.mjs acquisition', '5'],
+    ['Worker transitions and pipeline events through HTTP and Chromium', 'node scripts/validation/perception-consumer-cgroup.mjs dashboard', '8'],
+  ]
+  const selected = required.map(([name, invocation, timeout]) => {
+    const matches = steps.filter((entry) => entry.name === name)
+    assert.equal(matches.length, 1); const entry = matches[0]
+    assert.ok(gatesTheBuild(entry)); assert.equal(entry.attrs.get('timeout-minutes'), timeout)
+    const lines = entry.body.split('\n').map((line) => line.trim())
+    assert.equal(lines.filter((line) => line === invocation || line === 'run: ' + invocation).length, 1)
+    return entry
+  })
+  assert.ok(steps.indexOf(selected[0]) < steps.indexOf(selected[1]) && steps.indexOf(selected[1]) < steps.indexOf(selected[2]))
+  assert.match(selected[1].body, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*300000/)
+  assert.match(selected[2].body, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*445000/)
+  const pure = steps.find((entry) => entry.name === 'Verify fixed Linux CfT acquisition and closed consumer contracts')
+  assert.ok(pure && gatesTheBuild(pure))
+  assert.ok(pure.body.includes('python3 -I -S -B tests/validation/test_dashboard_cft157_linux.py'))
+  assert.ok(pure.body.includes('python3 -I -S -B tests/v2/perception-namespace-config.test.py CgroupConfiguration'))
+  assert.ok(pure.body.includes('node --test tests/v2/owned-browser-cleanup.test.mjs'))
+  const cleanup = steps.find((entry) => entry.name === 'Close admission and authenticate consumer cgroups before removing prerequisite')
+  assert.ok(cleanup); assert.equal(cleanup.attrs.get('if'), 'always()')
+  assert.equal(cleanup.attrs.get('continue-on-error'), undefined)
+  assert.equal(cleanup.attrs.get('run'), 'node scripts/validation/cleanup-perception-pidfd.mjs')
+  assert.ok(steps.indexOf(selected[2]) < steps.indexOf(cleanup))
+  assert.ok(!workflow.includes('/usr/bin/google-chrome') && !workflow.includes('PLAYWRIGHT_CHROME_EXECUTABLE:'))
+  assert.match(workflow, /APOLLO_DASHBOARD_CFT157_LINUX_ROOT:.*runner.temp.*github.run_id.*github.run_attempt/)
+  assert.ok(consumer.includes("'dashboard', 'acquisition'"))
+  assert.match(consumer, /export const DASHBOARD_CI_ARGV = Object.freeze\(\['--experimental-transform-types',\s*'--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--test', '--test-reporter=tap',\s*'tests\/v2\/dashboard-runtime-journey.e2e.mjs'\]\)/)
+  assert.ok(bootstrap.includes("mode === 'dashboard' || mode === 'acquisition'"))
+  assert.ok(bootstrap.includes('argv = [...DASHBOARD_CI_ARGV]'))
+  assert.ok(bootstrap.includes('spawn(executable, argv,'))
+  assert.ok(bootstrap.includes('const sourcePath = mode ==='))
+  assert.ok(bootstrap.includes("'scripts/validation/acquire-dashboard-cft157-linux.py'"))
+  assert.ok(bootstrap.includes("argv = ['-I', '-S', '-B', source"))
+  return selected[2]
+}
 test('dashboard runtime journey cannot silently skip or stop gating CI', async () => {
   const suite = 'tests/v2/dashboard-runtime-journey.e2e.mjs'
-  const [workflow, source] = await Promise.all([
-    read('.github/workflows/dashboard-runtime-ci.yml'), read(suite),
+  const [workflow, source, consumer, bootstrap] = await Promise.all([
+    read('.github/workflows/dashboard-runtime-ci.yml'), read(suite), read('scripts/validation/run-perception-addon-consumer.mjs'),
+    read('scripts/validation/perception-ci-child-bootstrap.mjs'),
   ])
   const gate = /process\.env\.(APOLLO_[A-Z_]+_E2E)\s*!==\s*'1'/.exec(source)?.[1]
   assert.ok(gate, 'derive the opt-in gate from the runtime journey')
-  const step = parseWorkflow(workflow).steps.find((entry) => entry.suiteFiles.includes(suite))
+  const step = verifyDashboardCftWiring(workflow, consumer, bootstrap)
   assert.ok(step && gatesTheBuild(step), 'the real worker journey must fail CI when it fails')
   assert.match(workflow, new RegExp(`^ {6}${gate}: ['\"]?1['\"]?\\s*$`, 'm'))
   assert.match(workflow, /^ {6}V2_DATABASE_URL: .*apollo_v2_e2e_dashboard.*connection_limit=1/m)
+})
+test('Linux CfT wiring refuses removed acquisition, disabled owners, host browser and broken exact argv', async () => {
+  const [workflow, consumer, bootstrap] = await Promise.all([read('.github/workflows/dashboard-runtime-ci.yml'),
+    read('scripts/validation/run-perception-addon-consumer.mjs'), read('scripts/validation/perception-ci-child-bootstrap.mjs')])
+  verifyDashboardCftWiring(workflow, consumer, bootstrap)
+  for (const name of ['Acquire official CfT 157 Linux under owned cgroup', 'Worker transitions and pipeline events through HTTP and Chromium']) {
+    const entry = parseWorkflow(workflow).steps.find((entry) => entry.name === name)
+    for (const replacement of ['', entry.body.replace('        run:', '        if: false\n        run:'),
+      entry.body.replace('        run:', '        continue-on-error: true\n        run:')]) {
+      assert.throws(() => verifyDashboardCftWiring(workflow.replace(entry.body, replacement), consumer, bootstrap))
+    }
+  }
+  for (const change of [workflow.replace('300000', '360000'), workflow.replace('445000', '500000'),
+    workflow.replace('perception-consumer-cgroup.mjs dashboard', 'perception-consumer-cgroup.mjs unit'),
+    workflow.replace('APOLLO_DASHBOARD_CFT157_LINUX_ROOT:', 'PLAYWRIGHT_CHROME_EXECUTABLE:')]) {
+    assert.throws(() => verifyDashboardCftWiring(change, consumer, bootstrap))
+  }
+  assert.throws(() => verifyDashboardCftWiring(workflow, consumer.replace('--test-reporter=tap', '--test-reporter=dot'), bootstrap))
+  assert.throws(() => verifyDashboardCftWiring(workflow, consumer, bootstrap.replace('argv = [...DASHBOARD_CI_ARGV]', 'argv = process.argv')))
 })
 
 test('T-F4.016 every mandatory product journey has a CI step, its own gate and a database', async () => {
@@ -771,7 +831,7 @@ const listMarkdown = async () => {
  * `npm test` finds `*.test.mjs` on its own; it finds neither `*.integration.mjs`
  * nor `*.e2e.mjs`, which is the whole reason a suite can exist and never run.
  */
-const suiteFilesRunByCi = (steps, scripts, cgroupSource) => {
+const suiteFilesRunByCi = (steps, scripts, cgroupSource, consumerSource = '', bootstrapSource = '') => {
   const gating = steps.filter(gatesTheBuild)
   const runByCi = new Set(gating.flatMap((step) => step.npmScripts))
   const files = new Set(gating.flatMap((step) => step.suiteFiles))
@@ -793,6 +853,14 @@ const suiteFilesRunByCi = (steps, scripts, cgroupSource) => {
     assert.ok(cgroupSource.includes("if (mode === '--controlled-gates')"))
     assert.ok(cgroupSource.includes('await runControlledCgroupGate()).success'))
     files.add(declaration[1])
+  }
+  const dashboardOwners = gating.filter((entry) => entry.job.id === 'dashboard-runtime' &&
+    entry.body.split('\n').some((line) => line.trim() === 'node scripts/validation/perception-consumer-cgroup.mjs dashboard'))
+  if (dashboardOwners.length) {
+    assert.equal(dashboardOwners.length, 1)
+    assert.match(consumerSource, /export const DASHBOARD_CI_ARGV = Object.freeze\(\['--experimental-transform-types',\s*'--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--test', '--test-reporter=tap',\s*'tests\/v2\/dashboard-runtime-journey.e2e.mjs'\]\)/)
+    assert.ok(bootstrapSource.includes('argv = [...DASHBOARD_CI_ARGV]') && bootstrapSource.includes('spawn(executable, argv,'))
+    files.add('tests/v2/dashboard-runtime-journey.e2e.mjs')
   }
   for (const [name, command] of Object.entries(scripts)) {
     if (!runByCi.has(name)) continue
@@ -884,15 +952,16 @@ async function inventoryCiSteps() {
 }
 
 test('T-F4.016 no integration or e2e suite file goes unrun by CI without being declared', async () => {
-  const [rawPackage, workflow, present, cgroupSource] = await Promise.all([
+  const [rawPackage, workflow, present, cgroupSource, consumerSource, bootstrapSource] = await Promise.all([
     read('package.json'),
     inventoryCiSteps(),
     listSuiteFiles(),
     read('scripts/validation/perception-consumer-cgroup.mjs'),
+    read('scripts/validation/run-perception-addon-consumer.mjs'), read('scripts/validation/perception-ci-child-bootstrap.mjs'),
   ])
   const { scripts } = JSON.parse(rawPackage)
   const steps = workflow
-  const { files: filesRunByCi } = suiteFilesRunByCi(steps, scripts, cgroupSource)
+  const { files: filesRunByCi } = suiteFilesRunByCi(steps, scripts, cgroupSource, consumerSource, bootstrapSource)
 
   assert.ok(present.length > 0, 'found no integration or e2e suite files under tests/; the glob and the tree have diverged')
 
@@ -925,10 +994,11 @@ test('T-F4.016 no integration or e2e suite file goes unrun by CI without being d
 })
 
 test('T-F4.016 every npm integration or e2e script either runs in CI or runs a declared suite', async () => {
-  const [rawPackage, steps, cgroupSource] = await Promise.all([read('package.json'), inventoryCiSteps(),
-    read('scripts/validation/perception-consumer-cgroup.mjs')])
+  const [rawPackage, steps, cgroupSource, consumerSource, bootstrapSource] = await Promise.all([read('package.json'), inventoryCiSteps(),
+    read('scripts/validation/perception-consumer-cgroup.mjs'), read('scripts/validation/run-perception-addon-consumer.mjs'),
+    read('scripts/validation/perception-ci-child-bootstrap.mjs')])
   const { scripts } = JSON.parse(rawPackage)
-  const { runByCi, files: filesRunByCi } = suiteFilesRunByCi(steps, scripts, cgroupSource)
+  const { runByCi, files: filesRunByCi } = suiteFilesRunByCi(steps, scripts, cgroupSource, consumerSource, bootstrapSource)
 
   const declared = new Set(KNOWN_UNRUN_SUITES.map((entry) => entry.file))
 

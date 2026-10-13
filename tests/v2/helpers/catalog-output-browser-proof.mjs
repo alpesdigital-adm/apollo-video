@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { closeOwnedBrowser } from './library-browser-proof.mjs'
+import { closeOwnedBrowser, observeOwnedBrowserLifecycle } from './library-browser-proof.mjs'
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const diagnosticMessage = (error) => String(error?.message ?? error)
@@ -53,7 +53,7 @@ export async function proveCatalogOutputBrowser({ baseUrl, authorization, userna
     const executablePath = [process.env.PLAYWRIGHT_CHROME_EXECUTABLE, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].find((path) => path && existsSync(path))
     assert.ok(executablePath, 'Catalog proof requires real Chromium')
     server = await chromium.launchServer({ executablePath, headless: true, timeout: 20_000 })
-    child = server.process(); assert.ok(child?.pid); evidence.browserPid = child.pid
+    child = server.process(); observeOwnedBrowserLifecycle(server, child); assert.ok(child?.pid); evidence.browserPid = child.pid
     browser = await chromium.connect(server.wsEndpoint(), { timeout: 20_000 })
     context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
     context.setDefaultTimeout(20_000); context.setDefaultNavigationTimeout(30_000)
@@ -130,7 +130,7 @@ export async function proveCatalogOutputBrowser({ baseUrl, authorization, userna
     const errors = []
     try {
       evidence.postflight = await closeOwnedBrowser({ context, browser, server, child })
-      if (!evidence.postflight.browserTerminal) errors.push(new Error('Owned Chromium is not terminal'))
+      if (!(process.platform === 'linux' ? evidence.postflight.localBrowserLifecycleTerminal : evidence.postflight.browserTerminal)) errors.push(new Error('Owned Chromium lifecycle is not terminal'))
     } catch (error) {
       evidence.postflight.browserTerminal = false
       errors.push(error)

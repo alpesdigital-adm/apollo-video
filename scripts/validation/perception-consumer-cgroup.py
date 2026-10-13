@@ -32,6 +32,8 @@ ENV_NAMES = frozenset((
     "FFMPEG_BIN", "FFPROBE_BIN", "APOLLO_PERCEPTION_PIDFD_ADDON", "APOLLO_PERCEPTION_PIDFD_PROVENANCE",
     "APOLLO_PERCEPTION_PIDFD_SHA256", "APOLLO_PERCEPTION_PIDFD_ROOT", "APOLLO_PERCEPTION_CONSUMER_RUN_ID",
     "APOLLO_PERCEPTION_CGROUP_SCOPE", "APOLLO_PERCEPTION_JOB_DEADLINE_MS",
+    "APOLLO_DASHBOARD_RUNTIME_E2E", "APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT",
+    "APOLLO_DASHBOARD_RUNTIME_SERVER_MODE", "APOLLO_DASHBOARD_CFT157_LINUX_ROOT",
 ))
 
 
@@ -195,6 +197,7 @@ def validate_consumer(consumer):
               "tests/v2/prisma-perception-producer-http.integration.mjs", "tests/v2/prisma-director-ocr.integration.mjs",
               "tests/v2/prisma-temporal-producer.integration.mjs", "tests/v2/prisma-face-producer.integration.mjs"}
     require((mode == "unit" and not args)
+            or (mode in ("dashboard", "acquisition") and not args)
             or (mode == "fixture" and len(args) == 1 and args[0] in
                 ("wait", "setsid-reparent", "zombie", "member-exit", "guardian-stop-owner-death"))
             or (mode == "gates" and args == ["tests/v2/perception-namespace-observer.integration.mjs"])

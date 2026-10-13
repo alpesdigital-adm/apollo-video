@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readlinkSync, realpathSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
-import { join, resolve, dirname } from 'node:path'
+import { join, posix, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseLinuxProcessStat, parseLinuxProcessCredentials } from './run-perception-ci.mjs'
 
@@ -18,6 +18,11 @@ export const CI_PIDFD_SOURCE_PATHS = Object.freeze([
   'scripts/validation/perception-namespace-node-bootstrap.mjs',
   'scripts/validation/perception-consumer-cgroup.py', 'scripts/validation/perception-consumer-cgroup.mjs',
   'tests/v2/perception-consumer-cgroup.integration.mjs',
+  'scripts/validation/acquire-dashboard-cft157-linux.py',
+  'tests/v2/dashboard-runtime-journey.e2e.mjs',
+  'tests/v2/helpers/dashboard-runtime-journey.mjs', 'tests/v2/helpers/library-browser-proof.mjs',
+  'src/components/AppShellNavigation.tsx',
+  'tests/v2/helpers/catalog-output-browser-proof.mjs', 'package-lock.json',
 ])
 export const identityKey = (value) => `${value.pid}:${value.starttime}`
 export const liveIdentity = (value) => value && !['Z', 'X', 'x'].includes(value.state)
@@ -123,6 +128,14 @@ export async function registryLock(root, action, { env = process.env, deadlineAt
   finally { rmdirSync(lock) }
 }
 
+export function assertDashboardPlaywrightFacts(facts, root = CI_ROOT) {
+  assert.equal(facts?.schemaVersion, 'dashboard-playwright-installation/v1')
+  assert.equal(facts.version, '1.62.0'); assert.match(facts.lockIntegrity, /^sha512-[A-Za-z0-9+/]+=*$/)
+  assert.equal(facts.fullDependencyClosureClaimed, false); assert.equal(facts.hashesAreUpstream, false)
+  assert.deepEqual(facts.files.map((row) => row.path), ['package.json', 'index.js', 'lib/coreBundle.js'].map((name) => posix.join(root, 'node_modules/playwright-core', name)))
+  for (const row of facts.files) { assert.ok(Number.isSafeInteger(row.bytes) && row.bytes > 0 && row.bytes <= 16 * 1024 * 1024); assert.match(row.sha256, /^[a-f0-9]{64}$/) }
+  return facts
+}
 export function initializeRegistry(root, runId, env = process.env) {
   assert.equal(process.platform, 'linux'); assert.ok(process.getuid() > 0 && process.getgid() > 0)
   assert.match(env.GITHUB_SHA ?? '', /^[a-f0-9]{40}$/)
@@ -137,6 +150,21 @@ export function initializeRegistry(root, runId, env = process.env) {
   const registry = { schemaVersion: 'perception-pidfd-registry/v1', runId, sourceCommit: env.GITHUB_SHA,
     root: assertOwnedRoot(root, env), creator: owner, admission: 'building', sourceFiles: [], cgroups: [], cgroupExecutables,
     createdAt: new Date().toISOString() }
+  if (env.APOLLO_DASHBOARD_CFT157_LINUX_ROOT !== undefined) {
+    const end = Date.now() + 3500
+    const directory = join(CI_ROOT, 'node_modules/playwright-core')
+    const files = ['package.json', 'index.js', 'lib/coreBundle.js'].map((name) => {
+      const path = join(directory, name); assert.equal(realpathSync(path), path)
+      const bytes = readAdmissionFile(path, 16 * 1024 * 1024, end)
+      return { path, bytes: bytes.length, sha256: digest(bytes) }
+    })
+    const installation = JSON.parse(readAdmissionFile(join(directory, 'package.json'), 65536, end))
+    const lock = JSON.parse(readAdmissionFile(join(CI_ROOT, 'package-lock.json'), 16 * 1024 * 1024, end))
+    assert.equal(lock.packages['node_modules/playwright-core'].version, '1.62.0')
+    registry.dashboardPlaywright = assertDashboardPlaywrightFacts({ schemaVersion: 'dashboard-playwright-installation/v1',
+      version: installation.version, lockIntegrity: lock.packages['node_modules/playwright-core'].integrity,
+      hashesAreUpstream: false, fullDependencyClosureClaimed: false, files })
+  }
   mkdirSync(join(root, 'owners'), { mode: 0o700 })
   mkdirSync(join(root, 'receipts'), { mode: 0o700 })
   writeFileSync(join(root, 'registry.json'), JSON.stringify(registry, null, 2), { flag: 'wx', mode: 0o600 })

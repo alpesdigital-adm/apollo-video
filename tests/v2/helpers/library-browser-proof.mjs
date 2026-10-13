@@ -1,67 +1,180 @@
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, readlinkSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { errorMonitor } from 'node:events'
 import net from 'node:net'
 import { promisify } from 'node:util'
+import { parseLinuxProcessStat } from '../../../scripts/validation/run-perception-ci.mjs'
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
-export async function ownedBrowserProcesses(pid) {
+const browserLifecycles = new WeakMap()
+export function linuxBrowserIdentityTerminal(expected, current) {
+  assert.ok(Number.isSafeInteger(expected?.pid) && expected.pid > 0 && /^[0-9]+$/.test(expected.starttime))
+  if (current === null) return true
+  assert.ok(current && Number.isSafeInteger(current.pid) && /^[0-9]+$/.test(current.starttime))
+  assert.equal(current.pid, expected.pid)
+  return current.starttime !== expected.starttime || ['Z', 'X', 'x'].includes(current.state)
+}
+export function assertLinuxBrowserBirth(before, after, ownerPid) {
+  assert.ok(Number.isSafeInteger(ownerPid) && ownerPid > 0)
+  assert.ok(Number.isSafeInteger(before?.pid) && before.pid > 0 && /^[0-9]+$/.test(before.starttime))
+  assert.equal(before.ppid, ownerPid, 'Public browser process must be the direct live child of this owner')
+  assert.match(before.state, /^[RSDZTtWXxIKP]$/); assert.match(after.state, /^[RSDZTtWXxIKP]$/)
+  assert.ok(!['Z', 'X', 'x'].includes(before.state), 'Browser birth must be live')
+  assert.equal(after.pid, before.pid); assert.equal(after.starttime, before.starttime); assert.equal(after.ppid, before.ppid)
+  assert.ok(!['Z', 'X', 'x'].includes(after.state), 'Browser birth changed to terminal during capture')
+}
+function linuxBrowserIdentity(pid, expected) {
+  let before
+  try { before = parseLinuxProcessStat(readFileSync(`/proc/${pid}/stat`, 'utf8')) }
+  catch (error) { if (error.code === 'ENOENT' && expected) return null; throw error }
+  assert.equal(before.pid, pid)
+  if (expected && linuxBrowserIdentityTerminal(expected, before)) return before
+  if (!expected) { assert.equal(before.ppid, process.pid); assert.ok(!['Z', 'X', 'x'].includes(before.state)) }
+  else assert.equal(before.ppid, expected.ppid)
+  const executable = readlinkSync(`/proc/${pid}/exe`)
+  const after = parseLinuxProcessStat(readFileSync(`/proc/${pid}/stat`, 'utf8'))
+  assert.equal(after.pid, pid); assert.equal(after.starttime, before.starttime)
+  assert.equal(after.ppid, before.ppid)
+  if (!expected) assertLinuxBrowserBirth(before, after, process.pid)
+  if (expected) assert.equal(executable, expected.executable)
+  return { ...after, executable }
+}
+export function observeOwnedBrowserLifecycle(server, child, capturePhase = 'after-launchServer-process') {
+  if (child && browserLifecycles.has(child)) return browserLifecycles.get(child)
+  const events = [], errors = [], listeners = [], streams = new Map()
+  const startedAt = Date.now()
+  let processCloseObserved = !child, serverCloseObserved = !server, stopped = false, stoppedAt = null
+  const diagnostic = (error) => ({ code: typeof error?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code) ? error.code : null,
+    messageSha256: digest(Buffer.from(String(error?.message ?? error))), messageBytes: Buffer.byteLength(String(error?.message ?? error)) })
+  const record = (kind, fields = {}) => {
+    if (stopped) return
+    if (events.length >= 64) { if (!errors.length) errors.push({ code: 'LIFECYCLE_OVERFLOW' }); return }
+    events.push({ kind, at: Date.now(), ...fields })
+  }
+  const listen = (target, event, handler) => {
+    if (!target?.on) return
+    const ours = (...args) => { try { handler(...args) } catch (error) { if (errors.length < 8) errors.push(diagnostic(error)) } }
+    target.on(event, ours); listeners.push([target, event, ours])
+  }
+  const observedError = (kind, error, fields = {}) => {
+    const fact = { ...fields, ...diagnostic(error) }
+    record(kind, fact); if (errors.length < 8) errors.push({ kind, ...fact })
+  }
+  let linuxBirth = null
+  if (process.platform === 'linux' && Number.isSafeInteger(child?.pid)) {
+    // First synchronous identity capture after the public process() call;
+    // never adopt a replacement PID later if this observation fails.
+    try { linuxBirth = linuxBrowserIdentity(child.pid) }
+    catch (error) { observedError('linux-browser-birth', error) }
+  }
+  listen(child, 'exit', (code, signal) => record('process-exit', { code, signal }))
+  listen(child, 'close', (code, signal) => { processCloseObserved = true; record('process-close', { code, signal }) })
+  listen(server, 'close', (code, signal) => { serverCloseObserved = true; record('server-close', { code, signal }) })
+  for (const [name, target] of [['process', child], ['server', server]]) {
+    listen(target, errorMonitor, (error) => observedError(`${name}-error`, error))
+  }
+  for (const [index, stream] of (child?.stdio ?? []).entries()) {
+    if (!stream) continue
+    if (streams.has(stream)) { streams.get(stream).push(index); continue }
+    const indices = [index]; streams.set(stream, indices)
+    for (const event of ['end', 'finish', 'close']) listen(stream, event, () => record(`stdio-${event}`, { indices: [...indices] }))
+    listen(stream, errorMonitor, (error) => observedError('stdio-error', error, { indices: [...indices] }))
+  }
+  const observer = {
+    snapshot: () => ({ capturePhase, startedAt, observedThrough: stoppedAt ?? Date.now(), stopped, processCloseObserved, serverCloseObserved, linuxBirth,
+      events: [...events], errors: [...errors],
+      stdio: [...streams].map(([stream, indices]) => ({ indices: [...indices], destroyed: stream.destroyed ?? null,
+        closed: stream.closed ?? null, readableEnded: stream.readableEnded ?? null, writableFinished: stream.writableFinished ?? null })) }),
+    dispose: () => { if (stopped) return; stopped = true; stoppedAt = Date.now(); for (const [target, event, ours] of listeners) target.removeListener(event, ours) },
+  }
+  if (child) browserLifecycles.set(child, observer)
+  return observer
+}
+export async function boundedOwnedBrowserCleanup(name, action, steps, clock = {
+  now: () => performance.now(), arm: (callback, milliseconds) => setTimeout(callback, milliseconds), disarm: clearTimeout,
+  resources: () => process.getActiveResourcesInfo(),
+}) {
+  const started = clock.now(), deadline = started + 5000
+  const step = { name, startedAt: new Date().toISOString(), timeoutMs: 5000, deadline, resourcesBefore: clock.resources() }
+  steps.push(step)
+  let timer
+  const timeout = () => new Error(`${name} cleanup timeout`)
+  try {
+    // Arm before action: synchronous spawnSync cannot be interrupted, and a
+    // late return must still fail the original absolute five-second deadline.
+    step.actionStatus = 'pending'
+    await new Promise((resolve, reject) => {
+      const remaining = deadline - clock.now()
+      if (remaining <= 0) { step.actionStatus = 'not-started'; reject(timeout()); return }
+      timer = clock.arm(() => reject(timeout()), remaining)
+      let pending
+      try { pending = action() } catch (error) { step.actionStatus = 'rejected'; reject(error); return }
+      Promise.resolve(pending).then((value) => { step.actionStatus = 'fulfilled'; resolve(value) },
+        (error) => { step.actionStatus = 'rejected'; reject(error) })
+    })
+    if (clock.now() >= deadline) throw timeout()
+    step.status = 'completed'
+  } catch (error) { step.status = 'failed'; step.error = error.message; throw error }
+  finally {
+    clock.disarm(timer); step.elapsedMs = clock.now() - started; step.deadlineExceeded = clock.now() >= deadline
+    step.resourcesAfter = clock.resources(); step.completedAt = new Date().toISOString()
+  }
+}
+export async function closeOwnedBrowserResources({ context, browser, server }, bounded, warnings) {
+  let serverCleanup
+  for (const [name, target] of [['context', context], ['browser', browser], ['browser-server', server]]) {
+    if (!target) continue
+    try { await bounded(name, () => { const action = target.close(); if (name === 'browser-server') serverCleanup = action; return action }) }
+    catch (error) { warnings.push(error.message) }
+  }
+  return { serverCleanup }
+}
+export function ownedBrowserCleanupAccepted({ remaining, warnings, browserServerTerminal, processCloseObserved, serverCloseObserved, lifecycleErrors }) {
+  return Array.isArray(remaining) && remaining.length === 0 && Array.isArray(warnings) && warnings.length === 0 &&
+    browserServerTerminal === true && processCloseObserved === true && serverCloseObserved === true &&
+    Array.isArray(lifecycleErrors) && lifecycleErrors.length === 0
+}
+export async function ownedBrowserProcesses(pid, expected) {
   if (!pid) return []
-  if (process.platform !== 'win32') { try { process.kill(pid, 0); return [{ pid }] } catch (error) { if (error.code === 'ESRCH') return []; throw error } }
+  if (process.platform === 'linux') {
+    assert.ok(expected, 'Linux browser check requires the original observed identity')
+    const current = linuxBrowserIdentity(pid, expected)
+    return linuxBrowserIdentityTerminal(expected, current) ? [] : [current]
+  }
+  assert.equal(process.platform, 'win32', 'Unsupported browser identity authority')
   const script = `$all = @(Get-CimInstance Win32_Process); $owned = @(${Number(pid)}); do { $next = @($all | Where-Object { $owned -contains $_.ParentProcessId -and $owned -notcontains $_.ProcessId } | ForEach-Object ProcessId); $owned += $next } while ($next.Count); ConvertTo-Json -Compress -InputObject @($all | Where-Object { $owned -contains $_.ProcessId } | ForEach-Object { $entry=$_; $live=Get-Process -Id $entry.ProcessId -ErrorAction SilentlyContinue; if ($live -and -not $live.HasExited -and ($live.ProcessName + '.exe') -eq $entry.Name -and [Math]::Abs(($live.StartTime.ToUniversalTime() - $entry.CreationDate.ToUniversalTime()).TotalMilliseconds) -lt 100) { @{ pid=$entry.ProcessId; created=$live.StartTime.ToUniversalTime().ToString('o') } } })`
   const { stdout } = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 10_000 })
   return JSON.parse(stdout)
 }
 export async function closeOwnedBrowser({ context, browser, server, child }) {
+  const lifecycle = observeOwnedBrowserLifecycle(server, child, 'cleanup-late')
+  try {
   const originalWsEndpoint = server?.wsEndpoint()
-  const observed = await ownedBrowserProcesses(child?.pid)
   const warnings = []
   const steps = []
-  let processClosed = !child
-  const onClose = () => { processClosed = true }
-  child?.once('close', onClose)
-  const bounded = async (name, action) => {
-    const step = { name, startedAt: new Date().toISOString(), resourcesBefore: process.getActiveResourcesInfo() }
-    steps.push(step)
-    let timer
-    try {
-      await Promise.race([action(), new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${name} cleanup timeout`)), 5000)
-      })])
-      step.status = 'completed'
-    } catch (error) {
-      step.status = 'failed'; step.error = error.message
-      throw error
-    } finally {
-      clearTimeout(timer)
-      step.resourcesAfter = process.getActiveResourcesInfo()
-      step.completedAt = new Date().toISOString()
-    }
-  }
-  let serverCleanup
-  for (const [name, target] of [['context', context], ['browser', browser], ['browser-server', server]]) {
-    if (!target) continue
-    try {
-      await bounded(name, () => {
-        if (name !== 'browser-server') return target.close()
-        serverCleanup = target.kill()
-        return serverCleanup
-      })
-    } catch (error) { warnings.push(error.message) }
-  }
+  const birth = lifecycle.snapshot().linuxBirth
+  const observed = process.platform === 'linux' ? (birth ? [birth] : []) : await ownedBrowserProcesses(child?.pid)
+  if (process.platform === 'linux' && child && !birth) warnings.push('Linux browser original identity was not observed; no PID adoption or signal fallback')
+  const bounded = (name, action) => boundedOwnedBrowserCleanup(name, action, steps)
+  const { serverCleanup } = await closeOwnedBrowserResources({ context, browser, server }, bounded, warnings)
   let remaining = []
   for (const identity of observed) {
-    const current = await ownedBrowserProcesses(identity.pid)
+    const current = await ownedBrowserProcesses(identity.pid, identity)
+    if (process.platform === 'linux') {
+      if (current.length) warnings.push('Live Linux browser remains; containment belongs exclusively to the external cgroup owner')
+      continue
+    }
     if (!current.some((item) => item.pid === identity.pid && item.created === identity.created)) continue
     if (process.platform === 'win32') await promisify(execFile)('taskkill.exe', ['/PID', String(identity.pid), '/T', '/F'], { windowsHide: true, timeout: 10_000 }).catch((error) => warnings.push(error.message))
-    else process.kill(identity.pid, 'SIGKILL')
   }
   for (const identity of observed) {
-    const current = await ownedBrowserProcesses(identity.pid)
-    remaining.push(...current.filter((item) => item.pid === identity.pid && item.created === identity.created))
+    const current = await ownedBrowserProcesses(identity.pid, identity)
+    remaining.push(...current.filter((item) => item.pid === identity.pid &&
+      (process.platform === 'linux' ? item.starttime === identity.starttime : item.created === identity.created)))
   }
   // Playwright waits for ChildProcess 'close' before releasing launchServer's
   // WebSocket listener. On Windows a dead Chromium can leave its stdio pipes
@@ -102,10 +215,17 @@ export async function closeOwnedBrowser({ context, browser, server, child }) {
       }
     } catch (error) { warnings.push(error.message) }
   }
-  child?.removeListener('close', onClose)
-  return { browserTerminal: remaining.length === 0 && browserServerTerminal && processClosed,
+  lifecycle.dispose()
+  const observation = lifecycle.snapshot()
+  const accepted = ownedBrowserCleanupAccepted({ remaining, warnings, browserServerTerminal,
+    processCloseObserved: observation.processCloseObserved, serverCloseObserved: observation.serverCloseObserved, lifecycleErrors: observation.errors })
+  return { browserTerminal: process.platform === 'linux' ? null : accepted,
+    localBrowserLifecycleTerminal: accepted, runCgroupTerminal: null,
+    terminalProofScope: process.platform === 'linux' ? 'original-browser-root-identity-and-public-close-only' : 'observed-windows-browser-tree-and-public-close',
     browserServerTerminal, observed, remaining, warnings, steps,
-    process: child ? { pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode, closeObserved: processClosed } : null }
+    lifecycle: observation,
+    process: child ? { pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode, closeObserved: observation.processCloseObserved } : null }
+  } finally { lifecycle.dispose() }
 }
 export async function proveLibraryBrowser({ baseUrl, cookie, prisma, workspaceId, projectId, sourceArtifactId, evidenceDir }) {
   const { chromium } = await import('playwright-core')
@@ -114,7 +234,8 @@ export async function proveLibraryBrowser({ baseUrl, cookie, prisma, workspaceId
   const evidence = { schemaVersion: 'library-browser-proof/v1', sourceCommit: process.env.GITHUB_SHA, ciRunId: process.env.GITHUB_RUN_ID ?? null, outcome: 'started', screenshots: [], checks: [], postflight: {} }
   let server, browser, context, child, primaryError
   try {
-    server = await chromium.launchServer({ executablePath, headless: true }); child = server.process(); assert.ok(child?.pid)
+    server = await chromium.launchServer({ executablePath, headless: true }); child = server.process()
+    observeOwnedBrowserLifecycle(server, child); assert.ok(child?.pid)
     browser = await chromium.connect(server.wsEndpoint()); context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); context.setDefaultTimeout(20_000)
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     const page = await context.newPage()
@@ -253,6 +374,6 @@ export async function proveLibraryBrowser({ baseUrl, cookie, prisma, workspaceId
   } finally {
     evidence.postflight = await closeOwnedBrowser({ context, browser, server, child })
     await writeFile(join(evidenceDir, 'library-browser.json'), JSON.stringify(evidence, null, 2))
-    if (!evidence.postflight.browserTerminal) throw new AggregateError([...(primaryError ? [primaryError] : []), new Error('Owned Chromium is not terminal')], 'Library browser proof or cleanup failed')
+    if (!(process.platform === 'linux' ? evidence.postflight.localBrowserLifecycleTerminal : evidence.postflight.browserTerminal)) throw new AggregateError([...(primaryError ? [primaryError] : []), new Error('Owned Chromium lifecycle is not terminal')], 'Library browser proof or cleanup failed')
   }
 }

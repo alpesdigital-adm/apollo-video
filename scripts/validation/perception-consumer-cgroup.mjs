@@ -9,7 +9,7 @@ import { CI_ROOT, budget, digest, identityKey, liveIdentity, readAuthorityIdenti
   registerAddonConsumer, registryLock, readRegistry, writeRegistry, jsonDigest } from './perception-addon-registry.mjs'
 import { loadPidfdBinding, openObservedPidfd } from './perception-pidfd.mjs'
 import { parseLinuxProcessStat, readLinuxProcessIdentity } from './run-perception-ci.mjs'
-import { fixedConsumer } from './run-perception-addon-consumer.mjs'
+import { fixedConsumer, fixedDashboardDeadline } from './run-perception-addon-consumer.mjs'
 
 export const CGROUP_ABI = 'perception-consumer-cgroup/v1'
 export const CGROUP_HELPER = join(CI_ROOT, 'scripts/validation/perception-consumer-cgroup.py')
@@ -27,6 +27,8 @@ export const CGROUP_ENVIRONMENT = Object.freeze([
   'APOLLO_PERCEPTION_PIDFD_ADDON', 'APOLLO_PERCEPTION_PIDFD_PROVENANCE', 'APOLLO_PERCEPTION_PIDFD_SHA256',
   'APOLLO_PERCEPTION_PIDFD_ROOT', 'APOLLO_PERCEPTION_CONSUMER_RUN_ID', 'APOLLO_PERCEPTION_CGROUP_SCOPE',
   'APOLLO_PERCEPTION_JOB_DEADLINE_MS',
+  'APOLLO_DASHBOARD_RUNTIME_E2E', 'APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT',
+  'APOLLO_DASHBOARD_RUNTIME_SERVER_MODE', 'APOLLO_DASHBOARD_CFT157_LINUX_ROOT',
 ])
 const safeError = (error) => { const message = String(error?.message ?? ''); return {
   name: error.name, code: error.code ?? null, messageSha256: digest(message), messageBytes: Buffer.byteLength(message),
@@ -185,12 +187,13 @@ export async function runCgroupConsumer(mode, args = [], env = process.env) {
   if (fixture) assert.ok(args.length === 1 && CGROUP_FIXTURES.includes(args[0]), 'Closed CI cgroup fixture required')
   else fixedConsumer(mode, args)
   assert.equal(process.platform, 'linux'); assert.ok(process.getuid() > 0 && process.getgid() > 0)
-  const started = Date.now(), deadlineAt = Number(env.APOLLO_PERCEPTION_JOB_DEADLINE_MS ?? started + 1200000)
+  const started = Date.now(), deadlineAt = fixedDashboardDeadline(mode,
+    Number(env.APOLLO_PERCEPTION_JOB_DEADLINE_MS ?? started + 1200000), started)
   assert.ok(Number.isSafeInteger(deadlineAt) && deadlineAt > started + 30000)
   const workEnd = deadlineAt - 25000, runId = 'pidfd-cgroup-' + randomUUID()
   const consumerRunId = fixture ? env.APOLLO_PERCEPTION_CONSUMER_RUN_ID : 'pidfd-consumer-cgroup-' + randomUUID()
   assert.match(consumerRunId ?? '', /^pidfd-consumer-[a-z-]+-[a-f0-9-]+$/)
-  env = { ...env, APOLLO_PERCEPTION_CONSUMER_RUN_ID: consumerRunId }
+  env = { ...env, APOLLO_PERCEPTION_CONSUMER_RUN_ID: consumerRunId, APOLLO_PERCEPTION_JOB_DEADLINE_MS: String(deadlineAt) }
   process.env.APOLLO_PERCEPTION_CONSUMER_RUN_ID = consumerRunId
   const registration = await registerAddonConsumer(env)
   const { binding } = await loadPidfdBinding(env)
@@ -211,6 +214,7 @@ export async function runCgroupConsumer(mode, args = [], env = process.env) {
     assert.equal(digest(readFileSync(expected.realpath)), expected.sha256, 'Root/guardian executable changed before spawn')
   }
   const report = { schemaVersion: 'perception-cgroup-owner-close/v1', runId: consumerRunId, cgroupRunId: runId,
+    mode, args,
     sourceCommit: env.GITHUB_SHA, buildRunId: registration.entry.buildRunId, owner,
     success: false, helpers: [], observed: [], terminality: [], errors: [],
     childCloseObserved: false, carrierCloseObserved: false, guardianCloseObserved: false, containmentRequired: false,
@@ -421,6 +425,29 @@ export async function runCgroupConsumer(mode, args = [], env = process.env) {
     for (const [name, handler] of signals) process.removeListener(name, handler)
     if (killFd !== undefined) { try { closeSync(killFd) } catch (error) { fail(error) } }
     report.success = !report.errors.length && !interrupted && !report.containmentRequired && cgroupTerminalProof(report)
+    if (mode === 'acquisition' && report.success) {
+      try {
+        assert.ok(Date.now() < deadlineAt, 'Acquisition publication deadline')
+        const path = posix.join(env.APOLLO_DASHBOARD_CFT157_LINUX_ROOT, 'manifest.json')
+        const metadata = lstatSync(path)
+        assert.ok(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 0 && metadata.size <= 1048576)
+        assert.equal(realpathSync(path), path)
+        const bytes = readFileSync(path); assert.ok(Date.now() < deadlineAt)
+        const manifest = JSON.parse(bytes)
+        assert.equal(manifest.outcome, 'files-verified-awaiting-owner'); assert.deepEqual(manifest.errors, [])
+        assert.equal(manifest.sourceHead, env.GITHUB_SHA)
+        assert.equal(manifest.sourceSha256, registration.registry.sourceFiles.find((row) => row.path === 'scripts/validation/acquire-dashboard-cft157-linux.py').sha256)
+        const closePath = posix.join(env.APOLLO_DASHBOARD_CFT157_LINUX_ROOT, 'actor-process.json')
+        const closeStat = lstatSync(closePath)
+        assert.ok(closeStat.isFile() && !closeStat.isSymbolicLink() && closeStat.size <= 65536)
+        const closeBytes = readFileSync(closePath), close = JSON.parse(closeBytes)
+        assert.equal(close.closeObserved, true); assert.equal(close.code, 0); assert.equal(close.signal, null)
+        assert.equal(close.runId, manifest.runId); assert.equal(close.birth.pid, manifest.pid)
+        assert.ok(Date.now() < deadlineAt)
+        report.acquisition = { path, bytes: bytes.length, sha256: digest(bytes), actorRunId: manifest.runId,
+          actorClose: { path: closePath, sha256: digest(closeBytes), bytes: closeBytes.length } }
+      } catch (error) { fail(error); report.success = false }
+    }
     report.completedAt = new Date().toISOString()
     try {
       if (fixture) {

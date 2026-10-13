@@ -10,7 +10,7 @@ import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { createDashboardRuntimePreparationForTest, prepareDashboardRuntimeJourney, runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.mjs'
+import { assertDashboardCftBuildBindings, createDashboardRuntimePreparationForTest, prepareDashboardRuntimeJourney, runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.mjs'
 import { dashboardColorProbePersistenceData } from './helpers/dashboard-controlled-export-fixture.mjs'
 
 // Source bytes, aligned transcript, initial timeline, rights and color probe are
@@ -684,4 +684,49 @@ test('dashboard runtime preparation rejects an incomplete imported binding befor
   const prepare = createDashboardRuntimePreparationForTest(async () => { calls++; return {} })
   await assert.rejects(prepare({ signal: t.signal }), /Prepared PrismaPublicOperationRepository binding is incomplete/)
   assert.equal(calls, 1)
+})
+
+test('dashboard CfT build bindings admit fresh authenticated layouts and reject source/bundle/CDP/helper authority mismatches', () => {
+  // Controlled representations of the IO facts consumed by the semantic gate.
+  // This unit does not authenticate raw files, an owner freeze or a browser.
+  const base = 'C:/Users/leand/Documents/Apollo/w61-70-20261008'
+  const sourceHead = '9'.repeat(40), buildCommit = 'a'.repeat(40), bundlePin = 'b'.repeat(64)
+  const helper = { path: 'C:/Users/leand/.codex/worktrees/w61-ci-observer/apollo-video/tests/v2/helpers/dashboard-runtime-journey.mjs', bytes: 12345, sha256: 'c'.repeat(64) }
+  const bundle = { schemaVersion: 1, sourceCommit: buildCommit, buildRunId: 'build-shell-95b4-v1-f2a493ed',
+    root: 'C:/Users/leand/.codex/worktrees/w61-70-integration/apollo-video',
+    files: [{ path: '.next/static/chunks/fixture.js', bytes: 4, sha256: 'd'.repeat(64) }], fileCount: 1, totalBytes: 4 }
+  const bundlePath = `${base}/${bundle.buildRunId}/bundle-manifest.json`
+  const facts = { sourceHead, helper, bundlePin, bundlePath, bundle, cdpManifest: structuredClone(bundle),
+    config: { sourceHead, buildSourceCommit: buildCommit, bundleManifestPath: bundlePath, bundleManifestSha256: bundlePin },
+    freeze: { schemaVersion: 'dashboard-cft157-freeze/v1', sourceHead, files: [structuredClone(helper)] } }
+  assert.notEqual(sourceHead, buildCommit, 'Build provenance need not equal the test source commit')
+  assert.doesNotThrow(() => assertDashboardCftBuildBindings(facts))
+  const mutations = [
+    (value) => { value.config.sourceHead = '8'.repeat(40) },
+    (value) => { value.config.buildSourceCommit = '8'.repeat(40) },
+    (value) => { value.sourceHead = 'short' },
+    (value) => { value.config.bundleManifestSha256 = 'e'.repeat(64) },
+    (value) => { value.bundlePin = undefined },
+    (value) => { value.cdpManifest.sourceCommit = '8'.repeat(40) },
+    (value) => { value.cdpManifest.files[0].sha256 = 'e'.repeat(64) },
+    (value) => { value.bundle.root = 'C:/arbitrary'; value.cdpManifest.root = value.bundle.root },
+    (value) => { value.bundle.buildRunId = 'other-build'; value.cdpManifest.buildRunId = value.bundle.buildRunId },
+    (value) => { value.freeze.sourceHead = '8'.repeat(40) },
+    (value) => { value.freeze.files = [] },
+    (value) => { value.freeze.files.push(structuredClone(value.freeze.files[0])) },
+    (value) => { value.freeze.files[0].sha256 = 'e'.repeat(64) },
+    (value) => { value.freeze.files[0].bytes += 1 },
+    (value) => { value.freeze.files[0].path += '.other' },
+  ]
+  for (const mutate of mutations) {
+    const invalid = structuredClone(facts); mutate(invalid)
+    assert.throws(() => assertDashboardCftBuildBindings(invalid))
+  }
+  for (const path of [`${base}/../outside/bundle-manifest.json`, `${base}/build/child/bundle-manifest.json`,
+    `${base}/build/bundle-manifest-v2.json`, `${base}/build\\escape/bundle-manifest.json`,
+    `${base}/build/bundle-manifest.json?query`, 'C:/arbitrary/bundle-manifest.json']) {
+    const invalid = structuredClone(facts)
+    invalid.config.bundleManifestPath = path; invalid.bundlePath = path
+    assert.throws(() => assertDashboardCftBuildBindings(invalid))
+  }
 })

@@ -12,11 +12,20 @@ import { assertPerceptionSuite, COMPOSED_SUITE } from './run-perception-ci-names
 import { assertCgroupScope, parseCgroupMembership, readCgroupSnapshot } from './perception-consumer-cgroup.mjs'
 
 export function fixedConsumer(mode, args) {
-  assert.ok(['unit', 'namespace', 'gates'].includes(mode), 'Fixed CI consumers only')
+  assert.ok(['unit', 'namespace', 'gates', 'dashboard', 'acquisition'].includes(mode), 'Fixed CI consumers only')
   if (mode === 'namespace') { assert.ok(args.length >= 1 && args.length <= 2); assertPerceptionSuite(args[0], args[1] ?? null) }
   else if (mode === 'gates') assert.deepEqual(args, [COMPOSED_SUITE])
   else assert.deepEqual(args, [])
   return [join(CI_ROOT, 'scripts/validation/perception-ci-child-bootstrap.mjs'), mode, ...args]
+}
+export const DASHBOARD_CI_ARGV = Object.freeze(['--experimental-transform-types',
+  '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--test', '--test-reporter=tap',
+  'tests/v2/dashboard-runtime-journey.e2e.mjs'])
+export function fixedDashboardDeadline(mode, configured, started) {
+  const cap = mode === 'dashboard' ? 445000 : mode === 'acquisition' ? 300000 : null
+  if (cap === null) return configured
+  assert.ok(Number.isSafeInteger(configured) && configured > started + 30000, 'Dashboard owner absolute deadline required')
+  return Math.min(configured, started + cap)
 }
 // Kernel-admitted domain only. Processes outside this exact cgroup are outside
 // the run's inventory, not UID/baseline exceptions. Unknown members still fail.
@@ -163,7 +172,7 @@ export async function runAddonConsumer(mode, args = [], env = process.env) {
   process.env.APOLLO_PERCEPTION_CONSUMER_RUN_ID = runId
   const started = Date.now(), configured = Number(env.APOLLO_PERCEPTION_JOB_DEADLINE_MS ?? started + 1200000)
   assert.ok(Number.isSafeInteger(configured) && configured > started + 30000)
-  const deadlineAt = configured, workDeadline = deadlineAt - 25000
+  const deadlineAt = fixedDashboardDeadline(mode, configured, started), workDeadline = deadlineAt - 25000
   const scope = assertCgroupScope(JSON.parse(env.APOLLO_PERCEPTION_CGROUP_SCOPE ?? 'null'))
   assert.equal(scope.membership, parseCgroupMembership(await budget(() => readFile(`/proc/${process.pid}/cgroup`,
     { encoding: 'utf8', signal: AbortSignal.timeout(500) }), workDeadline, 500, 'Consumer kernel admission')),

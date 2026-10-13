@@ -8,14 +8,14 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { buildPublicationAllowed } from '../../scripts/validation/build-perception-pidfd.mjs'
 import { awaitBootstrapGate } from '../../scripts/validation/perception-ci-child-bootstrap.mjs'
-import { fixedConsumer, consumerTerminalProof, unattributedConsumerFacts, recheckUnattributedConsumer } from '../../scripts/validation/run-perception-addon-consumer.mjs'
+import { fixedConsumer, fixedDashboardDeadline, DASHBOARD_CI_ARGV, consumerTerminalProof, unattributedConsumerFacts, recheckUnattributedConsumer } from '../../scripts/validation/run-perception-addon-consumer.mjs'
 import { assertCgroupScope, openCgroupKill, parseCgroupMembership, readCgroupSnapshot, cgroupTerminalProof,
   cgroupControlledCaseAccepted } from '../../scripts/validation/perception-consumer-cgroup.mjs'
 import { namespaceOwnerClosed, assertArchivePaths, planArchive } from '../../scripts/validation/cleanup-perception-pidfd.mjs'
 import { verifyOuterHostDeath, verifySudoCarrierBirth, verifyOuterRoleCredentials } from '../../scripts/validation/perception-outer-host-death.mjs'
 import { loadPidfdBinding } from '../../scripts/validation/perception-pidfd.mjs'
 import { awaitProductGate, bootstrapReadback } from '../../scripts/validation/perception-namespace-node-bootstrap.mjs'
-import { CI_PIDFD_SOURCE_PATHS, digest, initializeRegistry, readRegistry, registryLock,
+import { CI_PIDFD_SOURCE_PATHS, digest, initializeRegistry, readRegistry, registryLock, assertDashboardPlaywrightFacts,
   registerAddonConsumer, writeRegistry, sourceFingerprint } from '../../scripts/validation/perception-addon-registry.mjs'
 
 const cgroupScope = { runId: 'pidfd-cgroup-11111111-1111-1111-1111-111111111111',
@@ -243,15 +243,40 @@ function unknownMetadataIo(identities) {
   }
 }
 
-test('fixed CI consumer permits literal npm test, eight named namespaces and infrastructure gate only', () => {
+test('fixed CI consumer permits literal npm test, eight named namespaces, fixed dashboard/acquisition and infrastructure gate only', () => {
   assert.equal(fixedConsumer('unit', []).at(-1), 'unit')
   assert.equal(fixedConsumer('gates', ['tests/v2/perception-namespace-observer.integration.mjs']).at(-2), 'gates')
   const face = 'tests/v2/prisma-face-producer.integration.mjs'
   assert.deepEqual(fixedConsumer('namespace', [face, 'publish-race|face control']).slice(-2), [face, 'publish-race|face control'])
+  assert.equal(fixedConsumer('dashboard', []).at(-1), 'dashboard')
+  assert.equal(fixedConsumer('acquisition', []).at(-1), 'acquisition')
+  assert.deepEqual(DASHBOARD_CI_ARGV, ['--experimental-transform-types', '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON',
+    '--test', '--test-reporter=tap', 'tests/v2/dashboard-runtime-journey.e2e.mjs'])
   for (const [mode, args] of [['exec', ['/bin/true']], ['unit', ['--skip']], ['gates', ['ignored']],
-    ['namespace', ['tests/v2/arbitrary.integration.mjs']], ['namespace', [face, 'face']]]) {
+    ['namespace', ['tests/v2/arbitrary.integration.mjs']], ['namespace', [face, 'face']],
+    ['dashboard', ['tests/v2/arbitrary.mjs']], ['acquisition', ['https://arbitrary.invalid']], ['dashboard-test', []]]) {
     assert.throws(() => fixedConsumer(mode, args))
   }
+})
+test('fixed acquisition/dashboard owner budgets cap original admission without renewing or changing namespace budgets', () => {
+  assert.equal(fixedDashboardDeadline('acquisition', 900000, 100000), 400000)
+  assert.equal(fixedDashboardDeadline('dashboard', 900000, 100000), 545000)
+  assert.equal(fixedDashboardDeadline('dashboard', 180000, 100000), 180000)
+  assert.equal(fixedDashboardDeadline('namespace', 900000, 100000), 900000)
+  for (const value of [NaN, Infinity, 130000, 100000]) assert.throws(() => fixedDashboardDeadline('acquisition', value, 100000))
+})
+test('CfT build provenance requires the three exact measured Playwright 1.62 files and lock origin', () => {
+  const root = '/controlled/checkout'
+  const facts = { schemaVersion: 'dashboard-playwright-installation/v1', version: '1.62.0', lockIntegrity: 'sha512-YWJj',
+    fullDependencyClosureClaimed: false, hashesAreUpstream: false, files: ['package.json', 'index.js', 'lib/coreBundle.js']
+      .map((name) => ({ path: root + '/node_modules/playwright-core/' + name, bytes: 9, sha256: 'a'.repeat(64) })) }
+  assert.equal(assertDashboardPlaywrightFacts(facts, root), facts)
+  for (const mutate of [(value) => { value.version = '1.61.0' }, (value) => { value.files.pop() },
+    (value) => { value.files[0].sha256 = 'wrong' }, (value) => { value.files[1].path = '/other/index.js' },
+    (value) => { value.hashesAreUpstream = true }, (value) => { value.fullDependencyClosureClaimed = true }]) {
+    const changed = structuredClone(facts); mutate(changed); assert.throws(() => assertDashboardPlaywrightFacts(changed, root))
+  }
+  assert.throws(() => assertDashboardPlaywrightFacts(undefined, root))
 })
 
 test('build publication requires compiler success, actual close and every observed identity terminal', () => {

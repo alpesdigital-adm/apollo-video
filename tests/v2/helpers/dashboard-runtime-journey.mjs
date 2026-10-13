@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { closeSync, createReadStream, existsSync, fstatSync, openSync, readSync } from 'node:fs'
-import { copyFile, lstat, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
-import { closeOwnedBrowser } from './library-browser-proof.mjs'
+import { fileURLToPath } from 'node:url'
+import { closeOwnedBrowser, observeOwnedBrowserLifecycle } from './library-browser-proof.mjs'
 import { createDashboardPipelineObserver } from './dashboard-w36-pipeline-proof.mjs'
 import { seedDashboardControlledExportFixture } from './dashboard-controlled-export-fixture.mjs'
 import { installDashboardCancelDiagnostics, joinDashboardCancelEvents, validateDashboardCancelSnapshot } from './dashboard-cancel-diagnostics.mjs'
@@ -13,6 +14,129 @@ import { installDashboardCancelDiagnostics, joinDashboardCancelEvents, validateD
 const exec = promisify(execFile)
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+export function assertDashboardLinuxCftBindings(manifest, owner, actor, sourcePin, sourceHead) {
+  assert.equal(manifest.schemaVersion, 'dashboard-cft157-linux-acquisition/v1')
+  assert.equal(manifest.outcome, 'files-verified-awaiting-owner'); assert.deepEqual(manifest.errors, [])
+  assert.equal(manifest.sourceHead, sourceHead); assert.equal(manifest.sourceSha256, sourcePin)
+  assert.equal(manifest.version, '157.0.8090.0'); assert.equal(manifest.revision, '@2ea1b71af70d7fc5d41325dda8df37c1f98ac531')
+  assert.equal(manifest.nativeBrowserExecuted, false)
+  assert.equal(owner.schemaVersion, 'perception-cgroup-owner-close/v1'); assert.equal(owner.mode, 'acquisition')
+  assert.equal(owner.success, true); assert.deepEqual(owner.errors, []); assert.equal(owner.containmentRequired, false)
+  assert.equal(owner.carrierCloseObserved, true); assert.equal(owner.guardianCloseObserved, true)
+  assert.equal(owner.childCloseObserved, true); assert.equal(owner.empty.populated, 0); assert.equal(owner.empty.liveMembershipEmpty, true)
+  assert.ok(owner.observed.length > 0 && owner.terminality.length === owner.observed.length && owner.terminality.every((row) => row.terminal))
+  assert.ok(owner.actors.length >= 3 && owner.actors.every((row) => row.closeObserved))
+  assert.equal(owner.sourceCommit, sourceHead); assert.equal(owner.acquisition.actorRunId, manifest.runId)
+  assert.equal(actor.schemaVersion, 'dashboard-cft157-linux-child-close/v1'); assert.equal(actor.runId, manifest.runId)
+  assert.equal(actor.birth.pid, manifest.pid); assert.equal(actor.closeObserved, true); assert.equal(actor.code, 0); assert.equal(actor.signal, null)
+  assert.equal(manifest.requests.length, 2)
+  assert.equal(manifest.requests[0].url, 'https://storage.googleapis.com/storage/v1/b/chrome-for-testing-public/o/157.0.8090.0%2Flinux64%2Fchrome-linux64.zip')
+  assert.equal(manifest.requests[1].url, 'https://storage.googleapis.com/chrome-for-testing-public/157.0.8090.0/linux64/chrome-linux64.zip')
+  for (const row of manifest.requests) {
+    assert.equal(row.finalUrl, row.url); assert.equal(row.httpStatus, 200); assert.deepEqual(row.redirects, [])
+    assert.equal(row.connectionFinallyClosed, true); assert.match(row.sha256, /^[a-f0-9]{64}$/)
+  }
+  assert.equal(manifest.requests[1].bytes, 201551103); assert.equal(manifest.requests[1].md5Measured, 'BvMevHF6ZEenSob5RNSB4g==')
+  assert.equal(manifest.requests[1].crc32cOfficial, 'SFhLhQ=='); assert.equal(manifest.requests[1].crc32cCalculated, false)
+}
+async function admitDashboardLinuxCft() {
+  assert.equal(process.platform, 'linux')
+  const end = performance.now() + 60000
+  const remaining = () => { const value = Math.floor(end - performance.now()); assert.ok(value > 0, 'Linux CfT admission deadline'); return value }
+  const root = process.env.APOLLO_DASHBOARD_CFT157_LINUX_ROOT
+  assert.equal(root, `${process.env.RUNNER_TEMP}/apollo-dashboard-cft157-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`)
+  assert.ok(root.startsWith('/') && !root.includes('..') && !root.includes('\\'))
+  assert.equal(await realpath(root), root); remaining()
+  const rootFacts = await lstat(root); assert.ok(rootFacts.isDirectory() && !rootFacts.isSymbolicLink()); remaining()
+  const read = async (path, maximum, expected) => {
+    remaining(); assert.ok(path.startsWith(root + '/') || path.startsWith(process.env.APOLLO_PERCEPTION_PIDFD_ROOT + '/') || path === fileURLToPath(import.meta.url) || playwrightPaths.has(path))
+    const before = await lstat(path); remaining(); assert.ok(before.isFile() && !before.isSymbolicLink() && before.size > 0 && before.size <= maximum)
+    assert.equal(await realpath(path), path); remaining()
+    const stream = createReadStream(path, { highWaterMark: 65536, signal: AbortSignal.timeout(remaining()) })
+    const close = new Promise((done) => stream.once('close', done)), hash = createHash('sha256'), chunks = []
+    let bytes = 0, primary
+    try {
+      for await (const chunk of stream) { remaining(); bytes += chunk.length; assert.ok(bytes <= maximum); hash.update(chunk); if (maximum <= 1048576) chunks.push(chunk) }
+    } catch (error) { primary = error }
+    finally { stream.destroy(); try { await close; remaining() } catch (error) { primary ??= error } }
+    if (primary) throw primary
+    const after = await lstat(path); remaining()
+    assert.deepEqual([after.dev, after.ino, after.size, after.mtimeMs], [before.dev, before.ino, before.size, before.mtimeMs])
+    assert.equal(bytes, before.size); const digest = hash.digest('hex'); if (expected) assert.equal(digest, expected)
+    return { bytes, sha256: digest, raw: maximum <= 1048576 ? Buffer.concat(chunks) : null }
+  }
+  const playwrightPaths = new Set()
+  const { readRegistry, jsonDigest, assertDashboardPlaywrightFacts } = await import('../../../scripts/validation/perception-addon-registry.mjs'); remaining()
+  const registry = readRegistry(process.env.APOLLO_PERCEPTION_PIDFD_ROOT, process.env)
+  assert.equal(process.env.APOLLO_PERCEPTION_PIDFD_PROVENANCE, process.env.APOLLO_PERCEPTION_PIDFD_ROOT + '/provenance.json')
+  const provenance = JSON.parse((await read(process.env.APOLLO_PERCEPTION_PIDFD_PROVENANCE, 1048576, registry.provenanceSha256)).raw)
+  assert.equal(provenance.success, true); assert.equal(provenance.childCloseObserved, true)
+  assert.equal(provenance.runId, registry.runId); assert.equal(provenance.sourceCommit, process.env.GITHUB_SHA)
+  assert.deepEqual(provenance.dashboardPlaywright, registry.dashboardPlaywright)
+  const playwright = assertDashboardPlaywrightFacts(registry.dashboardPlaywright)
+  for (const row of playwright.files) { playwrightPaths.add(row.path); const actual = await read(row.path, 16 * 1024 * 1024, row.sha256); assert.equal(actual.bytes, row.bytes) }
+  const helperPath = fileURLToPath(import.meta.url), helperPin = registry.sourceFiles.find((row) => row.path === 'tests/v2/helpers/dashboard-runtime-journey.mjs')
+  assert.ok(helperPin); await read(helperPath, 1048576, helperPin.sha256)
+  const actorPin = registry.sourceFiles.find((row) => row.path === 'scripts/validation/acquire-dashboard-cft157-linux.py'); assert.ok(actorPin)
+  assert.deepEqual(provenance.sourceFiles, registry.sourceFiles)
+  const receiptDirectory = process.env.APOLLO_PERCEPTION_PIDFD_ROOT + '/receipts'
+  const names = await readdir(receiptDirectory); remaining(); assert.ok(names.length <= 256)
+  const owners = []
+  for (const name of names.filter((name) => /^pidfd-consumer-cgroup-[a-f0-9-]+\.json$/.test(name))) {
+    const packet = await read(receiptDirectory + '/' + name, 1048576)
+    const row = JSON.parse(packet.raw)
+    if (row.mode !== 'acquisition') continue
+    const seal = await read(receiptDirectory + '/' + name.replace(/\.json$/, '.sha256'), 64)
+    assert.equal(seal.raw.toString('utf8'), jsonDigest(row)); owners.push(row)
+  }
+  assert.equal(owners.length, 1, 'Exactly one closed acquisition owner is required before Chrome')
+  const owner = owners[0]
+  assert.equal(owner.acquisition.path, root + '/manifest.json')
+  const manifestBytes = await read(root + '/manifest.json', 1048576, owner.acquisition.sha256)
+  const manifest = JSON.parse(manifestBytes.raw); assert.equal(manifest.root, root)
+  assert.equal(owner.acquisition.actorClose.path, root + '/actor-process.json')
+  const actor = JSON.parse((await read(root + '/actor-process.json', 65536, owner.acquisition.actorClose.sha256)).raw)
+  assertDashboardLinuxCftBindings(manifest, owner, actor, actorPin.sha256, process.env.GITHUB_SHA)
+  assert.equal(manifest.inventory.path, root + '/inventory.json')
+  const inventory = JSON.parse((await read(root + '/inventory.json', 1048576, manifest.inventory.sha256)).raw)
+  assert.equal(inventory.schemaVersion, 'dashboard-cft157-linux-inventory/v1')
+  assert.equal(inventory.fileCount, inventory.files.length); assert.ok(inventory.files.length > 0 && inventory.files.length <= 2000)
+  const expected = new Set(), seen = new Set(); let total = 0
+  for (const row of inventory.files) {
+    assert.match(row.path, /^chrome-linux64\/[A-Za-z0-9_.+/-]+$/); assert.ok(!row.path.split('/').some((part) => !part || ['.', '..'].includes(part)))
+    assert.ok(!seen.has(row.path.toLowerCase())); seen.add(row.path.toLowerCase()); expected.add(row.path)
+    assert.ok(Number.isSafeInteger(row.bytes) && row.bytes >= 0 && row.bytes <= 512 * 1024 * 1024)
+    assert.ok([0o600, 0o700].includes(row.mode)); assert.match(row.sha256, /^[a-f0-9]{64}$/)
+    if (row.bytes === 0) {
+      const metadata = await lstat(root + '/' + row.path); remaining()
+      assert.ok(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === 0)
+      assert.equal(await realpath(root + '/' + row.path), root + '/' + row.path); assert.equal(row.sha256, sha256(Buffer.alloc(0)))
+    } else await read(root + '/' + row.path, Math.max(1048577, row.bytes), row.sha256)
+    const metadata = await lstat(root + '/' + row.path); remaining(); assert.equal(metadata.mode & 0o7777, row.mode)
+    total += row.bytes; assert.ok(total <= 1200 * 1024 * 1024)
+  }
+  const actual = new Set()
+  const walk = async (path) => {
+    for (const name of await readdir(root + '/' + path, { withFileTypes: true })) {
+      remaining(); assert.ok(!name.isSymbolicLink())
+      const childPath = path + '/' + name.name
+      if (name.isDirectory()) { assert.ok([...expected].some((item) => item.startsWith(childPath + '/'))); await walk(childPath) }
+      else { assert.ok(name.isFile() && expected.has(childPath)); actual.add(childPath) }
+    }
+  }
+  await walk('chrome-linux64'); assert.deepEqual(actual, expected); assert.equal(total, inventory.totalBytes)
+  const rootNames = await readdir(root); remaining()
+  assert.deepEqual(rootNames.sort(), ['actor-process.json', 'chrome-linux64', 'chrome-linux64.zip', 'inventory.json', 'manifest.json', 'metadata-gcs.json'].sort())
+  await read(root + '/chrome-linux64.zip', 201551103, manifest.requests[1].sha256)
+  await read(root + '/metadata-gcs.json', 65536, manifest.requests[0].sha256)
+  const executable = inventory.files.find((row) => row.path === 'chrome-linux64/chrome'); assert.ok(executable && executable.mode === 0o700)
+  remaining()
+  return { browserExecutable: root + '/chrome-linux64/chrome', expectedRevision: manifest.revision,
+    evidence: { proofScope: 'normal-dashboard-journey-with-pinned-linux-browser', causalityEstablished: false,
+      sourceHead: manifest.sourceHead, manifestSha256: manifestBytes.sha256, inventorySha256: manifest.inventory.sha256,
+      executable, playwright, acquisitionOwnerRunId: owner.runId, acquisitionCgroupTerminal: true,
+      browserVersionObserved: false, versionSessionDetached: false } }
+}
 const CARD_EXPECTATIONS = {
   draft: { tone: 'neutral', color: 'text-[#aaa49a]', badge: 'Configuração', action: 'open-result', button: 'Abrir workspace →' },
   'rendering-proxy': { tone: 'info', color: 'text-[#79a5da]', badge: 'Renderizando proxy', action: 'view-progress', button: 'Acompanhar →' },
@@ -89,6 +213,33 @@ export async function prepareDashboardRuntimeJourney(input) {
 export function createDashboardRuntimePreparationForTest(importModule) {
   assert.equal(typeof importModule, 'function')
   return createRuntimePreparation(importModule)
+}
+
+// Semantic check of pin-verified IO facts. The caller authenticates the raw
+// config/freeze/bundle/helper bytes; supplied metadata alone never admits a browser.
+export function assertDashboardCftBuildBindings({ config, sourceHead, bundlePath, bundlePin, bundle, cdpManifest, freeze, helper }) {
+  assert.match(sourceHead ?? '', /^[a-f0-9]{40}$/)
+  assert.match(config.sourceHead ?? '', /^[a-f0-9]{40}$/); assert.equal(config.sourceHead, sourceHead)
+  assert.match(config.buildSourceCommit ?? '', /^[a-f0-9]{40}$/)
+  assert.match(config.bundleManifestPath ?? '', /^C:\/Users\/leand\/Documents\/Apollo\/w61-70-20261008\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/bundle-manifest\.json$/)
+  assert.equal(config.bundleManifestPath, bundlePath)
+  assert.match(bundlePin ?? '', /^[a-f0-9]{64}$/); assert.equal(config.bundleManifestSha256, bundlePin)
+  assert.equal(bundle.schemaVersion, 1)
+  assert.equal(bundle.root, 'C:/Users/leand/.codex/worktrees/w61-70-integration/apollo-video')
+  assert.match(bundle.buildRunId ?? '', /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/)
+  assert.equal(config.bundleManifestPath, `C:/Users/leand/Documents/Apollo/w61-70-20261008/${bundle.buildRunId}/bundle-manifest.json`)
+  assert.equal(bundle.sourceCommit, config.buildSourceCommit)
+  assert.equal(cdpManifest?.sourceCommit, config.buildSourceCommit)
+  assert.deepEqual(bundle, cdpManifest, 'CfT and CDP must consume the same authenticated build manifest')
+  assert.equal(freeze.schemaVersion, 'dashboard-cft157-freeze/v1'); assert.equal(freeze.sourceHead, config.sourceHead)
+  assert.deepEqual(Object.keys(freeze).sort(), ['schemaVersion', 'sourceHead', 'files'].sort())
+  assert.ok(Array.isArray(freeze.files) && freeze.files.length > 0 && freeze.files.length <= 32)
+  assert.ok(freeze.files.every((row) => typeof row.path === 'string' && !/[\\\x00-\x1f\x7f]/.test(row.path) &&
+    row.path.split('/').every((part) => part !== '.' && part !== '..') && Number.isSafeInteger(row.bytes) && row.bytes > 0 && /^[a-f0-9]{64}$/.test(row.sha256 ?? '')))
+  assert.equal(new Set(freeze.files.map((row) => row.path.toLowerCase())).size, freeze.files.length)
+  const rows = freeze.files.filter((row) => row.path === helper.path)
+  assert.equal(rows.length, 1, 'External source freeze must contain this exact helper once')
+  assert.equal(rows[0].sha256, helper.sha256); assert.equal(rows[0].bytes, helper.bytes)
 }
 
 /** Real proxy workers and negative final admission; seeded review GUI is explicit. */
@@ -285,6 +436,7 @@ export async function runDashboardRuntimeJourney(input) {
     // No script URL is converted to a filesystem path or opened.
     evidence.cdp.scriptManifest = { state: 'externally-pinned', sha256: pin, buildSourceCommit: manifest.sourceCommit,
       testSourceCommit: process.env.GITHUB_SHA ?? null, fileCount: manifest.fileCount, scriptCount: cdpScriptHashes.size }
+    return manifest
   }
   const attachCdp = async (opened, deadline = performance.now() + 10000) => {
     const state = browserPages.get(opened), started = performance.now()
@@ -610,13 +762,20 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal(login.status, 200, await login.text())
     const cookie = /apollo_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')?.[1]
     assert.ok(cookie)
-    loadCdpScriptManifest()
+    const cdpManifest = loadCdpScriptManifest()
     const cftNames = ['APOLLO_DASHBOARD_CFT157_CONFIG_PATH', 'APOLLO_DASHBOARD_CFT157_CONFIG_SHA256',
       'APOLLO_DASHBOARD_CFT157_MANIFEST_PATH', 'APOLLO_DASHBOARD_CFT157_MANIFEST_SHA256',
       'APOLLO_DASHBOARD_CFT157_INVENTORY_PATH', 'APOLLO_DASHBOARD_CFT157_INVENTORY_SHA256',
       'APOLLO_DASHBOARD_CFT157_EXECUTABLE_SHA256']
     const cftEnabled = cftNames.some((name) => process.env[name] !== undefined)
+    const linuxCftEnabled = process.env.APOLLO_DASHBOARD_CFT157_LINUX_ROOT !== undefined
+    assert.ok(!(cftEnabled && linuxCftEnabled), 'CfT platform authorities cannot be mixed')
     let cftConfig
+    if (linuxCftEnabled) {
+      assert.equal(cancelEnabled, false, 'CfT journey must preserve the native consumer')
+      assert.equal(process.env.APOLLO_DASHBOARD_HTTP_CONNECTION_DIAGNOSTICS, undefined)
+      cftConfig = await admitDashboardLinuxCft(); evidence.cft157 = cftConfig.evidence
+    }
     if (cftEnabled) {
       assert.ok(cftNames.every((name) => typeof process.env[name] === 'string' && process.env[name].length > 0))
       assert.equal(cancelEnabled, false, 'CfT journey must preserve the native consumer without cancel instrumentation')
@@ -654,10 +813,10 @@ export async function runDashboardRuntimeJourney(input) {
       assert.equal(cftConfig.schemaVersion, 'dashboard-cft157-browser/v1')
       assert.match(cftConfig.runId, /^dashboard-cft157-v1-[a-f0-9]{8}$/)
       assert.equal(cftConfig.evidenceRoot, directory.replaceAll('\\', '/'))
-      assert.equal(cftConfig.sourceHead, 'eae747585acfcfec5e61a5c0555b9bc14a93f21d'); assert.equal(cftConfig.sourceHead, process.env.GITHUB_SHA)
+      assert.match(cftConfig.sourceHead, /^[a-f0-9]{40}$/); assert.equal(cftConfig.sourceHead, process.env.GITHUB_SHA)
       assert.match(cftConfig.freezePath, /^C:\/Users\/leand\/Documents\/Apollo\/w61-70-20261008\/dashboard-cft157-freeze-[A-Za-z0-9-]+\.json$/)
       assert.match(cftConfig.freezeSha256, /^[a-f0-9]{64}$/)
-      assert.equal(cftConfig.buildSourceCommit, '693233668b06da7ec2f0af6e080ffd4fdb78f1a6')
+      assert.match(cftConfig.buildSourceCommit, /^[a-f0-9]{40}$/)
       const root = 'C:/Users/leand/Documents/Apollo/w61-70-20261008/cft157-acquisition-v1-5b77fe0f/cft'
       assert.equal(cftConfig.acquisitionResultPath, root.slice(0, -4) + '/result.json')
       assert.equal(cftConfig.acquisitionResultSha256, 'c18eeab24b3237913e5e1da9430daf8b3773477b0214a0be2d64bec07c1e1910')
@@ -676,7 +835,18 @@ export async function runDashboardRuntimeJourney(input) {
       assert.equal(process.env.APOLLO_DASHBOARD_CFT157_INVENTORY_SHA256, cftConfig.inventorySha256)
       assert.equal(cftConfig.bundleManifestPath, process.env.APOLLO_DASHBOARD_RUNTIME_BUNDLE_MANIFEST)
       assert.equal(cftConfig.bundleManifestSha256, process.env.APOLLO_DASHBOARD_RUNTIME_BUNDLE_MANIFEST_SHA256)
-      assert.equal(cftConfig.bundleManifestSha256, 'bdf3126b4b6b976e1fff97ef42a1d1552ff636bcd858a35f9be26235bef8fbdc')
+      assert.match(cftConfig.bundleManifestPath, /^C:\/Users\/leand\/Documents\/Apollo\/w61-70-20261008\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/bundle-manifest\.json$/)
+      const bundle = JSON.parse(await pinned(cftConfig.bundleManifestPath, cftConfig.bundleManifestSha256, 1048576, true))
+      const freeze = JSON.parse(await pinned(cftConfig.freezePath, cftConfig.freezeSha256, 1048576, true))
+      const helperPath = fileURLToPath(import.meta.url).replaceAll('\\', '/')
+      assert.ok(Array.isArray(freeze.files) && freeze.files.length > 0 && freeze.files.length <= 32)
+      const helperRows = freeze.files.filter((row) => row.path === helperPath)
+      assert.equal(helperRows.length, 1, 'External source freeze must contain this exact helper once')
+      const helper = await pinned(helperPath, helperRows[0].sha256, 1048576)
+      assertDashboardCftBuildBindings({ config: cftConfig, sourceHead: process.env.GITHUB_SHA,
+        bundlePath: process.env.APOLLO_DASHBOARD_RUNTIME_BUNDLE_MANIFEST,
+        bundlePin: process.env.APOLLO_DASHBOARD_RUNTIME_BUNDLE_MANIFEST_SHA256,
+        bundle, cdpManifest, freeze, helper }); saldo()
       assert.equal(cftConfig.expectedProductVersion, '157.0.8090.0')
       assert.equal(cftConfig.expectedRevision, '@2ea1b71af70d7fc5d41325dda8df37c1f98ac531')
       const manifest = JSON.parse(await pinned(cftConfig.manifestPath, cftConfig.manifestSha256, 1048576, true))
@@ -690,16 +860,17 @@ export async function runDashboardRuntimeJourney(input) {
         priorRscFailuresPreserved: true, configurationSha256: process.env.APOLLO_DASHBOARD_CFT157_CONFIG_SHA256,
         sourceHead: cftConfig.sourceHead, buildSourceCommit: cftConfig.buildSourceCommit,
         freezePath: cftConfig.freezePath, freezeSha256: cftConfig.freezeSha256, executable,
+        helperSource: helper, bundleManifestSha256: cftConfig.bundleManifestSha256,
         manifestSha256: cftConfig.manifestSha256, inventorySha256: cftConfig.inventorySha256,
         browserVersionObserved: false, versionSessionDetached: false }
     }
-    const executablePath = cftEnabled ? cftConfig.browserExecutable :
+    const executablePath = cftEnabled || linuxCftEnabled ? cftConfig.browserExecutable :
       [process.env.PLAYWRIGHT_CHROME_EXECUTABLE, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].find((path) => path && existsSync(path))
     assert.ok(executablePath)
     server = await chromium.launchServer({ executablePath, headless: true, timeout: 20000 })
-    child = server.process(); evidence.browserPid = child.pid
+    child = server.process(); observeOwnedBrowserLifecycle(server, child); evidence.browserPid = child.pid
     browser = await chromium.connect(server.wsEndpoint(), { timeout: 20000 })
-    if (cftEnabled) {
+    if (cftEnabled || linuxCftEnabled) {
       const deadline = performance.now() + 5000
       const saldo = () => { const value = Math.floor(deadline - performance.now()); assert.ok(value > 0, 'CfT Browser.getVersion deadline exhausted'); return value }
       let versionSession, versionError
@@ -1535,7 +1706,7 @@ export async function runDashboardRuntimeJourney(input) {
       postflightError ??= new Error('Browser error ledger is nonempty at postflight')
       evidence.outcome = 'failed'
     }
-    try { evidence.postflight = await closeOwnedBrowser({ context, browser, server, child }); assert.equal(evidence.postflight.browserTerminal, true) }
+    try { evidence.postflight = await closeOwnedBrowser({ context, browser, server, child }); assert.equal(process.platform === 'linux' ? evidence.postflight.localBrowserLifecycleTerminal : evidence.postflight.browserTerminal, true) }
     catch (error) { evidence.postflight.cleanupError = safeError(error); postflightError ??= error }
     // Keep lifecycle and error observers active through closure. An unfinished
     // request or a late body failure cannot become terminal by closing a page.
@@ -1562,6 +1733,14 @@ export async function runDashboardRuntimeJourney(input) {
         }
       } catch (error) { owned.page.cleanupError = safeError(error); postflightError ??= error }
       finally { for (const [event, listener] of owned.handlers) owned.session.off(event, listener) }
+    }
+    if (process.env.APOLLO_DASHBOARD_CFT157_LINUX_ROOT && evidence.cft157) {
+      try {
+        const post = await admitDashboardLinuxCft()
+        assert.equal(post.evidence.inventorySha256, evidence.cft157.inventorySha256)
+        assert.deepEqual(post.evidence.executable, evidence.cft157.executable)
+        evidence.cft157.postInventoryAuthenticated = true
+      } catch (error) { evidence.cft157.postAuthenticationError = safeError(error); postflightError ??= error }
     }
     // pageerror/console observers remain active through close. A late error must
     // turn the persisted outcome into FAIL while preserving an earlier failure.

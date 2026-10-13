@@ -31,6 +31,7 @@ export async function buildPidfd({ compiler, timeout, headers, env = process.env
     uid: process.getuid(), gid: process.getgid(), napiVersion: 8, success: false, errors: [],
     childCloseObserved: false, observed: [], terminality: [], deadlineAt, foregroundBudgetMs: 60000,
     compiledAsNormalUid: true }
+  if (registry.dashboardPlaywright) report.dashboardPlaywright = registry.dashboardPlaywright
   writeFileSync(join(root, 'build-owner.json'), JSON.stringify(report, null, 2), { flag: 'wx', mode: 0o600 })
   const observed = new Map()
   let child, closed = false, closePromise, birth, stdoutFd, stderrFd, context, interval, observerWork = Promise.resolve(), interrupted
