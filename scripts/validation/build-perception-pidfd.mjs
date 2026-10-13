@@ -13,6 +13,12 @@ export function buildPublicationAllowed(report) {
     report.compilerExitCode === 0 && report.childSignal === null && report.observed.length > 0 &&
     report.terminality.length === report.observed.length && report.terminality.every((item) => item.terminal)
 }
+export function buildEnvironmentEvidence(context) {
+  // Both Maps already enforce the observer's 16,384-identity bounds. Preserve
+  // its sanitized before/recheck/guard facts; no new /proc/environment read.
+  return { environmentDenials: [...(context?.environmentDenials.values() ?? [])],
+    terminalEnvironmentRechecks: [...(context?.terminalEnvironmentRechecks.values() ?? [])] }
+}
 export async function buildPidfd({ compiler, timeout, headers, env = process.env } = {}) {
   assert.equal(process.platform, 'linux'); assert.ok(process.getuid() > 0 && process.getgid() > 0)
   assert.ok(Number(process.versions.napi) >= 8)
@@ -97,6 +103,7 @@ export async function buildPidfd({ compiler, timeout, headers, env = process.env
       } catch (error) { fail(error) }
     }
     report.observed = [...observed.values()]
+    Object.assign(report, buildEnvironmentEvidence(context))
     for (const fd of [stdoutFd, stderrFd]) if (fd !== undefined) { try { closeSync(fd) } catch (error) { fail(error) } }
     for (const [name, handler] of signals) process.removeListener(name, handler)
     report.interruptedBy = interrupted ?? null

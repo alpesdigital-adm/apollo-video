@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream'
 import { chmodSync, createReadStream, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildPublicationAllowed } from '../../scripts/validation/build-perception-pidfd.mjs'
+import { buildPublicationAllowed, buildEnvironmentEvidence } from '../../scripts/validation/build-perception-pidfd.mjs'
 import { awaitBootstrapGate } from '../../scripts/validation/perception-ci-child-bootstrap.mjs'
 import { fixedConsumer, fixedDashboardDeadline, DASHBOARD_CI_ARGV, consumerTerminalProof, unattributedConsumerFacts, recheckUnattributedConsumer } from '../../scripts/validation/run-perception-addon-consumer.mjs'
 import { assertCgroupScope, openCgroupKill, parseCgroupMembership, readCgroupSnapshot, cgroupTerminalProof,
@@ -290,6 +290,35 @@ test('build publication requires compiler success, actual close and every observ
   }
   assert.equal(consumerTerminalProof({ childCloseObserved: true, observed: valid.observed, terminality: valid.terminality }), true)
   assert.equal(consumerTerminalProof({ childCloseObserved: false, observed: valid.observed, terminality: valid.terminality }), false)
+})
+
+test('build receipt serializes observer denial and terminal recheck without permitting a failed build', () => {
+  // Controlled facts exercise serialization; they do not reconstruct the CI denial's missing metadata.
+  const before = { pid: 3365, starttime: '60217', ppid: 3000, state: 'S', uid: 1001 }
+  const denial = { pid: 3365, starttime: '60217', code: 'EACCES', before,
+    recheck: { ...before }, guardReason: 'new-live-process-or-inconclusive', observedAt: '2030-01-01T00:00:00.000Z' }
+  const terminal = { pid: 7, starttime: '70', uid: 1001, before: { pid: 7, starttime: '70', state: 'S' },
+    recheck: { pid: 7, starttime: '70', state: 'Z', uid: 1001 }, observation: 'terminal-state', state: 'Z',
+    reason: 'environ-eacces-same-identity-same-uid-terminal', observedAt: '2030-01-01T00:00:00.001Z' }
+  const context = { environmentDenials: new Map([['3365:60217', denial]]),
+    terminalEnvironmentRechecks: new Map([['7:70', terminal]]) }
+  const report = { errors: [{ code: 'EACCES' }], interruptedBy: null, childCloseObserved: true,
+    compilerExitCode: 0, childSignal: null, observed: [before], terminality: [{ terminal: true }],
+    ...buildEnvironmentEvidence(context) }
+  const receipt = JSON.parse(JSON.stringify(report))
+  assert.deepEqual(receipt.environmentDenials, [denial])
+  assert.deepEqual(receipt.terminalEnvironmentRechecks, [terminal])
+  assert.equal(buildPublicationAllowed(receipt), false)
+  assert.equal(context.environmentDenials.get('3365:60217'), denial)
+  assert.equal(context.terminalEnvironmentRechecks.get('7:70'), terminal)
+})
+
+test('build bootstrap failure records honest empty observer evidence when context was never created', () => {
+  const receipt = JSON.parse(JSON.stringify({ errors: [{ code: 'BOOTSTRAP_CONTEXT_FAILED' }], childCloseObserved: false,
+    observed: [], terminality: [], ...buildEnvironmentEvidence(undefined) }))
+  assert.deepEqual(receipt.environmentDenials, [])
+  assert.deepEqual(receipt.terminalEnvironmentRechecks, [])
+  assert.equal(buildPublicationAllowed(receipt), false)
 })
 
 test('unknown metadata retains snapshot gap and later parent facts without adopting identities', async () => {
