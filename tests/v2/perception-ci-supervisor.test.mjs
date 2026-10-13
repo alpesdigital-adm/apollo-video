@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { EventEmitter } from 'node:events'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -315,6 +316,39 @@ test('Linux stat identity handles comm parentheses and preserves decimal startti
     statText({ 1: '-1' }), statText({ 2: '1.5' }), statText({ 3: '9007199254740993' }),
     statText({ 19: 'NaN' }), statText().replace('123 (', '123 ['), statText().replace(')) S', '))S')]) {
     assert.throws(() => parseLinuxProcessStat(text))
+  }
+})
+
+test('Linux stat failure diagnostics retain strict fifty-field guards and hashes without comm or raw field text', () => {
+  const mutations = [
+    [statText().split(' ').slice(0, -1).join(' '), 'FIELD_COUNT', 49],
+    [statText({ 0: '?' }), 'STATE_FORMAT', 50],
+    [statText({ 19: 'NaN' }), 'STARTTIME_FORMAT', 50],
+    [statText({ 49: 'PRIVATE_FIELD' }), 'NUMERIC_FIELD_FORMAT', 50],
+    [statText({ 1: '-1' }), 'PPID_FORMAT_OR_RANGE', 50],
+    [statText({ 2: '9007199254740993' }), 'PGRP_FORMAT_OR_RANGE', 50],
+    [statText({ 3: '9007199254740993' }), 'SESSION_FORMAT_OR_RANGE', 50],
+  ]
+  for (const [text, code, count] of mutations) {
+    assert.throws(() => parseLinuxProcessStat(text), (error) => {
+      assert.equal(error.code, 'ERR_ASSERTION'); assert.equal(error.message, 'Incomplete Linux process identity')
+      assert.equal(createHash('sha256').update(error.message).digest('hex'), '17d566a82990cc222139b09fb17c33bf9bd3cb4977a59ccd6d4af40433f7f048')
+      const facts = error.linuxStatDiagnostic
+      assert.equal(facts.guardCode, code); assert.equal(facts.fieldCount, count); assert.equal(facts.minimumFieldCount, 50)
+      assert.equal(facts.commFormat, 'valid-delimited'); assert.equal(facts.statBytes, Buffer.byteLength(text))
+      assert.equal(facts.statSha256, createHash('sha256').update(text).digest('hex'))
+      assert.equal(facts.statHashScope, 'complete'); assert.ok(facts.invalidNumericFieldNumbers.length <= 8)
+      assert.doesNotMatch(JSON.stringify(facts), /PRIVATE_FIELD|worker|spaces|NaN/)
+      return true
+    })
+  }
+  for (const [text, code, format] of [[null, 'VALUE_TYPE', 'not-string'],
+    [statText().replace('123 (', '123 ['), 'PID_PREFIX', 'invalid-prefix'],
+    [statText().replace(')) S', '))S'), 'COMM_DELIMITER', 'invalid-delimiter']]) {
+    assert.throws(() => parseLinuxProcessStat(text), (error) => {
+      assert.equal(error.linuxStatDiagnostic.guardCode, code); assert.equal(error.linuxStatDiagnostic.commFormat, format)
+      assert.equal(error.linuxStatDiagnostic.fieldCount, null); return true
+    })
   }
 })
 

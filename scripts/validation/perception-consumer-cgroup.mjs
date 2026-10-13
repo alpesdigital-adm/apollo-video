@@ -29,7 +29,9 @@ export const CGROUP_ENVIRONMENT = Object.freeze([
   'APOLLO_PERCEPTION_JOB_DEADLINE_MS',
 ])
 const safeError = (error) => { const message = String(error?.message ?? ''); return {
-  name: error.name, code: error.code ?? null, messageSha256: digest(message), messageBytes: Buffer.byteLength(message) } }
+  name: error.name, code: error.code ?? null, messageSha256: digest(message), messageBytes: Buffer.byteLength(message),
+  ...(error.linuxStatDiagnostic ? { linuxStatDiagnostic: error.linuxStatDiagnostic } : {}),
+  ...(error.cgroupSnapshotDiagnostic ? { cgroupSnapshotDiagnostic: error.cgroupSnapshotDiagnostic } : {}) } }
 
 export function assertCgroupScope(scope) {
   assert.ok(scope && typeof scope === 'object')
@@ -86,22 +88,52 @@ export async function readCgroupSnapshot(scope, deadlineAt, io = { readFile }) {
     assert.ok(remaining > 0, 'Cgroup metadata deadline exhausted before read')
     const value = await budget(() => io.readFile(path, { encoding: 'utf8', signal: AbortSignal.timeout(Math.min(500, remaining)) }),
       deadlineAt, Math.min(500, remaining), 'Cgroup metadata')
-    assert.ok(Date.now() < deadlineAt && typeof value === 'string' && Buffer.byteLength(value) <= 65536)
+    try { assert.ok(Date.now() < deadlineAt && typeof value === 'string' && Buffer.byteLength(value) <= 65536) }
+    catch (error) {
+      const bytes = typeof value === 'string' ? Buffer.byteLength(value) : null
+      try { error.cgroupMetadataDiagnostic = { bytes, sha256: bytes !== null && bytes <= 65536 ? digest(value) : null,
+        hashScope: bytes === null ? 'not-text' : bytes > 65536 ? 'unmeasured-over-bound' : 'complete',
+        guardCode: typeof value !== 'string' ? 'METADATA_TYPE' : bytes > 65536 ? 'METADATA_SIZE' : 'METADATA_DEADLINE' } }
+      catch { /* Preserve the original guard if its Error object cannot be annotated. */ }
+      throw error
+    }
     return value
   }
   const ids = (await text(posix.join(scope.path, 'cgroup.procs'))).trim().split(/\s+/).filter(Boolean)
   assert.ok(ids.length <= 16384 && ids.every((value) => /^[1-9][0-9]*$/.test(value)))
   const entries = []
+  const disappearanceReads = []
+  Object.defineProperty(entries, 'disappearanceReads', { value: disappearanceReads, enumerable: false })
   for (const pid of new Set(ids.map(Number))) {
     assert.ok(Number.isSafeInteger(pid))
+    let before, stage = 'stat-before'
     try {
-      const before = parseLinuxProcessStat(await text(`/proc/${pid}/stat`))
+      before = parseLinuxProcessStat(await text(`/proc/${pid}/stat`))
+      stage = 'membership-read'
       const membership = parseCgroupMembership(await text(`/proc/${pid}/cgroup`))
+      stage = 'stat-after'
       const after = parseLinuxProcessStat(await text(`/proc/${pid}/stat`))
+      stage = 'identity-membership-check'
       assert.equal(identityKey(before), identityKey(after), 'Cgroup membership PID recycled during observation')
       assert.equal(membership, scope.membership, 'Kernel cgroup membership escaped the admitted domain')
       entries.push({ ...after, previousPpid: before.ppid, cgroupMembership: membership })
-    } catch (error) { if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error }
+    } catch (error) {
+      const disappeared = ['ENOENT', 'ESRCH'].includes(error.code)
+      const facts = { schemaVersion: 'cgroup-snapshot-diagnostic/v1', stage, requestedPid: pid,
+        outcome: disappeared ? 'read-disappearance-reported' : error.linuxStatDiagnostic ? 'malformed-stat' : 'read-or-integrity-failure',
+        errno: Number.isSafeInteger(error.errno) ? error.errno : null,
+        readErrorCode: ['ENOENT', 'ESRCH', 'EACCES', 'EPERM', 'EIO', 'ENOTDIR', 'ABORT_ERR', 'ERR_ASSERTION'].includes(error.code) ? error.code : null,
+        knownBefore: before ? { pid: before.pid, ppid: before.ppid, processGroupId: before.processGroupId,
+          sessionId: before.sessionId, state: before.state, starttime: before.starttime.length <= 32 ? before.starttime : null } : null,
+        metadataBound: error.cgroupMetadataDiagnostic ?? null,
+        terminalityEstablished: false }
+      if (disappeared) {
+        if (disappearanceReads.length < 8) disappearanceReads.push(facts)
+      } else {
+        try { error.cgroupSnapshotDiagnostic = facts } catch { /* Never mask an immutable original Error. */ }
+        throw error
+      }
+    }
   }
   return entries
 }
@@ -333,7 +365,12 @@ export async function runCgroupConsumer(mode, args = [], env = process.env) {
     assert.equal(carrier.pending + carrier.decoder.decode(), '', 'Extra/truncated pre-release cgroup frame')
     carrier.released = true; carrier.child.stdin.end('G'); report.productGateReleased = true
     while (!carrier.closeObserved && !interrupted && !report.errors.length) {
-      for (const entry of await readCgroupSnapshot(scope, workEnd)) observed.set(identityKey(entry), entry)
+      const snapshot = await readCgroupSnapshot(scope, workEnd)
+      if (snapshot.disappearanceReads.length) {
+        const facts = report.cgroupSnapshotDisappearanceReads ??= []
+        facts.push(...snapshot.disappearanceReads.slice(0, Math.max(0, 64 - facts.length)))
+      }
+      for (const entry of snapshot) observed.set(identityKey(entry), entry)
       await budget(() => Promise.race([carrier.close, new Promise((done) => setTimeout(done, 20))]), workEnd, 1000, 'Cgroup consumer close poll')
     }
     assert.ok(carrier.closeObserved && carrier.code === 0 && carrier.signal === null && !interrupted, 'Fixed cgroup consumer did not close successfully')

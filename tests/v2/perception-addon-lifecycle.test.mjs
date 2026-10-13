@@ -123,6 +123,57 @@ test('cgroup snapshot reads only kernel members, keeps reparenting facts and rej
   }
 })
 
+test('cgroup stat diagnostics identify the failed read stage and keep only an already validated prior identity', async () => {
+  for (const failAt of [1, 2]) {
+    let stats = 0
+    const io = { async readFile(path) {
+      if (path.endsWith('/cgroup.procs')) return '9\n'
+      if (path.endsWith('/cgroup')) return '0::' + cgroupScope.membership + '\n'
+      const text = cgroupStat(9, '80', 8)
+      return ++stats === failAt ? text.split(' ').slice(0, -1).join(' ') : text
+    } }
+    await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 1000, io), (error) => {
+      assert.equal(error.message, 'Incomplete Linux process identity'); assert.equal(error.linuxStatDiagnostic.fieldCount, 49)
+      const facts = error.cgroupSnapshotDiagnostic
+      assert.equal(facts.stage, failAt === 1 ? 'stat-before' : 'stat-after')
+      assert.equal(facts.requestedPid, 9); assert.equal(facts.outcome, 'malformed-stat'); assert.equal(facts.terminalityEstablished, false)
+      assert.deepEqual(facts.knownBefore, failAt === 1 ? null : { pid: 9, ppid: 8, processGroupId: 8, sessionId: 8, state: 'S', starttime: '80' })
+      assert.doesNotMatch(JSON.stringify(facts), /controlled|member|cmdline|environ/); return true
+    })
+  }
+})
+
+test('cgroup disappearance and read denial stay distinct from malformed stat and never claim terminality', async () => {
+  for (const code of ['ENOENT', 'ESRCH', 'EACCES', 'EIO']) {
+    const original = Object.assign(new Error('PRIVATE_READ_MESSAGE'), { code, errno: code === 'EACCES' ? -13 : -5 })
+    const io = { async readFile(path) { if (path.endsWith('/cgroup.procs')) return '9\n'; throw original } }
+    if (['ENOENT', 'ESRCH'].includes(code)) {
+      const snapshot = await readCgroupSnapshot(cgroupScope, Date.now() + 1000, io)
+      assert.equal(snapshot.length, 0); assert.equal(snapshot.disappearanceReads.length, 1)
+      assert.equal(snapshot.disappearanceReads[0].readErrorCode, code)
+      assert.equal(snapshot.disappearanceReads[0].outcome, 'read-disappearance-reported')
+      assert.equal(snapshot.disappearanceReads[0].terminalityEstablished, false)
+      assert.doesNotMatch(JSON.stringify(snapshot.disappearanceReads), /PRIVATE_READ_MESSAGE/)
+    } else await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 1000, io), (error) => {
+      assert.equal(error, original); assert.equal(error.cgroupSnapshotDiagnostic.stage, 'stat-before')
+      assert.equal(error.cgroupSnapshotDiagnostic.readErrorCode, code)
+      assert.equal(error.cgroupSnapshotDiagnostic.knownBefore, null); return true
+    })
+  }
+  for (const value of ['x'.repeat(65537), null]) {
+    await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 1000, { async readFile(path) {
+      return path.endsWith('/cgroup.procs') ? '9\n' : value
+    } }), (error) => {
+      assert.equal(error.cgroupSnapshotDiagnostic.metadataBound.guardCode, value === null ? 'METADATA_TYPE' : 'METADATA_SIZE')
+      assert.equal(error.cgroupSnapshotDiagnostic.metadataBound.sha256, null); return true
+    })
+  }
+  const immutable = Object.freeze(Object.assign(new Error('immutable original'), { code: 'EACCES', errno: -13 }))
+  await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 1000, { async readFile(path) {
+    if (path.endsWith('/cgroup.procs')) return '9\n'; throw immutable
+  } }), (error) => error === immutable)
+})
+
 test('cgroup read deadline starts no later action after delayed IO; empty membership is not a close/reap proof', async () => {
   let reads = 0
   await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 10, { readFile: async () => {

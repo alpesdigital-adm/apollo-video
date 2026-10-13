@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,13 +30,42 @@ export function createPerceptionRunId() {
   return `perception-${process.pid}-${Date.now()}-${randomUUID()}`
 }
 
+function linuxStatFailureFacts(text, stage) {
+  const isText = typeof text === 'string', end = isText ? text.lastIndexOf(')') : -1
+  const prefix = isText && /^[1-9]\d* \(/.test(text)
+  const delimiter = prefix && end > text.indexOf('(') && text.slice(end, end + 2) === ') '
+  const fields = delimiter ? text.slice(end + 2).trim().split(/\s+/) : null
+  const invalid = fields ? fields.flatMap((field, index) => index > 0 && !/^-?\d+$/.test(field) ? [index + 3] : []) : []
+  const ancestry = fields ? fields.slice(1, 4).map((field) => /^\d+$/.test(field) && Number.isSafeInteger(Number(field))) : []
+  let guardCode = stage
+  if (stage === 'IDENTITY_CHECK') {
+    const pid = Number(text.slice(0, text.indexOf(' ')))
+    guardCode = !Number.isSafeInteger(pid) || pid <= 0 ? 'PID_RANGE' : fields.length < 50 ? 'FIELD_COUNT'
+      : !/^[RSDZTtWXxIKP]$/.test(fields[0]) ? 'STATE_FORMAT' : !/^\d+$/.test(fields[19]) ? 'STARTTIME_FORMAT'
+        : invalid.length ? 'NUMERIC_FIELD_FORMAT' : !ancestry[0] ? 'PPID_FORMAT_OR_RANGE'
+          : !ancestry[1] ? 'PGRP_FORMAT_OR_RANGE' : !ancestry[2] ? 'SESSION_FORMAT_OR_RANGE' : 'UNCLASSIFIED_GUARD'
+  }
+  const statBytes = isText ? Buffer.byteLength(text) : null
+  return { schemaVersion: 'linux-proc-stat-diagnostic/v1', stage: 'parse-stat', guardCode,
+    statBytes, statSha256: isText && statBytes <= 65536 ? createHash('sha256').update(text).digest('hex') : null,
+    statHashScope: !isText ? 'not-string' : statBytes > 65536 ? 'unmeasured-over-bound' : 'complete',
+    commFormat: !isText ? 'not-string' : !prefix ? 'invalid-prefix' : !delimiter ? 'invalid-delimiter' : 'valid-delimited',
+    fieldCount: fields?.length ?? null, minimumFieldCount: 50,
+    invalidNumericFieldCount: invalid.length, invalidNumericFieldNumbers: invalid.slice(0, 8) }
+}
+
 export function parseLinuxProcessStat(text) {
+  let stage = 'VALUE_TYPE'
+  try {
   assert.equal(typeof text, 'string')
   const end = text.lastIndexOf(')')
+  stage = 'PID_PREFIX'
   assert.match(text, /^[1-9]\d* \(/, 'Malformed Linux process identity')
+  stage = 'COMM_DELIMITER'
   assert.ok(end > text.indexOf('(') && text.slice(end, end + 2) === ') ', 'Malformed Linux comm delimiter')
   const pid = Number(text.slice(0, text.indexOf(' ')))
   const fields = text.slice(end + 2).trim().split(/\s+/)
+  stage = 'IDENTITY_CHECK'
   assert.ok(end > 0 && Number.isSafeInteger(pid) && pid > 0 && fields.length >= 50 &&
     /^[RSDZTtWXxIKP]$/.test(fields[0]) && /^\d+$/.test(fields[19]) &&
     fields.slice(1).every((field) => /^-?\d+$/.test(field)) &&
@@ -44,6 +73,12 @@ export function parseLinuxProcessStat(text) {
   'Incomplete Linux process identity')
   return { pid, state: fields[0], ppid: Number(fields[1]),
     processGroupId: Number(fields[2]), sessionId: Number(fields[3]), starttime: fields[19] }
+  } catch (error) {
+    // Evidence only: all original guards, AssertionError identity/code/message
+    // and caller containment remain unchanged. Never serialize comm or stat text.
+    try { error.linuxStatDiagnostic = linuxStatFailureFacts(text, stage) } catch { /* Evidence must never replace the original failure. */ }
+    throw error
+  }
 }
 
 export async function readLinuxProcessIdentity(pid) {

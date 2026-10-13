@@ -15,6 +15,42 @@ const enabled = process.env.APOLLO_TEMPORAL_VIDEO_E2E === '1'
 const ffmpeg = process.env.APOLLO_TEMPORAL_FFMPEG
 const ffprobe = process.env.APOLLO_TEMPORAL_FFPROBE
 
+function assertQuarterTurnFixture(stream) {
+  const matrices = (stream.side_data_list ?? []).filter((item) => item.side_data_type === 'Display Matrix')
+  assert.ok(matrices.length > 0, 'Remux fixture must contain structured Display Matrix side data')
+  for (const matrix of matrices) {
+    assert.ok(typeof matrix.rotation === 'number' && Number.isFinite(matrix.rotation) && matrix.rotation === 90,
+      'The display_rotation=90 fixture must measure a 90-degree counterclockwise matrix')
+  }
+  if (stream.tags?.rotate !== undefined) {
+    const tag = stream.tags.rotate
+    assert.ok(typeof tag === 'string' && /^[+-]?\d+(?:\.\d+)?$/.test(tag.trim()) && Number.isFinite(Number(tag)),
+      'Legacy rotate metadata must contain finite decimal degrees')
+    // Historical mov.c FF_API_OLD_ROTATE_API negates the CCW matrix angle
+    // and normalizes it to [0,360). It is not the same scalar convention:
+    // matrix +90 CCW corresponds to legacy tag 270 CW. This does not identify
+    // the native version of the pinned ffprobe-static executable.
+    // https://github.com/FFmpeg/FFmpeg/blob/n4.4/libavformat/mov.c#L4289-L4297
+    const clockwise = (360 - matrices[0].rotation) % 360
+    assert.equal(Number(tag), clockwise, 'Legacy rotate tag must agree with the inverse matrix convention')
+  }
+}
+
+test('temporal rotation fixture requires matrix 90 and treats optional legacy tag 270 as inverse convention', () => {
+  const fixture = (rotation = 90, tag = '270') => ({ side_data_list: [{ side_data_type: 'Display Matrix', rotation }],
+    ...(tag === undefined ? {} : { tags: { rotate: tag } }) })
+  assert.doesNotThrow(() => assertQuarterTurnFixture(fixture()))
+  assert.doesNotThrow(() => assertQuarterTurnFixture({ side_data_list: [{ side_data_type: 'Display Matrix', rotation: 90 }] }))
+  for (const matrix of [0, -90, 270, 45, NaN, Infinity, null, '90']) {
+    assert.throws(() => assertQuarterTurnFixture(fixture(matrix)), undefined, `matrix ${String(matrix)}`)
+  }
+  for (const tag of ['0', '90', '-90', '180', '45', '', ' ', 'NaN', 'Infinity', '0x10e', null, 270]) {
+    assert.throws(() => assertQuarterTurnFixture(fixture(90, tag)), undefined, `tag ${String(tag)}`)
+  }
+  assert.throws(() => assertQuarterTurnFixture({ tags: { rotate: '270' } }), /structured Display Matrix/)
+  assert.throws(() => assertQuarterTurnFixture({ side_data_list: [{ side_data_type: 'Other', rotation: 90 }], tags: { rotate: '270' } }), /structured Display Matrix/)
+})
+
 test('real pinned temporal adapter measures static, pan and cut without semantic claims', {
   skip: !enabled && 'requires explicit pinned FFmpeg/FFprobe paths', timeout: 180_000,
 }, async () => {
@@ -106,14 +142,7 @@ test('real pinned temporal adapter measures static, pan and cut without semantic
       '-show_streams', '-of', 'json', rotatedPath], { windowsHide: true, timeout: 30_000 })
     const [rotationStream] = JSON.parse(rotationMetadata.stdout).streams
     assert.equal(rotationStream.codec_name, 'h264')
-    const rotations = [
-      ...(rotationStream.side_data_list ?? []).filter((item) => item.side_data_type === 'Display Matrix')
-        .map((item) => item.rotation),
-      ...(rotationStream.tags?.rotate === undefined ? [] : [rotationStream.tags.rotate]),
-    ]
-    assert.ok(rotations.length > 0 && rotations.every((angle) =>
-      angle !== null && String(angle).trim() !== '' && Number.isFinite(Number(angle)) && Math.abs(Number(angle)) === 90),
-    `Remuxed H264/MP4 fixture must carry structural 90-degree rotation before adapter rejection: ${JSON.stringify(rotations)}`)
+    assertQuarterTurnFixture(rotationStream)
     let rotationProbed = false, rotationDecoded = false
     const rotationAdapter = new FfmpegTemporalVideoAnalyzer(runtime, {
       onProcessStarted: (kind) => {
