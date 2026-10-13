@@ -225,6 +225,118 @@ def pidfd_signal(expected, requested, deadline):
             os.close(descriptor)
 
 
+def init_namespace_pids(expected):
+    status = bounded_read("/proc/%d/status" % expected["pid"], STATUS_LIMIT).decode("ascii", "strict")
+    fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
+    values = fields.get("NSpid", "").split()
+    require(2 <= len(values) <= 32 and all(value.isdigit() for value in values)
+            and int(values[0]) == expected["pid"] and int(values[-1]) == 1,
+            "minted init namespace PID binding mismatch")
+    return [int(value) for value in values]
+
+
+def mint_init_stop_anchor(expected, birth, unshare, descriptors, deadline):
+    # Register BEFORE revalidation, so host_main's existing finally owns even
+    # a failed binding. No fd is exposed in the launcher receipt or to product.
+    remaining(deadline)
+    require(type(expected["pid"]) is int and expected["pid"] > 1 and unshare["pid"] > 1
+            and key(expected) == key(birth["hostIdentity"]), "invalid minted init host identity")
+    init_fd = os.pidfd_open(expected["pid"], 0)
+    descriptors.append(init_fd)
+    current, parent = identity(expected["pid"]), identity(unshare["pid"])
+    require(current is not None and key(current) == key(expected) and current["state"] not in TERMINAL
+            and current["ppid"] == unshare["pid"] and parent is not None and key(parent) == key(unshare)
+            and parent["ppid"] == os.getpid() and parent["state"] not in TERMINAL,
+            "minted init parent or identity changed after pidfd open")
+    namespace_path = "/proc/%d/ns/pid" % expected["pid"]
+    namespace_fd = os.open(namespace_path, os.O_RDONLY | os.O_CLOEXEC)
+    descriptors.append(namespace_fd)
+    namespace = os.readlink(namespace_path)
+    require(namespace == birth["namespace"]["pid"] and namespace != os.readlink("/proc/self/ns/pid"),
+            "init PID namespace not isolated")
+    require(os.readlink("/proc/%d/ns/mnt" % expected["pid"]) == birth["namespace"]["mount"]
+            and birth["namespace"]["mount"] != os.readlink("/proc/self/ns/mnt"), "init mount namespace not isolated")
+    namespace_stat, pidfd_stat = os.fstat(namespace_fd), os.fstat(init_fd)
+    match = re.fullmatch(r"pid:\[([1-9][0-9]*)\]", namespace)
+    require(match is not None and namespace_stat.st_ino == int(match.group(1)), "init namespace token inode mismatch")
+    pids = init_namespace_pids(expected)
+    after = identity(expected["pid"])
+    require(after is not None and key(after) == key(expected) and after["ppid"] == unshare["pid"]
+            and after["state"] not in TERMINAL, "init identity changed during namespace binding")
+    remaining(deadline)
+    return {"identity": dict(expected), "birthIdentity": dict(birth["hostIdentity"]), "unshare": dict(unshare),
+            "pidfd": init_fd, "pidfdStat": (pidfd_stat.st_dev, pidfd_stat.st_ino),
+            "namespaceFd": namespace_fd, "namespaceStat": (namespace_stat.st_dev, namespace_stat.st_ino),
+            "namespace": namespace, "namespacePids": pids,
+            "namespaceBinding": "birth-bound-retained-pid-namespace-token/v1"}
+
+
+def revalidate_init_stop_anchor(anchor, deadline):
+    remaining(deadline)
+    expected, unshare = anchor["identity"], anchor["unshare"]
+    require(type(expected["pid"]) is int and expected["pid"] > 1 and unshare["pid"] > 1
+            and key(expected) == key(anchor["birthIdentity"]), "invalid retained init host identity")
+    pidfd_stat, namespace_stat = os.fstat(anchor["pidfd"]), os.fstat(anchor["namespaceFd"])
+    require((pidfd_stat.st_dev, pidfd_stat.st_ino) == anchor["pidfdStat"]
+            and (namespace_stat.st_dev, namespace_stat.st_ino) == anchor["namespaceStat"],
+            "retained init token changed")
+    current, parent = identity(expected["pid"]), identity(unshare["pid"])
+    require(current is not None and key(current) == key(expected) and current["state"] not in TERMINAL
+            and current["ppid"] == unshare["pid"] and parent is not None and key(parent) == key(unshare)
+            and parent["ppid"] == os.getpid() and parent["state"] not in TERMINAL,
+            "retained init identity or parent changed")
+    # PID namespace membership of an existing process is immutable; the token
+    # was bound while privileged. No root-namespace readlink after UID/cap drop.
+    require(init_namespace_pids(expected) == anchor["namespacePids"], "retained init namespace PID binding changed")
+    after = identity(expected["pid"])
+    require(after is not None and key(after) == key(expected) and after["ppid"] == unshare["pid"]
+            and after["state"] not in TERMINAL, "init identity changed during stop revalidation")
+    remaining(deadline)
+    return after
+
+
+def stop_minted_init(anchor, deadline, evidence):
+    # Fixed controlled fault only, from the ancestor guardian (pid_namespaces(7)).
+    # Do not add SIGSTOP to the generic TERM/KILL containment helper or RPC.
+    stop_deadline = min(deadline, time.monotonic() + 1)
+    evidence.update(stopDeadlineMonotonic=stop_deadline, failureStage="target-revalidation")
+    try:
+        revalidate_init_stop_anchor(anchor, stop_deadline)
+        remaining(stop_deadline)
+        evidence.update(failureStage="signal", stopAttempted=True)
+        signal.pidfd_send_signal(anchor["pidfd"], signal.SIGSTOP, None, 0)
+        evidence.update(stopAccepted=True, failureStage="stopped-readback")
+        while True:
+            stopped = revalidate_init_stop_anchor(anchor, stop_deadline)
+            if stopped["state"] in ("T", "t"):
+                remaining(stop_deadline)
+                evidence.update(stopObserved=True, observedIdentity=stopped, failureStage=None)
+                return
+            time.sleep(min(0.01, remaining(stop_deadline)))
+    except BaseException as error:
+        message = str(error).encode("utf8", "replace")
+        evidence["error"] = {"type": type(error).__name__, "errno": getattr(error, "errno", None),
+                             "messageSha256": hashlib.sha256(message).hexdigest(), "messageBytes": len(message)}
+        raise
+
+
+def guardian_product_gate(config, report, anchor, release_write, execution_deadline, deadline):
+    if config["controlledFault"] == "init-stop":
+        report["faultEvidence"] = {"kind": "init-stop", "launcherAckObserved": False,
+            "stopAttempted": False, "stopAccepted": False, "stopObserved": False, "nodeGateReleased": False,
+            "namespaceBinding": anchor["namespaceBinding"], "pidNamespace": anchor["namespace"],
+            "namespaceToken": {"device": anchor["namespaceStat"][0], "inode": anchor["namespaceStat"][1]},
+            "namespacePids": anchor["namespacePids"][:]}
+    gate_deadline = min(execution_deadline, time.monotonic() + 5)
+    require(select.select([0], [], [], remaining(gate_deadline))[0], "external pidfd attestation gate timeout")
+    require(os.read(0, 64) == b"G", "outer launcher denied Node exec gate")
+    if config["controlledFault"] == "init-stop":
+        report["faultEvidence"]["launcherAckObserved"] = True
+        stop_minted_init(anchor, execution_deadline, report["faultEvidence"])
+        raise RuntimeError("controlled init stop requires namespace containment")
+    packet_write(release_write, {"abi": ABI, "runId": config["runId"], "release": "product"}, deadline)
+
+
 class OwnerChannel:
     """One minted owner; credentials checked on EVERY recvmsg fragment."""
     def __init__(self, channel, owner, uid, gid, run_id, deadline):
@@ -757,8 +869,6 @@ def init_main(expected_unshare):
         owner = owner_after; report["owner"] = owner; report["nodeBootstrap"] = bootstrap
         report["order"].append("normal-node-bootstrap-exec-observed")
         packet_write(3, {**report, "stage": "init-node-ready"}, deadline)
-        if config["controlledFault"] == "init-stop":
-            signal.raise_signal(signal.SIGSTOP)  # Fixed composed negative; never an observer RPC.
         product_release = read_packet_wait(4, min(deadline, time.monotonic() + 5))
         require(product_release.get("abi") == ABI and product_release.get("runId") == config["runId"]
                 and product_release.get("release") == "product", "guardian did not release product main")
@@ -916,13 +1026,8 @@ def host_main():
         host_init = verified_metadata(birth["hostIdentity"]["pid"])
         require(host_init is not None and key(host_init) == key(birth["hostIdentity"])
                 and host_init["ppid"] == unshare_identity["pid"], "init host ancestry mismatch")
-        init_fd = os.pidfd_open(host_init["pid"], 0)
-        require(key(identity(host_init["pid"])) == key(host_init), "init identity changed after pidfd open")
-        require(os.readlink("/proc/%d/ns/pid" % host_init["pid"]) == birth["namespace"]["pid"]
-                and birth["namespace"]["pid"] != os.readlink("/proc/self/ns/pid"), "init PID namespace not isolated")
-        require(os.readlink("/proc/%d/ns/mnt" % host_init["pid"]) == birth["namespace"]["mount"]
-                and birth["namespace"]["mount"] != os.readlink("/proc/self/ns/mnt"), "init mount namespace not isolated")
-        descriptors.append(init_fd); minted[key(host_init)] = host_init
+        init_anchor = mint_init_stop_anchor(host_init, birth, unshare_identity, descriptors, deadline)
+        minted[key(host_init)] = host_init
         report["initIdentity"] = host_init
         ready = read_packet_wait(receipt_read, deadline, buffer)
         if ready.get("stage") == "init-final":
@@ -988,16 +1093,7 @@ def host_main():
             signal.raise_signal(signal.SIGSTOP)  # Owner must use its retained native pidfd.
         # Owner opens/rechecks the attested host pidfds while Node is STILL a
         # normal trusted bootstrap. Only this fixed gate acknowledgement exists.
-        gate_deadline = min(execution_deadline, time.monotonic() + 5)
-        require(select.select([0], [], [], remaining(gate_deadline))[0], "external pidfd attestation gate timeout")
-        require(os.read(0, 64) == b"G", "outer launcher denied Node exec gate")
-        if config["controlledFault"] == "init-stop":
-            stopped = identity(host_init["pid"])
-            require(stopped is not None and key(stopped) == key(host_init) and stopped["state"] in ("T", "t"),
-                    "controlled init stop was not observed")
-            report["faultEvidence"] = {"kind": "init-stop", "observedIdentity": stopped, "nodeGateReleased": False}
-            raise RuntimeError("controlled init stop requires namespace containment")
-        packet_write(release_write, {"abi": ABI, "runId": config["runId"], "release": "product"}, deadline)
+        guardian_product_gate(config, report, init_anchor, release_write, execution_deadline, deadline)
         os.close(release_write); descriptors.remove(release_write)
         signal.setitimer(signal.ITIMER_REAL, remaining(execution_deadline))
         last_heartbeat = time.monotonic()
