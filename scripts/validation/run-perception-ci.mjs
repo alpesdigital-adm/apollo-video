@@ -46,12 +46,26 @@ function linuxStatFailureFacts(text, stage) {
           : !ancestry[1] ? 'PGRP_FORMAT_OR_RANGE' : !ancestry[2] ? 'SESSION_FORMAT_OR_RANGE' : 'UNCLASSIFIED_GUARD'
   }
   const statBytes = isText ? Buffer.byteLength(text) : null
+  const numericAncestry = fields?.slice(1, 4).map((field) => /^-?\d+$/.test(field) && Number.isSafeInteger(Number(field))
+    ? Number(field) : null) ?? []
+  const pid = prefix ? Number(text.slice(0, text.indexOf(' '))) : null
+  // Linux v6.8 fs/proc/array.c do_task_stat initializes this exact tuple;
+  // lock_task_sighand must succeed to fill it. It is NOT a process identity.
+  // Recognition alone does not establish a particular read's kernel/cause.
+  const unavailable = stage === 'IDENTITY_CHECK' && Number.isSafeInteger(pid) && pid > 0 && fields?.length >= 50 &&
+    /^[RSDZTtWXxIKP]$/.test(fields[0]) && /^\d{1,32}$/.test(fields[19]) &&
+    fields.slice(1).every((field) => /^-?\d+$/.test(field)) &&
+    fields[1] === '0' && fields[2] === '-1' && fields[3] === '-1'
+      ? { schemaVersion: 'linux-task-sighand-unavailable/v1', pid, state: fields[0], starttime: fields[19],
+        ppid: 0, processGroupId: -1, sessionId: -1, identityEstablished: false, terminalityEstablished: false } : null
   return { schemaVersion: 'linux-proc-stat-diagnostic/v1', stage: 'parse-stat', guardCode,
     statBytes, statSha256: isText && statBytes <= 65536 ? createHash('sha256').update(text).digest('hex') : null,
     statHashScope: !isText ? 'not-string' : statBytes > 65536 ? 'unmeasured-over-bound' : 'complete',
     commFormat: !isText ? 'not-string' : !prefix ? 'invalid-prefix' : !delimiter ? 'invalid-delimiter' : 'valid-delimited',
     fieldCount: fields?.length ?? null, minimumFieldCount: 50,
-    invalidNumericFieldCount: invalid.length, invalidNumericFieldNumbers: invalid.slice(0, 8) }
+    invalidNumericFieldCount: invalid.length, invalidNumericFieldNumbers: invalid.slice(0, 8),
+    numericAncestry: { ppid: numericAncestry[0] ?? null, processGroupId: numericAncestry[1] ?? null,
+      sessionId: numericAncestry[2] ?? null }, unavailableObservation: unavailable }
 }
 
 export function parseLinuxProcessStat(text) {

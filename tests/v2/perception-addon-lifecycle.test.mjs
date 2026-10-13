@@ -14,6 +14,7 @@ import { assertCgroupScope, openCgroupKill, parseCgroupMembership, readCgroupSna
 import { namespaceOwnerClosed, assertArchivePaths, planArchive } from '../../scripts/validation/cleanup-perception-pidfd.mjs'
 import { verifyOuterHostDeath, verifySudoCarrierBirth, verifyOuterRoleCredentials } from '../../scripts/validation/perception-outer-host-death.mjs'
 import { loadPidfdBinding } from '../../scripts/validation/perception-pidfd.mjs'
+import { parseLinuxProcessStat } from '../../scripts/validation/run-perception-ci.mjs'
 import { awaitProductGate, bootstrapReadback } from '../../scripts/validation/perception-namespace-node-bootstrap.mjs'
 import { CI_PIDFD_SOURCE_PATHS, digest, initializeRegistry, readRegistry, registryLock, assertDashboardPlaywrightFacts,
   registerAddonConsumer, writeRegistry, sourceFingerprint } from '../../scripts/validation/perception-addon-registry.mjs'
@@ -140,6 +141,125 @@ test('cgroup stat diagnostics identify the failed read stage and keep only an al
       assert.deepEqual(facts.knownBefore, failAt === 1 ? null : { pid: 9, ppid: 8, processGroupId: 8, sessionId: 8, state: 'S', starttime: '80' })
       assert.doesNotMatch(JSON.stringify(facts), /controlled|member|cmdline|environ/); return true
     })
+  }
+})
+
+function cgroupUnavailableStat(pid = 9, starttime = '80', changes = {}) {
+  const fields = Array(50).fill('0')
+  Object.assign(fields, { 0: 'R', 1: '0', 2: '-1', 3: '-1', 19: starttime }, changes)
+  return `${pid} (PRIVATE_TASK_COMM) ${fields.join(' ')}`
+}
+
+function cgroupSentinelIo({ first = cgroupStat(9, '80', 8), after = cgroupUnavailableStat(),
+  rechecks = [cgroupStat(9, '80', 1), cgroupStat(9, '80', 1)], memberships = [cgroupScope.membership, cgroupScope.membership] } = {}) {
+  const calls = [], stats = [first, after, ...rechecks]
+  let index = 0, membershipIndex = 0
+  return { calls, async readFile(path) {
+    calls.push(path)
+    if (path.endsWith('/cgroup.procs')) return '9\n'
+    if (path.endsWith('/cgroup')) return '0::' + memberships[membershipIndex++] + '\n'
+    const value = stats[index++]
+    if (value instanceof Error) throw value
+    assert.notEqual(value, undefined, 'No generic retry beyond the fixed recheck')
+    return value
+  } }
+}
+
+test('cgroup exact unavailable after-stat permits one strict stat membership stat recheck and keeps evidence separate', async () => {
+  const io = cgroupSentinelIo()
+  const snapshot = await readCgroupSnapshot(cgroupScope, Date.now() + 1000, io)
+  assert.deepEqual([...snapshot], [{ pid: 9, state: 'S', ppid: 1, processGroupId: 8, sessionId: 8,
+    starttime: '80', previousPpid: 8, cgroupMembership: cgroupScope.membership }])
+  assert.equal(Object.keys(snapshot).includes('statUnavailableRechecks'), false)
+  assert.equal(snapshot.statUnavailableRechecks.length, 1)
+  const facts = snapshot.statUnavailableRechecks[0]
+  assert.equal(facts.outcome, 'strict-identity-and-membership-revalidated')
+  assert.equal(facts.identityEstablishedBySentinel, false); assert.equal(facts.terminalityEstablished, false)
+  assert.ok(facts.completedAt < facts.deadlineAt); assert.ok(facts.deadlineAt - facts.startedAt <= 500)
+  assert.ok(facts.completedMonotonic < facts.deadlineMonotonic)
+  assert.ok(facts.deadlineMonotonic - facts.startedMonotonic <= 500)
+  assert.equal(facts.knownBefore.starttime, '80'); assert.equal(facts.recheckedIdentity.ppid, 1)
+  assert.doesNotMatch(JSON.stringify(facts), /PRIVATE_TASK_COMM/)
+  assert.deepEqual(io.calls, [cgroupScope.path + '/cgroup.procs', '/proc/9/stat', '/proc/9/cgroup', '/proc/9/stat',
+    '/proc/9/stat', '/proc/9/cgroup', '/proc/9/stat'])
+})
+
+test('cgroup sentinel requires a prior exact PID starttime and domain, while malformed or denied stat never retries', async () => {
+  const malformed = cgroupUnavailableStat().split(' ').slice(0, -1).join(' ')
+  const denied = Object.assign(new Error('PRIVATE_READ_DENIAL'), { code: 'EACCES', errno: -13 })
+  for (const options of [{ first: cgroupUnavailableStat() }, { after: cgroupUnavailableStat(10) },
+    { after: cgroupUnavailableStat(9, '81') }, { after: malformed }, { after: denied },
+    { after: cgroupUnavailableStat(9, '80', { 3: '-2' }) }, { memberships: ['/not-admitted'] }]) {
+    const io = cgroupSentinelIo(options)
+    await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 1000, io), (error) => {
+      if (options.after === denied) assert.equal(error, denied)
+      assert.equal(error.cgroupSnapshotDiagnostic.unavailableRecheck, undefined)
+      assert.equal(error.cgroupSnapshotDiagnostic.terminalityEstablished, false); return true
+    })
+    assert.ok(io.calls.filter((path) => path.endsWith('/stat')).length <= 2)
+  }
+})
+
+test('persistent sentinel recycled identity changed membership and read errors preserve the initial assertion without adoption', async () => {
+  let initial
+  try { parseLinuxProcessStat(cgroupUnavailableStat()) } catch (error) { initial = error }
+  const denied = Object.assign(new Error('PRIVATE_RECHECK_DENIAL'), { code: 'EACCES', errno: -13 })
+  for (const options of [{ rechecks: [cgroupUnavailableStat()] }, { rechecks: [cgroupStat(9, '81')] },
+    { rechecks: [cgroupStat(10, '80')] }, { rechecks: [cgroupStat(9, '80'), cgroupStat(9, '81')] },
+    { rechecks: [cgroupStat(9, '80').split(' ').slice(0, -1).join(' ')] },
+    { memberships: [cgroupScope.membership, '/changed'] }, { rechecks: [denied] }]) {
+    const io = cgroupSentinelIo({ after: initial, ...options })
+    await assert.rejects(readCgroupSnapshot(cgroupScope, Date.now() + 1000, io), (error) => {
+      assert.equal(error, initial); assert.equal(error.message, 'Incomplete Linux process identity')
+      assert.equal(error.cgroupSnapshotDiagnostic.outcome, 'unavailable-stat-recheck-inconclusive')
+      const facts = error.cgroupSnapshotDiagnostic.unavailableRecheck
+      assert.equal(facts.outcome, 'inconclusive'); assert.equal(facts.identityEstablishedBySentinel, false)
+      assert.equal(facts.terminalityEstablished, false)
+      if (options.rechecks?.[0] === denied) assert.equal(facts.readErrorCode, 'EACCES')
+      assert.doesNotMatch(JSON.stringify(facts), /PRIVATE_READ_DENIAL|PRIVATE_RECHECK_DENIAL|PRIVATE_TASK_COMM/)
+      return true
+    })
+    assert.ok(io.calls.filter((path) => path.endsWith('/stat')).length <= 4)
+  }
+})
+
+test('gone during the one sentinel recheck records disappearance but never process terminality', async () => {
+  for (const code of ['ENOENT', 'ESRCH']) {
+    const io = cgroupSentinelIo({ rechecks: [Object.assign(new Error('PRIVATE_GONE'), { code })] })
+    const snapshot = await readCgroupSnapshot(cgroupScope, Date.now() + 1000, io)
+    assert.equal(snapshot.length, 0); assert.equal(snapshot.disappearanceReads.length, 1)
+    assert.equal(snapshot.statUnavailableRechecks.length, 1)
+    assert.equal(snapshot.statUnavailableRechecks[0].outcome, 'read-disappearance-reported')
+    assert.equal(snapshot.disappearanceReads[0].readErrorCode, code)
+    assert.equal(snapshot.disappearanceReads[0].terminalityEstablished, false)
+    assert.equal(snapshot.statUnavailableRechecks[0].terminalityEstablished, false)
+    assert.equal(io.calls.filter((path) => path.endsWith('/stat')).length, 3)
+    assert.doesNotMatch(JSON.stringify(snapshot.disappearanceReads), /PRIVATE_GONE|PRIVATE_TASK_COMM/)
+  }
+})
+
+test('sentinel recheck consumes one absolute window and late stat admits no membership or further read', async (t) => {
+  let clock = 1000, initial
+  t.mock.method(Date, 'now', () => clock)
+  try { parseLinuxProcessStat(cgroupUnavailableStat()) } catch (error) { initial = error }
+  for (const [outerEnd, late, sharedEnd] of [[3000, 1501, 1500], [1200, 1201, 1200]]) {
+    clock = 1000
+    const io = cgroupSentinelIo({ after: initial }), read = io.readFile
+    let stats = 0
+    io.readFile = async (path, options) => {
+      const statCall = path.endsWith('/stat') ? ++stats : null
+      const value = await read(path, options)
+      if (statCall === 3) clock = late
+      return value
+    }
+    await assert.rejects(readCgroupSnapshot(cgroupScope, outerEnd, io), (error) => {
+      assert.equal(error, initial)
+      const facts = error.cgroupSnapshotDiagnostic.unavailableRecheck
+      assert.equal(facts.deadlineAt, sharedEnd); assert.equal(facts.completedAt, late)
+      assert.equal(facts.metadataBound.guardCode, 'METADATA_DEADLINE')
+      assert.equal(facts.terminalityEstablished, false); return true
+    })
+    assert.equal(stats, 3); assert.equal(io.calls.filter((path) => path.endsWith('/cgroup')).length, 1)
   }
 })
 

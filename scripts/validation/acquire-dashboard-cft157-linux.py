@@ -5,6 +5,7 @@ not claimed to be interrupted by a Python socket timeout. Two GETs, no retry.
 """
 import argparse
 import base64
+from email.message import Message
 import hashlib
 import json
 import math
@@ -89,13 +90,64 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError("CFT_REDIRECT_PROHIBITED")
 
 
+def object_checksum_headers(headers):
+    """All HTTPMessage occurrences; only the explicit dict fixture is emulated.
+
+    Receipt projections retain occurrence/component hashes and pin matches, not
+    arbitrary header text. Identical duplicates are also rejected, not merged.
+    """
+    facts = {"schemaVersion": "cft-object-checksum-headers/v1", "interface": None,
+             "occurrenceCount": 0, "occurrences": [], "validated": False}
+    try:
+        if isinstance(headers, Message):
+            values = headers.get_all("x-goog-hash", [])
+            facts["interface"] = "http-message"
+        elif type(headers) is dict:
+            values = [headers["x-goog-hash"]] if "x-goog-hash" in headers else []
+            facts["interface"] = "dict-fixture"
+        else:
+            require(False, "CFT_OBJECT_CHECKSUM_HEADERS")
+        facts["occurrenceCount"] = len(values)
+        require(1 <= len(values) <= 8, "CFT_OBJECT_CHECKSUM_HEADERS")
+        components = []
+        for value in values:
+            occurrence = {"characters": len(value) if type(value) is str else None,
+                          "bytes": None, "sha256": None, "components": []}
+            facts["occurrences"].append(occurrence)
+            require(type(value) is str and 0 < len(value) <= 512, "CFT_OBJECT_CHECKSUM_HEADERS")
+            raw = value.encode("utf8")
+            occurrence.update(bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+            require(all(character == "\t" or 32 <= ord(character) < 127 for character in value), "CFT_OBJECT_CHECKSUM_HEADERS")
+            parts = value.split(",")
+            require(1 <= len(parts) <= 4, "CFT_OBJECT_CHECKSUM_HEADERS")
+            for part in parts:
+                token = part.strip()
+                match = re.fullmatch(r"(md5|crc32c)=([A-Za-z0-9+/]+={0,2})", token)
+                algorithm = match[1] if match else None
+                wanted = {"md5": MD5, "crc32c": CRC32C}.get(algorithm)
+                projection = {"algorithm": algorithm, "characters": len(token),
+                              "sha256": hashlib.sha256(token.encode("ascii")).hexdigest(),
+                              "matchesPin": match is not None and match[2] == wanted,
+                              "value": wanted if match is not None and match[2] == wanted else None}
+                occurrence["components"].append(projection)
+                components.append(algorithm)
+        require(all(component["matchesPin"] for occurrence in facts["occurrences"] for component in occurrence["components"])
+                and sorted(components) == ["crc32c", "md5"], "CFT_OBJECT_CHECKSUM_HEADERS")
+        facts["validated"] = True
+        return facts
+    except BaseException as error:
+        error.checksum_header_observation = facts
+        raise
+
+
 def fetch(url, destination, maximum, budget, seconds, opener=None):
     require(url in (METADATA_URL, ZIP_URL), "CFT_URL_NOT_FIXED")
     end = budget.phase(seconds)
     # Empty ProxyHandler prohibits ambient proxy injection; TLS verification is default.
     opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}),
         NoRedirect(), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
-    response, primary, facts = None, None, None
+    response, primary, facts, checksum_facts = None, None, None, None
+    connection_closed = False
     digest, md5, total = hashlib.sha256(), hashlib.md5(usedforsecurity=False), 0
     try:
         response = opener.open(urllib.request.Request(url, method="GET"), timeout=min(30, budget.check(end)))
@@ -107,9 +159,7 @@ def fetch(url, destination, maximum, budget, seconds, opener=None):
         if url == ZIP_URL:
             require(int(length) == SIZE and response.headers.get("x-goog-generation") == GENERATION,
                     "CFT_OBJECT_GENERATION_OR_LENGTH")
-            hashes = [item.strip() for item in response.headers.get("x-goog-hash", "").split(",")]
-            require(hashes.count("md5=" + MD5) == 1 and hashes.count("crc32c=" + CRC32C) == 1,
-                    "CFT_OBJECT_CHECKSUM_HEADERS")
+            checksum_facts = object_checksum_headers(response.headers)
         with destination.open("xb") as output:
             while True:
                 budget.check(end)
@@ -130,18 +180,24 @@ def fetch(url, destination, maximum, budget, seconds, opener=None):
                 "bytes": total, "sha256": digest.hexdigest(), "md5Measured": measured_md5,
                 "crc32cOfficial": CRC32C if url == ZIP_URL else None, "crc32cCalculated": False,
                 "redirects": [], "connectionFinallyClosed": False}
+        if checksum_facts is not None:
+            facts["checksumHeaders"] = checksum_facts
     except BaseException as error:
         primary = error
     finally:
         try:
             if response is not None:
                 response.close()
+                connection_closed = True
             if facts is not None:
                 facts["connectionFinallyClosed"] = True
             budget.check(end)
         except BaseException as error:
             primary = primary or error
     if primary is not None:
+        observation = getattr(primary, "checksum_header_observation", checksum_facts)
+        if observation is not None:
+            primary.checksum_header_observation = {**observation, "connectionFinallyClosed": connection_closed}
         raise primary
     return facts
 
@@ -295,7 +351,8 @@ def main():
         budget.check()
     except BaseException as error:
         receipt["outcome"] = "failed"; receipt["errors"].append({"type": type(error).__name__,
-            "messageSha256": hashlib.sha256(str(error).encode("utf8")).hexdigest()})
+            "messageSha256": hashlib.sha256(str(error).encode("utf8")).hexdigest(),
+            "checksumHeaders": getattr(error, "checksum_header_observation", None)})
         # Failure evidence may use reserved time, never promote success after deadline.
         try:
             if budget.now() < budget.end:

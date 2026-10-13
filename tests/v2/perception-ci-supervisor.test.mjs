@@ -352,6 +352,31 @@ test('Linux stat failure diagnostics retain strict fifty-field guards and hashes
   }
 })
 
+test('Linux unavailable task tuple remains a strict parser failure and only exact complete facts are classified', () => {
+  const sentinel = { 1: '0', 2: '-1', 3: '-1' }
+  const text = statText(sentinel)
+  assert.throws(() => parseLinuxProcessStat(text), (error) => {
+    assert.equal(error.code, 'ERR_ASSERTION'); assert.equal(error.message, 'Incomplete Linux process identity')
+    assert.equal(error.linuxStatDiagnostic.guardCode, 'PGRP_FORMAT_OR_RANGE')
+    assert.deepEqual(error.linuxStatDiagnostic.numericAncestry, { ppid: 0, processGroupId: -1, sessionId: -1 })
+    assert.deepEqual(error.linuxStatDiagnostic.unavailableObservation, {
+      schemaVersion: 'linux-task-sighand-unavailable/v1', pid: 123, state: 'S', starttime: '987654321987654321',
+      ppid: 0, processGroupId: -1, sessionId: -1, identityEstablished: false, terminalityEstablished: false,
+    })
+    assert.doesNotMatch(JSON.stringify(error.linuxStatDiagnostic), /worker|spaces|commline|environ/)
+    return true
+  })
+  for (const value of [statText({ ...sentinel, 1: '1' }), statText({ ...sentinel, 2: '-2' }),
+    statText({ ...sentinel, 3: '-2' }), statText({ ...sentinel, 0: '?' }),
+    statText({ ...sentinel, 19: '-1' }), statText({ ...sentinel, 49: 'PRIVATE_FIELD' }),
+    statText(sentinel).split(' ').slice(0, -1).join(' '), statText({ ...sentinel, 1: '00' }),
+    statText({ ...sentinel, 2: '-01' }), statText(sentinel).replace('123 (', '9007199254740993 (')]) {
+    assert.throws(() => parseLinuxProcessStat(value), (error) => {
+      assert.equal(error.linuxStatDiagnostic.unavailableObservation, null); return true
+    })
+  }
+})
+
 test('observed identities survive setsid and reparenting without adopting a reused root PID', () => {
   const observed = new Map()
   collectOwnedIdentities([entry(10, '100', { runMarked: true }), entry(11, '110', { ppid: 10 })], observed, 10)

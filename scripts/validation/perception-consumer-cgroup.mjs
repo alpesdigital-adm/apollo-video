@@ -85,12 +85,13 @@ export function openCgroupKill(scope, uid, io = { lstat: lstatSync, realpath: re
 
 export async function readCgroupSnapshot(scope, deadlineAt, io = { readFile }) {
   assertCgroupScope(scope)
-  const text = async (path) => {
-    const remaining = deadlineAt - Date.now()
+  const text = async (path, end = deadlineAt, monotonicEnd = Infinity) => {
+    end = Math.min(end, deadlineAt)
+    const remaining = Math.floor(Math.min(end - Date.now(), monotonicEnd - performance.now()))
     assert.ok(remaining > 0, 'Cgroup metadata deadline exhausted before read')
     const value = await budget(() => io.readFile(path, { encoding: 'utf8', signal: AbortSignal.timeout(Math.min(500, remaining)) }),
-      deadlineAt, Math.min(500, remaining), 'Cgroup metadata')
-    try { assert.ok(Date.now() < deadlineAt && typeof value === 'string' && Buffer.byteLength(value) <= 65536) }
+      end, Math.min(500, remaining), 'Cgroup metadata')
+    try { assert.ok(Date.now() < end && performance.now() < monotonicEnd && typeof value === 'string' && Buffer.byteLength(value) <= 65536) }
     catch (error) {
       const bytes = typeof value === 'string' ? Buffer.byteLength(value) : null
       try { error.cgroupMetadataDiagnostic = { bytes, sha256: bytes !== null && bytes <= 65536 ? digest(value) : null,
@@ -105,14 +106,19 @@ export async function readCgroupSnapshot(scope, deadlineAt, io = { readFile }) {
   assert.ok(ids.length <= 16384 && ids.every((value) => /^[1-9][0-9]*$/.test(value)))
   const entries = []
   const disappearanceReads = []
+  const statUnavailableRechecks = []
   Object.defineProperty(entries, 'disappearanceReads', { value: disappearanceReads, enumerable: false })
+  Object.defineProperty(entries, 'statUnavailableRechecks', { value: statUnavailableRechecks, enumerable: false })
+  const identityFacts = (value) => value ? { pid: value.pid, ppid: value.ppid, processGroupId: value.processGroupId,
+    sessionId: value.sessionId, state: value.state, starttime: value.starttime.length <= 32 ? value.starttime : null } : null
   for (const pid of new Set(ids.map(Number))) {
     assert.ok(Number.isSafeInteger(pid))
-    let before, stage = 'stat-before'
+    let before, stage = 'stat-before', unavailableRecheck, observedMembership
     try {
       before = parseLinuxProcessStat(await text(`/proc/${pid}/stat`))
       stage = 'membership-read'
       const membership = parseCgroupMembership(await text(`/proc/${pid}/cgroup`))
+      observedMembership = membership
       stage = 'stat-after'
       const after = parseLinuxProcessStat(await text(`/proc/${pid}/stat`))
       stage = 'identity-membership-check'
@@ -120,14 +126,70 @@ export async function readCgroupSnapshot(scope, deadlineAt, io = { readFile }) {
       assert.equal(membership, scope.membership, 'Kernel cgroup membership escaped the admitted domain')
       entries.push({ ...after, previousPpid: before.ppid, cgroupMembership: membership })
     } catch (error) {
+      const unavailable = error.linuxStatDiagnostic?.unavailableObservation
+      if (stage === 'stat-after' && before && pid === before.pid && observedMembership === scope.membership &&
+          unavailable?.schemaVersion === 'linux-task-sighand-unavailable/v1' &&
+          unavailable.pid === before.pid && unavailable.starttime === before.starttime &&
+          unavailable.identityEstablished === false && unavailable.terminalityEstablished === false) {
+        const recheckEnd = Math.min(deadlineAt, Date.now() + 500)
+        const startedMonotonic = performance.now()
+        const monotonicEnd = startedMonotonic + Math.max(0, recheckEnd - Date.now())
+        unavailableRecheck = { schemaVersion: 'cgroup-stat-unavailable-recheck/v1', requestedPid: pid,
+          knownBefore: identityFacts(before), initialStatDiagnostic: error.linuxStatDiagnostic,
+          deadlineAt: recheckEnd, startedAt: Date.now(), stage: 'recheck-stat', outcome: 'pending',
+          startedMonotonic, deadlineMonotonic: monotonicEnd,
+          identityEstablishedBySentinel: false, terminalityEstablished: false, recheckedIdentity: null }
+        try {
+          // ONE stat/membership/stat attempt under ONE absolute window. The
+          // sentinel is never returned, adopted, signaled or treated as terminal.
+          const verified = parseLinuxProcessStat(await text(`/proc/${pid}/stat`, recheckEnd, monotonicEnd))
+          unavailableRecheck.recheckedIdentity = identityFacts(verified)
+          assert.equal(identityKey(verified), identityKey(before), 'Cgroup sentinel recheck PID recycled')
+          unavailableRecheck.stage = 'recheck-membership'
+          const membership = parseCgroupMembership(await text(`/proc/${pid}/cgroup`, recheckEnd, monotonicEnd))
+          assert.equal(membership, scope.membership, 'Kernel cgroup membership escaped the admitted domain')
+          unavailableRecheck.stage = 'recheck-stat-final'
+          const after = parseLinuxProcessStat(await text(`/proc/${pid}/stat`, recheckEnd, monotonicEnd))
+          assert.equal(identityKey(after), identityKey(before), 'Cgroup sentinel final PID recycled')
+          unavailableRecheck.recheckedIdentity = identityFacts(after)
+          unavailableRecheck.outcome = 'strict-identity-and-membership-revalidated'
+          unavailableRecheck.completedAt = Date.now()
+          unavailableRecheck.completedMonotonic = performance.now()
+          assert.ok(unavailableRecheck.completedAt < recheckEnd && unavailableRecheck.completedMonotonic < monotonicEnd,
+            'Cgroup sentinel recheck deadline exhausted')
+          if (statUnavailableRechecks.length < 8) statUnavailableRechecks.push(unavailableRecheck)
+          entries.push({ ...after, previousPpid: before.ppid, cgroupMembership: membership })
+          continue
+        } catch (recheckError) {
+          unavailableRecheck.completedAt = Date.now()
+          unavailableRecheck.completedMonotonic = performance.now()
+          unavailableRecheck.outcome = ['ENOENT', 'ESRCH'].includes(recheckError.code)
+            ? 'read-disappearance-reported' : 'inconclusive'
+          unavailableRecheck.readErrorCode = ['ENOENT', 'ESRCH', 'EACCES', 'EPERM', 'EIO', 'ABORT_ERR', 'ERR_ASSERTION'].includes(recheckError.code)
+            ? recheckError.code : null
+          unavailableRecheck.errno = Number.isSafeInteger(recheckError.errno) ? recheckError.errno : null
+          unavailableRecheck.recheckStatDiagnostic = recheckError.linuxStatDiagnostic ?? null
+          unavailableRecheck.metadataBound = recheckError.cgroupMetadataDiagnostic ?? null
+          if (statUnavailableRechecks.length < 8) statUnavailableRechecks.push(unavailableRecheck)
+          if (unavailableRecheck.outcome === 'read-disappearance-reported') {
+            if (disappearanceReads.length < 8) disappearanceReads.push({ schemaVersion: 'cgroup-snapshot-diagnostic/v1',
+              stage: unavailableRecheck.stage, requestedPid: pid, outcome: unavailableRecheck.outcome,
+              readErrorCode: unavailableRecheck.readErrorCode, errno: unavailableRecheck.errno,
+              knownBefore: identityFacts(before), terminalityEstablished: false, unavailableRecheck })
+            continue
+          }
+          // Preserve the INITIAL AssertionError, not a replacement retry error.
+        }
+      }
       const disappeared = ['ENOENT', 'ESRCH'].includes(error.code)
       const facts = { schemaVersion: 'cgroup-snapshot-diagnostic/v1', stage, requestedPid: pid,
-        outcome: disappeared ? 'read-disappearance-reported' : error.linuxStatDiagnostic ? 'malformed-stat' : 'read-or-integrity-failure',
+        outcome: unavailableRecheck ? 'unavailable-stat-recheck-inconclusive' : disappeared ? 'read-disappearance-reported'
+          : unavailable ? 'unavailable-stat-not-eligible' : error.linuxStatDiagnostic ? 'malformed-stat' : 'read-or-integrity-failure',
         errno: Number.isSafeInteger(error.errno) ? error.errno : null,
         readErrorCode: ['ENOENT', 'ESRCH', 'EACCES', 'EPERM', 'EIO', 'ENOTDIR', 'ABORT_ERR', 'ERR_ASSERTION'].includes(error.code) ? error.code : null,
-        knownBefore: before ? { pid: before.pid, ppid: before.ppid, processGroupId: before.processGroupId,
-          sessionId: before.sessionId, state: before.state, starttime: before.starttime.length <= 32 ? before.starttime : null } : null,
+        knownBefore: identityFacts(before),
         metadataBound: error.cgroupMetadataDiagnostic ?? null,
+        ...(unavailableRecheck ? { unavailableRecheck } : {}),
         terminalityEstablished: false }
       if (disappeared) {
         if (disappearanceReads.length < 8) disappearanceReads.push(facts)
@@ -178,8 +240,11 @@ async function cgroupEmpty(scope, end) {
   assert.equal(text.split('\n').filter((line) => line.startsWith('populated ')).length, 1)
   assert.match(text, /^populated [01]$/m)
   if (/^populated 1$/m.test(text)) throw Object.assign(new Error('Cgroup still populated'), { code: 'CGROUP_NOT_EMPTY' })
-  if ((await readCgroupSnapshot(scope, end)).length) throw Object.assign(new Error('Cgroup live membership remains'), { code: 'CGROUP_NOT_EMPTY' })
-  return { populated: 0, liveMembershipEmpty: true, zombieReapingEstablished: false }
+  const snapshot = await readCgroupSnapshot(scope, end)
+  if (snapshot.length) throw Object.assign(new Error('Cgroup live membership remains'), { code: 'CGROUP_NOT_EMPTY' })
+  return { populated: 0, liveMembershipEmpty: true, zombieReapingEstablished: false,
+    ...(snapshot.disappearanceReads.length ? { disappearanceReads: snapshot.disappearanceReads } : {}),
+    ...(snapshot.statUnavailableRechecks.length ? { statUnavailableRechecks: snapshot.statUnavailableRechecks } : {}) }
 }
 
 export async function runCgroupConsumer(mode, args = [], env = process.env) {
@@ -374,6 +439,10 @@ export async function runCgroupConsumer(mode, args = [], env = process.env) {
         const facts = report.cgroupSnapshotDisappearanceReads ??= []
         facts.push(...snapshot.disappearanceReads.slice(0, Math.max(0, 64 - facts.length)))
       }
+      if (snapshot.statUnavailableRechecks.length) {
+        const facts = report.cgroupStatUnavailableRechecks ??= []
+        facts.push(...snapshot.statUnavailableRechecks.slice(0, Math.max(0, 64 - facts.length)))
+      }
       for (const entry of snapshot) observed.set(identityKey(entry), entry)
       await budget(() => Promise.race([carrier.close, new Promise((done) => setTimeout(done, 20))]), workEnd, 1000, 'Cgroup consumer close poll')
     }
@@ -478,6 +547,8 @@ export async function prepareCgroupCleanup(registry, env, end, report) {
       assert.equal(scope.runId, entry.runId); facts.scope = scope
       fd = openCgroupKill(scope, process.getuid())
       const current = await readCgroupSnapshot(scope, end)
+      facts.statUnavailableRechecks = current.statUnavailableRechecks
+      facts.disappearanceReads = current.disappearanceReads
       if (current.length) { writeFileSync(fd, '1'); facts.containmentRequired = true }
       while (true) {
         assert.ok(Date.now() < end, 'Cgroup cleanup aggregate deadline')

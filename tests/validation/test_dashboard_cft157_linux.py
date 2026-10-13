@@ -1,5 +1,7 @@
 """Synthetic Linux CfT contracts: no HTTP, kernel owner, browser or subprocess."""
 from copy import deepcopy
+import base64
+from email.message import Message
 import hashlib
 import importlib.util
 import io
@@ -9,6 +11,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -70,6 +73,82 @@ class Archive:
 
 
 class LinuxCftContracts(unittest.TestCase):
+    def checksum_message(self, *values):
+        headers = Message()
+        for value in values:
+            headers["x-goog-hash"] = value
+        return headers
+
+    def test_real_message_reads_repeated_and_combined_checksum_occurrences(self):
+        md5, crc = "md5=" + actor.MD5, "crc32c=" + actor.CRC32C
+        for values in ((md5, crc), (crc, md5), (md5 + ", " + crc,)):
+            headers = self.checksum_message(*values)
+            self.assertEqual(headers.get_all("x-goog-hash"), list(values))
+            observed = actor.object_checksum_headers(headers)
+            self.assertEqual(observed["interface"], "http-message")
+            self.assertEqual(observed["occurrenceCount"], len(values))
+            self.assertTrue(observed["validated"])
+            for raw, fact in zip(values, observed["occurrences"]):
+                self.assertEqual(fact["sha256"], hashlib.sha256(raw.encode()).hexdigest())
+                self.assertEqual(fact["bytes"], len(raw.encode()))
+            self.assertEqual(sorted(component["algorithm"] for occurrence in observed["occurrences"]
+                                    for component in occurrence["components"]), ["crc32c", "md5"])
+        self.assertEqual(actor.object_checksum_headers({"x-goog-hash": md5 + "," + crc})["interface"], "dict-fixture")
+
+    def test_real_message_duplicate_conflicting_malformed_or_missing_checksums_fail_and_close_without_read(self):
+        md5, crc = "md5=" + actor.MD5, "crc32c=" + actor.CRC32C
+        fixtures = [(), (md5,), (crc,), (md5, crc, md5), (md5 + "," + crc, crc),
+                    ("md5=" + "A" * 22 + "==", crc), (md5, "crc32c=AAAAAA=="),
+                    (md5, crc, "md5=wrong"), (md5, crc, ""), (md5 + ",," + crc,),
+                    (md5, crc, "sha1=AA=="), (md5 + ", " + crc + ",md5=" + actor.MD5,),
+                    (md5, "crc32c=not-base64!"), (md5, crc + "\r\ninjected=value")]
+        for values in fixtures:
+            with self.subTest(values=values), tempfile.TemporaryDirectory() as temporary:
+                reply = Reply(b"", actor.ZIP_URL)
+                reply.headers = self.checksum_message(*values)
+                reply.headers["Content-Length"] = str(actor.SIZE)
+                reply.headers["x-goog-generation"] = actor.GENERATION
+                reply.before_read = lambda: self.fail("Rejected checksum headers must never read payload")
+                opener = Opener(reply)
+                with self.assertRaisesRegex(ValueError, "^CFT_OBJECT_CHECKSUM_HEADERS$") as caught:
+                    actor.fetch(actor.ZIP_URL, Path(temporary) / "part", actor.SIZE, Clock().budget(), 90, opener)
+                observed = caught.exception.checksum_header_observation
+                self.assertEqual(observed["occurrenceCount"], len(values))
+                self.assertFalse(observed["validated"]); self.assertTrue(observed["connectionFinallyClosed"])
+                self.assertTrue(reply.closed); self.assertEqual(len(opener.calls), 1)
+                self.assertFalse((Path(temporary) / "part").exists())
+                self.assertNotIn("injected=value", json.dumps(observed))
+        with self.assertRaisesRegex(ValueError, "CFT_OBJECT_CHECKSUM_HEADERS"):
+            actor.object_checksum_headers(object())  # No arbitrary get/get_all emulation.
+
+    def test_checksum_representation_limits_are_closed_and_arbitrary_text_is_not_persisted(self):
+        for headers in (self.checksum_message(*(["md5=" + actor.MD5] * 9)),
+                        self.checksum_message("secret=" + "x" * 513),
+                        self.checksum_message("secret=credential", "crc32c=" + actor.CRC32C),
+                        {"x-goog-hash": 3}):
+            with self.subTest(headers=headers), self.assertRaisesRegex(ValueError, "CFT_OBJECT_CHECKSUM_HEADERS") as caught:
+                actor.object_checksum_headers(headers)
+            self.assertFalse(caught.exception.checksum_header_observation["validated"])
+            self.assertNotIn("credential", json.dumps(caught.exception.checksum_header_observation))
+
+    def test_binary_receipt_keeps_observed_checksum_occurrences_and_measured_hashes(self):
+        # Tiny controlled payload/pins, not acquired CfT bytes or upstream SHA.
+        payload = b"controlled ZIP stand-in"
+        expected_md5 = base64.b64encode(hashlib.md5(payload, usedforsecurity=False).digest()).decode()
+        for repeated in (True, False):
+            reply = Reply(payload, actor.ZIP_URL)
+            values = ("md5=" + expected_md5, "crc32c=" + actor.CRC32C)
+            reply.headers = self.checksum_message(*(values if repeated else (",".join(values),)))
+            reply.headers["Content-Length"] = str(len(payload)); reply.headers["x-goog-generation"] = actor.GENERATION
+            with self.subTest(repeated=repeated), tempfile.TemporaryDirectory() as temporary, \
+                 patch.object(actor, "SIZE", len(payload)), patch.object(actor, "MD5", expected_md5):
+                fact = actor.fetch(actor.ZIP_URL, Path(temporary) / "part", len(payload), Clock().budget(), 90, Opener(reply))
+                self.assertEqual(fact["checksumHeaders"]["occurrenceCount"], 2 if repeated else 1)
+                self.assertTrue(fact["checksumHeaders"]["validated"])
+                self.assertEqual(fact["sha256"], hashlib.sha256(payload).hexdigest())
+                self.assertEqual(fact["md5Measured"], expected_md5); self.assertFalse(fact["crc32cCalculated"])
+                self.assertTrue(fact["connectionFinallyClosed"]); self.assertTrue(reply.closed)
+
     def test_official_generation_size_md5_and_crc_are_exact_not_derived_from_current_file(self):
         metadata = {"bucket": "chrome-for-testing-public", "name": "157.0.8090.0/linux64/chrome-linux64.zip",
             "metageneration": "1", "contentType": "application/zip",
