@@ -139,6 +139,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
+  const { createMediaArtifactManifestV2, assertMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
   const { createQualityReport, resolveStrategicRubric } = await import('../../src/v2/domain/strategic-rubric.ts')
   const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { enqueueProjectFinalExportService } = await import('../../src/v2/application/enqueue-project-final-export.ts')
@@ -463,32 +464,23 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
         createdAt,
       },
     })
+    const sourceManifest = createMediaArtifactManifestV2({
+      artifactKey: sourceArtifactKey, artifactSha256: sourceSha256, byteSize: sourceBytes.byteLength,
+      mediaType: 'video', container: 'mp4',
+      recipe: { id: 'source-master', version: '1.0.0', parameters: { sourceManifestId, parameters: true } },
+      sources: [], probe: { width: 320, height: 180, duration: 4, fps: 30 },
+    })
     await client.v2MediaArtifactManifest.create({
       data: {
         id: sourceManifestId,
         workspaceId,
         artifactId: sourceArtifactId,
-        schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateVersionHash({ sourceManifestId }),
-        recipeId: 'source-master',
-        recipeVersion: '1.0.0',
-        parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-        manifestJson: stableSerialize({
-          schemaVersion: 'media-artifact-manifest/v2',
-          artifact: {
-            artifactKey: sourceArtifactKey,
-            sha256: sourceSha256,
-            byteSize: sourceBytes.byteLength,
-            mediaType: 'video',
-            container: 'mp4',
-          },
-          recipe: {
-            id: 'source-master',
-            version: '1.0.0',
-            parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-          },
-          sources: [],
-        }),
+        schemaVersion: sourceManifest.schemaVersion,
+        manifestHash: sourceManifest.manifestHash,
+        recipeId: sourceManifest.recipe.id,
+        recipeVersion: sourceManifest.recipe.version,
+        parametersHash: sourceManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(sourceManifest),
         createdAt,
       },
     })
@@ -538,11 +530,21 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     })
 
     const proxySha256 = calculateVersionHash({ proxyArtifactId })
+    const proxyArtifactKey = `workspaces/final-export-e2e-${suffix}/proxies/proxy.mp4`
+    // Controlled proxy metadata only: the one declared byte is not a rendered MP4.
+    const proxyManifest = createMediaArtifactManifestV2({
+      artifactKey: proxyArtifactKey, artifactSha256: proxySha256, byteSize: 1,
+      mediaType: 'video', container: 'mp4',
+      recipe: { id: 'editorial-proxy', version: '1.0.0', parameters: { proxyManifestId, parameters: true } },
+      sources: [{ artifactKey: sourceArtifactKey, sha256: sourceSha256, role: 'source-master',
+        execution: { tool: { id: 'controlled-fixture-metadata', version: '1.0.0',
+          digest: sha256(await readFile(new URL(import.meta.url))) } } }],
+    })
     await client.v2MediaArtifact.create({
       data: {
         id: proxyArtifactId,
         workspaceId,
-        artifactKey: `workspaces/final-export-e2e-${suffix}/proxies/proxy.mp4`,
+        artifactKey: proxyArtifactKey,
         sha256: proxySha256,
         byteSize: 1n,
         mediaType: 'video',
@@ -556,14 +558,12 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
         id: proxyManifestId,
         workspaceId,
         artifactId: proxyArtifactId,
-        schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateVersionHash({ proxyManifestId }),
-        recipeId: 'editorial-proxy',
-        recipeVersion: '1.0.0',
-        parametersHash: calculateVersionHash({ proxyManifestId, parameters: true }),
-        manifestJson: stableSerialize({
-          artifact: { artifactKey: `workspaces/final-export-e2e-${suffix}/proxies/proxy.mp4` },
-        }),
+        schemaVersion: proxyManifest.schemaVersion,
+        manifestHash: proxyManifest.manifestHash,
+        recipeId: proxyManifest.recipe.id,
+        recipeVersion: proxyManifest.recipe.version,
+        parametersHash: proxyManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(proxyManifest),
         createdAt,
       },
     })
@@ -578,6 +578,25 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
         createdAt,
       },
     })
+    for (const [artifactId, manifestId, expected] of [
+      [sourceArtifactId, sourceManifestId, sourceManifest],
+      [proxyArtifactId, proxyManifestId, proxyManifest],
+    ]) {
+      const [artifact, manifest] = await Promise.all([
+        client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } }),
+        client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: manifestId } }),
+      ])
+      assertMediaArtifactManifest(JSON.parse(manifest.manifestJson))
+      assert.deepEqual(JSON.parse(manifest.manifestJson), expected)
+      assert.deepEqual([artifact.workspaceId, artifact.artifactKey, artifact.sha256,
+        Number(artifact.byteSize), artifact.mediaType, artifact.container],
+      [workspaceId, expected.artifact.artifactKey, expected.artifact.sha256,
+        expected.artifact.byteSize, expected.artifact.mediaType, expected.artifact.container])
+      assert.deepEqual([manifest.workspaceId, manifest.artifactId, manifest.schemaVersion, manifest.manifestHash,
+        manifest.recipeId, manifest.recipeVersion, manifest.parametersHash],
+      [workspaceId, artifactId, expected.schemaVersion, expected.manifestHash,
+        expected.recipe.id, expected.recipe.version, expected.recipe.parametersHash])
+    }
     const proxyInputHash = calculateVersionHash({ projectVersionId, proxyArtifactId })
     await client.v2PublicOperation.create({
       data: {
