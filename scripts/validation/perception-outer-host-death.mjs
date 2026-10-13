@@ -29,8 +29,9 @@ export function verifySudoCarrierBirth({ facts, expected, current, rechecked, la
   assert.deepEqual(facts.launcherIdentity.gids, Array(4).fill(gid))
   assert.deepEqual(facts.carrierIdentity.uids, [uid, 0, 0, 0])
   assert.deepEqual(credentials.uids, [uid, 0, 0, 0], 'Carrier setuid UID role mismatch')
-  assert.ok(['owner-group', 'root-group'].includes(facts.gidRole), 'Unknown carrier GID role')
-  const expectedGids = [gid, ...Array(3).fill(facts.gidRole === 'owner-group' ? gid : 0)]
+  assert.ok(['owner-group', 'root-group', 'all-root-group'].includes(facts.gidRole), 'Unknown carrier GID role')
+  const expectedGids = facts.gidRole === 'all-root-group' ? [0, 0, 0, 0] :
+    [gid, ...Array(3).fill(facts.gidRole === 'owner-group' ? gid : 0)]
   assert.deepEqual(facts.carrierIdentity.gids, expectedGids, 'Carrier attested GID role mismatch')
   assert.deepEqual(credentials.gids, expectedGids, 'Carrier measured GID role mismatch')
   for (const file of [facts.executable, executable]) {

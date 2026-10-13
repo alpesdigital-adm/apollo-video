@@ -1027,9 +1027,10 @@ def capture_sudo_carrier_birth(creator, config, deadline, descriptors, diagnosti
     require(carrier["uids"] == [config["uid"], 0, 0, 0], "sudo carrier UID role mismatch")
     gids = carrier["gids"]
     diagnostic["stage"] = "carrier-gid-role"
-    require(gids[0] == config["gid"] and gids[1] == gids[2] == gids[3]
-            and gids[1] in (config["gid"], 0), "sudo carrier GID role mismatch")
-    gid_role = "owner-group" if gids[1] == config["gid"] else "root-group"
+    gid_roles = {tuple([config["gid"]] * 4): "owner-group",
+                 (config["gid"], 0, 0, 0): "root-group", (0, 0, 0, 0): "all-root-group"}
+    require(tuple(gids) in gid_roles, "sudo carrier GID role mismatch")
+    gid_role = gid_roles[tuple(gids)]
     diagnostic["stage"] = "launcher-metadata"
     launcher = verified_metadata(carrier["ppid"])
     diagnostic["facts"]["launcher"] = carrier_diagnostic_fact(launcher)

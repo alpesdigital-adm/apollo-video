@@ -570,6 +570,41 @@ class CarrierDiagnosticContracts(unittest.TestCase):
                 self.assertFalse(self.last_diagnostic["completed"]); self.assertEqual(world.opened, [])
                 if kind == "uid": self.assertEqual(self.last_diagnostic["facts"]["carrier"]["uids"], [0] * 4)
 
+    def test_carrier_GID_closed_enum_preserves_old_roles_and_accepts_observed_all_root_tuple(self):
+        for gids, role in (([1001] * 4, "owner-group"), ([1001, 0, 0, 0], "root-group"),
+                           ([0] * 4, "all-root-group")):
+            with self.subTest(role=role):
+                world = CarrierDiagnosticWorld(); world.carrier["gids"] = gids
+                result, diagnostic, descriptors = self.call(world)
+                self.assertEqual(result["gidRole"], role)
+                self.assertEqual(result["carrierIdentity"]["gids"], gids)
+                self.assertEqual(result["carrierIdentity"]["uids"], [1001, 0, 0, 0])
+                self.assertTrue(diagnostic["completed"]); self.assertEqual(descriptors, [])
+                self.assertEqual(world.closed, [17])
+        for gids in ([0, 1001, 1001, 1001], [0, 0, 1001, 0], [1001, 0, 1001, 0], [7] * 4):
+            with self.subTest(gids=gids):
+                world = CarrierDiagnosticWorld(); world.carrier["gids"] = gids
+                with self.assertRaisesRegex(RuntimeError, "sudo carrier GID role mismatch"): self.call(world)
+                self.assertEqual(self.last_diagnostic["stage"], "carrier-gid-role")
+                self.assertEqual(self.last_diagnostic["error"]["guardCode"], "CARRIER_GID_ROLE_MISMATCH")
+                self.assertFalse(self.last_diagnostic["completed"]); self.assertEqual(world.opened, [])
+
+    def test_all_root_GID_capture_rejects_changed_publication_readback(self):
+        world = CarrierDiagnosticWorld(); world.carrier["gids"] = [0] * 4
+        original = world.metadata; calls = 0
+        def changed(pid):
+            nonlocal calls
+            value = original(pid)
+            if pid == 10:
+                calls += 1
+                if calls == 2: value["gids"] = [1001, 0, 0, 0]
+            return value
+        world.metadata = changed
+        with self.assertRaisesRegex(RuntimeError, "sudo carrier facts changed before publication"): self.call(world)
+        self.assertEqual(self.last_diagnostic["stage"], "publication-recheck")
+        self.assertFalse(self.last_diagnostic["completed"])
+        self.assertEqual(world.closed, [17]); self.assertEqual(self.last_descriptors, [])
+
     def test_os_error_is_original_and_has_no_message_path_or_environment(self):
         world = CarrierDiagnosticWorld()
         original = PermissionError(errno.EACCES, "PRIVATE_ERROR", "/private/path")

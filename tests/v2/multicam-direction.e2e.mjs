@@ -395,6 +395,10 @@ test(
   async (t) => {
     const { randomUUID } = await import('node:crypto')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+    const { createMediaArtifactManifestV2, assertMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
+    const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
+    const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+    const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaCaptureSessionRepository } = await import('../../src/v2/infrastructure/prisma/capture-session-repository.ts')
     const { PrismaSyncDiagnosticRepository } = await import('../../src/v2/infrastructure/prisma/sync-diagnostic-repository.ts')
@@ -424,6 +428,7 @@ test(
     const clean = async () => {
       await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
       await client.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } })
+      await client.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null } })
       for (const table of [
         client.v2MulticamAngleScoreComponent, client.v2MulticamAngleCandidate,
         client.v2MulticamShotAlternative, client.v2MulticamShotDecision,
@@ -436,6 +441,7 @@ test(
         client.v2CommandArtifactInvalidation, client.v2PublicEventOutbox,
         client.v2EditCommand, client.v2ProjectVersion,
         client.v2ProjectMediaAsset, client.v2ProjectSnapshot,
+        client.v2AssetRightsChange, client.v2AssetRightsSnapshot,
         client.v2MediaArtifactManifest, client.v2MediaArtifact,
         client.v2Project,
       ]) {
@@ -444,13 +450,18 @@ test(
       await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
     }
     t.after(async () => {
+      const cleanupErrors = []
       try {
         await clean()
       } catch (error) {
-        console.error('journey cleanup failed:', error?.message ?? error)
-      } finally {
-        await client.$disconnect()
+        cleanupErrors.push(error)
       }
+      try {
+        await client.$disconnect()
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+      if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Multicam journey cleanup failed')
     })
     await clean()
 
@@ -466,38 +477,77 @@ test(
         createdByType: 'api-client', createdById: clientId, createdAt: at(0), updatedAt: at(0),
       },
     })
-    // Every recording the direction may cut has to be a linked, available
-    // project asset with a probed cadence, or `hydrateSource` refuses the render
-    // that follows (`prisma/project-proxy-render-repository.ts:111-141`).
+    // Controlled metadata, not physically measured recordings or an MP4 proof.
+    // Real readers require complete manifests and rights for each linked role.
+    const rightsRepository = new PrismaAssetRightsRepository(client)
     for (const track of world.session.tracks) {
       const artifactId = track.sourceAssetId
       const mediaType = ['microphone', 'master-audio', 'scratch-audio'].includes(track.role) ? 'audio' : 'video'
+      const artifactKey = `artifacts/${artifactId}.mp4`, artifactSha256 = 'b'.repeat(64)
+      const role = artifactId === 'asset-cam-a' ? 'source-master' : 'selected-insert'
+      const manifestId = `manifest-${artifactId}`
+      const manifest = createMediaArtifactManifestV2({
+        artifactKey, artifactSha256, byteSize: 4096, mediaType, container: 'mp4',
+        recipe: { id: 'capture-ingest', version: '1.0.0', parameters: { controlledFixture: 'multicam-direction', trackId: track.trackId } },
+        sources: [], probe: { duration: 60, fps: 30 },
+      })
       await client.v2MediaArtifact.create({
         data: {
-          id: artifactId, workspaceId, artifactKey: `artifacts/${artifactId}.mp4`,
-          sha256: 'b'.repeat(64), byteSize: BigInt(4096), mediaType, container: 'mp4',
+          id: artifactId, workspaceId, artifactKey,
+          sha256: artifactSha256, byteSize: BigInt(4096), mediaType, container: 'mp4',
           status: 'available', createdAt: at(0),
         },
       })
       await client.v2MediaArtifactManifest.create({
         data: {
-          id: `manifest-${artifactId}`, workspaceId, artifactId, schemaVersion: 'media-artifact-manifest/v1',
-          manifestHash: 'c'.repeat(64), recipeId: 'capture-ingest', recipeVersion: '1.0.0',
-          parametersHash: 'd'.repeat(64),
-          manifestJson: JSON.stringify({
-            artifact: { artifactKey: `artifacts/${artifactId}.mp4` },
-            probe: { duration: 60, fps: 30, rFrameRate: '30/1' },
-          }),
+          id: manifestId, workspaceId, artifactId, schemaVersion: manifest.schemaVersion,
+          manifestHash: manifest.manifestHash, recipeId: manifest.recipe.id, recipeVersion: manifest.recipe.version,
+          parametersHash: manifest.recipe.parametersHash, manifestJson: stableSerialize(manifest),
           createdAt: at(0),
         },
       })
       await client.v2ProjectMediaAsset.create({
         data: {
           id: randomUUID(), workspaceId, projectId, artifactId,
-          role: artifactId === 'asset-cam-a' ? 'source-master' : 'selected-insert',
+          role,
           originalFileName: `${artifactId}.mp4`, createdAt: at(0),
         },
       })
+      const allowedUses = [role === 'source-master' ? 'rendering' : 'editorial-reuse']
+      const rightsResult = await setAssetRightsService({ repository: rightsRepository, clock: () => at(0),
+        createId: () => `md-journey-rights-${artifactId}` })({
+        workspaceId, artifactId, baseRevision: assetRightsRevision(artifactId, 0),
+        actor: { type: 'api-client', id: clientId },
+        draft: { status: 'approved', allowedUses, prohibitedUses: [], allowedLocales: ['pt-BR'],
+          consent: { status: 'approved', allowedUses, allowedLocales: ['pt-BR'] },
+          sourceNote: 'Controlled multicam test rights; no physical recording or editorial acceptance proof' },
+      })
+      const [storedArtifact, storedManifest, storedLink, storedRights] = await Promise.all([
+        client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } }),
+        client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: manifestId } }),
+        client.v2ProjectMediaAsset.findFirstOrThrow({ where: { workspaceId, projectId, artifactId } }),
+        rightsRepository.findCurrent(workspaceId, artifactId),
+      ])
+      assert.deepEqual([storedArtifact.workspaceId, storedArtifact.artifactKey, storedArtifact.sha256,
+        storedArtifact.byteSize, storedArtifact.mediaType, storedArtifact.container, storedArtifact.status],
+      [workspaceId, artifactKey, artifactSha256, 4096n, mediaType, 'mp4', 'available'])
+      assert.deepEqual([storedManifest.workspaceId, storedManifest.artifactId, storedManifest.schemaVersion,
+        storedManifest.manifestHash, storedManifest.recipeId, storedManifest.recipeVersion, storedManifest.parametersHash],
+      [workspaceId, artifactId, manifest.schemaVersion, manifest.manifestHash, manifest.recipe.id,
+        manifest.recipe.version, manifest.recipe.parametersHash])
+      const storedBody = JSON.parse(storedManifest.manifestJson)
+      assertMediaArtifactManifest(storedBody); assert.deepEqual(storedBody, manifest)
+      assert.equal(storedLink.role, role)
+      assert.equal(storedRights.revision, rightsResult.revision)
+      assert.equal(storedRights.snapshot.snapshotHash, rightsResult.snapshot.snapshotHash)
+      assert.equal(storedArtifact.currentRightsSnapshotId, storedRights.snapshot.id)
+      assert.equal(storedRights.snapshot.workspaceId, workspaceId)
+      assert.equal(storedRights.snapshot.artifactId, artifactId)
+      assert.equal(storedRights.snapshot.status, 'approved')
+      assert.equal(storedRights.snapshot.consent.status, 'approved')
+      assert.deepEqual(storedRights.snapshot.allowedUses, allowedUses)
+      assert.deepEqual(storedRights.snapshot.consent.allowedUses, allowedUses)
+      assert.deepEqual(storedRights.snapshot.allowedLocales, ['pt-BR'])
     }
 
     const desiredActionRef = createDesiredActionReference(createDesiredAction({ objective: 'warming' }))

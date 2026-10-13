@@ -520,7 +520,8 @@ function sudoCarrierFixture(gidRole = 'owner-group') {
     gids: [1002, 1002, 1002, 1002] }
   const carrier = { pid: 21, ppid: 20, starttime: '201', state: 'S' }
   const guardian = { pid: 22, ppid: 21, starttime: '202', state: 'S' }
-  const gids = [1002, ...Array(3).fill(gidRole === 'owner-group' ? 1002 : 0)]
+  const gids = gidRole === 'all-root-group' ? [0, 0, 0, 0] :
+    [1002, ...Array(3).fill(gidRole === 'owner-group' ? 1002 : 0)]
   const executable = { path: '/usr/bin/sudo', dev: 8, ino: 31, bytes: 1234, mode: 0o104755,
     uid: 0, gid: 0, sha256: 'b'.repeat(64) }
   return { expected: { ...carrier }, current: { ...carrier }, rechecked: { ...carrier }, launcher, guardian,
@@ -533,14 +534,28 @@ function sudoCarrierFixture(gidRole = 'owner-group') {
       hostNamespace: 'pid:[42]', gidRole, executable: { ...executable } } }
 }
 
-test('outer death carrier validates fixed setuid UID and both explicitly measured closed GID roles', () => {
-  for (const role of ['owner-group', 'root-group']) {
+test('outer death carrier validates fixed setuid UID and all three explicitly measured closed GID roles', () => {
+  for (const role of ['owner-group', 'root-group', 'all-root-group']) {
     const input = sudoCarrierFixture(role)
     const result = verifySudoCarrierBirth(input)
     assert.equal(result.role, 'sudo-carrier'); assert.equal(result.gidRole, role)
     assert.deepEqual(result.uids, [1001, 0, 0, 0]); assert.deepEqual(result.gids, input.credentials.gids)
     assert.equal(result.authentication, 'parent-owned-pidfd/status-readback/warden-pre-drop-exe')
     assert.deepEqual(result.executable, input.executable)
+  }
+})
+
+test('outer death all-root carrier GID role still requires exact attested and measured tuple and owner real UID', () => {
+  for (const [label, mutate] of [
+    ['mixed', (v) => { v.credentials.gids = [0, 0, 1002, 0]; v.facts.carrierIdentity.gids = [...v.credentials.gids] }],
+    ['arbitrary', (v) => { v.credentials.gids = [7, 7, 7, 7]; v.facts.carrierIdentity.gids = [...v.credentials.gids] }],
+    ['attested-mismatch', (v) => { v.facts.carrierIdentity.gids = [1002, 0, 0, 0] }],
+    ['measured-mismatch', (v) => { v.credentials.gids = [1002, 0, 0, 0] }],
+    ['role-mismatch', (v) => { v.facts.gidRole = 'root-group' }],
+    ['root-real-uid', (v) => { v.credentials.uids = [0, 0, 0, 0]; v.facts.carrierIdentity.uids = [0, 0, 0, 0] }],
+  ]) {
+    const input = sudoCarrierFixture('all-root-group'); mutate(input)
+    assert.throws(() => verifySudoCarrierBirth(input), undefined, label)
   }
 })
 
