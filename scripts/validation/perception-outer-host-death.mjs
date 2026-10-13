@@ -1,17 +1,90 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CI_ROOT, budget, digest, identityKey, liveIdentity, readAuthorityIdentitySync } from './perception-addon-registry.mjs'
 import { loadPidfdBinding, openObservedPidfd } from './perception-pidfd.mjs'
 import { readLinuxProcessIdentity, parseLinuxProcessCredentials } from './run-perception-ci.mjs'
 import { COMPOSED_SUITE, verifyGuardianBirth, confirmTerminalIdentity, requireEmptyDatabase } from './run-perception-ci-namespace.mjs'
 
+export function verifySudoCarrierBirth({ facts, expected, current, rechecked, launcher, guardian,
+  credentials, uid, gid, namespace, wardenSha256, executable, token }) {
+  assert.ok(Number.isSafeInteger(uid) && uid > 0 && Number.isSafeInteger(gid) && gid > 0)
+  assert.equal(facts?.schemaVersion, 'perception-sudo-carrier-birth/v1', 'Authenticated carrier birth facts required')
+  assert.ok(Number.isSafeInteger(expected?.pid) && expected.pid > 1, 'Carrier must be a host PID above init')
+  assert.match(expected.starttime, /^\d+$/)
+  assert.equal(facts.measurement, 'privileged-before-drop')
+  assert.match(wardenSha256, /^[a-f0-9]{64}$/); assert.equal(facts.sourceSha256, wardenSha256)
+  assert.ok(token && token.terminal === false && typeof token.close === 'function', 'Parent-owned carrier pidfd required')
+  for (const value of [token.expected, token.current, facts.carrierIdentity, current, rechecked]) {
+    assert.equal(identityKey(value), identityKey(expected), 'Carrier PID/starttime mismatch')
+    assert.equal(value.ppid, launcher.pid, 'Carrier launcher parent mismatch'); assert.ok(liveIdentity(value))
+  }
+  assert.equal(identityKey(facts.launcherIdentity), identityKey(launcher), 'Carrier creator identity mismatch')
+  assert.equal(facts.launcherIdentity.ppid, launcher.ppid)
+  assert.equal(identityKey(facts.guardianIdentity), identityKey(guardian), 'Carrier guardian identity mismatch')
+  assert.equal(facts.guardianIdentity.ppid, expected.pid); assert.equal(guardian.ppid, expected.pid)
+  assert.match(namespace, /^pid:\[\d+\]$/); assert.equal(facts.hostNamespace, namespace)
+  assert.deepEqual(facts.launcherIdentity.uids, Array(4).fill(uid))
+  assert.deepEqual(facts.launcherIdentity.gids, Array(4).fill(gid))
+  assert.deepEqual(facts.carrierIdentity.uids, [uid, 0, 0, 0])
+  assert.deepEqual(credentials.uids, [uid, 0, 0, 0], 'Carrier setuid UID role mismatch')
+  assert.ok(['owner-group', 'root-group'].includes(facts.gidRole), 'Unknown carrier GID role')
+  const expectedGids = [gid, ...Array(3).fill(facts.gidRole === 'owner-group' ? gid : 0)]
+  assert.deepEqual(facts.carrierIdentity.gids, expectedGids, 'Carrier attested GID role mismatch')
+  assert.deepEqual(credentials.gids, expectedGids, 'Carrier measured GID role mismatch')
+  for (const file of [facts.executable, executable]) {
+    assert.equal(file.path, '/usr/bin/sudo', 'Carrier executable must be the fixed sudo binary')
+    assert.ok(Number.isSafeInteger(file.dev) && file.dev >= 0 && Number.isSafeInteger(file.ino) && file.ino > 0)
+    assert.ok(Number.isSafeInteger(file.bytes) && file.bytes > 0 && file.bytes <= 16 * 1024 * 1024)
+    assert.ok(Number.isSafeInteger(file.mode) && (file.mode & 0o170000) === 0o100000)
+    assert.equal(file.uid, 0); assert.equal(file.gid, 0)
+    assert.ok((file.mode & 0o4000) !== 0 && (file.mode & 0o2022) === 0 && (file.mode & 0o111) !== 0,
+      'Carrier executable root/setuid/nonwritable role mismatch')
+    assert.match(file.sha256, /^[a-f0-9]{64}$/)
+  }
+  assert.deepEqual(executable, facts.executable, 'Public sudo file authentication differs from privileged executable facts')
+  return { role: 'sudo-carrier', authentication: 'parent-owned-pidfd/status-readback/warden-pre-drop-exe',
+    pid: expected.pid, starttime: expected.starttime, ppid: launcher.pid, uidRole: 'owner-real/root-effective-saved-fs',
+    gidRole: facts.gidRole, uids: [...credentials.uids], gids: [...credentials.gids], hostNamespace: namespace,
+    executable: { ...executable } }
+}
+
+export function verifyOuterRoleCredentials(role, status, uid, gid) {
+  const credentials = parseLinuxProcessCredentials(status)
+  assert.ok(['root-unshare', 'root-init', 'normal-node'].includes(role), 'Unknown outer ancestry role')
+  const normal = role === 'normal-node'
+  assert.deepEqual(credentials.uids, Array(4).fill(normal ? uid : 0))
+  assert.deepEqual(credentials.gids, Array(4).fill(normal ? gid : 0))
+  if (normal) {
+    for (const name of ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'])
+      assert.match(status, new RegExp('^' + name + ':\\s+0000000000000000$', 'm'))
+    assert.match(status, /^NoNewPrivs:\s+1$/m); assert.match(status, /^Groups:\s*$/m)
+  }
+  return { role, ...credentials }
+}
+
+async function authenticatePublicSudoFile(deadlineAt) {
+  const path = '/usr/bin/sudo'
+  const before = await budget(() => lstat(path), deadlineAt, 300, 'Public sudo file stat')
+  assert.ok(before.isFile() && !before.isSymbolicLink() && before.size > 0 && before.size <= 16 * 1024 * 1024)
+  assert.equal(before.uid, 0); assert.equal(before.gid, 0)
+  assert.ok((before.mode & 0o4000) !== 0 && (before.mode & 0o2022) === 0 && (before.mode & 0o111) !== 0)
+  const bytes = await budget(() => readFile(path), deadlineAt, 1000, 'Public fixed sudo bytes')
+  const after = await budget(() => lstat(path), deadlineAt, 300, 'Public sudo file recheck')
+  for (const field of ['dev', 'ino', 'size', 'mode', 'uid', 'gid', 'mtimeMs', 'ctimeMs']) assert.equal(after[field], before[field])
+  assert.equal(bytes.length, before.size)
+  return { path, dev: before.dev, ino: before.ino, bytes: bytes.length, mode: before.mode,
+    uid: before.uid, gid: before.gid, sha256: digest(bytes) }
+}
+
 export function verifyOuterHostDeath(report) {
   assert.equal(report.kind, 'outer-host-death')
   assert.equal(report.launcherCloseObserved, true); assert.equal(report.launcherSignal, 'SIGKILL')
   assert.equal(report.launcherTerminal?.terminal, true)
   assert.equal(report.productGateReleased, false)
+  assert.equal(report.carrierCredentials?.role, 'sudo-carrier', 'Measured carrier role proof required')
+  assert.equal(report.carrierCredentials.authentication, 'parent-owned-pidfd/status-readback/warden-pre-drop-exe')
   assert.equal(report.identities.length, 5); assert.ok(report.identities.every((value) => value.terminal))
   assert.equal(report.postflight?.backendCount, 0); assert.equal(report.errors.length, 0)
   assert.equal(report.observedRunSuccess, false); assert.equal(report.innerReceiptPresent, false)
@@ -87,12 +160,30 @@ export async function runOuterHostDeath(env = process.env) {
     report.namespaceBinding = await budget(() => verifyGuardianBirth(prepared.packet, prepared.sudoIdentity),
       deadlineAt, 1500, 'Parent independently measured normal Node anchor')
     assert.equal(report.namespaceBinding.directlyObserved.namespace, prepared.namespaceBinding.directlyObserved.namespace)
-    for (const [identity, parent, uid] of [[expected[0], birth, process.getuid()], [expected[2], expected[1], 0],
-      [expected[3], expected[2], 0], [expected[4], expected[3], process.getuid()]]) {
+    assert.equal(prepared.config.uid, process.getuid()); assert.equal(prepared.config.gid, process.getgid())
+    // Privileged pre-drop executable/namespace facts are bound to current
+    // status, live ancestry and our OWN token; no normal setuid /proc/exe read.
+    const sudoFile = await authenticatePublicSudoFile(deadlineAt)
+    const carrierCurrent = await budget(() => readLinuxProcessIdentity(expected[0].pid), deadlineAt, 300, 'Parent carrier identity')
+    const carrierCredentials = parseLinuxProcessCredentials(await budget(() => readFile(`/proc/${expected[0].pid}/status`, 'utf8'),
+      deadlineAt, 300, 'Parent carrier credentials'))
+    const carrierRechecked = await budget(() => readLinuxProcessIdentity(expected[0].pid), deadlineAt, 300, 'Parent carrier final identity')
+    report.carrierBirthFacts = prepared.packet.carrierBirthFacts
+    report.carrierCredentials = verifySudoCarrierBirth({ facts: prepared.packet.carrierBirthFacts,
+      expected: expected[0], current: carrierCurrent, rechecked: carrierRechecked, launcher: birth,
+      guardian: expected[1], credentials: carrierCredentials, uid: prepared.config.uid, gid: prepared.config.gid,
+      namespace: birth.namespace, wardenSha256: prepared.packet.wardenSha256, executable: sudoFile,
+      token: held.get(identityKey(expected[0])) })
+    report.ancestryCredentials = []
+    for (const [role, identity, parent] of [['root-unshare', expected[2], expected[1]],
+      ['root-init', expected[3], expected[2]], ['normal-node', expected[4], expected[3]]]) {
       const stat = await budget(() => readLinuxProcessIdentity(identity.pid), deadlineAt, 300, 'Parent ancestry recheck')
       assert.equal(identityKey(stat), identityKey(identity)); assert.equal(stat.ppid, parent.pid); assert.ok(liveIdentity(stat))
-      const credentials = parseLinuxProcessCredentials(await budget(() => readFile(`/proc/${identity.pid}/status`, 'utf8'), deadlineAt, 300, 'Parent UID recheck'))
-      assert.deepEqual(credentials.uids, Array(4).fill(uid))
+      const status = await budget(() => readFile(`/proc/${identity.pid}/status`, 'utf8'), deadlineAt, 300, 'Parent role credentials')
+      const credentials = verifyOuterRoleCredentials(role, status, prepared.config.uid, prepared.config.gid)
+      const rechecked = await budget(() => readLinuxProcessIdentity(identity.pid), deadlineAt, 300, 'Parent role final identity')
+      assert.equal(identityKey(rechecked), identityKey(identity)); assert.equal(rechecked.ppid, parent.pid); assert.ok(liveIdentity(rechecked))
+      report.ancestryCredentials.push({ ...credentials, pid: identity.pid, starttime: identity.starttime, ppid: parent.pid })
     }
     report.parentTokensOpenedAndRechecked = expected.map((value) => ({ pid: value.pid, starttime: value.starttime }))
     // Intentionally NEVER send parent ACK: the actual HOST outer dies gated.

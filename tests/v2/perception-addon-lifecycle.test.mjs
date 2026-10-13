@@ -12,7 +12,7 @@ import { fixedConsumer, consumerTerminalProof, unattributedConsumerFacts, rechec
 import { assertCgroupScope, openCgroupKill, parseCgroupMembership, readCgroupSnapshot, cgroupTerminalProof,
   cgroupControlledCaseAccepted } from '../../scripts/validation/perception-consumer-cgroup.mjs'
 import { namespaceOwnerClosed, assertArchivePaths, planArchive } from '../../scripts/validation/cleanup-perception-pidfd.mjs'
-import { verifyOuterHostDeath } from '../../scripts/validation/perception-outer-host-death.mjs'
+import { verifyOuterHostDeath, verifySudoCarrierBirth, verifyOuterRoleCredentials } from '../../scripts/validation/perception-outer-host-death.mjs'
 import { loadPidfdBinding } from '../../scripts/validation/perception-pidfd.mjs'
 import { awaitProductGate, bootstrapReadback } from '../../scripts/validation/perception-namespace-node-bootstrap.mjs'
 import { CI_PIDFD_SOURCE_PATHS, digest, initializeRegistry, readRegistry, registryLock,
@@ -502,13 +502,137 @@ test('archive planning rejects source recursion, ancestor aliases and root ident
 test('host launcher death requires actual SIGKILL close, five terminal births and PG0 without fabricated inner proof', () => {
   const valid = { kind: 'outer-host-death', launcherCloseObserved: true, launcherSignal: 'SIGKILL',
     launcherTerminal: { terminal: true }, productGateReleased: false, identities: Array.from({ length: 5 }, () => ({ terminal: true })),
-    postflight: { backendCount: 0 }, errors: [], observedRunSuccess: false, innerReceiptPresent: false, outerReceiptPresent: false }
+    postflight: { backendCount: 0 }, errors: [], observedRunSuccess: false, innerReceiptPresent: false, outerReceiptPresent: false,
+    carrierCredentials: verifySudoCarrierBirth(sudoCarrierFixture()) }
   verifyOuterHostDeath(valid)
   for (const patch of [{ launcherCloseObserved: false }, { launcherSignal: 'SIGTERM' }, { productGateReleased: true },
-    { identities: [{ terminal: true }] }, { namespaceEmpty: true }, { nodeCloseObserved: true },
+    { identities: [{ terminal: true }] }, { carrierCredentials: undefined }, { namespaceEmpty: true }, { nodeCloseObserved: true },
     { innerReceiptPresent: true }, { observedRunSuccess: true }, { errors: ['inconclusive'] }]) {
     assert.throws(() => verifyOuterHostDeath({ ...valid, ...patch }))
   }
+})
+
+
+// Metadata-only role fixtures execute the real parent validator; no sudo,
+// native addon, /proc, privilege or Linux delivery is exercised by these tests.
+function sudoCarrierFixture(gidRole = 'owner-group') {
+  const launcher = { pid: 20, ppid: 10, starttime: '200', state: 'S', uids: [1001, 1001, 1001, 1001],
+    gids: [1002, 1002, 1002, 1002] }
+  const carrier = { pid: 21, ppid: 20, starttime: '201', state: 'S' }
+  const guardian = { pid: 22, ppid: 21, starttime: '202', state: 'S' }
+  const gids = [1002, ...Array(3).fill(gidRole === 'owner-group' ? 1002 : 0)]
+  const executable = { path: '/usr/bin/sudo', dev: 8, ino: 31, bytes: 1234, mode: 0o104755,
+    uid: 0, gid: 0, sha256: 'b'.repeat(64) }
+  return { expected: { ...carrier }, current: { ...carrier }, rechecked: { ...carrier }, launcher, guardian,
+    uid: 1001, gid: 1002, namespace: 'pid:[42]', wardenSha256: 'a'.repeat(64), executable,
+    credentials: { uids: [1001, 0, 0, 0], gids: [...gids] },
+    token: { terminal: false, expected: { ...carrier }, current: { ...carrier }, close() {} },
+    facts: { schemaVersion: 'perception-sudo-carrier-birth/v1', measurement: 'privileged-before-drop',
+      sourceSha256: 'a'.repeat(64), carrierIdentity: { ...carrier, uids: [1001, 0, 0, 0], gids: [...gids] },
+      launcherIdentity: structuredClone(launcher), guardianIdentity: { ...guardian },
+      hostNamespace: 'pid:[42]', gidRole, executable: { ...executable } } }
+}
+
+test('outer death carrier validates fixed setuid UID and both explicitly measured closed GID roles', () => {
+  for (const role of ['owner-group', 'root-group']) {
+    const input = sudoCarrierFixture(role)
+    const result = verifySudoCarrierBirth(input)
+    assert.equal(result.role, 'sudo-carrier'); assert.equal(result.gidRole, role)
+    assert.deepEqual(result.uids, [1001, 0, 0, 0]); assert.deepEqual(result.gids, input.credentials.gids)
+    assert.equal(result.authentication, 'parent-owned-pidfd/status-readback/warden-pre-drop-exe')
+    assert.deepEqual(result.executable, input.executable)
+  }
+})
+
+test('outer death carrier rejects absent or foreign source facts and reused parent-owned identities', () => {
+  const mutations = [
+    ['host-pid1', (v) => { v.expected.pid = 1 }],
+    ['missing-facts', (v) => { delete v.facts }],
+    ['source', (v) => { v.facts.sourceSha256 = 'c'.repeat(64) }],
+    ['measurement', (v) => { v.facts.measurement = 'after-drop' }],
+    ['schema', (v) => { v.facts.schemaVersion = 'perception-sudo-carrier-birth/v2' }],
+    ['missing-token', (v) => { delete v.token }],
+    ['terminal-token', (v) => { v.token.terminal = true }],
+    ['wrong-token-birth', (v) => { v.token.expected.starttime = '999' }],
+    ['wrong-carrier', (v) => { v.current.pid = 99 }],
+    ['reused-pid', (v) => { v.rechecked.starttime = '999' }],
+    ['changed-parent', (v) => { v.rechecked.ppid = 19 }],
+    ['dead', (v) => { v.rechecked.state = 'Z' }],
+    ['attested-birth', (v) => { v.facts.carrierIdentity.starttime = '999' }],
+    ['launcher-reuse', (v) => { v.facts.launcherIdentity.starttime = '999' }],
+    ['launcher-parent', (v) => { v.facts.launcherIdentity.ppid = 19 }],
+    ['guardian-reuse', (v) => { v.facts.guardianIdentity.starttime = '999' }],
+    ['guardian-parent', (v) => { v.guardian.ppid = 19 }],
+    ['host-namespace', (v) => { v.facts.hostNamespace = 'pid:[43]' }],
+  ]
+  for (const [label, mutate] of mutations) {
+    const value = sudoCarrierFixture(); mutate(value)
+    assert.throws(() => verifySudoCarrierBirth(value), undefined, label)
+  }
+})
+
+test('outer death carrier rejects wrong executable bytes inode and root/setuid permissions', () => {
+  const mutations = [
+    ['exe', (v) => { v.facts.executable.path = '/usr/bin/python3' }],
+    ['public-exe', (v) => { v.executable.path = '/bin/sudo' }],
+    ['hash', (v) => { v.executable.sha256 = 'c'.repeat(64) }],
+    ['inode', (v) => { v.executable.ino += 1 }],
+    ['device', (v) => { v.executable.dev += 1 }],
+    ['bytes', (v) => { v.executable.bytes += 1 }],
+    ['owner', (v) => { v.facts.executable.uid = 1001 }],
+    ['group', (v) => { v.facts.executable.gid = 1002 }],
+    ['no-setuid', (v) => { v.facts.executable.mode = 0o100755 }],
+    ['setgid', (v) => { v.facts.executable.mode |= 0o2000 }],
+    ['group-write', (v) => { v.facts.executable.mode |= 0o20 }],
+    ['world-write', (v) => { v.facts.executable.mode |= 0o2 }],
+    ['not-regular', (v) => { v.facts.executable.mode = 0o044755 }],
+  ]
+  for (const [label, mutate] of mutations) {
+    const value = sudoCarrierFixture(); mutate(value)
+    assert.throws(() => verifySudoCarrierBirth(value), undefined, label)
+  }
+})
+
+test('outer death carrier rejects normal or partial UID tuples and mixed arbitrary or inconsistent GID tuples', () => {
+  const mutations = [
+    ['normal-uid', (v) => { v.credentials.uids = [1001, 1001, 1001, 1001] }],
+    ['root-real-uid', (v) => { v.credentials.uids = [0, 0, 0, 0] }],
+    ['partial-uid', (v) => { v.credentials.uids = [1001, 0, 1001, 0] }],
+    ['attested-uid', (v) => { v.facts.carrierIdentity.uids = [1001, 0, 0, 1001] }],
+    ['wrong-real-gid', (v) => { v.credentials.gids = [0, 1002, 1002, 1002] }],
+    ['mixed-gid', (v) => { v.credentials.gids = [1002, 0, 1002, 0] }],
+    ['arbitrary-gid', (v) => { v.credentials.gids = [1002, 7, 7, 7]; v.facts.carrierIdentity.gids = [1002, 7, 7, 7] }],
+    ['different-readback', (v) => { v.credentials.gids = [1002, 0, 0, 0] }],
+    ['role-mismatch', (v) => { v.facts.gidRole = 'root-group' }],
+    ['unknown-role', (v) => { v.facts.gidRole = 'whatever-observed' }],
+  ]
+  for (const [label, mutate] of mutations) {
+    const value = sudoCarrierFixture(); mutate(value)
+    assert.throws(() => verifySudoCarrierBirth(value), undefined, label)
+  }
+})
+
+function outerRoleStatus(uids, gids) {
+  return 'Uid:\t' + uids.join('\t') + '\nGid:\t' + gids.join('\t') + '\nGroups:\t\nNoNewPrivs:\t1\n' +
+    ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'].map((name) => name + ':\t0000000000000000\n').join('')
+}
+
+test('outer death normal Node keeps all owner credentials zero caps and no root-role fallback', () => {
+  const normal = outerRoleStatus([1001, 1001, 1001, 1001], [1002, 1002, 1002, 1002])
+  assert.equal(verifyOuterRoleCredentials('normal-node', normal, 1001, 1002).role, 'normal-node')
+  for (const status of [outerRoleStatus([0, 0, 0, 0], [1002, 1002, 1002, 1002]),
+    outerRoleStatus([1001, 0, 0, 0], [1002, 1002, 1002, 1002]),
+    outerRoleStatus([1001, 1001, 1001, 1001], [1002, 0, 0, 0]),
+    normal.replace('CapEff:\t0000000000000000', 'CapEff:\t0000000000000020'),
+    normal.replace('NoNewPrivs:\t1', 'NoNewPrivs:\t0'), normal.replace('Groups:\t', 'Groups:\t0')]) {
+    assert.throws(() => verifyOuterRoleCredentials('normal-node', status, 1001, 1002))
+  }
+  const root = outerRoleStatus([0, 0, 0, 0], [0, 0, 0, 0])
+  for (const role of ['root-unshare', 'root-init']) {
+    assert.equal(verifyOuterRoleCredentials(role, root, 1001, 1002).role, role)
+    assert.throws(() => verifyOuterRoleCredentials(role, normal, 1001, 1002))
+  }
+  assert.throws(() => verifyOuterRoleCredentials('sudo-carrier', root, 1001, 1002))
 })
 
 test('CI source fingerprint explicitly includes new files without relying on tracked-only inventory', () => {

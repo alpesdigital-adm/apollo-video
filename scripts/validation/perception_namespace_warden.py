@@ -12,6 +12,7 @@ import re
 import select
 import signal
 import socket
+import stat
 import struct
 import sys
 import time
@@ -943,6 +944,76 @@ def trustworthy_binary(path):
         require(not capability, "privileged prerequisite has file capabilities")
 
 
+def capture_sudo_carrier_birth(creator, config, deadline, descriptors):
+    # Observe before dropping privilege, on the existing authenticated FD.
+    remaining(deadline)
+    carrier = verified_metadata(creator["pid"])
+    require(carrier is not None and key(carrier) == key(creator) and carrier["ppid"] == creator["ppid"]
+            and carrier["state"] not in TERMINAL, "sudo carrier birth changed")
+    require(carrier["uids"] == [config["uid"], 0, 0, 0], "sudo carrier UID role mismatch")
+    gids = carrier["gids"]
+    require(gids[0] == config["gid"] and gids[1] == gids[2] == gids[3]
+            and gids[1] in (config["gid"], 0), "sudo carrier GID role mismatch")
+    gid_role = "owner-group" if gids[1] == config["gid"] else "root-group"
+    launcher = verified_metadata(carrier["ppid"])
+    guardian = identity(os.getpid())
+    require(launcher is not None and launcher["state"] not in TERMINAL
+            and launcher["uids"] == [config["uid"]] * 4 and launcher["gids"] == [config["gid"]] * 4
+            and guardian is not None and guardian["ppid"] == carrier["pid"], "sudo carrier creator chain mismatch")
+    namespace = os.readlink("/proc/%d/ns/pid" % carrier["pid"])
+    require(re.fullmatch(r"pid:\[[0-9]+\]", namespace)
+            and namespace == os.readlink("/proc/%d/ns/pid" % launcher["pid"])
+            and namespace == os.readlink("/proc/self/ns/pid"), "sudo carrier host namespace mismatch")
+    executable = os.readlink("/proc/%d/exe" % carrier["pid"])
+    require(executable == "/usr/bin/sudo", "sudo carrier executable mismatch")
+    descriptor = os.open("/usr/bin/sudo", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    descriptors.append(descriptor)  # Register before validation can throw.
+    try:
+        metadata = os.fstat(descriptor)
+        active_executable = os.stat("/proc/%d/exe" % carrier["pid"])
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0 and metadata.st_gid == 0
+                and metadata.st_mode & 0o4000 and not metadata.st_mode & 0o2022
+                and metadata.st_mode & 0o111 and 0 < metadata.st_size <= 16 * 1024 * 1024
+                and (metadata.st_dev, metadata.st_ino) == (active_executable.st_dev, active_executable.st_ino),
+                "sudo carrier executable authority mismatch")
+        digest, size = hashlib.sha256(), 0
+        while True:
+            remaining(deadline)
+            chunk = os.read(descriptor, min(65536, metadata.st_size - size + 1))
+            if not chunk:
+                break
+            size += len(chunk)
+            require(size <= metadata.st_size, "sudo carrier executable grew")
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        require(size == metadata.st_size and (after.st_dev, after.st_ino, after.st_size, after.st_mode,
+                after.st_uid, after.st_gid, after.st_mtime_ns, after.st_ctime_ns) == (metadata.st_dev, metadata.st_ino,
+                metadata.st_size, metadata.st_mode, metadata.st_uid, metadata.st_gid, metadata.st_mtime_ns,
+                metadata.st_ctime_ns), "sudo carrier executable changed during authentication")
+        file_fact = {"path": executable, "dev": metadata.st_dev, "ino": metadata.st_ino,
+                     "bytes": size, "mode": metadata.st_mode, "uid": metadata.st_uid, "gid": metadata.st_gid,
+                     "sha256": digest.hexdigest()}
+    finally:
+        os.close(descriptor)
+        descriptors.remove(descriptor)
+    remaining(deadline)
+    active_executable = os.stat("/proc/%d/exe" % carrier["pid"])
+    verified = verified_metadata(carrier["pid"])
+    require(verified is not None and key(verified) == key(carrier) and verified["ppid"] == launcher["pid"]
+            and verified["state"] not in TERMINAL and verified["uids"] == carrier["uids"]
+            and verified["gids"] == carrier["gids"]
+            and os.readlink("/proc/%d/exe" % carrier["pid"]) == executable
+            and (active_executable.st_dev, active_executable.st_ino)
+                == (file_fact["dev"], file_fact["ino"])
+            and os.readlink("/proc/%d/ns/pid" % carrier["pid"]) == namespace
+            and key(identity(launcher["pid"])) == key(launcher)
+            and key(identity(os.getpid())) == key(guardian), "sudo carrier facts changed before publication")
+    return {"schemaVersion": "perception-sudo-carrier-birth/v1", "sourceSha256": SCRIPT_SHA256,
+            "measurement": "privileged-before-drop", "carrierIdentity": verified,
+            "launcherIdentity": launcher, "guardianIdentity": guardian, "hostNamespace": namespace,
+            "gidRole": gid_role, "executable": file_fact}
+
+
 def host_main():
     # sudo preserves only stdio by default. FD1 is framing-only; duplicate it
     # privately HERE, never request sudo -C or a sudoers/global security change.
@@ -967,6 +1038,7 @@ def host_main():
         creator = identity(os.getppid())
         require(creator is not None and creator["pid"] > 1, "guardian creator identity unavailable")
         bind_parent_death(creator)
+        report["carrierBirthFacts"] = capture_sudo_carrier_birth(creator, config, execution_deadline, descriptors)
         for binary in ("/usr/bin/unshare", "/usr/bin/python3"):
             trustworthy_binary(binary)
         prctl(36, 1)  # PR_SET_CHILD_SUBREAPER; only our forked namespace children.
