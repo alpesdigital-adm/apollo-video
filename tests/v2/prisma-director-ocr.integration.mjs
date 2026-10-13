@@ -151,18 +151,135 @@ async function raceAtOperationLock({ controller, operationId, attachName,
   return { attach: attached, cancel: canceled }
 }
 
-function isolatedDbEndpoint(suffix) {
-  const url = new URL(process.env.V2_DATABASE_URL)
+function isolatedDbEndpoint(suffix, databaseUrl = process.env.V2_DATABASE_URL) {
+  const url = new URL(databaseUrl)
   const runName = url.searchParams.get('application_name')
   assert.ok(runName?.startsWith('apollo-video-e2e-'),
     'the race must remain inside the supervised E2E application_name')
   const applicationName = `${runName}-${suffix}`
-  assert.ok(applicationName.length <= 63,
+  assert.ok(Buffer.byteLength(applicationName, 'utf8') <= 63,
     'PostgreSQL must retain the full run identity and race contender name')
   url.searchParams.set('application_name', applicationName)
   url.searchParams.set('connection_limit', '1')
   return { url: url.toString(), applicationName }
 }
+
+function orderedRaceEndpoint(role, scenario, fixtureId, databaseUrl = process.env.V2_DATABASE_URL) {
+  // Explicit contender names leave room for the entire supervised run identity;
+  // no slice/hash/truncation of that identity or of the eight-character fixture ID.
+  const roles = { latch: 'lat', attach: 'att', control: 'ctl' }
+  const scenarios = { 'cancel-first': 'cf', takeover: 'to' }
+  assert.ok(typeof role === 'string' && Object.hasOwn(roles, role), 'W65 race role is not in the closed contender enum')
+  assert.ok(typeof scenario === 'string' && Object.hasOwn(scenarios, scenario), 'W65 race scenario is not in the closed contender enum')
+  assert.ok(typeof fixtureId === 'string' && /^[a-f0-9]{8}$/.test(fixtureId), 'W65 race fixture identity must contain exactly eight hexadecimal characters')
+  return isolatedDbEndpoint(`${roles[role]}-${scenarios[scenario]}-${fixtureId}`, databaseUrl)
+}
+
+function inlineRightsEndpoint(role, rightsChange, fixtureId, databaseUrl = process.env.V2_DATABASE_URL) {
+  const roles = { latch: 'il', admit: 'ia' }
+  const scenarios = { revoke: 'rv', expiry: 'ex' }
+  assert.ok(typeof role === 'string' && Object.hasOwn(roles, role), 'W65 inline role is not in the closed contender enum')
+  assert.ok(typeof rightsChange === 'string' && Object.hasOwn(scenarios, rightsChange), 'W65 inline rights change is not in the closed contender enum')
+  assert.ok(typeof fixtureId === 'string' && /^[a-f0-9]{8}$/.test(fixtureId), 'W65 inline fixture identity must contain exactly eight hexadecimal characters')
+  return isolatedDbEndpoint(`${roles[role]}-${scenarios[rightsChange]}-${fixtureId}`, databaseUrl)
+}
+
+test('W65 ordered race names preserve the full CI run and fixture identities with six distinct bounded contenders', () => {
+  const runName = 'apollo-video-e2e-perception-38384233934'
+  const url = new URL('postgresql://test:test@127.0.0.1:5432/apollo_v2_e2e?schema=public&connection_limit=2&pool_timeout=10&connect_timeout=10')
+  url.searchParams.set('application_name', runName)
+  const names = []
+  for (const [scenario, scenarioCode] of [['cancel-first', 'cf'], ['takeover', 'to']]) {
+    for (const [role, roleCode] of [['latch', 'lat'], ['attach', 'att'], ['control', 'ctl']]) {
+      const endpoint = orderedRaceEndpoint(role, scenario, 'deadbeef', url.toString())
+      assert.equal(endpoint.applicationName, `${runName}-${roleCode}-${scenarioCode}-deadbeef`)
+      assert.ok(Buffer.byteLength(endpoint.applicationName, 'utf8') <= 63)
+      const actual = new URL(endpoint.url)
+      assert.equal(actual.searchParams.get('application_name'), endpoint.applicationName)
+      assert.equal(actual.searchParams.get('connection_limit'), '1')
+      assert.equal(actual.searchParams.get('schema'), 'public')
+      assert.equal(actual.searchParams.get('pool_timeout'), '10')
+      assert.equal(actual.searchParams.get('connect_timeout'), '10')
+      assert.equal(actual.host, url.host); assert.equal(actual.pathname, url.pathname)
+      names.push(endpoint.applicationName)
+    }
+  }
+  assert.equal(new Set(names).size, 6)
+  const boundaryRun = 'apollo-video-e2e-perception-1234567890123456789'
+  url.searchParams.set('application_name', boundaryRun)
+  const boundary = orderedRaceEndpoint('control', 'cancel-first', 'deadbeef', url.toString())
+  assert.equal(boundary.applicationName, `${boundaryRun}-ctl-cf-deadbeef`)
+  assert.equal(Buffer.byteLength(boundary.applicationName, 'utf8'), 63)
+})
+
+test('W65 ordered race names fail closed for unknown contenders, invalid fixtures and oversized UTF-8 run identities', () => {
+  const url = new URL('postgresql://test:test@127.0.0.1:5432/apollo_v2_e2e?application_name=apollo-video-e2e-perception-38384233934')
+  for (const role of ['unknown', 'constructor', '', null]) {
+    assert.throws(() => orderedRaceEndpoint(role, 'cancel-first', 'deadbeef', url.toString()), /closed contender enum/)
+  }
+  for (const scenario of ['unknown', 'constructor', '', null]) {
+    assert.throws(() => orderedRaceEndpoint('latch', scenario, 'deadbeef', url.toString()), /closed contender enum/)
+  }
+  for (const fixtureId of ['deadbee', 'deadbeeff', 'DEADBEEF', 'dead-beef', '', null]) {
+    assert.throws(() => orderedRaceEndpoint('latch', 'cancel-first', fixtureId, url.toString()), /exactly eight hexadecimal/)
+  }
+  for (const runName of ['apollo-video-e2e-perception-12345678901234567890', `apollo-video-e2e-${'é'.repeat(20)}`]) {
+    url.searchParams.set('application_name', runName)
+    assert.throws(() => orderedRaceEndpoint('control', 'cancel-first', 'deadbeef', url.toString()), /PostgreSQL must retain the full run identity/)
+  }
+  url.searchParams.set('application_name', 'production')
+  assert.throws(() => orderedRaceEndpoint('latch', 'cancel-first', 'deadbeef', url.toString()), /supervised E2E/)
+  url.searchParams.delete('application_name')
+  assert.throws(() => orderedRaceEndpoint('latch', 'cancel-first', 'deadbeef', url.toString()), /supervised E2E/)
+})
+
+test('W65 inline rights names preserve complete run and fixture identities with distinct latch/admission contenders', () => {
+  const runName = 'apollo-video-e2e-perception-38384233934'
+  const url = new URL('postgresql://test:test@127.0.0.1:5432/apollo_v2_e2e?schema=public&connection_limit=2&pool_timeout=10&connect_timeout=10')
+  url.searchParams.set('application_name', runName)
+  const names = []
+  for (const [rightsChange, scenarioCode] of [['revoke', 'rv'], ['expiry', 'ex']]) {
+    for (const [role, roleCode] of [['latch', 'il'], ['admit', 'ia']]) {
+      const endpoint = inlineRightsEndpoint(role, rightsChange, 'deadbeef', url.toString())
+      assert.equal(endpoint.applicationName, `${runName}-${roleCode}-${scenarioCode}-deadbeef`)
+      assert.ok(Buffer.byteLength(endpoint.applicationName, 'utf8') <= 63)
+      const actual = new URL(endpoint.url)
+      assert.equal(actual.searchParams.get('application_name'), endpoint.applicationName)
+      assert.equal(actual.searchParams.get('connection_limit'), '1')
+      assert.equal(actual.searchParams.get('schema'), 'public')
+      assert.equal(actual.searchParams.get('pool_timeout'), '10')
+      assert.equal(actual.searchParams.get('connect_timeout'), '10')
+      names.push(endpoint.applicationName)
+    }
+  }
+  assert.equal(new Set(names).size, 4)
+  for (const scenario of ['cancel-first', 'takeover']) for (const role of ['latch', 'attach', 'control']) {
+    names.push(orderedRaceEndpoint(role, scenario, 'deadbeef', url.toString()).applicationName)
+  }
+  assert.equal(new Set(names).size, 10, 'Inline and ordered contenders must not collide')
+  const boundaryRun = 'apollo-video-e2e-perception-12345678901234567890'
+  url.searchParams.set('application_name', boundaryRun)
+  const boundary = inlineRightsEndpoint('admit', 'expiry', 'deadbeef', url.toString())
+  assert.equal(boundary.applicationName, `${boundaryRun}-ia-ex-deadbeef`)
+  assert.equal(Buffer.byteLength(boundary.applicationName, 'utf8'), 63)
+})
+
+test('W65 inline rights names reject unsupported roles/changes and invalid or oversized identities without truncation', () => {
+  const url = new URL('postgresql://test:test@127.0.0.1:5432/apollo_v2_e2e?application_name=apollo-video-e2e-perception-38384233934')
+  for (const role of ['control', 'unknown', 'constructor', null]) {
+    assert.throws(() => inlineRightsEndpoint(role, 'revoke', 'deadbeef', url.toString()), /closed contender enum/)
+  }
+  for (const rightsChange of ['allow', 'unknown', 'constructor', null]) {
+    assert.throws(() => inlineRightsEndpoint('admit', rightsChange, 'deadbeef', url.toString()), /closed contender enum/)
+  }
+  for (const fixtureId of ['deadbee', 'deadbeeff', 'DEADBEEF', 'dead-beef', null]) {
+    assert.throws(() => inlineRightsEndpoint('admit', 'expiry', fixtureId, url.toString()), /exactly eight hexadecimal/)
+  }
+  for (const runName of ['apollo-video-e2e-perception-123456789012345678901', `apollo-video-e2e-${'é'.repeat(20)}`]) {
+    url.searchParams.set('application_name', runName)
+    assert.throws(() => inlineRightsEndpoint('admit', 'expiry', 'deadbeef', url.toString()), /PostgreSQL must retain the full run identity/)
+  }
+})
 
 // Real PG authority tests; no renderer/approval claim. Probe transactions abort
 // deliberately after resolution, preserving the surrounding editorial fixture.
@@ -1291,9 +1408,9 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
 
       for (const scenario of ['cancel-first', 'takeover']) {
         const candidate = await seedOrderedRace(scenario, scenario === 'takeover')
-        const latchEndpoint = isolatedDbEndpoint(`latch-${scenario}-${suffix}`)
-        const attachEndpoint = isolatedDbEndpoint(`attach-${scenario}-${suffix}`)
-        const controlEndpoint = isolatedDbEndpoint(`control-${scenario}-${suffix}`)
+        const latchEndpoint = orderedRaceEndpoint('latch', scenario, suffix)
+        const attachEndpoint = orderedRaceEndpoint('attach', scenario, suffix)
+        const controlEndpoint = orderedRaceEndpoint('control', scenario, suffix)
         const latchClient = new PrismaClient({ datasources: { db: { url: latchEndpoint.url } } })
         const oldWorker = new PrismaClient({ datasources: { db: { url: attachEndpoint.url } } })
         const controllerClient = new PrismaClient({ datasources: { db: { url: controlEndpoint.url } } })
@@ -1477,8 +1594,8 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
             fixtureOutputs: 'controlled-metadata-only', replayObserved: true, approvalTransferred: false }))
           continue
         }
-        const latchEndpoint = isolatedDbEndpoint('inline-latch-' + rightsChange + '-' + suffix)
-        const inlineEndpoint = isolatedDbEndpoint('inline-admit-' + rightsChange + '-' + suffix)
+        const latchEndpoint = inlineRightsEndpoint('latch', rightsChange, suffix)
+        const inlineEndpoint = inlineRightsEndpoint('admit', rightsChange, suffix)
         const latchClient = new PrismaClient({ datasources: { db: { url: latchEndpoint.url } } })
         const inlineClient = new PrismaClient({ datasources: { db: { url: inlineEndpoint.url } } })
         let resolveReady, rejectReady, release, latch, admission, failure

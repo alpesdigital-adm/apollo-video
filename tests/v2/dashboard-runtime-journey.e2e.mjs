@@ -2,14 +2,15 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { dirname, isAbsolute, join } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.mjs'
+import { createDashboardRuntimePreparationForTest, prepareDashboardRuntimeJourney, runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.mjs'
 import { dashboardColorProbePersistenceData } from './helpers/dashboard-controlled-export-fixture.mjs'
 
 // Source bytes, aligned transcript, initial timeline, rights and color probe are
@@ -50,6 +51,14 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
   assert.ok(process.env.V2_DATABASE_URL, 'V2_DATABASE_URL must point to an isolated PostgreSQL database')
   const artifactRoot = process.env.APOLLO_V2_ARTIFACT_ROOT?.trim() ?? ''
   assert.equal(isAbsolute(artifactRoot), true, 'APOLLO_V2_ARTIFACT_ROOT must be absolute')
+  let runtimePreparation
+  try {
+    runtimePreparation = await prepareDashboardRuntimeJourney({ signal: t.signal })
+    t.diagnostic(JSON.stringify({ kind: 'dashboard-runtime-preparation', ...runtimePreparation.evidence }))
+  } catch (error) {
+    try { if (error.dashboardRuntimePreparation) t.diagnostic(JSON.stringify({ kind: 'dashboard-runtime-preparation', ...error.dashboardRuntimePreparation })) } catch { /* Original preparation failure remains primary. */ }
+    throw error
+  }
   const { resolveFfmpegBinary } = await import('../../src/v2/infrastructure/media/ffmpeg-binary.ts')
   const ffmpegBin = resolveFfmpegBinary()
   assert.equal(isAbsolute(ffmpegBin), true, 'Resolved FFmpeg binary must be absolute')
@@ -95,6 +104,23 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
   let server
   let serverLogs = ''
   let journeyPrimaryError
+  const httpDiagnosticsEnabled = process.env.APOLLO_DASHBOARD_HTTP_CONNECTION_DIAGNOSTICS === '1'
+  let httpDiagnosticsModule, httpClient, httpServerReader, httpModuleFact, httpSnapshotFailure
+  let httpDiagnosticGatePassed = null
+  const httpWorkspacePaths = new Set()
+  const observeHttpConnections = () => {
+    try {
+      const clientFacts = httpClient?.snapshot() ?? null, serverFacts = httpServerReader?.snapshot() ?? null
+      return { schemaVersion: 'dashboard-native-http-diagnostics/v1', scope: 'diagnostic-not-normal-journey-or-performance',
+        runId: suffix, module: httpModuleFact ?? null, nodeVersion: process.versions.node, undiciVersion: process.versions.undici ?? null,
+        client: clientFacts, server: serverFacts, selectedWorkspacePaths: [...httpWorkspacePaths],
+        joins: clientFacts && serverFacts ? httpDiagnosticsModule.joinConnectionDiagnostics(clientFacts, serverFacts, [...httpWorkspacePaths]) : [],
+        resetAuthorIdentified: false }
+    } catch (error) {
+      httpSnapshotFailure ??= error
+      return { scope: 'diagnostic-not-normal-journey-or-performance', instrumentationFailed: true }
+    }
+  }
   const serverLifecycle = { schemaVersion: 'dashboard-owned-next-lifecycle/v1', runId: suffix,
     ownerPid: process.pid, pid: null, creationRequestedAt: null, spawnReturnedAt: null,
     spawnObservedAt: null, exitObservedAt: null, closeObservedAt: null, events: [] }
@@ -161,11 +187,38 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
     assert.match(authenticationAudit.contextHash, /^[a-f0-9]{64}$/)
     const port = await getFreePort()
     const baseUrl = `http://localhost:${port}`
+    let httpPreload = []
+    if (httpDiagnosticsEnabled) {
+      assert.notEqual(process.env.APOLLO_DASHBOARD_CANCEL_DIAGNOSTICS, '1', 'Native connection diagnostics never enable cancellation hooks')
+      assert.equal(process.env.APOLLO_DASHBOARD_HTTP_DIAGNOSTICS_PRELOAD, undefined, 'The test client cannot be a server preload')
+      const modulePath = 'C:/Users/leand/Documents/Apollo/w61-70-20261008/dashboard-http-connection-diagnostics.mjs'
+      assert.equal(process.env.APOLLO_DASHBOARD_HTTP_DIAGNOSTICS_MODULE_PATH, modulePath)
+      const modulePin = process.env.APOLLO_DASHBOARD_HTTP_DIAGNOSTICS_MODULE_SHA256
+      assert.match(modulePin ?? '', /^[a-f0-9]{64}$/)
+      const authEnd = performance.now() + 5000
+      const remaining = () => { const value = Math.floor(authEnd - performance.now()); assert.ok(value > 0, 'HTTP diagnostic source authentication deadline'); return value }
+      remaining(); const before = await lstat(modulePath); remaining()
+      assert.equal(before.isFile(), true); assert.equal(before.isSymbolicLink(), false); assert.ok(before.size > 0 && before.size <= 131072)
+      assert.equal((await realpath(modulePath)).replaceAll('\\', '/'), modulePath); remaining()
+      const bytes = await readFile(modulePath, { signal: AbortSignal.timeout(remaining()) }); remaining()
+      assert.equal(bytes.length, before.size); assert.equal(sha256(bytes), modulePin)
+      const after = await lstat(modulePath); remaining()
+      assert.deepEqual([after.dev, after.ino, after.size, after.mtimeMs], [before.dev, before.ino, before.size, before.mtimeMs])
+      httpDiagnosticsModule = await import(pathToFileURL(modulePath).href); remaining()
+      httpModuleFact = { path: modulePath, sha256: modulePin, bytes: bytes.length }
+      httpClient = httpDiagnosticsModule.createConnectionDiagnostics({ role: 'client', origin: baseUrl, runId: suffix })
+      httpPreload = ['--import', pathToFileURL(modulePath).href]
+    }
+    t.signal.throwIfAborted()
+    assert.ok(runtimePreparation.evidence.readyAt <= Date.now(), 'Dependency preparation must precede server creation')
     serverLifecycle.creationRequestedAt = Date.now()
-    server = spawn(process.execPath, ['node_modules/next/dist/bin/next', ...(process.env.APOLLO_DASHBOARD_RUNTIME_SERVER_MODE === 'dev' ? ['dev', '--webpack'] : ['start']), '-p', String(port)], {
+    serverLifecycle.runtimePreparationReadyAt = runtimePreparation.evidence.readyAt
+    server = spawn(process.execPath, [...httpPreload, 'node_modules/next/dist/bin/next', ...(process.env.APOLLO_DASHBOARD_RUNTIME_SERVER_MODE === 'dev' ? ['dev', '--webpack'] : ['start']), '-p', String(port)], {
       cwd: process.cwd(),
       env: {
         ...process.env,
+        ...(httpDiagnosticsEnabled ? { APOLLO_DASHBOARD_HTTP_DIAGNOSTICS_PRELOAD: '1',
+          APOLLO_DASHBOARD_HTTP_DIAGNOSTICS_ORIGIN: baseUrl, APOLLO_DASHBOARD_HTTP_DIAGNOSTICS_RUN_ID: suffix } : {}),
         NODE_ENV: process.env.APOLLO_DASHBOARD_RUNTIME_SERVER_MODE === 'dev' ? 'development' : 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
@@ -199,9 +252,15 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
       serverEvent('error', { code: /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code ?? '') ? error.code : null,
         messageSha256: sha256(message), messageBytes: Buffer.byteLength(message) })
     })
-    server.stdout.on('data', (chunk) => { serverLogs += String(chunk); process.stdout.write(chunk) })
+    if (httpDiagnosticsEnabled) httpServerReader = httpDiagnosticsModule.createServerDiagnosticReader({ runId: suffix, pid: server.pid })
+    server.stdout.on('data', (chunk) => { httpServerReader?.feed(chunk); serverLogs += String(chunk); process.stdout.write(chunk) })
+    if (httpDiagnosticsEnabled) {
+      server.stdout.once('end', () => httpServerReader.end())
+      server.stdout.once('close', () => httpServerReader.close())
+    }
     server.stderr.on('data', (chunk) => { serverLogs += String(chunk); process.stderr.write(chunk) })
     try { await waitForServer(baseUrl, server) } catch (error) { throw new Error(`${error.message}\n${serverLogs}`, { cause: error }) }
+    if (httpDiagnosticsEnabled) httpClient.assertHealthy()
     const authorization = `Bearer ${issued.token}`
     const created = await fetch(`${baseUrl}/v1/projects`, { method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `runtime-create-${suffix}` }, body: JSON.stringify({ name: 'Dashboard runtime W35', objective: 'discovery', format: '9:16', locale: 'pt-BR' }) })
     const createdBody = await created.json()
@@ -452,12 +511,14 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
       }),
     })
     assert.equal(compilationResponse.status, 201, `${await compilationResponse.text()}\n${serverLogs.slice(-4_000)}`)
-    await runDashboardRuntimeJourney({ client, baseUrl, authorization, workspaceId, projectId,
+    await runDashboardRuntimeJourney({ client, baseUrl, authorization, workspaceId, projectId, runtimePreparation,
       projectVersionId, projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId,
       sourceSha256, sourceByteSize: sourceBytes.length, sourceManifest, sourcePath, artifactRoot,
       sourceColorProbe: colorProbe,
       mechanicalSeed: { transcript, brief: snapshots[0][3], policies: snapshots[1][3], createdAt: createdAt.toISOString() },
-      uiUsername, uiPassword, suffix, signal: t.signal, observeOwnedServer })
+      uiUsername, uiPassword, suffix, signal: t.signal, observeOwnedServer,
+      ...(httpDiagnosticsEnabled ? { observeHttpConnections,
+        selectHttpWorkspacePath: (path) => httpWorkspacePaths.add(path) } : {}) })
   } catch (error) {
     journeyPrimaryError = error
     throw error
@@ -476,6 +537,7 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
       }
     })
     const serverTerminal = await cleanupStage('next-containment', async () => {
+      const containmentEnd = performance.now() + 10000
       if (server && server.exitCode === null) {
         server.kill()
         await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
@@ -485,7 +547,28 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
         }
       }
       assert.ok(!server || server.exitCode !== null || server.signalCode !== null, 'Owned export Next server must terminate')
+      if (httpDiagnosticsEnabled && server && serverLifecycle.closeObservedAt === null) {
+        const remaining = Math.floor(containmentEnd - performance.now())
+        assert.ok(remaining > 0, 'Owned Next close was not observed within the existing containment budget')
+        let timer
+        try { await Promise.race([once(server, 'close'), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Owned Next close remains inconclusive')), remaining)
+        })]) } finally { clearTimeout(timer) }
+      }
+      if (httpDiagnosticsEnabled && server) assert.ok(serverLifecycle.closeObservedAt !== null, 'Owned Next child close must be observed')
     })
+    if (httpDiagnosticsEnabled) {
+      await cleanupStage('http-client-unsubscribe', () => { httpClient?.close() })
+      httpDiagnosticGatePassed = await cleanupStage('http-diagnostics-gate', () => {
+        if (httpSnapshotFailure) throw httpSnapshotFailure
+        if (httpClient) httpClient.assertHealthy()
+        if (httpServerReader) httpServerReader.assertHealthy()
+        const snapshot = observeHttpConnections()
+        if (httpSnapshotFailure) throw httpSnapshotFailure
+        for (const path of httpWorkspacePaths) assert.ok(snapshot.client.events.some((event) =>
+          event.event === 'request-create' && event.data.path === path && event.data.method === 'GET'), 'Workspace GET diagnostics missing')
+      })
+    }
     // Either disconnect must still run after an evidence/containment failure.
     const disconnects = await Promise.allSettled([
       (async () => {
@@ -496,6 +579,17 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
     ])
     disconnects.forEach((result, index) => {
       if (result.status === 'rejected') cleanupErrors.push({ stage: index === 0 ? 'app-client-disconnect' : 'fixture-client-disconnect', error: result.reason })
+    })
+    if (httpDiagnosticsEnabled) await cleanupStage('http-diagnostics-write', async () => {
+      if (evidenceRoot) {
+        await writeFile(join(evidenceRoot, 'dashboard-http-connections.json'), JSON.stringify({ ...observeHttpConnections(),
+          ownedServer: observeOwnedServer(), primaryJourneyFailurePreserved: journeyPrimaryError !== undefined,
+          containmentObserved: serverTerminal, diagnosticGatePassed: httpDiagnosticGatePassed,
+          disconnects: disconnects.map((result) => result.status) }, null, 2))
+        // Archive after actual child-close/stdout end+close checks and both
+        // disconnect attempts, before artifact scratch removal.
+        await writeFile(join(evidenceRoot, 'owned-next.log'), serverLogs)
+      }
     })
     if (serverTerminal && disconnects.every((result) => result.status === 'fulfilled')) {
       await cleanupStage('artifact-scratch-remove', () => rm(join(artifactRoot, `workspaces/final-export-e2e-${suffix}`), { recursive: true, force: true }))
@@ -517,4 +611,77 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
       if (!journeyPrimaryError) throw cleanupErrors[0].error
     }
   }
+})
+
+function controlledPreparationBindings(onInvoke = () => assert.fail('Preparation must not invoke a runtime binding')) {
+  return Object.fromEntries(['PrismaPublicOperationRepository', 'createProjectProxyRenderWorker', 'createColorPipelineCompilationRepository',
+    'PrismaProjectProxyRenderRepository', 'PrismaProjectFinalExportRepository', 'PrismaAssetRightsRepository',
+    'enqueueProjectFinalExportService', 'calculateVersionHash', 'stableSerialize', 'createProtectedPayloadCipherFromEnvironment',
+    'probeVideo', 'resolveFfmpegBinary', 'parseCreateColorPipelineCompilationBody', 'setProjectLutSelectionService',
+    'PrismaProjectLutSelectionRepository'].map((name) => [name, onInvoke]).concat([['chromium', { launchServer: onInvoke }]]))
+}
+
+test('dashboard runtime preparation is complete and cached before resource admission; DI cannot admit the real journey', async (t) => {
+  const order = [], loaded = controlledPreparationBindings()
+  const prepare = createDashboardRuntimePreparationForTest(async (specifier) => { order.push(specifier); return loaded })
+  const prepared = await prepare({ signal: t.signal })
+  order.push('resources-admitted')
+  assert.equal(order.length, 15)
+  assert.equal(order[0], '../../../src/v2/infrastructure/prisma/public-operation-repository.ts')
+  assert.equal(order[1], '../../../src/v2/infrastructure/repository-factory.ts')
+  assert.equal(order[10], 'playwright-core')
+  assert.equal(order[13], '../../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
+  assert.equal(prepared.evidence.modules.length, 14)
+  assert.equal(prepared.evidence.status, 'ready')
+  assert.equal(prepared.evidence.nativeImportCancellationClaimed, false)
+  assert.equal(prepared.evidence.resetCauseEstablished, false)
+  assert.ok(prepared.evidence.elapsedMs >= 0)
+  for (const [index, module] of prepared.evidence.modules.entries()) {
+    assert.ok(module.completedAt >= module.startedAt && module.elapsedMs >= 0)
+    if (index) assert.ok(module.startedAt >= prepared.evidence.modules[index - 1].completedAt)
+  }
+  assert.strictEqual(await prepare({ signal: t.signal }), prepared)
+  assert.equal(order.length, 15, 'A cached preparation does not import again')
+  await assert.rejects(runDashboardRuntimeJourney({ runtimePreparation: prepared }), /Runtime dependencies must be prepared/)
+  await assert.rejects(runDashboardRuntimeJourney({ runtimePreparation: {} }), /Runtime dependencies must be prepared/)
+})
+
+test('dashboard runtime preparation failure preserves the primary error and never publishes or retries partial bindings', async (t) => {
+  const primary = new Error('controlled import failure'), order = [], loaded = controlledPreparationBindings()
+  const prepare = createDashboardRuntimePreparationForTest(async (specifier) => {
+    order.push(specifier)
+    if (order.length === 3) throw primary
+    return loaded
+  })
+  await assert.rejects(prepare({ signal: t.signal }), (error) => error === primary)
+  assert.equal(primary.dashboardRuntimePreparation.status, 'failed')
+  assert.equal(primary.dashboardRuntimePreparation.moduleId, 'proxy-repository')
+  assert.equal(primary.dashboardRuntimePreparation.modules.length, 2)
+  await assert.rejects(prepare({ signal: t.signal }), (error) => error === primary)
+  assert.equal(order.length, 3)
+})
+
+test('dashboard runtime preparation observes abort before importing and after a late import without publishing readiness', async () => {
+  const early = new AbortController(), earlyReason = new Error('controlled early abort')
+  early.abort(earlyReason)
+  let calls = 0
+  const earlyPrepare = createDashboardRuntimePreparationForTest(async () => { calls++; return controlledPreparationBindings() })
+  await assert.rejects(earlyPrepare({ signal: early.signal }), (error) => error === earlyReason)
+  assert.equal(calls, 0)
+  const late = new AbortController(), lateReason = new Error('controlled abort during import')
+  const latePrepare = createDashboardRuntimePreparationForTest(async () => {
+    calls++; late.abort(lateReason); return controlledPreparationBindings()
+  })
+  await assert.rejects(latePrepare({ signal: late.signal }), (error) => error === lateReason)
+  assert.equal(calls, 1)
+  assert.equal(lateReason.dashboardRuntimePreparation.status, 'failed')
+  assert.equal(lateReason.dashboardRuntimePreparation.stage, 'import-return')
+  assert.equal(lateReason.dashboardRuntimePreparation.modules.length, 0)
+})
+
+test('dashboard runtime preparation rejects an incomplete imported binding before resource admission', async (t) => {
+  let calls = 0
+  const prepare = createDashboardRuntimePreparationForTest(async () => { calls++; return {} })
+  await assert.rejects(prepare({ signal: t.signal }), /Prepared PrismaPublicOperationRepository binding is incomplete/)
+  assert.equal(calls, 1)
 })

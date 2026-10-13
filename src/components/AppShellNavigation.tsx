@@ -27,7 +27,7 @@ export default function AppShellNavigation({ active }: Readonly<{ active: AppShe
         if (!destination.available) {
           return <div aria-disabled="true" className={`${className} cursor-not-allowed opacity-50`} data-destination={destination.id} key={destination.id} title="Capability V2 ainda não integrada"><NavigationIcon index={index} />{destination.label}<span className="ml-auto text-[8px] uppercase tracking-wider">pendente</span></div>
         }
-        return <Link aria-current={destination.id === active ? 'page' : undefined} className={className} href={destination.href} key={destination.id}><NavigationIcon index={index} />{destination.label}</Link>
+        return <Link aria-current={destination.id === active ? 'page' : undefined} className={className} href={destination.href} key={destination.id} prefetch={false}><NavigationIcon index={index} />{destination.label}</Link>
       })}
     </nav></>
   )

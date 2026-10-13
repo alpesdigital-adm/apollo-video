@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs'
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { closeSync, createReadStream, existsSync, fstatSync, openSync, readSync } from 'node:fs'
+import { copyFile, lstat, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 import { closeOwnedBrowser } from './library-browser-proof.mjs'
 import { createDashboardPipelineObserver } from './dashboard-w36-pipeline-proof.mjs'
 import { seedDashboardControlledExportFixture } from './dashboard-controlled-export-fixture.mjs'
+import { installDashboardCancelDiagnostics, joinDashboardCancelEvents, validateDashboardCancelSnapshot } from './dashboard-cancel-diagnostics.mjs'
 
 const exec = promisify(execFile)
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -20,17 +21,94 @@ const CARD_EXPECTATIONS = {
   failed: { tone: 'danger', color: 'text-[#e08b8b]', badge: 'Requer atenção', action: 'inspect-error', button: 'Ver erro →' },
 }
 
+// Fixed existing imports only; preparation never calls a repository, provider or worker factory.
+const RUNTIME_IMPORTS = [
+  ['public-operation', '../../../src/v2/infrastructure/prisma/public-operation-repository.ts', ['PrismaPublicOperationRepository']],
+  ['repository-factory', '../../../src/v2/infrastructure/repository-factory.ts', ['createProjectProxyRenderWorker', 'createColorPipelineCompilationRepository']],
+  ['proxy-repository', '../../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts', ['PrismaProjectProxyRenderRepository']],
+  ['final-repository', '../../../src/v2/infrastructure/prisma/project-final-export-repository.ts', ['PrismaProjectFinalExportRepository']],
+  ['rights-repository', '../../../src/v2/infrastructure/prisma/asset-rights-repository.ts', ['PrismaAssetRightsRepository']],
+  ['final-admission', '../../../src/v2/application/enqueue-project-final-export.ts', ['enqueueProjectFinalExportService']],
+  ['version-hash', '../../../src/v2/application/version-hash.ts', ['calculateVersionHash', 'stableSerialize']],
+  ['payload-cipher', '../../../src/v2/infrastructure/security/recipe-parameter-cipher.ts', ['createProtectedPayloadCipherFromEnvironment']],
+  ['video-probe', '../../../src/v2/infrastructure/media/video-probe.ts', ['probeVideo']],
+  ['ffmpeg-resolution', '../../../src/v2/infrastructure/media/ffmpeg-binary.ts', ['resolveFfmpegBinary']],
+  ['playwright', 'playwright-core', ['chromium']],
+  ['color-contract', '../../../src/v2/public-api/color-pipeline-compilation-contract.ts', ['parseCreateColorPipelineCompilationBody']],
+  ['lut-service', '../../../src/v2/application/project-lut-selections.ts', ['setProjectLutSelectionService']],
+  ['lut-repository', '../../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts', ['PrismaProjectLutSelectionRepository']],
+]
+function createRuntimePreparation(importModule) {
+  let pending
+  return async ({ signal }) => {
+    assert.ok(signal instanceof AbortSignal, 'Runtime preparation requires the owned test signal')
+    signal.throwIfAborted()
+    if (!pending) pending = (async () => {
+      const startedAt = Date.now(), started = performance.now(), modules = [], bindings = {}
+      let stage = 'preparation-start', moduleId = null
+      try {
+        for (const [id, specifier, names] of RUNTIME_IMPORTS) {
+          signal.throwIfAborted(); stage = 'import-start'; moduleId = id
+          const importStartedAt = Date.now(), importStarted = performance.now()
+          const loaded = await importModule(specifier)
+          // Native import is not cancellable; a late result never admits resources or publishes readiness.
+          stage = 'import-return'; signal.throwIfAborted()
+          for (const name of names) {
+            const value = loaded[name]
+            if (name === 'chromium') assert.equal(typeof value?.launchServer, 'function', 'Prepared Chromium binding is incomplete')
+            else assert.equal(typeof value, 'function', `Prepared ${name} binding is incomplete`)
+            bindings[name] = value
+          }
+          modules.push(Object.freeze({ id, startedAt: importStartedAt, completedAt: Date.now(), elapsedMs: performance.now() - importStarted }))
+        }
+        signal.throwIfAborted()
+        return Object.freeze({ bindings: Object.freeze(bindings), evidence: Object.freeze({
+          schemaVersion: 'dashboard-runtime-preparation/v1', status: 'ready', ownerPid: process.pid,
+          startedAt, readyAt: Date.now(), elapsedMs: performance.now() - started, modules: Object.freeze(modules),
+          nativeImportCancellationClaimed: false, resetCauseEstablished: false }) })
+      } catch (error) {
+        try { error.dashboardRuntimePreparation = { schemaVersion: 'dashboard-runtime-preparation/v1', status: 'failed',
+          ownerPid: process.pid, startedAt, failedAt: Date.now(), elapsedMs: performance.now() - started,
+          stage, moduleId, modules, nativeImportCancellationClaimed: false, resetCauseEstablished: false } } catch { /* Preserve the exact original failure. */ }
+        throw error
+      }
+    })()
+    const prepared = await pending
+    signal.throwIfAborted()
+    return prepared
+  }
+}
+const prepareRuntime = createRuntimePreparation((specifier) => import(specifier))
+const preparedRuntimeTokens = new WeakSet()
+export async function prepareDashboardRuntimeJourney(input) {
+  const prepared = await prepareRuntime(input)
+  preparedRuntimeTokens.add(prepared)
+  return prepared
+}
+// Isolated pure tests exercise the same loader contract; their tokens cannot admit the real journey.
+export function createDashboardRuntimePreparationForTest(importModule) {
+  assert.equal(typeof importModule, 'function')
+  return createRuntimePreparation(importModule)
+}
+
 /** Real proxy workers and negative final admission; seeded review GUI is explicit. */
 export async function runDashboardRuntimeJourney(input) {
+  assert.ok(preparedRuntimeTokens.has(input.runtimePreparation), 'Runtime dependencies must be prepared before owned server/network admission')
+  input.signal.throwIfAborted()
+  const { PrismaPublicOperationRepository, createProjectProxyRenderWorker, createColorPipelineCompilationRepository, PrismaProjectProxyRenderRepository,
+    PrismaProjectFinalExportRepository, PrismaAssetRightsRepository, enqueueProjectFinalExportService,
+    calculateVersionHash, stableSerialize, createProtectedPayloadCipherFromEnvironment, probeVideo, resolveFfmpegBinary,
+    chromium, parseCreateColorPipelineCompilationBody, setProjectLutSelectionService, PrismaProjectLutSelectionRepository } = input.runtimePreparation.bindings
   const { client, baseUrl, authorization, workspaceId, projectId, projectVersionId,
     projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId, sourceSha256,
     sourceByteSize, sourceManifest, sourcePath, sourceColorProbe, artifactRoot, uiUsername, uiPassword, suffix, signal, mechanicalSeed,
-    observeOwnedServer } = input
+    observeOwnedServer, observeHttpConnections, selectHttpWorkspacePath } = input
   assert.equal(typeof observeOwnedServer, 'function', 'Owned test server lifecycle observer is required')
   const directory = process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT
   assert.ok(directory && isAbsolute(directory), 'Runtime evidence requires an absolute external directory')
   await mkdir(directory, { recursive: true })
   const evidence = { schemaVersion: 'dashboard-real-runtime/v2', runId: suffix, ownerPid: process.pid,
+    runtimePreparation: input.runtimePreparation.evidence,
     sourceCommit: process.env.GITHUB_SHA ?? null, states: [], outputs: [], screenshots: [], httpResponses: [],
     browserErrors: [], browserResponses: [],
     proofScope: 'runtime-proxy-and-negative-final-admission', editorialAcceptance: false, faceSafety: 'unknown',
@@ -45,17 +123,12 @@ export async function runDashboardRuntimeJourney(input) {
     governancePolicy: { anomalyRequestMinimum: 400, scope: 'owned E2E server only', productionDefaultChanged: false },
     unmeasuredProgress: { runtimeReachable: false, reason: 'All public operations use a known canonical phase count; historical no-total proof is controlled.' },
     deployed: false, ownerAccepted: false, postflight: {} }
-  const { PrismaPublicOperationRepository } = await import('../../../src/v2/infrastructure/prisma/public-operation-repository.ts')
-  const factory = await import('../../../src/v2/infrastructure/repository-factory.ts')
-  const { createProjectProxyRenderWorker } = factory
-  const { PrismaProjectProxyRenderRepository } = await import('../../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
-  const { PrismaProjectFinalExportRepository } = await import('../../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
-  const { PrismaAssetRightsRepository } = await import('../../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
-  const { enqueueProjectFinalExportService } = await import('../../../src/v2/application/enqueue-project-final-export.ts')
-  const { calculateVersionHash, stableSerialize } = await import('../../../src/v2/application/version-hash.ts')
-  const { createProtectedPayloadCipherFromEnvironment } = await import('../../../src/v2/infrastructure/security/recipe-parameter-cipher.ts')
-  const { probeVideo } = await import('../../../src/v2/infrastructure/media/video-probe.ts')
-  const { resolveFfmpegBinary } = await import('../../../src/v2/infrastructure/media/ffmpeg-binary.ts')
+  const httpDiagnosticsEnabled = process.env.APOLLO_DASHBOARD_HTTP_CONNECTION_DIAGNOSTICS === '1'
+  if (httpDiagnosticsEnabled) {
+    assert.equal(typeof observeHttpConnections, 'function'); assert.equal(typeof selectHttpWorkspacePath, 'function')
+    evidence.proofScope = 'native-http-diagnostic-not-normal-journey-or-performance'
+    evidence.httpConnections = observeHttpConnections()
+  }
   const prototype = PrismaPublicOperationRepository.prototype
   const originals = { claimNext: prototype.claimNext, advancePhase: prototype.advancePhase }
   let server, browser, context, child, primaryError, pipeline, activeObserver, observationError
@@ -102,10 +175,12 @@ export async function runDashboardRuntimeJourney(input) {
   }
   const readPublicWorkspace = async (id, stage) => {
     const path = `/v1/projects/${id}/workspace`
+    if (httpDiagnosticsEnabled) selectHttpWorkspacePath(path)
     const started = performance.now()
     const diagnostic = { stage, method: 'GET', path, startedAt: Date.now(), startedMonotonicMs: started,
       phase: 'headers', status: null, serverBefore: observeOwnedServer() }
     evidence.httpResponses.push(diagnostic)
+    if (httpDiagnosticsEnabled) diagnostic.httpConnectionsBefore = observeHttpConnections()
     try {
       const response = await fetch(`${baseUrl}${path}`, { headers: { authorization }, signal: AbortSignal.timeout(30000) })
       diagnostic.status = response.status; diagnostic.headersElapsedMs = performance.now() - started
@@ -135,6 +210,7 @@ export async function runDashboardRuntimeJourney(input) {
     } finally {
       diagnostic.elapsedMs = performance.now() - started; diagnostic.finishedAt = Date.now()
       diagnostic.serverAfter = observeOwnedServer()
+      if (httpDiagnosticsEnabled) diagnostic.httpConnectionsAfter = observeHttpConnections()
     }
   }
   const browserResponseTasks = new Set()
@@ -158,6 +234,13 @@ export async function runDashboardRuntimeJourney(input) {
   const browserOrigin = new URL(baseUrl).origin
   const cdpPaths = new Set(['/', '/batches', '/localization', '/library', '/presenters', '/capture-sessions', '/brand', '/workspace-settings', `/projects/${projectId}`])
   const cdpSessions = [], cdpScriptHashes = new Map()
+  const cancelEnabled = process.env.APOLLO_DASHBOARD_CANCEL_DIAGNOSTICS === '1'
+  assert.ok(process.env.APOLLO_DASHBOARD_CANCEL_DIAGNOSTICS === undefined || cancelEnabled,
+    'Cancel diagnostics require an explicit opt-in value of 1')
+  const cancelPages = []
+  if (cancelEnabled) evidence.cancelDiagnostics = { proofScope: 'observed-javascript-api-calls-only',
+    cancelCausalityEstablished: false, responseFetchIdentityEstablished: false,
+    bounds: { eventsPerPage: 1024, stackFrames: 16, stackBytes: 4096 }, pages: [] }
   evidence.cdp = { proofScope: 'passive-transport-diagnostics', canceledDoesNotIdentifyAuthor: true,
     bounds: { requestsPerPage: 256, eventsPerPage: 2048, stackFrames: 8, joinWindowMs: 50 }, pages: [],
     scriptManifest: { state: 'not-provided', buildSourceCommit: null, testSourceCommit: process.env.GITHUB_SHA ?? null } }
@@ -203,8 +286,8 @@ export async function runDashboardRuntimeJourney(input) {
     evidence.cdp.scriptManifest = { state: 'externally-pinned', sha256: pin, buildSourceCommit: manifest.sourceCommit,
       testSourceCommit: process.env.GITHUB_SHA ?? null, fileCount: manifest.fileCount, scriptCount: cdpScriptHashes.size }
   }
-  const attachCdp = async (opened) => {
-    const state = browserPages.get(opened), started = performance.now(), deadline = started + 10000
+  const attachCdp = async (opened, deadline = performance.now() + 10000) => {
+    const state = browserPages.get(opened), started = performance.now()
     const send = async (session, method, params) => {
       const remaining = deadline - performance.now()
       assert.ok(remaining > 0, 'Passive CDP setup deadline')
@@ -323,6 +406,78 @@ export async function runDashboardRuntimeJourney(input) {
     await send(session, 'Network.enable')
     page.setupCompletedAt = Date.now(); page.setupElapsedMs = performance.now() - started
   }
+  const attachCancelDiagnostics = async (opened, deadline) => {
+    if (!cancelEnabled) return
+    const state = browserPages.get(opened)
+    const page = { pageId: state.pageId, events: [], documents: [], collections: [], failures: [] }
+    const owned = { opened, state, page, seen: new Set(), restored: false }
+    cancelPages.push(owned); evidence.cancelDiagnostics.pages.push(page)
+    const remaining = deadline - performance.now()
+    assert.ok(remaining > 0, 'Cancel diagnostic setup deadline exhausted')
+    await bounded(opened.addInitScript(installDashboardCancelDiagnostics, { origin: browserOrigin,
+      pageId: state.pageId, paths: [...cdpPaths], scripts: [...cdpScriptHashes] }), remaining)
+  }
+  const collectCancelDiagnostics = async (opened, deadline, restore = false) => {
+    if (!cancelEnabled) return
+    let firstError
+    for (const owned of cancelPages) {
+      if ((opened && opened !== owned.opened) || owned.restored) continue
+      // The pipeline page navigates during its own bootstrap, outside the main
+      // harness navigation counter. Only the actual initial blank document skips.
+      if (owned.opened.url() === 'about:blank') continue
+      try {
+        const remaining = deadline - performance.now()
+        assert.ok(remaining > 0, 'Cancel diagnostic collection deadline exhausted')
+        const snapshot = await bounded(owned.opened.evaluate(({ paths, restore }) => {
+          const control = globalThis.__apolloDashboardCancelDiagnostics
+          if (!control) throw new Error('Cancel diagnostic control missing')
+          return restore ? control.restore() : control.drain(paths)
+        }, { paths: [...cdpPaths], restore }), remaining)
+        validateDashboardCancelSnapshot(snapshot, owned.state.pageId, cdpPaths, cdpScriptHashes)
+        assert.ok(owned.page.events.length + snapshot.events.length <= 1024, 'Cancel diagnostic page event bound')
+        for (const event of snapshot.events) {
+          const key = `${event.documentTimeOrigin}:${event.seq}`
+          assert.ok(!owned.seen.has(key), 'Cancel diagnostic event must be collected once')
+          owned.seen.add(key); owned.page.events.push(event)
+        }
+        const facts = { documentTimeOrigin: snapshot.documentTimeOrigin, restored: snapshot.restored,
+          installedDescriptors: snapshot.installedDescriptors, restoredDescriptors: snapshot.restoredDescriptors,
+          unmapped: snapshot.unmapped, unmappedStackFrames: snapshot.unmappedStackFrames,
+          overflow: snapshot.overflow, errors: snapshot.errors, limitations: snapshot.limitations }
+        const previous = owned.page.documents.find((value) => value.documentTimeOrigin === snapshot.documentTimeOrigin)
+        if (previous) Object.assign(previous, facts)
+        else { assert.ok(owned.page.documents.length < 32, 'Cancel diagnostic document bound'); owned.page.documents.push(facts) }
+        assert.ok(owned.page.collections.length < 1024, 'Cancel diagnostic collection bound')
+        owned.page.collections.push({ at: Date.now(), documentTimeOrigin: snapshot.documentTimeOrigin,
+          stageAtCollection: owned.state.stage, layoutAtCollection: owned.state.layout,
+          navigationIdAtCollection: owned.state.navigationId, eventCount: snapshot.events.length, restore })
+        if (restore && snapshot.restored && snapshot.restoredDescriptors === snapshot.installedDescriptors) owned.restored = true
+        assert.equal(snapshot.overflow, false, 'Cancel diagnostic overflow is a failure')
+        assert.deepEqual(snapshot.errors, [], 'Cancel diagnostic errors are a failure')
+        assert.equal(snapshot.installedDescriptors, 9, 'Every diagnostic descriptor must be installed')
+        if (restore) {
+          assert.equal(snapshot.restored, true); assert.equal(snapshot.restoredDescriptors, snapshot.installedDescriptors)
+        }
+      } catch (error) {
+        const failure = { kind: 'cancel-diagnostic-failed', pageId: owned.state.pageId,
+          restore, at: Date.now(), ...safeError(error) }
+        if (owned.page.failures.length < 16) owned.page.failures.push(failure)
+        evidence.browserErrors.push(failure); firstError ??= error
+      }
+    }
+    if (firstError) throw firstError
+  }
+  const correlateCancelDiagnostics = () => {
+    if (!cancelEnabled) return
+    evidence.cancelDiagnostics.scriptManifest = evidence.cdp.scriptManifest
+    const networks = cdpSessions.flatMap(({ page }) => page.requests.map((network) => {
+      const response = page.events.find((event) => event.kind === 'response' && event.cdpRequestId === network.cdpRequestId &&
+        event.timestamp >= network.timestamp)
+      return { ...network, pageId: page.pageId, responseWallTimeMs: response
+        ? network.wallTimeMs + (response.timestamp - network.timestamp) * 1000 : null }
+    }))
+    for (const { page } of cancelPages) page.events = joinDashboardCancelEvents(page.events, networks)
+  }
   const correlateCdp = () => {
     for (const { page } of cdpSessions) {
       const browserRecords = evidence.browserRequests.filter((record) => record.pageId === page.pageId && record.origin === browserOrigin)
@@ -367,8 +522,8 @@ export async function runDashboardRuntimeJourney(input) {
     browserEvent('navigation-intent', state, null, { targetPath })
     return state.navigationId
   }
-  const drainBrowserResponses = async ({ opened, navigationId, requiredPaths = [], label = 'finite-browser-barrier' } = {}) => {
-    const started = performance.now(), deadline = started + 10000
+  const drainBrowserResponses = async ({ opened, navigationId, requiredPaths = [], label = 'finite-browser-barrier', deadline: existingDeadline } = {}) => {
+    const started = performance.now(), deadline = existingDeadline ?? started + 10000
     const barrier = { label, pageId: opened ? browserPages.get(opened).pageId : null, navigationId: navigationId ?? null,
       startedAt: Date.now(), budgetMs: 10000, requiredPaths: [], status: 'pending' }
     evidence.browserBarriers.push(barrier)
@@ -383,6 +538,7 @@ export async function runDashboardRuntimeJourney(input) {
         barrier.pendingBodies = browserResponseTasks.size; barrier.missingPaths = missing
         if (!barrier.pendingRequestIds.length && !barrier.pendingBodies && !missing.length &&
           performance.now() - browserActivityAt >= 350) {
+          if (cancelEnabled) await collectCancelDiagnostics(opened, deadline)
           barrier.status = 'completed'; barrier.completedAt = Date.now(); barrier.completedAtSeq = browserSequence
           return
         }
@@ -391,7 +547,15 @@ export async function runDashboardRuntimeJourney(input) {
         await delay(Math.min(25, remaining))
       }
       assert.fail(`Browser finite requests/bootstrap did not settle: ${JSON.stringify(barrier)}`)
-    } catch (error) { barrier.status = 'failed'; barrier.error = safeError(error); throw error }
+    } catch (error) {
+      barrier.status = 'failed'; barrier.error = safeError(error)
+      // Capture while the old document still exists; a failed barrier remains
+      // the primary error even if the remaining diagnostic budget is exhausted.
+      if (cancelEnabled) {
+        try { await collectCancelDiagnostics(opened, deadline) } catch { /* Already recorded; preserve the barrier failure. */ }
+      }
+      throw error
+    }
   }
   const drainWorkspaceBootstrap = async (opened, navigationId, id) => {
     const prefix = `/v1/projects/${id}`
@@ -447,12 +611,118 @@ export async function runDashboardRuntimeJourney(input) {
     const cookie = /apollo_session=([^;]+)/.exec(login.headers.get('set-cookie') ?? '')?.[1]
     assert.ok(cookie)
     loadCdpScriptManifest()
-    const { chromium } = await import('playwright-core')
-    const executablePath = [process.env.PLAYWRIGHT_CHROME_EXECUTABLE, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].find((path) => path && existsSync(path))
+    const cftNames = ['APOLLO_DASHBOARD_CFT157_CONFIG_PATH', 'APOLLO_DASHBOARD_CFT157_CONFIG_SHA256',
+      'APOLLO_DASHBOARD_CFT157_MANIFEST_PATH', 'APOLLO_DASHBOARD_CFT157_MANIFEST_SHA256',
+      'APOLLO_DASHBOARD_CFT157_INVENTORY_PATH', 'APOLLO_DASHBOARD_CFT157_INVENTORY_SHA256',
+      'APOLLO_DASHBOARD_CFT157_EXECUTABLE_SHA256']
+    const cftEnabled = cftNames.some((name) => process.env[name] !== undefined)
+    let cftConfig
+    if (cftEnabled) {
+      assert.ok(cftNames.every((name) => typeof process.env[name] === 'string' && process.env[name].length > 0))
+      assert.equal(cancelEnabled, false, 'CfT journey must preserve the native consumer without cancel instrumentation')
+      const deadline = performance.now() + 10000
+      const saldo = () => { const value = Math.floor(deadline - performance.now()); assert.ok(value > 0, 'CfT file preflight deadline exhausted'); return value }
+      const pinned = async (path, pin, maximum, collect = false) => {
+        assert.match(pin, /^[a-f0-9]{64}$/); saldo()
+        const before = await lstat(path); saldo()
+        assert.equal(before.isFile(), true); assert.equal(before.isSymbolicLink(), false)
+        assert.ok(before.size > 0 && before.size <= maximum)
+        assert.equal((await realpath(path)).replaceAll('\\', '/'), path); saldo()
+        const stream = createReadStream(path, { signal: AbortSignal.timeout(saldo()), highWaterMark: 65536 })
+        const closed = new Promise((resolve) => stream.once('close', resolve)), chunks = [], hash = createHash('sha256')
+        let bytes = 0, primary
+        try {
+          for await (const chunk of stream) { saldo(); bytes += chunk.length; assert.ok(bytes <= before.size); hash.update(chunk); if (collect) chunks.push(chunk) }
+        } catch (error) { primary = error }
+        finally {
+          stream.destroy()
+          try { await closed; saldo() } catch (error) { primary ??= error }
+        }
+        if (primary) throw primary
+        const after = await lstat(path); saldo()
+        assert.deepEqual([after.dev, after.ino, after.size, after.mtimeMs], [before.dev, before.ino, before.size, before.mtimeMs])
+        assert.equal(bytes, before.size); assert.equal(hash.digest('hex'), pin)
+        return collect ? Buffer.concat(chunks) : { path, bytes, sha256: pin }
+      }
+      const configPath = process.env.APOLLO_DASHBOARD_CFT157_CONFIG_PATH
+      assert.equal(configPath, directory.replaceAll('\\', '/') + '/dashboard-cft157-config.json')
+      cftConfig = JSON.parse(await pinned(configPath, process.env.APOLLO_DASHBOARD_CFT157_CONFIG_SHA256, 1048576, true))
+      assert.deepEqual(Object.keys(cftConfig).sort(), ['schemaVersion', 'runId', 'evidenceRoot', 'sourceHead', 'buildSourceCommit',
+        'freezePath', 'freezeSha256', 'acquisitionResultPath', 'acquisitionResultSha256', 'manifestPath', 'manifestSha256',
+        'inventoryPath', 'inventorySha256', 'browserExecutable', 'browserExecutableBytes', 'browserExecutableSha256',
+        'bundleManifestPath', 'bundleManifestSha256', 'expectedProductVersion', 'expectedRevision'].sort())
+      assert.equal(cftConfig.schemaVersion, 'dashboard-cft157-browser/v1')
+      assert.match(cftConfig.runId, /^dashboard-cft157-v1-[a-f0-9]{8}$/)
+      assert.equal(cftConfig.evidenceRoot, directory.replaceAll('\\', '/'))
+      assert.equal(cftConfig.sourceHead, 'eae747585acfcfec5e61a5c0555b9bc14a93f21d'); assert.equal(cftConfig.sourceHead, process.env.GITHUB_SHA)
+      assert.match(cftConfig.freezePath, /^C:\/Users\/leand\/Documents\/Apollo\/w61-70-20261008\/dashboard-cft157-freeze-[A-Za-z0-9-]+\.json$/)
+      assert.match(cftConfig.freezeSha256, /^[a-f0-9]{64}$/)
+      assert.equal(cftConfig.buildSourceCommit, '693233668b06da7ec2f0af6e080ffd4fdb78f1a6')
+      const root = 'C:/Users/leand/Documents/Apollo/w61-70-20261008/cft157-acquisition-v1-5b77fe0f/cft'
+      assert.equal(cftConfig.acquisitionResultPath, root.slice(0, -4) + '/result.json')
+      assert.equal(cftConfig.acquisitionResultSha256, 'c18eeab24b3237913e5e1da9430daf8b3773477b0214a0be2d64bec07c1e1910')
+      assert.equal(cftConfig.browserExecutable, root + '/chrome-win64/chrome.exe')
+      assert.equal(cftConfig.browserExecutableBytes, 4434432)
+      assert.equal(cftConfig.browserExecutableSha256, '5c6d8b95a1d37eaaa206213fed158d31c08a17ac19ee29cf5f9e9f518571c9f1')
+      assert.equal(process.env.PLAYWRIGHT_CHROME_EXECUTABLE, cftConfig.browserExecutable)
+      assert.equal(process.env.APOLLO_DASHBOARD_CFT157_EXECUTABLE_SHA256, cftConfig.browserExecutableSha256)
+      assert.equal(cftConfig.manifestPath, root + '/manifest.json')
+      assert.equal(cftConfig.manifestSha256, 'c09ff542594e774ac36efc6c0c7edb3c49733c2a718ef2285bea5580d6fa6303')
+      assert.equal(cftConfig.inventoryPath, root + '/inventory.json')
+      assert.equal(cftConfig.inventorySha256, '5095ce835e5925c581dc94877a8bcd2b0d366bc9462899d59b29cc35abb83698')
+      assert.equal(process.env.APOLLO_DASHBOARD_CFT157_MANIFEST_PATH, cftConfig.manifestPath)
+      assert.equal(process.env.APOLLO_DASHBOARD_CFT157_MANIFEST_SHA256, cftConfig.manifestSha256)
+      assert.equal(process.env.APOLLO_DASHBOARD_CFT157_INVENTORY_PATH, cftConfig.inventoryPath)
+      assert.equal(process.env.APOLLO_DASHBOARD_CFT157_INVENTORY_SHA256, cftConfig.inventorySha256)
+      assert.equal(cftConfig.bundleManifestPath, process.env.APOLLO_DASHBOARD_RUNTIME_BUNDLE_MANIFEST)
+      assert.equal(cftConfig.bundleManifestSha256, process.env.APOLLO_DASHBOARD_RUNTIME_BUNDLE_MANIFEST_SHA256)
+      assert.equal(cftConfig.bundleManifestSha256, 'bdf3126b4b6b976e1fff97ef42a1d1552ff636bcd858a35f9be26235bef8fbdc')
+      assert.equal(cftConfig.expectedProductVersion, '157.0.8090.0')
+      assert.equal(cftConfig.expectedRevision, '@2ea1b71af70d7fc5d41325dda8df37c1f98ac531')
+      const manifest = JSON.parse(await pinned(cftConfig.manifestPath, cftConfig.manifestSha256, 1048576, true))
+      assert.equal(manifest.outcome, 'files-verified-awaiting-owner'); assert.equal(manifest.version, cftConfig.expectedProductVersion)
+      const inventory = JSON.parse(await pinned(cftConfig.inventoryPath, cftConfig.inventorySha256, 1048576, true))
+      assert.equal(inventory.schemaVersion, 'cft157-inventory/v1'); assert.equal(inventory.files.length, 310)
+      const executable = await pinned(cftConfig.browserExecutable, cftConfig.browserExecutableSha256, 4434432)
+      const row = inventory.files.find((entry) => entry.path === 'chrome-win64/chrome.exe')
+      assert.equal(row.bytes, executable.bytes); assert.equal(row.sha256, executable.sha256)
+      evidence.cft157 = { proofScope: 'normal-dashboard-journey-with-pinned-browser', causalityEstablished: false,
+        priorRscFailuresPreserved: true, configurationSha256: process.env.APOLLO_DASHBOARD_CFT157_CONFIG_SHA256,
+        sourceHead: cftConfig.sourceHead, buildSourceCommit: cftConfig.buildSourceCommit,
+        freezePath: cftConfig.freezePath, freezeSha256: cftConfig.freezeSha256, executable,
+        manifestSha256: cftConfig.manifestSha256, inventorySha256: cftConfig.inventorySha256,
+        browserVersionObserved: false, versionSessionDetached: false }
+    }
+    const executablePath = cftEnabled ? cftConfig.browserExecutable :
+      [process.env.PLAYWRIGHT_CHROME_EXECUTABLE, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].find((path) => path && existsSync(path))
     assert.ok(executablePath)
     server = await chromium.launchServer({ executablePath, headless: true, timeout: 20000 })
     child = server.process(); evidence.browserPid = child.pid
     browser = await chromium.connect(server.wsEndpoint(), { timeout: 20000 })
+    if (cftEnabled) {
+      const deadline = performance.now() + 5000
+      const saldo = () => { const value = Math.floor(deadline - performance.now()); assert.ok(value > 0, 'CfT Browser.getVersion deadline exhausted'); return value }
+      let versionSession, versionError
+      try {
+        const createRemaining = saldo()
+        versionSession = await bounded(browser.newBrowserCDPSession(), createRemaining)
+        const sendRemaining = saldo()
+        const version = await bounded(versionSession.send('Browser.getVersion'), sendRemaining)
+        assert.deepEqual(Object.keys(version).sort(), ['protocolVersion', 'product', 'revision', 'userAgent', 'jsVersion'].sort())
+        assert.ok(Object.values(version).every((value) => typeof value === 'string' && value.length <= 1024))
+        evidence.cft157.browserGetVersion = version; evidence.cft157.browserVersionObserved = true
+        assert.match(version.product, /^(Chrome|HeadlessChrome)\/157\.0\.8090\.0$/)
+        assert.equal(version.revision, cftConfig.expectedRevision)
+      } catch (error) { versionError = error; evidence.cft157.versionError = safeError(error) }
+      finally {
+        if (versionSession) {
+          try { const detachRemaining = saldo(); await bounded(versionSession.detach(), detachRemaining); evidence.cft157.versionSessionDetached = true }
+          catch (error) { evidence.cft157.versionSessionCleanupError = safeError(error); versionError ??= error }
+        }
+      }
+      if (versionError) throw versionError
+      assert.equal(evidence.cft157.versionSessionDetached, true)
+    }
     context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
     context.on('page', (opened) => {
       const state = { pageId: `page-${++browserPageSequence}`, navigationId: null, navigationCount: 0,
@@ -612,10 +882,16 @@ export async function runDashboardRuntimeJourney(input) {
     context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(30000)
     await context.addCookies([{ name: 'apollo_session', value: cookie, url: baseUrl, httpOnly: true, sameSite: 'Lax' }])
     const page = await context.newPage()
-    await attachCdp(page)
+    if (cancelEnabled) {
+      const deadline = performance.now() + 10000
+      await attachCdp(page, deadline); await attachCancelDiagnostics(page, deadline)
+    } else await attachCdp(page)
     const navigatedStates = new Set()
     const pipelinePage = await context.newPage()
-    await attachCdp(pipelinePage)
+    if (cancelEnabled) {
+      const deadline = performance.now() + 10000
+      await attachCdp(pipelinePage, deadline); await attachCancelDiagnostics(pipelinePage, deadline)
+    } else await attachCdp(pipelinePage)
     markBrowserPage(pipelinePage, 'pipeline-bootstrap', 'pipeline')
     pipeline = await createDashboardPipelineObserver({ page: pipelinePage, client, baseUrl, workspaceId, evidenceDir: directory })
     const observe = async ({ stage, id = projectId, operationId, operationStatus, status, phase, completed, eventTypes = [],
@@ -700,11 +976,100 @@ export async function runDashboardRuntimeJourney(input) {
         origin, seededStatus, visibleState: projected.visibleState,
         presentation: expected, actionDestination: `/projects/${id}${status === 'reviewing-proxy' ? '?mode=review' : ''}` })
     }
+    const proveShellNavigation = async () => {
+      const pageId = browserPages.get(page).pageId
+      const destinations = [['Projetos', '/'], ['Lotes', '/batches'], ['Localização', '/localization'],
+        ['Biblioteca', '/library'], ['Apresentadores', '/presenters'], ['Capturas', '/capture-sessions'],
+        ['Marca', '/brand'], ['Configurações', '/workspace-settings']]
+      const shellPaths = new Set(destinations.map(([, path]) => path))
+      const proof = evidence.shellNavigationProof = { pageId, projectId, status: 'pending',
+        scope: 'observed-shell-actions-and-render-hover-prefetch-only', hover: [], transitions: [],
+        prefetchRequestIds: [], noChromiumCauseClaim: true }
+      const remaining = (deadline) => { const value = Math.floor(deadline - performance.now()); assert.ok(value > 0, 'Shell action uses the existing finite browser barrier deadline'); return value }
+      const draftOnly = async () => {
+        assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'draft')
+        assert.equal(await client.v2ProjectMediaAsset.count({ where: { projectId, role: 'editorial-proxy' } }), 0)
+      }
+      try {
+        await draftOnly()
+        const hoverDeadline = performance.now() + 10000
+        markBrowserPage(page, 'shell-render-and-hover', 'desktop')
+        await drainBrowserResponses({ label: 'before-shell-hover', deadline: hoverDeadline })
+        await page.setViewportSize({ width: 1440, height: 1000 }); remaining(hoverDeadline)
+        assert.equal(new URL(page.url()).pathname, '/')
+        const navigation = page.getByTestId('app-shell-navigation')
+        await navigation.waitFor({ state: 'visible', timeout: remaining(hoverDeadline) })
+        for (const [label, path] of destinations) {
+          const link = navigation.getByRole('link', { name: label, exact: true })
+          assert.equal(await link.getAttribute('href', { timeout: remaining(hoverDeadline) }), path)
+          await link.hover({ timeout: remaining(hoverDeadline) })
+          proof.hover.push({ label, path, at: Date.now(), seq: browserSequence })
+        }
+        await drainBrowserResponses({ opened: page, navigationId: browserPages.get(page).navigationId,
+          label: 'shell-render-and-hover', deadline: hoverDeadline })
+        proof.renderHoverThroughSeq = browserSequence
+        const prefetched = evidence.browserRequests.filter((record) => record.pageId === pageId &&
+          record.origin === browserOrigin && shellPaths.has(record.path) && record.requestAtSeq <= proof.renderHoverThroughSeq &&
+          (record.requestHeaderDiagnostics.rsc.token === '1' || record.queryClassification.rscPresent) &&
+          (record.requestHeaderDiagnostics['next-router-prefetch'].present || record.requestHeaderDiagnostics['next-router-segment-prefetch'].present))
+        proof.prefetchRequestIds = prefetched.map((record) => record.requestId)
+        assert.deepEqual(proof.prefetchRequestIds, [], 'Rendering and hovering the shell must not request destination RSC prefetches')
+        assert.deepEqual(evidence.browserErrors, [], 'Shell hover preserves every browser error gate')
+        for (const [action, path, active] of [['click', '/brand', 'Marca'], ['keyboard-enter', '/', 'Projetos'],
+          ['back', '/brand', 'Marca'], ['forward', '/', 'Projetos']]) {
+          const deadline = performance.now() + 10000
+          const observation = { action, path, active, status: 'pending', startedAt: Date.now(), requestIds: [] }
+          proof.transitions.push(observation)
+          await drainBrowserResponses({ label: `before-shell-${action}`, deadline })
+          const navigationId = beginBrowserNavigation(page, `shell-${action}`, 'desktop', path)
+          observation.navigationId = navigationId
+          const shell = page.getByTestId('app-shell-navigation')
+          if (action === 'click') await shell.getByRole('link', { name: 'Marca', exact: true }).click({ timeout: remaining(deadline) })
+          else if (action === 'keyboard-enter') {
+            const link = shell.getByRole('link', { name: 'Projetos', exact: true })
+            await link.focus({ timeout: remaining(deadline) })
+            assert.equal(await link.evaluate((element) => element === document.activeElement), true)
+            remaining(deadline); await link.press('Enter', { timeout: remaining(deadline) })
+          } else if (action === 'back') await page.goBack({ waitUntil: 'domcontentloaded', timeout: remaining(deadline) })
+          else await page.goForward({ waitUntil: 'domcontentloaded', timeout: remaining(deadline) })
+          await page.waitForURL(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded', timeout: remaining(deadline) })
+          const heading = path === '/brand' ? page.getByRole('heading', { name: 'Marca', level: 1, exact: true })
+            : page.getByRole('heading', { name: /Um projeto começa pela direção/, level: 1 })
+          await heading.waitFor({ state: 'visible', timeout: remaining(deadline) })
+          const ariaCurrent = await shell.getByRole('link', { name: active, exact: true }).getAttribute('aria-current', { timeout: remaining(deadline) })
+          assert.equal(ariaCurrent, 'page')
+          assert.equal(await shell.locator('a[aria-current="page"]').count(), 1); remaining(deadline)
+          if (path === '/') {
+            const card = page.locator(`article[data-project-id="${projectId}"]`)
+            await card.waitFor({ state: 'visible', timeout: remaining(deadline) })
+            assert.equal(await card.locator('[data-state]').getAttribute('data-state', { timeout: remaining(deadline) }), 'draft')
+          }
+          // First Marca mount has these real effects. History may restore cached UI;
+          // its request ledger remains strict without inventing another response.
+          const requiredPaths = action === 'click' ? ['/v1/capabilities', '/v1/session',
+            `/v1/workspaces/${encodeURIComponent(workspaceId)}/luts`, `/v1/workspaces/${encodeURIComponent(workspaceId)}/lut-default`] : []
+          await drainBrowserResponses({ opened: page, navigationId, requiredPaths, label: `shell-${action}`, deadline })
+          assert.deepEqual(evidence.browserErrors, [], `Shell ${action} preserves every browser error gate`)
+          observation.observedPath = new URL(page.url()).pathname
+          observation.ariaCurrent = ariaCurrent; observation.headingVisible = await heading.isVisible(); remaining(deadline)
+          assert.equal(observation.headingVisible, true)
+          observation.requestIds = evidence.browserRequests.filter((record) => record.pageId === pageId && record.navigationId === navigationId).map((record) => record.requestId)
+          observation.status = 'completed'; observation.completedAt = Date.now(); observation.completedAtSeq = browserSequence
+        }
+        await draftOnly(); proof.status = 'completed'
+      } catch (error) {
+        proof.status = 'failed'; proof.error = safeError(error)
+        const pending = proof.transitions.find((record) => record.status === 'pending')
+        if (pending) { pending.status = 'failed'; pending.error = safeError(error) }
+        throw error
+      }
+    }
     await observe({ stage: 'draft', status: 'draft' })
     const draftReviewRequests = evidence.browserRequests.filter((record) => record.method === 'GET' &&
       [`/v1/projects/${projectId}/annotations`, `/v1/projects/${projectId}/proxy-reviews`].includes(record.path))
     assert.deepEqual(draftReviewRequests, [], 'Source-only draft must not request unavailable annotations or proxy reports')
     evidence.reviewAvailabilityProof = { projectId, draftRequests: 0, origin: 'browser-request-ledger', afterWorker: 'pending' }
+    await proveShellNavigation()
     const created = await post('/v1/projects', { name: 'Runtime event creation', objective: 'discovery', format: '9:16' }, `runtime-event-create-${suffix}`, 201)
     await pipeline.observe({ stage: 'created', projectId: created.project.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
     prototype.claimNext = async function (...args) {
@@ -974,7 +1339,7 @@ export async function runDashboardRuntimeJourney(input) {
     }
     const rights = new PrismaAssetRightsRepository(client)
     const enqueueFinal = enqueueProjectFinalExportService({ projects: controlledProjects, rights, operations: observedOperations,
-      colorPipelines: factory.createColorPipelineCompilationRepository(), clock: () => new Date(),
+      colorPipelines: createColorPipelineCompilationRepository(), clock: () => new Date(),
       createId: (kind) => `runtime-final-${kind}-${suffix}` })
     const finalRequest = { workspaceId, projectId, ...exportBody, actor, idempotencyKey: `runtime-final-${suffix}` }
     await assert.rejects(enqueueFinal(finalRequest), (error) => error.code === 'EDITORIAL_ACCEPTANCE_FAILED')
@@ -1037,7 +1402,6 @@ export async function runDashboardRuntimeJourney(input) {
       stages: compilation.pipeline.stages.map(({ id, kind, version, enabled, output, implementation, lut }) =>
         ({ id, kind, version, enabled, output, implementation, ...(lut ? { lut } : {}) })),
     }
-    const { parseCreateColorPipelineCompilationBody } = await import('../../../src/v2/public-api/color-pipeline-compilation-contract.ts')
     assert.deepEqual(parseCreateColorPipelineCompilationBody(copyCompilationBody), copyCompilationBody)
     await post(`/v1/projects/${copy.project.id}/color-pipeline-compilations`, copyCompilationBody, `runtime-copy-color-${suffix}`, 201)
     const selected = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
@@ -1134,8 +1498,6 @@ export async function runDashboardRuntimeJourney(input) {
     const claimAt = new Date()
     const staleClaim = await repository.claimNext({ type: 'project-proxy-render', workspaceId, operationId: staleVersionJob.operation.id,
       leaseOwner: `version-fence-worker-${suffix}`, now: claimAt.toISOString(), leaseUntil: new Date(claimAt.getTime() + 120000).toISOString() })
-    const { setProjectLutSelectionService } = await import('../../../src/v2/application/project-lut-selections.ts')
-    const { PrismaProjectLutSelectionRepository } = await import('../../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
     const versionBeforeEdit = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: staleVersionJob.version.id } })
     const changed = await setProjectLutSelectionService({ repository: new PrismaProjectLutSelectionRepository(client),
       createId: (kind) => `runtime-version-${kind}-${randomUUID()}`, createEventId: randomUUID })({
@@ -1161,8 +1523,14 @@ export async function runDashboardRuntimeJourney(input) {
     prototype.claimNext = originals.claimNext; prototype.advancePhase = originals.advancePhase
     let postflightError
     const cdpCleanupDeadline = performance.now() + 10000
-    try { await drainBrowserResponses() }
-    catch (error) { evidence.browserEvidencePostflightError = safeError(error); postflightError = error }
+    // Restore first, before closure or a pending transport consumes the finite
+    // cleanup budget. Failed restoration cannot forgive a transport failure.
+    if (cancelEnabled) {
+      try { await collectCancelDiagnostics(undefined, cdpCleanupDeadline, true) }
+      catch (error) { postflightError ??= error }
+    }
+    try { await drainBrowserResponses(cancelEnabled ? { deadline: cdpCleanupDeadline } : undefined) }
+    catch (error) { evidence.browserEvidencePostflightError = safeError(error); postflightError ??= error }
     if (!primaryError && evidence.browserErrors.length) {
       postflightError ??= new Error('Browser error ledger is nonempty at postflight')
       evidence.outcome = 'failed'
@@ -1178,6 +1546,12 @@ export async function runDashboardRuntimeJourney(input) {
     }
     try { correlateCdp() }
     catch (error) { evidence.cdp.correlationError = safeError(error); postflightError ??= error }
+    if (cancelEnabled) {
+      try { correlateCancelDiagnostics() }
+      catch (error) {
+        evidence.cancelDiagnostics.correlationError = safeError(error); postflightError ??= error
+      }
+    }
     for (const owned of cdpSessions) {
       try {
         if (!owned.page.closedObserved) {
@@ -1194,6 +1568,7 @@ export async function runDashboardRuntimeJourney(input) {
     if (evidence.browserErrors.length) postflightError ??= new Error('Browser error ledger is nonempty after browser close')
     if (postflightError) evidence.outcome = 'failed'
     evidence.ownedServerAtHelperPostflight = observeOwnedServer()
+    if (httpDiagnosticsEnabled) evidence.httpConnections = observeHttpConnections()
     try { await writeFile(join(directory, 'w35-runtime.json'), JSON.stringify(evidence, (_, value) => typeof value === 'bigint' ? value.toString() : value, 2)) }
     catch (error) { postflightError ??= error }
     if (!primaryError && postflightError) throw postflightError
