@@ -59,6 +59,18 @@
       "evidence": [
         {
           "type": "private",
+          "ref": "Apollo/w61-70-20261008/quality-review-wiring-v1-1af23274/result.json",
+          "scope": "PASS c18ddc1f5b5ab243160a9fdb0a4e3bdb8cf26fc23aadc405d5a1e00067399e2a:43/43zero skips nos guards CI/UI. ROOT CfT e publicado em step.env/GITHUB_ENV antes da admissao; archive always usa mesmo path literal mesmo se preparacao falhar. Negativos recusam runner em jobs.env, remocao/desativacao/waiver/publicacao desviada. FP2fcf0be8igual/noDB/close antes primeira snapshot/zeroobservados/scratch removido/postflight[]. Falha69be antesjob preservada; a correcao exige novo CI exato.",
+          "role": "implementation"
+        },
+        {
+          "type": "ci",
+          "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/38440030633",
+          "scope": "Head69be7739 dashboard FAIL antes de jobs: lista jobs/check-runs vazia e gh informa workflow file issue. Defeito estatico: runner.temp em jobs.env nao pertence aos contextos permitidos pela referencia oficial GitHub; mover inicializacao para step, mantendo path/allowlist/confinamento. Nenhum download, cgroup ou Chrome foi executado por este workflow; nao transferir PASS local/puros para CI. Central38440037794 e Media38440038064 tem resultados separados.",
+          "role": "implementation"
+        },
+        {
+          "type": "private",
           "ref": "Apollo/w61-70-20261008/cft157-linux-ci-pure-v2-1502fc2b/result.json",
           "scope": "PASS receipt55b74aaab8478fca810af260f961e6e82844cbf1cca433c87f1c04026f166a32: tres suites Node61total/60PASS/0FAIL/1LinuxSKIP, workflow canonicoci alinhado antes da rodada; guardavailability preservado.24pins pre/post e FP4a0904 iguais, childCloseObservedtrue antes primeira snapshot/zeroobservados/noDB/scratch removido/postflight[]. Python12+Cgroup6 e sintaxe dos16paths reutilizados somente com inputs byte-identicos a v1; supervisor alterado sem transferencia de syntax antigo.16fontes CfT Linux integradas por copia autenticada, sem aquisicao, Chrome Linux ou aprovacao CI nesta prova Windows.",
           "role": "implementation"

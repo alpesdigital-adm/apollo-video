@@ -450,6 +450,17 @@ const singleTestFileOf = (command) => {
 
 function verifyDashboardCftWiring(workflow, consumer, bootstrap) {
   const { steps } = parseWorkflow(workflow)
+  const jobEnvironment = /^ {4}env:\r?\n((?: {6}[^\n]*\n)*)/m.exec(workflow)?.[1]
+  assert.ok(jobEnvironment, 'Dashboard job environment must be scoped explicitly')
+  assert.ok(!/\$\{\{\s*runner[.\[]/.test(jobEnvironment), 'runner context is unavailable in jobs.env')
+  assert.ok(!jobEnvironment.includes('APOLLO_DASHBOARD_CFT157_LINUX_ROOT:'), 'CfT root belongs to its mandatory preparation step')
+  const preparations = steps.filter((entry) => entry.name === 'Declare owned Linux CfT root in step context')
+  assert.equal(preparations.length, 1)
+  const preparation = preparations[0]
+  assert.ok(gatesTheBuild(preparation))
+  assert.equal(preparation.env.get('APOLLO_DASHBOARD_CFT157_LINUX_ROOT'), '${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}')
+  const declaration = "printf 'APOLLO_DASHBOARD_CFT157_LINUX_ROOT=%s\\n' \"$APOLLO_DASHBOARD_CFT157_LINUX_ROOT\" >> \"$GITHUB_ENV\""
+  assert.equal(preparation.body.split('\n').filter((line) => line.trim() === declaration).length, 1)
   const required = [
     ['Build unprivileged CI pidfd addon', 'bash scripts/validation/build-perception-pidfd.sh', '2'],
     ['Acquire official CfT 157 Linux under owned cgroup', 'node scripts/validation/perception-consumer-cgroup.mjs acquisition', '5'],
@@ -464,6 +475,7 @@ function verifyDashboardCftWiring(workflow, consumer, bootstrap) {
     return entry
   })
   assert.ok(steps.indexOf(selected[0]) < steps.indexOf(selected[1]) && steps.indexOf(selected[1]) < steps.indexOf(selected[2]))
+  assert.ok(steps.indexOf(preparation) < steps.indexOf(selected[0]))
   assert.match(selected[1].body, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*300000/)
   assert.match(selected[2].body, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*445000/)
   const pure = steps.find((entry) => entry.name === 'Verify fixed Linux CfT acquisition and closed consumer contracts')
@@ -477,7 +489,10 @@ function verifyDashboardCftWiring(workflow, consumer, bootstrap) {
   assert.equal(cleanup.attrs.get('run'), 'node scripts/validation/cleanup-perception-pidfd.mjs')
   assert.ok(steps.indexOf(selected[2]) < steps.indexOf(cleanup))
   assert.ok(!workflow.includes('/usr/bin/google-chrome') && !workflow.includes('PLAYWRIGHT_CHROME_EXECUTABLE:'))
-  assert.match(workflow, /APOLLO_DASHBOARD_CFT157_LINUX_ROOT:.*runner.temp.*github.run_id.*github.run_attempt/)
+  const publication = steps.find((entry) => entry.name === 'Publish version-bound dashboard runtime evidence')
+  assert.ok(publication); assert.equal(publication.attrs.get('if'), 'always()')
+  assert.ok(publication.body.includes('${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}'),
+    'Evidence path must remain exact even when preparation failed before GITHUB_ENV publication')
   assert.ok(consumer.includes("'dashboard', 'acquisition'"))
   assert.match(consumer, /export const DASHBOARD_CI_ARGV = Object.freeze\(\['--experimental-transform-types',\s*'--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--test', '--test-reporter=tap',\s*'tests\/v2\/dashboard-runtime-journey.e2e.mjs'\]\)/)
   assert.ok(bootstrap.includes("mode === 'dashboard' || mode === 'acquisition'"))
@@ -505,7 +520,7 @@ test('Linux CfT wiring refuses removed acquisition, disabled owners, host browse
   const [workflow, consumer, bootstrap] = await Promise.all([read('.github/workflows/dashboard-runtime-ci.yml'),
     read('scripts/validation/run-perception-addon-consumer.mjs'), read('scripts/validation/perception-ci-child-bootstrap.mjs')])
   verifyDashboardCftWiring(workflow, consumer, bootstrap)
-  for (const name of ['Acquire official CfT 157 Linux under owned cgroup', 'Worker transitions and pipeline events through HTTP and Chromium']) {
+  for (const name of ['Declare owned Linux CfT root in step context', 'Acquire official CfT 157 Linux under owned cgroup', 'Worker transitions and pipeline events through HTTP and Chromium']) {
     const entry = parseWorkflow(workflow).steps.find((entry) => entry.name === name)
     for (const replacement of ['', entry.body.replace('        run:', '        if: false\n        run:'),
       entry.body.replace('        run:', '        continue-on-error: true\n        run:')]) {
@@ -519,6 +534,10 @@ test('Linux CfT wiring refuses removed acquisition, disabled owners, host browse
   }
   assert.throws(() => verifyDashboardCftWiring(workflow, consumer.replace('--test-reporter=tap', '--test-reporter=dot'), bootstrap))
   assert.throws(() => verifyDashboardCftWiring(workflow, consumer, bootstrap.replace('argv = [...DASHBOARD_CI_ARGV]', 'argv = process.argv')))
+  const forbiddenJobContext = workflow.replace('      CI: true',
+    '      APOLLO_DASHBOARD_CFT157_LINUX_ROOT: ${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}\n      CI: true')
+  assert.throws(() => verifyDashboardCftWiring(forbiddenJobContext, consumer, bootstrap), /runner context is unavailable/)
+  assert.throws(() => verifyDashboardCftWiring(workflow.replace('>> "$GITHUB_ENV"', '> /tmp/unowned-env'), consumer, bootstrap))
 })
 
 test('T-F4.016 every mandatory product journey has a CI step, its own gate and a database', async () => {

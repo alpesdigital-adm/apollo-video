@@ -28,7 +28,6 @@ jobs:
       APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
       APOLLO_PROTECTED_PAYLOAD_KEY_ID: dashboard-ci-test
       APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-      APOLLO_DASHBOARD_CFT157_LINUX_ROOT: ${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}
     services:
       postgres:
         image: pgvector/pgvector:0.8.5-pg16-trixie
@@ -46,6 +45,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Declare owned Linux CfT root in step context
+        env:
+          APOLLO_DASHBOARD_CFT157_LINUX_ROOT: ${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          printf 'APOLLO_DASHBOARD_CFT157_LINUX_ROOT=%s\n' "$APOLLO_DASHBOARD_CFT157_LINUX_ROOT" >> "$GITHUB_ENV"
       - name: Provision an isolated bounded database role
         run: |
           sudo apt-get update -qq
@@ -92,7 +96,7 @@ jobs:
           name: dashboard-runtime-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             ${{ env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT }}
-            ${{ env.APOLLO_DASHBOARD_CFT157_LINUX_ROOT }}
+            ${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}
             ${{ runner.temp }}/pidfd-archive
             ${{ runner.temp }}/apollo-ci-pidfd.*
           if-no-files-found: error
