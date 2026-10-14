@@ -451,6 +451,68 @@ test('SIGINT and SIGTERM both abort through the shared cleanup path and remove l
   }
 })
 
+function controlledReportsHaveClosedAdmittedChildren(reports, preAdmission) {
+  if (!Array.isArray(reports) || reports.length === 0 ||
+      reports.some((report) => !report || typeof report.runId !== 'string' || report.runId.length === 0) ||
+      new Set(reports.map((report) => report.runId)).size !== reports.length) return false
+  if (preAdmission && (preAdmission.case !== 'cancel-before-child-admission' || preAdmission.signal !== 'SIGTERM' ||
+      typeof preAdmission.runId !== 'string' || preAdmission.runId.length === 0 ||
+      reports.filter((report) => report === preAdmission.report).length !== 1 ||
+      reports.filter((report) => report.runId === preAdmission.runId).length !== 1)) return false
+  return reports.every((report) => {
+    if (!report || !Array.isArray(report.observedProcesses)) return false
+    if (report === preAdmission?.report) {
+      return report.runId === preAdmission.runId && report.rootPid === undefined &&
+        report.observedProcesses.length === 0 && report.childCloseObserved === false && report.childClosed === true &&
+        report.success === false && report.observationComplete === true && report.inventoryInconclusive === false &&
+        Array.isArray(report.activeSurvivors) && report.activeSurvivors.length === 0 &&
+        Array.isArray(report.cleanupErrors) && report.cleanupErrors.length === 0 &&
+        typeof report.error === 'string' && report.error.split(/\r?\n/, 1)[0] === 'Error: Perception supervisor received SIGTERM'
+    }
+    return Number.isSafeInteger(report.rootPid) && report.rootPid > 0 && report.childCloseObserved === true
+  })
+}
+
+test('controlled cleanup distinguishes its registered pre-admission rejection from admitted ChildProcess close', () => {
+  const cancelled = { runId: 'controlled-pre-admission', rootPid: undefined, observedProcesses: [],
+    childCloseObserved: false, childClosed: true, success: false, observationComplete: true,
+    inventoryInconclusive: false, activeSurvivors: [], cleanupErrors: [],
+    error: 'Error: Perception supervisor received SIGTERM\n    at controlled-test' }
+  const registration = { case: 'cancel-before-child-admission', signal: 'SIGTERM', runId: cancelled.runId, report: cancelled }
+  const admitted = { runId: 'controlled-admitted', rootPid: 123, observedProcesses: [entry(123, '123')],
+    childCloseObserved: true, processTreeTerminal: false, inventoryInconclusive: true }
+  assert.equal(controlledReportsHaveClosedAdmittedChildren([admitted, cancelled], registration), true)
+  assert.equal(cancelled.childCloseObserved, false, 'A no-child case never fabricates a close event')
+  assert.equal(admitted.processTreeTerminal, false, 'Close aggregation never upgrades an inconclusive tree')
+  assert.equal(admitted.inventoryInconclusive, true)
+  assert.equal(controlledReportsHaveClosedAdmittedChildren([admitted]), true)
+  assert.equal(controlledReportsHaveClosedAdmittedChildren([admitted, cancelled]), false)
+  assert.equal(controlledReportsHaveClosedAdmittedChildren([admitted, { ...cancelled }], registration), false)
+  assert.equal(controlledReportsHaveClosedAdmittedChildren([admitted, cancelled], { ...registration, runId: 'wrong-run' }), false)
+  assert.equal(controlledReportsHaveClosedAdmittedChildren([admitted, cancelled, cancelled], registration), false)
+})
+
+test('controlled cleanup rejects unknown no-root reports, admitted children without close and contradictory cancellation facts', () => {
+  const cancelled = { runId: 'controlled-pre-admission', observedProcesses: [], childCloseObserved: false,
+    childClosed: true, success: false, observationComplete: true, inventoryInconclusive: false,
+    activeSurvivors: [], cleanupErrors: [], error: 'Error: Perception supervisor received SIGTERM' }
+  for (const changed of [{ rootPid: 123 }, { rootPid: null }, { observedProcesses: [entry(123, '123')] },
+      { childCloseObserved: true }, { childClosed: false }, { success: true }, { observationComplete: false },
+      { inventoryInconclusive: true }, { cleanupErrors: ['controlled error'] }, { activeSurvivors: [entry(123, '123')] },
+      { error: 'Error: controlled inventory failure' }]) {
+    const report = { ...cancelled, ...changed }
+    assert.equal(controlledReportsHaveClosedAdmittedChildren([report], {
+      case: 'cancel-before-child-admission', signal: 'SIGTERM', runId: report.runId, report }), false, JSON.stringify(changed))
+  }
+  for (const report of [null, { rootPid: 123, observedProcesses: [], childCloseObserved: true },
+      { runId: 'unknown', observedProcesses: [], childCloseObserved: true },
+      { runId: 'admitted', rootPid: 123, observedProcesses: [entry(123, '123')], childCloseObserved: false },
+      { runId: 'unknown', rootPid: null, observedProcesses: [], childCloseObserved: true }]) {
+    assert.equal(controlledReportsHaveClosedAdmittedChildren([report]), false)
+  }
+  assert.equal(controlledReportsHaveClosedAdmittedChildren([]), false)
+})
+
 test('Linux owned cleanup proves close and terminal identities for setsid, timeout, signals and observation failure', {
   skip: process.platform !== 'linux', timeout: 90_000,
 }, async (t) => {
@@ -458,7 +520,7 @@ test('Linux owned cleanup proves close and terminal identities for setsid, timeo
   // retains normal parentage and inherits a unique run marker.
   const root = await mkdtemp(join(tmpdir(), 'apollo-perception-supervisor-'))
   const reports = [], pidPath = join(root, 'setsid-pid')
-  let primaryError
+  let primaryError, preAdmissionCancellation
   const budget = () => String(Date.now() + 120_000)
   const run = async (extra) => {
     const report = await supervisePerceptionCommand({ args: ['-e', 'setInterval(() => {}, 1000)'],
@@ -514,6 +576,8 @@ test('Linux owned cleanup proves close and terminal identities for setsid, timeo
       try {
         emitter.emit('SIGTERM')
         const cancelled = await run({ signal: controller.signal })
+        preAdmissionCancellation = { case: 'cancel-before-child-admission', signal: 'SIGTERM',
+          runId: cancelled.runId, report: cancelled }
         t.diagnostic(JSON.stringify({ scope: 'controlled-cancel-before-child-admission', rootPid: cancelled.rootPid ?? null,
           observedIdentities: cancelled.observedProcesses.length, childCloseObserved: cancelled.childCloseObserved }))
         assert.equal(interruption.interruptedBy, 'SIGTERM'); assert.match(cancelled.error, /SIGTERM/)
@@ -624,7 +688,7 @@ test('Linux owned cleanup proves close and terminal identities for setsid, timeo
         active = await inspect()
       }
       cleanup.terminal = cleanup.errors.length === 0 && active.length === 0 &&
-        reports.every((report) => report.childCloseObserved === true)
+        controlledReportsHaveClosedAdmittedChildren(reports, preAdmissionCancellation)
       if (!cleanup.terminal) cleanup.errors.push('Controlled test retained a live identity or unverified ChildProcess.close')
     } catch (error) { cleanup.terminal = false; cleanup.errors.push(String(error.stack ?? error)) }
     const preserve = primaryError || cleanup.errors.length || !cleanup.terminal ||
