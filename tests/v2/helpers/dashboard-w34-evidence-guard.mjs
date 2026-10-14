@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
-const FIXTURES = ['w34-bare', 'w34-versioned', 'w34-complete', 'w34-failed-op', 'w34-unmeasured', 'w34-archived']
+const FIXTURES = ['w34-bare', 'w34-versioned', 'w34-complete', 'w34-failed-op', 'w34-archived']
 const SCREENSHOTS = ['w34-desktop-aggregate.png', 'w34-mobile-aggregate.png']
 const ORIGINS = new Set(['real-api', 'controlled-pg-seed', 'absent'])
 const RELATIONS = ['project', 'currentVersion', 'latestOperation', 'openReviewIssues', 'outputs', 'administration']
@@ -15,7 +15,7 @@ export function verifyW34Evidence(directory, { sourceCommit, ciRunId, applicatio
   assert.match(ciRunId, /^\d+$/)
   assert.match(applicationName, /^apollo-video-e2e-[A-Za-z0-9-]+$/)
   const manifest = JSON.parse(readFileSync(join(directory, 'w34-manifest.json'), 'utf8'))
-  assert.equal(manifest.schemaVersion, 'w34-dashboard-aggregate/v1')
+  assert.equal(manifest.schemaVersion, 'w34-dashboard-aggregate/v2')
   assert.equal(manifest.outcome, 'passed')
   assert.equal(manifest.sourceCommit, sourceCommit)
   assert.equal(manifest.ciRunId, ciRunId)
@@ -37,13 +37,19 @@ export function verifyW34Evidence(directory, { sourceCommit, ciRunId, applicatio
     assert.equal(Number.isInteger(manifest.counts.before[key]), true)
   }
   assert.deepEqual(manifest.fixtures?.map((item) => item.name).sort(), [...FIXTURES].sort())
-  assert.deepEqual(manifest.tiles?.map((tile) => tile.value), [1, 2, 0, 1])
+  assert.deepEqual(manifest.tiles?.map((tile) => tile.value), [1, 1, 0, 1])
   assert.deepEqual(manifest.tiles.map((tile) => tile.label), ['Em configuração', 'Em produção', 'Aguardando revisão', 'Concluídos'])
   assert.deepEqual(manifest.expectedOrder?.slice().sort(), manifest.fixtures.map((item) => item.projectId).sort())
   const byName = Object.fromEntries(manifest.fixtures.map((item) => [item.name, item]))
   for (const fixture of manifest.fixtures) {
     assert.deepEqual(fixture.api, fixture.persisted, `${fixture.name}: API projection must equal the PostgreSQL rows`)
     assert.equal(fixture.persisted.schemaVersion, 'project-dashboard-summary/v2')
+    if (fixture.persisted.latestOperation) {
+      const progress = fixture.persisted.latestOperation.progress
+      assert.ok(progress && Number.isInteger(progress.completed) && progress.completed >= 0 && progress.completed <= 4)
+      assert.equal(progress.total, 4); assert.equal(progress.unit, 'render')
+    }
+
     for (const relation of RELATIONS) {
       assert.ok(ORIGINS.has(fixture.origins?.[relation]?.origin), `${fixture.name}.${relation}: origin must be labelled`)
     }
@@ -96,13 +102,18 @@ export function verifyW34Evidence(directory, { sourceCommit, ciRunId, applicatio
   assert.deepEqual(failed.latestOperation.error, { code: 'render-failed', retryable: true })
   assert.equal(byName['w34-failed-op'].expectedCard.error, 'render-failed · recuperável')
 
-  const unmeasured = byName['w34-unmeasured']
-  assert.deepEqual(unmeasured.persisted.latestOperation.progress, { completed: 1 })
-  assert.equal(unmeasured.expectedCard.measure, 'sem total medido')
-  assert.equal(unmeasured.card.desktop.bar, null)
-  assert.equal(unmeasured.card.mobile.bar, null)
-  assert.deepEqual(unmeasured.card.desktop.percentTexts, [])
-  assert.equal(unmeasured.origins.latestOperation.origin, 'controlled-pg-seed')
+  const rejection = manifest.progressConstraint
+  assert.equal(rejection?.origin, 'raw-postgresql-check-rejection')
+  assert.equal(rejection.sqlstate, '23514'); assert.equal(rejection.constraint, 'public_operations_progress_check')
+  assert.deepEqual(rejection.attemptedProgress, { completed: 1, total: null, unit: null })
+  assert.deepEqual(rejection.persistedProgressBefore, { completed: 1, total: 4, unit: 'render' })
+  assert.deepEqual(rejection.persistedProgressAfter, rejection.persistedProgressBefore)
+  assert.equal(rejection.rowUnchanged, true); assert.equal(rejection.statementRollbackReadback, true)
+  assert.ok(Number.isInteger(rejection.countBefore) && rejection.countBefore > 0); assert.equal(rejection.countAfter, rejection.countBefore)
+  assert.deepEqual(manifest.partialProgressCoverage, { origin: 'synthetic-unit-only', source: 'tests/v2/project-dashboard.test.mjs',
+    test: 'W34 synthetic port progress without a total never gains a percentage', postgresAccepted: false, browserObserved: false })
+  assert.equal(rejection.operationId, 'w34-versioned-op-new')
+  assert.equal(rejection.projectId, byName['w34-versioned'].projectId)
 
   const archived = byName['w34-archived'].persisted
   assert.equal(archived.administrationRevision, 2)

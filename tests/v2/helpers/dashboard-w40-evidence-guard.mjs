@@ -9,8 +9,8 @@ const proofSource = resolve(dirname(fileURLToPath(import.meta.url)), 'dashboard-
 
 const SIBLING_SCHEMAS = Object.freeze({
   29: 'w29-lut-browser-proof/v1', 30: 'w30-dashboard-browser-proof/v1', 31: 'w31-dashboard-combined-filters/v1',
-  32: 'w32-dashboard-pagination/v1', 33: 'w33-dashboard-workspace-isolation/v1', 34: 'w34-dashboard-aggregate/v1',
-  35: 'w35-dashboard-states/v1', 36: 'w36-dashboard-events/v1', 37: 'w37-rename-from-card/v1',
+  32: 'w32-dashboard-pagination/v1', 33: 'w33-dashboard-workspace-isolation/v1', 34: 'w34-dashboard-aggregate/v2',
+  35: 'w35-dashboard-states/v2', 36: 'w36-dashboard-events/v1', 37: 'w37-rename-from-card/v1',
   38: 'w38-archive-restore/v1', 39: 'w39-duplicate-copy-on-write/v1',
 })
 const PHASES = [

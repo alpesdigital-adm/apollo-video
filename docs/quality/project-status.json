@@ -22300,6 +22300,10 @@
       "acceptance": "pending",
       "blockers": [
         {
+          "kind": "validation",
+          "text": "W34 v2 ainda precisa provar negativa SQL 23514/public_operations_progress_check com readback e zero efeitos e cinco fixtures PG/browser na própria fonte/CI. Guards v2 e defesa sintética passaram localmente; completed informado sem total/unit não é estado PG persistível."
+        },
+        {
           "kind": "deployment",
           "text": "Implantação DigitalOcean não comprovada para este escopo; o pacote não inclui deploy."
         },
@@ -22319,7 +22323,7 @@
           "type": "repo",
           "ref": "tests/v2/helpers/dashboard-w34-aggregate.mjs",
           "role": "implementation",
-          "scope": "Agregado persistido de GET /v1/projects conferido contra PG e card (seis fixtures w34-), ausências reais nulas/vazias; relação inconsistente falha fechada em teste de domínio com injeção controlada; domínio recusa archivedFromStatus=archived."
+          "scope": "Cinco fixtures PG/browser persistíveis na fonte v2; negativa SQL progress parcial/23514 e readback/counts sem efeitos preparados. Cobertura parcial sem total isolada no teste sintético; ainda não executado nesta revisão."
         },
         {
           "type": "repo",
@@ -22338,10 +22342,28 @@
           "ref": "https://github.com/alpesdigital-adm/apollo-video/actions/runs/37313679577",
           "role": "controlled-e2e",
           "scope": "CI 37313679577: dois jobs verdes no SHA integrado em main; artifacts W29–W40 publicados e conferidos. Prova técnica controlada; não é deploy nem aceite."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w34-35-fixtures.mjs",
+          "role": "implementation",
+          "scope": "Negativa raw PostgreSQL preparada: completed=1/total=NULL/unit=NULL deve falhar pela constraint exata e preservar linha/contagem; ainda sem nova execução. Não muda constraint/runtime."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/project-dashboard.test.mjs",
+          "role": "implementation",
+          "scope": "Defesa sintética identificada de partial progress via port/contrato, com guard de fonte UI sem percentual/barra; não é PG/browser real."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w61-70-20261008/w34-w35-w40-progress-pure-v1-ed434615/result.json",
+          "role": "implementation",
+          "scope": "Validação isolada local de 13/10: três suítes (dashboard-w34-w35-evidence-guard, dashboard-w40-evidence-guard e project-dashboard), 22/22 PASS, zero skips; receipt 4b90081fd2b4c44db9505f49e2f6a2a696eeb82ea9806752d7f872aab542df7b. Onze pins pré/pós exatos, fingerprint d21fd33efc5839d3fd5e614034a99d2e31e7b8fa04bd1db4c21e1b5f7818e89f igual, noDB, três identidades conhecidas terminais e cleanup limpo. Confere guards W34/W35 v2, propagação estrita no W40 e defesa sintética; não executa a negativa SQL nem os novos casos PG/browser. FAIL835 e histórico9f preservados; nenhuma promoção de estado, TODO, implantação ou aceite."
         }
       ],
-      "nextAction": "Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
-      "notes": "Recorte técnico W34 comprovado em ambiente controlado. Lacunas: Operações, annotations e outputs vêm de seed PG controlado com FKs reais; nenhuma relação produzida por worker/operação real. Nenhuma caixa do TODO foi remarcada."
+      "nextAction": "Validar o recorte v2 na própria SHA: negativa SQL/zero efeitos e cinco fixtures PG/browser, sem substituir o caso impossível por medição inventada. Atender gates de implantação DigitalOcean e aceite separado; fechar as lacunas registradas sem promover TODO automaticamente.",
+      "notes": "Recorte técnico W34 comprovado em ambiente controlado. Lacunas: Operações, annotations e outputs vêm de seed PG controlado com FKs reais; nenhuma relação produzida por worker/operação real. Nenhuma caixa do TODO foi remarcada. Correção de cobertura em 13/10: CI835 recusou a fixture progressCompleted=1/progressTotal=NULL/progressUnit=NULL por public_operations_progress_check (23514). Essa forma não é persistível. A fonte v2 retira somente w34/w35-unmeasured da prova PG/browser, preserva os demais casos e prepara negativa SQL sobre operação canônica existente, com rollback/readback completo e contagens sem efeitos. W34 passa a cinco fixtures e W35 a oito estados persistíveis; nenhuma totalização é inventada. A defesa partial-progress continua apenas no teste sintético de port/contrato e no guard de fonte da UI; não afirma browser ou PostgreSQL aceitando a forma. No checkpoint inicial, patch ainda sem testes/CI desta fonte; históricos v1 e FAIL ficam preservados, sem mudança de state/TODO/deploy/aceite. Histórico do escopo anterior desse source ref: Agregado persistido de GET /v1/projects conferido contra PG e card (seis fixtures w34-), ausências reais nulas/vazias; relação inconsistente falha fechada em teste de domínio com injeção controlada; domínio recusa archivedFromStatus=archived. Validação isolada local de 13/10: três suítes (dashboard-w34-w35-evidence-guard, dashboard-w40-evidence-guard e project-dashboard), 22/22 PASS, zero skips; receipt 4b90081fd2b4c44db9505f49e2f6a2a696eeb82ea9806752d7f872aab542df7b. Onze pins pré/pós exatos, fingerprint d21fd33efc5839d3fd5e614034a99d2e31e7b8fa04bd1db4c21e1b5f7818e89f igual, noDB, três identidades conhecidas terminais e cleanup limpo. Confere guards W34/W35 v2, propagação estrita no W40 e defesa sintética; não executa a negativa SQL nem os novos casos PG/browser. FAIL835 e histórico9f preservados; nenhuma promoção de estado, TODO, implantação ou aceite."
     },
     {
       "id": "W35",
@@ -22362,6 +22384,10 @@
       "deployment": "pending",
       "acceptance": "pending",
       "blockers": [
+        {
+          "kind": "validation",
+          "text": "W35 v2 ainda precisa provar negativa SQL 23514/public_operations_progress_check com readback e zero efeitos e oito estados PG/browser na própria fonte/CI. Guards v2 e defesa sintética passaram localmente; completed informado sem total/unit não é estado PG persistível."
+        },
         {
           "kind": "validation",
           "text": "Jornada local95b/CfT157 passou no escopo proxy/retry/API, shell e negativo final, com transportes e close reais. Falta CI da propria SHA e final positivo W35 com contexto aprovado real; projeto unknown/blocked e segundo projeto seed nao comprovam rendering-final/completed/MP4/replay positivos. Supersede apos objetivo aprovado permanece nao comprovado. Nenhum TODO ou aceite promovido."
@@ -22392,7 +22418,7 @@
           "type": "repo",
           "ref": "tests/v2/helpers/dashboard-w35-states.mjs",
           "role": "implementation",
-          "scope": "Nove estados e o vazio real com rótulo, tom, ação e destino conferidos; progresso sem total sem barra e com total no número correto; Revisar agora leva a /projects/{id}?mode=review (corrigido na W40)."
+          "scope": "Oito estados PG/browser persistíveis na fonte v2; negativa SQL progress parcial/23514 e readback/counts sem efeitos preparados. Cobertura parcial sem total isolada no teste sintético; ainda não executado nesta revisão."
         },
         {
           "type": "repo",
@@ -22645,10 +22671,28 @@
           "ref": "Apollo/w61-70-20261008/dashboard-cancel-v1-3c30e981/result.json",
           "scope": "Diagnostico RSC opt-in em bundle693/testfbed+3paths congelados: puro16/16 sem skips receipt7b55f1d8ffc7468680b562be0b13e8f97b0d2ef3a20fb70cf253a0da3cf959aa; primeira invocacao aaa36e3b FAIL ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX por omissao do argumento historico transform-types, preservada receipt8bdf26fa8b8c39e8cd129b4b9365aa00ff731b7404548393fdccb598dc029c79. Repeticao3c30e981 FAIL21RSC ERR_ABORTED, receiptc45a803731d8072336382f2696d3ae2bcd8335a2c87659808eb8ca2abbd61f23/runtime209afca57b1545372cb283be5cc32b9778a3a7048c29efe767b829e766e44288. Noventa eventos:2abort-called posteriores aos21erros, sem fetchIds associados, zero cancel JS de reader/stream observado; nao prova ausencia de cancel nativo nem causa. Restauracao9/9 em cada pagina, overflowfalse/errors[],32identidades observadas terminais,4PG0/cluster/porta/scratch/postflight limpos. FP7bf95f5fc22b07c36af37c7bac09b5be2db506dcc8da0a67cd41280dcc82f1c8 igual; bundle1922/333909278B sem drift pre/post. Nao e jornada normal aprovada, nao ha waiver de transporte.",
           "role": "implementation"
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/helpers/dashboard-w34-35-fixtures.mjs",
+          "role": "implementation",
+          "scope": "Negativa raw PostgreSQL preparada: completed=1/total=NULL/unit=NULL deve falhar pela constraint exata e preservar linha/contagem; ainda sem nova execução. Não muda constraint/runtime."
+        },
+        {
+          "type": "repo",
+          "ref": "tests/v2/project-dashboard.test.mjs",
+          "role": "implementation",
+          "scope": "Defesa sintética identificada de partial progress via port/contrato, com guard de fonte UI sem percentual/barra; não é PG/browser real."
+        },
+        {
+          "type": "private",
+          "ref": "C:/Users/leand/Documents/Apollo/w61-70-20261008/w34-w35-w40-progress-pure-v1-ed434615/result.json",
+          "role": "implementation",
+          "scope": "Validação isolada local de 13/10: três suítes (dashboard-w34-w35-evidence-guard, dashboard-w40-evidence-guard e project-dashboard), 22/22 PASS, zero skips; receipt 4b90081fd2b4c44db9505f49e2f6a2a696eeb82ea9806752d7f872aab542df7b. Onze pins pré/pós exatos, fingerprint d21fd33efc5839d3fd5e614034a99d2e31e7b8fa04bd1db4c21e1b5f7818e89f igual, noDB, três identidades conhecidas terminais e cleanup limpo. Confere guards W34/W35 v2, propagação estrita no W40 e defesa sintética; não executa a negativa SQL nem os novos casos PG/browser. FAIL835 e histórico9f preservados; nenhuma promoção de estado, TODO, implantação ou aceite."
         }
       ],
-      "nextAction": "Publicar o slice coerente de shell/fixture/cleanup com navegador CfT157 reproduzivel e provar dashboard no CI da mesma SHA, mantendo EOF/erros/fechamento obrigatorios. Depois fechar W35 final positivo e supersede aprovado mediante qualidade/contexto reais e dependencias W62-W69; nao promover seed/DI ou face unknown.",
-      "notes": "As provas antigas de cards e runtime controlado permanecem historicas nos SHAs citados. O gate facial atual revelou que aquela preparacao nao prova admissao final positiva: W35 retorna em-construcao para essa lacuna. Jornada atual distingue proxy real, seed de review bloqueado e rejeicao da autoridade PostgreSQL; nenhuma aprovacao e gravada para tornar teste verde. T-FR/Media controlados sao provas mecanicas separadas, sem transferencia de autoridade editorial. Historico movido dos blockers/nextAction em13/10 apos CfT local PASS: Dashboard v6 em fonte0146/bundlea37 FAIL antes do primeiro estado: barreiras de request concluidas, duas chamadas prematuras annotations/proxy-reviews retornaram404 PROJECT_NOT_FOUND e22RSC transport-failed ERR_ABORTED. Nao ha excecao por content-type nem causa de cancelamento comprovada. ReceiptSHA2563a4684546b4a076ab5db578d38d29e1419123ab6d66ae75f68e11cdf10bb16f4; fingerprint6626e42c7dba2a602b81770e15c05883b3d8df763ccb8b3eae4e54d6d310de94 estavel;34identidades terminais/4amostrasPGzero/cluster e scratch limpos. Workspacev13/availabilityv1 emRR unico e integridade dos manifests estao em implementacao posterior, sem teste/build novo. Final positivo W35 continua pendente. Projeto real permanece revising/unknown/blocked; segundo projeto reviewing-proxy e proxy succeeded sao seed explicitos. Nao comprova rendering-final/completed/MP4/replay positivos. CI fbed4600 terminal: central38307039153 FAIL; Compose115003481183 SUCCESS, Quality115003480971 FAIL e Perception115003481536 FAIL; dashboard38307039138 FAIL, media38307039200 SUCCESS no escopo controlado. Archive134files/42536894B SHA35bd704919761b37d33005418e17b64f7c45bd00697cb7e7af3fd8a3c1656c30 autenticado; source mergeb347b727/tree d7033f73 igualheadfbed, main4dd inalterado. Quality/Perception recusam peers novos UID0 fora das identidades observadas, namespaces EACCES e contencao pidfd EPERM em identidades observadas: nenhuma exclusao por UID/ancestralidade ou atribuicao de servico. Cgroup exclusivo em implementacao isolada, sem prova Linux. Diagnostico RSC opt-in em bundle693/testfbed+3paths congelados: puro16/16 sem skips receipt7b55f1d8ffc7468680b562be0b13e8f97b0d2ef3a20fb70cf253a0da3cf959aa; primeira invocacao aaa36e3b FAIL ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX por omissao do argumento historico transform-types, preservada receipt8bdf26fa8b8c39e8cd129b4b9365aa00ff731b7404548393fdccb598dc029c79. Repeticao3c30e981 FAIL21RSC ERR_ABORTED, receiptc45a803731d8072336382f2696d3ae2bcd8335a2c87659808eb8ca2abbd61f23/runtime209afca57b1545372cb283be5cc32b9778a3a7048c29efe767b829e766e44288. Noventa eventos:2abort-called posteriores aos21erros, sem fetchIds associados, zero cancel JS de reader/stream observado; nao prova ausencia de cancel nativo nem causa. Restauracao9/9 em cada pagina, overflowfalse/errors[],32identidades observadas terminais,4PG0/cluster/porta/scratch/postflight limpos. FP7bf95f5fc22b07c36af37c7bac09b5be2db506dcc8da0a67cd41280dcc82f1c8 igual; bundle1922/333909278B sem drift pre/post. Nao e jornada normal aprovada, nao ha waiver de transporte. Proxima etapa: isolar consumer com ownership/cleanup externo verificado e investigar o transporte RSC sem relaxar gates. W35 final positivo, supersede aprovado, W66cutover16, W69clock/persistencia/publicacao e W62-W67qualificacao continuam pendentes. PR81 bloqueado; sem merge/deploy/aceite."
+      "nextAction": "Validar o recorte v2 na própria SHA: negativa SQL/zero efeitos e oito estados PG/browser, sem substituir o caso impossível por medição inventada. Publicar o slice coerente de shell/fixture/cleanup com navegador CfT157 reproduzivel e provar dashboard no CI da mesma SHA, mantendo EOF/erros/fechamento obrigatorios. Depois fechar W35 final positivo e supersede aprovado mediante qualidade/contexto reais e dependencias W62-W69; nao promover seed/DI ou face unknown.",
+      "notes": "As provas antigas de cards e runtime controlado permanecem historicas nos SHAs citados. O gate facial atual revelou que aquela preparacao nao prova admissao final positiva: W35 retorna em-construcao para essa lacuna. Jornada atual distingue proxy real, seed de review bloqueado e rejeicao da autoridade PostgreSQL; nenhuma aprovacao e gravada para tornar teste verde. T-FR/Media controlados sao provas mecanicas separadas, sem transferencia de autoridade editorial. Historico movido dos blockers/nextAction em13/10 apos CfT local PASS: Dashboard v6 em fonte0146/bundlea37 FAIL antes do primeiro estado: barreiras de request concluidas, duas chamadas prematuras annotations/proxy-reviews retornaram404 PROJECT_NOT_FOUND e22RSC transport-failed ERR_ABORTED. Nao ha excecao por content-type nem causa de cancelamento comprovada. ReceiptSHA2563a4684546b4a076ab5db578d38d29e1419123ab6d66ae75f68e11cdf10bb16f4; fingerprint6626e42c7dba2a602b81770e15c05883b3d8df763ccb8b3eae4e54d6d310de94 estavel;34identidades terminais/4amostrasPGzero/cluster e scratch limpos. Workspacev13/availabilityv1 emRR unico e integridade dos manifests estao em implementacao posterior, sem teste/build novo. Final positivo W35 continua pendente. Projeto real permanece revising/unknown/blocked; segundo projeto reviewing-proxy e proxy succeeded sao seed explicitos. Nao comprova rendering-final/completed/MP4/replay positivos. CI fbed4600 terminal: central38307039153 FAIL; Compose115003481183 SUCCESS, Quality115003480971 FAIL e Perception115003481536 FAIL; dashboard38307039138 FAIL, media38307039200 SUCCESS no escopo controlado. Archive134files/42536894B SHA35bd704919761b37d33005418e17b64f7c45bd00697cb7e7af3fd8a3c1656c30 autenticado; source mergeb347b727/tree d7033f73 igualheadfbed, main4dd inalterado. Quality/Perception recusam peers novos UID0 fora das identidades observadas, namespaces EACCES e contencao pidfd EPERM em identidades observadas: nenhuma exclusao por UID/ancestralidade ou atribuicao de servico. Cgroup exclusivo em implementacao isolada, sem prova Linux. Diagnostico RSC opt-in em bundle693/testfbed+3paths congelados: puro16/16 sem skips receipt7b55f1d8ffc7468680b562be0b13e8f97b0d2ef3a20fb70cf253a0da3cf959aa; primeira invocacao aaa36e3b FAIL ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX por omissao do argumento historico transform-types, preservada receipt8bdf26fa8b8c39e8cd129b4b9365aa00ff731b7404548393fdccb598dc029c79. Repeticao3c30e981 FAIL21RSC ERR_ABORTED, receiptc45a803731d8072336382f2696d3ae2bcd8335a2c87659808eb8ca2abbd61f23/runtime209afca57b1545372cb283be5cc32b9778a3a7048c29efe767b829e766e44288. Noventa eventos:2abort-called posteriores aos21erros, sem fetchIds associados, zero cancel JS de reader/stream observado; nao prova ausencia de cancel nativo nem causa. Restauracao9/9 em cada pagina, overflowfalse/errors[],32identidades observadas terminais,4PG0/cluster/porta/scratch/postflight limpos. FP7bf95f5fc22b07c36af37c7bac09b5be2db506dcc8da0a67cd41280dcc82f1c8 igual; bundle1922/333909278B sem drift pre/post. Nao e jornada normal aprovada, nao ha waiver de transporte. Proxima etapa: isolar consumer com ownership/cleanup externo verificado e investigar o transporte RSC sem relaxar gates. W35 final positivo, supersede aprovado, W66cutover16, W69clock/persistencia/publicacao e W62-W67qualificacao continuam pendentes. PR81 bloqueado; sem merge/deploy/aceite. Correção de cobertura em 13/10: CI835 recusou a fixture progressCompleted=1/progressTotal=NULL/progressUnit=NULL por public_operations_progress_check (23514). Essa forma não é persistível. A fonte v2 retira somente w34/w35-unmeasured da prova PG/browser, preserva os demais casos e prepara negativa SQL sobre operação canônica existente, com rollback/readback completo e contagens sem efeitos. W34 passa a cinco fixtures e W35 a oito estados persistíveis; nenhuma totalização é inventada. A defesa partial-progress continua apenas no teste sintético de port/contrato e no guard de fonte da UI; não afirma browser ou PostgreSQL aceitando a forma. No checkpoint inicial, patch ainda sem testes/CI desta fonte; históricos v1 e FAIL ficam preservados, sem mudança de state/TODO/deploy/aceite. Histórico do escopo anterior desse source ref: Nove estados e o vazio real com rótulo, tom, ação e destino conferidos; progresso sem total sem barra e com total no número correto; Revisar agora leva a /projects/{id}?mode=review (corrigido na W40). Validação isolada local de 13/10: três suítes (dashboard-w34-w35-evidence-guard, dashboard-w40-evidence-guard e project-dashboard), 22/22 PASS, zero skips; receipt 4b90081fd2b4c44db9505f49e2f6a2a696eeb82ea9806752d7f872aab542df7b. Onze pins pré/pós exatos, fingerprint d21fd33efc5839d3fd5e614034a99d2e31e7b8fa04bd1db4c21e1b5f7818e89f igual, noDB, três identidades conhecidas terminais e cleanup limpo. Confere guards W34/W35 v2, propagação estrita no W40 e defesa sintética; não executa a negativa SQL nem os novos casos PG/browser. FAIL835 e histórico9f preservados; nenhuma promoção de estado, TODO, implantação ou aceite."
     },
     {
       "id": "W36",
