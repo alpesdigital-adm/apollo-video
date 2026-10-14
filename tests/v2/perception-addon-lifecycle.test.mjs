@@ -269,13 +269,49 @@ test('cgroup exact unavailable after-stat permits one strict stat membership sta
   const facts = snapshot.statUnavailableRechecks[0]
   assert.equal(facts.outcome, 'strict-identity-and-membership-revalidated')
   assert.equal(facts.identityEstablishedBySentinel, false); assert.equal(facts.terminalityEstablished, false)
-  assert.ok(facts.completedAt < facts.deadlineAt); assert.ok(facts.deadlineAt - facts.startedAt <= 500)
+  assert.ok(facts.completedAt < facts.deadlineAt)
+  assert.ok(facts.deadlineAt <= facts.startedAt + 500, JSON.stringify({
+    startedAt: facts.startedAt, deadlineAt: facts.deadlineAt, maximumMs: 500, allocatedMs: facts.allocatedMs }))
   assert.ok(facts.completedMonotonic < facts.deadlineMonotonic)
-  assert.ok(facts.deadlineMonotonic - facts.startedMonotonic <= 500)
+  assert.ok(facts.deadlineMonotonic <= facts.startedMonotonic + 500, JSON.stringify({
+    startedMonotonic: facts.startedMonotonic, deadlineMonotonic: facts.deadlineMonotonic, maximumMs: 500, allocatedMs: facts.allocatedMs }))
   assert.equal(facts.knownBefore.starttime, '80'); assert.equal(facts.recheckedIdentity.ppid, 1)
   assert.doesNotMatch(JSON.stringify(facts), /PRIVATE_TASK_COMM/)
   assert.deepEqual(io.calls, [cgroupScope.path + '/cgroup.procs', '/proc/9/stat', '/proc/9/cgroup', '/proc/9/stat',
     '/proc/9/stat', '/proc/9/cgroup', '/proc/9/stat'])
+})
+
+test('sentinel recheck keeps the literal monotonic cap and rejects boundary late return or wall rollback', async (t) => {
+  let wall = 1000, mono = 100.125, initial
+  t.mock.method(Date, 'now', () => wall)
+  t.mock.method(performance, 'now', () => mono)
+  try { parseLinuxProcessStat(cgroupUnavailableStat()) } catch (error) { initial = error }
+  for (const kind of ['exact-deadline', 'above-500', 'wall-rollback']) {
+    wall = 1000; mono = 100.125
+    const io = cgroupSentinelIo({ after: initial }), read = io.readFile
+    let stats = 0
+    io.readFile = async (path, options) => {
+      const statCall = path.endsWith('/stat') ? ++stats : null
+      const value = await read(path, options)
+      if (statCall === 3) {
+        if (kind === 'wall-rollback') wall = 999
+        else mono = 100.125 + (kind === 'above-500' ? 501 : 500)
+      }
+      return value
+    }
+    await assert.rejects(readCgroupSnapshot(cgroupScope, 3000, io), (error) => {
+      assert.equal(error, initial)
+      const fact = error.cgroupSnapshotDiagnostic.unavailableRecheck
+      assert.equal(fact.startedAt, 1000); assert.equal(fact.deadlineAt, 1500); assert.equal(fact.allocatedMs, 500)
+      assert.equal(fact.startedMonotonic, 100.125); assert.equal(fact.deadlineMonotonic, 600.125)
+      assert.equal(fact.outcome, 'inconclusive'); assert.equal(fact.terminalityEstablished, false)
+      assert.ok(fact.deadlineMonotonic <= fact.startedMonotonic + 500, JSON.stringify({
+        startedMonotonic: fact.startedMonotonic, deadlineMonotonic: fact.deadlineMonotonic, maximumMs: 500 }))
+      return true
+    })
+    assert.equal(io.calls.filter((path) => path.endsWith('/cgroup')).length, 1, 'No membership read after the failed recovery boundary')
+    assert.equal(io.calls.filter((path) => path.endsWith('/stat')).length, 3)
+  }
 })
 
 test('cgroup sentinel requires a prior exact PID starttime and domain, while malformed or denied stat never retries', async () => {

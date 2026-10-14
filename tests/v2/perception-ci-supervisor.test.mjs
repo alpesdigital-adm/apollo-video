@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   CLEANUP_BUDGET_MS, attachSupervisorSignals, collectOwnedIdentities, containObservedIdentities, createPerceptionRunId,
-  parseLinuxProcessStat, readLinuxProcessIdentity, requireJobBudget, signalObservedIdentity,
+  parseLinuxProcessStat, readLinuxProcessIdentity, requireJobBudget, signalObservedIdentity, linuxProcessSnapshot,
   supervisePerceptionCommand,
   createLinuxObservationContext, observeLinuxProcesses,
 } from '../../scripts/validation/run-perception-ci.mjs'
@@ -453,7 +453,7 @@ test('SIGINT and SIGTERM both abort through the shared cleanup path and remove l
 
 test('Linux owned cleanup proves close and terminal identities for setsid, timeout, signals and observation failure', {
   skip: process.platform !== 'linux', timeout: 90_000,
-}, async () => {
+}, async (t) => {
   // Explicit setsid is confined to this controlled test. The real owner spawn
   // retains normal parentage and inherits a unique run marker.
   const root = await mkdtemp(join(tmpdir(), 'apollo-perception-supervisor-'))
@@ -508,20 +508,56 @@ test('Linux owned cleanup proves close and terminal identities for setsid, timeo
     assert.equal(timeout.success, false)
     await requireTerminal(timeout)
 
+    {
+      const emitter = new EventEmitter(), controller = new AbortController(), interruption = {}
+      const remove = attachSupervisorSignals(controller, interruption, emitter)
+      try {
+        emitter.emit('SIGTERM')
+        const cancelled = await run({ signal: controller.signal })
+        t.diagnostic(JSON.stringify({ scope: 'controlled-cancel-before-child-admission', rootPid: cancelled.rootPid ?? null,
+          observedIdentities: cancelled.observedProcesses.length, childCloseObserved: cancelled.childCloseObserved }))
+        assert.equal(interruption.interruptedBy, 'SIGTERM'); assert.match(cancelled.error, /SIGTERM/)
+        assert.equal(cancelled.success, false); assert.equal(cancelled.rootPid, undefined)
+        assert.deepEqual(cancelled.observedProcesses, []); assert.equal(cancelled.childCloseObserved, false)
+        assert.equal(cancelled.childClosed, true, 'No child existed; this is not a close event')
+        assert.deepEqual(cancelled.activeSurvivors, [])
+      } finally { remove() }
+    }
+
     for (const name of ['SIGINT', 'SIGTERM']) {
       const emitter = new EventEmitter(), controller = new AbortController(), interruption = {}
       const remove = attachSupervisorSignals(controller, interruption, emitter)
-      const timer = setTimeout(() => emitter.emit(name), 350)
+      const admissionDeadlineAt = Date.now() + 1500
+      let release
       try {
-        const interrupted = await run({ signal: controller.signal })
+        const interrupted = await run({ signal: controller.signal, snapshot: async (runId, context) => {
+          const entries = await linuxProcessSnapshot(runId, context)
+          const root = context.rootPid === undefined ? undefined : entries.find((identity) => identity.pid === context.rootPid &&
+            !['Z', 'X', 'x'].includes(identity.state))
+          const owned = root && context.observed.get(root.pid + ':' + root.starttime)
+          if (!release && root && owned) {
+            assert.equal(root.ppid, process.pid); assert.equal(owned.starttime, root.starttime)
+            assert.equal(owned.ownership, 'spawn+run-id')
+            const releasedAt = Date.now()
+            assert.ok(releasedAt < admissionDeadlineAt, 'Signal fixture must observe the real admitted child within the original 1500ms')
+            release = { scope: 'after-real-owned-child-snapshot', runId, pid: root.pid, starttime: root.starttime,
+              ppid: root.ppid, releasedAt, admissionDeadlineAt, signal: name }
+            emitter.emit(name)
+          }
+          return entries
+        } })
+        t.diagnostic(JSON.stringify({ controlledSignalRelease: release ?? null, rootPid: interrupted.rootPid ?? null,
+          childCloseObserved: interrupted.childCloseObserved }))
+        assert.ok(release, 'Signal cannot be released by elapsed time before child admission')
+        assert.equal(interrupted.rootPid, release.pid)
+        assert.ok(interrupted.observedProcesses.some((identity) => identity.pid === release.pid && identity.starttime === release.starttime))
         assert.equal(interruption.interruptedBy, name)
         assert.equal(interrupted.success, false)
         await requireTerminal(interrupted)
-      } finally { clearTimeout(timer); remove() }
+      } finally { remove() }
     }
 
     let observations = 0
-    const { linuxProcessSnapshot } = await import('../../scripts/validation/run-perception-ci.mjs')
     const inconclusive = await run({ snapshot: async (runId, context) => {
       if (++observations === 3) throw new Error('controlled inventory failure')
       return linuxProcessSnapshot(runId, context)

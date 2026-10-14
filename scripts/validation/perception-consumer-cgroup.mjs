@@ -131,25 +131,37 @@ export async function readCgroupSnapshot(scope, deadlineAt, io = { readFile }) {
           unavailable?.schemaVersion === 'linux-task-sighand-unavailable/v1' &&
           unavailable.pid === before.pid && unavailable.starttime === before.starttime &&
           unavailable.identityEstablished === false && unavailable.terminalityEstablished === false) {
-        const recheckEnd = Math.min(deadlineAt, Date.now() + 500)
-        const startedMonotonic = performance.now()
-        const monotonicEnd = startedMonotonic + Math.max(0, recheckEnd - Date.now())
+        const startedAt = Date.now(), startedMonotonic = performance.now()
+        const allocatedMs = Math.min(500, Math.max(0, deadlineAt - startedAt))
+        const recheckEnd = startedAt + allocatedMs
+        const monotonicEnd = startedMonotonic + allocatedMs
         unavailableRecheck = { schemaVersion: 'cgroup-stat-unavailable-recheck/v1', requestedPid: pid,
           knownBefore: identityFacts(before), initialStatDiagnostic: error.linuxStatDiagnostic,
-          deadlineAt: recheckEnd, startedAt: Date.now(), stage: 'recheck-stat', outcome: 'pending',
+          deadlineAt: recheckEnd, startedAt, allocatedMs, stage: 'recheck-stat', outcome: 'pending',
           startedMonotonic, deadlineMonotonic: monotonicEnd,
           identityEstablishedBySentinel: false, terminalityEstablished: false, recheckedIdentity: null }
         try {
+          let lastWall = startedAt
+          const recheckText = async (path) => {
+            const beforeWall = Date.now()
+            assert.ok(beforeWall >= lastWall, 'Cgroup sentinel recheck wall clock rollback')
+            lastWall = beforeWall
+            const value = await text(path, recheckEnd, monotonicEnd)
+            const afterWall = Date.now()
+            assert.ok(afterWall >= lastWall, 'Cgroup sentinel recheck wall clock rollback')
+            lastWall = afterWall
+            return value
+          }
           // ONE stat/membership/stat attempt under ONE absolute window. The
           // sentinel is never returned, adopted, signaled or treated as terminal.
-          const verified = parseLinuxProcessStat(await text(`/proc/${pid}/stat`, recheckEnd, monotonicEnd))
+          const verified = parseLinuxProcessStat(await recheckText(`/proc/${pid}/stat`))
           unavailableRecheck.recheckedIdentity = identityFacts(verified)
           assert.equal(identityKey(verified), identityKey(before), 'Cgroup sentinel recheck PID recycled')
           unavailableRecheck.stage = 'recheck-membership'
-          const membership = parseCgroupMembership(await text(`/proc/${pid}/cgroup`, recheckEnd, monotonicEnd))
+          const membership = parseCgroupMembership(await recheckText(`/proc/${pid}/cgroup`))
           assert.equal(membership, scope.membership, 'Kernel cgroup membership escaped the admitted domain')
           unavailableRecheck.stage = 'recheck-stat-final'
-          const after = parseLinuxProcessStat(await text(`/proc/${pid}/stat`, recheckEnd, monotonicEnd))
+          const after = parseLinuxProcessStat(await recheckText(`/proc/${pid}/stat`))
           assert.equal(identityKey(after), identityKey(before), 'Cgroup sentinel final PID recycled')
           unavailableRecheck.recheckedIdentity = identityFacts(after)
           unavailableRecheck.outcome = 'strict-identity-and-membership-revalidated'
