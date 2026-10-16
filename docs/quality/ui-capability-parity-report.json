@@ -4,9 +4,9 @@
     "uiActions": 176,
     "capabilities": 156,
     "endpoints": 156,
-    "registeredCapabilities": 386,
-    "operableCapabilities": 386,
-    "publicContractCapabilities": 386,
+    "registeredCapabilities": 387,
+    "operableCapabilities": 387,
+    "publicContractCapabilities": 387,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -2335,7 +2335,7 @@
     {
       "uiAction": "src/app/ProjectsPageClient.tsx:448",
       "capabilityId": "apollo.projects.create",
-      "capabilityVersion": "5.0.0",
+      "capabilityVersion": "6.0.0",
       "endpoint": "POST /v1/projects",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -4504,8 +4504,19 @@
       "capabilityId": "apollo.projects.create",
       "exposure": "public",
       "endpoint": "POST /v1/projects",
-      "inputSchemaRef": "apollo://schemas/create-project-request/v3",
-      "outputSchemaRef": "apollo://schemas/project-created/v4",
+      "inputSchemaRef": "apollo://schemas/create-project-request/v4",
+      "outputSchemaRef": "apollo://schemas/project-created/v5",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.output-variants.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/output-variants",
+      "inputSchemaRef": "apollo://schemas/create-project-output-variant-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-output-variant-created/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

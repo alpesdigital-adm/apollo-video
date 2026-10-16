@@ -192,3 +192,11 @@ Schema isolado não prova integração. Histórico bloqueado expõe motivo/Comma
 | API/segurança/observabilidade | Capability/contract tests, audit, errors/retry/cancel/lineage | Cross workspace, falsa provenance de detector, stale base/mismatch de ator não gravam; retry não troca fonte/spec. |
 
 Fixtures/domínio verificam invariantes; PG verifica persistência; renderer real verifica aplicação; pixels/MP4/critic verificam resultado. Implementação isolada, integração, E2E, implantação e aceite continuam separados. W66 permanece parcial enquanto faltar integração ou prova necessária.
+
+## 9. Decisão de contrato: `apollo.projects.create` 6.0.0 sem `format`
+
+Decisão de Astra, 16/10/2026, registrada na integração da fundação W66. `POST /v1/projects` deixa de aceitar e de devolver `format`: a capability `apollo.projects.create` passa de 5.0.0 para **6.0.0** (major, breaking), com `create-project-request/v4` (obrigatórios `name` e `objective`) e `project-created/v5`. O formato pertence a cada OutputVariant e é criado por `apollo.projects.output-variants.create` 1.0.0 (`POST /v1/projects/{projectId}/output-variants`, `create-project-output-variant-request/v1` e `project-output-variant-created/v1`).
+
+- **Sem fallback.** Não há alias, default `9:16`, campo opcional nem leitura de `project.format` para compatibilidade: a regra V2 proíbe contrato legado. Cliente que ainda envia `format` recebe rejeição de schema.
+- **Baseline.** `contracts/v1/public-contract-baseline.json` e o relatório de paridade foram regenerados no mesmo commit: 386 para 387 capabilities e 684 para 688 schemas (v4, v5 e os dois do output variant). A mudança de versão com remoção de campo é declarada, não silenciosa.
+- **Pendente (slices posteriores).** UI, chamadores e testes de ponta a ponta ainda criam projeto com `format` e serão migrados; enquanto isso, a integração fica vermelha em typecheck e testes unitários, e nada disso é empurrado ao PR #81.
