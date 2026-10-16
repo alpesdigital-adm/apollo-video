@@ -11,7 +11,7 @@ import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
-import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { requirePreflightForActionService } from './preflight-gate.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -130,8 +130,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       repository: dependencies.colorPipelines, workspaceId, projectId, sources: source.renderSources,
     })
 
-    const inputHash = calculateVersionHash({
-      kind: 'project-final-export/v1',
+    const inputHash = projectFinalRenderInputHash({
       projectId,
       projectVersionId,
       projectVersionHash,

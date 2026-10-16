@@ -34,6 +34,7 @@ import {
 } from './color-critic.ts'
 import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
 import { projectProxyRenderInputHash } from './project-render-sources.ts'
+import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -447,6 +448,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`)
         .digest('hex')
       const recipeParameters = Object.freeze({
+        assEmissionPolicy: ASS_EMISSION_POLICY,
         inputHash: context.inputHash, audioTimelineHash,
         projectVersionId: context.projectVersionId,
         editPlanSnapshotId: context.editPlanSnapshotId,

@@ -1,10 +1,17 @@
 import { assertDomain } from '../domain/errors.ts'
+import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import type {
   ProjectProxyRenderSource,
   ProjectRenderSourceAsset,
 } from './ports/project-proxy-render-repository.ts'
 import type { RenderColorPipelineBinding } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
+
+/** Enqueue and worker share the exact pre-render identity. The policy is input,
+ * never an output receipt hash: no MP4 -> receipt -> input hash cycle. */
+export function projectFinalRenderInputHash(input: Readonly<Record<string, unknown>>): string {
+  return calculateVersionHash({ ...input, kind: 'project-final-export/v1', assEmissionPolicy: ASS_EMISSION_POLICY })
+}
 
 export function projectRenderSourcesFingerprint(
   sources: readonly Readonly<ProjectRenderSourceAsset>[],
@@ -46,6 +53,7 @@ export function projectProxyRenderInputHash(input: {
 }): string {
   const source = input.source
   const base = {
+    assEmissionPolicy: ASS_EMISSION_POLICY,
     projectId: source.projectId,
     projectVersionId: source.projectVersionId,
     editPlanSnapshotId: source.editPlanSnapshotId,

@@ -10,6 +10,7 @@ import { createExternalAuditContext } from '../../src/v2/application/authenticat
 import { projectRenderSourcesFingerprint } from '../../src/v2/application/project-render-sources.ts'
 import { runNextProjectFinalExportOperationService } from '../../src/v2/application/run-project-final-export-worker.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
+import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
@@ -184,10 +185,11 @@ function approvedSource() {
   })
 }
 
-function finalInputHash() {
+function finalInputHash(includePolicy = true) {
   const source = approvedSource()
   return calculateVersionHash({
     kind: 'project-final-export/v1',
+    ...(includePolicy ? { assEmissionPolicy: ASS_EMISSION_POLICY } : {}),
     projectId,
     projectVersionId,
     projectVersionHash: source.projectVersionHash,
@@ -267,6 +269,7 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
   })
   assert.match(first.context.inputHash, /^[a-f0-9]{64}$/)
   assert.equal(replay.operation.id, first.operation.id)
+  assert.equal(first.context.inputHash, finalInputHash(), 'enqueue binds the independently computed policy identity')
   assert.equal(created.requestFingerprint.length, 64)
   assert.equal(created.authenticationAudit.contextHash, first.authenticationAudit.contextHash)
   assert.deepEqual(ids, { operation: 1, artifact: 1, manifest: 1 })
@@ -314,7 +317,7 @@ test('final export enqueue fails before allocation when catalog promotion rights
     && error.details.requiredUse === 'editorial-reuse')
 })
 
-function createOperations() {
+function createOperations(inputHash = finalInputHash()) {
   let operation = createQueuedPublicOperation({
     id: 'operation-final-export-test',
     workspaceId,
@@ -340,7 +343,7 @@ function createOperations() {
     sourceArtifactId,
     sourceManifestId,
     colorPipelineBindings,
-    inputHash: finalInputHash(),
+    inputHash,
     outputArtifactId: 'artifact-final-output',
     outputManifestId: 'manifest-final-output',
     outputSpec: {
@@ -569,6 +572,17 @@ test('final export worker revalidates rights, persists lineage and completes the
   assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, mapped: 1, converged: 0, attached: 1, attempts: 1, failed: 0, cleaned: 1, lutCleaned: 1, cataloged: 1 })
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
+})
+
+test('W69 final worker rejects pre-policy queued identity before any render or publication', async () => {
+  const operations = createOperations(finalInputHash(false))
+  const { calls, dependencies } = workerDependencies(operations)
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-old-clock')
+  assert.equal(outcome.status, 'failed')
+  assert.equal(operations.operation.error.code, 'invalid_render_input')
+  assert.equal(calls.rendered, 0)
+  assert.equal(calls.persisted, 0)
+  assert.equal(calls.attached, 0)
 })
 
 test('final export worker serializes heartbeats with fenced phase transitions', async () => {

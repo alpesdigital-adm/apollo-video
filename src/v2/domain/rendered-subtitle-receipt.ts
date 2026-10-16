@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain, DomainError } from './errors.ts'
+import { ASS_EMISSION_POLICY, assertAssCueText, assertAssFrameInterval, assFrameTimestamp } from './ass-emission-policy.ts'
+import { validateOutputSpec, type OutputSpec } from './output-spec.ts'
 import { renderElementMapHash, validateRenderElementMap, type RenderElementMap } from './review-system.ts'
 
 /**
@@ -10,7 +12,7 @@ import { renderElementMapHash, validateRenderElementMap, type RenderElementMap }
  * The renderer must construct this from the same finalized ASS bytes it passes
  * to FFmpeg; an EditPlan or an older proxy cannot synthesize the receipt.
  */
-export const RENDERED_SUBTITLE_RECEIPT_VERSION = 'rendered-subtitle-receipt/v1'
+export const RENDERED_SUBTITLE_RECEIPT_VERSION = 'rendered-subtitle-receipt/v2'
 
 export interface DrawnSubtitleCueReceipt {
   cueId: string
@@ -29,7 +31,10 @@ export interface RenderedSubtitleReceipt {
   projectId: string
   projectVersionId: string
   variantId: string
-  outputSpec: Readonly<{ format: string; width: number; height: number; fps: number }>
+  outputSpec: Readonly<OutputSpec>
+  outputSpecRevisionId: string
+  outputSpecHash: string
+  assEmissionPolicy: typeof ASS_EMISSION_POLICY
   producer: Readonly<{ operationId: string; attempt: number }>
   outputArtifactId: string
   outputSha256: string
@@ -53,12 +58,6 @@ function assertHash(value: string, name: string): void {
   assertDomain(HASH.test(value), 'INVALID_RENDER_INPUT', `${name} must be a SHA-256 hash`)
 }
 
-function assTimestamp(frame: number, fps: number): string {
-  const cs = Math.max(0, Math.round(frame / fps * 100))
-  return `${Math.floor(cs / 360_000)}:${String(Math.floor(cs % 360_000 / 6_000)).padStart(2, '0')}:` +
-    `${String(Math.floor(cs % 6_000 / 100)).padStart(2, '0')}.${String(cs % 100).padStart(2, '0')}`
-}
-
 function displayTextFromAssEvent(line: string): string {
   const parts = line.split(',', 10)
   assertDomain(parts.length === 10 && parts[0] === 'Dialogue: 0' &&
@@ -76,6 +75,7 @@ function displayTextFromAssEvent(line: string): string {
   assertDomain(Boolean(position), 'INVALID_RENDER_INPUT',
     'Subtitle receipt ASS event lacks the supported anchor override')
   const visible = payload.slice(position![0].length).replaceAll('\\N', '\n')
+  assertAssCueText(visible)
   assertDomain(visible.length > 0 && visible.normalize('NFC') === visible &&
       !/[{}\\\r]/.test(visible), 'INVALID_RENDER_INPUT',
   'Subtitle receipt text does not match the normalized ASS display text')
@@ -87,7 +87,9 @@ export function createRenderedSubtitleReceipt(input: {
   projectId: string
   projectVersionId: string
   variantId: string
-  outputSpec: Readonly<{ format: string; width: number; height: number; fps: number }>
+  outputSpec: Readonly<OutputSpec>
+  outputSpecRevisionId: string
+  outputSpecHash: string
   producer: Readonly<{ operationId: string; attempt: number }>
   outputArtifactId: string
   outputSha256: string
@@ -102,12 +104,17 @@ export function createRenderedSubtitleReceipt(input: {
   for (const [name, value] of Object.entries({
     workspaceId: input.workspaceId, projectId: input.projectId,
     projectVersionId: input.projectVersionId, variantId: input.variantId,
-    format: input.outputSpec.format, operationId: input.producer.operationId,
+    outputSpecRevisionId: input.outputSpecRevisionId, operationId: input.producer.operationId,
     outputArtifactId: input.outputArtifactId,
   })) {
     assertDomain(typeof value === 'string' && value.trim().length > 0,
       'INVALID_RENDER_INPUT', `Subtitle receipt ${name} is missing`)
   }
+  validateOutputSpec(input.outputSpec)
+  assertHash(input.outputSpecHash, 'outputSpecHash')
+  assertDomain(input.outputSpec.schemaVersion === 1 &&
+    calculateCanonicalHash(input.outputSpec) === input.outputSpecHash,
+  'INVALID_RENDER_INPUT', 'Subtitle receipt pinned OutputSpec revision hash differs')
   for (const [name, value] of Object.entries({
     outputSha256: input.outputSha256, renderInputHash: input.renderInputHash,
     ffmpegBinarySha256: input.ffmpegBinarySha256,
@@ -145,9 +152,10 @@ export function createRenderedSubtitleReceipt(input: {
       cue.endFrame <= input.map.durationFrames,
     'INVALID_RENDER_INPUT', 'Subtitle receipt cue identity or frame interval is invalid')
     assertHash(cue.anchorDecisionHash, 'anchorDecisionHash')
+    assertAssFrameInterval(cue.startFrame, cue.endFrame, input.outputSpec.fps)
     const fields = cue.assEventLine.split(',', 4)
-    assertDomain(fields[1] === assTimestamp(cue.startFrame, input.outputSpec.fps) &&
-      fields[2] === assTimestamp(cue.endFrame, input.outputSpec.fps),
+    assertDomain(fields[1] === assFrameTimestamp(cue.startFrame, input.outputSpec.fps) &&
+      fields[2] === assFrameTimestamp(cue.endFrame, input.outputSpec.fps),
     'INVALID_RENDER_INPUT', 'Subtitle receipt ASS timestamps differ from cue frames')
     assertDomain(scriptEvents.includes(cue.assEventLine) && !uniqueAssLines.has(cue.assEventLine) &&
       cue.displayText === displayTextFromAssEvent(cue.assEventLine),
@@ -173,7 +181,7 @@ export function createRenderedSubtitleReceipt(input: {
   }
   for (const cue of drawn) {
     const frames = mapCues.get(cue.cueId) ?? []
-    assertDomain(frames.length > 0 && frames.every((frame) =>
+    assertDomain(frames.every((frame) =>
       frame >= cue.startFrame && frame < cue.endFrame),
     'INVALID_RENDER_INPUT', 'Sampled subtitle map disagrees with emitted cue interval')
   }
@@ -181,7 +189,9 @@ export function createRenderedSubtitleReceipt(input: {
     schemaVersion: RENDERED_SUBTITLE_RECEIPT_VERSION as typeof RENDERED_SUBTITLE_RECEIPT_VERSION,
     workspaceId: input.workspaceId, projectId: input.projectId,
     projectVersionId: input.projectVersionId, variantId: input.variantId,
-    outputSpec: Object.freeze({ ...input.outputSpec }),
+    outputSpec: Object.freeze({ ...input.outputSpec, safeArea: Object.freeze({ ...input.outputSpec.safeArea }) }),
+    outputSpecRevisionId: input.outputSpecRevisionId, outputSpecHash: input.outputSpecHash,
+    assEmissionPolicy: ASS_EMISSION_POLICY,
     producer: Object.freeze({ ...input.producer }),
     outputArtifactId: input.outputArtifactId, outputSha256: input.outputSha256,
     outputByteSize: input.outputByteSize, renderInputHash: input.renderInputHash,

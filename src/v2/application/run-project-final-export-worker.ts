@@ -23,9 +23,9 @@ import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-ma
 import type { ProjectColorPlanRepository } from './ports/project-color-plan-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
-import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
-import { calculateVersionHash } from './version-hash.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import {
   immediateNextAttemptAt,
@@ -223,8 +223,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
       failureStage = 'input-validation'
-      const immutableInputHash = calculateVersionHash({
-        kind: 'project-final-export/v1',
+      const immutableInputHash = projectFinalRenderInputHash({
         projectId: context.projectId,
         projectVersionId: context.projectVersionId,
         projectVersionHash: context.projectVersionHash,
@@ -469,6 +468,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           id: 'editorial-final',
           version: EDITORIAL_FINAL_RECIPE_VERSION,
           parameters: {
+            assEmissionPolicy: ASS_EMISSION_POLICY,
             inputHash: context.inputHash,
             audioTimelineHash,
             projectVersionId: context.projectVersionId,

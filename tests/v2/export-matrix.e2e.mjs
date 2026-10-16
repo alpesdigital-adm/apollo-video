@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -792,6 +793,7 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
     const recomputedInputHash = retryDetail && retrySource && retryOutputSpec
       ? calculateVersionHash({
         kind: 'project-final-export/v1', projectId: retryDetail.projectId,
+        assEmissionPolicy: ASS_EMISSION_POLICY,
         projectVersionId: retryDetail.projectVersionId, projectVersionHash: retryDetail.projectVersionHash,
         editPlanSnapshotId: retrySource.editPlanSnapshotId, editPlanHash: retrySource.editPlanHash,
         directorRunId: retrySource.directorRunId, qualitySnapshotId: retrySource.qualitySnapshotId,
