@@ -1,20 +1,19 @@
-import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { open, realpath, stat } from 'node:fs/promises'
 
 import type { SyntheticRenderOutputInspector } from '../../application/ports/synthetic-render-output-inspector.ts'
-import { terminateChild } from '../../application/worker-lifecycle.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { sniffMediaInput } from '../../domain/media-input.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from './ffmpeg-binary.ts'
 import { probeVideo } from './video-probe.ts'
+import { NodeOwnedFfmpegExecutor } from './ffmpeg-owned-process.ts'
 
 const require = createRequire(import.meta.url)
 const ffprobeStatic = require('ffprobe-static') as { path?: string }
-const MAX_OUTPUT_BYTES = 1024 * 1024
-const TIMEOUT_MS = 120_000
+const inspectionExecutor = new NodeOwnedFfmpegExecutor()
 
 function resolveInspectionBinary(kind: 'ffmpeg' | 'ffprobe', environment: NodeJS.ProcessEnv): string {
   return kind === 'ffmpeg'
@@ -28,61 +27,13 @@ function contained(root: string, candidate: string): boolean {
 }
 
 async function runOwnedProcess(input: {
-  binary: 'ffmpeg' | 'ffprobe'
-  args: readonly string[]
-  environment: NodeJS.ProcessEnv
-  signal?: AbortSignal
+  binary: 'ffmpeg' | 'ffprobe'; args: readonly string[]; environment: NodeJS.ProcessEnv; signal?: AbortSignal
 }): Promise<Readonly<{ stdout: string; stderr: string }>> {
-  return new Promise((resolvePromise, reject) => {
-    if (input.signal?.aborted) {
-      reject(new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic render inspection was cancelled'))
-      return
-    }
-    const child = spawn(
-      resolveInspectionBinary(input.binary, input.environment), input.args,
-      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
-    )
-    let stdout = ''
-    let stderr = ''
-    let outputBytes = 0
-    let processError: Error | null = null
-    let aborted = false
-    let timedOut = false
-    let outputExceeded = false
-    let termination: Promise<unknown> | null = null
-    const stop = () => {
-      termination ??= terminateChild(child, { graceMs: 1_000 }).catch((error) => { processError = error as Error })
-    }
-    const onAbort = () => { aborted = true; stop() }
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    const timer = setTimeout(() => { timedOut = true; stop() }, TIMEOUT_MS)
-    timer.unref?.()
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => {
-      outputBytes += Buffer.byteLength(chunk)
-      if (outputBytes > MAX_OUTPUT_BYTES) { outputExceeded = true; stop(); return }
-      stdout += chunk
-    })
-    child.stderr.on('data', (chunk: string) => {
-      outputBytes += Buffer.byteLength(chunk)
-      if (outputBytes > MAX_OUTPUT_BYTES) { outputExceeded = true; stop(); return }
-      stderr += chunk
-    })
-    child.once('error', (error) => { processError = error })
-    child.once('close', async (code, killedBySignal) => {
-      clearTimeout(timer)
-      input.signal?.removeEventListener('abort', onAbort)
-      if (termination) await termination
-      if (aborted) return reject(new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic render inspection was cancelled'))
-      if (timedOut) return reject(new DomainError('RENDER_OUTPUT_INVALID', 'Synthetic render inspection timed out'))
-      if (outputExceeded) return reject(new DomainError('RENDER_OUTPUT_INVALID', 'Synthetic render inspection output exceeded its limit'))
-      if (processError || code !== 0 || killedBySignal) {
-        return reject(new DomainError('RENDER_OUTPUT_INVALID', `Synthetic render full decode failed${stderr.trim() ? `: ${stderr.trim().slice(0, 500)}` : ''}`))
-      }
-      resolvePromise(Object.freeze({ stdout, stderr }))
-    })
-  })
+  if (input.signal?.aborted) throw new DomainError('RENDER_EXECUTION_FAILED', 'Synthetic render inspection was cancelled')
+  const result = await inspectionExecutor.execute({ executable: resolveInspectionBinary(input.binary, input.environment),
+    args: input.args, owner: { runId: 'synthetic-inspection-' + randomUUID(), operation: 'synthetic-inspection' },
+    ...(input.signal ? { signal: input.signal } : {}) })
+  return Object.freeze({ stdout: result.stdout.toString('utf8'), stderr: result.stderr.toString('utf8') })
 }
 
 async function countDecodedFrames(path: string, environment: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<number> {

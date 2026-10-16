@@ -1,599 +1,94 @@
-import { randomUUID } from 'node:crypto'
-import {
-  Prisma,
-  type PrismaClient,
-  type V2IdempotencyRecord,
-  type V2Project,
-  type V2ProjectVersion,
-} from '../../../../generated/prisma-v2/index.js'
-
-import type {
-  ProjectDuplicationBundle,
-  ProjectDuplicationRepository,
-  ProjectDuplicationResult,
-} from '../../application/ports/project-duplication-repository.ts'
-import { stableSerialize } from '../../domain/canonical-hash.ts'
-import { createPublicEvent } from '../../domain/public-event.ts'
-import { persistPublicEvents } from './public-event-outbox.ts'
-import type { CommandActorType } from '../../domain/edit-command.ts'
-import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
-import { DomainError } from '../../domain/errors.ts'
+import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
+import type { ProjectDuplicationBundle, ProjectDuplicationRepository, ProjectDuplicationResult } from '../../application/ports/project-duplication-repository.ts'
+import type { ProjectForkCallerRequestV3, ForkMediaReferenceFactsV2, V2RenderablePlanSnapshotFacts } from '../../domain/project-fork-derivation.ts'
+import type { CommandActor } from '../../domain/edit-command.ts'
+import type { OperationalOutputParentV3, CreationOutputVersionBundleV2 } from '../../domain/output-version-bundle.ts'
 import { createProject, type ProjectStatus } from '../../domain/project.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
 import { createProjectSnapshot } from '../../domain/project-snapshot.ts'
-import { rebindSnapshotContentForDuplicate } from '../../domain/project-snapshot-rebind.ts'
+import { creationProjectMetadataV2 } from '../../domain/project-creation-command.ts'
+import { serializeOutputCanonicalJson } from '../../domain/output-canonical-policy.ts'
+import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
-import {
-  assertProjectCreationCommand,
-  projectCreationCommandData,
-} from './project-creation-command-persistence.ts'
+import { PrismaCreationOutputBundleRepositoryV2, assertForkCallerBindingV3 } from './output-version-bundle-repository.ts'
+import { readPersistedOperationalOutputBundleV3, readPersistedForkCreationOutputBundleV3 } from './output-state-consumption.ts'
 import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
-interface StoredDuplicationResponse {
-  projectId: string
-  versionId: string
+function resultFromReceipt(bundle: CreationOutputVersionBundleV2, replayed: boolean): Readonly<ProjectDuplicationResult> {
+  const c=bundle.command, fork=c.payload.forkDerivation
+  if(fork?.schemaVersion!=='project-fork-derivation/v3')throw new DomainError('PERSISTENCE_CONFLICT','Duplication receipt is not a content fork3')
+  const metadata=creationProjectMetadataV2(c)
+  const project=createProject({id:c.projectId,workspaceId:c.workspaceId,name:metadata.name,status:'draft',objective:metadata.objective,locale:metadata.locale,
+    ownerId:c.author.id,duplicatedFromProjectId:fork.document.kernel.document.source.version.projectId,createdBy:c.author,createdAt:c.createdAt})
+  return Object.freeze({project,version:bundle.version,bundle,sharedArtifactIds:Object.freeze([...new Set(fork.document.sourceReferences.map(r=>r.artifactId))]),copiedBytes:0,replayed})
+}
+function manifestBindings(bundle:OperationalOutputParentV3):Map<string,Set<string>> {
+  const result=new Map<string,Set<string>>()
+  const add=(artifactId:string,manifestId:string)=>{const ids=result.get(artifactId)??new Set<string>();ids.add(manifestId);result.set(artifactId,ids)}
+  if(bundle.schemaVersion==='project-creation-output-bundle/v2')for(const ref of bundle.command.payload.forkDerivation?.document.sourceReferences??[])add(ref.artifactId,ref.manifestFacts.id)
+  if(bundle.state.document.schemaVersion==='project-output-state/v3')for(const entry of bundle.state.document.entries)if(entry.consumption.status==='materialized')
+    for(const receipt of entry.consumption.materialization.document.normalizations)for(const fact of [receipt.document.source,receipt.document.derivative])add(fact.artifactId,fact.manifestId)
+  return result
 }
 
-function isPrismaCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === code
-  )
-}
-
-function parseStoredResponse(
-  record: V2IdempotencyRecord,
-  requestFingerprint: string,
-): StoredDuplicationResponse {
-  const value = readCompletedIdempotencyResponse(
-    record,
-    requestFingerprint,
-  )
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('projectId' in value) ||
-    !('versionId' in value) ||
-    typeof value.projectId !== 'string' ||
-    typeof value.versionId !== 'string'
-  ) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Stored project duplication response is invalid',
-    )
+/** The duplicate writer delegates the complete root transaction to the same
+ * Creation2 owner used by public creation. No bare ProjectVersion is written. */
+export class PrismaProjectDuplicationRepository implements ProjectDuplicationRepository {
+  constructor(private readonly client:PrismaClient=getV2PostgresClient()){}
+  async findIdempotent(input:Parameters<ProjectDuplicationRepository['findIdempotent']>[0]) {
+    return this.client.$transaction(async tx=>{
+      await tx.$executeRawUnsafe("SET LOCAL statement_timeout = '10000ms'")
+      await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '8000ms'")
+      await tx.$queryRawUnsafe('SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended($1,0))',serializeOutputCanonicalJson([input.workspaceId,input.clientId,input.key]))
+      const record=await tx.v2IdempotencyRecord.findUnique({where:{workspaceId_clientId_key:{workspaceId:input.workspaceId,clientId:input.clientId,key:input.key}}})
+      if(!record)return null
+      const ids=readCompletedIdempotencyResponse(record,input.requestFingerprint)
+      if(Object.keys(ids).sort().join('|')!=='projectId|versionId'||typeof ids.projectId!=='string'||typeof ids.versionId!=='string')
+        throw new DomainError('PERSISTENCE_CONFLICT','Duplication idempotency receipt identity is invalid')
+      const bundle=await readPersistedForkCreationOutputBundleV3(tx,{workspaceId:input.workspaceId,projectId:ids.projectId,versionId:ids.versionId})
+      if(!bundle)throw new DomainError('PERSISTENCE_CONFLICT','Duplication original receipt is missing')
+      assertForkCallerBindingV3(bundle.command,input.callerRequest)
+      if(serializeOutputCanonicalJson(bundle.command.audit)!==serializeOutputCanonicalJson(input.audit))
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH','Duplication replay full actor differs')
+      return resultFromReceipt(bundle,true)
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,maxWait:10000,timeout:30000})
   }
-  return { projectId: value.projectId, versionId: value.versionId }
-}
-
-function hydrateProject(
-  row: V2Project,
-  recorded?: Readonly<{ name: string; status: ProjectStatus; currentVersionId: string }>,
-) {
-  return createProject({
-    id: row.id,
-    workspaceId: row.workspaceId,
-    name: recorded?.name ?? row.name,
-    status: recorded?.status ?? row.status as ProjectStatus,
-    ...(row.objective ? { objective: row.objective } : {}),
-    ...(row.format ? { format: row.format } : {}),
-    ...(row.locale ? { locale: row.locale } : {}),
-    ...(row.ownerId ? { ownerId: row.ownerId } : {}),
-    ...((recorded?.currentVersionId ?? row.currentVersionId)
-      ? { currentVersionId: recorded?.currentVersionId ?? row.currentVersionId! }
-      : {}),
-    ...(row.duplicatedFromProjectId
-      ? { duplicatedFromProjectId: row.duplicatedFromProjectId }
-      : {}),
-    createdBy: {
-      type: row.createdByType as CommandActorType,
-      id: row.createdById,
-    },
-    createdAt: row.createdAt.toISOString(),
-  })
-}
-
-function hydrateVersion(row: V2ProjectVersion) {
-  return createProjectVersion({
-    id: row.id,
-    workspaceId: row.workspaceId,
-    projectId: row.projectId,
-    sequence: row.sequence,
-    ...(row.parentVersionId
-      ? { parentVersionId: row.parentVersionId }
-      : {}),
-    ...(row.forkedFromProjectId
-      ? { forkedFromProjectId: row.forkedFromProjectId }
-      : {}),
-    ...(row.forkedFromVersionId
-      ? { forkedFromVersionId: row.forkedFromVersionId }
-      : {}),
-    snapshotRefs: {
-      brief: row.briefSnapshotId,
-      ...(row.treatmentSnapshotId
-        ? { treatment: row.treatmentSnapshotId }
-        : {}),
-      ...(row.storySnapshotId ? { story: row.storySnapshotId } : {}),
-      editPlan: row.editPlanSnapshotId,
-      policies: row.policiesSnapshotId,
-    },
-    baseHash: row.baseHash,
-    createdBy: row.createdBy,
-    createdAt: row.createdAt.toISOString(),
-    ...(row.commandId ? { commandId: row.commandId } : {}),
-  })
-}
-
-async function hydrateResult(
-  client: Prisma.TransactionClient | PrismaClient,
-  ids: StoredDuplicationResponse,
-  replayed: boolean,
-  audit: Readonly<ApiAccessAuditContext>,
-  requestFingerprint: string,
-): Promise<Readonly<ProjectDuplicationResult>> {
-  const [project, version, media, command, firstAdministration] = await Promise.all([
-    client.v2Project.findUnique({ where: { id: ids.projectId } }),
-    client.v2ProjectVersion.findUnique({ where: { id: ids.versionId } }),
-    client.v2ProjectMediaAsset.findMany({
-      where: { projectId: ids.projectId },
-      orderBy: [{ role: 'asc' }, { artifactId: 'asc' }],
-      select: { artifactId: true },
-    }),
-    client.v2ProjectCreationCommand.findUnique({
-      where: { projectId_workspaceId: {
-        projectId: ids.projectId,
-        workspaceId: audit.workspaceId,
-      } },
-    }),
-    client.v2ProjectAdministrationCommand.findFirst({
-      where: { projectId: ids.projectId },
-      orderBy: { resultRevision: 'asc' },
-      select: { beforeName: true },
-    }),
-  ])
-  // The recorded result is the duplication as it was answered the first time: the copy's own
-  // first version (immutable, sequence 1, forked from the source) and the project as it was
-  // created. Later Commands on the copy move currentVersionId and may rename or archive it;
-  // none of that changes what this idempotency key recorded.
-  if (
-    !project ||
-    !version ||
-    version.projectId !== project.id ||
-    version.sequence !== 1 ||
-    version.parentVersionId !== null ||
-    project.duplicatedFromProjectId === null ||
-    version.forkedFromProjectId !== project.duplicatedFromProjectId ||
-    version.forkedFromVersionId === null
-  ) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Stored project duplication result is inconsistent',
-    )
-  }
-  assertProjectCreationCommand(command, {
-    workspaceId: project.workspaceId,
-    action: 'duplicate',
-    projectId: project.id,
-    versionId: version.id,
-    sourceProjectId: project.duplicatedFromProjectId,
-    sourceVersionId: version.forkedFromVersionId,
-    audit,
-    requestFingerprint,
-  })
-  return Object.freeze({
-    project: hydrateProject(project, {
-      name: firstAdministration?.beforeName ?? project.name,
-      status: 'draft' as ProjectStatus,
-      currentVersionId: version.id,
-    }),
-    version: hydrateVersion(version),
-    sharedArtifactIds: Object.freeze(
-      [...new Set(media.map((item) => item.artifactId))],
-    ),
-    copiedBytes: 0 as const,
-    replayed,
-  })
-}
-
-export class PrismaProjectDuplicationRepository
-implements ProjectDuplicationRepository {
-  constructor(
-    private readonly client: PrismaClient = getV2PostgresClient(),
-  ) {}
-
-  async findIdempotent(input: {
-    workspaceId: string
-    clientId: string
-    key: string
-    requestFingerprint: string
-    audit: Readonly<ApiAccessAuditContext>
-  }) {
-    const record = await this.client.v2IdempotencyRecord.findUnique({
-      where: {
-        workspaceId_clientId_key: {
-          workspaceId: input.workspaceId,
-          clientId: input.clientId,
-          key: input.key,
-        },
-      },
-    })
-    if (!record || record.expiresAt <= new Date()) return null
-    return hydrateResult(
-      this.client,
-      parseStoredResponse(record, input.requestFingerprint),
-      true,
-      input.audit,
-      input.requestFingerprint,
-    )
-  }
-
-  async readSource(input: {
-    workspaceId: string
-    projectId: string
-  }) {
-    const project = await this.client.v2Project.findFirst({
-      where: {
-        id: input.projectId,
-        workspaceId: input.workspaceId,
-      },
-      include: {
-        currentVersion: {
-          include: {
-            briefSnapshot: true,
-            treatmentSnapshot: true,
-            storySnapshot: true,
-            editPlanSnapshot: true,
-            policiesSnapshot: true,
-          },
-        },
-        mediaAssets: {
-          orderBy: [{ role: 'asc' }, { artifactId: 'asc' }],
-          select: {
-            artifactId: true,
-            role: true,
-            originalFileName: true,
-          },
-        },
-      },
-    })
-    if (!project?.currentVersion) return null
-    const sourceSnapshots = [
-      project.currentVersion.briefSnapshot,
-      project.currentVersion.treatmentSnapshot,
-      project.currentVersion.storySnapshot,
-      project.currentVersion.editPlanSnapshot,
-      project.currentVersion.policiesSnapshot,
-    ].filter((snapshot) => snapshot !== null).map((snapshot) => createProjectSnapshot({
-      id: snapshot.id,
-      workspaceId: snapshot.workspaceId,
-      projectId: snapshot.projectId,
-      kind: snapshot.kind as Parameters<typeof createProjectSnapshot>[0]['kind'],
-      contentSchemaVersion: snapshot.schemaVersion,
-      contentJson: snapshot.contentJson,
-      contentHash: snapshot.contentHash,
-      createdAt: snapshot.createdAt.toISOString(),
-    }))
-    return Object.freeze({
-      project: hydrateProject(project),
-      version: hydrateVersion(project.currentVersion),
-      snapshots: Object.freeze(sourceSnapshots),
-      media: Object.freeze(project.mediaAssets.map((item) =>
-        Object.freeze({ ...item }))),
-    })
-  }
-
-  async duplicateOrReplay(
-    bundle: Readonly<ProjectDuplicationBundle>,
-    attempt = 1,
-  ): Promise<Readonly<ProjectDuplicationResult>> {
-    if (
-      bundle.auditCommand.action !== 'duplicate' ||
-      bundle.auditCommand.workspaceId !== bundle.project.workspaceId ||
-      bundle.auditCommand.projectId !== bundle.project.id ||
-      bundle.auditCommand.versionId !== bundle.version.id ||
-      bundle.auditCommand.sourceProjectId !== bundle.sourceProjectId ||
-      bundle.auditCommand.sourceVersionId !== bundle.sourceVersionId ||
-      bundle.auditCommand.requestFingerprint !== bundle.idempotency.requestFingerprint ||
-      bundle.auditCommand.audit.clientId !== bundle.idempotency.clientId
-    ) {
-      throw new DomainError('PERSISTENCE_CONFLICT', 'Project duplication audit command is invalid')
+  async readSource(input:Parameters<ProjectDuplicationRepository['readSource']>[0]) {
+    const row=await this.client.v2Project.findFirst({where:{id:input.projectId,workspaceId:input.workspaceId},include:{currentVersion:{include:{briefSnapshot:true,
+      treatmentSnapshot:true,storySnapshot:true,editPlanSnapshot:true,policiesSnapshot:true}},mediaAssets:{include:{artifact:true},orderBy:[{role:'asc'},{artifactId:'asc'},{id:'asc'}]}}})
+    if(!row?.currentVersion)return null
+    const bundle=await readPersistedOperationalOutputBundleV3(this.client,{workspaceId:input.workspaceId,projectId:input.projectId,versionId:row.currentVersion.id})
+    if(!bundle)throw new DomainError('PERSISTENCE_CONFLICT','Duplication current source receipt is missing')
+    const snapshots=[row.currentVersion.briefSnapshot,row.currentVersion.treatmentSnapshot,row.currentVersion.storySnapshot,row.currentVersion.editPlanSnapshot,row.currentVersion.policiesSnapshot]
+      .filter(r=>r!==null).map(r=>createProjectSnapshot({id:r.id,workspaceId:r.workspaceId,projectId:r.projectId,kind:r.kind as Parameters<typeof createProjectSnapshot>[0]['kind'],
+        contentSchemaVersion:r.schemaVersion,contentJson:r.contentJson,contentHash:r.contentHash,createdAt:r.createdAt.toISOString()}))
+    const projectFacts={id:row.id,workspaceId:row.workspaceId,currentVersionId:row.currentVersion.id,name:row.name,status:row.status,format:row.format,ownerId:row.ownerId,
+      administrationRevision:row.administrationRevision,updatedAt:row.updatedAt.toISOString(),objective:row.objective!,locale:row.locale!,createdByType:row.createdByType,
+      createdById:row.createdById,createdAt:row.createdAt.toISOString()}
+    const project=createProject({id:row.id,workspaceId:row.workspaceId,name:row.name,status:row.status as ProjectStatus,objective:row.objective!,locale:row.locale!,
+      ...(row.ownerId?{ownerId:row.ownerId}:{}),currentVersionId:row.currentVersion.id,createdBy:{type:row.createdByType as CommandActor['type'],id:row.createdById},createdAt:row.createdAt.toISOString()})
+    let renderablePlanSnapshot:Readonly<V2RenderablePlanSnapshotFacts>|null=null
+    if(bundle.state.document.schemaVersion==='project-output-state/v3'&&bundle.state.document.renderablePlan!==null) {
+      const r=await this.client.v2RenderablePlanSnapshot.findUnique({where:{id:bundle.state.document.renderablePlan.snapshotId}})
+      if(!r)throw new DomainError('PERSISTENCE_CONFLICT','Duplication actual Renderable snapshot is missing')
+      renderablePlanSnapshot={...r,origin:r.origin as V2RenderablePlanSnapshotFacts['origin'],createdAt:r.createdAt.toISOString()}
     }
-    try {
-      return await this.client.$transaction(async (transaction) => {
-        const key = {
-          workspaceId_clientId_key: {
-            workspaceId: bundle.idempotency.workspaceId,
-            clientId: bundle.idempotency.clientId,
-            key: bundle.idempotency.key,
-          },
-        }
-        const existing = await transaction.v2IdempotencyRecord.findUnique({
-          where: key,
-        })
-        if (existing && existing.expiresAt > new Date()) {
-          return hydrateResult(
-            transaction,
-            parseStoredResponse(
-              existing,
-              bundle.idempotency.requestFingerprint,
-            ),
-            true,
-            bundle.auditCommand.audit,
-            bundle.idempotency.requestFingerprint,
-          )
-        }
-        if (existing) {
-          await transaction.v2IdempotencyRecord.delete({
-            where: { id: existing.id },
-          })
-        }
-        const [sourceProject, sourceVersion, client, sourceMedia] =
-          await Promise.all([
-            transaction.v2Project.findUnique({
-              where: { id: bundle.sourceProjectId },
-            }),
-            transaction.v2ProjectVersion.findUnique({
-              where: { id: bundle.sourceVersionId },
-            }),
-            transaction.v2ApiClient.findUnique({
-              where: { id: bundle.idempotency.clientId },
-            }),
-            transaction.v2ProjectMediaAsset.findMany({
-              where: {
-                workspaceId: bundle.project.workspaceId,
-                projectId: bundle.sourceProjectId,
-              },
-              orderBy: [{ role: 'asc' }, { artifactId: 'asc' }],
-              select: {
-                artifactId: true,
-                role: true,
-                originalFileName: true,
-              },
-            }),
-          ])
-        if (
-          !sourceProject ||
-          sourceProject.workspaceId !== bundle.project.workspaceId ||
-          sourceProject.currentVersionId !== bundle.sourceVersionId ||
-          !sourceVersion ||
-          sourceVersion.workspaceId !== bundle.project.workspaceId ||
-          sourceVersion.projectId !== sourceProject.id ||
-          sourceVersion.baseHash !== bundle.sourceVersionHash
-        ) {
-          throw new DomainError(
-            'VERSION_CONFLICT',
-            'Source project changed during duplication',
-          )
-        }
-        if (
-          !client ||
-          client.workspaceId !== bundle.project.workspaceId ||
-          client.status !== 'active'
-        ) {
-          throw new DomainError(
-            'AUTH_INVALID',
-            'Active project duplication client was not found',
-          )
-        }
-        if (
-          bundle.project.duplicatedFromProjectId !== sourceProject.id ||
-          bundle.version.forkedFromProjectId !== sourceProject.id ||
-          bundle.version.forkedFromVersionId !== sourceVersion.id ||
-          bundle.version.projectId !== bundle.project.id ||
-          bundle.project.currentVersionId !== bundle.version.id
-        ) {
-          throw new DomainError(
-            'PERSISTENCE_CONFLICT',
-            'Project duplication lineage is invalid',
-          )
-        }
-        const sourceSnapshots = await transaction.v2ProjectSnapshot.findMany({
-          where: { id: { in: [
-            sourceVersion.briefSnapshotId,
-            sourceVersion.treatmentSnapshotId,
-            sourceVersion.storySnapshotId,
-            sourceVersion.editPlanSnapshotId,
-            sourceVersion.policiesSnapshotId,
-          ].filter((id): id is string => Boolean(id)) } },
-        })
-        // The copy preserves the source's content except for the owner-binding fields, which
-        // the domain rule rebinds to the copy; its hash is recomputed by the same rule.
-        const sourceIdentity = sourceSnapshots.map((snapshot) => {
-          const expected = rebindSnapshotContentForDuplicate({
-            kind: snapshot.kind as Parameters<typeof createProjectSnapshot>[0]['kind'],
-            contentJson: snapshot.contentJson,
-            contentHash: snapshot.contentHash,
-            source: { projectId: sourceProject.id, versionId: sourceVersion.id },
-            copy: { projectId: bundle.project.id, versionId: bundle.version.id },
-          })
-          return {
-            kind: snapshot.kind,
-            schemaVersion: snapshot.schemaVersion,
-            contentHash: expected.contentHash,
-            contentJson: expected.contentJson,
-          }
-        }).sort((left, right) => left.kind.localeCompare(right.kind))
-        const duplicateIdentity = bundle.snapshots.map((snapshot) => ({
-          kind: snapshot.kind,
-          schemaVersion: snapshot.contentSchemaVersion,
-          contentHash: snapshot.contentHash,
-          contentJson: snapshot.contentJson,
-        })).sort((left, right) => left.kind.localeCompare(right.kind))
-        if (stableSerialize(duplicateIdentity) !== stableSerialize(sourceIdentity)) {
-          throw new DomainError(
-            'PERSISTENCE_CONFLICT',
-            'Project duplication snapshots must preserve source content and bind it to the copy',
-          )
-        }
-        const duplicateSnapshotRefs = new Set(Object.values(bundle.version.snapshotRefs))
-        if (
-          bundle.snapshots.some((snapshot) =>
-            snapshot.workspaceId !== bundle.project.workspaceId ||
-            snapshot.projectId !== bundle.project.id ||
-            !duplicateSnapshotRefs.has(snapshot.id)) ||
-          duplicateSnapshotRefs.size !== bundle.snapshots.length
-        ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project duplication snapshot ownership is invalid')
-        const requestedMedia = bundle.media
-          .map(({ artifactId, role, originalFileName }) => ({
-            artifactId,
-            role,
-            originalFileName,
-          }))
-          .sort((left, right) =>
-            `${left.role}:${left.artifactId}`.localeCompare(
-              `${right.role}:${right.artifactId}`,
-            ))
-        if (
-          stableSerialize(requestedMedia) !== stableSerialize(sourceMedia)
-        ) {
-          throw new DomainError(
-            'VERSION_CONFLICT',
-            'Source project media changed during duplication',
-          )
-        }
-
-        await transaction.v2IdempotencyRecord.create({
-          data: {
-            id: bundle.idempotency.id,
-            workspaceId: bundle.idempotency.workspaceId,
-            clientId: bundle.idempotency.clientId,
-            key: bundle.idempotency.key,
-            requestFingerprint: bundle.idempotency.requestFingerprint,
-            status: 'processing',
-            expiresAt: new Date(bundle.idempotency.expiresAt),
-          },
-        })
-        await transaction.v2Project.create({
-          data: {
-            id: bundle.project.id,
-            workspaceId: bundle.project.workspaceId,
-            name: bundle.project.name,
-            status: bundle.project.status,
-            objective: bundle.project.objective,
-            format: bundle.project.format,
-            locale: bundle.project.locale,
-            ownerId: bundle.project.ownerId,
-            currentVersionId: null,
-            duplicatedFromProjectId: sourceProject.id,
-            createdByType: bundle.project.createdBy.type,
-            createdById: bundle.project.createdBy.id,
-            createdAt: new Date(bundle.project.createdAt),
-          },
-        })
-        await transaction.v2ProjectSnapshot.createMany({
-          data: bundle.snapshots.map((snapshot) => ({
-            id: snapshot.id,
-            workspaceId: snapshot.workspaceId,
-            projectId: snapshot.projectId,
-            kind: snapshot.kind,
-            schemaVersion: snapshot.contentSchemaVersion,
-            contentJson: snapshot.contentJson,
-            contentHash: snapshot.contentHash,
-            createdAt: new Date(snapshot.createdAt),
-          })),
-        })
-        await transaction.v2ProjectVersion.create({
-          data: {
-            id: bundle.version.id,
-            workspaceId: bundle.version.workspaceId,
-            projectId: bundle.version.projectId,
-            sequence: 1,
-            forkedFromProjectId: sourceProject.id,
-            forkedFromVersionId: sourceVersion.id,
-            briefSnapshotId: bundle.version.snapshotRefs.brief!,
-            treatmentSnapshotId: bundle.version.snapshotRefs.treatment,
-            storySnapshotId: bundle.version.snapshotRefs.story,
-            editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
-            policiesSnapshotId: bundle.version.snapshotRefs.policies,
-            baseHash: bundle.version.baseHash,
-            createdBy: bundle.version.createdBy,
-            createdAt: new Date(bundle.version.createdAt),
-          },
-        })
-        if (bundle.media.length > 0) {
-          await transaction.v2ProjectMediaAsset.createMany({
-            data: bundle.media.map((item) => ({
-              id: item.id,
-              workspaceId: bundle.project.workspaceId,
-              projectId: bundle.project.id,
-              artifactId: item.artifactId,
-              role: item.role,
-              originalFileName: item.originalFileName,
-              createdAt: new Date(item.createdAt),
-            })),
-          })
-        }
-        await transaction.v2Project.update({
-          where: { id: bundle.project.id },
-          data: { currentVersionId: bundle.version.id },
-        })
-        await transaction.v2ProjectCreationCommand.create({
-          data: projectCreationCommandData(bundle.auditCommand),
-        })
-        await persistPublicEvents(transaction, [createPublicEvent({
-          id: randomUUID(), type: 'project.created', version: '1.0.0',
-          workspaceId: bundle.project.workspaceId,
-          occurredAt: bundle.project.createdAt,
-          actor: { clientId: bundle.auditCommand.audit.clientId },
-          resource: { type: 'project', id: bundle.project.id },
-          data: { action: 'duplicate', sourceProjectId: bundle.sourceProjectId,
-            projectVersionId: bundle.version.id },
-        }), createPublicEvent({
-          id: randomUUID(), type: 'project.version.created', version: '1.0.0',
-          workspaceId: bundle.project.workspaceId,
-          occurredAt: bundle.version.createdAt,
-          actor: { clientId: bundle.auditCommand.audit.clientId },
-          resource: { type: 'project-version', id: bundle.version.id },
-          data: { projectId: bundle.project.id, sourceVersionId: bundle.sourceVersionId },
-        })])
-        const response = {
-          projectId: bundle.project.id,
-          versionId: bundle.version.id,
-        }
-        await transaction.v2IdempotencyRecord.update({
-          where: { id: bundle.idempotency.id },
-          data: {
-            status: 'completed',
-            responseStatus: 201,
-            responseJson: JSON.stringify(response),
-          },
-        })
-        return hydrateResult(
-          transaction,
-          response,
-          false,
-          bundle.auditCommand.audit,
-          bundle.idempotency.requestFingerprint,
-        )
-      }, {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      })
-    } catch (error) {
-      if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.duplicateOrReplay(bundle, attempt + 1)
-      }
-      if (isPrismaCode(error, 'P2034')) {
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          'Project duplication conflicted with another transaction',
-        )
-      }
-      if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findIdempotent({
-          workspaceId: bundle.idempotency.workspaceId,
-          clientId: bundle.idempotency.clientId,
-          key: bundle.idempotency.key,
-          requestFingerprint: bundle.idempotency.requestFingerprint,
-          audit: bundle.auditCommand.audit,
-        })
-        if (replay) return replay
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          'Project duplication could not reserve unique identities',
-        )
-      }
-      throw error
+    const pinned=manifestBindings(bundle),media:Omit<ForkMediaReferenceFactsV2,'targetLinkId'>[]=[]
+    for(const link of row.mediaAssets) {
+      const manifests=await this.client.$queryRawUnsafe<Array<{id:string;facts:ForkMediaReferenceFactsV2['manifestFacts']}>>(
+        'SELECT id,w66_fork_manifest_facts_v2(id,$2) AS facts FROM media_artifact_manifests WHERE "artifactId"=$1 AND "workspaceId"=$2 ORDER BY id COLLATE "C"',link.artifactId,input.workspaceId)
+      const expected=pinned.get(link.artifactId),matches=expected?manifests.filter(m=>expected.has(m.id)):manifests
+      if(matches.length!==1 || expected&&expected.size!==1)throw new DomainError('PERSISTENCE_CONFLICT','Duplication requires one exact source manifest binding; ambiguous/missing metadata is blocked')
+      const a=link.artifact
+      media.push({sourceLinkId:link.id,workspaceId:row.workspaceId,sourceProjectId:row.id,artifactId:a.id,role:link.role as ForkMediaReferenceFactsV2['role'],
+        originalFileName:link.originalFileName,sourceLinkCreatedAt:link.createdAt.toISOString(),artifactKey:a.artifactKey,artifactSha256:a.sha256,artifactByteSize:a.byteSize.toString(),
+        artifactMediaType:a.mediaType,artifactContainer:a.container,artifactLifecycleRevision:a.lifecycleRevision,purpose:link.role==='selected-insert'?'editorial-reuse':'editing',manifestFacts:matches[0].facts})
     }
+    return Object.freeze({project,version:bundle.version,bundle,projectFacts,snapshots,renderablePlanSnapshot,media})
+  }
+  async duplicateOrReplay(input:Readonly<ProjectDuplicationBundle>) {
+    const result=await new PrismaCreationOutputBundleRepositoryV2(this.client).persist(input.write)
+    if(!input.write.forkCallerRequest)throw new DomainError('PERSISTENCE_CONFLICT','Duplication caller request is missing')
+    assertForkCallerBindingV3(result.bundle.command,input.write.forkCallerRequest)
+    return resultFromReceipt(result.bundle,result.replayed)
   }
 }

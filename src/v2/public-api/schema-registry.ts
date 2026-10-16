@@ -15,6 +15,8 @@ import {
 } from '../domain/sync-marker-detection.ts'
 import { MARKER_KINDS, MARKER_POSITIONS } from '../domain/sync-marker.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import { createProjectOutputVariantRequestSchema, outputBoundVersionSchemaFields,
+  outputConsumptionSummarySchema } from './project-output-variant-contract.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import { PROJECT_DASHBOARD_EVENT_TYPES } from '../domain/public-event-feed.ts'
@@ -16799,6 +16801,40 @@ const gateArtifactSchema = {
 }
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('create-project-request', 4, 'Create empty output-bound project root', {
+    type: 'object', additionalProperties: false, required: ['name', 'objective'],
+    properties: { name: { type: 'string', minLength: 1, maxLength: 120 }, objective: strategicObjectiveSchema,
+      locale: { type: 'string', minLength: 2, maxLength: 35 }, briefing: { type: 'string', maxLength: 10000 },
+      desiredAction: desiredActionInputSchema }, allOf: desiredActionObjectiveRequirements,
+  }),
+  defineSchema('project-created', 5, 'Creation receipt with immutable empty State2 and Version2', successSchema({
+    type: 'object', additionalProperties: false, required: ['projectAtCreation', 'creationVersion', 'outputState', 'replayed'],
+    properties: { projectAtCreation: { ...searchableProjectSchemaV2,
+        properties: { ...searchableProjectSchemaV2.properties, name: { type: 'string', minLength: 1, maxLength: 120 },
+          format: false, currentVersionId: false } },
+      creationVersion: { type: 'object', additionalProperties: false,
+        required: ['id', 'sequence', 'baseHash', 'snapshotRefs', 'createdAt', 'outputContractVersion', 'outputStateId', 'outputStateHash'],
+        properties: { ...outputBoundVersionSchemaFields, outputContractVersion: { const: 2 }, sequence: { const: 1 }, parentVersionId: false } },
+      outputState: { type: 'object', additionalProperties: false, required: ['id', 'hash', 'entryCount', 'consumption'],
+        properties: { id: idSchema, hash: sha256Schema, entryCount: { const: 0 }, consumption: {
+          type: 'object', additionalProperties: false, required: ['status', 'reasons'], properties: {
+            status: { const: 'blocked' }, reasons: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string' } } } } } },
+      replayed: { type: 'boolean' } },
+  })),
+  defineSchema('create-project-output-variant-request', 1, 'Explicit output variant Command with full effective spec and delivery profile',
+    createProjectOutputVariantRequestSchema),
+  defineSchema('project-output-variant-created', 1, 'Immutable output variant Command receipt, State3 and Version3', successSchema({
+    type: 'object', additionalProperties: false, required: ['version', 'command', 'variant', 'replayed'], properties: {
+      version: { type: 'object', additionalProperties: false,
+        required: ['id', 'sequence', 'baseHash', 'snapshotRefs', 'createdAt', 'parentVersionId', 'outputContractVersion', 'outputStateId', 'outputStateHash'],
+        properties: { ...outputBoundVersionSchemaFields, outputContractVersion: { const: 3 }, sequence: { type: 'integer', minimum: 2 } } },
+      command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'commandHash'],
+        properties: { id: idSchema, type: { const: 'create-output-variant' }, baseVersionId: idSchema, commandHash: sha256Schema } },
+      variant: { type: 'object', additionalProperties: false, required: ['id', 'outputSpecRevisionId', 'specHash', 'revisionNumber', 'consumption'],
+        properties: { id: idSchema, outputSpecRevisionId: idSchema, specHash: sha256Schema, revisionNumber: { const: 1 },
+          consumption: outputConsumptionSummarySchema } }, replayed: { type: 'boolean' },
+    },
+  })),
   defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchemaV1),
   defineSchema('subtitle-style-registry', 2, 'Content-addressed subtitle style registry carrying casing, grouping, shadow and placement tokens', subtitleStyleRegistrySchema),
   defineSchema('subtitle-css-preview-request', 1, 'Instant subtitle CSS preview request', subtitleCssPreviewRequestSchema),
@@ -23112,7 +23148,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  ...([8, 9, 10, 11, 12] as const).map((version) => defineSchema(
+  ...([8, 9, 10, 11, 12, 13] as const).map((version) => defineSchema(
     'project-workspace',
     version,
     version === 8
@@ -23123,12 +23159,56 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           ? 'Project workspace with evidence-bound compiled production brief'
           : version === 11
             ? 'Project workspace with review and block Director confidence uncertainty'
-            : 'Project workspace with face-safety review status',
+            : version === 12
+              ? 'Project workspace with face-safety review status'
+              : 'Project workspace with snapshot-bound annotations and proxy review availability',
     successSchema({
       type: 'object', additionalProperties: false,
-      required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
+      required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations', ...(version === 13 ? ['reviewAvailability'] : [])],
+      ...(version === 13 ? { allOf: [{
+        if: { type: 'object', properties: { version: {} }, required: ['version'] },
+        then: { type: 'object', properties: { reviewAvailability: { type: 'object', properties: { requestedVersionId: idSchema } } } },
+        else: { type: 'object', properties: { reviewAvailability: { type: 'object', properties: { requestedVersionId: { type: 'null' } } } } },
+      }] } : {}),
       properties: {
         project: searchableProjectSchemaV2,
+        ...(version === 13 ? { reviewAvailability: {
+          type: 'object', additionalProperties: false,
+          required: ['schemaVersion', 'requestedVersionId', 'annotations', 'proxyReview'],
+          allOf: [{
+            if: { type: 'object', properties: { requestedVersionId: { type: 'null' } } },
+            then: { type: 'object', properties: {
+              annotations: { type: 'object', properties: { state: { const: 'unavailable' }, reason: { const: 'no-version' } } },
+              proxyReview: { type: 'object', properties: { state: { const: 'unavailable' }, reason: { const: 'no-version' } } },
+            } },
+            else: { type: 'object', properties: {
+              annotations: { type: 'object', properties: { reason: { const: 'no-proxy' } } },
+              proxyReview: { type: 'object', properties: { reason: { const: 'no-report' } } },
+            } },
+          }],
+          properties: {
+            schemaVersion: { const: 'project-review-availability/v1' },
+            requestedVersionId: { anyOf: [idSchema, { type: 'null' }] },
+            annotations: { oneOf: [
+              { type: 'object', additionalProperties: false, required: ['state', 'reason'], properties: {
+                state: { const: 'unavailable' }, reason: { enum: ['no-version', 'no-proxy'] },
+              } },
+              { type: 'object', additionalProperties: false, required: ['state', 'sourceVersionId', 'proxyArtifactId', 'proxyHash', 'stale'], properties: {
+                state: { const: 'available' }, sourceVersionId: { anyOf: [idSchema, { type: 'null' }] },
+                proxyArtifactId: idSchema, proxyHash: sha256Schema, stale: { type: 'boolean' },
+              }, allOf: [{ if: { type: 'object', properties: { sourceVersionId: { type: 'null' } } }, then: { type: 'object', properties: { stale: { const: true } } } }] },
+            ] },
+            proxyReview: { oneOf: [
+              { type: 'object', additionalProperties: false, required: ['state', 'reason'], properties: {
+                state: { const: 'unavailable' }, reason: { enum: ['no-version', 'no-report'] },
+              } },
+              { type: 'object', additionalProperties: false, required: ['state', 'sourceVersionId', 'reviewId', 'proxyArtifactId', 'reviewHash'], properties: {
+                state: { const: 'available' }, sourceVersionId: idSchema, reviewId: idSchema,
+                proxyArtifactId: idSchema, reviewHash: sha256Schema,
+              } },
+            ] },
+          },
+        } } : {}),
         version: {
           type: 'object', additionalProperties: false,
           required: ['id', 'sequence', 'baseHash', 'createdAt', 'visibleState'],
@@ -23176,7 +23256,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               supersedesRunId: idSchema,
               baseVersionId: idSchema, resultVersionId: idSchema, treatmentSnapshotId: idSchema,
               storySnapshotId: idSchema, qualitySnapshotId: idSchema,
-              qualityStatus: { enum: version === 12
+              qualityStatus: { enum: version >= 12
                 ? ['approved', 'approved-with-warnings', 'review-required', 'blocked']
                 : ['approved', 'approved-with-warnings', 'blocked'] },
               qualityScore: { type: 'number', minimum: 0, maximum: 1 },

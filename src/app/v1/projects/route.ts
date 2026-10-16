@@ -9,7 +9,6 @@ import {
   parseDesiredActionInput,
   type DesiredActionInput,
 } from '@/v2/domain/desired-action'
-import type { OutputAspectRatio } from '@/v2/domain/output-spec'
 import type { StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 import {
   createProjectCreationRepository,
@@ -25,9 +24,9 @@ import {
 import {
   presentProjectDashboard,
   presentProjectV2,
-  presentProjectVersionV2,
   presentSuccess,
 } from '@/v2/public-api/presenters'
+import { presentOutputBoundVersion } from '@/v2/public-api/project-output-variant-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,7 +76,6 @@ export async function POST(request: NextRequest) {
     let body: {
       name?: unknown
       objective?: unknown
-      format?: unknown
       locale?: unknown
       briefing?: unknown
       desiredAction?: unknown
@@ -91,7 +89,7 @@ export async function POST(request: NextRequest) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
     }
     if (!Object.keys(body).every((key) => [
-      'name', 'objective', 'format', 'locale', 'briefing', 'desiredAction',
+      'name', 'objective', 'locale', 'briefing', 'desiredAction',
     ].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
@@ -100,9 +98,6 @@ export async function POST(request: NextRequest) {
     }
     if (typeof body.objective !== 'string') {
       throw new DomainError('INVALID_ARGUMENT', 'objective must be a string')
-    }
-    if (typeof body.format !== 'string') {
-      throw new DomainError('INVALID_ARGUMENT', 'format must be a string')
     }
     for (const field of ['locale', 'briefing'] as const) {
       if (body[field] !== undefined && typeof body[field] !== 'string') {
@@ -126,24 +121,19 @@ export async function POST(request: NextRequest) {
       workspaceId: actor.workspaceId,
       name: body.name,
       objective: body.objective as StrategicObjectiveId,
-      format: body.format as OutputAspectRatio,
       ...(locale ? { locale } : {}),
       ...(briefing ? { briefing } : {}),
       ...(desiredAction ? { desiredAction } : {}),
       actor,
-      idempotency: { clientId: actor.clientId, key: idempotencyKey },
+      idempotencyKey,
     })
 
     return NextResponse.json(
       presentSuccess({
-        project: presentProjectV2(result.project),
-        version: presentProjectVersionV2({
-          id: result.version.id,
-          sequence: result.version.sequence,
-          baseHash: result.version.baseHash,
-          snapshotRefs: result.version.snapshotRefs,
-          createdAt: result.version.createdAt,
-        }, { current: true, previewAvailable: false }),
+        projectAtCreation: presentProjectV2(result.projectAtCreation),
+        creationVersion: presentOutputBoundVersion(result.creationVersion),
+        outputState: { id: result.bundle.state.document.id, hash: result.bundle.state.stateHash,
+          entryCount: result.bundle.state.document.entries.length, consumption: result.bundle.state.document.consumption },
         replayed: result.replayed,
       }),
       {

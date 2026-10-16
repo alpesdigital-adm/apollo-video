@@ -37,6 +37,7 @@ export const EDIT_COMMAND_IMPACT_SCHEMAS = [
   'project-policy-overrides-impact/v1',
   'compare-action-impact/v1',
   'multicam-direction-impact/v1',
+  'project-output-state-impact/v1',
 ] as const
 export type EditCommandImpactSchema = (typeof EDIT_COMMAND_IMPACT_SCHEMAS)[number]
 
@@ -62,6 +63,22 @@ export interface EditCommandPolicy {
 }
 
 export const EDIT_COMMAND_POLICIES = Object.freeze({
+  'create-output-variant': Object.freeze({
+    renderPolicy: 'full-timeline',
+    impactSchema: 'project-output-state-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: true,
+    deferralReason: null,
+    evidence: 'output-variant-command.ts:createOutputVariantCommand binds a real variant/revision; its impact invalidates the entire affected output',
+  }),
+  'revise-output-spec': Object.freeze({
+    renderPolicy: 'full-timeline',
+    impactSchema: 'project-output-state-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: true,
+    deferralReason: null,
+    evidence: 'output-variant-command.ts:createOutputVariantCommand seals all effective pixels/encoding dependencies for the selected variant',
+  }),
   'attach-media-library-reference': Object.freeze({
     renderPolicy: 'no-render',
     impactSchema: 'media-library-attachment-impact/v1',

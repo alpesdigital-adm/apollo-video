@@ -1,26 +1,31 @@
 import type { Project } from '../../domain/project.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { ProjectVersionV2 } from '../../domain/project-version.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
-import type { ProjectCreationCommand } from '../../domain/project-creation-command.ts'
+import type { ProjectCreationOutputCommandV2 } from '../../domain/project-creation-command.ts'
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
+import type { OperationalOutputParentV3, CreationOutputVersionBundleV2 } from '../../domain/output-version-bundle.ts'
+import type { ProjectForkDerivationBodyV3, ProjectForkCallerRequestV3, ForkMediaReferenceFactsV2, V2RenderablePlanSnapshotFacts } from '../../domain/project-fork-derivation.ts'
+import type { CreationOutputBundleWriteV2 } from './output-version-bundle-repository.ts'
 
 export interface ProjectDuplicationSource {
   project: Readonly<Project>
-  version: Readonly<ProjectVersion>
+  version: OperationalOutputParentV3['version']
+  bundle: OperationalOutputParentV3
+  projectFacts: ProjectForkDerivationBodyV3['sourceProject']
+  renderablePlanSnapshot: Readonly<V2RenderablePlanSnapshotFacts> | null
   snapshots: readonly Readonly<ProjectSnapshot>[]
-  media: readonly Readonly<{
-    artifactId: string
-    role: string
-    originalFileName: string
-  }>[]
+  media: readonly Readonly<Omit<ForkMediaReferenceFactsV2, 'targetLinkId'>>[]
 }
 
 export interface ProjectDuplicationBundle {
   sourceProjectId: string
   sourceVersionId: string
   sourceVersionHash: string
-  project: Readonly<Project>
-  version: Readonly<ProjectVersion>
+  /** Immutable creation metadata, never a claim about the current head. */
+  project: Readonly<Omit<Project, 'currentVersionId'>>
+  version: Readonly<ProjectVersionV2>
+  bundle: Readonly<CreationOutputVersionBundleV2>
+  write: Readonly<CreationOutputBundleWriteV2>
   snapshots: readonly Readonly<ProjectSnapshot>[]
   media: readonly Readonly<{
     id: string
@@ -29,7 +34,7 @@ export interface ProjectDuplicationBundle {
     originalFileName: string
     createdAt: string
   }>[]
-  auditCommand: Readonly<ProjectCreationCommand>
+  auditCommand: Readonly<ProjectCreationOutputCommandV2>
   idempotency: Readonly<{
     id: string
     workspaceId: string
@@ -41,8 +46,9 @@ export interface ProjectDuplicationBundle {
 }
 
 export interface ProjectDuplicationResult {
-  project: Readonly<Project>
-  version: Readonly<ProjectVersion>
+  project: Readonly<Omit<Project, 'currentVersionId'>>
+  version: Readonly<ProjectVersionV2>
+  bundle: Readonly<CreationOutputVersionBundleV2>
   sharedArtifactIds: readonly string[]
   copiedBytes: 0
   replayed: boolean
@@ -55,6 +61,7 @@ export interface ProjectDuplicationRepository {
     key: string
     requestFingerprint: string
     audit: Readonly<ApiAccessAuditContext>
+    callerRequest: Readonly<ProjectForkCallerRequestV3>
   }): Promise<Readonly<ProjectDuplicationResult> | null>
   readSource(input: {
     workspaceId: string
