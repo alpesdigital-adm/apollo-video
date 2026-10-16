@@ -1,6 +1,7 @@
 import { type EditCommandType, requireEditCommandType } from './edit-command-registry.ts'
 import { assertDomain, DomainError } from './errors.ts'
 import type { ProjectVersion } from './project-version.ts'
+import { calculateCanonicalHash } from './canonical-hash.ts'
 
 export type CommandActorType = 'user' | 'director' | 'system' | 'api-client'
 
@@ -17,6 +18,7 @@ export interface EditScope {
   frameRange?: { startFrame: number; endFrame: number }
   locale?: string
   outputSpecIds?: string[]
+  outputVariantIds?: string[]
   applyToAllFormats?: boolean
   applyToAllLocales?: boolean
   recipeIds?: string[]
@@ -36,6 +38,7 @@ export interface EditCommand<TPayload = unknown> {
   reason?: string
   idempotencyKey: string
   createdAt: string
+  commandHash: string
 }
 
 /**
@@ -44,7 +47,7 @@ export interface EditCommand<TPayload = unknown> {
  * known render-invalidation policy.
  */
 export type EditCommandInput<TPayload = unknown> =
-  Omit<EditCommand<TPayload>, 'schemaVersion' | 'type'> & { type: EditCommandType }
+  Omit<EditCommand<TPayload>, 'schemaVersion' | 'type' | 'commandHash'> & { type: EditCommandType }
 
 export const SEMANTIC_DIFF_CATEGORIES = [
   'story',
@@ -126,6 +129,9 @@ function nonEmptyUnique(values: string[] | undefined, field: string): void {
 export function validateEditScope(scope: EditScope): void {
   nonEmptyUnique(scope.clipIds, 'clipIds')
   nonEmptyUnique(scope.outputSpecIds, 'outputSpecIds')
+  nonEmptyUnique(scope.outputVariantIds, 'outputVariantIds')
+  assertDomain(!(scope.outputVariantIds && (scope.outputSpecIds || scope.applyToAllFormats)),
+    'INVALID_SCOPE', 'Stable output variants cannot be scoped by format/preset aliases')
   nonEmptyUnique(scope.recipeIds, 'recipeIds')
 
   if (scope.frameRange) {
@@ -160,6 +166,7 @@ export function validateEditScope(scope: EditScope): void {
     scope.frameRange,
     scope.locale,
     scope.outputSpecIds,
+    scope.outputVariantIds,
     scope.applyToAllFormats,
     scope.applyToAllLocales,
     scope.recipeIds,
@@ -209,9 +216,18 @@ export function createEditCommand<TPayload>(
   )
   validateEditScope(input.scope)
 
-  return Object.freeze({
-    ...input,
+  const body = Object.freeze({
     schemaVersion: 1 as const,
+    id: input.id,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    baseVersionId: input.baseVersionId,
+    baseHash: input.baseHash,
+    type: input.type,
+    payload: input.payload,
+    ...(input.reason !== undefined ? { reason: input.reason } : {}),
+    idempotencyKey: input.idempotencyKey,
+    createdAt: input.createdAt,
     author: Object.freeze({ ...input.author }),
     scope: Object.freeze({
       ...input.scope,
@@ -219,12 +235,16 @@ export function createEditCommand<TPayload>(
       outputSpecIds: input.scope.outputSpecIds
         ? Object.freeze([...input.scope.outputSpecIds])
         : undefined,
+      outputVariantIds: input.scope.outputVariantIds
+        ? Object.freeze([...input.scope.outputVariantIds])
+        : undefined,
       recipeIds: input.scope.recipeIds ? Object.freeze([...input.scope.recipeIds]) : undefined,
       frameRange: input.scope.frameRange
         ? Object.freeze({ ...input.scope.frameRange })
         : undefined,
     }),
-  }) as Readonly<EditCommand<TPayload>>
+  })
+  return Object.freeze({ ...body, commandHash: calculateCanonicalHash(body) }) as Readonly<EditCommand<TPayload>>
 }
 
 function intersects(left: readonly string[] | undefined, right: readonly string[] | undefined) {
@@ -247,6 +267,7 @@ function scopesOverlap(left: EditScope, right: EditScope): readonly string[] {
     disjoint(left.clipIds, right.clipIds) ||
     (left.locale && right.locale && left.locale !== right.locale) ||
     disjoint(left.outputSpecIds, right.outputSpecIds) ||
+    disjoint(left.outputVariantIds, right.outputVariantIds) ||
     disjoint(left.recipeIds, right.recipeIds) ||
     (left.frameRange &&
       right.frameRange &&
@@ -273,6 +294,9 @@ function scopesOverlap(left: EditScope, right: EditScope): readonly string[] {
   if (left.locale && left.locale === right.locale) targets.push(`locale:${left.locale}`)
   for (const outputSpecId of intersects(left.outputSpecIds, right.outputSpecIds) ?? []) {
     targets.push(`output-spec:${outputSpecId}`)
+  }
+  for (const variantId of intersects(left.outputVariantIds, right.outputVariantIds) ?? []) {
+    targets.push(`output-variant:${variantId}`)
   }
   for (const recipeId of intersects(left.recipeIds, right.recipeIds) ?? []) {
     targets.push(`recipe:${recipeId}`)

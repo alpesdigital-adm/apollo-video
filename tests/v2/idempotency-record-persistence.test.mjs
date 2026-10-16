@@ -53,7 +53,7 @@ test('T-FR-245 every shared-ledger consumer uses the canonical replay reader', (
   const repositoryNames = [
     'api-client-repository.ts',
     'media-artifact-lifecycle-repository.ts',
-    'project-creation-repository.ts',
+    'output-version-bundle-repository.ts',
     'project-duplication-repository.ts',
     'webhook-delivery-repository.ts',
     'webhook-endpoint-creation-repository.ts',

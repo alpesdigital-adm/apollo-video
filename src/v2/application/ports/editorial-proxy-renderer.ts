@@ -23,9 +23,12 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
  * and final recipe 1.8.0 distinguish these suppressed pixels from older bottom-anchor output;
  * an older proxy cannot be reused across the safety-policy change.
  */
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.12.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.13.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.8.0'
+// 1.13.0 pins ass-frame-clock/v1: exact frame-representable floor boundaries,
+// local fragment validation and fail-closed C0/DEL text. These affect pixels;
+// renderer digest and both recipe versions invalidate previous reuse.
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.13.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.14.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.9.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {

@@ -92,7 +92,6 @@ import { STORY_GOLDEN_FIXTURES } from '../domain/story-plan.ts'
 import { presentCompiledRenderablePlan } from './renderable-plan-contract.ts'
 import { createPiecewiseClockMap } from '../domain/piecewise-clock-map.ts'
 import { applyPlaybackAnchor, buildPlaybackMap, defaultPlaybackPolicy } from '../domain/playback-map.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
 import {
   createSessionClock,
   createSourceClock,
@@ -102,7 +101,7 @@ import { timebaseFromRate } from '../domain/session-time.ts'
 import { createTrackCoverage } from '../domain/track-coverage.ts'
 import {
   presentAngleCandidateListing,
-  presentDirectedSessionResponse,
+  presentMulticamDirection,
   presentMulticamDirectionRead,
   presentShotDecisionListing,
 } from './multicam-direction-contract.ts'
@@ -6699,17 +6698,20 @@ const w20DirectedCommandExample = buildDirectMulticamSessionCommand({
   createdAt: w20At(140),
 })
 
-const w20DirectedProjectVersionExample = createProjectVersion({
+// Historical W20/v1 facts, never an operational W66 Version. Preserve the
+// original Command-derived base hash without fabricating a new output seal.
+const w20DirectedProjectVersionExample = Object.freeze({
+  schemaVersion: 1 as const,
   id: 'project-version-panel-8',
   workspaceId,
   projectId,
   sequence: 8,
   parentVersionId: 'project-version-panel-7',
-  snapshotRefs: {
+  snapshotRefs: Object.freeze({
     brief: 'project-snapshot-brief-1',
     editPlan: 'project-snapshot-edit-plan-8',
     policies: 'project-snapshot-policies-1',
-  },
+  }),
   baseHash: w20DirectedCommandExample.resultBaseHash,
   createdBy: 'client-editor-console',
   commandId: 'edit-command-direct-panel',
@@ -6717,11 +6719,29 @@ const w20DirectedProjectVersionExample = createProjectVersion({
 })
 
 const w20DirectedSessionExample = Object.freeze({
-  direction: w20DirectionExample,
+  // Literal projection of multicam-direction-directed/v1. Its historical
+  // projectVersion has five fields, not the current runtime Version contract.
+  direction: presentMulticamDirection(w20DirectionExample),
   directionVersion: w20DirectionVersion,
-  version: w20DirectedProjectVersionExample,
-  command: w20DirectedCommandExample.command,
-  impact: w20DirectedCommandExample.impact,
+  versionRef: directionVersionRef(w20Session, w20DirectionVersion),
+  projectVersion: Object.freeze({
+    id: w20DirectedProjectVersionExample.id,
+    sequence: w20DirectedProjectVersionExample.sequence,
+    parentVersionId: w20DirectedProjectVersionExample.parentVersionId,
+    baseHash: w20DirectedProjectVersionExample.baseHash,
+    createdAt: w20DirectedProjectVersionExample.createdAt,
+  }),
+  command: Object.freeze({
+    id: w20DirectedCommandExample.command.id,
+    type: w20DirectedCommandExample.command.type,
+    impactHash: w20DirectedCommandExample.impact.impactHash,
+    shotCount: w20DirectedCommandExample.impact.shotCount,
+    manualReviewRequired: w20DirectedCommandExample.impact.manualReviewRequired,
+  }),
+  invalidatedArtifacts: w20DirectedCommandExample.impact.affectedArtifacts.map(artifact => Object.freeze({
+    artifactId: artifact.artifactId, kind: artifact.kind, variantId: artifact.variantId, sourceVersionId: artifact.sourceVersionId,
+  })),
+  affectedRanges: w20DirectedCommandExample.impact.affectedRanges.map(range => Object.freeze({ ...range })),
   evidenceReplayed: false,
 })
 
@@ -7433,6 +7453,41 @@ const syntheticPhaseGateExample = {
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/create-project-request/v4': [{ name: 'Projeto sem formato implícito', objective: 'discovery', locale: 'pt-BR' }],
+    'apollo://schemas/project-created/v5': [{ data: {
+      projectAtCreation: { id: projectId, workspaceId, name: 'Projeto vazio explícito', status: 'draft',
+        objective: 'discovery', locale: 'pt-BR', ownerId: clientId, createdAt,
+        visibleState: { schemaVersion: 'visible-state/v1', label: 'draft', tone: 'neutral',
+          progress: { mode: 'not-started', percent: 0 }, primaryAction: 'open-result', availableActions: ['open-result'], terminal: false } },
+      creationVersion: { id: 'version-output-root', sequence: 1, baseHash: 'a'.repeat(64),
+        snapshotRefs: { brief: 'snapshot-output-brief', editPlan: 'snapshot-output-root', policies: 'snapshot-output-policies' },
+        createdAt, outputContractVersion: 2, outputStateId: 'state-output-root', outputStateHash: 'b'.repeat(64) },
+      outputState: { id: 'state-output-root', hash: 'b'.repeat(64), entryCount: 0,
+        consumption: { status: 'blocked', reasons: ['empty-project'] } }, replayed: false,
+    }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/create-project-output-variant-request/v1': [{
+      baseVersionId: 'version-output-root', baseHash: 'a'.repeat(64),
+      output: { locale: 'pt-BR', aspectRatio: '16:9', width: 640, height: 360, fps: 30,
+        safeArea: { top: .08, right: .06, bottom: .06, left: .06 }, deliveryProfileId: 'profile-output-example' },
+      profile: { schemaVersion: 'materialized-delivery-profile/v1', id: 'profile-output-example', version: 1,
+        rendererContractVersion: 'ffmpeg-editorial-output/v1',
+        final: { codec: 'h264', encoder: 'libx264', pixelFormat: 'yuv420p', container: 'mp4', faststart: true,
+          width: 640, height: 360, fps: 30, quality: { mode: 'crf', value: 18, preset: 'medium' },
+          audio: { codec: 'aac', bitrateKbps: 192, sampleRateHz: 48000, channels: 1 } },
+        proxy: { codec: 'h264', encoder: 'libx264', pixelFormat: 'yuv420p', container: 'mp4', faststart: true,
+          width: 320, height: 180, fps: 30, quality: { mode: 'crf', value: 23, preset: 'veryfast' },
+          audio: { codec: 'aac', bitrateKbps: 160, sampleRateHz: 48000, channels: 1 } },
+        proxyToFinal: { schemaVersion: 'output-canvas-transform/v1', scaleX: 2, scaleY: 2 },
+        subtitles: { mode: 'none', configuration: null, fontAssets: [] } }, preset: null,
+    }],
+    'apollo://schemas/project-output-variant-created/v1': [{ data: {
+      version: { id: 'version-output-variant', sequence: 2, parentVersionId: 'version-output-root', baseHash: 'c'.repeat(64),
+        snapshotRefs: { brief: 'snapshot-output-brief', editPlan: 'snapshot-output-variant', policies: 'snapshot-output-policies' },
+        createdAt, outputContractVersion: 3, outputStateId: 'state-output-variant', outputStateHash: 'd'.repeat(64) },
+      command: { id: 'command-output-create', type: 'create-output-variant', baseVersionId: 'version-output-root', commandHash: 'e'.repeat(64) },
+      variant: { id: 'variant-output-alpha', outputSpecRevisionId: 'revision-output-alpha', specHash: 'f'.repeat(64), revisionNumber: 1,
+        consumption: { status: 'blocked', reasons: ['empty-project'] } }, replayed: false,
+    }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/localization-canonical-list/v1': [{ data: { versions: [{ id: 'canonical-1', projectVersionId: 'version-1', sourceLocale: 'pt-BR', revision: 1, blocks: [], approvedAt: '2026-09-08T12:00:00.000Z', contentHash: 'a'.repeat(64) }] }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/localization-candidate-list/v1': [{ data: { candidates: [{ alignmentId: 'alignment-1', alignmentHash: 'a'.repeat(64), batchId: 'batch-1', projectVersionId: 'version-1', sourceLocale: 'pt-BR', blocks: [] }] }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/localization-profile-list/v1': [{ data: { profiles: [{ id: 'profile-en-us', targetLocale: 'en-US', market: 'US', allowedModes: ['subtitles-only'], profileHash: 'b'.repeat(64) }] }, meta: { apiVersion: 'v1' } }],
@@ -14886,7 +14941,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/multicam-direction-directed/v1': [
       {
-        data: presentDirectedSessionResponse({ ...w20DirectedSessionExample, replayed: false }),
+        data: { directed: w20DirectedSessionExample, replayed: false },
         meta: { apiVersion: 'v1' },
       },
     ],

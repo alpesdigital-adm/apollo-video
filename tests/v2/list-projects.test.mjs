@@ -189,8 +189,8 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v9')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v5').ref, 'apollo://schemas/project-list/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v4').ref, 'apollo://schemas/project-list/v4')
-  assert.equal(capabilities.get('apollo.projects.create').version, '5.0.0')
-  assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v4')
+  assert.equal(capabilities.get('apollo.projects.create').version, '6.0.0')
+  assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v3').ref, 'apollo://schemas/project-list/v3')
   assert.equal(getPublicSchema('apollo://schemas/project-created/v2').ref, 'apollo://schemas/project-created/v2')
 
@@ -206,10 +206,10 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   assert.equal(validate(invalidAction), false)
 })
 
-test('T-FR-236 exposes the current version state on create and duplicate responses', () => {
+test('T-FR-236 preserves historical create/duplicate visible states and exposes new creation as a sealed receipt', () => {
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  assert.equal(capabilities.get('apollo.projects.create').version, '5.0.0')
-  assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v4')
+  assert.equal(capabilities.get('apollo.projects.create').version, '6.0.0')
+  assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v5')
   assert.equal(capabilities.get('apollo.projects.duplicates.create').version, '2.0.0')
   assert.equal(capabilities.get('apollo.projects.duplicates.create').outputSchemaRef, 'apollo://schemas/project-duplicated/v2')
   assert.equal(getPublicSchema('apollo://schemas/project-created/v3').ref, 'apollo://schemas/project-created/v3')
@@ -230,6 +230,12 @@ test('T-FR-236 exposes the current version state on create and duplicate respons
   const validateCreate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
     .compile(getPublicSchema('apollo://schemas/project-created/v4').schema)
   assert.equal(validateCreate(createBody), true, JSON.stringify(validateCreate.errors))
+  const currentDefinition = getPublicSchema('apollo://schemas/project-created/v5')
+  const validateReceipt = addFormats(new Ajv2020({ strict: false, allErrors: true })).compile(currentDefinition.schema)
+  const receipt = structuredClone(publicSchemaExamples(currentDefinition)[0])
+  assert.equal(validateReceipt(receipt), true, JSON.stringify(validateReceipt.errors))
+  receipt.data.projectAtCreation.currentVersionId = receipt.data.creationVersion.id
+  assert.equal(validateReceipt(receipt), false, 'a creation receipt cannot claim the current head')
 
   const duplicateBody = structuredClone(createBody)
   duplicateBody.data.project.duplicatedFromProjectId = 'project-source-visible-1'

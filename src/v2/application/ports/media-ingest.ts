@@ -5,9 +5,6 @@ import type {
   DetectedMediaColor,
   MediaColorProbe,
 } from '../../domain/color-and-export.ts'
-import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
-import type { PublicEvent } from '../../domain/public-event.ts'
 
 export interface MediaIngestProbe {
   width: number
@@ -31,10 +28,12 @@ export interface NormalizedIngestMedia {
   proxySha256: string
   proxyByteSize: number
   probe: MediaIngestProbe
+  observation:Readonly<MediaNormalizationObservationV3>
 }
 
 export interface MediaIngestProcessor {
-  normalize(input: { sourcePath: string; operationId: string; signal?: AbortSignal }): Promise<Readonly<NormalizedIngestMedia>>
+  normalize(input: { sourcePath: string; operationId: string; owner:Readonly<MediaNormalizationOwnerV3>; signal?: AbortSignal }): Promise<Readonly<NormalizedIngestMedia>>
+  observeOriginalAudio(input:{sourcePath:string;operationId:string;owner:Readonly<MediaNormalizationOwnerV3>;signal?:AbortSignal}):Promise<Readonly<MediaNormalizationObservationV3>>
   cleanup(operationId: string): Promise<void>
 }
 
@@ -68,33 +67,15 @@ export interface ArtifactSourceMaterializer {
 }
 
 export interface ProjectMediaRepository {
+  readIngestRequestFingerprint(input:{workspaceId:string;projectId:string;operationId:string}):Promise<string>
   readProject(input: { workspaceId: string; projectId: string }): Promise<Readonly<{
     id: string
     locale: string
-    currentVersion: Readonly<ProjectVersion>
+    currentVersion: Readonly<import('../../domain/project-version.ts').ProjectVersionV3>
+    outputBundle:Readonly<import('../../domain/output-version-bundle.ts').OperationalOutputVersionBundleV3>
   }> | null>
-  persistCompletedIngest(input: {
-    workspaceId: string
-    projectId: string
-    uploadId: string
-    originalFileName: string
-    sourceArtifactId: string
-    sourceManifestId: string
-    proxyArtifactId: string
-    proxyManifestId: string
-    transcriptId: string
-    transcript: Readonly<MediaTranscript>
-    sourceManifest: Readonly<MediaArtifactManifest>
-    proxyManifest: Readonly<MediaArtifactManifest>
-    sourceColorProbe: Readonly<MediaColorProbe>
-    proxyColorProbe: Readonly<MediaColorProbe>
-    initialPlan: Readonly<{
-      snapshot: Readonly<ProjectSnapshot>
-      version: Readonly<ProjectVersion>
-      event: Readonly<PublicEvent>
-    }>
-    createdAt: string
-  }): Promise<void>
+  /** Full operational bundle owner publishes plan, facts, head, event and op terminal together. */
+  persistCompletedIngest(input:Readonly<import('./output-version-bundle-repository.ts').OperationalOutputBundleWriteV3>):Promise<void>
   persistCatalogedInput(input: {
     workspaceId: string
     projectId: string
@@ -103,7 +84,28 @@ export interface ProjectMediaRepository {
     artifactId: string
     manifestId: string
     mediaType: 'audio' | 'image'
+    normalization:Readonly<import('../../domain/output-materialization.ts').SealedOutputNormalizationV3>|null
     createdAt: string
   }): Promise<void>
   markIngestFailed(input: { workspaceId: string; projectId: string }): Promise<void>
+}
+
+export interface MediaNormalizationObservationV3 {
+  schemaVersion:'media-normalization-observation/v3'
+  operationId:string
+  attempt:number
+  leaseOwner:string
+  sourceProbe:Readonly<import('../../domain/output-materialization.ts').OutputObservedProbeV3>
+  audioProbes:Readonly<import('../../domain/output-materialization.ts').OutputNormalizationReceiptV3['audioProbes']>
+  derivativeProbe:Readonly<import('../../domain/output-materialization.ts').OutputObservedProbeV3>
+  execution:Readonly<import('../../domain/output-materialization.ts').OutputNormalizationReceiptV3['execution']>
+}
+export interface MediaNormalizationOwnerV3 {
+  attempt:number
+  leaseOwner:string
+  sourceSha256:string
+  sourceByteSize:number
+  /** Both absolute from operation admission. No stage renews either value. */
+  workEndMonotonicMs:number
+  hardEndMonotonicMs:number
 }

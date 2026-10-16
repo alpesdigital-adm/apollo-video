@@ -466,7 +466,7 @@ import { PrismaPerceptionTimelineRepository } from './prisma/perception-timeline
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
-import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
+import { PrismaCreationOutputBundleRepositoryV2, PrismaOperationalOutputBundleRepositoryV3 } from './prisma/output-version-bundle-repository.ts'
 import { PrismaProjectDuplicationRepository } from './prisma/project-duplication-repository.ts'
 import { PrismaProjectAdministrationRepository } from './prisma/project-administration-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
@@ -2881,7 +2881,11 @@ export function createSourceCleanupWorker(
 }
 
 export function createProjectCreationRepository(): ProjectCreationRepository {
-  return new PrismaProjectCreationRepository(resolveV2Client())
+  return new PrismaCreationOutputBundleRepositoryV2(resolveV2Client())
+}
+
+export function createProjectOutputVariantRepository() {
+  return new PrismaOperationalOutputBundleRepositoryV3(resolveV2Client())
 }
 
 export function createProjectDuplicationRepository(): ProjectDuplicationRepository {

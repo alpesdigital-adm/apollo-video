@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { stableSerialize } from './canonical-hash.ts'
+import { isSupportedClipRate, timelineSpanForRate } from './clip-timing.ts'
 import { assertDomain, DomainError } from './errors.ts'
 import type { CommandImpactV1 } from './command-impact.ts'
 
@@ -315,7 +316,9 @@ function clipDurationFrames(clip: MutableRecord): number {
     'INVALID_ARGUMENT',
     'Manual edit clip source range is invalid',
   )
-  return sourceOut - sourceIn
+  const rate = clip.rate === undefined ? 1 : Number(clip.rate)
+  assertDomain(isSupportedClipRate(rate), 'INVALID_ARGUMENT', 'Manual edit clip rate is invalid')
+  return timelineSpanForRate(sourceOut - sourceIn, rate)
 }
 
 function retimeTrack(track: MutableRecord): number {
@@ -504,8 +507,12 @@ export function materializeManualEditPlan(input: {
   } else if (operation.kind === 'inspect') {
     applyInspectorToPlan(plan, located.clip, operation.patch)
   }
-  const durations = timelineTracks(plan).map(retimeTrack)
-  plan.durationFrames = Math.max(0, ...durations)
+  // Selection owns audit only. Preserve every track's gaps, ranges, rate,
+  // duration and audio mapping; a render-free impact cannot compact a timeline.
+  if (operation.kind !== 'select') {
+    const durations = timelineTracks(plan).map(retimeTrack)
+    plan.durationFrames = Math.max(0, ...durations)
+  }
   plan.id = `edit-plan-${input.newVersionId}`
   plan.projectVersionId = input.newVersionId
   plan.createdAt = input.createdAt
