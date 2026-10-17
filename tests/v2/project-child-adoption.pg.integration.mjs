@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -20,9 +20,9 @@ import { externalActorAuditData } from '../../src/v2/infrastructure/prisma/exter
 import { PrismaMediaArtifactRepository } from '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
 import { readAdoptableObservationsV3 } from '../../src/v2/infrastructure/prisma/output-adoptable-observations.ts'
 import { readPersistedOperationalOutputBundleV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from '../../src/v2/infrastructure/prisma/project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from '../../src/v2/infrastructure/prisma/project-version-commit.ts'
 import { controlledNormalization, recordingNames } from './helpers/operational-editorial-fixture.mjs'
-import { seedSealedProject } from './helpers/pg-output-world.mjs'
+import { persistCurrentRights, seedSealedProject } from './helpers/pg-output-world.mjs'
 
 /**
  * W66 child Commands that adopt the persisted observed receipts of the project's other recordings, against a real
@@ -63,14 +63,9 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
     const artifacts = new PrismaMediaArtifactRepository(db)
     const rights = async (artifactId, label, status = 'approved', sequence = 1) => {
       const snapshot = createAssetRightsSnapshot({ id: `w66ad-${runId}-rights-${label}-${sequence}`, workspaceId, artifactId, sequence,
-        draft: { status, allowedUses: status === 'approved' ? ['rendering', 'editorial-reuse'] : [], prohibitedUses: [], consent: { status: 'not-required', allowedUses: [] } },
+        draft: { status, allowedUses: status === 'approved' ? ['rendering', 'editorial-reuse'] : [], prohibitedUses: [], sourceNote: `${label}-${sequence}`, consent: { status: 'not-required', allowedUses: [] } },
         createdBy: { type: 'api-client', id: clientId }, createdAt })
-      await db.v2AssetRightsSnapshot.create({ data: { id: snapshot.id, workspaceId, artifactId, sequence, schemaVersion: snapshot.schemaVersion,
-        snapshotHash: snapshot.snapshotHash, status: snapshot.status, allowedUsesJson: stableSerialize(snapshot.allowedUses),
-        prohibitedUsesJson: stableSerialize(snapshot.prohibitedUses), allowedWorkspaceIdsJson: stableSerialize(snapshot.allowedWorkspaceIds),
-        consentStatus: snapshot.consent.status, consentAllowedUsesJson: stableSerialize(snapshot.consent.allowedUses),
-        createdByType: snapshot.createdBy.type, createdById: snapshot.createdBy.id, createdAt: new Date(snapshot.createdAt) } })
-      await db.v2MediaArtifact.update({ where: { id: artifactId }, data: { currentRightsSnapshotId: snapshot.id, rightsRevision: sequence } })
+      await persistCurrentRights(db, snapshot)
       return snapshot
     }
     const persistRecording = async (label, { status = 'approved', persistReceipt = true } = {}) => {
@@ -143,10 +138,12 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
         createMaterializationId: () => `w66ad-${runId}-materialization-${label}-${++counter}`, adoptable })
       return { parent, bundle }
     }
+    // The Version row first (the head points at it), then the head, compare-and-swap on the parent.
     const commit = (parent, bundle) => db.$transaction(async (tx) => {
+      await commitProjectVersionWithOutputState(tx, bundle)
       const moved = await tx.v2Project.updateMany({ where: { id: projectId, workspaceId, currentVersionId: parent.version.id }, data: { currentVersionId: bundle.version.id } })
       assert.equal(moved.count, 1)
-      await commitProjectVersionWithOutputState(tx, bundle)
+      await settleDeferredOutputGuards(tx)
     }, transactionOptions)
     const residue = async (bundle) => ({
       versions: await db.v2ProjectVersion.count({ where: { id: bundle.version.id } }),
@@ -198,7 +195,7 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
     assert.deepEqual(await residue(stale.bundle), staleBefore)
 
     // 3c. rights that deny the use at commit
-    const denied = await persistRecording('denied', { status: 'denied' })
+    const denied = await persistRecording('denied', { status: 'revoked' })
     const refused = await sealChild('refused', ['cam-a', 'denied'], { ...recordings, denied })
     await assert.rejects(() => commit(refused.parent, refused.bundle), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
 
@@ -216,8 +213,16 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
           if (property === '$executeRawUnsafe') return (query, ...values) => {
             if (query.startsWith('INSERT INTO "output_operational_bundles" (')) {
               const columns = query.slice(query.indexOf('(') + 1, query.indexOf(')')).split(',').map((name) => name.replaceAll('"', ''))
-              const position = columns.indexOf('originJson')
-              values[position] = serializeOutputCanonicalJson(lie(JSON.parse(values[position])))
+              // A consistent lie: the origin is rewritten in its own column and in the bundle, and every seal recomputed, so
+              // the table's own checks pass and only the State guard can see that the adoptions do not hold.
+              const sha = (text) => createHash('sha256').update(text, 'utf8').digest('hex')
+              const at = (name) => columns.indexOf(name)
+              const origin = lie(JSON.parse(values[at('originJson')]))
+              values[at('originJson')] = serializeOutputCanonicalJson(origin)
+              values[at('originHash')] = sha(values[at('originJson')])
+              const bundle = JSON.parse(values[at('bundleJson')])
+              values[at('bundleJson')] = serializeOutputCanonicalJson({ ...bundle, origin })
+              values[at('bundleHash')] = sha(values[at('bundleJson')])
             }
             return transaction.$executeRawUnsafe(query, ...values)
           }
@@ -226,8 +231,9 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
         } })), options)
       } })
       await assert.rejects(() => forged.$transaction(async (tx) => {
-        await tx.v2Project.updateMany({ where: { id: projectId, workspaceId, currentVersionId: lying.parent.version.id }, data: { currentVersionId: lying.bundle.version.id } })
         await commitProjectVersionWithOutputState(tx, lying.bundle)
+        await tx.v2Project.updateMany({ where: { id: projectId, workspaceId, currentVersionId: lying.parent.version.id }, data: { currentVersionId: lying.bundle.version.id } })
+        await settleDeferredOutputGuards(tx)
       }, transactionOptions), (error) => String(error.meta?.message ?? error.message).includes('W66v3'), label)
       assert.deepEqual(await residue(lying.bundle), lyingBefore, label)
     }

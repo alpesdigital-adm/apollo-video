@@ -4,7 +4,7 @@
 -- guard and replaces only the origin-specific part: the origin must be the sealed Command row, its credential audit
 -- must match the row, its declared plan effect and replaced non-output snapshots must hold, and every entry
 -- re-materializes from the parent's exact normalization observations plus the persisted, observed receipts of the
--- project's other recordings that the origin adopts (each still under the rights it was adopted under at COMMIT).
+-- project's other recordings that the origin adopts (each under the rights it names; the writing transaction also requires them current).
 CREATE FUNCTION w66_assert_child_command_state_v1(p_state text) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE s project_output_states%ROWTYPE;v project_versions%ROWTYPE;b project_versions%ROWTYPE;bs project_output_states%ROWTYPE;
  ob output_operational_bundles%ROWTYPE;d jsonb;o jsonb;pj jsonb;sp project_snapshots%ROWTYPE;bp jsonb;cmd edit_commands%ROWTYPE;entry_record record;
@@ -125,12 +125,18 @@ BEGIN
    AND "projectId"=s."projectId" AND "workspaceId"=s."workspaceId" AND "sourceArtifactId"=adoption.element->>'sourceArtifactId'
    AND "sourceManifestId"=adoption.element->>'sourceManifestId' AND "sourceManifestHash"=adoption.element->>'sourceManifestHash';
   PERFORM w66_assert_normalization_v3(adopted_receipt.id,s."projectId",s."workspaceId");
-  SELECT * INTO STRICT adopted_artifact FROM media_artifacts WHERE id=adopted_receipt."sourceArtifactId" AND "workspaceId"=s."workspaceId" AND status='available';
-  SELECT * INTO STRICT adopted_rights FROM asset_rights_snapshots WHERE id=adopted_artifact."currentRightsSnapshotId" AND "artifactId"=adopted_artifact.id AND "workspaceId"=s."workspaceId";
-  IF adopted_rights.id IS DISTINCT FROM adoption.element#>>'{rights,snapshotId}' OR adopted_rights."snapshotHash" IS DISTINCT FROM adoption.element#>>'{rights,snapshotHash}'
-   OR adopted_artifact."rightsRevision" IS DISTINCT FROM (adoption.element#>>'{rights,revision}')::integer OR adopted_rights.status IS DISTINCT FROM 'approved'
-   OR (adopted_rights."expiresAt" IS NOT NULL AND adopted_rights."expiresAt"<=clock_timestamp()) THEN
-   RAISE EXCEPTION 'W66v3 adopted observation rights are not current' USING ERRCODE='23514';END IF;
+  -- History: the snapshot the adoption names is a persisted, approved revision of that artifact's rights, unexpired when the Version was born.
+  SELECT * INTO STRICT adopted_rights FROM asset_rights_snapshots WHERE id=adoption.element#>>'{rights,snapshotId}' AND "artifactId"=adopted_receipt."sourceArtifactId" AND "workspaceId"=s."workspaceId";
+  IF adopted_rights."snapshotHash" IS DISTINCT FROM adoption.element#>>'{rights,snapshotHash}' OR adopted_rights.sequence > (adoption.element#>>'{rights,revision}')::integer
+   OR adopted_rights.status IS DISTINCT FROM 'approved' OR (adopted_rights."expiresAt" IS NOT NULL AND adopted_rights."expiresAt"<=v."createdAt") THEN
+   RAISE EXCEPTION 'W66v3 adopted observation rights differ from the snapshot they name' USING ERRCODE='23514';END IF;
+  -- Currency: only the transaction that writes the Version (this guard then runs from a trigger) requires that snapshot to still be current.
+  IF pg_trigger_depth()>0 THEN
+   SELECT * INTO STRICT adopted_artifact FROM media_artifacts WHERE id=adopted_receipt."sourceArtifactId" AND "workspaceId"=s."workspaceId" AND status='available';
+   IF adopted_artifact."currentRightsSnapshotId" IS DISTINCT FROM adopted_rights.id OR adopted_artifact."rightsRevision" IS DISTINCT FROM (adoption.element#>>'{rights,revision}')::integer
+    OR (adopted_rights."expiresAt" IS NOT NULL AND adopted_rights."expiresAt"<=clock_timestamp()) THEN
+    RAISE EXCEPTION 'W66v3 adopted observation rights are not current' USING ERRCODE='23514';END IF;
+  END IF;
   IF NOT EXISTS(SELECT 1 FROM project_media_assets l WHERE l."projectId"=s."projectId" AND l."workspaceId"=s."workspaceId" AND l."artifactId"=adopted_receipt."sourceArtifactId") THEN
    RAISE EXCEPTION 'W66v3 adopted observation has no project media association' USING ERRCODE='23514';END IF;
  END LOOP;
