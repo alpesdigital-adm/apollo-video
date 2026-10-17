@@ -1,77 +1,48 @@
 import { randomUUID } from 'node:crypto'
 
-import { createAssetRightsSnapshot } from '../../../src/v2/domain/asset-rights.ts'
-import { calculateCanonicalHash, stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
+import { commitSealedChild, persistRecording, planPlayingRecordings, seedSealedProject, testActor } from './pg-output-world.mjs'
 
+/**
+ * The world the perception producers (OCR, temporal, face) run against: a workspace with one project whose head is a
+ * real, sealed Version that plays one recording, and the recording's source artifact with its manifest, project link and
+ * rights. It is built the way the product builds it (see pg-output-world.mjs): the creation Command, one explicit output
+ * variant, the recording's persisted ingest, and a child Command that adopts it. Nothing is inserted around those writers.
+ *
+ * `sourceSha256`, `byteSize` and `artifactKey` name the real file a worker reads back. The clip plays the whole recording,
+ * `durationFrames` long at 30 fps (default 120).
+ *
+ * `seedRights: false` leaves the source without any rights: a suite that proves the rights the ingest itself writes then
+ * runs that stage first, and calls `world.sealHead()` afterwards, which commits the child Command that makes the recording
+ * the head's timeline (a Version can only play a source whose rights allow it). Until then `versionId` is the empty
+ * variant's. With rights seeded the head is already sealed.
+ */
 export async function seedPerceptionProducerContext(db, options = {}) {
   const suffix = options.suffix ?? randomUUID().slice(0, 8)
   const workspaceId = `w61-admission-${suffix}`
   const otherWorkspaceId = `w61-other-${suffix}`
   const clientId = `w61-client-${suffix}`
   const projectId = `w61-project-${suffix}`
-  const versionId = `w61-version-${suffix}`
-  const sourceId = `w61-source-${suffix}`
-  const editId = `w61-edit-${suffix}`
   const sourceSha256 = options.sourceSha256 ?? 'a'.repeat(64)
   const byteSize = options.byteSize ?? 1024n
   const artifactKey = options.artifactKey ?? `${workspaceId}/source.mp4`
-  const now = new Date()
-  await db.v2Workspace.createMany({ data: [
-    { id: workspaceId, slug: workspaceId, name: 'W61 admission' },
-    { id: otherWorkspaceId, slug: otherWorkspaceId, name: 'W61 other' },
-  ] })
-  await db.v2ApiClient.create({ data: {
-    id: clientId, workspaceId, name: 'W61 test client',
-    allowedEnvironmentsJson: '["production"]', scopeGrantsJson: '["projects:write","projects:read","operations:read","operations:cancel","operations:retry"]',
-    createdBy: 'w61-test',
-  } })
-  await db.v2Project.create({ data: {
-    id: projectId, workspaceId, name: 'W61 source', objective: 'discovery', format: '9:16', locale: 'pt-BR',
-    createdByType: 'api-client', createdById: clientId,
-  } })
-  const plan = { schemaVersion: 2, state: 'compiled', id: `w61-plan-${suffix}`,
-    projectVersionId: versionId, fps: 30, durationFrames: 120,
-    videoTracks: [{ id: `w61-track-${suffix}`, kind: 'base-video', clips: [{ id: `w61-clip-${suffix}`,
-      sourceArtifactId: sourceId, sourceInFrame: 0, sourceOutFrame: 120,
-      timelineInFrame: 0, timelineOutFrame: 120, rate: 1 }] }],
-    subtitleTracks: [], transitions: [],
-    movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
-    composition: { layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1,
-      verticalPosition: 0.5, faceSafeFallback: [0.08, 0.08, 0.84, 0.84],
-      subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22] } }
-  for (const [kind, id, content] of [
-    ['brief', `w61-brief-${suffix}`, {}], ['policies', `w61-policy-${suffix}`, {}], ['edit-plan', editId, plan],
-  ]) {
-    await db.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind, schemaVersion: 1,
-      contentJson: stableSerialize(content), contentHash: calculateCanonicalHash(content) } })
+  const actor = testActor({ workspaceId, clientId, credentialId: `w61-credential-${suffix}`, environment: 'production',
+    scopes: ['projects:write', 'projects:read', 'operations:read', 'operations:cancel', 'operations:retry'] })
+  await db.v2Workspace.create({ data: { id: otherWorkspaceId, slug: otherWorkspaceId, name: 'W61 other' } })
+  const sealed = await seedSealedProject(db, { workspaceId, actor, prefix: 'w61', ids: { project: projectId } })
+  const seedRights = options.seedRights !== false
+  const recording = await persistRecording(db, { workspaceId, projectId, actor, slug: `w61-source-${suffix}`, durationFrames: options.durationFrames ?? 120,
+    sourceSha256, sourceByteSize: Number(byteSize), sourceKey: artifactKey, rights: seedRights ? {} : { source: false } })
+  const world = { suffix, workspaceId, otherWorkspaceId, clientId, projectId, sourceId: recording.names.sourceArtifactId,
+    sourceSha256, byteSize, artifactKey, rightsId: recording.sourceRights?.id ?? null, actor, recording,
+    versionId: sealed.head.version.id, editId: sealed.head.editPlanSnapshot.id, plan: JSON.parse(sealed.head.editPlanSnapshot.contentJson) }
+  world.sealHead = async () => {
+    const head = await commitSealedChild(db, { workspaceId, projectId, actor, suffix: `w61-${suffix}-playing`,
+      mutatePlan: planPlayingRecordings([recording]), adopt: [recording.names.sourceArtifactId] })
+    world.versionId = head.version.id
+    world.editId = head.editPlanSnapshot.id
+    world.plan = JSON.parse(head.editPlanSnapshot.contentJson)
+    return head
   }
-  await db.v2ProjectVersion.create({ data: {
-    id: versionId, workspaceId, projectId, sequence: 1,
-    briefSnapshotId: `w61-brief-${suffix}`, policiesSnapshotId: `w61-policy-${suffix}`,
-    editPlanSnapshotId: editId, baseHash: 'b'.repeat(64), createdBy: clientId,
-  } })
-  await db.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
-  await db.v2MediaArtifact.create({ data: { id: sourceId, workspaceId,
-    artifactKey, sha256: sourceSha256, byteSize,
-    mediaType: 'video', container: 'mp4', status: 'available' } })
-  await db.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId, projectId,
-    artifactId: sourceId, role: 'source-master', originalFileName: 'source.mp4' } })
-  if (options.seedRights === false) return { suffix, workspaceId, otherWorkspaceId, clientId,
-    projectId, versionId, sourceId, editId, sourceSha256, byteSize, artifactKey, rightsId: null, plan }
-  const rights = createAssetRightsSnapshot({ id: `w61-rights-${suffix}`, workspaceId, artifactId: sourceId,
-    // Match the normal media-ingest grant exactly; analysis never adds library reuse.
-    sequence: 1, draft: { status: 'approved', allowedUses: ['distribution', 'editing', 'rendering', 'transcription'], prohibitedUses: [],
-      consent: { status: 'not-required', allowedUses: [] } },
-    createdBy: { type: 'user', id: 'w61-owner' }, createdAt: now.toISOString() })
-  await db.v2AssetRightsSnapshot.create({ data: {
-    id: rights.id, workspaceId, artifactId: sourceId, sequence: 1,
-    schemaVersion: rights.schemaVersion, snapshotHash: rights.snapshotHash, status: rights.status,
-    allowedUsesJson: stableSerialize(rights.allowedUses), prohibitedUsesJson: '[]',
-    allowedWorkspaceIdsJson: stableSerialize(rights.allowedWorkspaceIds),
-    consentStatus: rights.consent.status, consentAllowedUsesJson: '[]',
-    createdByType: 'user', createdById: 'w61-owner', createdAt: now,
-  } })
-  await db.v2MediaArtifact.update({ where: { id: sourceId }, data: { currentRightsSnapshotId: rights.id, rightsRevision: 1 } })
-  return { suffix, workspaceId, otherWorkspaceId, clientId, projectId, versionId, sourceId,
-    editId, sourceSha256, byteSize, artifactKey, rightsId: rights.id, plan }
+  if (seedRights) await world.sealHead()
+  return world
 }

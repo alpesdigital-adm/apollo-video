@@ -4,16 +4,16 @@
 // production one; only persistence is replaced. Used by the contract test and by tests that need a
 // sealed ProjectVersion3/State3 parent instead of a hand-assembled Version.
 import { randomUUID } from 'node:crypto'
-import { createProjectService, createProjectOutputVariantService } from '../../../src/v2/application/create-project.ts'
-import { createExternalAuditContext, materializeActorAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
-import { calculateCanonicalHash, stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
-import { createEditCommand } from '../../../src/v2/domain/edit-command.ts'
-import { createProjectSnapshot } from '../../../src/v2/domain/project-snapshot.ts'
-import { transitionProjectOutputState } from '../../../src/v2/domain/project-output-state-transition.ts'
-import { buildCreationOutputVersionBundleV2, buildOperationalOutputVersionBundleV3, operationalBundlePlanV3 } from '../../../src/v2/domain/output-version-bundle.ts'
-import { DomainError } from '../../../src/v2/domain/errors.ts'
-import { getPublicSchema } from '../../../src/v2/public-api/schema-registry.ts'
-import { publicSchemaExamples } from '../../../src/v2/public-api/schema-examples.ts'
+const { createProjectService, createProjectOutputVariantService } = await import('../../../src/v2/application/create-project.ts')
+const { createExternalAuditContext, materializeActorAuditContext } = await import('../../../src/v2/application/authenticate-api-client.ts')
+const { calculateCanonicalHash, stableSerialize } = await import('../../../src/v2/domain/canonical-hash.ts')
+const { createEditCommand } = await import('../../../src/v2/domain/edit-command.ts')
+const { createProjectSnapshot } = await import('../../../src/v2/domain/project-snapshot.ts')
+const { transitionProjectOutputState } = await import('../../../src/v2/domain/project-output-state-transition.ts')
+const { buildCreationOutputVersionBundleV2, buildOperationalOutputVersionBundleV3, operationalBundlePlanV3 } = await import('../../../src/v2/domain/output-version-bundle.ts')
+const { DomainError } = await import('../../../src/v2/domain/errors.ts')
+const { getPublicSchema } = await import('../../../src/v2/public-api/schema-registry.ts')
+const { publicSchemaExamples } = await import('../../../src/v2/public-api/schema-examples.ts')
 import { prepareEditorialSourceFixture, ingestOnto, recordingNames } from './operational-editorial-fixture.mjs'
 
 const clone = value => structuredClone(value)

@@ -649,7 +649,7 @@ try {
     report.expectedSelectedTests = 3
     assert.equal(report.passed, 3, 'Face offline filtered proof requires exactly three passing tests')
     const expectedNames = [
-      'W61 publish-race fixture hydrates a real child and rights expiry offline',
+      'W61 publish-race rights fixtures hydrate and expire offline',
       'W61 publish-race matcher checks typed codes, not error prose',
       'W61 face control uses scoped canonical audit before the repository transaction',
     ]

@@ -10,7 +10,7 @@ DECLARE s project_output_states%ROWTYPE;v project_versions%ROWTYPE;b project_ver
  ob output_operational_bundles%ROWTYPE;d jsonb;o jsonb;pj jsonb;sp project_snapshots%ROWTYPE;bp jsonb;cmd edit_commands%ROWTYPE;entry_record record;
  e project_output_state_entries%ROWTYPE;re output_spec_revisions%ROWTYPE;m output_materializations%ROWTYPE;expected_version jsonb;target_v project_versions%ROWTYPE;
  source_state project_output_states%ROWTYPE;root_state text;project_row projects%ROWTYPE;source_plan jsonb;expected_producer jsonb;metadata jsonb;tr media_transcripts%ROWTYPE;operation_row public_operations%ROWTYPE;detail_row media_ingest_operations%ROWTYPE;manual_payload jsonb;manual_impact jsonb;impact_ranges jsonb;impact_body jsonb;manual_impact_text text;affected_output jsonb;
- replaced text[];adopted_ids text[];adoption record;adopted_receipt output_normalization_receipts%ROWTYPE;adopted_artifact media_artifacts%ROWTYPE;adopted_rights asset_rights_snapshots%ROWTYPE;
+ replaced text[];adopted_ids text[];adoption record;adopted_receipt output_normalization_receipts%ROWTYPE;adopted_artifact media_artifacts%ROWTYPE;adopted_rights asset_rights_snapshots%ROWTYPE;written_now boolean;
 BEGIN
  SELECT * INTO STRICT s FROM project_output_states WHERE id=p_state AND "schemaVersion"='project-output-state/v3';
  SELECT * INTO STRICT v FROM project_versions WHERE id=s."resultVersionId" AND "workspaceId"=s."workspaceId" AND "projectId"=s."projectId" AND "outputContractVersion"=3;
@@ -120,6 +120,8 @@ BEGIN
      LATERAL jsonb_array_elements(CASE WHEN source_entry.element#>>'{consumption,status}'='materialized' THEN source_entry.element#>'{consumption,materialization,document,normalizations}' ELSE '[]'::jsonb END) AS source_n(element)
      WHERE source_n.element#>>'{document,id}'=a.element->>'receiptId' OR source_n.element#>>'{document,source,artifactId}'=a.element->>'sourceArtifactId')) THEN
   RAISE EXCEPTION 'W66v3 child normalization lineage differs' USING ERRCODE='23514';END IF;
+ -- Currency is a property of the write: only the transaction that inserted this Version row requires its adoptions' rights to be current.
+ SELECT pv.xmin::text::bigint=(txid_current() % 4294967296) INTO written_now FROM project_versions pv WHERE pv.id=v.id;
  FOR adoption IN SELECT a.element FROM jsonb_array_elements(o->'adoptions') AS a(element) LOOP
   SELECT * INTO STRICT adopted_receipt FROM output_normalization_receipts WHERE id=adoption.element->>'receiptId' AND "receiptHash"=adoption.element->>'receiptHash'
    AND "projectId"=s."projectId" AND "workspaceId"=s."workspaceId" AND "sourceArtifactId"=adoption.element->>'sourceArtifactId'
@@ -130,8 +132,8 @@ BEGIN
   IF adopted_rights."snapshotHash" IS DISTINCT FROM adoption.element#>>'{rights,snapshotHash}' OR adopted_rights.sequence > (adoption.element#>>'{rights,revision}')::integer
    OR adopted_rights.status IS DISTINCT FROM 'approved' OR (adopted_rights."expiresAt" IS NOT NULL AND adopted_rights."expiresAt"<=v."createdAt") THEN
    RAISE EXCEPTION 'W66v3 adopted observation rights differ from the snapshot they name' USING ERRCODE='23514';END IF;
-  -- Currency: only the transaction that writes the Version (this guard then runs from a trigger) requires that snapshot to still be current.
-  IF pg_trigger_depth()>0 THEN
+  -- Currency: only the transaction that wrote this Version requires that snapshot to still be current.
+  IF written_now THEN
    SELECT * INTO STRICT adopted_artifact FROM media_artifacts WHERE id=adopted_receipt."sourceArtifactId" AND "workspaceId"=s."workspaceId" AND status='available';
    IF adopted_artifact."currentRightsSnapshotId" IS DISTINCT FROM adopted_rights.id OR adopted_artifact."rightsRevision" IS DISTINCT FROM (adoption.element#>>'{rights,revision}')::integer
     OR (adopted_rights."expiresAt" IS NOT NULL AND adopted_rights."expiresAt"<=clock_timestamp()) THEN

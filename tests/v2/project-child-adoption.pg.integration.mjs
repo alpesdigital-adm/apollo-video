@@ -175,6 +175,15 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
     await commit(second.parent, second.bundle)
     assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId, second.bundle.version.id)
 
+    // ---- 2b. rights move on after a Version is sealed: its adoption stays valid history, and the project keeps committing.
+    // Any write to the project re-asserts the head State at COMMIT; only the Version being written must see current rights.
+    await rights(recordings['cam-c'].names.sourceArtifactId, 'cam-c-source-again', 'approved', 2)
+    await db.v2Project.update({ where: { id: projectId }, data: { name: 'Renamed after an adopted source changed rights' } })
+    const carried = await sealChild('carried', ['cam-a', 'cam-c'], recordings)
+    assert.deepEqual(carried.bundle.origin.adoptions, [], 'the head already observes both recordings: nothing to adopt')
+    await commit(carried.parent, carried.bundle)
+    assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId, carried.bundle.version.id)
+
     // ---- 3. fail-closed (each leaves no version, no Command and the head where it was)
     const guarded = await sealChild('guard', ['cam-a', 'cam-b'], recordings)
     const before = await residue(guarded.bundle)

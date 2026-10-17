@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { Prisma, PrismaClient } from '../../../generated/prisma-v2/index.js'
 import { cancelPublicOperationService } from '../../../src/v2/application/cancel-public-operation.ts'
 import { createAssetRightsSnapshot } from '../../../src/v2/domain/asset-rights.ts'
-import { rebuildRetiredContractOneVersion } from '../../../src/v2/domain/project-version.ts'
+import { commitSealedChild, RECORDING_ALLOWED_USES } from './pg-output-world.mjs'
 import { calculateVersionHash } from '../../../src/v2/application/version-hash.ts'
 import { DomainError } from '../../../src/v2/domain/errors.ts'
 import { stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
@@ -140,7 +140,8 @@ export function createFenceRightsSnapshot(world, sequence, expiresAt, label) {
   return createAssetRightsSnapshot({
     id: `rights-${label}`, workspaceId: world.workspaceId,
     artifactId: world.sourceId, sequence,
-    draft: { status: 'approved', allowedUses: ['editing'],
+    // The grants a recording carries (editing among them): a sealed Version can only be committed over a source whose rights allow it.
+    draft: { status: 'approved', allowedUses: [...RECORDING_ALLOWED_USES],
       prohibitedUses: [], ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
       sourceNote: `Controlled publish fence fixture ${label}`,
       consent: { status: 'not-required', allowedUses: [] } },
@@ -169,18 +170,13 @@ export function fenceRightsRow(rights) {
   }
 }
 
-export function createFenceChildVersion(world, base, editPlanHash, id) {
-  const sequence = base.sequence + 1
-  return rebuildRetiredContractOneVersion({ id, workspaceId: world.workspaceId,
-    projectId: world.projectId, sequence, parentVersionId: base.id,
-    snapshotRefs: { ...(base.briefSnapshotId ? { brief: base.briefSnapshotId } : {}),
-      ...(base.treatmentSnapshotId ? { treatment: base.treatmentSnapshotId } : {}),
-      ...(base.storySnapshotId ? { story: base.storySnapshotId } : {}),
-      editPlan: base.editPlanSnapshotId, policies: base.policiesSnapshotId },
-    baseHash: calculateVersionHash({ projectId: world.projectId, sequence,
-      parentVersionId: base.id, previousBaseHash: base.baseHash,
-      editPlanHash }), createdBy: base.createdBy, createdAt: new Date().toISOString(),
-  })
+/**
+ * A real sealed child of the world's head, stored but NOT made the head: the Version the head race moves the project to.
+ * (The world's actor is the author of its Command; the head is moved afterwards, under the lock, by the race itself.)
+ */
+export async function commitFenceChildVersion(db, world, label) {
+  return commitSealedChild(db, { workspaceId: world.workspaceId, projectId: world.projectId, actor: world.actor,
+    suffix: `${label}-head-${randomUUID().slice(0, 12)}`, moveHead: false })
 }
 
 export async function installExpiringRights(db, world, expiresAt, label) {
@@ -261,24 +257,7 @@ export async function verifyProducerPublishFences({ db, world, repository, Repos
           return { beforeExpiry, afterExpiry }
         }
       } else {
-        const base = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: world.versionId } })
-        const editPlan = await db.v2ProjectSnapshot.findUniqueOrThrow({
-          where: { id: base.editPlanSnapshotId },
-        })
-        childVersionId = `${label}-head-${randomUUID()}`
-        const child = createFenceChildVersion(world, base, editPlan.contentHash,
-          childVersionId)
-        await db.v2ProjectVersion.create({ data: {
-          id: child.id, workspaceId: child.workspaceId, projectId: child.projectId,
-          sequence: child.sequence, parentVersionId: child.parentVersionId,
-          briefSnapshotId: child.snapshotRefs.brief ?? null,
-          treatmentSnapshotId: child.snapshotRefs.treatment ?? null,
-          storySnapshotId: child.snapshotRefs.story ?? null,
-          editPlanSnapshotId: child.snapshotRefs.editPlan,
-          policiesSnapshotId: child.snapshotRefs.policies,
-          baseHash: child.baseHash, createdBy: child.createdBy,
-          createdAt: new Date(child.createdAt),
-        } })
+        childVersionId = (await commitFenceChildVersion(db, world, `${label}-${kind}`)).version.id
         lockedTable = 'projects'; lockedId = world.projectId
         whileLocked = (tx) => tx.v2Project.update({ where: { id: world.projectId },
           data: { currentVersionId: childVersionId } })

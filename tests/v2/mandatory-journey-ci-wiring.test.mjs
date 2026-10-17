@@ -326,7 +326,7 @@ test('W61 perception CI preserves supervised mandatory coverage and its exact fa
   const face = await read('tests/v2/prisma-face-producer.integration.mjs')
   const selected = [...face.matchAll(/^test\('([^']+)'/gm)].map((match) => match[1]).filter((name) => /publish-race|face control/.test(name))
   assert.deepEqual(selected, [
-    'W61 publish-race fixture hydrates a real child and rights expiry offline',
+    'W61 publish-race rights fixtures hydrate and expire offline',
     'W61 publish-race matcher checks typed codes, not error prose',
     'W61 face control uses scoped canonical audit before the repository transaction',
   ])

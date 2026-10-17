@@ -18,6 +18,7 @@ import { PrismaPerceptionProducerEnvelopeRepository } from '../../src/v2/infrast
 import { PrismaTemporalProducerEnvelopeRepository } from '../../src/v2/infrastructure/prisma/temporal-producer-envelope-repository.ts'
 import { PrismaFaceProducerEnvelopeRepository } from '../../src/v2/infrastructure/prisma/face-producer-envelope-repository.ts'
 import { PrismaAssetRightsRepository } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
+import { PrismaProjectMediaRepository } from '../../src/v2/infrastructure/prisma/project-media-repository.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
 import { assertDatabaseClockBefore, runProducerPublishLockRace, waitForDatabaseClock } from './helpers/producer-publish-lock-race.mjs'
@@ -121,7 +122,7 @@ test('W61 PostgreSQL analysis admission and claims use the ingest-produced editi
     const operations = new PrismaPublicOperationRepository(db)
     try {
       world = await seedPerceptionProducerContext(db, { seedRights: false })
-      const { workspaceId, projectId, versionId, sourceId, clientId, suffix } = world
+      const { workspaceId, projectId, sourceId, clientId, suffix } = world
       const rightsRepository = new PrismaAssetRightsRepository(db)
       const auditContext = createExternalAuditContext({ clientId, credentialId: `ingest-rights-${suffix}`,
         workspaceId, environment: 'production' })
@@ -165,7 +166,8 @@ test('W61 PostgreSQL analysis admission and claims use the ingest-produced editi
         processor: { async normalize() { normalizationStopped = true;
           throw new DomainError('INVALID_MEDIA_ARTIFACT', 'Controlled ingest rights stage complete', { code: stopCode }) } },
         providers: { async resolveTranscription() { assert.fail('this proof stops before transcription') } },
-        projectMedia: { async markIngestFailed() { terminalProjectCalls += 1 } },
+        // The worker refuses a project that has no explicit output variant before any effect: it reads the real project.
+        projectMedia: { readProject: (input) => new PrismaProjectMediaRepository(db).readProject(input), async markIngestFailed() { terminalProjectCalls += 1 } },
       })
       assert.deepEqual(await ingest('controlled-ingest-rights-worker'), { operationId: ingestId, status: 'failed' })
       assert.equal(terminalError?.code, stopCode.toLowerCase())
@@ -178,12 +180,14 @@ test('W61 PostgreSQL analysis admission and claims use the ingest-produced editi
       receipt.rights = { snapshotId: ingestRights.id, snapshotHash: ingestRights.snapshotHash,
         uses: ingestRights.allowedUses, consent: ingestRights.consent, sourceNote: ingestRights.sourceNote,
         terminalSentinel: terminalError.code }
+      // The ingest stage wrote the grant; only now can a Version play the recording (its child Command adopts the receipt).
+      await world.sealHead()
       const modalities = [
         ['ocr', PrismaPerceptionProducerRequestContextRepository, PrismaPerceptionProducerEnvelopeRepository, enqueuePerceptionProducerRunService],
         ['temporal', PrismaTemporalProducerRequestContextRepository, PrismaTemporalProducerEnvelopeRepository, enqueueTemporalProducerRunService],
         ['face', PrismaFaceProducerRequestContextRepository, PrismaFaceProducerEnvelopeRepository, enqueueFaceProducerRunService],
       ]
-      const base = { workspaceId, projectId, projectVersionId: versionId, sourceArtifactId: sourceId, actor }
+      const base = { workspaceId, projectId, projectVersionId: world.versionId, sourceArtifactId: sourceId, actor }
       const setRights = async (change = {}) => {
         const artifact = await db.v2MediaArtifact.findUniqueOrThrow({ where: { id: sourceId } })
         return setAssetRightsService({ repository: rightsRepository, clock: () => new Date(),

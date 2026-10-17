@@ -27,25 +27,16 @@ import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import { publicSchemaDocument } from '../../src/v2/public-api/schema-examples.ts'
 import { presentPublicOperationV2, presentSuccess } from '../../src/v2/public-api/presenters.ts'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
-import { createFenceChildVersion, createFenceRightsSnapshot, expectProducerPublishErrorCode, fenceRightsRow, verifyProducerPublishFences } from './helpers/producer-publish-lock-race.mjs'
+import { createFenceRightsSnapshot, expectProducerPublishErrorCode, fenceRightsRow, verifyProducerPublishFences } from './helpers/producer-publish-lock-race.mjs'
 
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const expectedVideoSha = 'a6f255543f3b135ab51a463865625a09b5672d352cc97ac175de11619a5f38f7'
 
-test('W61 publish-race fixture hydrates a real child and rights expiry offline', () => {
+// The head child of the race is a real sealed Version now (commitFenceChildVersion), proven by the PostgreSQL race itself.
+test('W61 publish-race rights fixtures hydrate and expire offline', () => {
   const world = { workspaceId: 'workspace-fence-offline', projectId: 'project-fence-offline',
     sourceId: 'artifact-fence-offline' }
-  const child = createFenceChildVersion(world, { id: 'version-fence-base', sequence: 1,
-    briefSnapshotId: 'brief-fence', treatmentSnapshotId: null, storySnapshotId: null,
-    editPlanSnapshotId: 'edit-fence', policiesSnapshotId: 'policies-fence',
-    baseHash: 'b'.repeat(64), createdBy: 'owner-fence' }, 'c'.repeat(64),
-  'version-fence-child')
-  assert.equal(child.sequence, 2)
-  assert.equal(child.parentVersionId, 'version-fence-base')
-  assert.equal(child.commandId, undefined)
-  assert.equal(child.snapshotRefs.editPlan, 'edit-fence')
-  assert.notEqual(child.baseHash, 'b'.repeat(64))
   const expiresAt = new Date(Date.now() + 10_000)
   const rights = createFenceRightsSnapshot(world, 2, expiresAt, 'offline')
   const renewed = createFenceRightsSnapshot(world, 3, null, 'offline-renewed')

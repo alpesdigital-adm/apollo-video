@@ -1,21 +1,21 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { writeSync } from 'node:fs'
-import { calculateCanonicalHash,stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
-import { createExternalAuditContext, materializeActorAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
-import { createOutputSpecRevisionBody } from '../../../src/v2/domain/output-spec-revision.ts'
-import { createOutputVariantCommand } from '../../../src/v2/domain/output-variant-command.ts'
-import { createQueuedPublicOperation,startPublicOperationAttempt,advancePublicOperationPhase } from '../../../src/v2/domain/public-operation.ts'
-import { createMediaTranscript } from '../../../src/v2/domain/media-transcript.ts'
-import { createMediaArtifactManifest,createMediaArtifactManifestV2 } from '../../../src/v2/domain/media-artifact.ts'
-import { validateOutputObservedProbeV3,sealOutputNormalizationV3 } from '../../../src/v2/domain/output-materialization.ts'
-import { observedAudioFromVideoProbeV3 } from '../../../src/v2/infrastructure/media/video-probe.ts'
-import { compileInitialSourceEditPlan } from '../../../src/v2/application/apply-editorial-cut-command.ts'
-import { createProjectSnapshot } from '../../../src/v2/domain/project-snapshot.ts'
-import { buildOperationalOutputVersionBundleV3,buildCreationOutputVersionBundleV2 } from '../../../src/v2/domain/output-version-bundle.ts'
-import { createProjectCreationOutputCommandV2,normalizeProjectCreationIntentV2 } from '../../../src/v2/domain/project-creation-command.ts'
-import { createProductionBrief } from '../../../src/v2/domain/production-brief.ts'
-import { duplicateProjectService } from '../../../src/v2/application/duplicate-project.ts'
+const { calculateCanonicalHash, stableSerialize } = await import('../../../src/v2/domain/canonical-hash.ts')
+const { createExternalAuditContext, materializeActorAuditContext } = await import('../../../src/v2/application/authenticate-api-client.ts')
+const { createOutputSpecRevisionBody } = await import('../../../src/v2/domain/output-spec-revision.ts')
+const { createOutputVariantCommand } = await import('../../../src/v2/domain/output-variant-command.ts')
+const { createQueuedPublicOperation, startPublicOperationAttempt, advancePublicOperationPhase } = await import('../../../src/v2/domain/public-operation.ts')
+const { createMediaTranscript } = await import('../../../src/v2/domain/media-transcript.ts')
+const { createMediaArtifactManifest, createMediaArtifactManifestV2 } = await import('../../../src/v2/domain/media-artifact.ts')
+const { validateOutputObservedProbeV3, sealOutputNormalizationV3 } = await import('../../../src/v2/domain/output-materialization.ts')
+const { observedAudioFromVideoProbeV3 } = await import('../../../src/v2/infrastructure/media/video-probe.ts')
+const { compileInitialSourceEditPlan } = await import('../../../src/v2/application/apply-editorial-cut-command.ts')
+const { createProjectSnapshot } = await import('../../../src/v2/domain/project-snapshot.ts')
+const { buildOperationalOutputVersionBundleV3, buildCreationOutputVersionBundleV2 } = await import('../../../src/v2/domain/output-version-bundle.ts')
+const { createProjectCreationOutputCommandV2, normalizeProjectCreationIntentV2 } = await import('../../../src/v2/domain/project-creation-command.ts')
+const { createProductionBrief } = await import('../../../src/v2/domain/production-brief.ts')
+const { duplicateProjectService } = await import('../../../src/v2/application/duplicate-project.ts')
 // Fixed, payload-free diagnostics for the supervised one-case investigation.
 // The synchronous fd2 sink does not retain a stream or create another process.
 // Diagnostic sink failure never substitutes for the actual constructor error.
@@ -74,8 +74,10 @@ export function recordingNames(slug='ingest3') {
 }
 function normalization(sourceProjectId,scope,options={}) {
  const names=recordingNames(options.slug)
+ // A suite whose worker reads the source bytes back names the real file's key, digest and size; every other suite keeps the controlled facts.
+ const sourceKey=options.sourceKey??names.sourceKey,sourceSha=options.sourceSha256??names.sourceSha,sourceBytes=options.sourceByteSize??1000
  const sourceProbe=observed(options),derivativeProbe=observed({...options,derivative:true})
- const sourceManifest=createMediaArtifactManifest({artifactKey:names.sourceKey,artifactSha256:names.sourceSha,byteSize:1000,mediaType:'video',container:'mp4',recipe:{id:'direct-upload',version:'1.0.0',parameters:{mimeType:'video/mp4'}},
+ const sourceManifest=createMediaArtifactManifest({artifactKey:sourceKey,artifactSha256:sourceSha,byteSize:sourceBytes,mediaType:'video',container:'mp4',recipe:{id:'direct-upload',version:'1.0.0',parameters:{mimeType:'video/mp4'}},
   probe:{width:sourceProbe.width,height:sourceProbe.height,duration:(options.durationFrames??60)/(options.nativeFps??30),fps:options.nativeFps??30}})
  const derivativeManifest=createMediaArtifactManifestV2({artifactKey:names.derivativeKey,artifactSha256:names.derivativeSha,byteSize:2000,mediaType:'video',container:'mp4',
   recipe:{id:'editing-proxy',version:'1.2.0',parameters:{normalizationPolicy:'output-normalization-receipt/v3',maxWidth:1280,maxHeight:1280,videoCodec:'h264',audioCodec:'aac'}},
@@ -86,7 +88,7 @@ function normalization(sourceProjectId,scope,options={}) {
   sourceProbe,derivativeProbe,audioProbes:{source:observedAudioFromVideoProbeV3(sourceProbe),derivative:observedAudioFromVideoProbeV3(derivativeProbe)},
   execution:{provider:'ffmpeg',recipeVersion:'media-normalization-execution/2026-10-14-v3',binarySha256:'f'.repeat(64),argv:['-hide_banner','-loglevel','error','-y','-i','/controlled/'+names.slug+'/source.mp4','-map','0:v:0','-map','0:a:0?',
    '-vf','scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos','-c:v','libx264','-preset','veryfast','-crf','24','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-ar','48000','-movflags','+faststart','/controlled/'+names.slug+'/derivative.mp4'],
-   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:names.sourceSha,sourceSha256After:names.sourceSha,derivativeSha256:names.derivativeSha,autorotate:true},createdAt:options.createdAt??'2026-10-14T12:00:02.000Z'}))
+   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:sourceSha,sourceSha256After:sourceSha,derivativeSha256:names.derivativeSha,autorotate:true},createdAt:options.createdAt??'2026-10-14T12:00:02.000Z'}))
 }
 export async function prepareEditorialSourceFixture(creation,receipt,options={}) {
  const finishSource=editorialFixturePhaseStart('prepare-source')
