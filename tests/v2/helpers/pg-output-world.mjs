@@ -16,6 +16,7 @@
 // Pure counterpart: output-world.mjs (the same services on an in-memory repository).
 import { randomUUID } from 'node:crypto'
 
+import { createExternalAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
 import { createProjectService, createProjectOutputVariantService } from '../../../src/v2/application/create-project.ts'
 import {
   PrismaCreationOutputBundleRepositoryV2,
@@ -31,6 +32,30 @@ export function uniqueRun(prefix) {
 }
 
 /**
+ * The authenticated actor the application services take (the shape `authenticateApiClient` yields), for a PG suite that
+ * has no HTTP layer. `ensureWorkspaceActor` creates the workspace and API client rows it names.
+ */
+export function testActor({ workspaceId, clientId, credentialId = `${clientId}-credential`, environment = 'sandbox', scopes = ['projects:write', 'media:write'] }) {
+  const auditContext = createExternalAuditContext({ workspaceId, clientId, credentialId, environment })
+  return Object.freeze({ ...auditContext, auditContext, scopes: new Set(scopes), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' })
+}
+
+/**
+ * The rows a sealed Command's author must have: the workspace and the API client the Command names (the creation
+ * Command and every edit Command carry foreign keys to both). Created when missing, never replaced.
+ */
+export async function ensureWorkspaceActor(client, { workspaceId, actor, createdAt = new Date() }) {
+  if (!(await client.v2Workspace.findUnique({ where: { id: workspaceId }, select: { id: true } }))) {
+    await client.v2Workspace.create({ data: { id: workspaceId, slug: workspaceId, name: workspaceId, createdAt, updatedAt: createdAt } })
+  }
+  if (!(await client.v2ApiClient.findFirst({ where: { id: actor.clientId, workspaceId }, select: { id: true } }))) {
+    await client.v2ApiClient.create({ data: { id: actor.clientId, workspaceId, name: actor.clientId, allowedEnvironmentsJson: JSON.stringify([actor.environment]),
+      scopeGrantsJson: JSON.stringify([...actor.scopes]), createdBy: actor.clientId, createdAt } })
+  }
+}
+
+/**
  * Creates the root and, unless `variant` is false, one explicit output variant on it.
  *
  * `ids` pins identities the suite already names (`{ project: 'my-project' }`); every other kind is allocated from
@@ -42,6 +67,7 @@ export async function seedSealedProject(client, {
   locale = 'pt-BR', variant = {}, at = () => new Date(),
 }) {
   const allocate = uniqueRun(prefix)
+  await ensureWorkspaceActor(client, { workspaceId, actor })
   const createId = (kind) => ids[kind] ?? allocate.id(kind)
   const dependencies = (repository) => ({ repository, clock: at, createId, createEventId: randomUUID })
   const created = await createProjectService(dependencies(new PrismaCreationOutputBundleRepositoryV2(client)))({
@@ -60,4 +86,29 @@ export async function seedSealedProject(client, {
   return Object.freeze({
     projectId, root, variant: bundle, head: bundle, variantId: entry.variantId, run: allocate.run, createId,
   })
+}
+
+/** The row of an AssetRightsSnapshot, every column its integrity check reads back (hydrateAssetRights recomputes the seal). */
+export function assetRightsRow(snapshot) {
+  const list = (value) => (value === undefined ? null : JSON.stringify(value))
+  return {
+    id: snapshot.id, workspaceId: snapshot.workspaceId, artifactId: snapshot.artifactId, sequence: snapshot.sequence,
+    schemaVersion: snapshot.schemaVersion, snapshotHash: snapshot.snapshotHash, owner: snapshot.owner ?? null, license: snapshot.license ?? null,
+    status: snapshot.status, allowedUsesJson: JSON.stringify(snapshot.allowedUses), prohibitedUsesJson: JSON.stringify(snapshot.prohibitedUses),
+    allowedWorkspaceIdsJson: JSON.stringify(snapshot.allowedWorkspaceIds), allowedMarketsJson: list(snapshot.allowedMarkets),
+    allowedLocalesJson: list(snapshot.allowedLocales), allowedSyntheticOperationsJson: list(snapshot.allowedSyntheticOperations),
+    expiresAt: snapshot.expiresAt ? new Date(snapshot.expiresAt) : null, consentStatus: snapshot.consent.status,
+    consentAllowedUsesJson: JSON.stringify(snapshot.consent.allowedUses), consentAllowedMarketsJson: list(snapshot.consent.allowedMarkets),
+    consentAllowedLocalesJson: list(snapshot.consent.allowedLocales), consentSyntheticOperationsJson: list(snapshot.consent.allowedSyntheticOperations),
+    consentExpiresAt: snapshot.consent.expiresAt ? new Date(snapshot.consent.expiresAt) : null,
+    consentDocumentArtifactId: snapshot.consent.documentArtifactId ?? null, sourceNote: snapshot.sourceNote ?? null,
+    createdByType: snapshot.createdBy.type, createdById: snapshot.createdBy.id, createdAt: new Date(snapshot.createdAt),
+  }
+}
+
+/** Stores a rights snapshot and makes it the artifact's current one at its sequence (the audited pointer and revision). */
+export async function persistCurrentRights(client, snapshot) {
+  await client.v2AssetRightsSnapshot.create({ data: assetRightsRow(snapshot) })
+  await client.v2MediaArtifact.update({ where: { id: snapshot.artifactId }, data: { currentRightsSnapshotId: snapshot.id, rightsRevision: snapshot.sequence } })
+  return snapshot
 }

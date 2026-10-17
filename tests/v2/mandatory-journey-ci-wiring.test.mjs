@@ -823,6 +823,7 @@ const KNOWN_UNRUN_SUITES = [
   // W66 PostgreSQL proofs: opt-in by APOLLO_RUN_W66_* variables, run only by the local supervisor
   // (frozen source and inputs, disposable cluster, backend accounting). CI seeds are not yet canonical,
   // so wiring them waits for the writer cutover; the supervised results are the proof until then.
+  { file: 'tests/v2/disposable-database.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/prisma-deferred-commit-semantics.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/project-child-adoption.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
   { file: 'tests/v2/project-creation-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG },
