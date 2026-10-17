@@ -319,6 +319,7 @@ import { requireOutputHash } from './output-spec-revision.ts'
 import type { ProjectVersionV2, ProjectVersionV3 } from './project-version.ts'
 import type { ProjectOutputStateV2, ProjectOutputStateV3 } from './project-output-state.ts'
 import { createEditorialSourceBindingV1 } from './output-materialization.ts'
+import { CHILD_COMMAND_TRANSITIONS, type ChildCommandOriginV3 } from './output-child-command.ts'
 import type { EditorialCutPayloadV3 } from './editorial-cut-impact.ts'
 export type OperationalOutputOriginV3 = Readonly<
   { kind:'create-output-variant'|'revise-output-spec'; result:ReturnType<typeof createOutputVariantCommand> } |
@@ -329,7 +330,8 @@ export type OperationalOutputOriginV3 = Readonly<
   { kind:'editorial-cut-command'; command:EditCommand<EditorialCutPayloadV3>; audit:ApiAccessAuditContext; requestFingerprint:string } |
   { kind:'inherit-command'; command:EditCommand<PersistedManualEditPayload>; audit:ApiAccessAuditContext; requestFingerprint:string } |
   { kind:'restore-command'; command:EditCommand<PersistedManualEditPayload>; audit:ApiAccessAuditContext; requestFingerprint:string;
-    target:Readonly<{versionId:string;baseHash:string;stateId:string;stateHash:string}> }
+    target:Readonly<{versionId:string;baseHash:string;stateId:string;stateHash:string}> } |
+  ChildCommandOriginV3
 >
 export function validateOperationalOutputOriginV3(input: OperationalOutputOriginV3,
   base: Readonly<{version:ProjectVersionV2|ProjectVersionV3;state:ProjectOutputStateV2|ProjectOutputStateV3}>,
@@ -355,6 +357,30 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
     const {schemaVersion:_schema,transcriptHash:_seal,...facts}=t.document,fresh=createMediaTranscript(facts)
     assertDomain(fresh.transcriptHash===t.document.transcriptHash && stableSerialize(fresh)===stableSerialize(t.document),
       'INVALID_COMMAND','Ingest transcript authority differs')
+  } else if(input.kind==='child-command') {
+    exact(input,['kind','command','audit','requestFingerprint','replaces'])
+    const c=input.command,transition=CHILD_COMMAND_TRANSITIONS[c.type as keyof typeof CHILD_COMMAND_TRANSITIONS]
+    assertDomain(transition!==undefined,'INVALID_COMMAND','Command type has no declared child output transition')
+    assertDomain(c.workspaceId===allocation.workspaceId && c.projectId===allocation.projectId &&
+      c.baseVersionId===base.version.id && c.baseHash===base.version.baseHash &&
+      c.author.id===allocation.createdBy && c.createdAt===allocation.createdAt,
+      'INVALID_COMMAND','Child Command scope/base/actor/time differs')
+    const {schemaVersion:_schema,commandHash:_seal,...body}=c
+    assertDomain(createEditCommand({...body,type:c.type} as unknown as Parameters<typeof createEditCommand>[0]).commandHash===c.commandHash,
+      'INVALID_COMMAND','Child Command historical hash differs')
+    if(c.type==='manual-edit') {
+      // Selection and restore keep their dedicated, fully re-derived origins.
+      const manual=c.payload as Partial<PersistedManualEditPayload>
+      assertDomain(manual.action==='apply' && manual.operation!==undefined && manual.operation.kind!=='select',
+        'INVALID_COMMAND','Manual selection and restore use their dedicated origin')
+    }
+    if(c.author.type==='api-client') {
+      assertDomain(input.audit!==null && input.audit.workspaceId===allocation.workspaceId && input.audit.clientId===c.author.id &&
+        input.audit.delegatedUserId===c.author.delegatedUserId,'INVALID_COMMAND','Child Command external actor audit differs')
+    } else assertDomain(input.audit===null,'INVALID_COMMAND','Only an external actor carries a credential audit')
+    requireOutputHash(input.requestFingerprint,'child request fingerprint')
+    assertDomain(Array.isArray(input.replaces) && input.replaces.every((kind,index)=>transition!.replaces.includes(kind) &&
+      (index===0||input.replaces[index-1]!<kind)),'INVALID_COMMAND','Child replacement kinds exceed the declared effect or are unsorted')
   } else {
     const result=input.kind==='create-output-variant'||input.kind==='revise-output-spec'?input.result:null
     const command=result?.command??('command' in input?input.command:null)

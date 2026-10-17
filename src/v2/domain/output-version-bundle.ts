@@ -264,6 +264,7 @@ import { createOutputPlanAuthority } from './project-output-state.ts'
 import { materializeManualEditPlan, materializeManualRestorePlan } from './manual-editing.ts'
 import { createManualCommandImpact } from './command-impact.ts'
 import { materializeEditorialCutPlanV3, createEditorialAudioProjectionV1, createEditorialCutImpactV2 } from './editorial-cut-impact.ts'
+import { CHILD_COMMAND_TRANSITIONS } from './output-child-command.ts'
 
 export type OperationalOutputParentV3 = Readonly<CreationOutputVersionBundleV2|OperationalOutputVersionBundleV3>
 export interface OperationalOutputVersionBundleV3 {
@@ -282,6 +283,8 @@ export interface BuildOperationalOutputVersionBundleV3 {
   /** Restore carries an exact factual target, never latest/ancestor inference. */
   restoreTarget:OperationalOutputParentV3|null
   editPlanSnapshot:Readonly<ProjectSnapshot>
+  /** Non-output snapshots a child Command replaces, exactly the kinds its origin declares. */
+  replacementSnapshots?:readonly Readonly<ProjectSnapshot>[]
   normalizations:readonly SealedOutputNormalizationV3[]
   materializationIds:Readonly<Record<string,string>>
 }
@@ -406,11 +409,28 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     assertDomain(input.normalizations.length===factual.size && new Set(input.normalizations.map(n=>n.document.id)).size===factual.size &&
       input.normalizations.every(n=>factual.has(n.document.id) && stableSerialize(n)===stableSerialize(factual.get(n.document.id))),
       'INVALID_COMMAND','Manual child must reuse exact source normalization observations')
+  } else if(origin.kind==='child-command') {
+    const effect=CHILD_COMMAND_TRANSITIONS[origin.command.type as keyof typeof CHILD_COMMAND_TRANSITIONS]!
+    if(effect.planEffect==='preserves-plan')assertDomain(
+      calculateOutputCanonicalHash(semanticsV3(operationalBundlePlanV3(source)))===calculateOutputCanonicalHash(semanticsV3(edit)),
+      'INVALID_COMMAND','Child Command declared an unchanged plan but changed its semantics')
+    const parentNormalizations=parent.state.document.schemaVersion==='project-output-state/v3'?
+      parent.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[]):[]
+    const factual=new Map(parentNormalizations.map(n=>[n.document.id,n]))
+    assertDomain(input.normalizations.length===factual.size && new Set(input.normalizations.map(n=>n.document.id)).size===factual.size &&
+      input.normalizations.every(n=>factual.has(n.document.id) && stableSerialize(n)===stableSerialize(factual.get(n.document.id))),
+      'INVALID_COMMAND','Child Command must reuse the exact parent normalization observations')
   } else if(origin.kind!=='ingest-operation'&&origin.kind!=='editorial-cut-command')assertDomain(
     calculateOutputCanonicalHash(semanticsV3(operationalBundlePlanV3(source)))===calculateOutputCanonicalHash(semanticsV3(edit)),
     'INVALID_COMMAND','Origin changed plan semantics outside its declared effect')
   const nonOutput=source.schemaVersion==='project-creation-output-bundle/v2'?source.command.payload.snapshots:source.snapshots
-  const snapshots=nonOutput.filter(s=>s.kind!=='edit-plan').map(s=>snapshotV3(s,a.workspaceId,a.projectId))
+  let snapshots=nonOutput.filter(s=>s.kind!=='edit-plan').map(s=>snapshotV3(s,a.workspaceId,a.projectId))
+  const declaredReplacements:readonly string[]=origin.kind==='child-command'?origin.replaces:[]
+  const replacements=(input.replacementSnapshots??[]).map(s=>snapshotV3(s,a.workspaceId,a.projectId))
+  assertDomain(replacements.length===declaredReplacements.length && new Set(replacements.map(s=>s.kind)).size===replacements.length &&
+    replacements.every(s=>declaredReplacements.includes(s.kind) && s.createdAt===a.createdAt && !snapshots.some(x=>x.id===s.id) && s.id!==edit.id),
+    'INVALID_COMMAND','Replacement snapshots differ from the declared child effect')
+  snapshots=[...snapshots.filter(s=>!declaredReplacements.includes(s.kind)),...replacements]
   assertDomain(snapshots.some(s=>s.kind==='brief') && snapshots.some(s=>s.kind==='policies'),
     'INVALID_PROJECT_VERSION','Child3 requires actual non-output snapshots')
   let entries:OutputStateEntryV3[]=[]
@@ -423,6 +443,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
   })
   else assertDomain(source.state.document.entries.length===0,'PRECONDITION_REQUIRED',
     'Fork2 source revisions require explicit target revision materialization before child3')
+  if(origin.kind==='child-command')assertDomain(entries.length>0,'PRECONDITION_REQUIRED','A child Command requires an explicit output variant')
   let provenance:ProjectOutputStateBodyV3['provenance'],transition:ProjectOutputStateBodyV3['transition'],commandId:string|null
   let producerBody:Record<string,OutputJson>
   if(origin.kind==='create-output-variant'||origin.kind==='revise-output-spec') {

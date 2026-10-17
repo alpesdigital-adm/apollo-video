@@ -231,11 +231,7 @@ export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBun
           for (const snapshot of p.snapshots) await insert(tx,'project_snapshots',{id:snapshot.id,workspaceId:snapshot.workspaceId,projectId:snapshot.projectId,kind:snapshot.kind,
             schemaVersion:snapshot.contentSchemaVersion,contentJson:snapshot.contentJson,contentHash:snapshot.contentHash,createdAt:new Date(snapshot.createdAt)})
           const snapshotRefs=p.allocations.snapshotRefs
-          await insert(tx,'project_versions',{id:v.id,workspaceId:v.workspaceId,projectId:v.projectId,sequence:1,parentVersionId:null,commandId:null,
-            forkedFromProjectId:kernel?.source.version.projectId ?? null,forkedFromVersionId:kernel?.source.version.id ?? null,
-            briefSnapshotId:snapshotRefs.brief,policiesSnapshotId:snapshotRefs.policies,editPlanSnapshotId:snapshotRefs['edit-plan'],treatmentSnapshotId:snapshotRefs.treatment ?? null,storySnapshotId:snapshotRefs.story ?? null,
-            baseHash:v.baseHash,createdBy:v.createdBy,createdAt:date,outputContractVersion:2,outputStateId:s.id,outputStateHash:bundle.state.stateHash,
-            outputBaseHashJson:bundle.outputBaseHashJson,outputVersionJson:encode(v)})
+          await persistCreationVersionV2(tx,bundle,kernel?{projectId:kernel.source.version.projectId,versionId:kernel.source.version.id}:null)
           const {commandHash:_commandHash,payload:_payload,audit:_audit,author:_author,...commandBody}=command
           void _commandHash;void _payload;void _audit;void _author
           const historicOwned=fork?.schemaVersion==='project-fork-derivation/v2'?forkOwnedIdentities(fork.document.kernel.document.source,fork.document.kernel.document.sourceRenderablePlanSnapshot):[]
@@ -323,7 +319,7 @@ export class PrismaCreationOutputBundleRepositoryV2 implements CreationOutputBun
 
 import type { OperationalOutputBundleRepositoryV3, OperationalOutputBundleWriteV3 } from '../../application/ports/output-version-bundle-repository.ts'
 import { buildOperationalOutputVersionBundleV3, type OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
-import { persistOutputVersionBundleInTransactionV3, persistOperationalIngestFactsInTransactionV3 } from './output-version-bundle-persistence.ts'
+import { persistCreationVersionV2, persistOutputVersionBundleInTransactionV3, persistOperationalIngestFactsInTransactionV3 } from './output-version-bundle-persistence.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { readOutputNormalizationsV3, assertCurrentOutputSourceUseV3, readEditorialSourceBindingV1 } from './output-version-materializer.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'

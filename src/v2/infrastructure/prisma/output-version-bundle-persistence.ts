@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { DomainError } from '../../domain/errors.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { serializeOutputCanonicalJson } from '../../domain/output-canonical-policy.ts'
-import type { OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { CreationOutputVersionBundleV2, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
 
 export type OutputBundleTransactionV3=Pick<Prisma.TransactionClient,'$executeRawUnsafe'|'$queryRawUnsafe'>
 const encode=serializeOutputCanonicalJson
@@ -12,6 +12,18 @@ async function insert(tx:OutputBundleTransactionV3,table:string,data:Record<stri
   const keys=Object.keys(data)
   await tx.$executeRawUnsafe('INSERT INTO "'+table+'" ('+keys.map(k=>'"'+k+'"').join(',')+
     ') VALUES ('+keys.map((_,i)=>'$'+(i+1)).join(',')+')',...Object.values(data))
+}
+/** The sequence-one Version of a project (creation contract two), with the sealed document it was built from.
+ * Together with persistOutputVersionBundleInTransactionV3 this is the only code that writes project_versions. */
+export async function persistCreationVersionV2(tx:OutputBundleTransactionV3,b:Readonly<CreationOutputVersionBundleV2>,
+  forkedFrom:Readonly<{projectId:string;versionId:string}>|null):Promise<void> {
+  const v=b.version,s=b.state.document
+  await insert(tx,'project_versions',{id:v.id,workspaceId:v.workspaceId,projectId:v.projectId,sequence:1,parentVersionId:null,commandId:null,
+    forkedFromProjectId:forkedFrom?.projectId??null,forkedFromVersionId:forkedFrom?.versionId??null,
+    briefSnapshotId:v.snapshotRefs.brief,policiesSnapshotId:v.snapshotRefs.policies,editPlanSnapshotId:v.snapshotRefs.editPlan,
+    treatmentSnapshotId:v.snapshotRefs.treatment??null,storySnapshotId:v.snapshotRefs.story??null,
+    baseHash:v.baseHash,createdBy:v.createdBy,createdAt:new Date(v.createdAt),outputContractVersion:2,outputStateId:s.id,
+    outputStateHash:b.state.stateHash,outputBaseHashJson:b.outputBaseHashJson,outputVersionJson:encode(v)})
 }
 /** Inserts no head/event/audit/operation. No flush, nested transaction or commit:
  * each real writer must finish ALL of its own writes, flush once, await the

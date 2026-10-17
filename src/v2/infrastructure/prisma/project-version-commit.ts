@@ -1,0 +1,41 @@
+import type { Prisma } from '../../../../generated/prisma-v2/index.js'
+import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { DomainError } from '../../domain/errors.ts'
+import type { OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import { externalActorAuditData } from './external-actor-audit.ts'
+import { persistOutputVersionBundleInTransactionV3 } from './output-version-bundle-persistence.ts'
+
+type ChildBundle = OperationalOutputVersionBundleV3 & { origin: Extract<OperationalOutputVersionBundleV3['origin'], { kind: 'child-command' }> }
+
+/**
+ * The single place where a Version and its sealed output State are written for a Command that owns no
+ * dedicated origin. A writer calls it exactly once inside its own serializable transaction, after it has
+ * locked and revalidated the facts it depends on and before it moves the project head:
+ *
+ *   1. the Command row, with the credential audit columns of an external author;
+ *   2. every snapshot of the bundle (the new EditPlan and any replaced non-output snapshot);
+ *   3. the Version, State, entries, materializations and the reciprocal bundle row.
+ *
+ * It does not move `projects.currentVersionId`, write events, domain rows or invalidations: those stay
+ * with the writer. The deferred database guard validates the whole bundle at COMMIT; nothing here
+ * confers success. Use `readPersistedOperationalOutputBundleV3` after the commit to read it back.
+ */
+export async function commitProjectVersionWithOutputState(tx: Prisma.TransactionClient, bundle: OperationalOutputVersionBundleV3): Promise<void> {
+  if (bundle.origin.kind !== 'child-command') {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Only child Command bundles are committed through the shared Version writer')
+  }
+  const { origin } = bundle as ChildBundle
+  const command = origin.command, { commandHash: _commandHash, ...body } = command
+  const audit = origin.audit === null ? null : externalActorAuditData(origin.audit, command.workspaceId, command.author.id)
+  await tx.v2EditCommand.create({ data: {
+    id: command.id, workspaceId: command.workspaceId, projectId: command.projectId, baseVersionId: command.baseVersionId,
+    baseHash: command.baseHash, type: command.type, scopeJson: stableSerialize(command.scope), payloadJson: stableSerialize(command.payload),
+    reason: command.reason ?? null, actorType: command.author.type, actorId: command.author.id, delegatedUserId: command.author.delegatedUserId ?? null,
+    actorCredentialId: audit?.actorCredentialId ?? null, actorEnvironment: audit?.actorEnvironment ?? null,
+    actorAuthenticationKind: audit?.actorAuthenticationKind ?? null, actorContextHash: audit?.actorContextHash ?? null,
+    actorDelegatedIdentityId: audit?.delegatedIdentityId ?? null, actorWorkspaceRole: audit?.workspaceRole ?? null,
+    idempotencyKey: command.idempotencyKey, requestFingerprint: origin.requestFingerprint, commandHash: command.commandHash,
+    commandJson: stableSerialize(body), outputPayloadJson: null, outputPayloadHash: null, createdAt: new Date(command.createdAt),
+  } })
+  await persistOutputVersionBundleInTransactionV3(tx, bundle)
+}

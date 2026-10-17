@@ -10,6 +10,7 @@ import { buildCreationOutputVersionBundleV2, buildOperationalOutputVersionBundle
 import { DomainError } from '../../../src/v2/domain/errors.ts'
 import { getPublicSchema } from '../../../src/v2/public-api/schema-registry.ts'
 import { publicSchemaExamples } from '../../../src/v2/public-api/schema-examples.ts'
+import { prepareEditorialSourceFixture } from './operational-editorial-fixture.mjs'
 
 const clone = value => structuredClone(value)
 export const variantBody = () => clone(publicSchemaExamples(getPublicSchema('apollo://schemas/create-project-output-variant-request/v1'))[0])
@@ -61,3 +62,12 @@ export const creationRequest = f => ({ workspaceId: f.actor.workspaceId, actor: 
 export const variantRequest = (f, parent, key = 'variant-request-http') => ({ ...variantBody(), workspaceId: f.actor.workspaceId,
   projectId: parent.version.projectId, baseVersionId: parent.version.id, baseHash: parent.version.baseHash,
   actor: f.actor, idempotencyKey: key })
+
+// Root, one explicit variant and a controlled ingest (synthetic probe facts, real sealed normalization and
+// materialization): the parent a child Command needs. See operational-editorial-fixture.mjs for its limits.
+export async function ingestedWorld(options = {}) {
+  const world = outputWorld(), root = await world.create(creationRequest(world))
+  const prepared = await prepareEditorialSourceFixture(null, { bundle: root.bundle, projectAtCreation: root.projectAtCreation },
+    { actor: world.actor, ...options })
+  return { world, root, prepared, parent: prepared.bundle, actor: world.actor }
+}
