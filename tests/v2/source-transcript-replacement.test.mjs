@@ -1,15 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { assertDirectorSnapshotContent } from '../../src/v2/application/director-snapshot-identity.ts'
 import { replaceSourceTranscriptService } from '../../src/v2/application/replace-source-transcript.ts'
+import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { calculateVersionHash, stableSerialize } from '../../src/v2/application/version-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { operationalBundlePlanV3 } from '../../src/v2/domain/output-version-bundle.ts'
+import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
+import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
+import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import {
   createSourceTranscriptArtifactInvalidations,
   materializeSourceTranscriptReplacement,
 } from '../../src/v2/domain/source-transcript-replacement.ts'
+import { readPersistedOperationalOutputBundleV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
 import { ingestedWorld, recompiledChild } from './helpers/output-world.mjs'
+import { persistedOutputQueries } from './helpers/persisted-output-client.mjs'
 
 const currentTranscript = createMediaTranscript({
   language: 'pt-BR', text: 'texto antigo', provider: 'groq', model: 'whisper-large-v3',
@@ -392,27 +399,107 @@ const directorTranscript = transcriptFromFrames('transcript-replacement', [
   ['resultados', 420, 450], // clip-3, rate 1 -> 220..250
 ])
 
-test('T-FR-233 replaced transcript with retimed frames survives the sealed Version and its re-materialized State', async () => {
+/** The Director's repository for this journey: the sealed replacement is the head it plans from. */
+class DirectorRepository {
+  constructor(parent, editPlan, transcriptId) {
+    this.snapshotRows = new Map()
+    this.parent = parent
+    this.editPlan = editPlan
+    this.transcriptId = transcriptId
+    this.records = new Map()
+  }
+
+  async findIdempotentResult({ workspaceId, projectId, idempotencyKey }) {
+    return this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
+  }
+
+  async readContext({ workspaceId, projectId }) {
+    if (workspaceId !== this.parent.version.workspaceId || projectId !== this.parent.version.projectId) return null
+    return {
+      workspaceId,
+      project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
+      parent: this.parent,
+      currentVersion: this.parent.version,
+      brief: {
+        objective: 'discovery',
+        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
+        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
+      },
+      policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
+      editPlan: this.editPlan,
+      currentDurationFrames: this.editPlan.durationFrames,
+      proxyVariantId: '9:16',
+      sourceRights: {
+        state: 'present', snapshotId: 'rights-transcript-master',
+        snapshotHash: 'd'.repeat(64), status: 'approved', consentStatus: 'not-required',
+      },
+      outputReferences: [
+        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: this.parent.version.id, variantId: '9:16' },
+      ],
+      transcript: {
+        id: this.transcriptId, sourceArtifactId: 'artifact-source3', language: 'pt-BR',
+        provider: 'groq', model: 'whisper-large-v3', transcriptHash: directorTranscript.transcriptHash,
+      },
+    }
+  }
+
+  async commitWithCanonicalSnapshots(scope, prepare) {
+    // Controlled in-memory transaction: explicit canonical store, no PG claim.
+    const rows = new Map(this.snapshotRows)
+    const resolve = async (candidates) => candidates.map((candidate) => {
+      assert.equal(candidate.workspaceId, scope.workspaceId)
+      assert.equal(candidate.projectId, scope.projectId)
+      const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
+      const stored = rows.get(key)
+      if (stored) {
+        assertDirectorSnapshotContent(candidate, stored)
+        return stored
+      }
+      rows.set(key, candidate)
+      return candidate
+    })
+    const commit = await prepare(resolve)
+    const sealed = childCommandOf(commit.bundle)
+    assert.equal(sealed.command.baseVersionId, scope.baseVersionId)
+    assert.equal(sealed.command.baseHash, scope.baseHash)
+    assert.equal(sealed.requestFingerprint, scope.requestFingerprint)
+    this.lastCommit = commit
+    const result = Object.freeze({ run: commit.run, command: sealed.command, version: commit.bundle.version, replayed: false })
+    this.records.set(`${sealed.command.workspaceId}:${sealed.command.projectId}:${sealed.command.idempotencyKey}`, {
+      requestFingerprint: sealed.requestFingerprint, result,
+    })
+    this.snapshotRows = rows
+    return result
+  }
+}
+
+async function mixedRateReplacement(label) {
   // A 20 second source leaves room for the three clips; the timeline below is the parent the replacement starts from.
   const world = await ingestedWorld({ sourceDurationSeconds: 20 })
   const parent = recompiledChild(world.parent, world.actor, (plan) => ({
     ...plan, durationFrames: 300,
     videoTracks: [{ ...plan.videoTracks[0], clips: directorSourceRanges.map((range) => ({ sourceArtifactId: 'artifact-source3', ...range })) }],
     subtitleTracks: [],
-  }), { suffix: 'mixed-rate' })
+  }), { suffix: `mixed-rate-${label}` })
   const repository = new Repository(parent, directorTranscript)
-  const replacement = await serviceFor(repository, 'rate-journey')(
-    requestFor(parent, world.actor, directorTranscript, 'source-transcript-rate-journey'))
+  const replacement = await serviceFor(repository, `rate-journey-${label}`)(
+    requestFor(parent, world.actor, directorTranscript, `source-transcript-rate-journey-${label}`))
+  return { world, parent, replacement, chain: [...world.chain, parent, replacement.bundle] }
+}
+
+const expectedRetiming = [['Comunicar', 10, 25], ['bem', 120, 135], ['resultados', 220, 250]]
+
+test('T-FR-233 replaced transcript with retimed frames survives the sealed Version and its re-materialized State', async () => {
+  const { parent, replacement } = await mixedRateReplacement('sealed')
 
   // 1. The command retimed the evidence through clips of mixed rates.
-  const expected = [['Comunicar', 10, 25], ['bem', 120, 135], ['resultados', 220, 250]]
-  assert.deepEqual(retimed(replacement.editPlan), expected)
+  assert.deepEqual(retimed(replacement.editPlan), expectedRetiming)
 
   // 2. The persistable snapshot carries exactly those frames (no in-memory-only state).
   const persisted = JSON.parse(replacement.snapshot.contentJson)
   assert.equal(replacement.snapshot.kind, 'edit-plan')
   assert.equal(replacement.snapshot.contentHash, calculateVersionHash(replacement.editPlan))
-  assert.deepEqual(retimed(persisted), expected)
+  assert.deepEqual(retimed(persisted), expectedRetiming)
   assert.equal(persisted.retimedTranscript.sourceTranscriptId, 'transcript-replacement')
   assert.equal(persisted.retimedTranscript.words.some((word) => word.text === 'perdido'), false)
   // Every retimed word stays inside its clip and inside the timeline.
@@ -429,4 +516,43 @@ test('T-FR-233 replaced transcript with retimed frames survives the sealed Versi
     assert.equal(entry.consumption.status, 'materialized')
     assert.equal(entry.consumption.materialization.document.planSnapshotId, replacement.snapshot.id)
   }
+})
+
+test('T-FR-233 the Director plans from the replaced transcript read out of the sealed replacement', async () => {
+  const { world, replacement, chain } = await mixedRateReplacement('director')
+  const sealedPlan = JSON.parse(replacement.bundle.editPlanSnapshot.contentJson)
+  const directorRepository = new DirectorRepository(replacement.bundle, sealedPlan, 'transcript-replacement')
+  const counters = new Map()
+  let event = 0
+  const runDirector = runProjectDirectorService({
+    repository: directorRepository,
+    clock: () => new Date('2026-10-16T22:20:00.000Z'),
+    createId: (kind) => {
+      const next = (counters.get(kind) ?? 0) + 1
+      counters.set(kind, next)
+      return `${kind}-${next}`
+    },
+    createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
+    compileBrief: createEvidenceBoundBriefCompiler(),
+  })
+  const run = await runDirector({
+    workspaceId: replacement.bundle.version.workspaceId, projectId: replacement.bundle.version.projectId,
+    baseVersionId: replacement.version.id, baseHash: replacement.version.baseHash,
+    actor: world.actor,
+    idempotency: { key: 'director-after-transcript-replacement' },
+    reason: 'Replanejar a composição com a transcrição corrigida.',
+  })
+  assert.equal(run.run.editPlan.retimedTranscript.sourceTranscriptId, 'transcript-replacement')
+  assert.deepEqual(retimed(run.run.editPlan), expectedRetiming)
+  assert.equal(run.run.perception.timeline.observations.length, expectedRetiming.length)
+  // The Director's own Version is sealed on top of the replacement: its State descends from the replacement's.
+  const directed = directorRepository.lastCommit.bundle
+  assert.equal(directed.state.document.parentStateHash, replacement.bundle.state.stateHash)
+  assert.equal(directed.version.parentVersionId, replacement.version.id)
+  assert.deepEqual(directed.origin.replaces, ['brief', 'story', 'treatment'].filter((kind) => directed.version.snapshotRefs[kind] !== replacement.version.snapshotRefs[kind]))
+  assert.equal(directed.version.snapshotRefs.policies, replacement.version.snapshotRefs.policies)
+  // A Version that replaced brief, treatment and story reads back from its sealed rows exactly as it was sealed.
+  const client = { $queryRawUnsafe: persistedOutputQueries([...chain, directed]) }
+  const read = await readPersistedOperationalOutputBundleV3(client, { workspaceId: directed.version.workspaceId, projectId: directed.version.projectId, versionId: directed.version.id })
+  assert.equal(stableSerialize(read), stableSerialize(directed))
 })

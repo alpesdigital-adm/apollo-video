@@ -29,7 +29,9 @@ import { createProjectSnapshot, type ProjectSnapshot } from '../../domain/projec
 import { assertDirectorSnapshotAuthority, assertDirectorSnapshotContent, bindDirectorSnapshotIdentities } from '../../application/director-snapshot-identity.ts'
 import type { StoryPlan } from '../../domain/story-plan.ts'
 import { validateTreatmentPlan, type TreatmentPlan } from '../../domain/treatment-plan.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../domain/director-run-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
@@ -44,6 +46,8 @@ import {
   resolveStrategicObjective,
 } from '../../domain/strategic-objective.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
 import { parseDirectorDecisionLog } from '../../domain/director-decision.ts'
 import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
@@ -304,24 +308,8 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     idempotencyKey: row.command.idempotencyKey,
     createdAt: row.command.createdAt.toISOString(),
   })
-  const version = createProjectVersion({
-    id: row.resultVersion.id,
-    workspaceId: row.resultVersion.workspaceId,
-    projectId: row.resultVersion.projectId,
-    sequence: row.resultVersion.sequence,
-    parentVersionId: row.resultVersion.parentVersionId ?? undefined,
-    snapshotRefs: {
-      brief: row.resultVersion.briefSnapshotId,
-      treatment: row.resultVersion.treatmentSnapshotId ?? undefined,
-      story: row.resultVersion.storySnapshotId ?? undefined,
-      editPlan: row.resultVersion.editPlanSnapshotId,
-      policies: row.resultVersion.policiesSnapshotId,
-    },
-    baseHash: row.resultVersion.baseHash,
-    createdBy: row.resultVersion.createdBy,
-    commandId: row.resultVersion.commandId ?? undefined,
-    createdAt: row.resultVersion.createdAt.toISOString(),
-  })
+  if (row.command.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director command seal is invalid')
+  const version = hydrateProjectVersionRowV3(row.resultVersion)
   const perception = parseDirectorPerceptionSnapshot({
     contentJson: row.perceptionSnapshot.contentJson,
     contentHash: row.perceptionSnapshot.contentHash,
@@ -434,6 +422,17 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
   return Object.freeze({ run, command, version, impact, invalidations: Object.freeze(invalidations), replayed })
 }
 
+/** The sealed bundle carries the Command, audit, request fingerprint and Version; the transaction below reads them by their old names. */
+function commitView(commit: Readonly<DirectorRunCommit>) {
+  const sealed = childCommandOf<RunDirectorCommandPayload>(commit.bundle)
+  if (!sealed.audit) throw new DomainError('AUTH_INVALID', 'A Director run requires an authenticated external actor')
+  if (sealed.command.type !== 'run-director' || commit.bundle.version.commandId !== sealed.command.id) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Director Version does not belong to its Command')
+  }
+  return { ...commit, command: sealed.command, authenticationAudit: sealed.audit, requestFingerprint: sealed.requestFingerprint, version: commit.bundle.version }
+}
+type DirectorCommitView = ReturnType<typeof commitView>
+
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
@@ -515,7 +514,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const project = await this.client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
       include: {
-        currentVersion: { include: { briefSnapshot: true, editPlanSnapshot: true, policiesSnapshot: true } },
+        currentVersion: { include: { briefSnapshot: true, policiesSnapshot: true } },
         mediaAssets: {
           where: { role: 'source-master' },
           orderBy: { createdAt: 'desc' },
@@ -571,7 +570,9 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           })
         })()
       : undefined
-    const editPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'current EditPlan') as unknown as EditorialCutEditPlan
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: project.workspaceId, projectId: project.id, versionId: versionRow.id })
+    if (!parent) return null
+    const editPlan = parseRecord(operationalBundlePlanV3(parent).contentJson, 'current EditPlan') as unknown as EditorialCutEditPlan
     const retimedTranscript = editPlan.retimedTranscript as unknown
     if (typeof retimedTranscript !== 'object' || retimedTranscript === null || !('sourceTranscriptId' in retimedTranscript) || typeof retimedTranscript.sourceTranscriptId !== 'string') {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan has no valid transcript selection')
@@ -634,24 +635,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       workspaceId: project.workspaceId,
       project: Object.freeze({ id: project.id, objective: projectObjective.id, format: project.format, locale: project.locale }),
       ...(latestDirectorObjective ? { latestDirectorObjective } : {}),
-      currentVersion: createProjectVersion({
-        id: versionRow.id,
-        workspaceId: versionRow.workspaceId,
-        projectId: versionRow.projectId,
-        sequence: versionRow.sequence,
-        parentVersionId: versionRow.parentVersionId ?? undefined,
-        snapshotRefs: {
-          brief: versionRow.briefSnapshotId,
-          treatment: versionRow.treatmentSnapshotId ?? undefined,
-          story: versionRow.storySnapshotId ?? undefined,
-          editPlan: versionRow.editPlanSnapshotId,
-          policies: versionRow.policiesSnapshotId,
-        },
-        baseHash: versionRow.baseHash,
-        createdBy: versionRow.createdBy,
-        commandId: versionRow.commandId ?? undefined,
-        createdAt: versionRow.createdAt.toISOString(),
-      }),
+      parent,
+      currentVersion: parent.version,
       brief: Object.freeze(parseRecord(versionRow.briefSnapshot.contentJson, 'project brief')),
       policies: Object.freeze(parseRecord(versionRow.policiesSnapshot.contentJson, 'project policies')),
       editPlan: Object.freeze(editPlan),
@@ -789,7 +774,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
             return bindDirectorSnapshotIdentities(candidates, rows)
           }
           // This callback only projects fixed planner output and seals it.
-          const bundle = await prepare(resolve)
+          const bundle = commitView(await prepare(resolve))
           if (new Set(bundle.snapshots.map((item) => item.id)).size !== bundle.snapshots.length ||
             resolvedIds.size !== bundle.snapshots.length || !bundle.snapshots.every((item) => resolvedIds.has(item.id))) {
             throw new DomainError('PERSISTENCE_CONFLICT', 'Director bundle omitted or added resolved snapshot identities')
@@ -860,7 +845,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     return now
   }
 
-  private async commitBundle(transaction: Prisma.TransactionClient, bundle: DirectorRunCommit): Promise<Readonly<DirectorRunResult>> {
+  private async commitBundle(transaction: Prisma.TransactionClient, bundle: DirectorCommitView): Promise<Readonly<DirectorRunResult>> {
     const decisionLog = parseDirectorDecisionLog(bundle.decisionLog)
     if (
       decisionLog.workspaceId !== bundle.run.workspaceId ||
@@ -1099,7 +1084,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       project.currentVersion.id !== bundle.command.baseVersionId ||
       project.currentVersion.baseHash !== bundle.command.baseHash ||
       bundle.version.parentVersionId !== project.currentVersion.id ||
-      bundle.version.sequence !== project.currentVersion.sequence + 1
+      bundle.version.sequence !== project.currentVersion.sequence + 1 ||
+      bundle.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash
     ) throw new DomainError('VERSION_CONFLICT', 'Project version changed before Director commit', { currentVersionId: project.currentVersion.id, currentBaseHash: project.currentVersion.baseHash })
     const [proxyOutputs, finalOutputs] = await Promise.all([
       transaction.v2ProjectProxyRenderOperation.findMany({
@@ -1137,46 +1123,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         )
       assertDirectorSnapshotContent(item, this.snapshotFromRow(row))
     }
-    await transaction.v2EditCommand.create({
-      data: {
-        id: bundle.command.id,
-        workspaceId: bundle.command.workspaceId,
-        projectId: bundle.command.projectId,
-        baseVersionId: bundle.command.baseVersionId,
-        baseHash: bundle.command.baseHash,
-        type: bundle.command.type,
-        scopeJson: stableSerialize(bundle.command.scope),
-        payloadJson: stableSerialize(bundle.command.payload),
-        reason: bundle.command.reason,
-        actorType: bundle.command.author.type,
-        actorId: bundle.command.author.id,
-        delegatedUserId: bundle.command.author.delegatedUserId,
-        ...editCommandExternalActorAuditData(
-          bundle.authenticationAudit,
-          bundle.command.workspaceId,
-          bundle.command.author,
-        ),
-        idempotencyKey: bundle.command.idempotencyKey,
-        requestFingerprint: bundle.requestFingerprint,
-        createdAt: new Date(bundle.command.createdAt),
-      },
-    })
-    await transaction.v2ProjectVersion.create({ data: {
-      id: bundle.version.id,
-      workspaceId: bundle.version.workspaceId,
-      projectId: bundle.version.projectId,
-      sequence: bundle.version.sequence,
-      parentVersionId: bundle.version.parentVersionId,
-      briefSnapshotId: bundle.version.snapshotRefs.brief!,
-      treatmentSnapshotId: bundle.version.snapshotRefs.treatment!,
-      storySnapshotId: bundle.version.snapshotRefs.story!,
-      editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
-      policiesSnapshotId: bundle.version.snapshotRefs.policies,
-      baseHash: bundle.version.baseHash,
-      createdBy: bundle.version.createdBy,
-      commandId: bundle.command.id,
-      createdAt: new Date(bundle.version.createdAt),
-    } })
+    await commitProjectVersionWithOutputState(transaction, bundle.bundle)
     const refs = bundle.command.payload.snapshotRefs
     await transaction.v2DirectorRun.create({ data: {
       id: bundle.run.id,

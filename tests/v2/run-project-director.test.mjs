@@ -11,7 +11,8 @@ import { runNextProjectDirectorOperationService } from '../../src/v2/application
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
+import { ingestedWorld, recompiledChild, worldActor } from './helpers/output-world.mjs'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
@@ -31,7 +32,21 @@ import {
   authenticationAudit as testAuthenticationAudit,
 } from './helpers/authentication-audit.mjs'
 
-const baseHash = 'a'.repeat(64)
+// Every run starts from a real sealed Version3/State3 of the shared output world: an ingested 14 second source and
+// the compiled editorial timeline below as the head's EditPlan.
+const world = await ingestedWorld({
+  actor: worldActor({ workspaceId: 'workspace-1', clientId: 'client-1', credentialId: 'credential-director-world', environment: 'production' }),
+  sourceDurationSeconds: 14,
+})
+const head = recompiledChild(world.parent, world.actor, () => structuredClone(compiledEditorialPlan()),
+  { suffix: 'director-base', versionId: 'project-version-4', snapshotId: 'snapshot-edit-4' })
+const baseHash = head.version.baseHash
+
+/** The prepared commit with the Command, audit, request fingerprint and Version its sealed bundle carries. */
+function directorView(commit) {
+  const sealed = childCommandOf(commit.bundle)
+  return { ...commit, command: sealed.command, authenticationAudit: sealed.audit, requestFingerprint: sealed.requestFingerprint, version: commit.bundle.version }
+}
 
 test('Director quality read is workspace-scoped and returns the exact immutable snapshot binding', async () => {
   const expected = Object.freeze({
@@ -103,24 +118,24 @@ function compiledEditorialPlan(selectedInsert = false, ctaText) {
     storyPlanId: null,
     fps: 30,
     durationFrames: 300,
-    sources: Object.freeze([{ id: 'source-1', artifactId: 'artifact-master-1', kind: 'video', durationSeconds: 14 }]),
+    sources: Object.freeze([{ id: 'source-1', artifactId: 'artifact-source3', kind: 'video', durationSeconds: 14 }]),
     videoTracks: Object.freeze([{ id: 'track-base', kind: 'base-video', clips: Object.freeze([
-      Object.freeze({ id: 'clip-1', sourceArtifactId: 'artifact-master-1', sourceInFrame: 0, sourceOutFrame: 100, timelineInFrame: 0, timelineOutFrame: 100, rate: 1 }),
+      Object.freeze({ id: 'clip-1', sourceArtifactId: 'artifact-source3', sourceInFrame: 0, sourceOutFrame: 100, timelineInFrame: 0, timelineOutFrame: 100, rate: 1 }),
       Object.freeze({
         id: 'clip-2',
-        sourceArtifactId: selectedInsert ? 'artifact-selected-insert-1' : 'artifact-master-1',
+        sourceArtifactId: selectedInsert ? 'artifact-selected-insert-1' : 'artifact-source3',
         sourceInFrame: selectedInsert ? 0 : 160,
         sourceOutFrame: selectedInsert ? 100 : 260,
         timelineInFrame: 100,
         timelineOutFrame: 200,
         rate: 1,
         ...(selectedInsert ? {
-          audioSourceArtifactId: 'artifact-master-1',
+          audioSourceArtifactId: 'artifact-source3',
           audioSourceInFrame: 160,
           audioSourceOutFrame: 260,
         } : {}),
       }),
-      Object.freeze({ id: 'clip-3', sourceArtifactId: 'artifact-master-1', sourceInFrame: 320, sourceOutFrame: 420, timelineInFrame: 200, timelineOutFrame: 300, rate: 1 }),
+      Object.freeze({ id: 'clip-3', sourceArtifactId: 'artifact-source3', sourceInFrame: 320, sourceOutFrame: 420, timelineInFrame: 200, timelineOutFrame: 300, rate: 1 }),
     ]) }]),
     overlayTracks: Object.freeze([]), subtitleTracks: Object.freeze([]), audioTracks: Object.freeze([]), effectTracks: Object.freeze([]),
     markers: Object.freeze([
@@ -128,7 +143,7 @@ function compiledEditorialPlan(selectedInsert = false, ctaText) {
       Object.freeze({ kind: 'editorial-cut', atFrame: 200, sourceStartSeconds: 8.666, sourceEndSeconds: 10.666, ruleIds: Object.freeze(['duration-two-days']) }),
     ]),
     protectedElements: Object.freeze([]), localeVariantRefs: Object.freeze([]), formatVariantRefs: Object.freeze([]),
-    lineageRefs: Object.freeze(['artifact-master-1']),
+    lineageRefs: Object.freeze(['artifact-source3']),
     editorial: Object.freeze({
       commandType: 'remove-spoken-content',
       exclusions: Object.freeze([
@@ -173,14 +188,11 @@ class InMemoryDirectorRepository {
       { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: '9:16' },
       { artifactId: 'artifact-final-4', kind: 'final', sourceVersionId: 'project-version-4', variantId: '9:16' },
     ]
-    this.currentVersion = createProjectVersion({
-      id: 'project-version-4', workspaceId: 'workspace-1', projectId: 'project-1', sequence: 4,
-      parentVersionId: 'project-version-3',
-      snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-4', policies: 'snapshot-policy-1' },
-      baseHash, createdBy: 'client-1', createdAt: '2026-07-18T20:00:00.000Z',
-    })
+    this.parent = head
     this.records = new Map()
   }
+
+  get currentVersion() { return this.parent.version }
 
   async findIdempotentResult({ workspaceId, projectId, idempotencyKey, actorContextHash }) {
     const record = this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
@@ -198,7 +210,8 @@ class InMemoryDirectorRepository {
       ...(this.latestDirectorObjective
         ? { latestDirectorObjective: this.latestDirectorObjective }
         : {}),
-      currentVersion: this.currentVersion,
+      parent: this.parent,
+      currentVersion: this.parent.version,
       brief: {
         objective: this.projectObjective,
         desiredAction: createDesiredAction({
@@ -224,7 +237,7 @@ class InMemoryDirectorRepository {
       sourceRights: this.sourceRights,
       outputReferences: this.outputReferences,
       transcript: {
-        id: 'transcript-1', sourceArtifactId: 'artifact-master-1', language: 'pt-BR',
+        id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR',
         provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
       },
       ...(this.ocrEnvelope ? { ocrEnvelope: this.ocrEnvelope } : {}),
@@ -234,19 +247,22 @@ class InMemoryDirectorRepository {
   async commitWithCanonicalSnapshots(scope, prepare) {
     // Controlled in-memory transaction: explicit canonical store, no PG claim.
     const rows = new Map(this.snapshotRows)
-    const resolve = async (candidates) => candidates.map((candidate) => {
-      assert.equal(candidate.workspaceId, scope.workspaceId)
-      assert.equal(candidate.projectId, scope.projectId)
-      const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
-      const stored = rows.get(key)
-      if (stored) {
-        assertDirectorSnapshotContent(candidate, stored)
-        return stored
-      }
-      rows.set(key, candidate)
-      return candidate
-    })
-    const bundle = await prepare(resolve)
+    const resolve = async (candidates) => {
+      this.resolvedCandidates = [...(this.resolvedCandidates ?? []), ...candidates]
+      return candidates.map((candidate) => {
+        assert.equal(candidate.workspaceId, scope.workspaceId)
+        assert.equal(candidate.projectId, scope.projectId)
+        const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
+        const stored = rows.get(key)
+        if (stored) {
+          assertDirectorSnapshotContent(candidate, stored)
+          return stored
+        }
+        rows.set(key, candidate)
+        return candidate
+      })
+    }
+    const bundle = directorView(await prepare(resolve))
     assert.equal(bundle.command.baseVersionId, scope.baseVersionId)
     assert.equal(bundle.command.baseHash, scope.baseHash)
     assert.equal(bundle.requestFingerprint, scope.requestFingerprint)
@@ -265,7 +281,7 @@ class InMemoryDirectorRepository {
       authenticationAudit: bundle.authenticationAudit,
       result,
     })
-    this.currentVersion = bundle.version
+    this.parent = bundle.bundle
     this.outputReferences = this.outputReferences.map((reference) => ({
       ...reference,
       sourceVersionId: bundle.version.id,
@@ -324,7 +340,7 @@ function controlledOcrEnvelope({ empty = false, regions = 1 } = {}) {
     id: 'ocr-envelope-controlled-1', workspaceId: 'workspace-1', projectId: 'project-1',
     projectVersionId: 'project-version-4', operationId: 'ocr-operation-controlled-1',
     operationAttempt: 1, operationFenceHash: '1'.repeat(64),
-    sourceArtifactId: 'artifact-master-1', sourceSha256: '2'.repeat(64),
+    sourceArtifactId: 'artifact-source3', sourceSha256: '2'.repeat(64),
     editPlanSnapshotId: 'snapshot-edit-4', editPlanSnapshotHash: '3'.repeat(64),
     timelineDurationFrames: 300,
     timeMap: compiledEditorialPlan().videoTracks[0].clips.map((clip) => ({
@@ -747,18 +763,24 @@ test('Director V2 replays exactly and rejects payload or version drift', async (
   )
 })
 
-test('Director V2 preserves a selected B-roll insert with bound source audio and an explicit decision', async () => {
-  const { service } = fixture({ selectedInsert: true })
-  const result = await service(request())
-  const insertedClip = result.run.editPlan.videoTracks[0].clips[1]
-
+test('Director V2 plans a selected B-roll insert with bound source audio, but cannot seal it without an observed insert', async () => {
+  const { repository, service } = fixture({ selectedInsert: true })
+  // The planner still decides to use the insert, with its own audio kept and an explicit decision...
+  await assert.rejects(service(request()), (error) => error.code === 'PRECONDITION_REQUIRED' &&
+    error.details.sourceArtifactIds.length === 1 && error.details.sourceArtifactIds[0] === 'artifact-selected-insert-1')
+  const planned = JSON.parse(repository.resolvedCandidates.find((item) => item.kind === 'edit-plan').contentJson)
+  const treatment = JSON.parse(repository.resolvedCandidates.find((item) => item.kind === 'treatment').contentJson)
+  const insertedClip = planned.videoTracks[0].clips[1]
   assert.equal(insertedClip.sourceArtifactId, 'artifact-selected-insert-1')
-  assert.equal(insertedClip.audioSourceArtifactId, 'artifact-master-1')
-  assert.equal(result.run.treatmentPlan.mode, 'talking-head')
-  assert.equal(result.run.decisions.some((decision) =>
+  assert.equal(insertedClip.audioSourceArtifactId, 'artifact-source3')
+  assert.equal(treatment.mode, 'talking-head')
+  assert.equal(planned.director.decisions.some((decision) =>
     decision.category === 'insert' && decision.choice === 'use_selected_insert'), true)
-  assert.equal(result.run.assumptions.some((assumption) =>
+  assert.equal(planned.director.assumptions.some((assumption) =>
     assumption.includes('asset-selection') && assumption.includes('rights')), true)
+  // ...but a Version whose outputs could not be rendered is never sealed: the insert has no normalization authority yet.
+  assert.equal(repository.lastBundle, undefined)
+  assert.equal(repository.currentVersion.id, 'project-version-4')
 })
 
 test('Director V2 persists an evidence-bound media-only treatment before proxy enqueue', async () => {
@@ -1258,8 +1280,8 @@ test('Director pure recomposition preserves IDs/time and reuses planned critic w
       return candidate
     })
     const beforeIds = [...allocations]
-    first = await prepare(resolve(false))
-    second = await prepare(resolve(true))
+    first = directorView(await prepare(resolve(false)))
+    second = directorView(await prepare(resolve(true)))
     assert.deepEqual(allocations, beforeIds, 'retry callback cannot allocate an identity')
     assert.equal(first.command.id, second.command.id)
     assert.equal(first.version.id, second.version.id)

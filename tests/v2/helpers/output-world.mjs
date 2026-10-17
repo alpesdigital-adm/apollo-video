@@ -82,10 +82,10 @@ export async function ingestedWorld(options = {}) {
  * Version3/State3 with a specific timeline without going through the Command that would normally compile it.
  * The Command is a plain recompiling child, so only the plan (and what re-materializes from it) differs.
  */
-export function recompiledChild(parent, actor, mutatePlan, { suffix = 'recompiled', type = 'apply-review-patch', createdAt = '2026-10-16T09:00:00.000Z' } = {}) {
+export function recompiledChild(parent, actor, mutatePlan, { suffix = 'recompiled', type = 'apply-review-patch', createdAt = '2026-10-16T09:00:00.000Z', versionId, snapshotId } = {}) {
   const audit = materializeActorAuditContext(actor)
   const scope = { workspaceId: parent.version.workspaceId, projectId: parent.version.projectId }
-  const resultVersionId = `version-${suffix}`
+  const resultVersionId = versionId ?? `version-${suffix}`
   const base = operationalBundlePlanV3(parent), plan = mutatePlan(JSON.parse(base.contentJson))
   const next = { ...plan, id: `edit-plan-${resultVersionId}`, projectVersionId: resultVersionId, createdAt }
   const command = createEditCommand({ ...scope, id: `command-${suffix}`, baseVersionId: parent.version.id, baseHash: parent.version.baseHash,
@@ -95,7 +95,7 @@ export function recompiledChild(parent, actor, mutatePlan, { suffix = 'recompile
   return transitionProjectOutputState({ parent, command, audit, requestFingerprint: calculateCanonicalHash({ suffix }),
     allocation: { ...scope, resultVersionId, stateId: `state-${suffix}`, parentVersionId: parent.version.id,
       sequence: parent.version.sequence + 1, createdBy: audit.clientId, createdAt },
-    editPlanSnapshot: createProjectSnapshot({ ...scope, id: `snapshot-${suffix}`, kind: 'edit-plan', contentSchemaVersion: base.contentSchemaVersion,
+    editPlanSnapshot: createProjectSnapshot({ ...scope, id: snapshotId ?? `snapshot-${suffix}`, kind: 'edit-plan', contentSchemaVersion: base.contentSchemaVersion,
       contentJson: stableSerialize(next), contentHash: calculateCanonicalHash(next), createdAt }),
     createMaterializationId: () => `materialization-${suffix}-${++counter}` })
 }

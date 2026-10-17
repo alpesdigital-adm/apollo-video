@@ -25,7 +25,7 @@ import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createPerceptionTimeline, PERCEPTION_KINDS, type PerceptionObservation } from '../domain/perception-timeline.ts'
 import type { PerceptionProducerEnvelope } from '../domain/perception-producer-envelope.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
   bindDirectorObjective,
@@ -117,7 +117,7 @@ export function projectDirectorRequestFingerprint(input: {
 export interface RunProjectDirectorDependencies {
   repository: DirectorRunRepository
   clock: () => Date
-  createId: (kind: 'director-run' | 'edit-command' | 'project-version' | 'project-snapshot') => string
+  createId: (kind: 'director-run' | 'edit-command' | 'project-version' | 'project-snapshot' | 'project-output-state' | 'output-materialization') => string
   createEventId: () => string
   compileBrief: (input: {
     text: string
@@ -1068,6 +1068,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const proposedStorySnapshotId = dependencies.createId('project-snapshot')
     const proposedEditPlanSnapshotId = dependencies.createId('project-snapshot')
     const proposedQualitySnapshotId = dependencies.createId('project-snapshot')
+    // Fixed with the rest of the identifiers: a retried owner transaction rebinds references, it never mints new ones.
+    const stateId = dependencies.createId('project-output-state')
+    const materializationIds = context.parent.state.document.entries.map(() => dependencies.createId('output-materialization'))
     const compiledBrief = briefChanged
       ? Object.freeze({
           ...context.brief,
@@ -1181,23 +1184,24 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         reason: request.reason?.trim() || 'Generate the first complete V2 editorial direction and reviewable proxy.',
         idempotencyKey, createdAt,
       })
-      const hashes = Object.fromEntries(snapshots.map((item) => [item.kind, item.contentHash]))
-      const version = createProjectVersion({
-        id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1,
-        parentVersionId: context.currentVersion.id,
-        snapshotRefs: {
-          brief: briefSnapshotId,
-          treatment: treatmentSnapshotId,
-          story: storySnapshotId,
-          editPlan: editPlanSnapshotId,
-          policies: context.currentVersion.snapshotRefs.policies,
-        },
-        baseHash: calculateVersionHash({
-          projectId, sequence: context.currentVersion.sequence + 1, parentVersionId: context.currentVersion.id,
-          previousBaseHash: context.currentVersion.baseHash, commandId, directorRunId, snapshotHashes: hashes,
-        }),
-        createdBy: clientId, commandId, createdAt,
+      // The Version keeps the parent's snapshots except the ones this run replaced. A snapshot the canonical store
+      // resolved to the parent's own row is inherited, not replaced.
+      const resolvedByKind = new Map(snapshots.map((item) => [item.kind, item]))
+      const replacementSnapshots = (['brief', 'story', 'treatment'] as const).flatMap((kind) => {
+        const resolved = resolvedByKind.get(kind)
+        return resolved && resolved.id !== context.currentVersion.snapshotRefs[kind] ? [resolved] : []
       })
+      let allocatedMaterializations = 0
+      const bundle = transitionProjectOutputState({
+        parent: context.parent, command, audit: authenticationAudit, requestFingerprint,
+        editPlanSnapshot: resolvedByKind.get('edit-plan')!, replacementSnapshots,
+        allocation: {
+          workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: context.currentVersion.id,
+          sequence: context.currentVersion.sequence + 1, createdBy: clientId, createdAt,
+        },
+        createMaterializationId: () => materializationIds[allocatedMaterializations++]!,
+      })
+      const version = bundle.version
       const run: DirectorRun = Object.freeze({
         schemaVersion: 2 as const, id: directorRunId, workspaceId, projectId, commandId,
         baseVersionId, resultVersionId: versionId, status: 'planned' as const,
@@ -1241,7 +1245,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         },
       })
       return {
-        command, authenticationAudit, requestFingerprint, snapshots, version, run, decisionLog, event,
+        bundle, snapshots, run, decisionLog, event,
         sourceEvidence: {
           transcriptId: context.transcript.id,
           transcriptHash: context.transcript.transcriptHash,

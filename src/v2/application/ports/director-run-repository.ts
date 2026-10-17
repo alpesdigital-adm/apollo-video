@@ -1,12 +1,12 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectorRun, RunDirectorCommandPayload } from '../../domain/director-run.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
+import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { ProjectVersionV2, ProjectVersionV3 } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { DirectorRunImpactV1 } from '../../domain/director-run-impact.ts'
-import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type {
   PreviousDirectorObjectiveBinding,
   StrategicObjectiveId,
@@ -23,7 +23,9 @@ export interface DirectorRunContext {
     locale: string
   }>
   latestDirectorObjective?: Readonly<PreviousDirectorObjectiveBinding>
-  currentVersion: Readonly<ProjectVersion>
+  /** The sealed output bundle of the current head: the exact parent the Director's Version is born from. */
+  parent: OperationalOutputParentV3
+  currentVersion: Readonly<ProjectVersionV2 | ProjectVersionV3>
   brief: Readonly<Record<string, unknown>>
   policies: Readonly<Record<string, unknown>>
   editPlan: Readonly<EditorialCutEditPlan>
@@ -55,11 +57,10 @@ export interface DirectorRunContext {
 }
 
 export interface DirectorRunCommit {
-  command: Readonly<EditCommand<RunDirectorCommandPayload>>
-  authenticationAudit: Readonly<ApiAccessAuditContext>
-  requestFingerprint: string
+  /** Version, State, EditPlan, replaced brief/treatment/story, Command and credential audit, sealed together. */
+  bundle: Readonly<OperationalOutputVersionBundleV3>
+  /** Every canonical snapshot the Director resolved, including the perception and quality report the Version does not reference. */
   snapshots: readonly Readonly<ProjectSnapshot>[]
-  version: Readonly<ProjectVersion>
   run: Readonly<DirectorRun>
   decisionLog: Readonly<DirectorDecisionLog>
   event: Readonly<PublicEvent>
@@ -86,7 +87,7 @@ export interface DirectorRunCommit {
 export interface DirectorRunResult {
   run: Readonly<DirectorRun>
   command: Readonly<EditCommand<RunDirectorCommandPayload>>
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV3>
   impact: Readonly<DirectorRunImpactV1>
   invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
   replayed: boolean
