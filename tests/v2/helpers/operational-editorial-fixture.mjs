@@ -116,7 +116,7 @@ export async function prepareEditorialSourceFixture(creation,receipt,options={})
  assert.equal(plan.durationFrames,Math.floor((options.sourceDurationSeconds??2)*(options.fps??30)+1e-7))
  assert.equal(n.document.sourceProbe.frames.length,observedFrames)
  assert.equal(n.document.sourceProbe.fps.numerator,'30');assert.equal(n.document.sourceProbe.fps.denominator,'1')
- finishSource();return {bundle,transcript,n,refs}
+ finishSource();return {bundle,transcript,n,refs,variant}
 }
 
 export async function createEditorialForkFixture({actor,transcript,sourceDurationSeconds,fps,sibling=true}) {

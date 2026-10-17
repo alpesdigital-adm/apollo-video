@@ -350,7 +350,7 @@ async function assertIngestFenceV3(tx:Tx,input:OperationalOutputBundleWriteV3['p
     r.uploadId!==input.origin.detail.uploadId)throw new DomainError('VERSION_CONFLICT','Operational ingest fence lost')
 }
 
-async function assertManualOutputReferencesV3(tx:Tx,b:OperationalOutputVersionBundleV3) {
+export async function assertManualOutputReferencesV3(tx:Tx,b:OperationalOutputVersionBundleV3) {
   if(b.origin.kind!=='inherit-command'&&b.origin.kind!=='restore-command')return
   const c=b.origin.command,impact=c.payload.impact
   if(b.origin.kind==='inherit-command')return // Real select impact contains no affected outputs.

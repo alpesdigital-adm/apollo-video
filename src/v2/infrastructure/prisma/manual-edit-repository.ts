@@ -17,7 +17,9 @@ import {
   timelineViewModelFromEditPlan,
   type PersistedManualEditPayload,
 } from '../../domain/manual-editing.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3, type OperationalOutputParentV3 } from '../../domain/output-version-bundle.ts'
+import { manualEditCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
   createCommandArtifactInvalidations,
@@ -25,14 +27,10 @@ import {
   parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
-import {
-  editCommandExternalActorAuditData,
-  hydrateEditCommandExternalActorAudit,
-} from './edit-command-actor-audit.ts'
-
-type VersionWithPlan = Prisma.V2ProjectVersionGetPayload<{
-  include: { editPlanSnapshot: true }
-}>
+import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
+import { assertManualOutputReferencesV3 } from './output-version-bundle-repository.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
 
 type StoredManualCommand = Prisma.V2EditCommandGetPayload<{
   include: {
@@ -82,35 +80,18 @@ function hydrateInvalidation(item: StoredInvalidation) {
   })
 }
 
-function hydrateVersion(row: VersionWithPlan): Readonly<ManualEditVersionRecord> {
-  const editPlan = parseRecord(row.editPlanSnapshot.contentJson, 'manual EditPlan')
-  if (
-    editPlan.schemaVersion !== 2 ||
-    editPlan.state !== 'compiled' ||
-    editPlan.projectVersionId !== row.id
-  ) {
+/** A manual edit works on a compiled EditPlan; the sealed bundle is the only source of the current one. */
+function assertCompiledManualPlan(editPlan: Record<string, unknown>, versionId: string): void {
+  if (editPlan.schemaVersion !== 2 || editPlan.state !== 'compiled' || editPlan.projectVersionId !== versionId) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored manual EditPlan is inconsistent')
   }
-  return Object.freeze({
-    version: createProjectVersion({
-      id: row.id,
-      workspaceId: row.workspaceId,
-      projectId: row.projectId,
-      sequence: row.sequence,
-      parentVersionId: row.parentVersionId ?? undefined,
-      snapshotRefs: {
-        brief: row.briefSnapshotId,
-        editPlan: row.editPlanSnapshotId,
-        policies: row.policiesSnapshotId,
-      },
-      baseHash: row.baseHash,
-      createdBy: row.createdBy,
-      commandId: row.commandId ?? undefined,
-      createdAt: row.createdAt.toISOString(),
-    }),
-    editPlan: Object.freeze(editPlan),
-    editPlanHash: row.editPlanSnapshot.contentHash,
-  })
+}
+
+function recordFromBundle(bundle: OperationalOutputParentV3): Readonly<ManualEditVersionRecord> {
+  const snapshot = operationalBundlePlanV3(bundle)
+  const editPlan = parseRecord(snapshot.contentJson, 'manual EditPlan')
+  assertCompiledManualPlan(editPlan, bundle.version.id)
+  return Object.freeze({ version: bundle.version, editPlan: Object.freeze(editPlan), editPlanHash: snapshot.contentHash, bundle })
 }
 
 function hydrateStoredCommand(
@@ -151,7 +132,16 @@ function hydrateStoredCommand(
     idempotencyKey: row.idempotencyKey,
     createdAt: row.createdAt.toISOString(),
   })
-  const resultVersion = hydrateVersion(row.resultVersion)
+  if (row.commandHash !== command.commandHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored manual command seal is invalid')
+  }
+  const resultEditPlan = parseRecord(row.resultVersion.editPlanSnapshot.contentJson, 'manual EditPlan')
+  assertCompiledManualPlan(resultEditPlan, row.resultVersion.id)
+  const resultVersion = Object.freeze({
+    version: hydrateProjectVersionRowV3(row.resultVersion),
+    editPlan: Object.freeze(resultEditPlan),
+    editPlanHash: row.resultVersion.editPlanSnapshot.contentHash,
+  })
   const editPlanHash = resultVersion.editPlanHash
   const impact = payload.impact ? parseCommandImpact(payload.impact) : undefined
   if (
@@ -256,7 +246,6 @@ export class PrismaManualEditRepository implements ManualEditRepository {
     const project = await this.client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
       include: {
-        currentVersion: { include: { editPlanSnapshot: true } },
         mediaAssets: {
           where: { artifact: { status: 'available' } },
           select: { artifactId: true },
@@ -265,14 +254,17 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           orderBy: { sequence: 'desc' },
           take: 40,
           include: {
-            editPlanSnapshot: true,
             command: { select: { id: true, type: true, payloadJson: true } },
           },
         },
       },
     })
-    if (!project?.currentVersion) return null
-    const current = hydrateVersion(project.currentVersion)
+    if (!project?.currentVersionId) return null
+    const currentBundle = await readPersistedOperationalOutputBundleV3(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId,
+    })
+    if (!currentBundle) return null
+    const current = recordFromBundle(currentBundle)
     const [proxyOutputs, finalOutputs] = await Promise.all([
       this.client.v2ProjectProxyRenderOperation.findMany({
         where: {
@@ -293,18 +285,12 @@ export class PrismaManualEditRepository implements ManualEditRepository {
         select: { outputArtifactId: true, outputAspectRatio: true },
       }),
     ])
-    const targetRow = input.targetVersionId
-      ? project.versions.find((version) => version.id === input.targetVersionId)
-        ?? await this.client.v2ProjectVersion.findFirst({
-          where: {
-            id: input.targetVersionId,
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-          },
-          include: { editPlanSnapshot: true },
+    const targetBundle = input.targetVersionId
+      ? await readPersistedOperationalOutputBundleV3(this.client, {
+          workspaceId: input.workspaceId, projectId: input.projectId, versionId: input.targetVersionId,
         })
       : undefined
-    if (input.targetVersionId && !targetRow) return null
+    if (input.targetVersionId && !targetBundle) return null
     const history = project.versions.map((row) => {
       let action: 'apply' | 'undo' | 'redo' | 'restore' | undefined
       let restoresVersionId: string | undefined
@@ -348,7 +334,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           variantId: output.outputAspectRatio,
         })),
       ].toSorted((left, right) => left.artifactId.localeCompare(right.artifactId))),
-      ...(targetRow ? { targetVersion: hydrateVersion(targetRow) } : {}),
+      ...(targetBundle ? { targetVersion: recordFromBundle(targetBundle) } : {}),
       history: Object.freeze(history),
     })
   }
@@ -392,9 +378,19 @@ export class PrismaManualEditRepository implements ManualEditRepository {
   }
 
   async commitOrReplay(
-    bundle: ManualEditCommit,
+    input: ManualEditCommit,
     serializationAttempt = 1,
   ): Promise<ManualEditResult> {
+    const sealed = manualEditCommandOf(input.bundle)
+    if (!sealed.audit) throw new DomainError('AUTH_INVALID', 'A manual edit requires an authenticated external actor')
+    // Local view with the names the transaction below was written against.
+    const bundle = {
+      command: sealed.command, authenticationAudit: sealed.audit, requestFingerprint: sealed.requestFingerprint,
+      version: input.bundle.version, event: input.event, comparison: input.comparison, impact: input.impact,
+    }
+    if (bundle.command.type !== 'manual-edit' || bundle.version.commandId !== bundle.command.id || bundle.version.parentVersionId !== bundle.command.baseVersionId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Manual edit Version does not belong to its Command')
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const key = {
@@ -439,7 +435,8 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           project.currentVersion.id !== bundle.command.baseVersionId ||
           project.currentVersion.baseHash !== bundle.command.baseHash ||
           bundle.version.parentVersionId !== project.currentVersion.id ||
-          bundle.version.sequence !== project.currentVersion.sequence + 1
+          bundle.version.sequence !== project.currentVersion.sequence + 1 ||
+          input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash
         ) {
           throw new DomainError(
             'VERSION_CONFLICT',
@@ -462,101 +459,59 @@ export class PrismaManualEditRepository implements ManualEditRepository {
             'Manual command and impact payload are inconsistent',
           )
         }
-        const [proxyOutputs, finalOutputs] = await Promise.all([
-          transaction.v2ProjectProxyRenderOperation.findMany({
-            where: {
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              projectVersionId: bundle.command.baseVersionId,
-              operation: { status: 'succeeded', phase: 'completed' },
-            },
-            select: { outputArtifactId: true },
-          }),
-          transaction.v2ProjectFinalExportOperation.findMany({
-            where: {
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              projectVersionId: bundle.command.baseVersionId,
-              operation: { status: 'succeeded', phase: 'completed' },
-            },
-            select: { outputArtifactId: true, outputAspectRatio: true },
-          }),
-        ])
-        const variantId = bundle.command.payload.variantId
-        const currentAffectedArtifacts = bundle.impact.renderSemanticsChanged
-          ? normalizeCommandImpactOutputReferences([
-              ...(project.format === variantId
-                ? proxyOutputs.map((output) => ({
+        if (sealed.kind !== 'child-command') {
+          // Selection and restore: the database guard re-derives these references, so the owner's own check runs.
+          await assertManualOutputReferencesV3(transaction, input.bundle)
+        } else {
+          const [proxyOutputs, finalOutputs] = await Promise.all([
+            transaction.v2ProjectProxyRenderOperation.findMany({
+              where: {
+                workspaceId: bundle.command.workspaceId,
+                projectId: bundle.command.projectId,
+                projectVersionId: bundle.command.baseVersionId,
+                operation: { status: 'succeeded', phase: 'completed' },
+              },
+              select: { outputArtifactId: true },
+            }),
+            transaction.v2ProjectFinalExportOperation.findMany({
+              where: {
+                workspaceId: bundle.command.workspaceId,
+                projectId: bundle.command.projectId,
+                projectVersionId: bundle.command.baseVersionId,
+                operation: { status: 'succeeded', phase: 'completed' },
+              },
+              select: { outputArtifactId: true, outputAspectRatio: true },
+            }),
+          ])
+          const variantId = bundle.command.payload.variantId
+          const currentAffectedArtifacts = bundle.impact.renderSemanticsChanged
+            ? normalizeCommandImpactOutputReferences([
+                ...(project.format === variantId
+                  ? proxyOutputs.map((output) => ({
+                      artifactId: output.outputArtifactId,
+                      kind: 'proxy' as const,
+                      sourceVersionId: bundle.command.baseVersionId,
+                      variantId,
+                    }))
+                  : []),
+                ...finalOutputs
+                  .filter((output) => output.outputAspectRatio === variantId)
+                  .map((output) => ({
                     artifactId: output.outputArtifactId,
-                    kind: 'proxy' as const,
+                    kind: 'final' as const,
                     sourceVersionId: bundle.command.baseVersionId,
                     variantId,
-                  }))
-                : []),
-              ...finalOutputs
-                .filter((output) => output.outputAspectRatio === variantId)
-                .map((output) => ({
-                  artifactId: output.outputArtifactId,
-                  kind: 'final' as const,
-                  sourceVersionId: bundle.command.baseVersionId,
-                  variantId,
-                })),
-            ])
-          : []
-        if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
-          throw new DomainError(
-            'VERSION_CONFLICT',
-            'Project render outputs changed before Command impact commit',
-          )
+                  })),
+              ])
+            : []
+          if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
+            throw new DomainError(
+              'VERSION_CONFLICT',
+              'Project render outputs changed before Command impact commit',
+            )
+          }
         }
-        await transaction.v2EditCommand.create({
-          data: {
-            id: bundle.command.id,
-            workspaceId: bundle.command.workspaceId,
-            projectId: bundle.command.projectId,
-            baseVersionId: bundle.command.baseVersionId,
-            baseHash: bundle.command.baseHash,
-            type: bundle.command.type,
-            scopeJson: stableSerialize(bundle.command.scope),
-            payloadJson: stableSerialize(bundle.command.payload),
-            reason: bundle.command.reason,
-            actorType: bundle.command.author.type,
-            actorId: bundle.command.author.id,
-            delegatedUserId: bundle.command.author.delegatedUserId,
-            ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
-            idempotencyKey: bundle.command.idempotencyKey,
-            requestFingerprint: bundle.requestFingerprint,
-            createdAt: new Date(bundle.command.createdAt),
-          },
-        })
-        await transaction.v2ProjectSnapshot.create({
-          data: {
-            id: bundle.snapshot.id,
-            workspaceId: bundle.snapshot.workspaceId,
-            projectId: bundle.snapshot.projectId,
-            kind: bundle.snapshot.kind,
-            schemaVersion: bundle.snapshot.contentSchemaVersion,
-            contentJson: bundle.snapshot.contentJson,
-            contentHash: bundle.snapshot.contentHash,
-            createdAt: new Date(bundle.snapshot.createdAt),
-          },
-        })
-        await transaction.v2ProjectVersion.create({
-          data: {
-            id: bundle.version.id,
-            workspaceId: bundle.version.workspaceId,
-            projectId: bundle.version.projectId,
-            sequence: bundle.version.sequence,
-            parentVersionId: bundle.version.parentVersionId,
-            briefSnapshotId: bundle.version.snapshotRefs.brief!,
-            editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
-            policiesSnapshotId: bundle.version.snapshotRefs.policies,
-            baseHash: bundle.version.baseHash,
-            createdBy: bundle.version.createdBy,
-            commandId: bundle.command.id,
-            createdAt: new Date(bundle.version.createdAt),
-          },
-        })
+        await commitProjectVersionWithOutputState(transaction, input.bundle)
         const invalidations = createCommandArtifactInvalidations({
           impact: bundle.impact,
           createdAt: bundle.command.createdAt,
@@ -623,7 +578,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
-        return this.commitOrReplay(bundle, serializationAttempt + 1)
+        return this.commitOrReplay(input, serializationAttempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const existing = await this.findIdempotentResult({

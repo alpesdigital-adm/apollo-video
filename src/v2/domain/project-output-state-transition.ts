@@ -7,6 +7,7 @@ import type { SealedOutputNormalizationV3 } from './output-materialization.ts'
 import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3, type OperationalOutputParentV3,
   type OperationalOutputVersionBundleV3 } from './output-version-bundle.ts'
 import type { OutputOriginAllocation } from './output-version-origin.ts'
+import type { PersistedManualEditPayload } from './manual-editing.ts'
 import { createProjectSnapshot, type ProjectSnapshot } from './project-snapshot.ts'
 
 /**
@@ -84,6 +85,62 @@ export function transitionProjectOutputState(input: Readonly<{
     editPlanSnapshot: input.editPlanSnapshot,
     replacementSnapshots: replacements,
     normalizations: parentNormalizationsV3(input.parent),
+    materializationIds,
+  })
+}
+
+/** The sealed Command, audit and request fingerprint of a manual-edit bundle, whichever origin it took. */
+export function manualEditCommandOf(bundle: Readonly<OperationalOutputVersionBundleV3>): Readonly<{
+  kind: 'child-command' | 'inherit-command' | 'restore-command'
+  command: Readonly<EditCommand<PersistedManualEditPayload>>
+  audit: Readonly<ApiAccessAuditContext> | null
+  requestFingerprint: string
+}> {
+  const origin = bundle.origin
+  assertDomain(origin.kind === 'child-command' || origin.kind === 'inherit-command' || origin.kind === 'restore-command',
+    'PERSISTENCE_CONFLICT', 'The bundle was not produced by a manual-edit Command')
+  return Object.freeze({ kind: origin.kind, command: origin.command as Readonly<EditCommand<PersistedManualEditPayload>>,
+    audit: origin.audit, requestFingerprint: origin.requestFingerprint })
+}
+
+/**
+ * The output transition of one manual-edit Command. The Command's own action decides the origin, so a caller
+ * cannot pick a weaker one: a render-free selection inherits (its plan is re-derived by the real constructor),
+ * undo/redo/restore return to an exact factual target, and every other operation is a child Command that
+ * recompiles the plan. The authors of all three are external clients: the audit is required.
+ */
+export function transitionManualEditOutputState(input: Readonly<{
+  parent: OperationalOutputParentV3
+  /** The exact factual target of undo, redo and restore; absent for apply. */
+  restoreTarget: OperationalOutputParentV3 | null
+  allocation: OutputOriginAllocation
+  command: Readonly<EditCommand<PersistedManualEditPayload>>
+  audit: Readonly<ApiAccessAuditContext>
+  requestFingerprint: string
+  editPlanSnapshot: Readonly<ProjectSnapshot>
+  createMaterializationId: () => string
+}>): Readonly<OperationalOutputVersionBundleV3> {
+  const payload = input.command.payload
+  if (payload.action === 'apply' && payload.operation?.kind !== 'select') {
+    assertDomain(input.restoreTarget === null, 'INVALID_COMMAND', 'Apply has no restore target')
+    return transitionProjectOutputState({ parent: input.parent, allocation: input.allocation, command: input.command, audit: input.audit,
+      requestFingerprint: input.requestFingerprint, editPlanSnapshot: input.editPlanSnapshot, createMaterializationId: input.createMaterializationId })
+  }
+  const source = payload.action === 'apply' ? input.parent : input.restoreTarget
+  assertDomain(source !== null && (payload.action === 'apply') === (input.restoreTarget === null), 'INVALID_COMMAND',
+    'Undo, redo and restore require their exact factual target')
+  const plan = JSON.parse(input.editPlanSnapshot.contentJson) as { durationFrames?: unknown }
+  const materializationIds = plan.durationFrames === 0 ? {} :
+    Object.fromEntries(source.state.document.entries.map((entry) => [entry.variantId, input.createMaterializationId()]))
+  const target = input.restoreTarget
+  return buildOperationalOutputVersionBundleV3({
+    allocation: input.allocation, parent: input.parent, restoreTarget: target,
+    origin: target === null ?
+      { kind: 'inherit-command', command: input.command, audit: input.audit, requestFingerprint: input.requestFingerprint } :
+      { kind: 'restore-command', command: input.command, audit: input.audit, requestFingerprint: input.requestFingerprint,
+        target: { versionId: target.version.id, baseHash: target.version.baseHash, stateId: target.state.document.id, stateHash: target.state.stateHash } },
+    editPlanSnapshot: input.editPlanSnapshot,
+    normalizations: parentNormalizationsV3(source),
     materializationIds,
   })
 }

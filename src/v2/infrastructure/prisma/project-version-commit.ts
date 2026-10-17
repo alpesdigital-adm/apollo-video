@@ -3,15 +3,20 @@ import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
 import { externalActorAuditData } from './external-actor-audit.ts'
+import { assertCurrentOutputSourceUseV3 } from './output-version-materializer.ts'
 import { persistOutputVersionBundleInTransactionV3 } from './output-version-bundle-persistence.ts'
 
-type ChildBundle = OperationalOutputVersionBundleV3 & { origin: Extract<OperationalOutputVersionBundleV3['origin'], { kind: 'child-command' }> }
+type CommandBundle = OperationalOutputVersionBundleV3 & {
+  origin: Extract<OperationalOutputVersionBundleV3['origin'], { kind: 'child-command' | 'inherit-command' | 'restore-command' }>
+}
 
 /**
  * The single place where a Version and its sealed output State are written for a Command that owns no
- * dedicated origin. A writer calls it exactly once inside its own serializable transaction, after it has
- * locked and revalidated the facts it depends on and before it moves the project head:
+ * dedicated operation (a child Command, or a manual-edit selection/restore). A writer calls it exactly once
+ * inside its own serializable transaction, after it has locked and revalidated the facts it depends on and
+ * before it moves the project head:
  *
+ *   0. the publication guard: the current rights and consent of every source the State materializes;
  *   1. the Command row, with the credential audit columns of an external author;
  *   2. every snapshot of the bundle (the new EditPlan and any replaced non-output snapshot);
  *   3. the Version, State, entries, materializations and the reciprocal bundle row.
@@ -21,12 +26,13 @@ type ChildBundle = OperationalOutputVersionBundleV3 & { origin: Extract<Operatio
  * confers success. Use `readPersistedOperationalOutputBundleV3` after the commit to read it back.
  */
 export async function commitProjectVersionWithOutputState(tx: Prisma.TransactionClient, bundle: OperationalOutputVersionBundleV3): Promise<void> {
-  if (bundle.origin.kind !== 'child-command') {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Only child Command bundles are committed through the shared Version writer')
+  if (bundle.origin.kind !== 'child-command' && bundle.origin.kind !== 'inherit-command' && bundle.origin.kind !== 'restore-command') {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Only Command bundles are committed through the shared Version writer')
   }
-  const { origin } = bundle as ChildBundle
+  const { origin } = bundle as CommandBundle
   const command = origin.command, { commandHash: _commandHash, ...body } = command
   const audit = origin.audit === null ? null : externalActorAuditData(origin.audit, command.workspaceId, command.author.id)
+  await assertCurrentOutputSourceUseV3(tx, bundle)
   await tx.v2EditCommand.create({ data: {
     id: command.id, workspaceId: command.workspaceId, projectId: command.projectId, baseVersionId: command.baseVersionId,
     baseHash: command.baseHash, type: command.type, scopeJson: stableSerialize(command.scope), payloadJson: stableSerialize(command.payload),

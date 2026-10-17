@@ -4,10 +4,7 @@ import test from 'node:test'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 
-import {
-  applyManualEditService,
-  readArtifactInvalidationsService,
-} from '../../src/v2/application/manual-edit.ts'
+import { readArtifactInvalidationsService } from '../../src/v2/application/manual-edit.ts'
 import {
   materializeManualEditPlan,
   timelineViewModelFromEditPlan,
@@ -410,178 +407,25 @@ test('T-FR-233 persisted impact is content-addressed and rejects tampering', () 
   )
 })
 
-test('T-FR-233 manual Command persists the impact in payload v2 and binds it to the outbox event', async () => {
-  let committed
+// The Command a manual crop persists, rebuilt here from the same domain constructors the service uses. The apply
+// service and the repository against a sealed Version3 parent are covered by manual-edit-apply.test.mjs; this test
+// is about what the proxy repositories do with the persisted result.
+test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged proxy only with the attested base proxy map', async () => {
   const basePlan = plan()
-  const service = applyManualEditService({
-    repository: {
-      async findIdempotentResult() { return null },
-      async readContext() {
-        return {
-          version: {
-            id: baseVersionId, workspaceId, projectId, sequence: 1,
-            snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-1', policies: 'snapshot-policy-1' },
-            baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', createdAt,
-          },
-          editPlan: basePlan,
-          editPlanHash: 'b'.repeat(64),
-          availableAssetIds: ['source-1'],
-          renderVariantIds: ['9:16'],
-          outputReferences: outputs,
-          history: [],
-        }
-      },
-      async commitOrReplay(bundle) {
-        committed = bundle
-        return {
-          command: bundle.command,
-          version: bundle.version,
-          editPlan: JSON.parse(bundle.snapshot.contentJson),
-          timeline: timelineViewModelFromEditPlan({
-            editPlan: JSON.parse(bundle.snapshot.contentJson),
-            versionId: bundle.version.id,
-            revision: bundle.version.sequence,
-            selectedClipId: 'clip-1',
-          }),
-          comparison: bundle.comparison,
-          impact: bundle.impact,
-          invalidations: createCommandArtifactInvalidations({
-            impact: bundle.impact,
-            createdAt: bundle.command.createdAt,
-          }),
-          replayed: false,
-        }
-      },
-    },
-    clock: () => new Date('2026-07-31T19:01:00.000Z'),
-    createId: (kind) => ({
-      'edit-command': commandId,
-      'project-version': resultVersionId,
-      'project-snapshot': 'project-snapshot-impact-2',
-    })[kind],
-    createEventId: () => '8c196f8c-5da2-4ac7-9c51-7a4cf42575f1',
-  })
-  const result = await service({
-    workspaceId, projectId, baseVersionId, baseHash: 'a'.repeat(64), expectedRevision: 1,
-    action: 'apply', variantId: '9:16', targetId: 'clip-1',
-    operation: {
-      kind: 'crop', clipId: 'clip-1',
-      crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
-    },
-    actor: impactActor(),
-    idempotencyKey: 'command-impact-test-1',
-  })
-  assert.equal(committed.command.payload.schemaVersion, 2)
-  assert.equal(committed.command.payload.impact.impactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.commandImpactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.invalidatedArtifactCount, 2)
-  assert.equal(committed.event.data.minimalRenderCount, 1)
-  assert.equal(committed.command.payload.impact.changeKinds[0], 'crop')
-  assert.deepEqual(JSON.parse(committed.snapshot.contentJson).videoTracks[0].clips[0].crop, {
-    x: 0.2, y: 0, width: 0.6, height: 1,
-  })
-  await assert.rejects(
-    () => service({
-      workspaceId, projectId, baseVersionId, baseHash: 'a'.repeat(64), expectedRevision: 1,
-      action: 'apply', variantId: '16:9', targetId: 'clip-1',
-      operation: { kind: 'inspect', clipId: 'clip-1', patch: { layout: 'unsafe-scope' } },
-      actor: impactActor(),
-      idempotencyKey: 'command-impact-invalid-variant',
-    }),
-    (error) => error.code === 'INVALID_ARGUMENT' && /variant/.test(error.message),
-  )
-  const driftRepository = new PrismaManualEditRepository({
-    async $transaction(callback) {
-      return callback({
-        v2EditCommand: { async findUnique() { return null } },
-        v2Project: { async findFirst() { return {
-          format: '9:16',
-          currentVersion: { id: baseVersionId, baseHash: 'a'.repeat(64), sequence: 1 },
-        } } },
-        v2ProjectProxyRenderOperation: { async findMany() { return [
-          { outputArtifactId: 'artifact-proxy-9x16' },
-          { outputArtifactId: 'artifact-proxy-concurrent' },
-        ] } },
-        v2ProjectFinalExportOperation: { async findMany() { return [
-          { outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' },
-        ] } },
-      })
-    },
-  })
-  await assert.rejects(
-    () => driftRepository.commitOrReplay(committed),
-    (error) => error.code === 'VERSION_CONFLICT' && /outputs changed/.test(error.message),
-  )
-
-  let persistedInvalidations = []
-  const baseVersionRow = {
-    id: baseVersionId, workspaceId, projectId, sequence: 1, parentVersionId: null,
-    briefSnapshotId: 'snapshot-brief-1', treatmentSnapshotId: null, storySnapshotId: null,
-    editPlanSnapshotId: 'snapshot-edit-1', policiesSnapshotId: 'snapshot-policy-1',
-    baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', commandId: null,
-    createdAt: new Date(createdAt),
-    editPlanSnapshot: { contentJson: JSON.stringify(basePlan), contentHash: 'b'.repeat(64) },
+  const operation = { kind: 'crop', clipId: 'clip-1', crop: { x: 0.2, y: 0, width: 0.6, height: 1 } }
+  const afterPlan = materializeManualEditPlan({ editPlan: basePlan, operation, newVersionId: resultVersionId, createdAt,
+    availableAssetIds: ['source-1'], variantId: '9:16' })
+  const cropImpact = createManualCommandImpact({ commandId, baseVersionId, resultVersionId, variantId: '9:16', targetId: 'clip-1',
+    action: 'apply', operation, beforeEditPlan: basePlan, afterEditPlan: afterPlan, outputReferences: outputs })
+  const committed = {
+    command: { id: commandId, payload: { schemaVersion: 2, action: 'apply', expectedRevision: 1, variantId: '9:16', targetId: 'clip-1', operation, impact: cropImpact } },
+    version: { snapshotRefs: { editPlan: 'project-snapshot-impact-2' } },
+    snapshot: { contentJson: stableSerialize(afterPlan), contentHash: calculateVersionHash(afterPlan) },
   }
-  const resultPlan = JSON.parse(committed.snapshot.contentJson)
-  const resultVersionRow = {
-    id: committed.version.id, workspaceId, projectId, sequence: committed.version.sequence,
-    parentVersionId: committed.version.parentVersionId,
-    briefSnapshotId: committed.version.snapshotRefs.brief,
-    treatmentSnapshotId: null, storySnapshotId: null,
-    editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
-    policiesSnapshotId: committed.version.snapshotRefs.policies,
-    baseHash: committed.version.baseHash, createdBy: committed.version.createdBy,
-    commandId: committed.command.id, createdAt: new Date(committed.version.createdAt),
-    editPlanSnapshot: {
-      contentJson: JSON.stringify(resultPlan), contentHash: committed.snapshot.contentHash,
-    },
-  }
-  const persistedRepository = new PrismaManualEditRepository({
-    async $transaction(callback) {
-      const transaction = {
-        v2EditCommand: {
-          async findUnique() { return null },
-          async create() {},
-          async findUniqueOrThrow() {
-            return {
-              id: committed.command.id, workspaceId, projectId,
-              baseVersionId, baseHash: committed.command.baseHash,
-              type: 'manual-edit', scopeJson: JSON.stringify(committed.command.scope),
-              payloadJson: JSON.stringify(committed.command.payload), reason: null,
-              actorType: committed.command.author.type, actorId: committed.command.author.id,
-              delegatedUserId: null, idempotencyKey: committed.command.idempotencyKey,
-              actorCredentialId: committed.authenticationAudit.credentialId,
-              actorEnvironment: committed.authenticationAudit.environment,
-              actorAuthenticationKind: committed.authenticationAudit.authenticationKind,
-              actorContextHash: committed.authenticationAudit.contextHash,
-              actorDelegatedIdentityId: null, actorWorkspaceRole: null,
-              requestFingerprint: committed.requestFingerprint,
-              createdAt: new Date(committed.command.createdAt),
-              baseVersion: baseVersionRow, resultVersion: resultVersionRow,
-              artifactInvalidations: persistedInvalidations,
-            }
-          },
-        },
-        v2Project: {
-          async findFirst() { return {
-            format: '9:16', currentVersion: { id: baseVersionId, baseHash: 'a'.repeat(64), sequence: 1 },
-          } },
-          async updateMany() { return { count: 1 } },
-        },
-        v2ProjectProxyRenderOperation: { async findMany() { return [{ outputArtifactId: 'artifact-proxy-9x16' }] } },
-        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' }] } },
-        v2ProjectSnapshot: { async create() {} },
-        v2ProjectVersion: { async create() {} },
-        v2CommandArtifactInvalidation: { async createMany({ data }) { persistedInvalidations = data } },
-        v2PublicEventOutbox: { async create() {} },
-      }
-      return callback(transaction)
-    },
-  })
-  const persisted = await persistedRepository.commitOrReplay(committed)
-  assert.deepEqual(persisted.invalidations.map((item) => item.artifactId).toSorted(), [
-    'artifact-final-9x16', 'artifact-proxy-9x16',
-  ])
+  const persistedInvalidations = createCommandArtifactInvalidations({ impact: cropImpact, createdAt }).map((item) => ({
+    ...item, workspaceId, projectId, dependencyTypesJson: JSON.stringify(item.dependencyTypes),
+    affectedRangesJson: JSON.stringify(item.affectedRanges), createdAt: new Date(item.createdAt),
+  }))
   assert.equal(persistedInvalidations.length, 2)
   assert.ok(persistedInvalidations.every((item) => item.status === 'stale'))
   assert.ok(persistedInvalidations.every((item) => item.resultVersionId === resultVersionId))
@@ -921,49 +765,6 @@ test('W65 renderable snapshot attachment accepts only its own sealed null-OCR re
   assert.equal(attached, 0)
   await attach(parameters, null)
   assert.equal(attached, 1)
-})
-
-test('T-FR-233 Prisma context discovers only completed proxy/final outputs for the immutable base', async () => {
-  const queries = []
-  const currentVersion = {
-    id: baseVersionId, workspaceId, projectId, sequence: 1, parentVersionId: null,
-    briefSnapshotId: 'snapshot-brief-1', treatmentSnapshotId: null, storySnapshotId: null,
-    editPlanSnapshotId: 'snapshot-edit-1', policiesSnapshotId: 'snapshot-policy-1',
-    baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', commandId: null,
-    createdAt: new Date(createdAt),
-    editPlanSnapshot: {
-      id: 'snapshot-edit-1', contentJson: JSON.stringify(plan()), contentHash: 'b'.repeat(64),
-    },
-  }
-  const repository = new PrismaManualEditRepository({
-    v2Project: { async findFirst() { return {
-      id: projectId, workspaceId, format: '9:16', currentVersion,
-      mediaAssets: [{ artifactId: 'source-1' }], versions: [currentVersion],
-    } } },
-    v2ProjectProxyRenderOperation: { async findMany(query) {
-      queries.push(query)
-      return [{ outputArtifactId: 'artifact-proxy-9x16' }]
-    } },
-    v2ProjectFinalExportOperation: { async findMany(query) {
-      queries.push(query)
-      return [
-        { outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' },
-        { outputArtifactId: 'artifact-final-16x9', outputAspectRatio: '16:9' },
-      ]
-    } },
-  })
-  const context = await repository.readContext({ workspaceId, projectId })
-  assert.deepEqual(context.renderVariantIds, ['9:16'])
-  assert.deepEqual(context.outputReferences.map((item) => item.artifactId), [
-    'artifact-final-16x9', 'artifact-final-9x16', 'artifact-proxy-9x16',
-  ])
-  assert.equal(queries.length, 2)
-  for (const query of queries) {
-    assert.equal(query.where.workspaceId, workspaceId)
-    assert.equal(query.where.projectId, projectId)
-    assert.equal(query.where.projectVersionId, baseVersionId)
-    assert.deepEqual(query.where.operation, { status: 'succeeded', phase: 'completed' })
-  }
 })
 
 test('T-FR-233 stale ranges are canonicalized into an ordered, strictly disjoint list', () => {

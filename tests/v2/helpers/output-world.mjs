@@ -73,7 +73,8 @@ export async function ingestedWorld(options = {}) {
   const world = outputWorld(options.actor), root = await world.create(creationRequest(world))
   const prepared = await prepareEditorialSourceFixture(null, { bundle: root.bundle, projectAtCreation: root.projectAtCreation },
     { actor: world.actor, ...options })
-  return { world, root, prepared, parent: prepared.bundle, actor: world.actor }
+  // `chain` is every sealed bundle from the creation root to the ingest, oldest first.
+  return { world, root, prepared, parent: prepared.bundle, actor: world.actor, chain: [root.bundle, prepared.variant, prepared.bundle] }
 }
 
 /**
