@@ -20,7 +20,7 @@ import type { MediaArtifactLifecycleStatus, MediaArtifactType } from '../../doma
 import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../../domain/project-output-state-transition.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 type LibraryMetadata = V2MediaLibraryEntry & {
   thumbnailArtifact: { id: string; status: string } | null
@@ -322,6 +322,7 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
           const reference = await transaction.v2MediaLibraryAttachment.create({ data: { id: randomUUID(), workspaceId: input.workspaceId, projectId: input.projectId, selectionKind: input.selection.kind, selectionId, parentArtifactId, sourceSha256: source.sha256, rightsSnapshotId: item.rights.snapshotId!, segmentHash: item.source.type === 'segment' ? item.source.segmentHash : null, semanticRangeJson: item.source.type === 'segment' ? stableSerialize(item.source.semanticRange) : null, sourceTimeMappingJson: item.source.type === 'segment' ? stableSerialize(item.source.sourceTimeMapping) : null, commandId, baseVersionId: base.id, resultVersionId, resultVersionHash, actorContextHash: input.authenticationAudit.contextHash, idempotencyKey: input.idempotencyKey, requestFingerprint, createdAt: new Date(input.createdAt) } })
           const updated = await transaction.v2Project.updateMany({ where: { id: input.projectId, workspaceId: input.workspaceId, currentVersionId: base.id }, data: { currentVersionId: resultVersionId } })
           if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during library attachment')
+          await settleDeferredOutputGuards(transaction)
           return resultOf(reference, false)
         }, { isolationLevel: 'Serializable' as Prisma.TransactionIsolationLevel })
       } catch (error) {

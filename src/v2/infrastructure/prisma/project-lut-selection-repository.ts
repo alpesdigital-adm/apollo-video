@@ -12,7 +12,7 @@ import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../domain/project-lut-selection-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
@@ -391,6 +391,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
           id: input.event.id, workspaceId: input.event.workspaceId, type: input.event.type, version: input.event.version, occurredAt: new Date(input.event.occurredAt), sequence: input.event.sequence,
           actorClientId: input.event.actor?.clientId, actorUserId: input.event.actor?.userId, resourceType: input.event.resource.type, resourceId: input.event.resource.id, dataJson: stableSerialize(input.event.data),
         } })
+        await settleDeferredOutputGuards(transaction)
         const row = await transaction.v2ProjectLutSelection.findUniqueOrThrow({ where: { id: input.selection.id }, include: selectionInclude })
         return hydrate(row, false)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })

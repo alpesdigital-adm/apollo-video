@@ -49,7 +49,7 @@ import {
 } from '../../domain/strategic-objective.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
 import { parseDirectorDecisionLog } from '../../domain/director-decision.ts'
 import { readPerceptionProducerEnvelope } from './perception-producer-envelope-repository.ts'
@@ -1266,6 +1266,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         randomUUID,
       )
     }
+    await settleDeferredOutputGuards(transaction)
     const stored = await transaction.v2DirectorRun.findUniqueOrThrow({ where: { id: bundle.run.id }, include: directorRunInclude })
     return hydrateStoredRun(stored, false)
   }

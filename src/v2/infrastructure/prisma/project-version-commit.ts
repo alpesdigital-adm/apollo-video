@@ -46,3 +46,15 @@ export async function commitProjectVersionWithOutputState(tx: Prisma.Transaction
   } })
   await persistOutputVersionBundleInTransactionV3(tx, bundle)
 }
+
+/**
+ * The Version guards are deferred constraint triggers: they validate the whole bundle when the transaction ends. Prisma's
+ * interactive transaction does not report a refused COMMIT (a deferred trigger that raises leaves the callback's value
+ * returned and every row rolled back), so a writer that stops at COMMIT would answer success for a Version that was never
+ * stored. Each writer therefore calls this as the LAST write of its own transaction, after the head, the events and its
+ * domain rows: the guards then run inside the callback and a refusal rejects it, which rolls the transaction back.
+ * Nothing may write or re-defer afterwards; reads are fine.
+ */
+export async function settleDeferredOutputGuards(tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE')
+}

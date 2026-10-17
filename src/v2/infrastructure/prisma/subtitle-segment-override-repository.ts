@@ -18,7 +18,7 @@ import {
 } from '../../domain/subtitle-segment-override.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const include = Prisma.validator<Prisma.V2SubtitleSegmentOverrideInclude>()({ command: true, resultVersion: true })
 type Stored = Prisma.V2SubtitleSegmentOverrideGetPayload<{ include: typeof include }>
@@ -332,6 +332,7 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
           data: { currentVersionId: bundleVersion.id },
         })
         if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during subtitle segment override commit')
+        await settleDeferredOutputGuards(tx)
         return hydrate(
           await tx.v2SubtitleSegmentOverride.findUniqueOrThrow({
             where: { id_workspaceId: { id: input.subtitleOverride.id, workspaceId: input.subtitleOverride.workspaceId } },

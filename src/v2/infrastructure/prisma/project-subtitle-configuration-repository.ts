@@ -11,7 +11,7 @@ import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { SUBTITLE_PRESETS, validateSubtitlePreset, type SubtitleModeRequest, type SubtitlePresetId } from '../../domain/subtitle-system.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const include = Prisma.validator<Prisma.V2ProjectSubtitleConfigurationInclude>()({ command: true, resultVersion: true })
 type Stored = Prisma.V2ProjectSubtitleConfigurationGetPayload<{ include: typeof include }>
@@ -145,6 +145,7 @@ export class PrismaProjectSubtitleConfigurationRepository implements ProjectSubt
         await tx.v2ProjectSubtitleConfiguration.create({ data: { id: input.configuration.id, workspaceId: input.configuration.workspaceId, projectId: input.configuration.projectId, commandId: input.configuration.commandId, baseVersionId: input.configuration.baseVersionId, resultVersionId: input.configuration.resultVersionId, variantId: input.configuration.variantId, action: input.configuration.action, previousConfigurationId: input.configuration.previousConfigurationId, requestedMode: input.configuration.requested.mode, resolvedPresetId: input.configuration.resolved.enabled ? input.configuration.resolved.presetId : null, resolvedPresetHash: input.configuration.resolved.enabled ? input.configuration.resolved.presetHash : null, origin: input.configuration.origin, transcriptHash: input.configuration.transcriptHash, workspaceDefaultRevision: input.configuration.workspaceDefaultRevision, configurationJson: stableSerialize(input.configuration), configurationHash: input.configuration.configurationHash, impactJson: stableSerialize(input.impact), impactHash: input.impact.impactHash, createdAt: new Date(input.configuration.createdAt) } })
         await tx.v2ProjectSubtitleConfigurationHead.upsert({ where: { projectId_workspaceId_variantId: { projectId: input.configuration.projectId, workspaceId: input.configuration.workspaceId, variantId: input.configuration.variantId } }, create: { projectId: input.configuration.projectId, workspaceId: input.configuration.workspaceId, variantId: input.configuration.variantId, configurationId: input.configuration.id, updatedAt: new Date(input.configuration.createdAt) }, update: { configurationId: input.configuration.id, updatedAt: new Date(input.configuration.createdAt) } })
         const updated = await tx.v2Project.updateMany({ where: { id: command.projectId, workspaceId: command.workspaceId, currentVersionId: command.baseVersionId }, data: { currentVersionId: version.id } }); if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during subtitle configuration commit')
+        await settleDeferredOutputGuards(tx)
         return hydrate(await tx.v2ProjectSubtitleConfiguration.findUniqueOrThrow({ where: { id_workspaceId: { id: input.configuration.id, workspaceId: input.configuration.workspaceId } }, include }), false)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {

@@ -28,7 +28,7 @@ import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const colorPlanInclude = Prisma.validator<Prisma.V2ProjectColorPlanInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -489,6 +489,7 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
           resourceId: input.event.resource.id,
           dataJson: stableSerialize(input.event.data),
         } })
+        await settleDeferredOutputGuards(transaction)
         const row = await transaction.v2ProjectColorPlan.findUniqueOrThrow({ where: { id: input.colorPlan.id }, include: colorPlanInclude })
         return hydrate(row, false)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })

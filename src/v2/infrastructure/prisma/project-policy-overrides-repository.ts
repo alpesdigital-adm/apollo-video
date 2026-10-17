@@ -26,7 +26,7 @@ import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRow, hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import {
   editCommandExternalActorAuditData,
   hydrateEditCommandExternalActorAudit,
@@ -408,6 +408,7 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
           resourceId: bundle.event.resource.id,
           dataJson: stableSerialize(bundle.event.data),
         } })
+        await settleDeferredOutputGuards(transaction)
         const stored = await transaction.v2EditCommand.findUniqueOrThrow({
           where: { id: bundle.command.id },
           include: storedCommandInclude,

@@ -21,7 +21,7 @@ import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 type StoredCommand = Prisma.V2EditCommandGetPayload<{
   include: {
@@ -254,6 +254,7 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
           resourceType: bundle.event.resource.type, resourceId: bundle.event.resource.id,
           dataJson: stableSerialize(bundle.event.data),
         } })
+        await settleDeferredOutputGuards(transaction)
         const stored = await transaction.v2EditCommand.findUniqueOrThrow({
           where: { id: bundle.command.id },
           include: { baseVersion: { include: { editPlanSnapshot: true } }, resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },

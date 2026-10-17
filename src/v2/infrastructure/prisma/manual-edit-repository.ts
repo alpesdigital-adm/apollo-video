@@ -32,7 +32,7 @@ import {
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { assertManualOutputReferencesV3 } from './output-version-bundle-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 type StoredManualCommand = Prisma.V2EditCommandGetPayload<{
   include: {
@@ -572,6 +572,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
             dataJson: stableSerialize(bundle.event.data),
           },
         })
+        await settleDeferredOutputGuards(transaction)
         const stored = await transaction.v2EditCommand.findUniqueOrThrow({
           where: { id: bundle.command.id },
           include: {

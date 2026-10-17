@@ -30,7 +30,7 @@ import { rational, type Rational } from '../../domain/session-time.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 /**
  * The project side of `direct-multicam-session` against PostgreSQL (F4.012).
@@ -479,6 +479,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
             dataJson: stableSerialize(bundle.event.data),
           },
         })
+        await settleDeferredOutputGuards(transaction)
         const stored = await transaction.v2EditCommand.findUniqueOrThrow({
           where: { id: bundle.command.id },
           include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },

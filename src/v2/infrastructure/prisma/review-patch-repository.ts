@@ -31,7 +31,7 @@ import {
 import { persistPublicEvents } from './public-event-outbox.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
+import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import {
   externalActorAuditData,
   hydrateExternalActorAudit,
@@ -485,6 +485,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
             },
           }),
         ])
+        await settleDeferredOutputGuards(transaction)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
