@@ -22,7 +22,7 @@ import { readAdoptableObservationsV3 } from '../../src/v2/infrastructure/prisma/
 import { readPersistedOperationalOutputBundleV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from '../../src/v2/infrastructure/prisma/project-version-commit.ts'
 import { controlledNormalization, recordingNames } from './helpers/operational-editorial-fixture.mjs'
-import { persistCurrentRights, seedSealedProject } from './helpers/pg-output-world.mjs'
+import { assetRightsRow, persistCurrentRights, seedSealedProject } from './helpers/pg-output-world.mjs'
 
 /**
  * W66 child Commands that adopt the persisted observed receipts of the project's other recordings, against a real
@@ -176,9 +176,10 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
     assert.equal((await db.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId, second.bundle.version.id)
 
     // ---- 2b. rights move on after a Version is sealed: its adoption stays valid history, and the project keeps committing.
-    // Any write to the project re-asserts the head State at COMMIT; only the Version being written must see current rights.
+    // Writing a project media link or snapshot queues the deferred check of the HEAD State; only the Version being written must see
+    // current rights, so the head's adoption (history by now) must not freeze the project: a further recording persists fine.
     await rights(recordings['cam-c'].names.sourceArtifactId, 'cam-c-source-again', 'approved', 2)
-    await db.v2Project.update({ where: { id: projectId }, data: { name: 'Renamed after an adopted source changed rights' } })
+    recordings['cam-late'] = await persistRecording('cam-late')
     const carried = await sealChild('carried', ['cam-a', 'cam-c'], recordings)
     assert.deepEqual(carried.bundle.origin.adoptions, [], 'the head already observes both recordings: nothing to adopt')
     await commit(carried.parent, carried.bundle)
@@ -246,6 +247,23 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
       }, transactionOptions), (error) => String(error.meta?.message ?? error.message).includes('W66v3'), label)
       assert.deepEqual(await residue(lying.bundle), lyingBefore, label)
     }
+    // 3e. the guard's verdict for a State is reused only within one statement and one set of writes: after the child passed its check,
+    // moving an adopted source's rights inside the same transaction fails the next check of that State (the verdict is not remembered across a write)
+    const reused = await sealChild('reused', ['cam-a', 'cam-b'], recordings)
+    const reusedArtifact = recordings['cam-b'].names.sourceArtifactId
+    const reusedBefore = await residue(reused.bundle)
+    const late = createAssetRightsSnapshot({ id: `w66ad-${runId}-rights-cam-b-late`, workspaceId, artifactId: reusedArtifact, sequence: 3,
+      draft: { status: 'approved', allowedUses: ['rendering', 'editorial-reuse'], prohibitedUses: [], sourceNote: 'cam-b-late', consent: { status: 'not-required', allowedUses: [] } },
+      createdBy: { type: 'api-client', id: clientId }, createdAt })
+    await db.v2AssetRightsSnapshot.create({ data: assetRightsRow(late) })
+    await assert.rejects(() => db.$transaction(async (tx) => {
+      await commitProjectVersionWithOutputState(tx, reused.bundle)
+      await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE') // the child passes: its adoptions are current
+      await tx.v2MediaArtifact.update({ where: { id: reusedArtifact }, data: { currentRightsSnapshotId: late.id, rightsRevision: 3 } })
+      // moving the head re-asserts the State at once (constraints are immediate now): the verdict above must not be reused
+      await tx.v2Project.updateMany({ where: { id: projectId, workspaceId, currentVersionId: reused.parent.version.id }, data: { currentVersionId: reused.bundle.version.id } })
+    }, transactionOptions), (error) => String(error.meta?.message ?? error.message).includes('W66v3 adopted observation rights are not current'), '3e')
+    assert.deepEqual(await residue(reused.bundle), reusedBefore, '3e left nothing')
     assert.deepEqual(await residue(guarded.bundle), before, 'the guard cases left the head and the history where they were')
   } finally {
     await db.$disconnect()

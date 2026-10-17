@@ -176,7 +176,7 @@ test('the database guard names exactly the types, plan effects, replacements, or
   // Adoption is verified by the same guard: listed, sorted, unique, exactly the observations outside the parent, persisted and rights-current.
   assert.deepEqual(producer.adoptions, [])
   for (const marker of ["jsonb_typeof(o->'adoptions')", "'adoptions',o->'adoptions'", 'W66v3 child adoption shape/order differs', 'W66v3 child normalization lineage differs',
-    'w66_assert_normalization_v3(adopted_receipt.id', 'W66v3 adopted observation rights differ from the snapshot they name', 'written_now', 'W66v3 adopted observation rights are not current',
+    'w66_assert_normalization_v3(adopted_receipt.id', 'W66v3 adopted observation rights differ from the snapshot they name', 'written_now', 'W66v3 adopted observation rights are not current', 'apollo.w66_state_verified', 'pg_stat_xact_all_tables',
     'W66v3 adopted observation has no project media association']) {
     assert.ok(sql.includes(marker), marker)
   }

@@ -202,9 +202,18 @@ BEGIN
 EXCEPTION WHEN no_data_found OR too_many_rows THEN RAISE EXCEPTION 'W66v3 reciprocal bundle missing/ambiguous at COMMIT' USING ERRCODE='23514';
 END $$;
 CREATE OR REPLACE FUNCTION w66_assert_operational_state_v3(p_state text) RETURNS void LANGUAGE plpgsql AS $$
-DECLARE origin_kind text;BEGIN
+DECLARE origin_kind text;fingerprint text;BEGIN
+ -- A deferred batch queues one check per written row; each re-reads every receipt of the State. The verdict for a State cannot change
+ -- unless something was written, so it is reused for the same State, in the same statement, with the same number of rows this
+ -- transaction has written to any table. Any write changes the count, a new statement changes the timestamp, and with track_counts
+ -- off nothing is reused. A refused check raises, so no refusal is ever remembered.
+ IF current_setting('track_counts')='on' THEN
+  fingerprint:=p_state||':'||statement_timestamp()::text||':'||(SELECT coalesce(sum(x.n_tup_ins+x.n_tup_upd+x.n_tup_del),0) FROM pg_stat_xact_all_tables x WHERE x.schemaname='public')::text;
+  IF current_setting('apollo.w66_state_verified',true)=fingerprint THEN RETURN;END IF;
+ END IF;
  SELECT "originJson"::jsonb->>'kind' INTO STRICT origin_kind FROM output_operational_bundles WHERE "stateId"=p_state;
  IF origin_kind='editorial-cut-command' THEN PERFORM w66_assert_editorial_state_v1(p_state);
  ELSIF origin_kind='child-command' THEN PERFORM w66_assert_child_command_state_v1(p_state);
  ELSE PERFORM w66_assert_operational_state_v3_historical(p_state);END IF;
+ IF fingerprint IS NOT NULL THEN PERFORM set_config('apollo.w66_state_verified',fingerprint,true);END IF;
 END $$;
