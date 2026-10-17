@@ -1,3 +1,4 @@
+import type { AdoptableObservationReader } from './adoptable-observation-reader.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type {
   PersistedManualEditPayload,
@@ -69,7 +70,7 @@ export interface ManualEditInvalidationView {
   invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
 }
 
-export interface ManualEditRepository {
+export interface ManualEditRepository extends Partial<AdoptableObservationReader> {
   findIdempotentResult(input: {
     workspaceId: string
     projectId: string

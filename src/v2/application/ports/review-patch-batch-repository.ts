@@ -1,3 +1,4 @@
+import type { AdoptableObservationReader } from './adoptable-observation-reader.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { PatchImpact, PatchOperation, PatchSet, ReviewAnnotation } from '../../domain/review-system.ts'
 import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
@@ -89,7 +90,7 @@ export interface ReviewPatchBatchApplyResult {
   replayed: boolean
 }
 
-export interface ReviewPatchBatchRepository {
+export interface ReviewPatchBatchRepository extends Partial<AdoptableObservationReader> {
   findBatchIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }): Promise<Readonly<{ requestFingerprint: string; batch: ReviewPatchBatch }> | null>
   readProposalSet(input: { workspaceId: string; projectId: string; proposalIds: readonly string[] }): Promise<Readonly<ReviewPatchBatchProposalContext> | null>
   createBatch(input: { batch: ReviewPatchBatch; idempotencyKey: string; requestFingerprint: string }): Promise<Readonly<ReviewPatchBatch>>

@@ -57,20 +57,36 @@ function observed({derivative=false,nativeFps=30,durationFrames=60,gapAt=-1,gapP
   originSource:'format-start-time',originSeconds:{numerator:'0',denominator:'1'},width:raw.streams[0].width,height:raw.streams[0].height,fps:{numerator:String(nativeFps),denominator:'1'},rotationDegrees:0,timeBase,
   frames:video.map((v,frame)=>({frame,pts:String(v.best_effort_timestamp),timeBase})),frameEndPts:video.map(v=>String(v.best_effort_timestamp+v.duration)),endPts:String(video.at(-1).best_effort_timestamp+step)}))
 }
+// One recording's identities. The default slug keeps the legacy ids every existing suite pins; any other slug names
+// another, independent recording (its own artifact, manifest, receipt, operation, bytes and Version ids).
+export function recordingNames(slug='ingest3') {
+ if(slug==='ingest3')return Object.freeze({slug,normalizationId:'normalization-ingest3',operationId:'operation-ingest3',leaseOwner:'worker-ingest3',
+  sourceArtifactId:'artifact-source3',sourceManifestId:'manifest-source3',derivativeArtifactId:'artifact-derivative3',derivativeManifestId:'manifest-derivative3',
+  sourceKey:'controlled/source.mp4',derivativeKey:'controlled/derivative.mp4',sourceSha:'a'.repeat(64),derivativeSha:'b'.repeat(64),
+  versionId:'version-ingest3',stateId:'state-ingest3',snapshotId:'snapshot-ingest3',planId:'edit-plan-ingest3',transcriptId:'transcript-ingest3',
+  materialization:'materialization-ingest3-'})
+ // A slug that already names an artifact ('asset-cam-a', 'artifact-cam-a') is that artifact verbatim.
+ return Object.freeze({slug,normalizationId:'normalization-'+slug,operationId:'operation-'+slug,leaseOwner:'worker-'+slug,
+  sourceArtifactId:/^(asset|artifact)-/.test(slug)?slug:'artifact-'+slug,sourceManifestId:'manifest-'+slug,derivativeArtifactId:'artifact-derivative-'+slug,derivativeManifestId:'manifest-derivative-'+slug,
+  sourceKey:'controlled/'+slug+'/source.mp4',derivativeKey:'controlled/'+slug+'/derivative.mp4',sourceSha:sha('source:'+slug),derivativeSha:sha('derivative:'+slug),
+  versionId:'version-'+slug,stateId:'state-'+slug,snapshotId:'snapshot-'+slug,planId:'edit-plan-'+slug,transcriptId:'transcript-'+slug,
+  materialization:'materialization-'+slug+'-'})
+}
 function normalization(sourceProjectId,scope,options={}) {
+ const names=recordingNames(options.slug)
  const sourceProbe=observed(options),derivativeProbe=observed({...options,derivative:true})
- const sourceManifest=createMediaArtifactManifest({artifactKey:'controlled/source.mp4',artifactSha256:'a'.repeat(64),byteSize:1000,mediaType:'video',container:'mp4',recipe:{id:'direct-upload',version:'1.0.0',parameters:{mimeType:'video/mp4'}},
+ const sourceManifest=createMediaArtifactManifest({artifactKey:names.sourceKey,artifactSha256:names.sourceSha,byteSize:1000,mediaType:'video',container:'mp4',recipe:{id:'direct-upload',version:'1.0.0',parameters:{mimeType:'video/mp4'}},
   probe:{width:sourceProbe.width,height:sourceProbe.height,duration:(options.durationFrames??60)/(options.nativeFps??30),fps:options.nativeFps??30}})
- const derivativeManifest=createMediaArtifactManifestV2({artifactKey:'controlled/derivative.mp4',artifactSha256:'b'.repeat(64),byteSize:2000,mediaType:'video',container:'mp4',
+ const derivativeManifest=createMediaArtifactManifestV2({artifactKey:names.derivativeKey,artifactSha256:names.derivativeSha,byteSize:2000,mediaType:'video',container:'mp4',
   recipe:{id:'editing-proxy',version:'1.2.0',parameters:{normalizationPolicy:'output-normalization-receipt/v3',maxWidth:1280,maxHeight:1280,videoCodec:'h264',audioCodec:'aac'}},
   sources:[{artifactKey:sourceManifest.artifact.artifactKey,sha256:sourceManifest.artifact.sha256,role:'source-master',execution:{tool:{id:'ffmpeg',version:'static',digest:'f'.repeat(64)}}}],
   probe:{width:derivativeProbe.width,height:derivativeProbe.height,duration:(options.durationFrames??60)/(options.nativeFps??30),fps:options.nativeFps??30}})
- return traceEditorialFixtureSync('normalization-seal',()=>sealOutputNormalizationV3({canonicalPolicyVersion:'output-canonical-json/v1',schemaVersion:'output-normalization-receipt/v3',id:'normalization-ingest3',kind:'ffmpeg-video-derivative',workspaceId:scope.workspaceId,projectId:sourceProjectId,operationId:'operation-ingest3',attempt:1,leaseOwner:'worker-ingest3',
-  source:{artifactId:'artifact-source3',manifestId:'manifest-source3',manifest:sourceManifest},derivative:{artifactId:'artifact-derivative3',manifestId:'manifest-derivative3',manifest:derivativeManifest},
+ return traceEditorialFixtureSync('normalization-seal',()=>sealOutputNormalizationV3({canonicalPolicyVersion:'output-canonical-json/v1',schemaVersion:'output-normalization-receipt/v3',id:names.normalizationId,kind:'ffmpeg-video-derivative',workspaceId:scope.workspaceId,projectId:sourceProjectId,operationId:names.operationId,attempt:1,leaseOwner:names.leaseOwner,
+  source:{artifactId:names.sourceArtifactId,manifestId:names.sourceManifestId,manifest:sourceManifest},derivative:{artifactId:names.derivativeArtifactId,manifestId:names.derivativeManifestId,manifest:derivativeManifest},
   sourceProbe,derivativeProbe,audioProbes:{source:observedAudioFromVideoProbeV3(sourceProbe),derivative:observedAudioFromVideoProbeV3(derivativeProbe)},
-  execution:{provider:'ffmpeg',recipeVersion:'media-normalization-execution/2026-10-14-v3',binarySha256:'f'.repeat(64),argv:['-hide_banner','-loglevel','error','-y','-i','/controlled/source.mp4','-map','0:v:0','-map','0:a:0?',
-   '-vf','scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos','-c:v','libx264','-preset','veryfast','-crf','24','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-ar','48000','-movflags','+faststart','/controlled/derivative.mp4'],
-   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:'a'.repeat(64),sourceSha256After:'a'.repeat(64),derivativeSha256:'b'.repeat(64),autorotate:true},createdAt:options.createdAt??'2026-10-14T12:00:02.000Z'}))
+  execution:{provider:'ffmpeg',recipeVersion:'media-normalization-execution/2026-10-14-v3',binarySha256:'f'.repeat(64),argv:['-hide_banner','-loglevel','error','-y','-i','/controlled/'+names.slug+'/source.mp4','-map','0:v:0','-map','0:a:0?',
+   '-vf','scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos','-c:v','libx264','-preset','veryfast','-crf','24','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-ar','48000','-movflags','+faststart','/controlled/'+names.slug+'/derivative.mp4'],
+   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:names.sourceSha,sourceSha256After:names.sourceSha,derivativeSha256:names.derivativeSha,autorotate:true},createdAt:options.createdAt??'2026-10-14T12:00:02.000Z'}))
 }
 export async function prepareEditorialSourceFixture(creation,receipt,options={}) {
  const finishSource=editorialFixturePhaseStart('prepare-source')
@@ -83,7 +99,7 @@ export async function prepareEditorialSourceFixture(creation,receipt,options={})
    proxyToFinal:{schemaVersion:'output-canvas-transform/v1',scaleX:2,scaleY:2},subtitles:{mode:'none',configuration:null,fontAssets:[]}},preset:null}))
  const root=receipt.bundle,result=traceEditorialFixtureSync('source-variant-command',()=>createOutputVariantCommand({command:{...scope,id:'command-editorial-source-variant',baseVersionId:root.version.id,baseHash:root.version.baseHash,type:'create-output-variant',author:{type:'api-client',id:audit.clientId},
   idempotencyKey:'editorial-source-variant',createdAt},audit,base:root.version,baseState:root.state,historicalBaselineRequested:false,revision,expectedRevisionId:null,expectedSpecHash:null,durationFrames:0}))
- const makeSnapshot=(id,plan,time)=>createProjectSnapshot({...scope,id,kind:'edit-plan',contentSchemaVersion:2,contentJson:stableSerialize(plan),contentHash:calculateCanonicalHash(plan),createdAt:time})
+ const makeSnapshot=(id,plan,time)=>snapshotOf(scope,id,plan,time)
  const rootPlan=JSON.parse(root.command.payload.snapshots.find(s=>s.kind==='edit-plan').contentJson),variantPlan={...rootPlan,id:'edit-plan-editorial-source-variant',projectVersionId:'version-editorial-source-variant',createdAt}
  let variant=traceEditorialFixtureSync('variant-bundle',()=>buildOperationalOutputVersionBundleV3({allocation:{...scope,resultVersionId:variantPlan.projectVersionId,stateId:'state-editorial-source-variant',parentVersionId:root.version.id,sequence:2,createdBy:audit.clientId,createdAt},
   parent:root,origin:{kind:'create-output-variant',result},restoreTarget:null,editPlanSnapshot:makeSnapshot('snapshot-editorial-source-variant',variantPlan,createdAt),normalizations:[],materializationIds:{}}))
@@ -95,19 +111,28 @@ export async function prepareEditorialSourceFixture(creation,receipt,options={})
   variant=traceEditorialFixtureSync('sibling-bundle',()=>buildOperationalOutputVersionBundleV3({allocation:{...scope,resultVersionId:plan.projectVersionId,stateId:'state-editorial-sibling',parentVersionId:variant.version.id,sequence:variant.version.sequence+1,createdBy:audit.clientId,createdAt},
    parent:variant,origin:{kind:'create-output-variant',result},restoreTarget:null,editPlanSnapshot:makeSnapshot('snapshot-editorial-sibling',plan,createdAt),normalizations:[],materializationIds:{}}))
  }
+ const {bundle,transcript,n,refs}=ingestRecording(variant,scope,audit,options)
+ finishSource();return {bundle,transcript,n,refs,variant}
+}
+function snapshotOf(scope,id,plan,time) {return createProjectSnapshot({...scope,id,kind:'edit-plan',contentSchemaVersion:2,contentJson:stableSerialize(plan),contentHash:calculateCanonicalHash(plan),createdAt:time})}
+// One controlled ingest of one recording onto `parent` (any sealed bundle with an explicit variant): the sealed
+// normalization, the initial plan compiled from that recording and the Version/State the real ingest origin produces.
+// It replaces the project's plan with that recording's: earlier recordings keep their receipts but leave the State.
+export function ingestRecording(parent,scope,audit,options={}) {
+ const names=recordingNames(options.slug)
  const at=options.ingestAt??'2026-10-14T12:00:02.000Z',transcript=options.transcript??createMediaTranscript({language:'pt-BR',text:'Fonte controlada.',words:[{word:'Fonte',start:0,end:1},{word:'controlada.',start:1,end:2}],
   segments:[{id:0,start:0,end:2,text:'Fonte controlada.'}],provider:'controlled',model:'explicit-domain-fixture'})
- let op=advancePublicOperationPhase(startPublicOperationAttempt(createQueuedPublicOperation({...scope,id:'operation-ingest3',clientId:audit.clientId,type:'media-ingest',target:{type:'media-artifact',id:'artifact-source3',manifestId:'manifest-source3'},createdAt}),at),'persisting',at)
+ let op=advancePublicOperationPhase(startPublicOperationAttempt(createQueuedPublicOperation({...scope,id:names.operationId,clientId:audit.clientId,type:'media-ingest',target:{type:'media-artifact',id:names.sourceArtifactId,manifestId:names.sourceManifestId},createdAt:at}),at),'persisting',at)
  const {completedAt,nextAttemptAt,deadLetteredAt,result:unusedResult,error,...operation}=op
  // Native observations use their own explicit 30/1 clock. The requested
  // timeline clock is separately supplied (including the original decimal FPS
  // vector); the measured coverage encloses the conservative compiler frames.
  const nativeFps=30,observedFrames=Math.ceil((options.sourceDurationSeconds??2)*nativeFps)
- const n=traceEditorialFixtureSync('normalization',()=>normalization(scope.projectId,scope,{createdAt:at,nativeFps,durationFrames:observedFrames})),plan=traceEditorialFixtureSync('compile-source',()=>compileInitialSourceEditPlan({id:'edit-plan-ingest3',projectVersionId:'version-ingest3',transcriptId:'transcript-ingest3',transcript,
-  sourceArtifactId:'artifact-source3',sourceDurationSeconds:options.sourceDurationSeconds??2,fps:options.fps??30,createdAt:at,sourceTranscriptCueIntent:options.cueIntent===false?undefined:{schemaVersion:'source-transcript-cue-intent/v1',kind:'alignment-only',emission:'suppressed-missing-visual-clock-authority',trackId:'track-source-captions',cueIdPrefix:'cue-source'}}))
- const bundle=traceEditorialFixtureSync('ingest-bundle',()=>buildOperationalOutputVersionBundleV3({allocation:{...scope,resultVersionId:'version-ingest3',stateId:'state-ingest3',parentVersionId:variant.version.id,sequence:variant.version.sequence+1,createdBy:audit.clientId,createdAt:at},parent:variant,
-  origin:{kind:'ingest-operation',operation,requestFingerprint:calculateCanonicalHash({controlled:'explicit-ingest-request'}),leaseOwner:'worker-ingest3',detail:{uploadId:'00000000-0000-4000-a000-000000000001',sourceArtifactId:'artifact-source3',sourceManifestId:'manifest-source3'},
-   transcript:{...scope,id:'transcript-ingest3',sourceArtifactId:'artifact-source3',sourceManifestId:'manifest-source3',document:transcript,createdAt:at}},restoreTarget:null,editPlanSnapshot:makeSnapshot('snapshot-ingest3',plan,at),normalizations:[n],materializationIds:Object.fromEntries(variant.state.document.entries.map(e=>[e.variantId,'materialization-ingest3-'+e.variantId]))}))
+ const n=traceEditorialFixtureSync('normalization',()=>normalization(scope.projectId,scope,{createdAt:at,nativeFps,durationFrames:observedFrames,slug:options.slug})),plan=traceEditorialFixtureSync('compile-source',()=>compileInitialSourceEditPlan({id:names.planId,projectVersionId:names.versionId,transcriptId:names.transcriptId,transcript,
+  sourceArtifactId:names.sourceArtifactId,sourceDurationSeconds:options.sourceDurationSeconds??2,fps:options.fps??30,createdAt:at,sourceTranscriptCueIntent:options.cueIntent===false?undefined:{schemaVersion:'source-transcript-cue-intent/v1',kind:'alignment-only',emission:'suppressed-missing-visual-clock-authority',trackId:'track-source-captions',cueIdPrefix:'cue-source'}}))
+ const bundle=traceEditorialFixtureSync('ingest-bundle',()=>buildOperationalOutputVersionBundleV3({allocation:{...scope,resultVersionId:names.versionId,stateId:names.stateId,parentVersionId:parent.version.id,sequence:parent.version.sequence+1,createdBy:audit.clientId,createdAt:at},parent,
+  origin:{kind:'ingest-operation',operation,requestFingerprint:calculateCanonicalHash(names.slug==='ingest3'?{controlled:'explicit-ingest-request'}:{controlled:'explicit-ingest-request',recording:names.slug}),leaseOwner:names.leaseOwner,detail:{uploadId:'00000000-0000-4000-a000-000000000001',sourceArtifactId:names.sourceArtifactId,sourceManifestId:names.sourceManifestId},
+   transcript:{...scope,id:names.transcriptId,sourceArtifactId:names.sourceArtifactId,sourceManifestId:names.sourceManifestId,document:transcript,createdAt:at}},restoreTarget:null,editPlanSnapshot:snapshotOf(scope,names.snapshotId,plan,at),normalizations:[n],materializationIds:Object.fromEntries(parent.state.document.entries.map(e=>[e.variantId,names.materialization+e.variantId]))}))
  const refs=[n.document.source,n.document.derivative].map((f,i)=>({artifactId:f.artifactId,role:i?'editing-proxy':'source-master',originalFileName:i?'proxy.mp4':'source.mp4',
   sourceLinkId:i?'11111111-1111-4111-8111-111111111112':'11111111-1111-4111-8111-111111111111',workspaceId:scope.workspaceId,sourceProjectId:scope.projectId,sourceLinkCreatedAt:at,
   artifactKey:f.manifest.artifact.artifactKey,artifactSha256:f.manifest.artifact.sha256,artifactByteSize:String(f.manifest.artifact.byteSize),artifactMediaType:'video',artifactContainer:'mp4',artifactLifecycleRevision:1,purpose:'editing',
@@ -116,7 +141,13 @@ export async function prepareEditorialSourceFixture(creation,receipt,options={})
  assert.equal(plan.durationFrames,Math.floor((options.sourceDurationSeconds??2)*(options.fps??30)+1e-7))
  assert.equal(n.document.sourceProbe.frames.length,observedFrames)
  assert.equal(n.document.sourceProbe.fps.numerator,'30');assert.equal(n.document.sourceProbe.fps.denominator,'1')
- finishSource();return {bundle,transcript,n,refs,variant}
+ return {bundle,transcript,n,refs,names}
+}
+/** Ingests one more recording onto an already sealed bundle (the head of a world), later than that head. */
+export function ingestOnto(parent,{actor,slug,sourceDurationSeconds,fps,transcript}={}) {
+ const scope={workspaceId:parent.version.workspaceId,projectId:parent.version.projectId},audit=materializeActorAuditContext(actor??defaultActor())
+ const ingestAt=new Date(Date.parse(parent.version.createdAt)+1000).toISOString()
+ return ingestRecording(parent,scope,audit,{slug,ingestAt,sourceDurationSeconds,fps,transcript})
 }
 
 export async function createEditorialForkFixture({actor,transcript,sourceDurationSeconds,fps,sibling=true}) {
@@ -156,3 +187,4 @@ export async function createEditorialForkFixture({actor,transcript,sourceDuratio
    transcript:prepared.bundle.origin.transcript,normalizationRefs:[{id:prepared.n.document.id,projectId:prepared.n.document.projectId,receiptHash:prepared.n.receiptHash}],inventory}}
  finishContext();finishFork();return {fork,prepared,context}
 }
+export const controlledNormalization=normalization

@@ -417,10 +417,24 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     const parentNormalizations=parent.state.document.schemaVersion==='project-output-state/v3'?
       parent.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[]):[]
     const factual=new Map(parentNormalizations.map(n=>[n.document.id,n]))
-    // A child may use fewer sources than its parent but only the parent's exact observations: nothing is invented.
+    // A child may use fewer of its parent's observations (always the parent's exact ones) and may ADOPT the persisted,
+    // observed receipts of the project's other recordings: those, and only those, are named by the origin. Nothing is invented.
     assertDomain(new Set(input.normalizations.map(n=>n.document.id)).size===input.normalizations.length &&
-      input.normalizations.every(n=>factual.has(n.document.id) && stableSerialize(n)===stableSerialize(factual.get(n.document.id))),
+      input.normalizations.every(n=>!factual.has(n.document.id) || stableSerialize(n)===stableSerialize(factual.get(n.document.id))),
       'INVALID_COMMAND','Child Command must reuse the exact parent normalization observations')
+    const outside=input.normalizations.filter(n=>!factual.has(n.document.id)),named=new Map(origin.adoptions.map(adoption=>[adoption.receiptId,adoption]))
+    assertDomain(outside.length===origin.adoptions.length && named.size===origin.adoptions.length && outside.every(n=>named.has(n.document.id)),
+      'INVALID_COMMAND','Child adoptions differ from the observations outside the parent State')
+    const parentSources=new Set(parentNormalizations.map(n=>n.document.source.artifactId))
+    for(const n of outside) {
+      const adoption=named.get(n.document.id)!
+      // The materializer below validates every receipt's seal; here the origin only has to name the receipt it adopts.
+      assertDomain(n.receiptHash===adoption.receiptHash && n.document.workspaceId===a.workspaceId &&
+        n.document.projectId===a.projectId && n.document.source.artifactId===adoption.sourceArtifactId &&
+        n.document.source.manifestId===adoption.sourceManifestId && n.document.source.manifest.manifestHash===adoption.sourceManifestHash,
+        'INVALID_COMMAND','Child adoption differs from the receipt it names or belongs to another workspace or project')
+      assertDomain(!parentSources.has(adoption.sourceArtifactId),'INVALID_COMMAND','Child adoption repeats a source the parent State already observes')
+    }
   } else if(origin.kind!=='ingest-operation'&&origin.kind!=='editorial-cut-command')assertDomain(
     calculateOutputCanonicalHash(semanticsV3(operationalBundlePlanV3(source)))===calculateOutputCanonicalHash(semanticsV3(edit)),
     'INVALID_COMMAND','Origin changed plan semantics outside its declared effect')
@@ -483,7 +497,9 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     transition=origin.kind==='restore-command'?'restore':origin.kind==='editorial-cut-command'?'editorial-cut':'inherit'
     producerBody={schemaVersion:origin.kind==='editorial-cut-command'?'output-editorial-derived-producer/v1':'output-child-command-producer/v3',canonicalPolicyVersion:OUTPUT_CANONICAL_POLICY_VERSION,
       kind:origin.kind,commandId:c.id,commandHash:c.commandHash,payloadHash:calculateOutputCanonicalHash(c.payload),
-      target:origin.kind==='restore-command'?origin.target:null}
+      target:origin.kind==='restore-command'?origin.target:null,
+      // The adoptions (receipts, seals, sources and the rights they were adopted under) are part of the State's producer.
+      ...(origin.kind==='child-command'?{adoptions:JSON.parse(stableSerialize(origin.adoptions)) as OutputJson}:{})}
   }
   const ids=new Set<string>()
   for(const e of entries) {

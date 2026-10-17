@@ -2,8 +2,9 @@ import type { ApiAccessAuditContext } from './api-access-control.ts'
 import { calculateCanonicalHash, stableSerialize } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import type { EditCommand } from './edit-command.ts'
-import { CHILD_COMMAND_TRANSITIONS, CHILD_REPLACEABLE_SNAPSHOT_KINDS, type ChildReplaceableSnapshotKind } from './output-child-command.ts'
-import type { SealedOutputNormalizationV3 } from './output-materialization.ts'
+import { CHILD_COMMAND_TRANSITIONS, CHILD_REPLACEABLE_SNAPSHOT_KINDS, type AdoptableObservationV3, type AdoptedObservationV3,
+  type ChildReplaceableSnapshotKind } from './output-child-command.ts'
+import { validateOutputNormalizationV3, type SealedOutputNormalizationV3 } from './output-materialization.ts'
 import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3, type OperationalOutputParentV3,
   type OperationalOutputVersionBundleV3 } from './output-version-bundle.ts'
 import type { OutputOriginAllocation } from './output-version-origin.ts'
@@ -49,17 +50,54 @@ export function requiredSourceArtifactIds(plan: Readonly<Record<string, unknown>
   return ids
 }
 
+/** The sources a plan consumes that the parent State does not observe (sorted); none for an empty plan. */
+export function unobservedSourceArtifactIds(parent: OperationalOutputParentV3, plan: Readonly<Record<string, unknown>>): readonly string[] {
+  if (plan.durationFrames === 0) return []
+  const observed = new Set(parentNormalizationsV3(parent).map((n) => n.document.source.artifactId))
+  return [...requiredSourceArtifactIds(plan)].filter((id) => !observed.has(id)).toSorted()
+}
+
 /**
  * The observations a child plan is materialized from: those its parent State already holds, restricted to the
- * sources the new plan consumes. A plan that consumes a source nobody has observed cannot be materialized, so
- * the Command is refused instead of sealing a Version whose outputs could not be rendered.
+ * sources the new plan consumes, and the receipts of the project's other recordings it ADOPTS for the rest.
+ *
+ * Fail-closed. A source the parent does not observe is adopted only from a receipt the caller offered for exactly that
+ * source artifact: sealed, of this workspace and project, with current rights evidence, and the only receipt offered
+ * for it. A source with no such receipt is an unobserved artifact and the Command is refused, naming it, instead of
+ * sealing a Version whose outputs could not be rendered. Offers for sources the plan does not consume (or the
+ * parent already observes) are ignored: adoption is never broader than consumption.
  */
-export function observedNormalizationsFor(parent: OperationalOutputParentV3, plan: Readonly<Record<string, unknown>>): readonly SealedOutputNormalizationV3[] {
-  if (plan.durationFrames === 0) return []
+export function observedNormalizationsFor(parent: OperationalOutputParentV3, plan: Readonly<Record<string, unknown>>,
+  adoptable: readonly Readonly<AdoptableObservationV3>[] = []): Readonly<{
+  normalizations: readonly SealedOutputNormalizationV3[]
+  adoptions: readonly AdoptedObservationV3[]
+}> {
+  if (plan.durationFrames === 0) return Object.freeze({ normalizations: Object.freeze([]), adoptions: Object.freeze([]) })
   const available = parentNormalizationsV3(parent), required = requiredSourceArtifactIds(plan)
-  const missing = [...required].filter((id) => !available.some((n) => n.document.source.artifactId === id)).toSorted()
-  assertDomain(missing.length === 0, 'PRECONDITION_REQUIRED', 'The new EditPlan consumes sources that have no observed normalization', { sourceArtifactIds: missing })
-  return available.filter((n) => required.has(n.document.source.artifactId))
+  const missing = unobservedSourceArtifactIds(parent, plan)
+  const adoptedNormalizations: SealedOutputNormalizationV3[] = [], adoptions: AdoptedObservationV3[] = []
+  const unobserved: string[] = [], withoutRights: string[] = []
+  for (const sourceArtifactId of missing) {
+    const offers = adoptable.filter((offer) => offer.normalization.document.source.artifactId === sourceArtifactId)
+    if (offers.length === 0) { unobserved.push(sourceArtifactId); continue }
+    assertDomain(offers.length === 1, 'INVALID_COMMAND', 'More than one receipt is offered for one source artifact', { sourceArtifactId })
+    const offer = offers[0]!, normalization = validateOutputNormalizationV3(offer.normalization), document = normalization.document
+    assertDomain(document.workspaceId === parent.version.workspaceId && document.projectId === parent.version.projectId, 'INVALID_COMMAND',
+      'An adoptable observation belongs to another workspace or project', { sourceArtifactId })
+    if (offer.rights === null) { withoutRights.push(sourceArtifactId); continue }
+    adoptedNormalizations.push(normalization)
+    adoptions.push(Object.freeze({
+      receiptId: document.id, receiptHash: normalization.receiptHash, sourceArtifactId, sourceManifestId: document.source.manifestId,
+      sourceManifestHash: document.source.manifest.manifestHash,
+      rights: Object.freeze({ snapshotId: offer.rights.snapshotId, snapshotHash: offer.rights.snapshotHash, revision: offer.rights.revision }),
+    }))
+  }
+  assertDomain(unobserved.length === 0, 'PRECONDITION_REQUIRED', 'The new EditPlan consumes sources that have no observed normalization', { sourceArtifactIds: unobserved })
+  assertDomain(withoutRights.length === 0, 'ASSET_RIGHTS_BLOCKED', 'An adopted recording has no current rights evidence', { artifactIds: withoutRights })
+  return Object.freeze({
+    normalizations: Object.freeze([...available.filter((n) => required.has(n.document.source.artifactId)), ...adoptedNormalizations]),
+    adoptions: Object.freeze(adoptions.toSorted((left, right) => (left.receiptId < right.receiptId ? -1 : left.receiptId > right.receiptId ? 1 : 0))),
+  })
 }
 
 /** Every normalization observation the parent State already materialized. */
@@ -90,6 +128,8 @@ export function transitionProjectOutputState(input: Readonly<{
   requestFingerprint: string
   editPlanSnapshot: Readonly<ProjectSnapshot>
   replacementSnapshots?: readonly Readonly<ProjectSnapshot>[]
+  /** The persisted receipts of the project's other recordings a repository offers; adopted only as the plan consumes them. */
+  adoptable?: readonly Readonly<AdoptableObservationV3>[]
   createMaterializationId: () => string
 }>): Readonly<OperationalOutputVersionBundleV3> {
   const replacements = input.replacementSnapshots ?? []
@@ -104,15 +144,16 @@ export function transitionProjectOutputState(input: Readonly<{
   const variantIds = input.parent.state.document.entries.map((entry) => entry.variantId)
   const materializationIds = plan.durationFrames === 0 ? {} :
     Object.fromEntries(variantIds.map((variantId) => [variantId, input.createMaterializationId()]))
+  const observed = observedNormalizationsFor(input.parent, plan, input.adoptable)
   return buildOperationalOutputVersionBundleV3({
     allocation: input.allocation,
     parent: input.parent,
     origin: { kind: 'child-command', command: input.command, audit: input.audit,
-      requestFingerprint: input.requestFingerprint, replaces },
+      requestFingerprint: input.requestFingerprint, replaces, adoptions: observed.adoptions },
     restoreTarget: null,
     editPlanSnapshot: input.editPlanSnapshot,
     replacementSnapshots: replacements,
-    normalizations: observedNormalizationsFor(input.parent, plan),
+    normalizations: observed.normalizations,
     materializationIds,
   })
 }
@@ -146,13 +187,16 @@ export function transitionManualEditOutputState(input: Readonly<{
   audit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   editPlanSnapshot: Readonly<ProjectSnapshot>
+  /** Offered receipts of the project's other recordings; only an apply (a recompiling child) can adopt them. */
+  adoptable?: readonly Readonly<AdoptableObservationV3>[]
   createMaterializationId: () => string
 }>): Readonly<OperationalOutputVersionBundleV3> {
   const payload = input.command.payload
   if (payload.action === 'apply' && payload.operation?.kind !== 'select') {
     assertDomain(input.restoreTarget === null, 'INVALID_COMMAND', 'Apply has no restore target')
     return transitionProjectOutputState({ parent: input.parent, allocation: input.allocation, command: input.command, audit: input.audit,
-      requestFingerprint: input.requestFingerprint, editPlanSnapshot: input.editPlanSnapshot, createMaterializationId: input.createMaterializationId })
+      requestFingerprint: input.requestFingerprint, editPlanSnapshot: input.editPlanSnapshot, createMaterializationId: input.createMaterializationId,
+      ...(input.adoptable === undefined ? {} : { adoptable: input.adoptable }) })
   }
   const source = payload.action === 'apply' ? input.parent : input.restoreTarget
   assertDomain(source !== null && (payload.action === 'apply') === (input.restoreTarget === null), 'INVALID_COMMAND',

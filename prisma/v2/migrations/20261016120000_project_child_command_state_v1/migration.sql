@@ -3,13 +3,14 @@
 -- child-command origin. This guard copies the shared State/Version/bundle/materialization spine of the operational
 -- guard and replaces only the origin-specific part: the origin must be the sealed Command row, its credential audit
 -- must match the row, its declared plan effect and replaced non-output snapshots must hold, and every entry
--- re-materializes from the parent's exact normalization observations.
+-- re-materializes from the parent's exact normalization observations plus the persisted, observed receipts of the
+-- project's other recordings that the origin adopts (each still under the rights it was adopted under at COMMIT).
 CREATE FUNCTION w66_assert_child_command_state_v1(p_state text) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE s project_output_states%ROWTYPE;v project_versions%ROWTYPE;b project_versions%ROWTYPE;bs project_output_states%ROWTYPE;
  ob output_operational_bundles%ROWTYPE;d jsonb;o jsonb;pj jsonb;sp project_snapshots%ROWTYPE;bp jsonb;cmd edit_commands%ROWTYPE;entry_record record;
  e project_output_state_entries%ROWTYPE;re output_spec_revisions%ROWTYPE;m output_materializations%ROWTYPE;expected_version jsonb;target_v project_versions%ROWTYPE;
  source_state project_output_states%ROWTYPE;root_state text;project_row projects%ROWTYPE;source_plan jsonb;expected_producer jsonb;metadata jsonb;tr media_transcripts%ROWTYPE;operation_row public_operations%ROWTYPE;detail_row media_ingest_operations%ROWTYPE;manual_payload jsonb;manual_impact jsonb;impact_ranges jsonb;impact_body jsonb;manual_impact_text text;affected_output jsonb;
- replaced text[];
+ replaced text[];adopted_ids text[];adoption record;adopted_receipt output_normalization_receipts%ROWTYPE;adopted_artifact media_artifacts%ROWTYPE;adopted_rights asset_rights_snapshots%ROWTYPE;
 BEGIN
  SELECT * INTO STRICT s FROM project_output_states WHERE id=p_state AND "schemaVersion"='project-output-state/v3';
  SELECT * INTO STRICT v FROM project_versions WHERE id=s."resultVersionId" AND "workspaceId"=s."workspaceId" AND "projectId"=s."projectId" AND "outputContractVersion"=3;
@@ -71,10 +72,10 @@ BEGIN
   OR cmd."actorId" IS DISTINCT FROM v."createdBy" OR cmd."createdAt" IS DISTINCT FROM v."createdAt" OR v."commandId" IS DISTINCT FROM cmd.id THEN
   RAISE EXCEPTION 'W66v3 Command base/actor/time differs' USING ERRCODE='23514'; END IF;
  -- The origin is the sealed Command itself plus its declared effect; nothing is re-derived from the caller.
- IF NOT w66_v3_exact_keys(o,ARRAY['kind','command','audit','requestFingerprint','replaces']) OR o->>'kind' IS DISTINCT FROM 'child-command'
+ IF NOT w66_v3_exact_keys(o,ARRAY['kind','command','audit','requestFingerprint','replaces','adoptions']) OR o->>'kind' IS DISTINCT FROM 'child-command'
   OR cmd.type NOT IN ('attach-media-library-reference','manual-edit','apply-review-patch','apply-review-patch-batch','run-director','set-project-lut-selection','set-project-color-plan','set-project-subtitle-mode','apply-subtitle-segment-override','replace-source-transcript','direct-multicam-session','set-project-policy-overrides')
   OR o->'command' IS DISTINCT FROM cmd."commandJson"::jsonb||jsonb_build_object('commandHash',cmd."commandHash")
-  OR o->>'requestFingerprint' IS DISTINCT FROM cmd."requestFingerprint" OR jsonb_typeof(o->'replaces') IS DISTINCT FROM 'array'
+  OR o->>'requestFingerprint' IS DISTINCT FROM cmd."requestFingerprint" OR jsonb_typeof(o->'replaces') IS DISTINCT FROM 'array' OR jsonb_typeof(o->'adoptions') IS DISTINCT FROM 'array'
   OR cmd."outputPayloadJson" IS NOT NULL OR cmd."outputPayloadHash" IS NOT NULL
   OR (cmd.type='manual-edit' AND (cmd."payloadJson"::jsonb->>'action' IS DISTINCT FROM 'apply'
    OR cmd."payloadJson"::jsonb#>>'{operation,kind}' IS NULL OR cmd."payloadJson"::jsonb#>>'{operation,kind}'='select')) THEN
@@ -94,15 +95,47 @@ BEGIN
  -- Declared plan effect: these types may only re-identify the parent plan.
  IF cmd.type IN ('attach-media-library-reference','set-project-lut-selection','set-project-color-plan','set-project-subtitle-mode','apply-subtitle-segment-override','set-project-policy-overrides') AND pj-ARRAY['id','projectVersionId','createdAt'] IS DISTINCT FROM bp-ARRAY['id','projectVersionId','createdAt'] THEN
   RAISE EXCEPTION 'W66v3 child Command changed a plan it declared unchanged' USING ERRCODE='23514'; END IF;
+ adopted_ids:=ARRAY(SELECT a.element->>'receiptId' FROM jsonb_array_elements(o->'adoptions') WITH ORDINALITY AS a(element,item_order) ORDER BY a.item_order);
+ IF adopted_ids IS DISTINCT FROM ARRAY(SELECT u.id FROM unnest(adopted_ids) AS u(id) ORDER BY u.id COLLATE "C")
+  OR (SELECT count(DISTINCT u.id) FROM unnest(adopted_ids) AS u(id))<>cardinality(adopted_ids)
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(o->'adoptions') AS a(element)
+   WHERE NOT coalesce(w66_v3_exact_keys(a.element,ARRAY['receiptId','receiptHash','sourceArtifactId','sourceManifestId','sourceManifestHash','rights']),false)
+    OR NOT coalesce(w66_v3_exact_keys(a.element->'rights',ARRAY['snapshotId','snapshotHash','revision']),false)) THEN
+  RAISE EXCEPTION 'W66v3 child adoption shape/order differs' USING ERRCODE='23514';END IF;
  IF EXISTS(SELECT 1 FROM jsonb_array_elements(d->'entries') AS child_entry(element)
   WHERE child_entry.element#>>'{consumption,status}'='materialized' AND
    EXISTS(SELECT 1 FROM jsonb_array_elements(child_entry.element#>'{consumption,materialization,document,normalizations}') AS child_n(element)
     WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(source_state."stateJson"::jsonb->'entries') AS source_entry(element),
      LATERAL jsonb_array_elements(CASE WHEN source_entry.element#>>'{consumption,status}'='materialized' THEN source_entry.element#>'{consumption,materialization,document,normalizations}' ELSE '[]'::jsonb END) AS source_n(element)
-     WHERE source_n.element=child_n.element))) THEN
+     WHERE source_n.element=child_n.element)
+    AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(o->'adoptions') AS a(element)
+     WHERE a.element->>'receiptId'=child_n.element#>>'{document,id}' AND a.element->>'receiptHash'=child_n.element->>'receiptHash'
+      AND a.element->>'sourceArtifactId'=child_n.element#>>'{document,source,artifactId}' AND a.element->>'sourceManifestId'=child_n.element#>>'{document,source,manifestId}'
+      AND a.element->>'sourceManifestHash'=child_n.element#>>'{document,source,manifest,manifestHash}')))
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(o->'adoptions') AS a(element)
+   WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(d->'entries') AS child_entry(element),
+     LATERAL jsonb_array_elements(CASE WHEN child_entry.element#>>'{consumption,status}'='materialized' THEN child_entry.element#>'{consumption,materialization,document,normalizations}' ELSE '[]'::jsonb END) AS child_n(element)
+     WHERE child_n.element#>>'{document,id}'=a.element->>'receiptId')
+    OR EXISTS(SELECT 1 FROM jsonb_array_elements(source_state."stateJson"::jsonb->'entries') AS source_entry(element),
+     LATERAL jsonb_array_elements(CASE WHEN source_entry.element#>>'{consumption,status}'='materialized' THEN source_entry.element#>'{consumption,materialization,document,normalizations}' ELSE '[]'::jsonb END) AS source_n(element)
+     WHERE source_n.element#>>'{document,id}'=a.element->>'receiptId' OR source_n.element#>>'{document,source,artifactId}'=a.element->>'sourceArtifactId')) THEN
   RAISE EXCEPTION 'W66v3 child normalization lineage differs' USING ERRCODE='23514';END IF;
+ FOR adoption IN SELECT a.element FROM jsonb_array_elements(o->'adoptions') AS a(element) LOOP
+  SELECT * INTO STRICT adopted_receipt FROM output_normalization_receipts WHERE id=adoption.element->>'receiptId' AND "receiptHash"=adoption.element->>'receiptHash'
+   AND "projectId"=s."projectId" AND "workspaceId"=s."workspaceId" AND "sourceArtifactId"=adoption.element->>'sourceArtifactId'
+   AND "sourceManifestId"=adoption.element->>'sourceManifestId' AND "sourceManifestHash"=adoption.element->>'sourceManifestHash';
+  PERFORM w66_assert_normalization_v3(adopted_receipt.id,s."projectId",s."workspaceId");
+  SELECT * INTO STRICT adopted_artifact FROM media_artifacts WHERE id=adopted_receipt."sourceArtifactId" AND "workspaceId"=s."workspaceId" AND status='available';
+  SELECT * INTO STRICT adopted_rights FROM asset_rights_snapshots WHERE id=adopted_artifact."currentRightsSnapshotId" AND "artifactId"=adopted_artifact.id AND "workspaceId"=s."workspaceId";
+  IF adopted_rights.id IS DISTINCT FROM adoption.element#>>'{rights,snapshotId}' OR adopted_rights."snapshotHash" IS DISTINCT FROM adoption.element#>>'{rights,snapshotHash}'
+   OR adopted_artifact."rightsRevision" IS DISTINCT FROM (adoption.element#>>'{rights,revision}')::integer OR adopted_rights.status IS DISTINCT FROM 'approved'
+   OR (adopted_rights."expiresAt" IS NOT NULL AND adopted_rights."expiresAt"<=clock_timestamp()) THEN
+   RAISE EXCEPTION 'W66v3 adopted observation rights are not current' USING ERRCODE='23514';END IF;
+  IF NOT EXISTS(SELECT 1 FROM project_media_assets l WHERE l."projectId"=s."projectId" AND l."workspaceId"=s."workspaceId" AND l."artifactId"=adopted_receipt."sourceArtifactId") THEN
+   RAISE EXCEPTION 'W66v3 adopted observation has no project media association' USING ERRCODE='23514';END IF;
+ END LOOP;
  expected_producer:=jsonb_build_object('schemaVersion','output-child-command-producer/v3','canonicalPolicyVersion','output-canonical-json/v1','kind','child-command',
-  'commandId',cmd.id,'commandHash',cmd."commandHash",'payloadHash',ob."producerPayloadHash",'target','null'::jsonb);
+  'commandId',cmd.id,'commandHash',cmd."commandHash",'payloadHash',ob."producerPayloadHash",'target','null'::jsonb,'adoptions',o->'adoptions');
  -- Non-output snapshots are inherited unless the origin declares the kind; a replaced kind is a new snapshot born with the Version.
  IF (NOT 'brief'=ANY(replaced) AND v."briefSnapshotId" IS DISTINCT FROM b."briefSnapshotId")
   OR (NOT 'policies'=ANY(replaced) AND v."policiesSnapshotId" IS DISTINCT FROM b."policiesSnapshotId")

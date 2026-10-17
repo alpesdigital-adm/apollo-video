@@ -1,3 +1,4 @@
+import type { AdoptableObservationReader } from './adoptable-observation-reader.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { PatchGateResult, PatchImpact, PatchOperation, PatchSet, ReviewAnnotation } from '../../domain/review-system.ts'
 import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
@@ -76,7 +77,7 @@ export interface ReviewPatchApplyResult {
   replayed: boolean
 }
 
-export interface ReviewPatchRepository {
+export interface ReviewPatchRepository extends Partial<AdoptableObservationReader> {
   findProposalIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }): Promise<Readonly<{ requestFingerprint: string; proposal: ReviewPatchProposal }> | null>
   readProposalContext(input: { workspaceId: string; projectId: string; annotationId: string }): Promise<Readonly<ReviewPatchProposalContext> | null>
   createProposal(input: { proposal: ReviewPatchProposal; idempotencyKey: string; requestFingerprint: string }): Promise<Readonly<ReviewPatchProposal>>

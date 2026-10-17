@@ -14,7 +14,7 @@ import { buildCreationOutputVersionBundleV2, buildOperationalOutputVersionBundle
 import { DomainError } from '../../../src/v2/domain/errors.ts'
 import { getPublicSchema } from '../../../src/v2/public-api/schema-registry.ts'
 import { publicSchemaExamples } from '../../../src/v2/public-api/schema-examples.ts'
-import { prepareEditorialSourceFixture } from './operational-editorial-fixture.mjs'
+import { prepareEditorialSourceFixture, ingestOnto, recordingNames } from './operational-editorial-fixture.mjs'
 
 const clone = value => structuredClone(value)
 export const variantBody = () => clone(publicSchemaExamples(getPublicSchema('apollo://schemas/create-project-output-variant-request/v1'))[0])
@@ -83,7 +83,7 @@ export async function ingestedWorld(options = {}) {
  * Version3/State3 with a specific timeline without going through the Command that would normally compile it.
  * The Command is a plain recompiling child, so only the plan (and what re-materializes from it) differs.
  */
-export function recompiledChild(parent, actor, mutatePlan, { suffix = 'recompiled', type = 'apply-review-patch', createdAt = '2026-10-16T09:00:00.000Z', versionId, snapshotId } = {}) {
+export function recompiledChild(parent, actor, mutatePlan, { suffix = 'recompiled', type = 'apply-review-patch', createdAt = '2026-10-16T09:00:00.000Z', versionId, snapshotId, adoptable } = {}) {
   const audit = materializeActorAuditContext(actor)
   const scope = { workspaceId: parent.version.workspaceId, projectId: parent.version.projectId }
   const resultVersionId = versionId ?? `version-${suffix}`
@@ -98,5 +98,34 @@ export function recompiledChild(parent, actor, mutatePlan, { suffix = 'recompile
       sequence: parent.version.sequence + 1, createdBy: audit.clientId, createdAt },
     editPlanSnapshot: createProjectSnapshot({ ...scope, id: snapshotId ?? `snapshot-${suffix}`, kind: 'edit-plan', contentSchemaVersion: base.contentSchemaVersion,
       contentJson: stableSerialize(next), contentHash: calculateCanonicalHash(next), createdAt }),
-    createMaterializationId: () => `materialization-${suffix}-${++counter}` })
+    createMaterializationId: () => `materialization-${suffix}-${++counter}`, ...(adoptable === undefined ? {} : { adoptable }) })
 }
+
+/** The rights evidence the world gives a recording: one current approved snapshot of its source artifact. */
+export function rightsEvidenceFor(slug) {
+  const names = recordingNames(slug)
+  return Object.freeze({ snapshotId: `rights-${names.slug}`, snapshotHash: calculateCanonicalHash({ rights: names.sourceArtifactId }), revision: 1 })
+}
+
+/**
+ * Several recordings ingested one after another onto one project: root, explicit variant, then one ingest per slug.
+ * State3 keeps only the latest ingest's recording in the head State, but every ingest persisted its own receipt, so
+ * the earlier ones are what `adoptable` offers a child Command (each with its rights evidence), exactly as the
+ * repositories read them. `durations` gives a recording's observed length in seconds (default 2).
+ */
+export async function ingestedRecordings(slugs, { durations = {}, ...options } = {}) {
+  const world = await ingestedWorld({ ...options, slug: slugs[0], sourceDurationSeconds: durations[slugs[0]] ?? 2 })
+  const receipts = new Map([[slugs[0], world.prepared.n]])
+  const chain = [...world.chain]
+  let head = world.parent
+  for (const slug of slugs.slice(1)) {
+    const next = ingestOnto(head, { actor: world.actor, slug, sourceDurationSeconds: durations[slug] ?? 2 })
+    head = next.bundle
+    receipts.set(slug, next.n)
+    chain.push(head)
+  }
+  const last = slugs.at(-1)
+  const adoptable = slugs.filter((slug) => slug !== last).map((slug) => ({ normalization: receipts.get(slug), rights: rightsEvidenceFor(slug) }))
+  return { ...world, parent: head, chain, receipts, adoptable, slugs, names: (slug) => recordingNames(slug) }
+}
+

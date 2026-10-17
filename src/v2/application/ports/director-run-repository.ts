@@ -1,3 +1,4 @@
+import type { AdoptableObservationReader } from './adoptable-observation-reader.ts'
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectorRun, RunDirectorCommandPayload } from '../../domain/director-run.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
@@ -107,7 +108,7 @@ export interface DirectorSnapshotCommitScope {
 export type ResolveDirectorSnapshots = (candidates: readonly Readonly<ProjectSnapshot>[]) =>
   Promise<readonly Readonly<ProjectSnapshot>[]>
 
-export interface DirectorRunRepository {
+export interface DirectorRunRepository extends Partial<AdoptableObservationReader> {
   readQualityReport(input: {
     workspaceId: string
     projectId: string

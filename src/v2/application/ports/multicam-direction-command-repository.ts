@@ -1,3 +1,4 @@
+import type { AdoptableObservationReader } from './adoptable-observation-reader.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
@@ -85,7 +86,7 @@ export interface MulticamDirectionCommandCommit {
   }>
 }
 
-export interface MulticamDirectionCommandRepository {
+export interface MulticamDirectionCommandRepository extends AdoptableObservationReader {
   findIdempotentResult(input: {
     workspaceId: string
     projectId: string

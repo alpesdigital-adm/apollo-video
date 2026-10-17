@@ -1,3 +1,5 @@
+import type { AdoptableObservationReader } from '../../application/ports/adoptable-observation-reader.ts'
+import { readAdoptableObservationsV3 } from './output-adoptable-observations.ts'
 import { randomUUID } from 'node:crypto'
 
 import { Prisma, type PrismaClient, type V2ProjectSnapshot } from '../../../../generated/prisma-v2/index.js'
@@ -444,6 +446,11 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
   constructor(client: PrismaClient = getV2PostgresClient(), clock: () => Date = () => new Date()) {
     this.client = client
     this.clock = clock
+  }
+
+  /** The persisted receipts of the recordings a new plan consumes and the head State does not observe (see adoptable-observations). */
+  async readAdoptableObservations(input: Parameters<AdoptableObservationReader['readAdoptableObservations']>[0]) {
+    return readAdoptableObservationsV3(this.client, input)
   }
 
   async readQualityReport(input: {

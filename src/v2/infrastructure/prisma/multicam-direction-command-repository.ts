@@ -1,3 +1,5 @@
+import type { AdoptableObservationReader } from '../../application/ports/adoptable-observation-reader.ts'
+import { readAdoptableObservationsV3 } from './output-adoptable-observations.ts'
 import {
   Prisma,
   type PrismaClient,
@@ -196,6 +198,11 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
   // that run under it.
   constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
+  }
+
+  /** The persisted receipts of the recordings a new plan consumes and the head State does not observe (see adoptable-observations). */
+  async readAdoptableObservations(input: Parameters<AdoptableObservationReader['readAdoptableObservations']>[0]) {
+    return readAdoptableObservationsV3(this.client, input)
   }
 
   async findIdempotentResult(input: {

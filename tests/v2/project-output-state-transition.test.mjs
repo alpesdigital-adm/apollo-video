@@ -107,7 +107,7 @@ test('a Command declared as preserving the plan cannot change its semantics; rec
 
 test('the child origin rejects undeclared types, forged commands, actor audits and dedicated manual operations', async () => {
   const w = await world(), base = childInput(w, { suffix: 'neg' })
-  const origin = (patch) => ({ kind: 'child-command', command: base.command, audit: base.audit, requestFingerprint: base.input.requestFingerprint, replaces: [], ...patch })
+  const origin = (patch) => ({ kind: 'child-command', command: base.command, audit: base.audit, requestFingerprint: base.input.requestFingerprint, replaces: [], adoptions: [], ...patch })
   const allocation = base.input.allocation, parent = base.parent
   const validate = (o) => validateOperationalOutputOriginV3(o, parent, allocation)
   assert.ok(validate(origin({})))
@@ -170,9 +170,15 @@ test('the database guard names exactly the types, plan effects, replacements, or
   assert.deepEqual(quoted(sql.match(/w66_v3_exact_keys\(o,ARRAY\[([^\]]*)\]\)/)[1]).sort(), Object.keys(bundle.origin).sort())
   assert.ok(sql.includes(`o->>'kind' IS DISTINCT FROM '${bundle.origin.kind}'`) && sql.includes(`origin_kind='${bundle.origin.kind}'`))
   const producer = bundle.state.document.producer.document, body = sql.match(/expected_producer:=jsonb_build_object\(([^;]*)\);/)[1]
-  assert.deepEqual(quoted(body).filter((token) => Object.keys(producer).includes(token)).sort(), Object.keys(producer).sort())
+  assert.deepEqual([...new Set(quoted(body).filter((token) => Object.keys(producer).includes(token)))].sort(), Object.keys(producer).sort())
   assert.ok(body.includes(`'${producer.schemaVersion}'`) && body.includes(`'kind','${producer.kind}'`))
   assert.equal(producer.target, null)
+  // Adoption is verified by the same guard: listed, sorted, unique, exactly the observations outside the parent, persisted and rights-current.
+  assert.deepEqual(producer.adoptions, [])
+  for (const marker of ["jsonb_typeof(o->'adoptions')", "'adoptions',o->'adoptions'", 'W66v3 child adoption shape/order differs', 'W66v3 child normalization lineage differs',
+    'w66_assert_normalization_v3(adopted_receipt.id', 'W66v3 adopted observation rights are not current', 'W66v3 adopted observation has no project media association']) {
+    assert.ok(sql.includes(marker), marker)
+  }
 })
 
 test('a child plan is materialized only from observed sources: an unobserved source is refused, an emptied plan blocks', async () => {

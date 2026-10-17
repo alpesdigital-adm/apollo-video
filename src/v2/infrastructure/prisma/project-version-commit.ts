@@ -3,7 +3,7 @@ import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
 import { externalActorAuditData } from './external-actor-audit.ts'
-import { assertCurrentOutputSourceUseV3 } from './output-version-materializer.ts'
+import { assertAdoptedObservationsCurrentV3, assertCurrentOutputSourceUseV3 } from './output-version-materializer.ts'
 import { persistOutputVersionBundleInTransactionV3 } from './output-version-bundle-persistence.ts'
 
 type CommandBundle = OperationalOutputVersionBundleV3 & {
@@ -32,6 +32,7 @@ export async function commitProjectVersionWithOutputState(tx: Prisma.Transaction
   const { origin } = bundle as CommandBundle
   const command = origin.command, { commandHash: _commandHash, ...body } = command
   const audit = origin.audit === null ? null : externalActorAuditData(origin.audit, command.workspaceId, command.author.id)
+  await assertAdoptedObservationsCurrentV3(tx, bundle)
   await assertCurrentOutputSourceUseV3(tx, bundle)
   await tx.v2EditCommand.create({ data: {
     id: command.id, workspaceId: command.workspaceId, projectId: command.projectId, baseVersionId: command.baseVersionId,

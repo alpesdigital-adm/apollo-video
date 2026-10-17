@@ -358,7 +358,7 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
     assertDomain(fresh.transcriptHash===t.document.transcriptHash && stableSerialize(fresh)===stableSerialize(t.document),
       'INVALID_COMMAND','Ingest transcript authority differs')
   } else if(input.kind==='child-command') {
-    exact(input,['kind','command','audit','requestFingerprint','replaces'])
+    exact(input,['kind','command','audit','requestFingerprint','replaces','adoptions'])
     const c=input.command,transition=CHILD_COMMAND_TRANSITIONS[c.type as keyof typeof CHILD_COMMAND_TRANSITIONS]
     assertDomain(transition!==undefined,'INVALID_COMMAND','Command type has no declared child output transition')
     assertDomain(c.workspaceId===allocation.workspaceId && c.projectId===allocation.projectId &&
@@ -381,6 +381,17 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
     requireOutputHash(input.requestFingerprint,'child request fingerprint')
     assertDomain(Array.isArray(input.replaces) && input.replaces.every((kind,index)=>transition!.replaces.includes(kind) &&
       (index===0||input.replaces[index-1]!<kind)),'INVALID_COMMAND','Child replacement kinds exceed the declared effect or are unsorted')
+    assertDomain(Array.isArray(input.adoptions),'INVALID_COMMAND','Child origin states its adoptions')
+    input.adoptions.forEach((adoption,index)=>{
+      exact(adoption,['receiptId','receiptHash','sourceArtifactId','sourceManifestId','sourceManifestHash','rights'])
+      exact(adoption.rights,['snapshotId','snapshotHash','revision'])
+      requireOutputId(adoption.receiptId,'adopted receipt');requireOutputHash(adoption.receiptHash,'adopted receipt seal')
+      requireOutputId(adoption.sourceArtifactId,'adopted source artifact');requireOutputId(adoption.sourceManifestId,'adopted source manifest')
+      requireOutputHash(adoption.sourceManifestHash,'adopted source manifest seal')
+      requireOutputId(adoption.rights.snapshotId,'adopted rights snapshot');requireOutputHash(adoption.rights.snapshotHash,'adopted rights seal')
+      assertDomain(Number.isSafeInteger(adoption.rights.revision)&&adoption.rights.revision>=0,'INVALID_COMMAND','Adopted rights revision is invalid')
+      assertDomain(index===0||input.adoptions[index-1]!.receiptId<adoption.receiptId,'INVALID_COMMAND','Child adoptions are unsorted or repeated')
+    })
   } else {
     const result=input.kind==='create-output-variant'||input.kind==='revise-output-spec'?input.result:null
     const command=result?.command??('command' in input?input.command:null)

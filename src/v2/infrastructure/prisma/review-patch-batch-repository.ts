@@ -1,3 +1,5 @@
+import type { AdoptableObservationReader } from '../../application/ports/adoptable-observation-reader.ts'
+import { readAdoptableObservationsV3 } from './output-adoptable-observations.ts'
 import { randomUUID } from 'node:crypto'
 
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
@@ -108,6 +110,11 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
   constructor(client: PrismaClient, createEventId: () => string = randomUUID) {
     this.client = client
     this.createEventId = createEventId
+  }
+
+  /** The persisted receipts of the recordings a new plan consumes and the head State does not observe (see adoptable-observations). */
+  async readAdoptableObservations(input: Parameters<AdoptableObservationReader['readAdoptableObservations']>[0]) {
+    return readAdoptableObservationsV3(this.client, input)
   }
 
   private batchById(input: { workspaceId: string; projectId: string; batchId: string }) {

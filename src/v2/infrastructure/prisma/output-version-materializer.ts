@@ -47,6 +47,31 @@ export async function readOutputNormalizationsV3(tx:Tx,input:Readonly<{
   return Object.freeze(result)
 }
 
+/**
+ * Under the commit transaction: every receipt a child Version adopted is still persisted exactly as it was sealed,
+ * its artifacts are locked (UTF8/C order, before any rights read), and the rights it was adopted under are still
+ * the current ones. A recording whose rights moved since the Command was sealed is a stale Command (VERSION_CONFLICT):
+ * it is re-sealed against the rights now current. The asset-use policy over the final materialization
+ * (assertCurrentOutputSourceUseV3) runs after this and has the last word.
+ */
+export async function assertAdoptedObservationsCurrentV3(tx:Prisma.TransactionClient,bundle:OperationalOutputVersionBundleV3) {
+  if(bundle.origin.kind!=='child-command'||bundle.origin.adoptions.length===0)return
+  const {workspaceId,projectId}=bundle.version,adoptions=bundle.origin.adoptions
+  const stored=await readOutputNormalizationsV3(tx,{workspaceId,projectId,ids:adoptions.map(a=>a.receiptId),lock:true})
+  for(const adoption of adoptions) {
+    const receipt=stored.find(n=>n.document.id===adoption.receiptId)
+    if(!receipt||receipt.receiptHash!==adoption.receiptHash||receipt.document.source.artifactId!==adoption.sourceArtifactId||
+      receipt.document.source.manifestId!==adoption.sourceManifestId||receipt.document.source.manifest.manifestHash!==adoption.sourceManifestHash)
+      throw new DomainError('PERSISTENCE_CONFLICT','An adopted observation is not the persisted receipt it names',{receiptId:adoption.receiptId})
+  }
+  const artifacts=await tx.v2MediaArtifact.findMany({where:{workspaceId,id:{in:adoptions.map(a=>a.sourceArtifactId)}},include:{currentRightsSnapshot:true}})
+  for(const adoption of adoptions) {
+    const artifact=artifacts.find(a=>a.id===adoption.sourceArtifactId),snapshot=artifact?.currentRightsSnapshot
+    if(!artifact||!snapshot||snapshot.id!==adoption.rights.snapshotId||snapshot.snapshotHash!==adoption.rights.snapshotHash||artifact.rightsRevision!==adoption.rights.revision)
+      throw new DomainError('VERSION_CONFLICT','The rights an adopted recording was sealed under are no longer current',{artifactId:adoption.sourceArtifactId})
+  }
+}
+
 import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import type { OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
