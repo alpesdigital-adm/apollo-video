@@ -11,6 +11,7 @@ import type { RenderInputRenderer, StagedRender } from '../application/ports/ren
 import type { ColorPipelineCompilation } from '../domain/color-pipeline-compilation.ts'
 import { createDirectedAudioTimelineHash, type DirectedEditPlan } from '../domain/director-run.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
+import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
 import { DomainError } from '../domain/errors.ts'
 import { assertRenderInputSpec, type MaterializedRenderInputAsset, type MaterializedRenderInputV1 } from '../domain/render-input.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
@@ -201,7 +202,7 @@ export class FfmpegEditorialRenderInputRenderer implements RenderInputRenderer {
       }
       if (props.lutBindings.length === 1) lutPaths[props.lutBindings[0]!.artifactId] = byAssetId.get(props.lutBindings[0]!.assetId)!
       const editPlan = props.editPlan
-      const subtitleCues = editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
+      const subtitleCues = emittedSubtitleTracks(editPlan.subtitleTracks).flatMap((track) => track.cues)
       const render = await this.renderer.render({
         operationId, renderKind: 'final',
         sources: props.sourceAssets.map((asset) => ({ artifactId: asset.artifactId, path: byAssetId.get(asset.id)!, mediaType: asset.kind as 'video' | 'audio',

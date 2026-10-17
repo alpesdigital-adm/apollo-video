@@ -35,6 +35,7 @@ import {
 import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
 import { projectProxyRenderInputHash } from './project-render-sources.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
+import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -210,8 +211,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
-      const cueTracks = source.editPlan.subtitleTracks.filter(
-        (track) => 'cues' in track && track.cues.length > 0,
+      const cueTracks = emittedSubtitleTracks(source.editPlan.subtitleTracks).filter(
+        (track) => track.cues.length > 0,
       )
       const subtitleResolution = source.subtitleResolution
       // An explicitly disabled style must never leak the EditPlan's cues into FFmpeg.

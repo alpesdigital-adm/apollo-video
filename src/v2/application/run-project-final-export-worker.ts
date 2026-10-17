@@ -25,6 +25,7 @@ import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
+import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import {
@@ -256,7 +257,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       failureStage = 'rights'
       await assertRights(renderSourceIds, source.locale)
       failureStage = 'input-validation'
-      const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
+      const subtitleCues = emittedSubtitleTracks(source.editPlan.subtitleTracks).flatMap((track) => track.cues)
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       const musicTracks = 'audioTracks' in source.editPlan && Array.isArray(source.editPlan.audioTracks) ? source.editPlan.audioTracks : []
