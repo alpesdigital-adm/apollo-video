@@ -20,16 +20,15 @@ import {
   parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
-import { applyReviewPatchService } from '../../src/v2/application/review-patch.ts'
 import { applyReviewPatchBatchService } from '../../src/v2/application/review-patch-batch.ts'
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
-import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
-import { buildRenderElementMap, renderElementMapHash } from '../../src/v2/domain/review-system.ts'
+import { buildRenderElementMap, materializePatchEditPlan, renderElementMapHash } from '../../src/v2/domain/review-system.ts'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 import {
   presentArtifactInvalidationViewV2,
@@ -1354,81 +1353,28 @@ test('T-FR-233 applied review batch persists impact v2 and normalized invalidati
   assert.equal(result.invalidations.length, 2)
 })
 
-test('T-FR-233 applied review patch persists impact v2 and normalized invalidations', async () => {
-  let committed
-  const service = applyReviewPatchService({
-    repository: {
-      async readApplyContext() {
-        return {
-          annotation: {
-            id: 'annotation-impact-1', projectVersionId: baseVersionId, frame: 30,
-            timeRangeMs: [1000, 1000], screenshotRef: 'screenshot-impact-1', scope: 'point',
-            targetIds: ['subtitle:cue-1'], applicationScope: { kind: 'frame', targetIds: ['subtitle:cue-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: [], global: false },
-            affectedCount: 1, text: 'Mover legenda', author: { id: 'client-impact-1', name: 'Client', type: 'api-client' }, status: 'open', createdAt,
-          },
-          currentVersion: {
-            id: baseVersionId, workspaceId, projectId, sequence: 1,
-            snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-1', policies: 'snapshot-policy-1' },
-            baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', createdAt,
-          },
-          editPlan: plan(), editPlanHash: 'b'.repeat(64), policies: {}, availableAssetIds: ['source-1'],
-          renderVariantIds: ['9:16'], outputReferences: outputs,
-          proposal: {
-            id: 'review-proposal-impact-1', workspaceId, projectId, annotationId: 'annotation-impact-1', baseVersionId,
-            status: 'ready', interpretationVersion: 'review-patch-interpreter/1.0.0', choices: [],
-            patch: { id: 'patch-impact-1', baseVersionId, operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1000] }], annotationIds: ['annotation-impact-1'], estimatedCost: 0, invalidatedRanges: [[1000, 1000]] },
-            impact: { operationCount: 1, cost: 0, invalidatedRanges: [[1000, 1000]], changedTargets: ['subtitle:cue-1'], expectedScoreDelta: 3, invalidatedArtifacts: ['proxy', 'final'] },
-            gates: [], createdAt, updatedAt: createdAt,
-          },
-        }
-      },
-      async commitOrReplay(bundle) {
-        committed = bundle
-        return {
-          proposal: { id: bundle.proposalId }, command: bundle.command, version: bundle.version,
-          editPlan: JSON.parse(bundle.snapshot.contentJson), comparison: bundle.comparison,
-          impact: bundle.impact,
-          invalidations: createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt }),
-          replayed: false,
-        }
-      },
-    },
-    clock: () => new Date('2026-08-01T01:00:00.000Z'),
-    createId: (kind) => ({
-      'edit-command': 'edit-command-review-impact-4',
-      'project-version': resultVersionId,
-      'project-snapshot': 'project-snapshot-review-impact-2',
-    })[kind],
-    createEventId: () => '3e0a7962-5347-4bef-a810-95ab71340456',
+// The Command a review patch apply persists, rebuilt here from the same domain constructors the service uses.
+// The apply service itself (against a sealed Version3 parent) is covered by review-patch-apply.test.mjs.
+test('T-FR-233 a review patch result reuses proxy ranges only with the attested base proxy map', async () => {
+  const patch = {
+    id: 'patch-impact-1', baseVersionId,
+    operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1000] }],
+    annotationIds: ['annotation-impact-1'], estimatedCost: 0, invalidatedRanges: [[1000, 1000]],
+  }
+  const patchedPlan = materializePatchEditPlan({ editPlan: plan(), patch, newVersionId: resultVersionId, createdAt, availableAssetIds: ['source-1'] })
+  const reviewImpact = createReviewPatchCommandImpact({
+    commandId: 'edit-command-review-impact-4', baseVersionId, resultVersionId, variantIds: ['9:16'],
+    operations: patch.operations, invalidatedRangesMs: patch.invalidatedRanges,
+    beforeEditPlan: plan(), afterEditPlan: patchedPlan, outputReferences: outputs,
   })
-  const result = await service({
-    workspaceId, projectId, proposalId: 'review-proposal-impact-1', confirmed: true,
-    actor: impactActor(), idempotencyKey: 'review-impact-apply-1',
-  })
-  assert.equal(committed.command.payload.schemaVersion, 2)
-  assert.equal(committed.command.payload.impact.impactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.commandImpactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.artifactInvalidationCount, 2)
+  const committed = {
+    command: { id: 'edit-command-review-impact-4', payload: { schemaVersion: 2, proposalId: 'review-proposal-impact-1', annotationIds: patch.annotationIds, patch, impact: reviewImpact } },
+    version: { snapshotRefs: { editPlan: 'project-snapshot-review-impact-2' } },
+    snapshot: { contentJson: stableSerialize(patchedPlan), contentHash: calculateVersionHash(patchedPlan) },
+  }
+  const result = { impact: reviewImpact, invalidations: createCommandArtifactInvalidations({ impact: reviewImpact, createdAt }) }
   assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 30, endFrame: 31 }])
   assert.equal(result.invalidations.length, 2)
-
-  const driftRepository = new PrismaReviewPatchRepository({
-    v2ReviewPatchProposal: { async findFirst() { return null } },
-    async $transaction(callback) {
-      return callback({
-        v2ReviewPatchProposal: { async findFirst() { return { id: committed.proposalId, status: 'ready', baseVersionId } } },
-        v2Project: { async findFirst() { return { format: '9:16', currentVersion: { id: baseVersionId, sequence: 1 } } } },
-        v2ProjectProxyRenderOperation: { async findMany() { return [
-          { outputArtifactId: 'artifact-proxy-9x16' }, { outputArtifactId: 'artifact-proxy-concurrent' },
-        ] } },
-        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' }] } },
-      })
-    },
-  })
-  await assert.rejects(
-    () => driftRepository.commitOrReplay(committed),
-    (error) => error.code === 'VERSION_CONFLICT' && /outputs changed/.test(error.message),
-  )
 
   const persistedInvalidations = result.invalidations.map((invalidation) => ({
     ...invalidation,

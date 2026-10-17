@@ -24,7 +24,7 @@ export function worldActor(overrides = {}) {
   return { ...auditContext, auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
     clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' }
 }
-export function outputWorld() {
+export function outputWorld(actor = worldActor()) {
   const roots = new Map(), commands = new Map(), bundles = new Map()
   let head, writes = 0, beforeCommit = () => {}, counter = 0
   const clockIds = { clock: () => new Date('2026-10-13T12:00:00.000Z'),
@@ -59,7 +59,7 @@ export function outputWorld() {
   }
   return { create: createProjectService({ ...clockIds, repository: creationRepository }),
     variant: createProjectOutputVariantService({ ...clockIds, repository: operationalRepository }),
-    actor: worldActor(), counts: () => writes, head: () => head, changeHeadBeforeCommit: value => { beforeCommit = () => { head = value } } }
+    actor, counts: () => writes, head: () => head, changeHeadBeforeCommit: value => { beforeCommit = () => { head = value } } }
 }
 export const creationRequest = f => ({ workspaceId: f.actor.workspaceId, actor: f.actor, name: 'Empty explicit project',
   objective: 'discovery', locale: 'pt-BR', idempotencyKey: 'root-request-http' })
@@ -70,7 +70,7 @@ export const variantRequest = (f, parent, key = 'variant-request-http') => ({ ..
 // Root, one explicit variant and a controlled ingest (synthetic probe facts, real sealed normalization and
 // materialization): the parent a child Command needs. See operational-editorial-fixture.mjs for its limits.
 export async function ingestedWorld(options = {}) {
-  const world = outputWorld(), root = await world.create(creationRequest(world))
+  const world = outputWorld(options.actor), root = await world.create(creationRequest(world))
   const prepared = await prepareEditorialSourceFixture(null, { bundle: root.bundle, projectAtCreation: root.projectAtCreation },
     { actor: world.actor, ...options })
   return { world, root, prepared, parent: prepared.bundle, actor: world.actor }
