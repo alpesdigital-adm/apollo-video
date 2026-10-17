@@ -30,6 +30,7 @@ import { rational, type Rational } from '../../domain/session-time.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 /**
@@ -300,11 +301,11 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
       currentVersion: parent.version,
       currentPlan: Object.freeze(currentPlan),
       currentDurationFrames,
-      proxyVariantId: project.format ?? '9:16',
+      proxyVariantId: projectOutputFormat(project, parent) ?? '9:16',
       outputReferences: Object.freeze([
         ...proxyOutputs.map((output) => Object.freeze({
           artifactId: output.outputArtifactId, kind: 'proxy' as const,
-          sourceVersionId: versionRow.id, variantId: project.format ?? '9:16',
+          sourceVersionId: versionRow.id, variantId: projectOutputFormat(project, parent) ?? '9:16',
         })),
         ...finalOutputs.map((output) => Object.freeze({
           artifactId: output.outputArtifactId, kind: 'final' as const,
@@ -402,7 +403,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
             select: { outputArtifactId: true },
           })).map((output) => ({
             artifactId: output.outputArtifactId, kind: 'proxy' as const,
-            sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16',
+            sourceVersionId: bundle.command.baseVersionId, variantId: projectOutputFormat(project, input.bundle) ?? '9:16',
           })),
           ...(await transaction.v2ProjectFinalExportOperation.findMany({
             where: {
@@ -485,7 +486,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
           include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
         })
         return hydrateStoredCommand(stored, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.commitOrReplay(input, serializationAttempt + 1)

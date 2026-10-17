@@ -36,3 +36,12 @@ test('the settle step is the guards-immediate statement and the writer documents
   assert.match(text, /export async function settleDeferredOutputGuards\(tx: Prisma\.TransactionClient\): Promise<void> \{\s*await tx\.\$executeRawUnsafe\('SET CONSTRAINTS ALL IMMEDIATE'\)/)
   assert.match(text, /does not report a refused COMMIT/)
 })
+
+// The deferred guard runs inside the callback and re-reads every receipt of the State (about a second per 2 MB of receipts, the
+// measured cost of three 24-second recordings), so a Version writer's interactive transaction cannot keep Prisma's 5 s default.
+test('every Version writer gives its transaction 30 s for the guard', () => {
+  for (const { name, text } of writers) {
+    const anchor = Math.max(text.indexOf('this.commitBundle('), -1) >= 0 ? text.indexOf('this.commitBundle(') : text.indexOf('await commitProjectVersionWithOutputState(')
+    assert.match(text.slice(anchor), /isolationLevel: (?:Prisma\.TransactionIsolationLevel\.Serializable|'Serializable' as Prisma\.TransactionIsolationLevel), timeout: 30_000 \}\)/, name)
+  }
+})

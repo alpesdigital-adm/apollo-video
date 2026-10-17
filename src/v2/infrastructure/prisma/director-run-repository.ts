@@ -49,6 +49,7 @@ import {
 } from '../../domain/strategic-objective.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
 import { parseDirectorDecisionLog } from '../../domain/director-decision.ts'
@@ -538,7 +539,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const versionRow = project?.currentVersion
     const master = project?.mediaAssets[0]
     if (!project || !versionRow || !master) return null
-    if (!project.objective || !project.format || !project.locale) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
+    if (!project.objective || !project.locale) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
     const projectObjective = resolveStrategicObjective(project.objective)
     const latestDirectorRun = project.directorRuns[0]
     const latestDirectorObjective = latestDirectorRun
@@ -579,6 +580,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       : undefined
     const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: project.workspaceId, projectId: project.id, versionId: versionRow.id })
     if (!parent) return null
+    const format = projectOutputFormat(project, parent)
+    if (!format) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
     const editPlan = parseRecord(operationalBundlePlanV3(parent).contentJson, 'current EditPlan') as unknown as EditorialCutEditPlan
     const retimedTranscript = editPlan.retimedTranscript as unknown
     if (typeof retimedTranscript !== 'object' || retimedTranscript === null || !('sourceTranscriptId' in retimedTranscript) || typeof retimedTranscript.sourceTranscriptId !== 'string') {
@@ -640,7 +643,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     if (latestOcr && !ocrEnvelope) throw new DomainError('PERSISTENCE_CONFLICT', 'Selected OCR envelope disappeared')
     return Object.freeze({
       workspaceId: project.workspaceId,
-      project: Object.freeze({ id: project.id, objective: projectObjective.id, format: project.format, locale: project.locale }),
+      project: Object.freeze({ id: project.id, objective: projectObjective.id, format, locale: project.locale }),
       ...(latestDirectorObjective ? { latestDirectorObjective } : {}),
       parent,
       currentVersion: parent.version,
@@ -648,7 +651,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       policies: Object.freeze(parseRecord(versionRow.policiesSnapshot.contentJson, 'project policies')),
       editPlan: Object.freeze(editPlan),
       currentDurationFrames,
-      proxyVariantId: project.format,
+      proxyVariantId: format,
       sourceRights: master.artifact.currentRightsSnapshot
         ? Object.freeze({
             state: 'present' as const,
@@ -665,7 +668,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           })
         : Object.freeze({ state: 'missing' as const }),
       outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: versionRow.id, variantId: project.format! })),
+        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: versionRow.id, variantId: format })),
         ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: versionRow.id, variantId: output.outputAspectRatio })),
       ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
       transcript: Object.freeze({
@@ -799,7 +802,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
             ...bundle,
             ...(bundle.operationFence ? { operationFence: { ...bundle.operationFence, now: authorityNow.toISOString() } } : {}),
           })
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
       } catch (error) {
         const serialization = isPrismaCode(error, 'P2034') ||
           isPrismaCode(error, 'P2010') && typeof error === 'object' && error !== null &&
@@ -1105,7 +1108,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       }),
     ])
     const currentOutputs = [
-      ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
+      ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectOutputFormat(project, bundle.bundle) ?? '9:16' })),
       ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
     ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
     if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {

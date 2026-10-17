@@ -12,6 +12,7 @@ import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../domain/project-lut-selection-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
@@ -262,6 +263,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
     const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
     if (!parent) return null
     const currentVersionId = parent.version.id
+    const format = projectOutputFormat(project, parent)
         const [resolved, proxyOutputs, finalOutputs] = await Promise.all([
       resolve(this.client, { workspaceId: input.workspaceId, requested: input.requested }),
       this.client.v2ProjectProxyRenderOperation.findMany({
@@ -276,16 +278,16 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
     const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'current project LUT EditPlan')
     if (editPlan.projectVersionId !== currentVersionId) throw new DomainError('PERSISTENCE_CONFLICT', 'Current project LUT EditPlan identity is invalid')
     const currentDurationFrames = Number(editPlan.durationFrames)
-    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !project.format) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT render context is incomplete')
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !format) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT render context is incomplete')
     if (currentDurationFrames === 0 && (proxyOutputs.length > 0 || finalOutputs.length > 0)) throw new DomainError('PERSISTENCE_CONFLICT', 'Project outputs exist before a renderable timeline')
     return Object.freeze({
       parent,
       ...(resolved.workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision: resolved.workspaceDefaultRevision } : {}),
       ...(resolved.lut ? { resolvedLutVersion: resolved.lut } : {}),
       currentDurationFrames,
-      proxyVariantId: project.format,
+      proxyVariantId: format,
       outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: project.format! })),
+        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: format })),
         ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
       ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
     })
@@ -356,7 +358,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
           }),
         ])
         const currentOutputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: command.baseVersionId, variantId: project.format ?? '9:16' })),
+          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: command.baseVersionId, variantId: projectOutputFormat(project, input.bundle) ?? '9:16' })),
           ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: command.baseVersionId, variantId: output.outputAspectRatio })),
         ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
         if (stableSerialize(currentOutputs) !== stableSerialize(command.payload.impact.affectedArtifacts)) throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before LUT selection impact commit')
@@ -394,7 +396,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
         await settleDeferredOutputGuards(transaction)
         const row = await transaction.v2ProjectLutSelection.findUniqueOrThrow({ where: { id: input.selection.id }, include: selectionInclude })
         return hydrate(row, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey })

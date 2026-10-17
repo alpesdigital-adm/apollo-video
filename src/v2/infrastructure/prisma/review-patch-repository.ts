@@ -486,7 +486,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
           }),
         ])
         await settleDeferredOutputGuards(transaction)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
       if (!isPrismaCode(error, 'P2002')) throw error

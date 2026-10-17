@@ -340,7 +340,7 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
           }),
           false,
         )
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const replay = await this.findIdempotent({

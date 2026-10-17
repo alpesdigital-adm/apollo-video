@@ -324,7 +324,7 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
           if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during library attachment')
           await settleDeferredOutputGuards(transaction)
           return resultOf(reference, false)
-        }, { isolationLevel: 'Serializable' as Prisma.TransactionIsolationLevel })
+        }, { isolationLevel: 'Serializable' as Prisma.TransactionIsolationLevel, timeout: 30_000 })
       } catch (error) {
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
         if (attempt < 3 && (code === 'P2034' || code === 'P2002')) continue

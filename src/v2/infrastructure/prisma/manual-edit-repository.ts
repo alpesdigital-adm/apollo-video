@@ -583,7 +583,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
         })
         const result = hydrateStoredCommand(stored, false)
         return Object.freeze({ ...result, comparison: bundle.comparison })
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.commitOrReplay(input, serializationAttempt + 1)

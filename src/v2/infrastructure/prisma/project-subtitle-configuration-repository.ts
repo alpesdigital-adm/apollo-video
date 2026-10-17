@@ -147,7 +147,7 @@ export class PrismaProjectSubtitleConfigurationRepository implements ProjectSubt
         const updated = await tx.v2Project.updateMany({ where: { id: command.projectId, workspaceId: command.workspaceId, currentVersionId: command.baseVersionId }, data: { currentVersionId: version.id } }); if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during subtitle configuration commit')
         await settleDeferredOutputGuards(tx)
         return hydrate(await tx.v2ProjectSubtitleConfiguration.findUniqueOrThrow({ where: { id_workspaceId: { id: input.configuration.id, workspaceId: input.configuration.workspaceId } }, include }), false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') { const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey }); if (replay?.requestFingerprint === requestFingerprint) return replay.result; if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle configuration') }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) return this.commitOrReplay(input, attempt + 1)

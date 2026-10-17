@@ -28,6 +28,7 @@ import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const colorPlanInclude = Prisma.validator<Prisma.V2ProjectColorPlanInclude>()({
@@ -250,9 +251,11 @@ function creativeLutRefs(colorPlan: ProjectColorPlanCommit['colorPlan']) {
 
 async function readContext(client: DbClient, input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectColorPlanContext> | null> {
   const project = await client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId } })
-  if (!project?.currentVersionId || !project.format) return null
+  if (!project?.currentVersionId) return null
   const parent = await readPersistedOperationalOutputBundleV3(client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
   if (!parent) return null
+  const format = projectOutputFormat(project, parent)
+  if (!format) return null
   const currentVersionId = parent.version.id
   const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'project ColorPlan EditPlan')
   const targets = targetsFromEditPlan(editPlan)
@@ -322,9 +325,9 @@ async function readContext(client: DbClient, input: { workspaceId: string; proje
     targets,
     trustedSourceMetadata: Object.freeze(trustedSourceMetadata),
     currentDurationFrames,
-    proxyVariantId: project.format,
+    proxyVariantId: format,
     outputReferences: Object.freeze([
-      ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: project.format! })),
+      ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: format })),
       ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
     ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
   })
@@ -492,7 +495,7 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
         await settleDeferredOutputGuards(transaction)
         const row = await transaction.v2ProjectColorPlan.findUniqueOrThrow({ where: { id: input.colorPlan.id }, include: colorPlanInclude })
         return hydrate(row, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey })

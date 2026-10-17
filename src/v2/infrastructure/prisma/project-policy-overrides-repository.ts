@@ -26,6 +26,7 @@ import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRow, hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import {
   editCommandExternalActorAuditData,
@@ -264,7 +265,8 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
     if (!parent) return null
     const editPlan = parseRecord(operationalBundlePlanV3(parent).contentJson, 'project policy EditPlan')
     const currentDurationFrames = Number(editPlan.durationFrames)
-    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !project.format) {
+    const format = projectOutputFormat(project, parent)
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !format) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Project policy render context is incomplete')
     }
     const currentVersionId = parent.version.id
@@ -292,9 +294,9 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
         content: policy.content,
       }),
       currentDurationFrames,
-      proxyVariantId: project.format,
+      proxyVariantId: format,
       outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: project.format! })),
+        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: format })),
         ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
       ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
     })
@@ -365,7 +367,7 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
           }),
         ])
         const outputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
+          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectOutputFormat(project, input.bundle) ?? '9:16' })),
           ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
         ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
         const expectedAffectedOutputs = bundle.command.payload.impact.renderSemanticsChanged ? outputs : []
@@ -414,7 +416,7 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
           include: storedCommandInclude,
         })
         return hydrateStoredCommand(stored, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
         return this.commitOrReplay(input, serializationAttempt + 1)
