@@ -6,36 +6,9 @@ import { createCommandArtifactInvalidations } from '../../src/v2/domain/command-
 import { operationalBundlePlanV3 } from '../../src/v2/domain/output-version-bundle.ts'
 import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
 import { ingestedWorld, recompiledChild } from './helpers/output-world.mjs'
+import { reviewedTimeline } from './helpers/review-timeline.mjs'
 
 const createdAt = '2026-07-31T19:00:00.000Z'
-
-/** The timeline a reviewer annotated: two 3 second clips of the world's source and one subtitle cue. */
-function reviewedTimeline(plan) {
-  return {
-    ...plan,
-    durationFrames: 180,
-    sources: [{ id: 'artifact-source3', artifactId: 'artifact-source3', kind: 'video', durationSeconds: 6 }],
-    videoTracks: [{
-      id: 'base-video', kind: 'base-video',
-      clips: [
-        { id: 'clip-1', sourceArtifactId: 'artifact-source3', sourceInFrame: 0, sourceOutFrame: 90, timelineInFrame: 0, timelineOutFrame: 90, rate: 1 },
-        { id: 'clip-2', sourceArtifactId: 'artifact-source3', sourceInFrame: 90, sourceOutFrame: 180, timelineInFrame: 90, timelineOutFrame: 180, rate: 1 },
-      ],
-    }],
-    overlayTracks: [],
-    subtitleTracks: [{
-      id: 'captions', kind: 'captions', presetId: 'clean-color', anchor: 'bottom',
-      faceProtection: true, maxLines: 2, maxCharactersPerBlock: 32,
-      cues: [{ id: 'cue-1', startFrame: 15, endFrame: 45, text: 'Texto original', anchor: 'bottom' }],
-    }],
-    audioTracks: [], effectTracks: [], markers: [], transitions: [],
-    protectedElements: [], localeVariantRefs: [], formatVariantRefs: [], lineageRefs: ['artifact-source3'],
-    movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
-    subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 32 },
-    composition: { layout: 'fit', background: 'black', foregroundScale: 1, verticalPosition: 0.5 },
-    director: { plannerVersion: 'impact-test', decisions: [], assumptions: [] },
-  }
-}
 
 test('T-FR-233 applied review patch persists impact v2, a sealed Version and normalized invalidations', async () => {
   // The parent is a real sealed Version3/State3 whose EditPlan is the reviewed timeline.
