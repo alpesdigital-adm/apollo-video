@@ -34,7 +34,7 @@ test('T-FR-114 persists a deterministic novelty verdict PostgreSQL itself refuse
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaNoveltyBudgetRepository } = await import('../../src/v2/infrastructure/prisma/novelty-budget-repository.ts')
     const {
       DEFAULT_NOVELTY_BUDGET_POLICY,
@@ -58,14 +58,14 @@ test('T-FR-114 persists a deterministic novelty verdict PostgreSQL itself refuse
     })
     let entity = 0, event = 0
     const created = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client),
       clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-novelty-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(810_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Novelty project', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'novelty-project' } })
+    })({ workspaceId, name: 'Novelty project', objective: 'awareness', actor, idempotencyKey: 'novelty-project' })
 
-    const projectId = created.project.id
-    const projectVersionId = created.project.currentVersionId
+    const projectId = created.projectAtCreation.id
+    const projectVersionId = created.creationVersion.id
     const repository = new PrismaNoveltyBudgetRepository(client)
 
     const policy = createNoveltyBudgetPolicy({ ...DEFAULT_NOVELTY_BUDGET_POLICY, id: 'novelty-policy-integration' })

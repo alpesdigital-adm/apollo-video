@@ -10,8 +10,8 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     '../../src/v2/application/authenticate-api-client.ts'
   )
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-  const { PrismaProjectCreationRepository } = await import(
-    '../../src/v2/infrastructure/prisma/project-creation-repository.ts'
+  const { PrismaCreationOutputBundleRepositoryV2 } = await import(
+    '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
   )
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -82,7 +82,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       return `integration-${kind}-${next}`
     }
     let eventCounter = 0
-    const repository = new PrismaProjectCreationRepository(client)
+    const repository = new PrismaCreationOutputBundleRepositoryV2(client)
     const createProject = createProjectService({
       repository,
       clock: () => testNow,
@@ -96,10 +96,9 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       workspaceId,
       name: 'Projeto integração',
       objective: 'discovery',
-      format: '9:16',
       briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto.',
       actor,
-      idempotency: { clientId, key: 'integration-create-project' },
+      idempotencyKey: 'integration-create-project',
     }
 
     const first = await createProject(request)
@@ -107,13 +106,13 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
 
     assert.equal(first.replayed, false)
     assert.equal(replay.replayed, true)
-    assert.equal(replay.project.id, first.project.id)
+    assert.equal(replay.projectAtCreation.id, first.projectAtCreation.id)
     assert.equal(await client.v2Project.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 3)
     assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 1)
     const firstAuditCommand = await client.v2ProjectCreationCommand.findUnique({
-      where: { projectId_workspaceId: { projectId: first.project.id, workspaceId } },
+      where: { projectId_workspaceId: { projectId: first.projectAtCreation.id, workspaceId } },
     })
     assert.equal(firstAuditCommand?.action, 'create')
     assert.equal(firstAuditCommand?.actorClientId, clientId)
@@ -122,8 +121,8 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       firstAuditCommand?.actorContextHash,
       materializeActorAuditContext(actor).contextHash,
     )
-    assert.equal(firstAuditCommand?.projectId, first.project.id)
-    assert.equal(firstAuditCommand?.versionId, first.version.id)
+    assert.equal(firstAuditCommand?.projectId, first.projectAtCreation.id)
+    assert.equal(firstAuditCommand?.versionId, first.creationVersion.id)
     const outbox = await client.v2PublicEventOutbox.findMany({
       where: { workspaceId },
       orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
@@ -133,25 +132,22 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       ['project.created', 'project.version.created'],
     )
     assert.ok(outbox.every((event) => event.publishedAt === null))
-    assert.equal(outbox[0].resourceId, first.project.id)
-    assert.equal(outbox[1].resourceId, first.version.id)
-    assert.equal(JSON.parse(outbox[1].dataJson).projectId, first.project.id)
+    assert.equal(outbox[0].resourceId, first.projectAtCreation.id)
+    assert.equal(outbox[1].resourceId, first.creationVersion.id)
+    assert.equal(JSON.parse(outbox[1].dataJson).projectId, first.projectAtCreation.id)
 
     const concurrentRequest = {
       ...request,
       name: 'Projeto concorrente',
-      idempotency: {
-        ...request.idempotency,
-        key: 'integration-create-project-concurrent',
-      },
+      idempotencyKey: 'integration-create-project-concurrent',
     }
     const concurrentResults = await Promise.all([
       createProject(concurrentRequest),
       createProject(concurrentRequest),
     ])
     assert.deepEqual(concurrentResults.map((result) => result.replayed).sort(), [false, true])
-    assert.equal(concurrentResults[0].project.id, concurrentResults[1].project.id)
-    assert.equal(concurrentResults[0].version.id, concurrentResults[1].version.id)
+    assert.equal(concurrentResults[0].projectAtCreation.id, concurrentResults[1].projectAtCreation.id)
+    assert.equal(concurrentResults[0].creationVersion.id, concurrentResults[1].creationVersion.id)
     assert.equal(await client.v2Project.count({ where: { workspaceId } }), 2)
     assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 2)
     assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 6)
@@ -179,10 +175,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     const responseLossRequest = {
       ...request,
       name: 'Projeto resposta perdida',
-      idempotency: {
-        ...request.idempotency,
-        key: 'integration-create-project-response-loss',
-      },
+      idempotencyKey: 'integration-create-project-response-loss',
     }
     await assert.rejects(
       () => createProjectWithResponseLoss(responseLossRequest),
@@ -200,12 +193,12 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       createProject({
         ...request,
         name: 'Projeto vencedor A',
-        idempotency: { ...request.idempotency, key: mismatchedKey },
+        idempotencyKey: mismatchedKey,
       }),
       createProject({
         ...request,
         name: 'Projeto vencedor B',
-        idempotency: { ...request.idempotency, key: mismatchedKey },
+        idempotencyKey: mismatchedKey,
       }),
     ])
     assert.equal(mismatchedResults.filter((result) => result.status === 'fulfilled').length, 1)
@@ -220,7 +213,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
 
     let collisionEventCall = 0
     const createProjectWithCollision = createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client),
       clock: () => new Date(testNow.getTime() + 1_000),
       createId: createEntityId,
       createEventId: () => {
@@ -233,10 +226,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
         createProjectWithCollision({
           ...request,
           name: 'Project that must roll back',
-          idempotency: {
-            ...request.idempotency,
-            key: 'integration-create-project-collision',
-          },
+          idempotencyKey: 'integration-create-project-collision',
         }),
       (error) => error?.code === 'PERSISTENCE_CONFLICT',
     )

@@ -255,11 +255,16 @@ test('F1.001 outbox writers never set createdAt, so it stays the database transa
   }, [renameEvent(1)])
   assert.equal(data.length, 1)
   assert.equal('createdAt' in data[0], false)
+  // Project creation is written by the shared bundle writer; every direct outbox insert there is checked.
   const creation = readFileSync(
-    new URL('../../src/v2/infrastructure/prisma/project-creation-repository.ts', import.meta.url), 'utf8',
+    new URL('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts', import.meta.url), 'utf8',
   )
-  const block = creation.slice(creation.indexOf('v2PublicEventOutbox.createMany'))
-  assert.equal(/createdAt/.test(block.slice(0, block.indexOf('})') + 2)), false)
+  const inserts = [...creation.matchAll(/v2PublicEventOutbox\.create(?:Many)?\(/g)]
+  assert.ok(inserts.length > 0, 'the creation writer must insert its outbox events directly')
+  for (const insert of inserts) {
+    const block = creation.slice(insert.index)
+    assert.equal(/createdAt/.test(block.slice(0, block.indexOf('})') + 2)), false)
+  }
 })
 
 test('F1.001 capability, schema and presenter agree and expose only a refetch signal', () => {

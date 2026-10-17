@@ -47,8 +47,8 @@ test('review annotations persist idempotently without mutating the project versi
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
   )
-  const { PrismaProjectCreationRepository } = await import(
-    '../../src/v2/infrastructure/prisma/project-creation-repository.ts'
+  const { PrismaCreationOutputBundleRepositoryV2 } = await import(
+    '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
   )
   const { PrismaReviewAnnotationRepository } = await import(
     '../../src/v2/infrastructure/prisma/review-annotation-repository.ts'
@@ -131,7 +131,7 @@ test('review annotations persist idempotently without mutating the project versi
     let entityCounter = 0
     let eventCounter = 0
     const projectResult = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client),
       clock: () => new Date(createdAt),
       createId: (kind) => `${kind}-review-integration-${++entityCounter}`,
       createEventId: () => `00000000-0000-4000-8000-${String(++eventCounter).padStart(12, '0')}`,
@@ -139,7 +139,6 @@ test('review annotations persist idempotently without mutating the project versi
       workspaceId,
       name: 'Projeto de revisão',
       objective: 'discovery',
-      format: '9:16',
       actor: projectActor,
       idempotency: { clientId: 'review-integration-client', key: 'review-integration-project' },
     })
@@ -175,7 +174,7 @@ test('review annotations persist idempotently without mutating the project versi
       data: {
         id: randomUUID(),
         workspaceId,
-        projectId: projectResult.project.id,
+        projectId: projectResult.projectAtCreation.id,
         artifactId,
         role: 'editing-proxy',
         originalFileName: 'proxy.mp4',
@@ -205,7 +204,7 @@ test('review annotations persist idempotently without mutating the project versi
     const colorRepository = new PrismaColorPipelineCompilationRepository(client)
     const compiled = await createColorPipelineCompilationService({ repository: colorRepository,
       createId: () => 'review-integration-color-compilation', clock: () => new Date(createdAt) })({ workspaceId,
-      projectId: projectResult.project.id, sourceArtifactId: artifactId, sourceManifestId: colorProbe.manifestId,
+      projectId: projectResult.projectAtCreation.id, sourceArtifactId: artifactId, sourceManifestId: colorProbe.manifestId,
       outputMetadata: fixtureColorMetadata, actor: projectActor, idempotencyKey: 'review-integration-color-compilation',
       stages: [
         { id: 'review-technical', kind: 'technical', version: 'v1', enabled: true, output: fixtureColorMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
@@ -214,7 +213,7 @@ test('review annotations persist idempotently without mutating the project versi
         { id: 'review-output', kind: 'output', version: 'v1', enabled: true, output: fixtureColorMetadata, implementation: implementation('ffmpeg-zscale', { dither: false }) },
       ] })
     const compilation = compiled.value.compilation
-    const persistedCompilation = await colorRepository.read({ workspaceId, projectId: projectResult.project.id, compilationId: compilation.id })
+    const persistedCompilation = await colorRepository.read({ workspaceId, projectId: projectResult.projectAtCreation.id, compilationId: compilation.id })
     assert.deepEqual(persistedCompilation.compilation, compilation, 'Color binding must read back the exact persisted domain compilation')
     const colorBinding = { sourceArtifactId: compilation.sourceArtifactId, sourceManifestId: compilation.sourceManifestId,
       compilationId: compilation.id, compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }
@@ -222,7 +221,7 @@ test('review annotations persist idempotently without mutating the project versi
       data: {
         id: 'review-integration-operation',
         workspaceId,
-        projectId: projectResult.project.id,
+        projectId: projectResult.projectAtCreation.id,
         clientId: issued.client.id,
         actorCredentialId: projectAuthenticationAudit.credentialId,
         actorEnvironment: projectAuthenticationAudit.environment,
@@ -250,9 +249,9 @@ test('review annotations persist idempotently without mutating the project versi
       data: {
         operationId: 'review-integration-operation',
         workspaceId,
-        projectId: projectResult.project.id,
-        projectVersionId: projectResult.version.id,
-        editPlanSnapshotId: projectResult.version.snapshotRefs.editPlan,
+        projectId: projectResult.projectAtCreation.id,
+        projectVersionId: projectResult.creationVersion.id,
+        editPlanSnapshotId: projectResult.creationVersion.snapshotRefs.editPlan,
         sourceArtifactId: artifactId,
         sourceManifestId: 'review-integration-manifest',
         colorPipelineBindingsJson: stableSerialize([colorBinding]),
@@ -275,8 +274,8 @@ test('review annotations persist idempotently without mutating the project versi
     })
     await new PrismaRenderElementMapRepository(client).persistOrReplay({
       workspaceId,
-      projectId: projectResult.project.id,
-      projectVersionId: projectResult.version.id,
+      projectId: projectResult.projectAtCreation.id,
+      projectVersionId: projectResult.creationVersion.id,
       proxyArtifactId: artifactId,
       map: renderElementMap,
       createdAt,
@@ -297,11 +296,11 @@ test('review annotations persist idempotently without mutating the project versi
     })
     await waitForServer(baseUrl, server)
     const authorization = `Bearer ${issued.token}`
-    const reviewUrl = `${baseUrl}/v1/projects/${projectResult.project.id}/annotations`
+    const reviewUrl = `${baseUrl}/v1/projects/${projectResult.projectAtCreation.id}/annotations`
     const initialResponse = await fetch(`${reviewUrl}?limit=10`, { headers: { authorization } })
     const initialPayload = await initialResponse.json()
     assert.equal(initialResponse.status, 200, JSON.stringify(initialPayload))
-    assert.equal(initialPayload.data.session.projectVersionId, projectResult.version.id)
+    assert.equal(initialPayload.data.session.projectVersionId, projectResult.creationVersion.id)
     assert.equal(initialPayload.data.session.proxyArtifactId, artifactId)
     assert.equal(initialPayload.data.session.proxyHash, proxyHash)
     assert.equal(initialPayload.data.session.stale, false)
@@ -311,7 +310,7 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(initialPayload.data.annotations.length, 0)
 
     const elementQuery = new URLSearchParams({
-      projectVersionId: projectResult.version.id,
+      projectVersionId: projectResult.creationVersion.id,
       proxyArtifactId: artifactId,
       proxyHash,
       frame: '30',
@@ -320,7 +319,7 @@ test('review annotations persist idempotently without mutating the project versi
       displayWidth: '540',
       displayHeight: '960',
     })
-    const elementUrl = `${baseUrl}/v1/projects/${projectResult.project.id}/render-elements?${elementQuery.toString()}`
+    const elementUrl = `${baseUrl}/v1/projects/${projectResult.projectAtCreation.id}/render-elements?${elementQuery.toString()}`
     const elementResponse = await fetch(elementUrl, { headers: { authorization } })
     const elementPayload = await elementResponse.json()
     assert.equal(elementResponse.status, 200, JSON.stringify(elementPayload))
@@ -328,13 +327,13 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(elementPayload.data.chooserRequired, true)
     assert.deepEqual(elementPayload.data.candidates.map((item) => item.type), ['subtitle', 'background'])
     elementQuery.set('proxyHash', 'f'.repeat(64))
-    const mismatchResponse = await fetch(`${baseUrl}/v1/projects/${projectResult.project.id}/render-elements?${elementQuery.toString()}`, { headers: { authorization } })
+    const mismatchResponse = await fetch(`${baseUrl}/v1/projects/${projectResult.projectAtCreation.id}/render-elements?${elementQuery.toString()}`, { headers: { authorization } })
     const mismatchPayload = await mismatchResponse.json()
     assert.equal(mismatchResponse.status, 409)
     assert.equal(mismatchPayload.error.code, 'VERSION_CONFLICT')
 
     const annotationRequest = {
-      projectVersionId: projectResult.version.id,
+      projectVersionId: projectResult.creationVersion.id,
       proxyArtifactId: artifactId,
       proxyHash,
       frame: 30,
@@ -385,7 +384,7 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(regionalEvents.length, 1)
     assert.equal(regionalEvents[0].actorClientId, issued.client.id)
     const regionalEventData = JSON.parse(regionalEvents[0].dataJson)
-    assert.equal(regionalEventData.projectId, projectResult.project.id)
+    assert.equal(regionalEventData.projectId, projectResult.projectAtCreation.id)
     assert.equal(regionalEventData.status, 'open')
     assert.equal('text' in regionalEventData, false)
     assert.equal('screenshotRef' in regionalEventData, false)
@@ -424,12 +423,12 @@ test('review annotations persist idempotently without mutating the project versi
 
     const stored = await repository.list({
       workspaceId,
-      projectId: projectResult.project.id,
-      projectVersionId: projectResult.version.id,
+      projectId: projectResult.projectAtCreation.id,
+      projectVersionId: projectResult.creationVersion.id,
       limit: 10,
     })
     const projectAfterReview = await client.v2Project.findUnique({
-      where: { id: projectResult.project.id },
+      where: { id: projectResult.projectAtCreation.id },
       include: { versions: true },
     })
 
@@ -444,7 +443,7 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal((await client.v2PublicEventOutbox.count({
       where: { workspaceId, type: 'annotation.created' },
     })), 2)
-    assert.equal(projectAfterReview.currentVersionId, projectResult.version.id)
+    assert.equal(projectAfterReview.currentVersionId, projectResult.creationVersion.id)
     assert.equal(projectAfterReview.versions.length, 1)
   } finally {
     if (server && server.exitCode === null) {

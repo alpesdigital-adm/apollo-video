@@ -43,7 +43,7 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaTransformationProviderRegistryRepository } = await import('../../src/v2/infrastructure/prisma/transformation-provider-registry-repository.ts')
     const { PrismaTransformationQualityRepository } = await import('../../src/v2/infrastructure/prisma/transformation-quality-repository.ts')
 
@@ -53,7 +53,7 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     const actor = Object.freeze({ ...auditContext, scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext })
     const durableAudit = materializeActorAuditContext(actor)
     let entity = 0, event = 0
-    const created = await createProjectService({ repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)), createId: (kind) => `${kind}-transformation-${++entity}`, createEventId: () => `00000000-0000-4000-8000-${String(800_000 + ++event).padStart(12, '0')}` })({ workspaceId, name: 'Transformation project', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'transformation-project' } })
+    const created = await createProjectService({ repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)), createId: (kind) => `${kind}-transformation-${++entity}`, createEventId: () => `00000000-0000-4000-8000-${String(800_000 + ++event).padStart(12, '0')}` })({ workspaceId, name: 'Transformation project', objective: 'awareness', actor, idempotencyKey: 'transformation-project' })
     const repository = new PrismaTransformationProviderRegistryRepository(client)
 
     const providerInput = (id, quality, price) => ({
@@ -69,15 +69,15 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     await recordTransformationProviderHealthService({ repository, health: { providerId: 'transformation-provider-primary', workspaceId, status: 'healthy', circuitState: 'closed', consecutiveFailures: 0, observedLatencyMs: 100, observedAt: at(2) } })
     await recordTransformationProviderHealthService({ repository, health: { providerId: 'transformation-provider-cheap', workspaceId, status: 'unavailable', circuitState: 'open', consecutiveFailures: 3, observedLatencyMs: null, observedAt: at(2), cooldownUntil: at(62) } })
 
-    const brief = createTransformationBrief({ workspaceId, projectId: created.project.id, projectVersionId: created.version.id, storyPlanId: 'transformation-story-plan', storyPlanHash: hash('1'), sourceArtifactId: 'transformation-source-artifact', sourceArtifactHash: hash('2'), sourceRange: { startFrame: 0, endFrame: 150 }, intent: 'dramatic-emphasis', editorialIntent: 'Melhorar a luz sem alterar a pessoa.', mode: 'relight', prompt: 'Luz suave lateral.', negativeConstraints: ['não alterar o rosto'], preserve: ['identity', 'speech', 'wardrobe'], allowedChanges: ['lighting'], target: { lighting: 'soft-side' }, outputSpecIds: ['output-vertical'], intensityBps: 2_000, noveltyBps: 1_000, safety: ['identity-locked'], safeZones: [{ x: .2, y: .05, width: .6, height: .8, purpose: 'subject' }], fallbackLadder: ['source-unchanged'], rightsSnapshotId: 'rights-transformation', rightsSnapshotHash: hash('3'), identitySnapshotId: 'identity-transformation', identitySnapshotHash: hash('4'), createdAt: at(3) })
+    const brief = createTransformationBrief({ workspaceId, projectId: created.projectAtCreation.id, projectVersionId: created.creationVersion.id, storyPlanId: 'transformation-story-plan', storyPlanHash: hash('1'), sourceArtifactId: 'transformation-source-artifact', sourceArtifactHash: hash('2'), sourceRange: { startFrame: 0, endFrame: 150 }, intent: 'dramatic-emphasis', editorialIntent: 'Melhorar a luz sem alterar a pessoa.', mode: 'relight', prompt: 'Luz suave lateral.', negativeConstraints: ['não alterar o rosto'], preserve: ['identity', 'speech', 'wardrobe'], allowedChanges: ['lighting'], target: { lighting: 'soft-side' }, outputSpecIds: ['output-vertical'], intensityBps: 2_000, noveltyBps: 1_000, safety: ['identity-locked'], safeZones: [{ x: .2, y: .05, width: .6, height: .8, purpose: 'subject' }], fallbackLadder: ['source-unchanged'], rightsSnapshotId: 'rights-transformation', rightsSnapshotHash: hash('3'), identitySnapshotId: 'identity-transformation', identitySnapshotHash: hash('4'), createdAt: at(3) })
     assert.equal((await persistTransformationBriefService({ repository, brief })).replayed, false)
     assert.equal((await persistTransformationBriefService({ repository, brief })).replayed, true)
 
-    const routed = await routeTransformationBriefService({ repository, workspaceId, projectId: created.project.id, briefId: brief.id, policy: { region: 'br', maximumCostMinorUnits: 100, minimumQualityScoreBps: 8_000, output: { width: 1080, height: 1920, includeAudio: true, fps: 30 } }, createdAt: at(4) })
+    const routed = await routeTransformationBriefService({ repository, workspaceId, projectId: created.projectAtCreation.id, briefId: brief.id, policy: { region: 'br', maximumCostMinorUnits: 100, minimumQualityScoreBps: 8_000, output: { width: 1080, height: 1920, includeAudio: true, fps: 30 } }, createdAt: at(4) })
     assert.equal(routed.replayed, false)
     assert.equal(routed.selection.selectedProviderId, 'transformation-provider-primary')
     assert.ok(routed.selection.candidates.find((candidate) => candidate.providerId === 'transformation-provider-cheap').reasons.includes('health-unavailable'))
-    assert.equal((await routeTransformationBriefService({ repository, workspaceId, projectId: created.project.id, briefId: brief.id, policy: { region: 'br', maximumCostMinorUnits: 100, minimumQualityScoreBps: 8_000, output: { width: 1080, height: 1920, includeAudio: true, fps: 30 } }, createdAt: at(4) })).replayed, true)
+    assert.equal((await routeTransformationBriefService({ repository, workspaceId, projectId: created.projectAtCreation.id, briefId: brief.id, policy: { region: 'br', maximumCostMinorUnits: 100, minimumQualityScoreBps: 8_000, output: { width: 1080, height: 1920, includeAudio: true, fps: 30 } }, createdAt: at(4) })).replayed, true)
     assert.equal(await client.v2TransformationProviderSelection.count({ where: { workspaceId } }), 1)
 
     // Public keys are aliases for one server-owned ledger/rung claim. Two
@@ -85,7 +85,7 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     // created, and each key remains permanently bound to its own fingerprint.
     const fallbackLedgerId = 'transformation-fallback-ledger-1'
     await client.v2TransformationFallbackLedger.create({ data: {
-      id: fallbackLedgerId, workspaceId, projectId: created.project.id, projectVersionId: created.version.id,
+      id: fallbackLedgerId, workspaceId, projectId: created.projectAtCreation.id, projectVersionId: created.creationVersion.id,
       schemaVersion: 'transformation-fallback-ledger/v1', briefId: brief.id, briefHash: brief.briefHash,
       ladderJson: '["video-to-video","generated-cutaway","source-unchanged"]', currentRung: 'generated-cutaway',
       incurredCostMinorUnits: 10, costCurrency: 'BRL', reviewDecision: 'awaiting-review',
@@ -95,7 +95,7 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     const quality = new PrismaTransformationQualityRepository(client)
     const claimInput = (key, fingerprint, suffix) => ({
       claimId: 'transformation-fallback-claim-1', requestId: `transformation-fallback-request-${suffix}`,
-      workspaceId, projectId: created.project.id, ledgerId: fallbackLedgerId, ledgerHash: hash('8'), briefId: brief.id,
+      workspaceId, projectId: created.projectAtCreation.id, ledgerId: fallbackLedgerId, ledgerHash: hash('8'), briefId: brief.id,
       rung: 'generated-cutaway', idempotencyKey: key, requestFingerprint: fingerprint,
       authenticationAudit: durableAudit, createdAt: at(6),
     })
@@ -122,7 +122,7 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
       workspaceRole: durableAudit.workspaceRole ?? null,
     } })
     const settleInput = {
-      workspaceId, projectId: created.project.id, claimId: aliasA.claim.id, expectedLedgerId: fallbackLedgerId,
+      workspaceId, projectId: created.projectAtCreation.id, claimId: aliasA.claim.id, expectedLedgerId: fallbackLedgerId,
       outcome: 'skipped', resultLedgerId: fallbackLedgerId, resultLedgerHash: hash('8'),
       reason: 'capability-unavailable', settledAt: at(7),
     }
@@ -136,10 +136,10 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     assert.equal(replay.requestReplayed, true)
     assert.equal(replay.claim.outcome, 'skipped')
 
-    const invisible = await repository.readBrief({ workspaceId: 'another-workspace', projectId: created.project.id, briefId: brief.id })
+    const invisible = await repository.readBrief({ workspaceId: 'another-workspace', projectId: created.projectAtCreation.id, briefId: brief.id })
     assert.equal(invisible, null)
     await client.v2TransformationBrief.update({ where: { id: brief.id }, data: { briefJson: JSON.stringify({ ...brief, prompt: 'tampered' }) } })
-    await assert.rejects(repository.readBrief({ workspaceId, projectId: created.project.id, briefId: brief.id }), (error) => error.code === 'PERSISTENCE_CONFLICT')
+    await assert.rejects(repository.readBrief({ workspaceId, projectId: created.projectAtCreation.id, briefId: brief.id }), (error) => error.code === 'PERSISTENCE_CONFLICT')
   } finally {
     await cleanup()
     await client.$disconnect()

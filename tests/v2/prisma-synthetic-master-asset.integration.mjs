@@ -69,7 +69,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticMasterAssetRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-asset-repository.ts')
     const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
@@ -97,12 +97,12 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     let entity = 0
     let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-master-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(700_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Master persistido', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'master-project' } })
-    const projectId = project.project.id
-    const projectVersionId = project.version.id
+    })({ workspaceId, name: 'Master persistido', objective: 'awareness', actor, idempotencyKey: 'master-project' })
+    const projectId = project.projectAtCreation.id
+    const projectVersionId = project.creationVersion.id
 
     // Media artifacts the master points at, plus the consent evidence.
     const artifactIds = {

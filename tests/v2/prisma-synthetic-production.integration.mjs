@@ -52,8 +52,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const { PrismaMediaArtifactRepository } = await import(
     '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
   )
-  const { PrismaProjectCreationRepository } = await import(
-    '../../src/v2/infrastructure/prisma/project-creation-repository.ts'
+  const { PrismaCreationOutputBundleRepositoryV2 } = await import(
+    '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
   )
   const { PrismaProjectWorkspaceQueryRepository } = await import(
     '../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts'
@@ -168,7 +168,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     let entity = 0
     let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client),
       clock: () => new Date(now),
       createId: (kind) => `${kind}-synthetic-integration-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
@@ -176,9 +176,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       workspaceId,
       name: 'Apresentador sintético sem pessoa real',
       objective: 'awareness',
-      format: '9:16',
       actor,
-      idempotency: { clientId, key: 'synthetic-integration-create-project' },
+      idempotencyKey: 'synthetic-integration-create-project',
     })
 
     const baseStory = STORY_GOLDEN_FIXTURES.linear
@@ -217,8 +216,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       clock: () => new Date(now),
     })({
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: project.projectAtCreation.id,
+      projectVersionId: project.creationVersion.id,
       plan: hybridStoryInput,
       actor,
       idempotencyKey: 'hybrid-story-plan-integration-key',
@@ -226,7 +225,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     assert.equal(hybridStory.value.plan.schemaVersion, 4)
     assert.equal(hybridStory.value.plan.productionMode, 'hybrid')
     assert.equal((await client.v2StoryPlan.findUniqueOrThrow({ where: { id: hybridStory.value.plan.id } })).schemaVersion, 4)
-    const readHybrid = await readStoryPlanService({ repository: storyRepository })({ workspaceId, projectId: project.project.id, storyPlanId: hybridStory.value.plan.id })
+    const readHybrid = await readStoryPlanService({ repository: storyRepository })({ workspaceId, projectId: project.projectAtCreation.id, storyPlanId: hybridStory.value.plan.id })
     assert.equal(readHybrid.plan.storyHash, hybridStory.value.plan.storyHash)
 
     const artifacts = [
@@ -352,7 +351,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
         ? `synthetic-block-${++scriptBlockOrdinal}`
         : `${kind}-synthetic-production-integration`,
     })({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.profileSnapshotId, locale: 'pt-BR',
       scriptText: 'Olá. Mundo.', actor, idempotencyKey: 'synthetic-production-script-plan',
     })
@@ -392,8 +391,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       createId: () => 'synthetic-approved-audio-master-integration',
     })({
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: project.projectAtCreation.id,
+      projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.profileSnapshotId,
       source: { kind: 'uploaded' },
       audioArtifactId: 'synthetic-audio-master',
@@ -419,7 +418,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     assert.equal(
       (await audioMasterRepository.read({
         workspaceId,
-        projectId: project.project.id,
+        projectId: project.projectAtCreation.id,
         audioMasterId: audioMasterResult.value.master.id,
       }))?.master.masterHash,
       audioMasterResult.value.master.masterHash,
@@ -451,8 +450,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       const planned = createProviderJob({
         id: block.jobId,
         workspaceId,
-        projectId: project.project.id,
-        originProjectVersionId: project.version.id,
+        projectId: project.projectAtCreation.id,
+        originProjectVersionId: project.creationVersion.id,
         operation: 'audio-avatar',
         adapterId: 'controlled-avatar',
         adapterVersion: 'version-1',
@@ -516,7 +515,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
         },
       })
       const report = createSyntheticCriticReport({
-        id: block.reportId, workspaceId, projectId: project.project.id, providerJobId: block.jobId, blockId: block.id,
+        id: block.reportId, workspaceId, projectId: project.projectAtCreation.id, providerJobId: block.jobId, blockId: block.id,
         capability: 'audio-avatar', adapterId: 'controlled-avatar', adapterVersion: 'version-1',
         artifactId: block.artifactId, artifactSha256: block.artifactSha256,
         audioArtifactId: null, alignmentArtifactId: null, scriptHash,
@@ -627,8 +626,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     })
     const request = {
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: project.projectAtCreation.id,
+      projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.profileSnapshotId,
       audio: {
         artifactId: 'synthetic-audio-master',
@@ -679,8 +678,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       }),
     })({
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: project.projectAtCreation.id,
+      projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.profileSnapshotId,
       operation: 'audio-avatar',
       adapterId: 'controlled-avatar',
@@ -732,7 +731,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
           })
           const ledgerBase = {
             workspaceId,
-            projectId: project.project.id,
+            projectId: project.projectAtCreation.id,
             jobId: job.id,
             schemaVersion: 'provider-result-artifact/v1',
             providerJobRef: job.providerJobId,
@@ -759,7 +758,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     })
     for (let stage = 0; stage < 8; stage += 1) await runProviderOnce('synthetic-provider-worker')
     const completedProvider = await providerRepository.read({
-      workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id,
+      workspaceId, projectId: project.projectAtCreation.id, jobId: enqueued.persisted.job.id,
     })
     assert.equal(
       completedProvider?.job.status,
@@ -785,7 +784,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       }),
       (error) => error.code === 'PERSISTENCE_CONFLICT',
     )
-    const ledgerRows = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id })
+    const ledgerRows = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: enqueued.persisted.job.id })
     assert.deepEqual(ledgerRows.map(({ role }) => role), ['alignment-evidence', 'primary-video'])
     assert.equal(ledgerRows[1].observedCost.costMinorUnits, 12)
     assert.equal(ledgerRows[1].providerJobRef, completedProvider.job.providerJobId)
@@ -801,7 +800,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     await assert.rejects(
       syntheticRepository.readRun({
         workspaceId,
-        projectId: project.project.id,
+        projectId: project.projectAtCreation.id,
         runId: created.run.plan.id,
       }),
       /failed integrity validation/,

@@ -131,7 +131,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
     const { PrismaNoveltyBudgetRepository } = await import('../../src/v2/infrastructure/prisma/novelty-budget-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
@@ -169,9 +169,9 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const auditContext = createExternalAuditContext({ clientId, credentialId: issued.credential.id, workspaceId, environment: 'production' })
     const actor = Object.freeze({ ...auditContext, scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext })
     let entity = 0
-    const created = await createProjectService({ repository: new PrismaProjectCreationRepository(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ workspaceId, name: 'Advanced cleanup production journey', objective: 'awareness', format: '16:9', actor, idempotency: { clientId, key: 'transformation-production-project' } })
-    const projectId = created.project.id
-    const projectVersionId = created.version.id
+    const created = await createProjectService({ repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ workspaceId, name: 'Advanced cleanup production journey', objective: 'awareness', actor, idempotencyKey: 'transformation-production-project' })
+    const projectId = created.projectAtCreation.id
+    const projectVersionId = created.creationVersion.id
 
     const storage = new LocalMediaUploadStorage(artifactRoot)
     const artifacts = new PrismaMediaArtifactRepository(client)
@@ -200,7 +200,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
       sourceArtifactId,
       sourceManifestId,
     }]
-    await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: created.version.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, colorPipelineBindingsJson: stableSerialize(proxyColorBindings), inputHash: createHash('sha256').update('proxy-input').digest('hex'), outputArtifactId: sourceArtifactId, outputManifestId: sourceManifestId, originalFileName: 'source.mp4', createdAt: at(1) } })
+    await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: created.creationVersion.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, colorPipelineBindingsJson: stableSerialize(proxyColorBindings), inputHash: createHash('sha256').update('proxy-input').digest('hex'), outputArtifactId: sourceArtifactId, outputManifestId: sourceManifestId, originalFileName: 'source.mp4', createdAt: at(1) } })
     const seededProxyOperation = await new PrismaPublicOperationRepository(client).findById(workspaceId, proxyOperationId)
     assert.equal(seededProxyOperation?.operation.result?.resource.manifestId, sourceManifestId)
 
