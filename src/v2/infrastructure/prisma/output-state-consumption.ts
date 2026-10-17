@@ -213,7 +213,9 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
     const fresh=buildOperationalOutputVersionBundleV3({allocation:{workspaceId:input.workspaceId,projectId:input.projectId,
       resultVersionId:input.versionId,stateId:stored.state.document.id,parentVersionId:parent.version.id,sequence:stored.version.sequence,
       createdBy:stored.version.createdBy,createdAt:stored.version.createdAt},parent,origin,restoreTarget:target,
-      editPlanSnapshot:stored.editPlanSnapshot,normalizations:actual,materializationIds})
+      editPlanSnapshot:stored.editPlanSnapshot,normalizations:actual,materializationIds,
+      // A child Command's replaced non-output snapshots are born with its Version; the origin declares which.
+      ...(origin.kind==='child-command'?{replacementSnapshots:stored.snapshots.filter(s=>(origin.replaces as readonly string[]).includes(s.kind))}:{})})
     if(serializeOutputCanonicalJson(JSON.parse(stableSerializeOperational(fresh)))!==serializeOutputCanonicalJson(stored))
       throw new Error('Reconstructed operational bundle differs')
     return fresh

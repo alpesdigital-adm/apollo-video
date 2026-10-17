@@ -1,12 +1,37 @@
 import type { ApiAccessAuditContext } from './api-access-control.ts'
+import { calculateCanonicalHash, stableSerialize } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import type { EditCommand } from './edit-command.ts'
 import { CHILD_COMMAND_TRANSITIONS, CHILD_REPLACEABLE_SNAPSHOT_KINDS, type ChildReplaceableSnapshotKind } from './output-child-command.ts'
 import type { SealedOutputNormalizationV3 } from './output-materialization.ts'
-import { buildOperationalOutputVersionBundleV3, type OperationalOutputParentV3,
+import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3, type OperationalOutputParentV3,
   type OperationalOutputVersionBundleV3 } from './output-version-bundle.ts'
 import type { OutputOriginAllocation } from './output-version-origin.ts'
-import type { ProjectSnapshot } from './project-snapshot.ts'
+import { createProjectSnapshot, type ProjectSnapshot } from './project-snapshot.ts'
+
+/**
+ * The EditPlan of a Command whose declared effect is `preserves-plan`: the parent's plan, byte for byte,
+ * under the identity of the Version it is born with (id, projectVersionId, createdAt). The bundle builder
+ * refuses any other difference, so a writer cannot smuggle a plan change through this effect.
+ */
+export function reidentifiedEditPlanSnapshot(parent: OperationalOutputParentV3,
+  input: Readonly<{ snapshotId: string; versionId: string; createdAt: string }>): Readonly<ProjectSnapshot> {
+  const source = operationalBundlePlanV3(parent), plan = JSON.parse(source.contentJson) as Record<string, unknown>
+  const next = { ...plan, id: `edit-plan-${input.versionId}`, projectVersionId: input.versionId,
+    ...('createdAt' in plan ? { createdAt: input.createdAt } : {}) }
+  return createProjectSnapshot({ id: input.snapshotId, workspaceId: source.workspaceId, projectId: source.projectId, kind: 'edit-plan',
+    contentSchemaVersion: source.contentSchemaVersion, contentJson: stableSerialize(next), contentHash: calculateCanonicalHash(next),
+    createdAt: input.createdAt })
+}
+
+/** The sealed Command, audit and request fingerprint a child bundle carries, typed by the caller's payload. */
+export function childCommandOf<Payload>(bundle: Readonly<OperationalOutputVersionBundleV3>): Readonly<{
+  command: Readonly<EditCommand<Payload>>; audit: Readonly<ApiAccessAuditContext> | null; requestFingerprint: string
+}> {
+  assertDomain(bundle.origin.kind === 'child-command', 'PERSISTENCE_CONFLICT', 'The bundle was not produced by a child Command')
+  const origin = bundle.origin
+  return Object.freeze({ command: origin.command as Readonly<EditCommand<Payload>>, audit: origin.audit, requestFingerprint: origin.requestFingerprint })
+}
 
 /** The exact normalization observations a child must reuse: those its parent State already materialized. */
 export function parentNormalizationsV3(parent: OperationalOutputParentV3): readonly SealedOutputNormalizationV3[] {

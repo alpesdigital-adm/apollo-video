@@ -53,3 +53,10 @@ export function hydrateProjectVersionRow(row: Readonly<ProjectVersionRowFacts>):
   'PERSISTENCE_CONFLICT', 'Stored ProjectVersion columns differ from its sealed document', { id: row.id })
   return Object.freeze(document!)
 }
+
+/** A Version produced by a Command is always operational (contract 3); the creation root is read by its own owner. */
+export function hydrateProjectVersionRowV3(row: Readonly<ProjectVersionRowFacts>): Readonly<ProjectVersionV3> {
+  const version = hydrateProjectVersionRow(row)
+  assertDomain(version.outputContractVersion === 3, 'PERSISTENCE_CONFLICT', 'A Command result Version must be operational', { id: row.id })
+  return version as Readonly<ProjectVersionV3>
+}
