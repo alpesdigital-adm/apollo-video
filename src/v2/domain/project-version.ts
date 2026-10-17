@@ -133,6 +133,13 @@ export function createProjectVersion(input: ProjectVersionInput): Readonly<Proje
   })
 }
 
+/**
+ * Retired contract one. It recomputes the Version a legacy contract-one bundle claims so that history can still be
+ * validated; nothing operational constructs a Version through it, and it is never written. Operational Versions are
+ * only ever sealed by the output state transition (contracts two and three).
+ */
+export const rebuildRetiredContractOneVersion = createProjectVersion
+
 export function createHistoricalProjectVersionAudit(input: {
   outputContractVersion: 0
   outputStateId: null

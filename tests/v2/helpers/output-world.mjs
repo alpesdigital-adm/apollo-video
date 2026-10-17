@@ -24,11 +24,12 @@ export function worldActor(overrides = {}) {
   return { ...auditContext, auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
     clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' }
 }
-export function outputWorld(actor = worldActor()) {
+/** `ids` pins the identity a kind would otherwise be given by counter (for suites that name their project). */
+export function outputWorld(actor = worldActor(), { ids = {} } = {}) {
   const roots = new Map(), commands = new Map(), bundles = new Map()
   let head, writes = 0, beforeCommit = () => {}, counter = 0
   const clockIds = { clock: () => new Date('2026-10-13T12:00:00.000Z'),
-    createId: kind => `${kind}-${++counter}`, createEventId: randomUUID }
+    createId: kind => ids[kind] ?? `${kind}-${++counter}`, createEventId: randomUUID }
   const creationRepository = { async persist(input) {
     const identity = input.proposal.author.id + ':' + input.idempotencyKey, existing = roots.get(identity)
     if (existing) {
@@ -70,7 +71,7 @@ export const variantRequest = (f, parent, key = 'variant-request-http') => ({ ..
 // Root, one explicit variant and a controlled ingest (synthetic probe facts, real sealed normalization and
 // materialization): the parent a child Command needs. See operational-editorial-fixture.mjs for its limits.
 export async function ingestedWorld(options = {}) {
-  const world = outputWorld(options.actor), root = await world.create(creationRequest(world))
+  const world = outputWorld(options.actor, { ids: options.ids }), root = await world.create(creationRequest(world))
   const prepared = await prepareEditorialSourceFixture(null, { bundle: root.bundle, projectAtCreation: root.projectAtCreation },
     { actor: world.actor, ...options })
   // `chain` is every sealed bundle from the creation root to the ingest, oldest first.

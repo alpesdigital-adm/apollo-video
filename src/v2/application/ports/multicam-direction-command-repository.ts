@@ -1,10 +1,9 @@
-import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { MulticamDirectionImpactV1 } from '../../domain/multicam-direction-impact.ts'
-import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { ProjectVersionV2, ProjectVersionV3 } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { Rational } from '../../domain/session-time.ts'
 import type { StrategicObjectiveId } from '../../domain/strategic-objective.ts'
@@ -44,7 +43,9 @@ export interface MulticamDirectionCommandContext {
   readonly workspaceId: string
   readonly projectId: string
   readonly objective: StrategicObjectiveId
-  readonly currentVersion: Readonly<ProjectVersion>
+  /** The sealed output bundle of the current head: the exact parent the direction's Version is born from. */
+  readonly parent: OperationalOutputParentV3
+  readonly currentVersion: Readonly<ProjectVersionV2 | ProjectVersionV3>
   /**
    * The plan the project version currently holds.
    *
@@ -63,7 +64,7 @@ export interface MulticamDirectionCommandContext {
 
 export interface MulticamDirectionCommandResult {
   readonly command: Readonly<EditCommand<DirectMulticamSessionPayload>>
-  readonly version: Readonly<ProjectVersion>
+  readonly version: Readonly<ProjectVersionV3>
   readonly editPlan: Readonly<DirectedEditPlan>
   readonly impact: Readonly<MulticamDirectionImpactV1>
   readonly invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
@@ -71,11 +72,8 @@ export interface MulticamDirectionCommandResult {
 }
 
 export interface MulticamDirectionCommandCommit {
-  readonly command: Readonly<EditCommand<DirectMulticamSessionPayload>>
-  readonly authenticationAudit: Readonly<ApiAccessAuditContext>
-  readonly requestFingerprint: string
-  readonly snapshot: Readonly<ProjectSnapshot>
-  readonly version: Readonly<ProjectVersion>
+  /** Version, State, EditPlan, Command and credential audit, sealed together by the child-command transition. */
+  readonly bundle: Readonly<OperationalOutputVersionBundleV3>
   readonly editPlan: Readonly<DirectedEditPlan>
   readonly event: Readonly<PublicEvent>
   /** The direction this Command was compiled from, named so the commit can refuse a swap. */

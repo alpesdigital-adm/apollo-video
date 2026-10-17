@@ -7,7 +7,7 @@ import { normalizeProjectName, PROJECT_STATUSES } from './project.ts'
 import { assertDomain } from './errors.ts'
 import { calculateCanonicalHash, stableSerialize } from './canonical-hash.ts'
 import { createProjectSnapshot, type ProjectSnapshot } from './project-snapshot.ts'
-import { createProjectVersion } from './project-version.ts'
+import { rebuildRetiredContractOneVersion } from './project-version.ts'
 import { createProjectOutputState, outputBoundVersionHashBody } from './project-output-state.ts'
 import { freezeOutputJson, type OutputJson } from './output-spec-revision.ts'
 import type { OutputOriginAllocation, ForkCropDecisionDraft } from './output-version-origin.ts'
@@ -124,7 +124,7 @@ export function validateForkSourceBundle(bundle: Readonly<OutputVersionBundle>):
   validateOutputCanonicalPolicy(bundle.version)
   const state = createProjectOutputState(bundle.state.document, bundle.facts)
   assertDomain(state.stateHash === bundle.state.stateHash, 'INVALID_PROJECT_VERSION', 'Origin base State seal mismatch')
-  const version = createProjectVersion({ ...bundle.version, outputState: state, previousBaseHash: bundle.previousBaseHash })
+  const version = rebuildRetiredContractOneVersion({ ...bundle.version, outputState: state, previousBaseHash: bundle.previousBaseHash })
   assertDomain(same(version, bundle.version), 'INVALID_PROJECT_VERSION', 'Origin base Version mismatch')
   assertDomain(bundle.outputBaseHashJson === serializeOutputCanonicalJson(outputBoundVersionHashBody({
     workspaceId: version.workspaceId, projectId: version.projectId, resultVersionId: version.id,

@@ -7,7 +7,7 @@ import { freezeOutputJson, requireOutputHash, requireOutputId, type OutputJson }
 import { createProjectCreationCommand, type ProjectCreationCommand } from './project-creation-command.ts'
 import { calculateOutputBoundVersionHash, outputBoundVersionHashBody, createProjectOutputState,
   type OutputPlanFacts, type ProjectOutputState, type ProjectOutputStateBody } from './project-output-state.ts'
-import { createProjectVersion, type ProjectVersion, type ProjectVersionInput } from './project-version.ts'
+import { rebuildRetiredContractOneVersion, type ProjectVersion, type ProjectVersionInput } from './project-version.ts'
 import { createProjectSnapshot, type ProjectSnapshot } from './project-snapshot.ts'
 
 type AllocatedVersion = Omit<ProjectVersionInput, 'baseHash' | 'outputState' | 'previousBaseHash'>
@@ -97,7 +97,7 @@ function revalidateParent(parent: Readonly<OutputVersionBundle>): void {
     parentVersionId: state.document.parentVersionId, previousBaseHash: parent.previousBaseHash,
     producerHash: state.document.producer.hash, outputStateId: state.document.id, outputStateHash: state.stateHash })),
   'INVALID_PROJECT_VERSION', 'Bundle parent base hash authority text mismatch')
-  createProjectVersion({ ...parent.version, outputState: state, previousBaseHash: parent.previousBaseHash })
+  rebuildRetiredContractOneVersion({ ...parent.version, outputState: state, previousBaseHash: parent.previousBaseHash })
 }
 function timelineDuration(facts: OutputPlanFacts): number {
   const document = (facts.renderablePlanDocument ?? facts.editPlanDocument) as Record<string, OutputJson>
@@ -216,7 +216,7 @@ export function buildOutputVersionBundle(input: BuildOutputVersionBundleInput): 
   const baseHash = calculateOutputBoundVersionHash(baseHashBody)
   assertDomain(input.expectedBaseHash === null || input.expectedBaseHash === baseHash,
     'INVALID_PROJECT_VERSION', 'Expected Version hash does not bind this exact output bundle')
-  return Object.freeze({ state, version: createProjectVersion({ ...version, baseHash, outputState: state, previousBaseHash }),
+  return Object.freeze({ state, version: rebuildRetiredContractOneVersion({ ...version, baseHash, outputState: state, previousBaseHash }),
     facts, nonOutputSnapshotFacts, previousBaseHash, editCommandSeal, outputBaseHashJson })
 }
 

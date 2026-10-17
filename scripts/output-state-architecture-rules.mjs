@@ -11,17 +11,16 @@
 
 /** The only file allowed to write a ProjectVersion row. */
 export const VERSION_WRITER = 'infrastructure/prisma/output-version-bundle-persistence.ts'
-/** The only file allowed to define the retired builder, and the domain code that validates retired contract-one bundles. */
+/** The only file allowed to define or name the retired builder. */
 export const VERSION_BUILDER = 'domain/project-version.ts'
-export const CONTRACT_ONE_HISTORY = Object.freeze([
-  'domain/output-version-bundle.ts',
-  'domain/project-fork-derivation.ts',
-])
+/**
+ * Retired contract one is still validated, never produced: domain code recomputes the Version a legacy bundle claims
+ * through `rebuildRetiredContractOneVersion`. That name is allowed in the domain layer only, so no application or
+ * infrastructure file (and therefore no writer) can reach it. There is deliberately no per-file allow-list.
+ */
+export const RETIRED_VERSION_REBUILD_LAYER = 'domain/'
 
-export const PENDING_ROWS = Object.freeze([
-  'application/multicam-direction.ts',
-  'infrastructure/prisma/multicam-direction-command-repository.ts',
-])
+export const PENDING_ROWS = Object.freeze([])
 
 const WRITES_VERSION_ROW = [
   /\.v2ProjectVersion\s*\.\s*(?:create|createMany|upsert)\s*\(/,
@@ -29,12 +28,16 @@ const WRITES_VERSION_ROW = [
   /insert\s*\(\s*\w+\s*,\s*['"]project_versions['"]/,
 ]
 const BUILDS_RETIRED_VERSION = /\bcreateProjectVersion\b/
+const REBUILDS_RETIRED_VERSION = /\brebuildRetiredContractOneVersion\b/
 
 function violationKinds(rel, source) {
   const kinds = []
   if (rel !== VERSION_WRITER && WRITES_VERSION_ROW.some((pattern) => pattern.test(source))) kinds.push('writes a ProjectVersion row outside the shared writer')
-  if (rel !== VERSION_BUILDER && !CONTRACT_ONE_HISTORY.includes(rel) && BUILDS_RETIRED_VERSION.test(source)) {
+  if (rel !== VERSION_BUILDER && BUILDS_RETIRED_VERSION.test(source)) {
     kinds.push('uses the retired createProjectVersion builder instead of a sealed Version read or the output state transition')
+  }
+  if (rel !== VERSION_BUILDER && !rel.startsWith(RETIRED_VERSION_REBUILD_LAYER) && REBUILDS_RETIRED_VERSION.test(source)) {
+    kinds.push('rebuilds a retired contract-one Version outside the domain layer')
   }
   return kinds
 }

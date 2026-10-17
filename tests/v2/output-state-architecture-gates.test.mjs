@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import {
-  CONTRACT_ONE_HISTORY,
   PENDING_ROWS,
   VERSION_BUILDER,
   VERSION_WRITER,
@@ -23,9 +22,28 @@ const builder = { rel: VERSION_BUILDER, source: 'export function createProjectVe
 
 test('the shared persistence file and the builder definition are the only allowed places', () => {
   assert.deepEqual(outputStateArchitectureViolations([clean, writer, builder], none), [])
-  for (const rel of CONTRACT_ONE_HISTORY) {
-    assert.deepEqual(outputStateArchitectureViolations([{ rel, source: 'createProjectVersion({})\n' }], none), [], rel)
+  // No file other than the definition may name the retired builder: not even the domain code that validates history.
+  for (const rel of ['domain/output-version-bundle.ts', 'domain/project-fork-derivation.ts', VERSION_WRITER]) {
+    const found = outputStateArchitectureViolations([{ rel, source: 'createProjectVersion({})\n' }], none)
+    assert.equal(found.length > 0, true, rel)
+    assert.match(found.join('\n'), /retired createProjectVersion builder/, rel)
   }
+})
+
+test('retired contract-one history is rebuilt by the domain layer only', () => {
+  const call = 'const version = rebuildRetiredContractOneVersion({})\n'
+  assert.deepEqual(outputStateArchitectureViolations([{ rel: 'domain/project-fork-derivation.ts', source: call }], none), [])
+  for (const rel of ['application/lut.ts', 'infrastructure/prisma/some-repository.ts', VERSION_WRITER]) {
+    const found = outputStateArchitectureViolations([{ rel, source: call }], none)
+    assert.equal(found.length, 1, rel)
+    assert.match(found[0], /rebuilds a retired contract-one Version outside the domain layer/)
+  }
+})
+
+test('the allow-list is exactly the builder definition and the shared writer', () => {
+  assert.equal(VERSION_BUILDER, 'domain/project-version.ts')
+  assert.equal(VERSION_WRITER, 'infrastructure/prisma/output-version-bundle-persistence.ts')
+  assert.deepEqual([...PENDING_ROWS], [], 'the cutover is complete: no writer is pending')
 })
 
 test('a second ProjectVersion writer is refused in every spelling', () => {
@@ -43,7 +61,7 @@ test('a second ProjectVersion writer is refused in every spelling', () => {
   assert.deepEqual(outputStateArchitectureViolations([{ rel: 'infrastructure/prisma/reader.ts', source: 'await tx.v2ProjectVersion.findMany({})\n// project_versions\n' }], none), [])
 })
 
-test('the retired builder is refused outside its definition and the contract-one history', () => {
+test('the retired builder is refused outside its definition', () => {
   const found = outputStateArchitectureViolations([{ rel: 'application/lut.ts', source: "import { createProjectVersion } from '../domain/project-version.ts'\n" }], none)
   assert.equal(found.length, 1)
   assert.match(found[0], /retired createProjectVersion builder/)
