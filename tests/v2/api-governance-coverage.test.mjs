@@ -208,7 +208,16 @@ test('T-FR-242 external editorial Commands and durable Director runs bind creden
     'version-compare-repository.ts',
   ]) {
     const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
-    assert.match(source, /editCommandExternalActorAuditData/)
+    if (relative === 'editorial-command-repository.ts') {
+      // Command3 is written by the shared operational bundle writer, which stores the same
+      // credential audit columns; this repository only reads and replays them.
+      const writer = readFileSync(join(root, 'src/v2/infrastructure/prisma/output-version-bundle-repository.ts'), 'utf8')
+      assert.match(writer, /externalActorAuditData\(input\.audit,\s*a\.workspaceId,\s*c\.author\.id\)/)
+      assert.match(writer, /actorCredentialId:\s*audit\.actorCredentialId/)
+      assert.match(writer, /actorContextHash:\s*audit\.actorContextHash/)
+    } else {
+      assert.match(source, /editCommandExternalActorAuditData/)
+    }
     assert.match(source, /hydrateEditCommandExternalActorAudit/)
     if (!relative.startsWith('review-patch')) {
       assert.doesNotMatch(

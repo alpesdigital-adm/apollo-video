@@ -69,7 +69,7 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
     requiresImpact: true,
     supportsRenderFreeImpact: true,
     deferralReason: null,
-    evidence: 'output-variant-command.ts:createOutputVariantCommand binds a real variant/revision; its impact invalidates the entire affected output',
+    evidence: 'output-variant-command.ts:96 createOutputVariantCommand binds a real variant/revision; its impact invalidates the entire affected output',
   }),
   'revise-output-spec': Object.freeze({
     renderPolicy: 'full-timeline',
@@ -77,7 +77,7 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
     requiresImpact: true,
     supportsRenderFreeImpact: true,
     deferralReason: null,
-    evidence: 'output-variant-command.ts:createOutputVariantCommand seals all effective pixels/encoding dependencies for the selected variant',
+    evidence: 'output-variant-command.ts:115 createOutputVariantCommand seals all effective pixels/encoding dependencies for the selected variant',
   }),
   'attach-media-library-reference': Object.freeze({
     renderPolicy: 'no-render',

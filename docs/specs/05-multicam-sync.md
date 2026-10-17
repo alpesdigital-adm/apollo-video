@@ -1515,7 +1515,7 @@ segura os quadros enquanto qualquer ramo do grafo ainda puder querer um, então 
 custo de um corte era o tamanho da FONTE e não o do que ele guarda. Hoje cada
 clipe tem a sua própria entrada `-ss`/`-t` sobre o mesmo arquivo já normalizado
 em cor, e o `trim` corta a partir do quadro 0 dessa entrada
-(`ffmpeg-editorial-proxy-renderer.ts:732-760`). O `-ss` começa meio quadro cedo e
+(`ffmpeg-editorial-composition-graph.ts:149-177`). O `-ss` começa meio quadro cedo e
 o `-t` leva um quadro de folga, para que um período de quadro que não divida em
 microssegundos jamais arredonde para depois do primeiro quadro do clipe; o `trim`
 segue cortando o intervalo exato.
@@ -1532,7 +1532,7 @@ objetivo da mudança é que os bytes **não** se movam.
 | Master | Clipes | Antes | Depois |
 |---|---|---|---|
 | 600 s | 6 | 111,3 s | 12,9 s, saída byte a byte idêntica (sha256 `8f11166c…`, 5 932 461 bytes) |
-| 7200 s | 6 | morto em 1856,5 s com 11,9 GB, `RENDER_EXECUTION_FAILED { killed: true, signal: 'SIGTERM' }` pelo timeout de 30 min do próprio renderer (`ffmpeg-editorial-proxy-renderer.ts:860`) | 38,9 s, abaixo de 3,6 GB, 7 075 824 bytes |
+| 7200 s | 6 | morto em 1856,5 s com 11,9 GB, `RENDER_EXECUTION_FAILED { killed: true, signal: 'SIGTERM' }` pelo timeout de 30 min do próprio renderer (`ffmpeg-editorial-proxy-renderer.ts:674`) | 38,9 s, abaixo de 3,6 GB, 7 075 824 bytes |
 
 Duas horas com dois minutos de saída é a Jornada 6 do brief — "extrair um
 conteúdo de dois minutos de uma live de duas horas"

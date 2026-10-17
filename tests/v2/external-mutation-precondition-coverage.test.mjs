@@ -259,6 +259,9 @@ const coverage = Object.freeze({
   'apollo.projects.duplicates.create': {
     mode: 'idempotent-create', evidence: 'request additionally binds the source current version and hash; serializable persistence rechecks the source snapshots and media before creating the copy-on-write fork',
   },
+  'apollo.projects.output-variants.create': {
+    mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId and baseHash before the serializable operational bundle transaction; a stale base is VERSION_CONFLICT',
+  },
   'apollo.projects.rename': {
     mode: 'revision-bound-action', evidence: 'F1.003 requires baseRevision and applies a serializable exact-state CAS before the immutable administration command and event are committed',
   },
@@ -826,7 +829,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'state-machine-action': 20,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 26,
+    'base-version-bound-action': 27,
     'fenced-natural-idempotent-action': 5,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

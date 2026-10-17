@@ -249,6 +249,9 @@ const coverage = Object.freeze({
   'apollo.projects.duplicates.create': {
     mode: 'durable-covered', evidence: 'F1-051 serializable source-version binding, shared immutable artifacts and idempotent public API E2E',
   },
+  'apollo.projects.output-variants.create': {
+    mode: 'durable-covered', evidence: 'W66 serializable operational bundle transaction locks the project, moves currentVersionId only from the exact base and replays one actor-bound idempotent key (project-output-commands.pg.integration.mjs, project-output-command-contract.test.mjs)',
+  },
   'apollo.projects.rename': {
     mode: 'durable-covered', evidence: 'F1.003 serializable administration revision CAS, actor-bound idempotency and immutable command plus public-event audit',
   },
@@ -606,7 +609,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    181,
+    182,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

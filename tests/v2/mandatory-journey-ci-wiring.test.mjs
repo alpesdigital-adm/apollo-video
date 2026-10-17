@@ -711,6 +711,8 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
 const PAID_PROVIDERS = 'calls paid providers, which the owner’s briefing forbids in CI'
 const PHASE_1_3 = 'Phase 1-3 suite with an npm script and no CI step'
 const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means writing one first'
+const W66_SUPERVISED_PG = 'W66 PostgreSQL proof that runs only under the local supervised harness (disposable cluster, frozen source/inputs); not a hosted CI step until the writer cutover'
+const W69_PINNED_TOOLCHAIN = 'W69 subtitle clock proof that needs an externally pinned FFmpeg/font toolchain or a real Chromium and has no download or skip fallback; local only until pinned in hosted CI'
 
 /**
  * Suite files that no CI step runs, each with a reason and with every document
@@ -818,6 +820,18 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/visual-montage-render.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/wave10-combined-journey.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/wave9-combined-journeys.integration.mjs', reason: PHASE_1_3 },
+  // W66 PostgreSQL proofs: opt-in by APOLLO_RUN_W66_* variables, run only by the local supervisor
+  // (frozen source and inputs, disposable cluster, backend accounting). CI seeds are not yet canonical,
+  // so wiring them waits for the writer cutover; the supervised results are the proof until then.
+  { file: 'tests/v2/project-creation-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  { file: 'tests/v2/project-operational-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  { file: 'tests/v2/project-output-commands.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  { file: 'tests/v2/project-output-state.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  // W69 subtitle clock proofs need an externally pinned toolchain or a real Chromium; there is no
+  // download or skip fallback, so they run locally with their pins and are not hosted CI steps yet.
+  { file: 'tests/v2/ass-emission-clock-pixels.integration.mjs', reason: W69_PINNED_TOOLCHAIN },
+  { file: 'tests/v2/ffmpeg-subtitle-clock-collector.integration.mjs', reason: W69_PINNED_TOOLCHAIN },
+  { file: 'tests/v2/subtitle-vtt-native.integration.mjs', reason: W69_PINNED_TOOLCHAIN },
 ]
 
 const listSuiteFiles = async () => {

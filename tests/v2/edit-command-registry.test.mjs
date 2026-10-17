@@ -60,6 +60,10 @@ import {
   parseMulticamDirectionImpact,
 } from '../../src/v2/domain/multicam-direction-impact.ts'
 import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
+import { materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import { createOutputVariantCommand } from '../../src/v2/domain/output-variant-command.ts'
+import { createOutputSpecRevisionBody } from '../../src/v2/domain/output-spec-revision.ts'
+import { outputWorld, creationRequest, variantRequest } from './helpers/output-world.mjs'
 
 const workspaceId = 'workspace-registry-1'
 const projectId = 'project-registry-1'
@@ -295,8 +299,46 @@ function subtitleSegmentOverrideImpact() {
   })
 }
 
+/**
+ * Output-state impacts live inside the sealed Command payload: they have no commandType or impactHash of
+ * their own, and the Command payload hash is their seal. Their "parser" is the production constructor: the
+ * document is accepted only when createOutputVariantCommand re-derives it, field for field, from the same
+ * facts. Both Commands are built over a real sealed root and variant produced by the public services.
+ */
+async function outputStateImpactFixtures() {
+  const world = outputWorld(), root = (await world.create(creationRequest(world))).bundle
+  const firstVariant = (await world.variant(variantRequest(world, root))).bundle
+  const audit = materializeActorAuditContext(world.actor), createdAtOutput = '2026-10-13T12:00:00.000Z'
+  const sample = variantRequest(world, root)
+  const revisionBody = (variantId, revisionNumber, id) => createOutputSpecRevisionBody({
+    canonicalPolicyVersion: 'output-canonical-json/v1', id, variantId, workspaceId: audit.workspaceId,
+    projectId: root.version.projectId, revisionNumber, createdAt: createdAtOutput,
+    output: { ...sample.output, schemaVersion: 1, id: variantId }, profile: sample.profile, preset: sample.preset })
+  const command = (type, base) => ({ id: 'command-registry-' + type, workspaceId: audit.workspaceId,
+    projectId: root.version.projectId, baseVersionId: base.version.id, baseHash: base.version.baseHash, type,
+    author: { type: 'api-client', id: audit.clientId }, idempotencyKey: 'registry-' + type, createdAt: createdAtOutput })
+  const previous = firstVariant.state.document.entries[0]
+  const construct = {
+    'create-output-variant': () => createOutputVariantCommand({ command: command('create-output-variant', root),
+      audit, base: root.version, baseState: root.state, historicalBaselineRequested: false,
+      revision: revisionBody('variant-registry-new', 1, 'revision-registry-new-1'), expectedRevisionId: null,
+      expectedSpecHash: null, durationFrames }),
+    'revise-output-spec': () => createOutputVariantCommand({ command: command('revise-output-spec', firstVariant),
+      audit, base: firstVariant.version, baseState: firstVariant.state, historicalBaselineRequested: false,
+      revision: revisionBody(previous.variantId, previous.spec.revisionNumber + 1, 'revision-registry-next'),
+      expectedRevisionId: previous.outputSpecRevisionId, expectedSpecHash: previous.specHash, durationFrames }),
+  }
+  return Object.fromEntries(Object.entries(construct).map(([type, make]) => [type, {
+    sealedInPayload: true, commandType: type,
+    build: () => make().command.payload.impact,
+    parse: (impact) => { assert.deepEqual(impact, make().command.payload.impact); return impact },
+  }]))
+}
+const OUTPUT_STATE_IMPACTS = await outputStateImpactFixtures()
+
 /** Real impact document plus its real parser, per registered Command type. */
 const IMPACT_FIXTURES = {
+  ...OUTPUT_STATE_IMPACTS,
   'attach-media-library-reference': { build: () => createMediaLibraryAttachmentImpact({ commandId: 'command-library', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', selectionKind: 'asset', selectionId: 'asset-source', parentArtifactId: 'asset-source', sourceSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-source' }), parse: parseMediaLibraryAttachmentImpact },
   'apply-subtitle-segment-override': { build: () => subtitleSegmentOverrideImpact(), parse: parseCommandImpact },
   'compare-action': { build: () => compareActionImpact(), parse: parseCompareActionImpact },
@@ -332,7 +374,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 14)
+  assert.equal(EDIT_COMMAND_TYPES.length, 16)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -392,11 +434,17 @@ test('T-F0-027 the latest PostgreSQL Command constraint matches the canonical re
   assert.deepEqual(persistedTypes, [...EDIT_COMMAND_TYPES])
 })
 
+// Registered types that no application service builds yet. The list must shrink, never grow silently:
+// the test below fails the day a service starts producing one of them.
+const NOT_YET_PRODUCED_BY_AN_APPLICATION_SERVICE = new Map([
+  ['revise-output-spec', 'accepted by the domain constructor, the bundle builder and persistence; its application service belongs to the per-variant revise slice'],
+])
+
 test('T-F0-027 every registered type is produced by an application service and vice versa', async () => {
   const applicationRoot = fileURLToPath(new URL('../../src/v2/application/', import.meta.url))
   const entries = await readdir(applicationRoot, { withFileTypes: true, recursive: true })
   const discovered = new Set()
-  let callSites = 0
+  let callSites = 0, outputFactorySites = 0
   const actorTypes = new Set(['user', 'director', 'system', 'api-client'])
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.ts')) continue
@@ -415,9 +463,26 @@ test('T-F0-027 every registered type is produced by an application service and v
       )
       discovered.add(type)
     }
+    // Output Commands are sealed by their own domain constructor, which wraps createEditCommand.
+    for (const match of source.matchAll(/createOutputVariantCommand\s*\(\{/g)) {
+      outputFactorySites += 1
+      const window = source.slice(match.index, match.index + 2000)
+      const literals = [...window.matchAll(/\btype:\s*'([^']+)'/g)]
+        .map((item) => item[1])
+        .filter((value) => !actorTypes.has(value))
+      assert.ok(literals.length > 0, `createOutputVariantCommand call site without a literal type in ${entry.name}`)
+      assert.ok(isEditCommandType(literals[0]), `${entry.name} creates unregistered Command type "${literals[0]}"`)
+      discovered.add(literals[0])
+    }
   }
-  assert.equal(callSites, 14, 'expected one createEditCommand call site per Command type')
-  assert.deepEqual([...discovered].toSorted(), [...EDIT_COMMAND_TYPES])
+  assert.equal(callSites, 14, 'expected one createEditCommand call site per classic Command type')
+  assert.equal(outputFactorySites, 1, 'expected one application call site of the output Command constructor')
+  assert.deepEqual(
+    [...NOT_YET_PRODUCED_BY_AN_APPLICATION_SERVICE.keys()].filter((type) => discovered.has(type)), [],
+    'a type listed as not yet produced now has an application producer: remove it from the list',
+  )
+  assert.deepEqual(
+    [...discovered, ...NOT_YET_PRODUCED_BY_AN_APPLICATION_SERVICE.keys()].toSorted(), [...EDIT_COMMAND_TYPES])
 })
 
 test('T-F0-027 each impact-bearing type produces a document its declared parser accepts', () => {
@@ -431,6 +496,11 @@ test('T-F0-027 each impact-bearing type produces a document its declared parser 
     assert.ok(fixture, `${type} requires an impact but the gate has no fixture for it`)
     const impact = fixture.build()
     assert.equal(impact.schemaVersion, policy.impactSchema, `${type} impact schema mismatch`)
+    if (fixture.sealedInPayload) {
+      assert.equal(fixture.commandType, type, `${type} fixture builds another Command type`)
+      assert.deepEqual(fixture.parse(JSON.parse(JSON.stringify(impact))), impact)
+      continue
+    }
     assert.equal(impact.commandType, type, `${type} impact commandType mismatch`)
     const parsed = fixture.parse(JSON.parse(JSON.stringify(impact)))
     assert.equal(parsed.impactHash, impact.impactHash)
@@ -456,12 +526,13 @@ test('T-F0-027 partial-range types narrow renders to the edited region', () => {
 test('T-F0-027 full-timeline types always invalidate from frame zero', () => {
   assert.deepEqual(
     [...editCommandTypesByRenderPolicy('full-timeline')],
-    ['remove-spoken-content', 'run-director', 'set-project-color-plan', 'set-project-lut-selection', 'set-project-subtitle-mode'],
+    ['create-output-variant', 'remove-spoken-content', 'revise-output-spec', 'run-director', 'set-project-color-plan', 'set-project-lut-selection', 'set-project-subtitle-mode'],
   )
   for (const type of editCommandTypesByRenderPolicy('full-timeline')) {
     const impact = IMPACT_FIXTURES[type].build()
     assert.deepEqual(impact.affectedRanges, [{ startFrame: 0, endFrame: durationFrames }], type)
-    for (const render of impact.minimalRenders) {
+    // Output-state impacts name no render jobs, only the ranges whose pixels may change.
+    for (const render of impact.minimalRenders ?? []) {
       for (const range of render.ranges) {
         assert.equal(range.startFrame, 0, `${type} minimal render must start at frame zero`)
       }

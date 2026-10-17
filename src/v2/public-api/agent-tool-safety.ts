@@ -167,6 +167,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one empty draft project with no provider or external side effect.',
     },
+    'apollo.projects.output-variants.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one stable output variant and an immutable ProjectVersion against an exact base version and hash; it starts no render or provider work and the prior version stays restorable.',
+    },
     'apollo.projects.duplicates.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible copy-on-write project while sharing immutable snapshots and artifact bytes.',
