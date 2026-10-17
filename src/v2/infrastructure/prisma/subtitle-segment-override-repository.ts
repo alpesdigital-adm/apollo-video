@@ -18,6 +18,7 @@ import {
 } from '../../domain/subtitle-segment-override.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const include = Prisma.validator<Prisma.V2SubtitleSegmentOverrideInclude>()({ command: true, resultVersion: true })
@@ -220,7 +221,7 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
       }),
       this.readHeadChain(input),
     ])
-    const proxyVariantId = project.format ?? input.variantId
+    const proxyVariantId = projectOutputFormat(project, parent) ?? input.variantId
     const declared = Array.isArray(editPlan.outputVariantIds)
       ? editPlan.outputVariantIds.filter((value): value is string => typeof value === 'string')
       : []

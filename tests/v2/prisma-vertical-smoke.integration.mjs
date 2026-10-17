@@ -125,11 +125,13 @@ async function createFixture(path) {
 }
 
 async function createLibraryFixtures(root) {
-  const audio = join(root, 'library-audio.wav')
+  // AAC in an m4a container, not PCM WAV: a PCM WAV carries no container timestamp (no ffprobe prints a start_time for it), and
+  // the sealed ingest refuses an observation without one.
+  const audio = join(root, 'library-audio.m4a')
   const image = join(root, 'library-image.jpg')
   await execFileAsync(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
-    'sine=frequency=660:sample_rate=48000:duration=1', '-c:a', 'pcm_s16le', audio,
+    'sine=frequency=660:sample_rate=48000:duration=1', '-c:a', 'aac', '-b:a', '96k', audio,
   ], { windowsHide: true, timeout: 120_000 })
   const svg = '<svg width="640" height="480" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="480" fill="#d8f0d8"/><text x="35" y="170" font-family="DejaVu Sans" font-size="52" font-weight="bold" fill="#102030">OFERTA VÁLIDA</text><text x="35" y="300" font-family="DejaVu Sans" font-size="48" font-weight="bold" fill="#204080">WELCOME APOLLO</text></svg>'
   await sharp(Buffer.from(svg)).jpeg({ quality: 94 }).toFile(image)
@@ -340,7 +342,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       assert.equal(project.status, projectStatusBeforeLibrary)
       return asset
     }
-    await uploadLibraryInput({ path: libraryFixtures.audio, kind: 'audio', mimeType: 'audio/wav', role: 'source-audio' })
+    await uploadLibraryInput({ path: libraryFixtures.audio, kind: 'audio', mimeType: 'audio/mp4', role: 'source-audio' })
     const imageAsset = await uploadLibraryInput({ path: libraryFixtures.image, kind: 'image', mimeType: 'image/jpeg', role: 'source-image' })
     const imageAnalysis = await prisma.v2ImageAnalysis.findFirstOrThrow({ where: { workspaceId, artifactId: imageAsset.artifactId } })
     const imageAnalysisJson = JSON.parse(imageAnalysis.analysisJson)
@@ -367,7 +369,8 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({
       where: { id: projectAfterIngest.currentVersionId },
     })
-    assert.equal(baseVersion.sequence, 2)
+    // creation Version (1), the explicit output variant the seed created (2, `seed.project.versionId`), then the ingest (3)
+    assert.equal(baseVersion.sequence, 3)
     assert.equal(baseVersion.parentVersionId, seed.project.versionId)
     const ingestPlanSnapshot = await prisma.v2ProjectSnapshot.findUniqueOrThrow({
       where: { id: baseVersion.editPlanSnapshotId },
@@ -495,6 +498,14 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       await rm(join(root, 'workspaces'), { recursive: true, force: true })
       assert.equal(await stat(join(root, 'workspaces')).catch(() => null), null)
     }
+
+    // The proxy render is admitted only for the project's head, from a status that may enter rendering: say which one failed.
+    const beforeRender = await prisma.v2Project.findUniqueOrThrow({
+      where: { id: seed.project.id }, select: { status: true, currentVersionId: true },
+    })
+    assert.equal(beforeRender.currentVersionId, appliedColorPlan.version.id, `the head is not the ColorPlan Version (status ${beforeRender.status})`)
+    assert.ok(['draft', 'generating', 'reviewing-assets', 'reviewing-proxy', 'revising', 'failed', 'rendering-proxy'].includes(beforeRender.status),
+      `project status ${beforeRender.status} cannot enter proxy rendering`)
 
     const enqueued = await enqueueProjectProxyRenderService({
       projects: proxyProjects,

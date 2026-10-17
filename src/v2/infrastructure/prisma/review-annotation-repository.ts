@@ -12,6 +12,7 @@ import { DomainError } from '../../domain/errors.ts'
 import { assertMediaArtifactManifest, type MediaArtifactManifest } from '../../domain/media-artifact.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { REVIEW_SCOPE_KINDS, type ReviewScope } from '../../domain/review-system.ts'
+import { resolveProjectOutputFormat } from './project-output-format.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
 import {
   externalActorAuditData,
@@ -202,7 +203,7 @@ interface ProxyCandidate {
 
 export type ReviewPreviewReader = Pick<Prisma.TransactionClient,
   'v2Project' | 'v2ProjectFinalExportOperation' | 'v2ProjectProxyRenderOperation' |
-  'v2ProjectMediaAsset' | 'v2MediaArtifact'>
+  'v2ProjectMediaAsset' | 'v2MediaArtifact' | 'v2ProjectOutputState'>
 
 export async function readReviewPreviewContext(
   client: ReviewPreviewReader,
@@ -231,6 +232,7 @@ export async function readReviewPreviewContext(
     ? project.versions.find((version) => version.id === input.projectVersionId)
     : project.versions.find((version) => version.id === project.currentVersionId)
   if (!selectedVersion) return null
+  const format = await resolveProjectOutputFormat(client, { ...project, workspaceId: input.workspaceId }, selectedVersion.id)
   const [finalOperations, proxyOperations] = await Promise.all([
     client.v2ProjectFinalExportOperation.findMany({
       where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
@@ -306,7 +308,7 @@ export async function readReviewPreviewContext(
     height: probe.height,
     durationFrames,
     stale: selectedVersion.id !== project.currentVersionId || candidate.projectVersionId !== selectedVersion.id,
-    formatId: project.format ?? '9:16',
+    formatId: format ?? '9:16',
     localeId: project.locale ?? 'pt-BR',
     recipeIds,
     availableScopeCounts: Object.freeze({
@@ -316,7 +318,7 @@ export async function readReviewPreviewContext(
       scene: scenes.length,
       range: 1,
       project: 1,
-      formats: project.format ? 1 : 0,
+      formats: format ? 1 : 0,
       locales: project.locale ? 1 : 0,
       recipes: recipeIds.length,
     }),

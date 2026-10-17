@@ -7,8 +7,24 @@ import { calculateVersionHash } from '../../application/version-hash.ts'
 import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { resolveProjectOutputFormat } from './project-output-format.ts'
 
-export function queryProxySourceProject(client: PrismaClient | Prisma.TransactionClient, input: {
+/**
+ * The project with the Version, media and rights its proxy render is built from. A project born under 6.0.0 has no format of
+ * its own: `format` is then the aspect ratio of the only output the Version's sealed State carries (null when there are several
+ * or none; the render then refuses instead of guessing which output it meant).
+ */
+export async function queryProxySourceProject(client: PrismaClient | Prisma.TransactionClient, input: {
+  workspaceId: string; projectId: string; projectVersionId?: string; editPlanSnapshotId?: string;
+  sourceArtifactId?: string; sourceManifestId?: string
+}) {
+  const project = await findProxySourceProject(client, input)
+  if (!project || project.format) return project
+  const format = await resolveProjectOutputFormat(client, project, input.projectVersionId ?? project.versions[0]?.id ?? project.currentVersionId)
+  return format ? { ...project, format } : project
+}
+
+function findProxySourceProject(client: PrismaClient | Prisma.TransactionClient, input: {
   workspaceId: string; projectId: string; projectVersionId?: string; editPlanSnapshotId?: string;
   sourceArtifactId?: string; sourceManifestId?: string
 }) {
@@ -167,7 +183,8 @@ export function hydrateProxySource(
   const manifest = expected?.sourceManifestId
     ? media?.artifact.manifests.find((item) => item.id === expected.sourceManifestId)
     : media?.artifact.manifests[0]
-  if (!project || !version || !media || !manifest) return null
+  // No single output format (several outputs, or none): there is no one proxy to build, so there is no source either.
+  if (!project || !version || !media || !manifest || !project.format) return null
   const editPlan = parseProxySourceRecord(version.editPlanSnapshot.contentJson, 'project proxy EditPlan') as unknown as EditorialCutEditPlan | DirectedEditPlan
   const manifestBody = parseProxySourceRecord(manifest.manifestJson, 'project proxy source manifest')
   const artifactBody = manifestBody.artifact
@@ -192,7 +209,7 @@ export function hydrateProxySource(
     editPlanSnapshotId: version.editPlanSnapshotId,
     editPlanHash: version.editPlanSnapshot.contentHash,
     editPlan: Object.freeze(editPlan),
-    format: project.format ?? '9:16',
+    format: project.format,
     sourceArtifactId: media.artifactId,
     sourceManifestId: manifest.id,
     sourceArtifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,

@@ -37,6 +37,7 @@ import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { hydrateAssetSelection } from './asset-selection-repository.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
+import { resolveProjectOutputFormat } from './project-output-format.ts'
 import { hydrateProxyReview } from './proxy-review-repository.ts'
 
 type StoredQualityIteration = Prisma.V2QualityIterationGetPayload<{
@@ -581,10 +582,11 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
       }),
     ])
     if (!project || !proxyRow) return null
+    const format = await resolveProjectOutputFormat(this.client, project, project.currentVersion?.id)
     if (
       !project.currentVersion ||
       !project.objective ||
-      !project.format ||
+      !format ||
       !project.locale ||
       selectionRows.length !== input.assetSelectionIds.length
     ) {
@@ -619,7 +621,7 @@ export class PrismaQualityIterationRepository implements QualityIterationReposit
       projectVersionId: project.currentVersion.id,
       projectVersionHash: project.currentVersion.baseHash,
       objective: project.objective,
-      format: project.format,
+      format,
       locale: project.locale,
       proxyReview: hydrateProxyReview(proxyRow),
       assetSelections: Object.freeze(selectionRows.map(hydrateAssetSelection)),

@@ -10,14 +10,16 @@ import { PrismaClient } from '../generated/prisma-v2/index.js'
 import { beginMediaUploadService } from '../src/v2/application/begin-media-upload.ts'
 import { createExternalAuditContext } from '../src/v2/application/authenticate-api-client.ts'
 import { enqueueMediaIngestService } from '../src/v2/application/enqueue-media-ingest.ts'
-import { createProjectService } from '../src/v2/application/create-project.ts'
+import { createProjectOutputVariantService, createProjectService } from '../src/v2/application/create-project.ts'
 import { issueMediaUploadSessionService } from '../src/v2/application/issue-media-upload-session.ts'
 import { completeMediaUploadService } from '../src/v2/application/manage-media-upload.ts'
 import { receiveMediaUploadContentService } from '../src/v2/application/receive-media-upload-content.ts'
 import { calculateFileSha256 } from '../src/v2/infrastructure/media/local-artifact-manifest.ts'
 import { LocalMediaUploadStorage } from '../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { PrismaMediaTransferRepository } from '../src/v2/infrastructure/prisma/media-transfer-repository.ts'
-import { PrismaCreationOutputBundleRepositoryV2 } from '../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
+import { PrismaCreationOutputBundleRepositoryV2, PrismaOperationalOutputBundleRepositoryV3 } from '../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
+import { getPublicSchema } from '../src/v2/public-api/schema-registry.ts'
+import { publicSchemaExamples } from '../src/v2/public-api/schema-examples.ts'
 import { PrismaPublicOperationRepository } from '../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { createMediaUploadSessionSignerFromEnvironment } from '../src/v2/infrastructure/security/media-upload-session-signer.ts'
 
@@ -28,6 +30,33 @@ const DEFAULTS = Object.freeze({
   sourceMime: 'video/mp4',
   waitSeconds: 900,
 })
+
+/** Output canvas per aspect ratio: the final render and its half-size proxy, one delivery profile each. */
+const CANVAS = Object.freeze({
+  '16:9': { width: 640, height: 360, proxyWidth: 320, proxyHeight: 180 },
+  '9:16': { width: 360, height: 640, proxyWidth: 180, proxyHeight: 320 },
+  '1:1': { width: 480, height: 480, proxyWidth: 240, proxyHeight: 240 },
+  '4:5': { width: 384, height: 480, proxyWidth: 192, proxyHeight: 240 },
+})
+
+/**
+ * The create-output-variant request body (without its base Version) for `aspectRatio`, from the example the public contract
+ * publishes, so it always satisfies the contract. A project has no format of its own: this is the explicit output it edits.
+ */
+export function outputVariantRequestFor({ aspectRatio, locale }) {
+  const canvas = CANVAS[aspectRatio]
+  if (!canvas) throw new Error(`--format ${aspectRatio} has no output canvas; use one of ${Object.keys(CANVAS).join(', ')}`)
+  const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/create-project-output-variant-request/v1'))[0])
+  const id = `profile-${aspectRatio.replace(':', 'x')}`
+  body.output = { ...body.output, locale, aspectRatio, width: canvas.width, height: canvas.height, deliveryProfileId: id }
+  body.profile = { ...body.profile, id,
+    final: { ...body.profile.final, width: canvas.width, height: canvas.height },
+    proxy: { ...body.profile.proxy, width: canvas.proxyWidth, height: canvas.proxyHeight },
+    proxyToFinal: { ...body.profile.proxyToFinal, scaleX: canvas.width / canvas.proxyWidth, scaleY: canvas.height / canvas.proxyHeight } }
+  delete body.baseVersionId
+  delete body.baseHash
+  return body
+}
 
 export function readSeedArguments(values) {
   const parsed = new Map()
@@ -155,8 +184,8 @@ export async function seedV2ProjectSource({
   if (!storageRoot) throw new Error('APOLLO_V2_ARTIFACT_ROOT is required')
   const storage = new LocalMediaUploadStorage(storageRoot)
   const signer = createMediaUploadSessionSignerFromEnvironment(environment)
-  // A project has no format any more: it is created empty and sealed. input.format is kept as an option for the
-  // output variant that ingest requires, which this script does not create yet (shared output world, slice S2b).
+  // A project has no format of its own: it is born at its creation Version (no output), and the output ingest requires is an
+  // explicit variant built on that Version. `input.format` names the variant's aspect ratio.
   const project = await createProjectService({
     repository: new PrismaCreationOutputBundleRepositoryV2(client),
     clock,
@@ -171,6 +200,22 @@ export async function seedV2ProjectSource({
     actor,
     idempotencyKey: `seed-project:${input.seedId}`,
   })
+  const variant = await createProjectOutputVariantService({
+    repository: new PrismaOperationalOutputBundleRepositoryV3(client),
+    clock,
+    createId: (kind) => `${kind}-${randomUUID()}`,
+    createEventId: randomUUID,
+  })({
+    ...outputVariantRequestFor({ aspectRatio: input.format, locale: input.locale }),
+    workspaceId: input.workspaceId,
+    projectId: project.projectAtCreation.id,
+    baseVersionId: project.creationVersion.id,
+    baseHash: project.creationVersion.baseHash,
+    actor,
+    idempotencyKey: `seed-variant:${input.seedId}`,
+  })
+  const variantEntry = variant.bundle.state.document.entries.find((entry) => entry.variantId === variant.bundle.origin.result.command.payload.variantId)
+    ?? variant.bundle.state.document.entries.at(-1)
 
   const transfers = new PrismaMediaTransferRepository(client)
   const begun = await beginMediaUploadService({ repository: transfers, clock })({
@@ -239,12 +284,6 @@ export async function seedV2ProjectSource({
     operations,
     clock,
   })({ upload: verifiedUpload, actor })
-  const brief = await client.v2ProjectSnapshot.findUnique({
-    where: { id: project.creationVersion.snapshotRefs.brief },
-    select: { contentJson: true, contentHash: true },
-  })
-  if (!brief) throw new Error('Persisted project brief snapshot was not found')
-  const outputSpec = JSON.parse(brief.contentJson).outputSpec
   const deadline = Date.now() + input.waitSeconds * 1_000
   let completedOperation = operation
   while (!['succeeded', 'failed', 'cancelled'].includes(completedOperation.operation.status)) {
@@ -270,8 +309,9 @@ export async function seedV2ProjectSource({
   const sourceFingerprint = createHash('sha256').update(`${sourceMetadata.size}:${checksum}`).digest('hex')
   return Object.freeze({
     workspaceId: input.workspaceId,
-    project: { id: project.projectAtCreation.id, versionId: project.creationVersion.id, replayed: project.replayed },
-    outputSpec: { ...outputSpec, snapshotHash: brief.contentHash },
+    // `versionId` is the Version ingest builds on (the variant's); the creation Version is its parent.
+    project: { id: project.projectAtCreation.id, versionId: variant.bundle.version.id, creationVersionId: project.creationVersion.id, replayed: project.replayed && variant.replayed },
+    outputSpec: { ...variantEntry.spec.output, specHash: variantEntry.specHash },
     source: { uploadId: verifiedUpload.id, artifactId: sourceAsset.artifactId, proxyArtifactId: proxyAsset.artifactId, checksum, byteSize: sourceMetadata.size.toString(), fingerprint: sourceFingerprint },
     ingestOperation: { id: completedOperation.operation.id, status: completedOperation.operation.status, replayed: operation.replayed },
   })

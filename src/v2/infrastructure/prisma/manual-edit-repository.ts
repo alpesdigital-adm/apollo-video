@@ -32,6 +32,7 @@ import {
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { assertManualOutputReferencesV3 } from './output-version-bundle-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 type StoredManualCommand = Prisma.V2EditCommandGetPayload<{
@@ -326,13 +327,13 @@ export class PrismaManualEditRepository implements ManualEditRepository {
       availableAssetIds: Object.freeze([
         ...new Set(project.mediaAssets.map((item) => item.artifactId)),
       ]),
-      renderVariantIds: Object.freeze([project.format ?? '9:16']),
+      renderVariantIds: Object.freeze([projectOutputFormat(project, currentBundle) ?? '9:16']),
       outputReferences: Object.freeze([
         ...proxyOutputs.map((output) => Object.freeze({
           artifactId: output.outputArtifactId,
           kind: 'proxy' as const,
           sourceVersionId: current.version.id,
-          variantId: project.format ?? '9:16',
+          variantId: projectOutputFormat(project, currentBundle) ?? '9:16',
         })),
         ...finalOutputs.map((output) => Object.freeze({
           artifactId: output.outputArtifactId,
@@ -493,7 +494,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           const variantId = bundle.command.payload.variantId
           const currentAffectedArtifacts = bundle.impact.renderSemanticsChanged
             ? normalizeCommandImpactOutputReferences([
-                ...(project.format === variantId
+                ...(projectOutputFormat(project, input.bundle) === variantId
                   ? proxyOutputs.map((output) => ({
                       artifactId: output.outputArtifactId,
                       kind: 'proxy' as const,

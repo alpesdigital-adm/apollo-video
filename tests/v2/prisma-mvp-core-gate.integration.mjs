@@ -7,6 +7,7 @@ import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { createProjectWithVariant } from './helpers/explicit-project-http.mjs'
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -133,28 +134,24 @@ test('T-FR-220 persists a fail-closed server-only MVP Core gate through the publ
     await waitForServer(baseUrl, server)
     const authorization = `Bearer ${issued.token}`
 
-    async function createProject(name, format, key) {
-      const response = await fetch(`${baseUrl}/v1/projects`, {
-        method: 'POST',
-        headers: {
-          authorization,
-          'content-type': 'application/json',
-          'idempotency-key': key,
-        },
-        body: JSON.stringify({
-          name,
-          objective: 'discovery',
-          format,
-          locale: 'pt-BR',
-        }),
+    // 6.0.0: the project is born without an output and `format` is not part of the request; the output the gate inspects is an
+    // explicit variant, so `version` is the variant's Version (the head), exactly what the gate is asked to bind.
+    async function createProject(name, aspectRatio, key) {
+      const call = async (path, body, idempotencyKey) => {
+        const response = await fetch(`${baseUrl}${path}`, {
+          method: 'POST',
+          headers: { authorization, 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+          body: JSON.stringify(body),
+        })
+        const payload = await response.json()
+        assert.ok(response.ok, `${path} ${response.status} ${JSON.stringify(payload)}
+${serverLogs.slice(-4_000)}`)
+        return payload.data
+      }
+      const world = await createProjectWithVariant(call, {
+        project: { name, objective: 'discovery', locale: 'pt-BR' }, aspectRatio, key,
       })
-      const payload = await response.json()
-      assert.equal(
-        response.status,
-        201,
-        `${JSON.stringify(payload)}\n${serverLogs.slice(-4_000)}`,
-      )
-      return payload.data
+      return { project: world.created.projectAtCreation, version: world.version }
     }
 
     const primary = await createProject(

@@ -10,6 +10,7 @@ import type {
   SubtitleSidecarRepository,
 } from '../../application/ports/subtitle-sidecar-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { resolveProjectOutputFormat } from './project-output-format.ts'
 import {
   renderElementMapHash,
   validateRenderElementMap,
@@ -184,6 +185,7 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
         include: { editPlanSnapshot: true },
       }),
     ])
+    const projectFormat = await resolveProjectOutputFormat(this.client, { ...project, workspaceId: input.workspaceId }, projectVersionId)
     const render = final && final.outputAspectRatio === input.variantId
       ? {
           kind: 'final' as const,
@@ -195,10 +197,10 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
           editPlanHash: final.editPlanSnapshot.contentHash,
           editPlanJson: final.editPlanSnapshot.contentJson,
         }
-      : proxy && (project.format ?? input.variantId) === input.variantId
+      : proxy && (projectFormat ?? input.variantId) === input.variantId
         ? {
             kind: 'proxy' as const,
-            variantId: project.format ?? input.variantId,
+            variantId: projectFormat ?? input.variantId,
             outputArtifactId: proxy.outputArtifactId,
             outputManifestId: proxy.outputManifestId,
             renderInputHash: proxy.inputHash,

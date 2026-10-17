@@ -11,7 +11,7 @@ import { createPublicEvent } from '../../domain/public-event.ts'
 import { PrismaAssetRightsRepository } from './asset-rights-repository.ts'
 import { readPersistedCreationOutputBundleV2, readPersistedForkCreationOutputBundleV3 } from './output-state-consumption.ts'
 import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
-import { normalizeProjectName } from '../../domain/project.ts'
+import { normalizeProjectName, projectStatusTransitionPath } from '../../domain/project.ts'
 
 type Tx = Prisma.TransactionClient
 const encode = serializeOutputCanonicalJson
@@ -524,9 +524,14 @@ export class PrismaOperationalOutputBundleRepositoryV3 implements OperationalOut
           await persistOutputVersionBundleInTransactionV3(tx,bundle)
           await persistManualInvalidationsV3(tx,bundle)
           if(bundle.origin.kind==='editorial-cut-command')await persistEditorialInvalidationsV3(tx,bundle)
-          const cas=await tx.v2Project.updateMany({where:{id:a.projectId,workspaceId:a.workspaceId,currentVersionId:a.parentVersionId},
-            data:{currentVersionId:a.resultVersionId}})
-          if(cas.count!==1)throw new DomainError('VERSION_CONFLICT','Operational head CAS failed')
+          // A video ingest took the project to `ingesting` when it was admitted; the Version that records its result is also what
+          // returns it to `draft` (the head is already known to be the parent: only the status can make this CAS miss).
+          const completesIngest=bundle.origin.kind==='ingest-operation'
+          const cas=await tx.v2Project.updateMany({where:{id:a.projectId,workspaceId:a.workspaceId,currentVersionId:a.parentVersionId,
+            ...(completesIngest?{status:{in:projectStatusTransitionPath('ingesting','draft',{includeSame:true})}}:{})},
+            data:{currentVersionId:a.resultVersionId,...(completesIngest?{status:'draft'}:{})}})
+          if(cas.count!==1)throw completesIngest?new DomainError('PROJECT_TRANSITION_REJECTED','Project cannot complete ingest from its current status'):
+            new DomainError('VERSION_CONFLICT','Operational head CAS failed')
           const editorialEvent=bundle.origin.kind==='editorial-cut-command'?createPublicEvent({id:input.versionEventId,
             type:'project.version.created',version:'1.0.0',workspaceId:a.workspaceId,occurredAt:a.createdAt,sequence:bundle.version.sequence,
             actor:{clientId:a.createdBy,...(input.audit.delegatedUserId?{userId:input.audit.delegatedUserId}:{})},
