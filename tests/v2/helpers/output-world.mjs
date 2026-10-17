@@ -5,8 +5,12 @@
 // sealed ProjectVersion3/State3 parent instead of a hand-assembled Version.
 import { randomUUID } from 'node:crypto'
 import { createProjectService, createProjectOutputVariantService } from '../../../src/v2/application/create-project.ts'
-import { createExternalAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
-import { buildCreationOutputVersionBundleV2, buildOperationalOutputVersionBundleV3 } from '../../../src/v2/domain/output-version-bundle.ts'
+import { createExternalAuditContext, materializeActorAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
+import { createEditCommand } from '../../../src/v2/domain/edit-command.ts'
+import { createProjectSnapshot } from '../../../src/v2/domain/project-snapshot.ts'
+import { transitionProjectOutputState } from '../../../src/v2/domain/project-output-state-transition.ts'
+import { buildCreationOutputVersionBundleV2, buildOperationalOutputVersionBundleV3, operationalBundlePlanV3 } from '../../../src/v2/domain/output-version-bundle.ts'
 import { DomainError } from '../../../src/v2/domain/errors.ts'
 import { getPublicSchema } from '../../../src/v2/public-api/schema-registry.ts'
 import { publicSchemaExamples } from '../../../src/v2/public-api/schema-examples.ts'
@@ -70,4 +74,27 @@ export async function ingestedWorld(options = {}) {
   const prepared = await prepareEditorialSourceFixture(null, { bundle: root.bundle, projectAtCreation: root.projectAtCreation },
     { actor: world.actor, ...options })
   return { world, root, prepared, parent: prepared.bundle, actor: world.actor }
+}
+
+/**
+ * A sealed child of `parent` whose EditPlan is `mutatePlan(parentPlan)`: the way a test obtains a real
+ * Version3/State3 with a specific timeline without going through the Command that would normally compile it.
+ * The Command is a plain recompiling child, so only the plan (and what re-materializes from it) differs.
+ */
+export function recompiledChild(parent, actor, mutatePlan, { suffix = 'recompiled', type = 'apply-review-patch', createdAt = '2026-10-16T09:00:00.000Z' } = {}) {
+  const audit = materializeActorAuditContext(actor)
+  const scope = { workspaceId: parent.version.workspaceId, projectId: parent.version.projectId }
+  const resultVersionId = `version-${suffix}`
+  const base = operationalBundlePlanV3(parent), plan = mutatePlan(JSON.parse(base.contentJson))
+  const next = { ...plan, id: `edit-plan-${resultVersionId}`, projectVersionId: resultVersionId, createdAt }
+  const command = createEditCommand({ ...scope, id: `command-${suffix}`, baseVersionId: parent.version.id, baseHash: parent.version.baseHash,
+    author: { type: 'api-client', id: audit.clientId }, type, scope: { project: true }, payload: { schemaVersion: 1 },
+    idempotencyKey: `key-${suffix}`, createdAt })
+  let counter = 0
+  return transitionProjectOutputState({ parent, command, audit, requestFingerprint: calculateCanonicalHash({ suffix }),
+    allocation: { ...scope, resultVersionId, stateId: `state-${suffix}`, parentVersionId: parent.version.id,
+      sequence: parent.version.sequence + 1, createdBy: audit.clientId, createdAt },
+    editPlanSnapshot: createProjectSnapshot({ ...scope, id: `snapshot-${suffix}`, kind: 'edit-plan', contentSchemaVersion: base.contentSchemaVersion,
+      contentJson: stableSerialize(next), contentHash: calculateCanonicalHash(next), createdAt }),
+    createMaterializationId: () => `materialization-${suffix}-${++counter}` })
 }

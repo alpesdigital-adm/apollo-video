@@ -1,21 +1,15 @@
-import { assertDirectorSnapshotContent } from '../../src/v2/application/director-snapshot-identity.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { replaceSourceTranscriptService } from '../../src/v2/application/replace-source-transcript.ts'
-import {
-  createExternalAuditContext,
-} from '../../src/v2/application/authenticate-api-client.ts'
-import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { calculateVersionHash, stableSerialize } from '../../src/v2/application/version-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
-import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
-import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
+import { operationalBundlePlanV3 } from '../../src/v2/domain/output-version-bundle.ts'
 import {
   createSourceTranscriptArtifactInvalidations,
   materializeSourceTranscriptReplacement,
 } from '../../src/v2/domain/source-transcript-replacement.ts'
+import { ingestedWorld, recompiledChild } from './helpers/output-world.mjs'
 
 const currentTranscript = createMediaTranscript({
   language: 'pt-BR', text: 'texto antigo', provider: 'groq', model: 'whisper-large-v3',
@@ -72,65 +66,71 @@ function plan() {
   }
 }
 
-function version() {
-  return createProjectVersion({
-    id: 'version-base', workspaceId: 'workspace-transcript', projectId: 'project-transcript',
-    sequence: 4, parentVersionId: 'version-parent',
-    snapshotRefs: {
-      brief: 'snapshot-brief', treatment: undefined, story: undefined,
-      editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies',
-    },
-    baseHash: 'a'.repeat(64), createdBy: 'client-transcript', createdAt: '2026-07-31T22:00:00.000Z',
-  })
+// The service tests run on a real sealed Version3/State3: the parent bundle of the shared output world, whose
+// source is 'artifact-source3' (2s by default, 20s when a test needs room for several clips).
+let worldPromise
+const sharedWorld = () => (worldPromise ??= ingestedWorld())
+const parentPlanOf = (parent) => JSON.parse(operationalBundlePlanV3(parent).contentJson)
+
+function replacementContext(parent, replacement, overrides = {}) {
+  const snapshot = operationalBundlePlanV3(parent), editPlan = JSON.parse(snapshot.contentJson)
+  return {
+    parent, editPlan, editPlanHash: snapshot.contentHash,
+    currentTranscript: { id: editPlan.retimedTranscript.sourceTranscriptId, transcriptHash: editPlan.retimedTranscript.sourceTranscriptHash, sourceArtifactId: 'artifact-source3' },
+    replacementTranscript: { id: 'transcript-replacement', transcriptHash: replacement.transcriptHash, sourceArtifactId: 'artifact-source3', transcript: replacement },
+    outputReferences: [
+      { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: parent.version.id, variantId: '9:16' },
+      { artifactId: 'final-16x9', kind: 'final', sourceVersionId: parent.version.id, variantId: '16:9' },
+    ],
+    ...overrides,
+  }
 }
 
 class Repository {
   committed
+  constructor(parent, replacement = replacementTranscript, overrides = {}) { this.parent = parent; this.replacement = replacement; this.overrides = overrides }
   async findIdempotentResult() { return this.committed ?? null }
-  async readContext() {
-    return {
-      currentVersion: version(), editPlan: plan(), editPlanHash: 'b'.repeat(64),
-      currentTranscript: { id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash, sourceArtifactId: 'artifact-master' },
-      replacementTranscript: { id: 'transcript-replacement', transcriptHash: replacementTranscript.transcriptHash, sourceArtifactId: 'artifact-master', transcript: replacementTranscript },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: 'version-base', variantId: '9:16' },
-        { artifactId: 'final-16x9', kind: 'final', sourceVersionId: 'version-base', variantId: '16:9' },
-      ],
-    }
-  }
-  async commitOrReplay(bundle) {
-    const invalidations = createSourceTranscriptArtifactInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
+  async readContext() { return replacementContext(this.parent, this.replacement, this.overrides) }
+  async commitOrReplay(input) {
+    const { bundle } = input, command = bundle.origin.command
+    const invalidations = createSourceTranscriptArtifactInvalidations({ impact: command.payload.impact, createdAt: command.createdAt })
     const result = {
-      command: bundle.command, version: bundle.version,
-      editPlan: JSON.parse(bundle.snapshot.contentJson), impact: bundle.command.payload.impact,
-      invalidations, replayed: false, snapshot: bundle.snapshot,
+      command, version: bundle.version,
+      editPlan: JSON.parse(bundle.editPlanSnapshot.contentJson), impact: command.payload.impact,
+      invalidations, replayed: false, snapshot: bundle.editPlanSnapshot, bundle,
     }
-    this.committed = { requestFingerprint: bundle.requestFingerprint, result }
+    this.committed = { requestFingerprint: bundle.origin.requestFingerprint, result }
     return result
   }
 }
 
-test('T-FR-233 source transcript replacement retimes immutable evidence and blocks render until DirectorRun', async () => {
-  const repository = new Repository()
+const serviceFor = (repository, label) => {
   let id = 0
-  const execute = replaceSourceTranscriptService({
+  return replaceSourceTranscriptService({
     repository,
-    clock: () => new Date('2026-07-31T22:10:00.000Z'),
-    createId: (kind) => `${kind}-transcript-${++id}`,
+    clock: () => new Date('2026-10-16T22:10:00.000Z'),
+    createId: (kind) => `${kind}-${label}-${++id}`,
     createEventId: () => '123e4567-e89b-42d3-a456-426614174000',
   })
-  const request = {
-    workspaceId: 'workspace-transcript', projectId: 'project-transcript',
-    baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
-    replacementTranscriptId: 'transcript-replacement',
-    expectedTranscriptHash: replacementTranscript.transcriptHash,
-    actor: transcriptActor(),
-    idempotencyKey: 'source-transcript-replacement-1',
-  }
+}
+
+const requestFor = (parent, actor, replacement, key) => ({
+  workspaceId: parent.version.workspaceId, projectId: parent.version.projectId,
+  baseVersionId: parent.version.id, baseHash: parent.version.baseHash,
+  replacementTranscriptId: 'transcript-replacement',
+  expectedTranscriptHash: replacement.transcriptHash,
+  actor, idempotencyKey: key,
+})
+
+test('T-FR-233 source transcript replacement retimes immutable evidence and blocks render until DirectorRun', async () => {
+  const { parent, actor } = await sharedWorld()
+  const repository = new Repository(parent)
+  const execute = serviceFor(repository, 'transcript')
+  const request = requestFor(parent, actor, replacementTranscript, 'source-transcript-replacement-1')
   const result = await execute(request)
-  assert.deepEqual(Object.keys(version().snapshotRefs), ['brief', 'editPlan', 'policies'])
   assert.equal(result.command.type, 'replace-source-transcript')
-  assert.equal(result.version.sequence, 5)
+  assert.equal(result.version.outputContractVersion, 3)
+  assert.equal(result.version.sequence, parent.version.sequence + 1)
   assert.equal(result.editPlan.retimedTranscript.sourceTranscriptId, 'transcript-replacement')
   assert.equal(result.editPlan.retimedTranscript.sourceTranscriptHash, replacementTranscript.transcriptHash)
   assert.deepEqual(
@@ -144,33 +144,34 @@ test('T-FR-233 source transcript replacement retimes immutable evidence and bloc
   assert.equal(result.invalidations.length, 2)
   assert.ok(result.invalidations.every((item) => item.status === 'stale'))
   assert.equal(result.command.payload.nextRequiredCapability, 'apollo.projects.commands.apply:run-director')
+  // The Version is bound to a sealed State: every member re-materializes from the retimed plan
+  // and from the parent's exact observations.
+  const { bundle } = result
+  assert.equal(bundle.state.document.transition, 'inherit')
+  assert.equal(bundle.state.document.parentStateHash, parent.state.stateHash)
+  assert.equal(bundle.origin.kind, 'child-command')
+  assert.deepEqual(bundle.origin.replaces, [])
+  assert.equal(bundle.origin.audit.credentialId, actor.credentialId)
+  assert.equal(bundle.version.snapshotRefs.editPlan, bundle.editPlanSnapshot.id)
+  for (const entry of bundle.state.document.entries) {
+    assert.equal(entry.consumption.status, 'materialized')
+    assert.equal(entry.consumption.materialization.document.planSnapshotId, bundle.editPlanSnapshot.id)
+  }
   const replay = await execute(request)
   assert.equal(replay.replayed, true)
   assert.equal(replay.version.id, result.version.id)
 })
 
 test('T-FR-233 source transcript replacement fails closed on cross-source and hash drift', async () => {
-  const repository = new Repository()
-  const execute = replaceSourceTranscriptService({
-    repository,
-    clock: () => new Date('2026-07-31T22:10:00.000Z'),
-    createId: (kind) => `${kind}-transcript-test`,
-    createEventId: () => '123e4567-e89b-42d3-a456-426614174001',
-  })
-  const base = {
-    workspaceId: 'workspace-transcript', projectId: 'project-transcript',
-    baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
-    replacementTranscriptId: 'transcript-replacement', actor: transcriptActor(),
-    idempotencyKey: 'source-transcript-replacement-2',
-  }
+  const { parent, actor } = await sharedWorld()
+  const repository = new Repository(parent)
+  const execute = serviceFor(repository, 'transcript-test')
+  const base = requestFor(parent, actor, replacementTranscript, 'source-transcript-replacement-2')
   await assert.rejects(() => execute({ ...base, expectedTranscriptHash: 'f'.repeat(64) }), (error) => error.code === 'VERSION_CONFLICT')
-  repository.readContext = async () => ({
-    currentVersion: version(), editPlan: plan(), editPlanHash: 'b'.repeat(64),
-    currentTranscript: { id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash, sourceArtifactId: 'artifact-master' },
-    replacementTranscript: { id: 'transcript-replacement', transcriptHash: replacementTranscript.transcriptHash, sourceArtifactId: 'artifact-other', transcript: replacementTranscript },
-    outputReferences: [],
-  })
-  await assert.rejects(() => execute({ ...base, expectedTranscriptHash: replacementTranscript.transcriptHash, idempotencyKey: 'source-transcript-replacement-3' }), (error) => error.code === 'INVALID_ARGUMENT')
+  repository.overrides = { replacementTranscript: { id: 'transcript-replacement', transcriptHash: replacementTranscript.transcriptHash, sourceArtifactId: 'artifact-other', transcript: replacementTranscript } }
+  await assert.rejects(() => execute({ ...base, idempotencyKey: 'source-transcript-replacement-3' }), (error) => error.code === 'INVALID_ARGUMENT')
+  assert.equal(repository.committed, undefined)
+  assert.equal(parentPlanOf(parent).retimedTranscript.sourceTranscriptId, 'transcript-ingest3')
 })
 
 // ---------------------------------------------------------------------------
@@ -266,19 +267,6 @@ test('T-FR-233 each word is retimed through the timeline clip that fully contain
     ['depois', 48, 54], // source 66..78 in clip-fast: 30+round(36/2)=48, 30+round(48/2)=54
   ])
 })
-
-function transcriptActor() {
-  const auditContext = createExternalAuditContext({
-    clientId: 'client-transcript', credentialId: 'credential-transcript',
-    workspaceId: 'workspace-transcript', environment: 'production',
-  })
-  return Object.freeze({
-    ...auditContext, scopes: new Set(['projects:write']),
-    authenticationKind: 'bearer', clientKillSwitchEngaged: false,
-    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active',
-    workspaceAccessStatus: 'active', auditContext,
-  })
-}
 
 test('T-FR-233 transcript evidence follows timeline order when source chronology is reordered', () => {
   const reorderedTranscript = transcriptFromFrames('t', [
@@ -388,7 +376,7 @@ test('T-FR-233 retiming fails closed on unsupported rates and inconsistent clip 
 })
 
 // ---------------------------------------------------------------------------
-// Application journey without Postgres: replacement -> snapshot -> Director
+// Application journey without Postgres: replacement of a mixed-rate timeline -> sealed Version
 // ---------------------------------------------------------------------------
 
 const directorSourceRanges = Object.freeze([
@@ -397,28 +385,6 @@ const directorSourceRanges = Object.freeze([
   Object.freeze({ id: 'clip-3', sourceInFrame: 400, sourceOutFrame: 500, timelineInFrame: 200, timelineOutFrame: 300, rate: 1 }),
 ])
 
-function directorEditPlan() {
-  return {
-    schemaVersion: 2, state: 'compiled', id: 'edit-plan-base-1', projectVersionId: 'version-base',
-    storyPlanId: null, fps: FPS, durationFrames: 300,
-    sources: [{ id: 'source-1', artifactId: 'artifact-master', kind: 'video', durationSeconds: 20 }],
-    videoTracks: [{ id: 'track-base', kind: 'base-video', clips: directorSourceRanges.map((range) => ({
-      sourceArtifactId: 'artifact-master', ...range,
-    })) }],
-    overlayTracks: [], subtitleTracks: [], audioTracks: [], effectTracks: [],
-    markers: [], protectedElements: [], localeVariantRefs: [], formatVariantRefs: [],
-    lineageRefs: ['artifact-master'],
-    retimedTranscript: {
-      sourceTranscriptId: 'transcript-current',
-      sourceTranscriptHash: currentTranscript.transcriptHash,
-      words: [],
-    },
-    movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
-    subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 42 },
-    createdAt: '2026-07-31T22:00:00.000Z',
-  }
-}
-
 const directorTranscript = transcriptFromFrames('transcript-replacement', [
   ['Comunicar', 10, 25], // clip-1, rate 1 -> 10..25
   ['perdido', 110, 130], // gap between clip-1 and clip-2 -> discarded
@@ -426,120 +392,17 @@ const directorTranscript = transcriptFromFrames('transcript-replacement', [
   ['resultados', 420, 450], // clip-3, rate 1 -> 220..250
 ])
 
-class DirectorRepository {
-  constructor(editPlan, transcriptId, sequence) {
-    this.snapshotRows = new Map()
-    this.editPlan = editPlan
-    this.transcriptId = transcriptId
-    this.currentVersion = createProjectVersion({
-      id: 'version-next', workspaceId: 'workspace-transcript', projectId: 'project-transcript',
-      sequence, parentVersionId: 'version-base',
-      snapshotRefs: { brief: 'snapshot-brief', editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
-      baseHash: 'c'.repeat(64), createdBy: 'client-transcript', createdAt: '2026-07-31T22:10:00.000Z',
-    })
-    this.records = new Map()
-  }
-
-  async findIdempotentResult({ workspaceId, projectId, idempotencyKey }) {
-    return this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
-  }
-
-  async readContext({ workspaceId, projectId }) {
-    if (workspaceId !== 'workspace-transcript' || projectId !== 'project-transcript') return null
-    return {
-      workspaceId,
-      project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
-      currentVersion: this.currentVersion,
-      brief: {
-        objective: 'discovery',
-        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
-      },
-      policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
-      editPlan: this.editPlan,
-      currentDurationFrames: this.editPlan.durationFrames,
-      proxyVariantId: '9:16',
-      sourceRights: {
-        state: 'present', snapshotId: 'rights-transcript-master',
-        snapshotHash: 'd'.repeat(64), status: 'approved', consentStatus: 'not-required',
-      },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: 'version-next', variantId: '9:16' },
-      ],
-      transcript: {
-        id: this.transcriptId, sourceArtifactId: 'artifact-master', language: 'pt-BR',
-        provider: 'groq', model: 'whisper-large-v3', transcriptHash: directorTranscript.transcriptHash,
-      },
-    }
-  }
-
-  async commitWithCanonicalSnapshots(scope, prepare) {
-    // Controlled in-memory transaction: explicit canonical store, no PG claim.
-    const rows = new Map(this.snapshotRows)
-    const resolve = async (candidates) => candidates.map((candidate) => {
-      assert.equal(candidate.workspaceId, scope.workspaceId)
-      assert.equal(candidate.projectId, scope.projectId)
-      const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
-      const stored = rows.get(key)
-      if (stored) {
-        assertDirectorSnapshotContent(candidate, stored)
-        return stored
-      }
-      rows.set(key, candidate)
-      return candidate
-    })
-    const bundle = await prepare(resolve)
-    assert.equal(bundle.command.baseVersionId, scope.baseVersionId)
-    assert.equal(bundle.command.baseHash, scope.baseHash)
-    assert.equal(bundle.requestFingerprint, scope.requestFingerprint)
-    const result = await this.commitPreparedBundle(bundle)
-    this.snapshotRows = rows
-    return result
-  }
-
-  async commitPreparedBundle(bundle) {
-    this.lastBundle = bundle
-    const result = Object.freeze({ run: bundle.run, command: bundle.command, version: bundle.version, replayed: false })
-    this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
-      requestFingerprint: bundle.requestFingerprint, result,
-    })
-    return result
-  }
-}
-
-class RateRepository extends Repository {
-  async readContext() {
-    return {
-      currentVersion: version(), editPlan: directorEditPlan(), editPlanHash: 'b'.repeat(64),
-      currentTranscript: { id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash, sourceArtifactId: 'artifact-master' },
-      replacementTranscript: {
-        id: 'transcript-replacement', transcriptHash: directorTranscript.transcriptHash,
-        sourceArtifactId: 'artifact-master', transcript: directorTranscript,
-      },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: 'version-base', variantId: '9:16' },
-      ],
-    }
-  }
-}
-
-test('T-FR-233 replaced transcript with retimed frames survives the snapshot and reaches the Director', async () => {
-  const repository = new RateRepository()
-  let id = 0
-  const replace = replaceSourceTranscriptService({
-    repository,
-    clock: () => new Date('2026-07-31T22:10:00.000Z'),
-    createId: () => ['edit-command-1', 'version-next', 'snapshot-next'][id++],
-    createEventId: () => '123e4567-e89b-42d3-a456-426614174010',
-  })
-  const replacement = await replace({
-    workspaceId: 'workspace-transcript', projectId: 'project-transcript',
-    baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
-    replacementTranscriptId: 'transcript-replacement',
-    expectedTranscriptHash: directorTranscript.transcriptHash,
-    actor: transcriptActor(),
-    idempotencyKey: 'source-transcript-rate-journey',
-  })
+test('T-FR-233 replaced transcript with retimed frames survives the sealed Version and its re-materialized State', async () => {
+  // A 20 second source leaves room for the three clips; the timeline below is the parent the replacement starts from.
+  const world = await ingestedWorld({ sourceDurationSeconds: 20 })
+  const parent = recompiledChild(world.parent, world.actor, (plan) => ({
+    ...plan, durationFrames: 300,
+    videoTracks: [{ ...plan.videoTracks[0], clips: directorSourceRanges.map((range) => ({ sourceArtifactId: 'artifact-source3', ...range })) }],
+    subtitleTracks: [],
+  }), { suffix: 'mixed-rate' })
+  const repository = new Repository(parent, directorTranscript)
+  const replacement = await serviceFor(repository, 'rate-journey')(
+    requestFor(parent, world.actor, directorTranscript, 'source-transcript-rate-journey'))
 
   // 1. The command retimed the evidence through clips of mixed rates.
   const expected = [['Comunicar', 10, 25], ['bem', 120, 135], ['resultados', 220, 250]]
@@ -557,29 +420,13 @@ test('T-FR-233 replaced transcript with retimed frames survives the snapshot and
     word.timelineStartFrame >= 0 && word.timelineEndFrame <= persisted.durationFrames &&
     word.timelineEndFrame > word.timelineStartFrame))
 
-  // 3. The Director reads the replaced transcript back out of that snapshot.
-  const directorRepository = new DirectorRepository(persisted, 'transcript-replacement', replacement.version.sequence)
-  const counters = new Map()
-  let event = 0
-  const runDirector = runProjectDirectorService({
-    repository: directorRepository,
-    clock: () => new Date('2026-07-31T22:20:00.000Z'),
-    createId: (kind) => {
-      const next = (counters.get(kind) ?? 0) + 1
-      counters.set(kind, next)
-      return `${kind}-${next}`
-    },
-    createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
-    compileBrief: createEvidenceBoundBriefCompiler(),
-  })
-  const run = await runDirector({
-    workspaceId: 'workspace-transcript', projectId: 'project-transcript',
-    baseVersionId: 'version-next', baseHash: 'c'.repeat(64),
-    actor: transcriptActor(),
-    idempotency: { key: 'director-after-transcript-replacement' },
-    reason: 'Replanejar a composição com a transcrição corrigida.',
-  })
-  assert.equal(run.run.editPlan.retimedTranscript.sourceTranscriptId, 'transcript-replacement')
-  assert.deepEqual(retimed(run.run.editPlan), expected)
-  assert.equal(run.run.perception.timeline.observations.length, expected.length)
+  // 3. The Version is bound to a sealed State whose members re-materialized from that very snapshot.
+  const { bundle } = replacement
+  assert.equal(bundle.version.snapshotRefs.editPlan, replacement.snapshot.id)
+  assert.equal(bundle.state.document.parentStateHash, parent.state.stateHash)
+  assert.ok(bundle.state.document.entries.length > 0)
+  for (const entry of bundle.state.document.entries) {
+    assert.equal(entry.consumption.status, 'materialized')
+    assert.equal(entry.consumption.materialization.document.planSnapshotId, replacement.snapshot.id)
+  }
 })

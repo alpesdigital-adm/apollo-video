@@ -21,7 +21,6 @@ export const CONTRACT_ONE_HISTORY = Object.freeze([
 export const PENDING_ROWS = Object.freeze([
   'application/manual-edit.ts',
   'application/multicam-direction.ts',
-  'application/replace-source-transcript.ts',
   'application/review-patch-batch.ts',
   'application/review-patch.ts',
   'application/run-project-director.ts',
@@ -30,7 +29,6 @@ export const PENDING_ROWS = Object.freeze([
   'infrastructure/prisma/multicam-direction-command-repository.ts',
   'infrastructure/prisma/review-patch-batch-repository.ts',
   'infrastructure/prisma/review-patch-repository.ts',
-  'infrastructure/prisma/source-transcript-replacement-repository.ts',
 ])
 
 const WRITES_VERSION_ROW = [
