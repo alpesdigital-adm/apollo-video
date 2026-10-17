@@ -1,7 +1,7 @@
-import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { CommandImpactOutputReference, CommandImpactV1 } from '../../domain/command-impact.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { ProjectVersionV3 } from '../../domain/project-version.ts'
 import type {
   SubtitleSegmentOverride,
   SubtitleSegmentOverrideAction,
@@ -18,7 +18,8 @@ export interface SubtitleSegmentOverrideCompiledSegment {
 }
 
 export interface SubtitleSegmentOverrideContext {
-  currentVersion: Readonly<ProjectVersion>
+  /** The sealed output bundle of the current head: the exact parent the Command's Version is born from. */
+  parent: OperationalOutputParentV3
   durationFrames: number
   /** Compiled segments of the target variant. An override may only name one of these. */
   segments: readonly Readonly<SubtitleSegmentOverrideCompiledSegment>[]
@@ -44,7 +45,7 @@ export interface SubtitleSegmentOverridePayload {
 
 export interface SubtitleSegmentOverrideResult {
   command: Readonly<EditCommand<SubtitleSegmentOverridePayload>>
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV3>
   subtitleOverride: Readonly<SubtitleSegmentOverride>
   impact: Readonly<CommandImpactV1>
   replayed: boolean
@@ -61,10 +62,8 @@ export interface SubtitleSegmentOverrideRepository {
     segmentId: string
   }): Promise<Readonly<SubtitleSegmentOverrideContext> | null>
   commitOrReplay(input: {
-    requestFingerprint: string
-    authenticationAudit?: Readonly<ApiAccessAuditContext>
-    command: SubtitleSegmentOverrideResult['command']
-    version: Readonly<ProjectVersion>
+    /** The bundle carries the Version, State, EditPlan, Command and credential audit, sealed together. */
+    bundle: Readonly<OperationalOutputVersionBundleV3>
     subtitleOverride: Readonly<SubtitleSegmentOverride>
     impact: Readonly<CommandImpactV1>
   }): Promise<Readonly<SubtitleSegmentOverrideResult>>

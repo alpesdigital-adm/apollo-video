@@ -2,7 +2,7 @@ import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { createSubtitleSegmentOverrideCommandImpact } from '../domain/command-impact.ts'
 import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
 import { DomainError } from '../domain/errors.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import {
   createSubtitleSegmentOverride,
   normalizeSubtitleSegmentOverrideDimensions,
@@ -36,7 +36,7 @@ const id = (value: unknown, field: string) => {
  */
 export function applySubtitleSegmentOverrideService(dependencies: {
   repository: SubtitleSegmentOverrideRepository
-  createId: (kind: 'command' | 'version' | 'override') => string
+  createId: (kind: 'command' | 'version' | 'override' | 'edit-plan-snapshot' | 'state' | 'materialization') => string
   clock?: () => Date
 }) {
   return async (request: {
@@ -106,7 +106,9 @@ export function applySubtitleSegmentOverrideService(dependencies: {
 
     const context = await dependencies.repository.readContext({ workspaceId, projectId, variantId, segmentId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Subtitle segment override context was not found')
-    if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) {
+    const parent = context.parent
+    const currentVersion = parent.version
+    if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== request.baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Subtitle segment override base version is stale')
     }
     // Fail-closed scope, both halves. A variant the EditPlan does not compile and a
@@ -130,6 +132,8 @@ export function applySubtitleSegmentOverrideService(dependencies: {
     const createdAt = (dependencies.clock ?? (() => new Date()))().toISOString()
     const commandId = id(dependencies.createId('command'), 'commandId')
     const versionId = id(dependencies.createId('version'), 'versionId')
+    const editPlanSnapshotId = id(dependencies.createId('edit-plan-snapshot'), 'editPlanSnapshotId')
+    const stateId = id(dependencies.createId('state'), 'stateId')
     // The range is taken from the compiled segment, never from the caller: an
     // exception cannot claim frames the EditPlan does not give that segment.
     const range = Object.freeze({ startFrame: segment.startFrame, endFrame: segment.endFrame })
@@ -173,23 +177,18 @@ export function applySubtitleSegmentOverrideService(dependencies: {
       ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}),
       idempotencyKey, createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId, workspaceId, projectId,
-      sequence: context.currentVersion.sequence + 1,
-      parentVersionId: baseVersionId,
-      snapshotRefs: context.currentVersion.snapshotRefs,
-      baseHash: calculateCanonicalHash({
-        schemaVersion: 'project-version-subtitle-segment-override/v1',
-        previousBaseHash: request.baseHash,
-        commandId,
-        overrideHash: subtitleOverride.overrideHash,
-        impactHash: impact.impactHash,
-      }),
-      createdBy: audit.clientId, commandId, createdAt,
+    // The override lives in its own domain row and is applied when subtitles compile; the EditPlan is the
+    // parent's under the new Version's identity.
+    const bundle = transitionProjectOutputState({
+      parent, command, audit, requestFingerprint,
+      allocation: {
+        workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: currentVersion.id,
+        sequence: currentVersion.sequence + 1, createdBy: audit.clientId, createdAt,
+      },
+      editPlanSnapshot: reidentifiedEditPlanSnapshot(parent, { snapshotId: editPlanSnapshotId, versionId, createdAt }),
+      createMaterializationId: () => id(dependencies.createId('materialization'), 'materializationId'),
     })
-    return dependencies.repository.commitOrReplay({
-      requestFingerprint, authenticationAudit: audit, command, version, subtitleOverride, impact,
-    })
+    return dependencies.repository.commitOrReplay({ bundle, subtitleOverride, impact })
   }
 }
 
