@@ -1,4 +1,3 @@
-import { editCommandExternalActorAuditData } from './edit-command-actor-audit.ts'
 import { randomUUID } from 'node:crypto'
 import type { Prisma, PrismaClient, V2MediaLibraryAttachment, V2MediaLibraryEntry, V2MediaSegment } from '../../../../generated/prisma-v2/index.js'
 
@@ -18,7 +17,10 @@ import {
 } from '../../domain/media-library.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { MediaArtifactLifecycleStatus, MediaArtifactType } from '../../domain/media-artifact.ts'
+import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../../domain/project-output-state-transition.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
 
 type LibraryMetadata = V2MediaLibraryEntry & {
   thumbnailArtifact: { id: string; status: string } | null
@@ -285,9 +287,12 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
             if (existing.requestFingerprint !== requestFingerprint || existing.actorContextHash !== input.authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different library attachment')
             return resultOf(existing, true)
           }
-          const project = await transaction.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { locale: true, currentVersion: true } })
-          if (!project?.currentVersion) throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
-          const base = project.currentVersion
+          const project = await transaction.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { locale: true, currentVersionId: true } })
+          if (!project?.currentVersionId) throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
+          // The sealed parent bundle of the head: the Version is born from its exact State, never from loose columns.
+          const parent = await readPersistedOperationalOutputBundleV3(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
+          if (!parent) throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
+          const base = parent.version
           if (base.id !== input.baseVersionId || base.baseHash !== input.baseVersionHash) throw new DomainError('VERSION_CONFLICT', 'Project version changed before library attachment')
           const row = input.selection.kind === 'asset'
             ? await transaction.v2MediaLibraryEntry.findFirst({ where: { workspaceId: input.workspaceId, artifactId: selectionId }, include }) as EntryWithArtifact | null
@@ -300,13 +305,20 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
           if (!source || source.currentRightsSnapshotId !== item.rights.snapshotId) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Library source or rights changed before attachment')
           const commandId = `command-library-${randomUUID()}`
           const resultVersionId = `version-library-${randomUUID()}`
-          const resultVersionHash = calculateCanonicalHash({ schemaVersion: 'media-library-attachment-version/v1', projectId: input.projectId, sequence: base.sequence + 1, parentVersionId: base.id, previousBaseHash: base.baseHash, commandId, selection: input.selection, sourceSha256: source.sha256, rightsSnapshotId: item.rights.snapshotId, segmentHash: item.source.type === 'segment' ? item.source.segmentHash : null })
-          const command = input.createCommand({ commandId, resultVersionId, editPlanSnapshotId: base.editPlanSnapshotId, parentArtifactId, sourceSha256: source.sha256, rightsSnapshotId: item.rights.snapshotId!, ...(item.source.type === 'segment' ? { segmentHash: item.source.segmentHash, semanticRange: item.source.semanticRange, sourceTimeMapping: item.source.sourceTimeMapping } : {}) })
-          const actorAuditData = editCommandExternalActorAuditData(input.authenticationAudit, input.workspaceId, command.author)
+          const stateId = `state-library-${randomUUID()}`
+          const resultEditPlanSnapshotId = `snapshot-library-${randomUUID()}`
+          const command = input.createCommand({ commandId, resultVersionId, editPlanSnapshotId: base.snapshotRefs.editPlan, parentArtifactId, sourceSha256: source.sha256, rightsSnapshotId: item.rights.snapshotId!, ...(item.source.type === 'segment' ? { segmentHash: item.source.segmentHash, semanticRange: item.source.semanticRange, sourceTimeMapping: item.source.sourceTimeMapping } : {}) })
           const impact = parseMediaLibraryAttachmentImpact((command.payload as { impact: unknown }).impact)
-          if (command.id !== commandId || command.workspaceId !== input.workspaceId || command.projectId !== input.projectId || command.baseVersionId !== base.id || command.baseHash !== base.baseHash || command.type !== 'attach-media-library-reference' || command.author.id !== input.authenticationAudit.clientId || impact.commandId !== commandId || impact.resultVersionId !== resultVersionId || impact.baseVersionId !== base.id || impact.preservedEditPlanSnapshotId !== base.editPlanSnapshotId || impact.selectionId !== selectionId || impact.selectionKind !== input.selection.kind || impact.parentArtifactId !== parentArtifactId || impact.sourceSha256 !== source.sha256 || impact.rightsSnapshotId !== item.rights.snapshotId) throw new DomainError('PERSISTENCE_CONFLICT', 'Application Command does not match locked library attachment facts')
-          await transaction.v2EditCommand.create({ data: { id: commandId, workspaceId: input.workspaceId, projectId: input.projectId, baseVersionId: base.id, baseHash: base.baseHash, type: 'attach-media-library-reference', scopeJson: stableSerialize(command.scope), payloadJson: stableSerialize(command.payload), actorType: command.author.type, actorId: command.author.id, delegatedUserId: command.author.delegatedUserId, ...actorAuditData, idempotencyKey: input.idempotencyKey, requestFingerprint, createdAt: new Date(input.createdAt) } })
-          await transaction.v2ProjectVersion.create({ data: { id: resultVersionId, workspaceId: input.workspaceId, projectId: input.projectId, sequence: base.sequence + 1, parentVersionId: base.id, briefSnapshotId: base.briefSnapshotId, treatmentSnapshotId: base.treatmentSnapshotId, storySnapshotId: base.storySnapshotId, editPlanSnapshotId: base.editPlanSnapshotId, policiesSnapshotId: base.policiesSnapshotId, baseHash: resultVersionHash, createdBy: input.authenticationAudit.clientId, commandId, createdAt: new Date(input.createdAt) } })
+          if (command.id !== commandId || command.workspaceId !== input.workspaceId || command.projectId !== input.projectId || command.baseVersionId !== base.id || command.baseHash !== base.baseHash || command.type !== 'attach-media-library-reference' || command.author.id !== input.authenticationAudit.clientId || impact.commandId !== commandId || impact.resultVersionId !== resultVersionId || impact.baseVersionId !== base.id || impact.preservedEditPlanSnapshotId !== base.snapshotRefs.editPlan || impact.selectionId !== selectionId || impact.selectionKind !== input.selection.kind || impact.parentArtifactId !== parentArtifactId || impact.sourceSha256 !== source.sha256 || impact.rightsSnapshotId !== item.rights.snapshotId) throw new DomainError('PERSISTENCE_CONFLICT', 'Application Command does not match locked library attachment facts')
+          // The attachment is an inherit-class Command: the EditPlan is the parent's under the new Version's identity.
+          const bundle = transitionProjectOutputState({
+            parent, command, audit: input.authenticationAudit, requestFingerprint,
+            allocation: { workspaceId: input.workspaceId, projectId: input.projectId, resultVersionId, stateId, parentVersionId: base.id, sequence: base.sequence + 1, createdBy: input.authenticationAudit.clientId, createdAt: input.createdAt },
+            editPlanSnapshot: reidentifiedEditPlanSnapshot(parent, { snapshotId: resultEditPlanSnapshotId, versionId: resultVersionId, createdAt: input.createdAt }),
+            createMaterializationId: () => `materialization-library-${randomUUID()}`,
+          })
+          const resultVersionHash = bundle.version.baseHash
+          await commitProjectVersionWithOutputState(transaction, bundle)
           const reference = await transaction.v2MediaLibraryAttachment.create({ data: { id: randomUUID(), workspaceId: input.workspaceId, projectId: input.projectId, selectionKind: input.selection.kind, selectionId, parentArtifactId, sourceSha256: source.sha256, rightsSnapshotId: item.rights.snapshotId!, segmentHash: item.source.type === 'segment' ? item.source.segmentHash : null, semanticRangeJson: item.source.type === 'segment' ? stableSerialize(item.source.semanticRange) : null, sourceTimeMappingJson: item.source.type === 'segment' ? stableSerialize(item.source.sourceTimeMapping) : null, commandId, baseVersionId: base.id, resultVersionId, resultVersionHash, actorContextHash: input.authenticationAudit.contextHash, idempotencyKey: input.idempotencyKey, requestFingerprint, createdAt: new Date(input.createdAt) } })
           const updated = await transaction.v2Project.updateMany({ where: { id: input.projectId, workspaceId: input.workspaceId, currentVersionId: base.id }, data: { currentVersionId: resultVersionId } })
           if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during library attachment')

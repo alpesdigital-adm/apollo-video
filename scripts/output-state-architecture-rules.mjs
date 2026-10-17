@@ -27,7 +27,6 @@ export const PENDING_ROWS = Object.freeze([
   'application/run-project-director.ts',
   'infrastructure/prisma/director-run-repository.ts',
   'infrastructure/prisma/manual-edit-repository.ts',
-  'infrastructure/prisma/media-library-repository.ts',
   'infrastructure/prisma/multicam-direction-command-repository.ts',
   'infrastructure/prisma/review-patch-batch-repository.ts',
   'infrastructure/prisma/review-patch-repository.ts',
