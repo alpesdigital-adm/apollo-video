@@ -8,12 +8,13 @@ import { attachMediaLibraryItemService } from '../../src/v2/application/media-li
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createMediaSegmentService } from '../../src/v2/application/media-segments.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
-import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { mediaLibrarySearchField } from '../../src/v2/domain/media-library.ts'
 import { PrismaMediaLibraryRepository } from '../../src/v2/infrastructure/prisma/media-library-repository.ts'
 import { PrismaImageAnalysisRepository } from '../../src/v2/infrastructure/prisma/image-analysis-repository.ts'
 import { createImageAnalysis } from '../../src/v2/domain/image-analysis.ts'
 import { PrismaMediaSegmentRepository } from '../../src/v2/infrastructure/prisma/media-segment-repository.ts'
+import { seedSealedProject } from './helpers/pg-output-world.mjs'
 
 function rightsRow(snapshot) {
   return {
@@ -37,36 +38,23 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
   const segmentRepository = new PrismaMediaSegmentRepository(prisma)
   const artifactIds = ['video', 'audio', 'restricted', 'other'].map((kind) => `library-${kind}-${suffix}`)
   const thumbnailId = `library-thumbnail-${suffix}`
-  const cleanup = async () => {
-    await prisma.v2ImageReuseReference.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2ImageAnalysis.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2MediaSegmentMaterialization.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2MediaSegmentDerivativeJob.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2MediaLibraryAttachment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2MediaSegment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2MediaArtifact.updateMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } }, data: { currentRightsSnapshotId: null } })
-    await prisma.v2MediaLibraryEntry.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2MediaArtifact.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2Project.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-    await prisma.v2Workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } })
-  }
+  // The project's sealed rows are append-only (w66_output_immutable): every identity above is unique to this run and
+  // nothing is cleaned up; the owner of the disposable schema resets it.
   try {
-    await cleanup()
     await prisma.v2Workspace.createMany({ data: [
       { id: workspaceId, slug: workspaceId, name: 'Library integration' },
       { id: otherWorkspaceId, slug: otherWorkspaceId, name: 'Other library' },
     ] })
-    await prisma.v2Project.create({ data: {
-      id: projectId, workspaceId, name: 'Target project', locale: 'pt-BR', createdByType: 'user', createdById: 'integration-test',
-    } })
-    const baseVersionId = `library-version-${suffix}`
-    const snapshotIds = ['brief', 'edit-plan', 'policies'].map((kind) => `library-${kind}-${suffix}`)
-    for (const [index, kind] of ['brief', 'edit-plan', 'policies'].entries()) await prisma.v2ProjectSnapshot.create({ data: { id: snapshotIds[index], workspaceId, projectId, kind, schemaVersion: 1, contentJson: '{}', contentHash: calculateCanonicalHash({ kind }), createdAt: new Date('2026-08-08T12:00:00.000Z') } })
-    await prisma.v2ProjectVersion.create({ data: { id: baseVersionId, workspaceId, projectId, sequence: 1, briefSnapshotId: snapshotIds[0], editPlanSnapshotId: snapshotIds[1], policiesSnapshotId: snapshotIds[2], baseHash: 'a'.repeat(64), createdBy: 'integration-test', createdAt: new Date('2026-08-08T12:00:00.000Z') } })
-    await prisma.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
+    const actor = Object.freeze({
+      clientId: 'integration-client', credentialId: 'integration-credential', workspaceId, environment: 'production',
+      authenticationKind: 'bearer', scopes: new Set(['projects:write']), clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active',
+      auditContext: createExternalAuditContext({ clientId: 'integration-client', credentialId: 'integration-credential', workspaceId, environment: 'production' }),
+    })
+    // The head the attachment is made against is a real sealed Version: root, then one explicit output variant.
+    const world = await seedSealedProject(prisma, { workspaceId, actor, prefix: 'library', ids: { project: projectId }, name: 'Target project' })
+    const baseVersion = world.head.version
+    const baseVersionId = baseVersion.id
     const artifacts = [
       { id: artifactIds[0], workspaceId, mediaType: 'video', container: 'mp4', status: 'available', byteSize: 1111n },
       { id: artifactIds[1], workspaceId, mediaType: 'audio', container: 'wav', status: 'available', byteSize: 2222n },
@@ -112,15 +100,23 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     assert.equal((await repository.list({ workspaceId }, new Date('2026-08-08T13:00:00.000Z'))).items.some((item) => item.id === artifactIds[3]), false)
 
     const attach = attachMediaLibraryItemService({ repository, clock: () => new Date('2026-08-08T13:00:00.000Z') })
-    const actor = { clientId: 'integration-client', credentialId: 'integration-credential', workspaceId, environment: 'production', authenticationKind: 'bearer', scopes: new Set(['projects:write']), auditContext: createExternalAuditContext({ clientId: 'integration-client', credentialId: 'integration-credential', workspaceId, environment: 'production' }) }
-    const attachRequest = { workspaceId, projectId, selection: { kind: 'asset', artifactId: artifactIds[0] }, baseVersionId, baseVersionHash: 'a'.repeat(64), idempotencyKey: `library-insert-${suffix}`, actor }
+    const attachRequest = { workspaceId, projectId, selection: { kind: 'asset', artifactId: artifactIds[0] }, baseVersionId, baseVersionHash: baseVersion.baseHash, idempotencyKey: `library-insert-${suffix}`, actor }
     const created = await attach(attachRequest)
     const replay = await attach(attachRequest)
     const storedCommand = await prisma.v2EditCommand.findUniqueOrThrow({ where: { id: created.commandId } })
     const persistedImpact = parseMediaLibraryAttachmentImpact(JSON.parse(storedCommand.payloadJson).impact)
     const storedVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: created.resultVersionId } })
-    assert.equal(persistedImpact.preservedEditPlanSnapshotId, snapshotIds[1])
-    assert.equal(storedVersion.editPlanSnapshotId, persistedImpact.preservedEditPlanSnapshotId)
+    // The impact names the plan the attachment preserved (the base's); the child Version carries that same plan under
+    // its own identity, so a render of the base stays valid and the plan content is untouched.
+    assert.equal(persistedImpact.preservedEditPlanSnapshotId, baseVersion.snapshotRefs.editPlan)
+    assert.notEqual(storedVersion.editPlanSnapshotId, persistedImpact.preservedEditPlanSnapshotId)
+    const semantics = (row) => { const { id: _id, projectVersionId: _version, createdAt: _at, ...body } = JSON.parse(row.contentJson); return body }
+    assert.deepEqual(
+      semantics(await prisma.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: storedVersion.editPlanSnapshotId } })),
+      semantics(await prisma.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: persistedImpact.preservedEditPlanSnapshotId } })),
+    )
+    assert.equal(storedVersion.outputContractVersion, 3)
+    assert.equal(storedVersion.parentVersionId, baseVersionId)
     assert.equal(persistedImpact.resultVersionId, storedVersion.id)
     assert.equal(persistedImpact.baseVersionId, baseVersionId)
     assert.deepEqual(persistedImpact.minimalRenders, [])
@@ -239,7 +235,6 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     assert.ok([...page24.items, ...tail.items].some((item) => item.kind === 'segment'))
     await assert.rejects(() => repository.list({ workspaceId: otherWorkspaceId, limit: 24, after: page24.nextCursor }, new Date()), /cursor/i)
   } finally {
-    await cleanup()
     await prisma.$disconnect()
   }
 })
