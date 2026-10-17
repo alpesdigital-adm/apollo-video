@@ -30,7 +30,7 @@ export async function seedDashboardControlledExportFixture(input) {
   assert.equal(typeof compileColorPipeline, 'function', 'Seed must compile its actual color pipeline before inserting operation details')
   const { calculateVersionHash, stableSerialize } = await import('../../../src/v2/application/version-hash.ts')
   const { compileInitialSourceEditPlan } = await import('../../../src/v2/application/apply-editorial-cut-command.ts')
-  const { createProjectVersion } = await import('../../../src/v2/domain/project-version.ts')
+  const { rebuildRetiredContractOneVersion } = await import('../../../src/v2/domain/project-version.ts')
   const { createMediaArtifactManifestV2 } = await import('../../../src/v2/domain/media-artifact.ts')
   const { createMediaColorProbe } = await import('../../../src/v2/domain/color-and-export.ts')
   const { assetRightsRevision } = await import('../../../src/v2/domain/asset-rights.ts')
@@ -147,7 +147,7 @@ export async function seedDashboardControlledExportFixture(input) {
     [refs.brief, 'brief', 1, brief], [refs.policies, 'policies', 1, policies], [refs.editPlan, 'edit-plan', 2, initialPlan],
   ]) await client.v2ProjectSnapshot.create({ data: { id: snapshotId, workspaceId, projectId, kind, schemaVersion,
     contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt } })
-  const baseVersion = createProjectVersion({ id: baseVersionId, workspaceId, projectId, sequence: 1,
+  const baseVersion = rebuildRetiredContractOneVersion({ id: baseVersionId, workspaceId, projectId, sequence: 1,
     snapshotRefs: refs, baseHash: calculateVersionHash({ schemaVersion: 'controlled-dashboard-mechanical-base/v1',
       workspaceId, projectId, baseVersionId, snapshots: { brief: calculateVersionHash(brief), policies: calculateVersionHash(policies),
         editPlan: calculateVersionHash(initialPlan) }, sourceManifestHash: sourceManifestOwn.manifestHash, transcriptHash: transcript.transcriptHash }),

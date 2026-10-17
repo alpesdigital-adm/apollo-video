@@ -35,7 +35,7 @@ export type ProjectVersionInput = Omit<ProjectVersion,
   previousBaseHash: string | null
 }
 
-/** Audit-only history has a separate type. It cannot enter createProjectVersion
+/** Audit-only history has a separate type. It cannot enter rebuildRetiredContractOneVersion
  * or any operational reader accepting ProjectVersion. No automatic fallback. */
 export interface HistoricalProjectVersionAudit {
   kind: 'historical-project-version-audit'
@@ -56,7 +56,12 @@ function requireIdentifier(value: string, field: string): void {
   )
 }
 
-export function createProjectVersion(input: ProjectVersionInput): Readonly<ProjectVersion> {
+/**
+ * Retired contract one. It recomputes the Version a legacy contract-one bundle claims so that history can still be
+ * validated; nothing operational constructs a Version through it and it is never written. Operational Versions are
+ * only ever sealed by the output state transition (contracts two and three). The domain layer alone may call it.
+ */
+export function rebuildRetiredContractOneVersion(input: ProjectVersionInput): Readonly<ProjectVersion> {
   validateOutputCanonicalPolicy(input)
   requireIdentifier(input.id, 'id')
   requireIdentifier(input.workspaceId, 'workspaceId')
@@ -132,13 +137,6 @@ export function createProjectVersion(input: ProjectVersionInput): Readonly<Proje
     }),
   })
 }
-
-/**
- * Retired contract one. It recomputes the Version a legacy contract-one bundle claims so that history can still be
- * validated; nothing operational constructs a Version through it, and it is never written. Operational Versions are
- * only ever sealed by the output state transition (contracts two and three).
- */
-export const rebuildRetiredContractOneVersion = createProjectVersion
 
 export function createHistoricalProjectVersionAudit(input: {
   outputContractVersion: 0

@@ -16,7 +16,7 @@ import { createProjectForkDerivationV2, materializeForkEditPlanV2, buildForkRend
 import { calculateRenderablePlanHash } from '../../src/v2/domain/renderable-plan-authority.ts'
 import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
 import { createEditCommand } from '../../src/v2/domain/edit-command.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { rebuildRetiredContractOneVersion } from '../../src/v2/domain/project-version.ts'
 import { buildCreationOutputVersionBundleV2, validateCreationOutputVersionBundleV2, buildOutputVersionBundle } from '../../src/v2/domain/output-version-bundle.ts'
 import { createQueuedPublicOperation } from '../../src/v2/domain/public-operation.ts'
 import { assertCreationRecompositionV2 } from '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
@@ -359,7 +359,7 @@ function contentSource(compiled = false, music = false, secondaryAudio = false) 
     invalidations: [], createdAt }, { editPlanDocument: edit, renderablePlanDocument: renderable })
   const body = outputBoundVersionHashBody({ ...scope, resultVersionId: versionId, parentVersionId: variant.version.id,
     previousBaseHash: variant.version.baseHash, producerHash: state.document.producer.hash, outputStateId: stateId, outputStateHash: state.stateHash })
-  const version = createProjectVersion({ ...policy, ...scope, id: versionId, sequence: 3, parentVersionId: variant.version.id,
+  const version = rebuildRetiredContractOneVersion({ ...policy, ...scope, id: versionId, sequence: 3, parentVersionId: variant.version.id,
     snapshotRefs: { ...variant.version.snapshotRefs, editPlan: 'snapshot-content-source' }, commandId: sourceCommand.id,
     baseHash: calculateOutputBoundVersionHash(body), outputState: state, previousBaseHash: variant.version.baseHash,
     createdBy: audit.clientId, createdAt })
@@ -741,7 +741,7 @@ test('Fork remaps only owned contract containers and preserves external/anonymou
   source.state = createProjectOutputState(stateDocument, source.facts)
   const body = outputBoundVersionHashBody({ ...scope, resultVersionId: source.version.id, parentVersionId: source.version.parentVersionId,
     previousBaseHash: source.previousBaseHash, producerHash: source.state.document.producer.hash, outputStateId: source.state.document.id, outputStateHash: source.state.stateHash })
-  source.version = createProjectVersion({ ...source.version, outputState: source.state, previousBaseHash: source.previousBaseHash, baseHash: calculateOutputBoundVersionHash(body) })
+  source.version = rebuildRetiredContractOneVersion({ ...source.version, outputState: source.state, previousBaseHash: source.previousBaseHash, baseHash: calculateOutputBoundVersionHash(body) })
   source.outputBaseHashJson = serializeOutputCanonicalJson(body)
   source.renderableFacts = { ...source.renderableFacts, planJson: JSON.stringify(renderable), planHash: calculateRenderablePlanHash(renderable) }
   input.sourceRenderablePlanSnapshot = source.renderableFacts
@@ -812,7 +812,7 @@ function operationalForkInput(music=true,secondaryAudio=false,compiled=true) {
   const base=outputBoundVersionHashBody({...scope,resultVersionId:source.version.id,parentVersionId:source.version.parentVersionId,previousBaseHash:source.previousBaseHash,
     producerHash:source.state.document.producer.hash,outputStateId:source.state.document.id,outputStateHash:source.state.stateHash})
   const versionInput=structuredClone(source.version);delete versionInput.schemaVersion;delete versionInput.outputContractVersion;delete versionInput.outputStateId;delete versionInput.outputStateHash
-  source.version=createProjectVersion({...versionInput,baseHash:calculateOutputCanonicalHash(base),outputState:source.state,previousBaseHash:source.previousBaseHash})
+  source.version=rebuildRetiredContractOneVersion({...versionInput,baseHash:calculateOutputCanonicalHash(base),outputState:source.state,previousBaseHash:source.previousBaseHash})
   source.outputBaseHashJson=serializeOutputCanonicalJson(base)
   // Refresh the older isolated kernel under the same explicit target identities.
   raw.source=source;raw.cropDecisions[0].sourceOverlayHash=calculateOutputCanonicalHash(source.state.document.overlays[0])

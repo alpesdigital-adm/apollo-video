@@ -6,7 +6,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createOutputSpecRevisionBody } from '../../src/v2/domain/output-spec-revision.ts'
 import { createProjectOutputState, calculateOutputBoundVersionHash,
   createIngestOutputVersionProducer, createOutputPlanAuthority } from '../../src/v2/domain/project-output-state.ts'
-import { createProjectVersion, createHistoricalProjectVersionAudit } from '../../src/v2/domain/project-version.ts'
+import { rebuildRetiredContractOneVersion, createHistoricalProjectVersionAudit } from '../../src/v2/domain/project-version.ts'
 import { createOutputVariantCommand } from '../../src/v2/domain/output-variant-command.ts'
 import { calculateOutputCanonicalHash, OUTPUT_CANONICAL_POLICY_VERSION,
   serializeOutputCanonicalJson } from '../../src/v2/domain/output-canonical-policy.ts'
@@ -91,7 +91,7 @@ function resealGeometry(value, bindProbe = true) {
 }
 function versionOf(state, overrides = {}) {
   const body = state.document
-  return createProjectVersion({ ...policy, id: body.resultVersionId, workspaceId: body.workspaceId, projectId: body.projectId,
+  return rebuildRetiredContractOneVersion({ ...policy, id: body.resultVersionId, workspaceId: body.workspaceId, projectId: body.projectId,
     sequence: 1, snapshotRefs: { editPlan: body.editPlan.snapshotId, policies: 'snapshot-policies' },
     baseHash: calculateOutputBoundVersionHash({ workspaceId: body.workspaceId, projectId: body.projectId,
       resultVersionId: body.resultVersionId, parentVersionId: null, previousBaseHash: null,
@@ -535,7 +535,7 @@ test('W66 historical contract zero remains audit-only and cannot hydrate an oper
     document: { schemaVersion: 1, historical: true } })
   assert.equal(audit.kind, 'historical-project-version-audit')
   assert.equal(audit.outputContractVersion, 0)
-  assert.throws(() => createProjectVersion({ ...audit, ...policy, sequence: 1, snapshotRefs: { editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
+  assert.throws(() => rebuildRetiredContractOneVersion({ ...audit, ...policy, sequence: 1, snapshotRefs: { editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
     previousBaseHash: null, createdBy: 'actor-output', createdAt }), /requires its sealed/)
 })
 

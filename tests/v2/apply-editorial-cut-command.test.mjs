@@ -10,7 +10,6 @@ import { buildOperationalOutputVersionBundleV3 } from '../../src/v2/domain/outpu
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createEditorialCutImpactV2, createEditorialCutInvalidations, parseEditorialCutImpactV2 } from '../../src/v2/domain/editorial-cut-impact.ts'
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 

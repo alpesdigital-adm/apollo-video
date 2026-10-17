@@ -25,7 +25,7 @@ import { critiqueOutputFormat, selectExportableVariants } from '../../src/v2/dom
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { rebuildRetiredContractOneVersion } from '../../src/v2/domain/project-version.ts'
 import {
   advancePublicOperationPhase,
   retryOrFailPublicOperation,
@@ -196,7 +196,7 @@ const currentTranscript = transcriptFromSourceFrames([['rascunho', 6, 15]])
 const replacementTranscript = transcriptFromSourceFrames(WORD_SOURCE_FRAMES)
 
 function baseVersion() {
-  return createProjectVersion({
+  return rebuildRetiredContractOneVersion({
     id: 'version-base', workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
     sequence: 4, parentVersionId: 'version-parent',
     snapshotRefs: { brief: 'snapshot-brief', editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },

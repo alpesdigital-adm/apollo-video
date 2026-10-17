@@ -6,7 +6,7 @@ import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-cont
 import { createPublicEvent } from '../../src/v2/domain/public-event.ts'
 import { calculateCanonicalHash,stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createProjectCreationCommand,createProjectCreationOutputCommandV2,normalizeProjectCreationIntentV2 } from '../../src/v2/domain/project-creation-command.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { rebuildRetiredContractOneVersion } from '../../src/v2/domain/project-version.ts'
 import { createOutputSpecRevisionBody,createOutputVariant } from '../../src/v2/domain/output-spec-revision.ts'
 import { createOutputVariantCommand } from '../../src/v2/domain/output-variant-command.ts'
 import { createProjectOutputState,createOutputPlanAuthority,calculateOutputBoundVersionHash,outputBoundVersionHashBody } from '../../src/v2/domain/project-output-state.ts'
@@ -94,7 +94,7 @@ function rootFixture(world, { optionalSnapshots = false, forkSource = null } = {
 
 function versionFor(world, state, { sequence, briefId, policiesId, treatmentId, storyId, previousBaseHash, parentVersionId, commandId, forkSource }) {
   const body = state.document
-  return createProjectVersion({ ...policy, id: body.resultVersionId, workspaceId: body.workspaceId, projectId: body.projectId,
+  return rebuildRetiredContractOneVersion({ ...policy, id: body.resultVersionId, workspaceId: body.workspaceId, projectId: body.projectId,
     sequence, ...(parentVersionId ? { parentVersionId } : {}), ...(commandId ? { commandId } : {}),
     ...(forkSource ? { forkedFromProjectId: forkSource.projectId, forkedFromVersionId: forkSource.version.id } : {}),
     snapshotRefs: { brief: briefId, policies: policiesId, editPlan: body.editPlan.snapshotId,

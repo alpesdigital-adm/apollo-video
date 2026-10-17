@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { Prisma, PrismaClient } from '../../../generated/prisma-v2/index.js'
 import { cancelPublicOperationService } from '../../../src/v2/application/cancel-public-operation.ts'
 import { createAssetRightsSnapshot } from '../../../src/v2/domain/asset-rights.ts'
-import { createProjectVersion } from '../../../src/v2/domain/project-version.ts'
+import { rebuildRetiredContractOneVersion } from '../../../src/v2/domain/project-version.ts'
 import { calculateVersionHash } from '../../../src/v2/application/version-hash.ts'
 import { DomainError } from '../../../src/v2/domain/errors.ts'
 import { stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
@@ -171,7 +171,7 @@ export function fenceRightsRow(rights) {
 
 export function createFenceChildVersion(world, base, editPlanHash, id) {
   const sequence = base.sequence + 1
-  return createProjectVersion({ id, workspaceId: world.workspaceId,
+  return rebuildRetiredContractOneVersion({ id, workspaceId: world.workspaceId,
     projectId: world.projectId, sequence, parentVersionId: base.id,
     snapshotRefs: { ...(base.briefSnapshotId ? { brief: base.briefSnapshotId } : {}),
       ...(base.treatmentSnapshotId ? { treatment: base.treatmentSnapshotId } : {}),

@@ -23,7 +23,7 @@ import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeli
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { rebuildRetiredContractOneVersion } from '../../src/v2/domain/project-version.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
@@ -283,7 +283,7 @@ const replacementTranscript = transcriptFromSourceFrames(WORD_SOURCE_FRAMES)
 const repeatReplacementTranscript = transcriptFromSourceFrames(REPEAT_WORD_SOURCE_FRAMES)
 
 function baseVersion() {
-  return createProjectVersion({
+  return rebuildRetiredContractOneVersion({
     id: 'version-base', workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
     sequence: 4, parentVersionId: 'version-parent',
     snapshotRefs: { brief: 'snapshot-brief', editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
