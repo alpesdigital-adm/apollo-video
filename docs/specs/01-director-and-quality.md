@@ -169,6 +169,12 @@ selecionada tornou o CTA observável; revisão 2, rubrica
 `conversion-sale/v1`, supersessão e QualityReport foram relidos do estado
 persistido. Isso comprova integração/E2E do slice, não implantação ou aceite.
 
+Essa evidência permanece histórica e vinculada ao SHA citado. Na fonte atual
+de 12/10/2026, o positivo de mudança após aprovação ainda precisa ser repetido:
+a jornada manual do commit `69323366` prova a rejeição pública da mudança sem
+aprovação e a repetição de `discovery`, sem supersessão artificial. Ela não
+transfere a aprovação do critic histórico nem comprova uma nova revisão 2.
+
 ### 7.2 Entradas opcionais
 
 - Briefing livre.

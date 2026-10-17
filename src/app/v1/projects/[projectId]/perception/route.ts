@@ -93,6 +93,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
       id: result.timeline.id,
       projectId: result.timeline.projectId,
       projectVersionId: result.timeline.projectVersionId,
+      origin: result.timeline.origin,
       timeline: result.timeline.timeline,
       createdAt: result.timeline.createdAt,
       replayed: result.replayed,

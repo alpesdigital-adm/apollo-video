@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { errorMonitor } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
@@ -90,6 +91,11 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createDesiredAction, createDesiredActionReference } = await import('../../src/v2/domain/desired-action.ts')
   const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
+  const { createMediaArtifactManifestV2, assertMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
+  const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
+  const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+  const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
+  const { closeOwnedBrowser, observeOwnedBrowserLifecycle, boundedOwnedBrowserCleanup } = await import('./helpers/library-browser-proof.mjs')
   const fixtures = await import('./wave20-fixtures.mjs')
 
   const client = new PrismaClient()
@@ -118,11 +124,14 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   const artifactRoot = mkdtempSync(join(tmpdir(), 'apollo-w20-ui-'))
   let server
   let browser
+  let browserServer, browserChild, context, primaryError, serverClose
+  const serverLifecycle = { pid: null, exitObserved: false, closeObserved: false, signalAttempt: null }
 
-  const clean = async () => {
-    await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } })
-    for (const table of [
+  const clean = async (stage = (_name, action) => action()) => {
+    await stage('db-detach-rights', () => client.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null } }))
+    await stage('db-detach-project-head', () => client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } }))
+    await stage('db-detach-command', () => client.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } }))
+    for (const [ordinal, table] of [
       client.v2ColorCriticProposedDelta, client.v2ColorCriticIssue,
       client.v2ColorCriticDimensionResult, client.v2ColorCriticReportMeasurement,
       client.v2ColorCriticReport,
@@ -144,16 +153,18 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       client.v2CommandArtifactInvalidation, client.v2PublicEventOutbox,
       client.v2EditCommand, client.v2ProjectVersion,
       client.v2ProjectMediaAsset, client.v2ProjectSnapshot,
-      client.v2MediaArtifactManifest, client.v2MediaArtifact,
+      client.v2AssetUseDecision, client.v2AssetRightsChange,
+      client.v2MediaArtifactLineage, client.v2MediaArtifactManifest,
+      client.v2AssetRightsSnapshot, client.v2MediaArtifact,
       client.v2Project,
-    ]) {
-      await table.deleteMany({ where: { workspaceId } })
+    ].entries()) {
+      await stage(`db-delete-${ordinal}`, () => table.deleteMany({ where: { workspaceId } }))
     }
     // Before the API client, not after: bootstrap login provisions a UI
     // principal pointing at it, and that relation is onDelete: Restrict.
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    await stage('db-delete-ui-principal', () => client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } }))
+    await stage('db-delete-api-client', () => client.v2ApiClient.deleteMany({ where: { workspaceId } }))
+    await stage('db-delete-workspace', () => client.v2Workspace.deleteMany({ where: { id: workspaceId } }))
   }
 
   try {
@@ -298,6 +309,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     })
 
     const sessions = new PrismaCaptureSessionRepository(client)
+    const rightsRepository = new PrismaAssetRightsRepository(client)
     const world = fixtures.buildDirectableMulticamWorld({
       workspaceId, sessionId, projectId, trackPrefix, ingest,
     })
@@ -307,9 +319,20 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     for (const track of world.session.tracks) {
       const artifactId = track.sourceAssetId
       const mediaType = ['microphone', 'master-audio', 'scratch-audio'].includes(track.role) ? 'audio' : 'video'
+      const role = artifactId === masterCameraAssetId ? 'source-master' : 'selected-insert'
+      const artifactKey = `artifacts/${artifactId}.mp4`
+      // These are controlled source-link metadata, not new physical recordings.
+      // Capture parts above name the separately generated ingest and its real SHA.
+      const manifest = createMediaArtifactManifestV2({
+        artifactKey, artifactSha256: sha('f'), byteSize: 4096, mediaType, container: 'mp4',
+        recipe: { id: 'capture-ingest', version: '1.0.0',
+          parameters: { fixture: 'wave20-operator-source-link', trackId: track.trackId } },
+        sources: [],
+        probe: mediaType === 'video' ? { width: 64, height: 64, duration: 300, fps: 30 } : { duration: 300 },
+      })
       await client.v2MediaArtifact.create({
         data: {
-          id: artifactId, workspaceId, artifactKey: `artifacts/${artifactId}.mp4`,
+          id: artifactId, workspaceId, artifactKey,
           sha256: sha('f'), byteSize: BigInt(4_096), mediaType, container: 'mp4',
           status: 'available', createdAt,
         },
@@ -317,12 +340,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       await client.v2MediaArtifactManifest.create({
         data: {
           id: `w20-ui-manifest-${artifactId}`, workspaceId, artifactId,
-          schemaVersion: 'media-artifact-manifest/v1', manifestHash: sha('7'),
-          recipeId: 'capture-ingest', recipeVersion: '1.0.0', parametersHash: sha('8'),
-          manifestJson: JSON.stringify({
-            artifact: { artifactKey: `artifacts/${artifactId}.mp4` },
-            probe: { duration: 300, fps: 30, rFrameRate: '30/1' },
-          }),
+          schemaVersion: manifest.schemaVersion, manifestHash: manifest.manifestHash,
+          recipeId: manifest.recipe.id, recipeVersion: manifest.recipe.version,
+          parametersHash: manifest.recipe.parametersHash, manifestJson: stableSerialize(manifest),
           createdAt,
         },
       })
@@ -330,10 +350,39 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
         data: {
           // A UUID column, not a readable id: the row is keyed by one.
           id: randomUUID(), workspaceId, projectId, artifactId,
-          role: artifactId === masterCameraAssetId ? 'source-master' : 'selected-insert',
+          role,
           originalFileName: `${artifactId}.mp4`, createdAt,
         },
       })
+      const [storedArtifact, storedManifest] = await Promise.all([
+        client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } }),
+        client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: `w20-ui-manifest-${artifactId}` } }),
+      ])
+      assertMediaArtifactManifest(JSON.parse(storedManifest.manifestJson))
+      assert.deepEqual(JSON.parse(storedManifest.manifestJson), manifest)
+      assert.deepEqual([storedArtifact.workspaceId, storedArtifact.artifactKey, storedArtifact.sha256,
+        storedArtifact.byteSize, storedArtifact.mediaType, storedArtifact.container],
+      [workspaceId, artifactKey, manifest.artifact.sha256, 4096n, mediaType, 'mp4'])
+      assert.deepEqual([storedManifest.workspaceId, storedManifest.artifactId, storedManifest.schemaVersion,
+        storedManifest.manifestHash, storedManifest.recipeId, storedManifest.recipeVersion, storedManifest.parametersHash],
+      [workspaceId, artifactId, manifest.schemaVersion, manifest.manifestHash,
+        manifest.recipe.id, manifest.recipe.version, manifest.recipe.parametersHash])
+      const use = role === 'source-master' ? 'rendering' : 'editorial-reuse'
+      const rights = await setAssetRightsService({ repository: rightsRepository,
+        clock: () => createdAt, createId: () => `w20-ui-rights-${artifactId}` })({ workspaceId, artifactId,
+        baseRevision: assetRightsRevision(artifactId, 0),
+        draft: { status: 'approved', allowedUses: [use], prohibitedUses: [], allowedLocales: ['pt-BR'],
+          consent: { status: 'not-required', allowedUses: [] },
+          sourceNote: 'Owner-controlled synthetic Wave20 source-link fixture; not an external recording license' },
+        actor: { type: 'api-client', id: issued.client.id } })
+      const readback = (await rightsRepository.findCurrentForArtifacts(workspaceId, [artifactId])).get(artifactId)
+      assert.equal(readback?.snapshotHash, rights.snapshot.snapshotHash)
+      assert.equal(readback?.createdBy.id, issued.client.id)
+      assert.equal(rights.revision, assetRightsRevision(artifactId, 1))
+      assert.deepEqual(readback?.allowedUses, [use])
+      assert.equal(evaluateAssetUse(readback, { workspaceId, use, locale: 'pt-BR' }, createdAt).outcome, 'allow')
+      assert.notEqual(evaluateAssetUse(readback, { workspaceId,
+        use: use === 'rendering' ? 'editorial-reuse' : 'rendering', locale: 'pt-BR' }, createdAt).outcome, 'allow')
     }
     for (const version of world.versions) {
       await sessions.appendVersion({
@@ -528,6 +577,17 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    serverLifecycle.pid = server.pid
+    server.once(errorMonitor, (error) => {
+      const message = String(error?.message ?? error)
+      serverLifecycle.error = { at: Date.now(), code: typeof error?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code) ? error.code : null,
+        messageSha256: createHash('sha256').update(message).digest('hex'), messageBytes: Buffer.byteLength(message) }
+    })
+    server.once('exit', (code, signal) => { Object.assign(serverLifecycle, { exitObserved: true, exitCode: code, exitSignal: signal, exitAt: Date.now() }) })
+    serverClose = new Promise((resolve) => server.once('close', (code, signal) => {
+      Object.assign(serverLifecycle, { closeObserved: true, closeCode: code, closeSignal: signal, closeAt: Date.now() })
+      resolve()
+    }))
     server.stdout.on('data', (chunk) => { serverLogs += String(chunk) })
     server.stderr.on('data', (chunk) => { serverLogs += String(chunk) })
     await waitForServer(baseUrl, server)
@@ -618,8 +678,12 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     assert.ok(executablePath, 'set PLAYWRIGHT_CHROME_EXECUTABLE to run the Wave 20 operator browser E2E')
 
     const { chromium } = await import('playwright-core')
-    browser = await chromium.launch({ executablePath, headless: true })
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1600 } })
+    browserServer = await chromium.launchServer({ executablePath, headless: true })
+    browserChild = browserServer.process()
+    observeOwnedBrowserLifecycle(browserServer, browserChild)
+    assert.ok(browserChild?.pid, 'Owned Wave20 browser must expose its real child process')
+    browser = await chromium.connect(browserServer.wsEndpoint())
+    context = await browser.newContext({ viewport: { width: 1440, height: 1600 } })
     // Bounded on purpose. A journey that drives six commands has many places to
     // wait, and a CI job that hangs says less than one that fails: the default
     // is generous enough for a production build on a cold cache and short
@@ -1381,25 +1445,75 @@ ${serverLogs.slice(-2_000)}`,
       + `direction v1 -> v2 and project version ${projectVersionId} -> ${advanced.version.id}, `
       + 'with the replay, the stale fence and the repeated request each answered differently',
     )
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
-    if (browser) await browser.close()
-    if (server && server.exitCode === null) {
-      server.kill('SIGTERM')
-      await new Promise((resolve) => setTimeout(resolve, 500))
+    const errors = [], boundedSteps = []
+    let browserTerminal = !browserServer, nextTerminal = !server, clientDisconnected = false, databaseCleaned = false
+    const diagnostic = (error) => {
+      const message = String(error?.message ?? error)
+      return { code: typeof error?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code) ? error.code : null,
+        messageSha256: createHash('sha256').update(message).digest('hex'), messageBytes: Buffer.byteLength(message) }
     }
-    // Reported, not rethrown: a cleanup failure that masks the real assertion
-    // turns one clear defect into two confusing ones.
-    try {
-      await clean()
-    } catch (error) {
-      console.error('cleanup failed:', error?.message ?? error)
-    } finally {
-      await client.$disconnect()
+    const emit = (record, failure = false) => {
+      try { console[failure ? 'error' : 'log'](JSON.stringify(record)) } catch (error) { errors.push(error) }
+    }
+    const stage = async (name, action) => {
+      const startedAt = Date.now(), started = performance.now()
+      emit({ kind: 'wave20-cleanup', stage: name, event: 'started', startedAt })
       try {
-        rmSync(artifactRoot, { recursive: true, force: true })
+        const result = await action()
+        emit({ kind: 'wave20-cleanup', stage: name, event: 'completed', startedAt,
+          completedAt: Date.now(), elapsedMs: performance.now() - started })
+        return result
       } catch (error) {
-        console.error('artifact root cleanup failed:', error?.message ?? error)
+        emit({ kind: 'wave20-cleanup', stage: name, event: 'failed', startedAt,
+          completedAt: Date.now(), elapsedMs: performance.now() - started, error: diagnostic(error) }, true)
+        throw error
       }
     }
+    const attempt = async (name, action) => { try { await stage(name, action) } catch (error) { errors.push(error) } }
+    await attempt('browser', async () => {
+      if (!browserServer) return
+      const proof = await closeOwnedBrowser({ context, browser, server: browserServer, child: browserChild })
+      emit({ kind: 'wave20-browser-postflight', localBrowserLifecycleTerminal: proof.localBrowserLifecycleTerminal,
+        runCgroupTerminal: proof.runCgroupTerminal, terminalProofScope: proof.terminalProofScope, process: proof.process,
+        remaining: proof.remaining, lifecycle: proof.lifecycle, warnings: proof.warnings.map(diagnostic),
+        steps: proof.steps.map(({ error, ...step }) => ({ ...step, ...(error ? { error: diagnostic(error) } : {}) })) })
+      assert.equal(proof.localBrowserLifecycleTerminal, true, 'Owned Wave20 browser cleanup must observe real closes without warnings')
+      browserTerminal = true
+    })
+    await attempt('next-server', async () => {
+      if (!server) return
+      await boundedOwnedBrowserCleanup('wave20-next-server', async () => {
+        if (server.exitCode === null && server.signalCode === null) {
+          serverLifecycle.signalAttempt = { method: 'original-ChildProcess.kill', signal: 'SIGTERM', at: Date.now(), sent: server.kill('SIGTERM') }
+        }
+        await serverClose
+        assert.equal(serverLifecycle.closeObserved, true)
+        assert.equal(serverLifecycle.error, undefined, 'Owned Next spawn/process error must fail cleanup')
+      }, boundedSteps)
+      nextTerminal = true
+    })
+    await attempt('database-clean', async () => {
+      assert.ok(browserTerminal && nextTerminal, 'Retain fixture rows when browser/Next terminality is inconclusive')
+      await clean(stage)
+      databaseCleaned = true
+    })
+    await attempt('client-disconnect', async () => {
+      await boundedOwnedBrowserCleanup('wave20-client-disconnect', () => client.$disconnect(), boundedSteps)
+      clientDisconnected = true
+    })
+    await attempt('artifact-remove', async () => {
+      assert.ok(browserTerminal && nextTerminal && clientDisconnected && databaseCleaned,
+        'Retain artifact root when cleanup terminality is inconclusive')
+      rmSync(artifactRoot, { recursive: true, force: true })
+    })
+    emit({ kind: 'wave20-cleanup-summary', browserTerminal, nextTerminal, clientDisconnected, databaseCleaned,
+      nextTerminalProofScope: 'original-ChildProcess-close; descendants-require-external-run-owner-postflight',
+      serverLifecycle, steps: boundedSteps.map(({ error, ...step }) => ({ ...step, ...(error ? { error: diagnostic(error) } : {}) })),
+      primaryError: primaryError ? diagnostic(primaryError) : null, errors: errors.map(diagnostic) })
+    if (!primaryError && errors.length) throw new AggregateError(errors, 'Wave20 cleanup failed')
   }
 })

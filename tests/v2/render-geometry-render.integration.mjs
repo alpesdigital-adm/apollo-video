@@ -16,7 +16,7 @@ import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-
 import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
+const ffmpegPath = process.env.FFMPEG_BIN ?? require('ffmpeg-static')
 const colorMetadata = Object.freeze({
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
   range: 'limited', bitDepth: 8,

@@ -48,7 +48,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticScriptPlanRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-script-plan-repository.ts')
@@ -68,12 +68,12 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     let entity = 0
     let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-script-plan-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(700_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Plano de blocos', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'script-plan-project' } })
-    const projectId = project.project.id
-    const projectVersionId = project.version.id
+    })({ workspaceId, name: 'Plano de blocos', objective: 'awareness', actor, idempotencyKey: 'script-plan-project' })
+    const projectId = project.projectAtCreation.id
+    const projectVersionId = project.creationVersion.id
 
     await client.v2MediaArtifact.create({
       data: {

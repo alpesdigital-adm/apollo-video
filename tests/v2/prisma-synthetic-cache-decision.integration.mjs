@@ -58,7 +58,7 @@ test('T-FR-105 synthetic cache decisions persist idempotently, summarize by outc
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
 
@@ -90,19 +90,19 @@ test('T-FR-105 synthetic cache decisions persist idempotently, summarize by outc
     let entity = 0
     let event = 0
     const createProject = createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-cache-decision-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(810_000 + ++event).padStart(12, '0')}`,
     })
     const project = await createProject({
-      workspaceId, name: 'Ledger de cache', objective: 'awareness', format: '9:16',
-      actor, idempotency: { clientId: actor.clientId, key: 'cache-decision-project' },
+      workspaceId, name: 'Ledger de cache', objective: 'awareness',
+      actor, idempotencyKey: 'cache-decision-project',
     })
-    const projectId = project.project.id
-    const projectVersionId = project.version.id
+    const projectId = project.projectAtCreation.id
+    const projectVersionId = project.creationVersion.id
     const foreignProject = await createProject({
-      workspaceId: foreignWorkspaceId, name: 'Ledger alheio', objective: 'awareness', format: '9:16',
-      actor: foreignActor, idempotency: { clientId: foreignActor.clientId, key: 'cache-decision-foreign-project' },
+      workspaceId: foreignWorkspaceId, name: 'Ledger alheio', objective: 'awareness',
+      actor: foreignActor, idempotencyKey: 'cache-decision-foreign-project',
     })
 
     // The reuse candidate the ledger points at has to exist for real: the
@@ -281,7 +281,7 @@ test('T-FR-105 synthetic cache decisions persist idempotently, summarize by outc
 
     // 5. Cross-workspace invisibility: a neighbour's economy is never yours.
     await repository.record(createSyntheticCacheDecision({
-      id: 'scd-foreign-1', workspaceId: foreignWorkspaceId, projectId: foreignProject.project.id, subject,
+      id: 'scd-foreign-1', workspaceId: foreignWorkspaceId, projectId: foreignProject.projectAtCreation.id, subject,
       outcome: 'miss', reasonCode: 'CACHE_MISS_NO_CANDIDATE',
       reason: 'no approved generation carries this exact cache key',
       policyVersion: 'synthetic-presenter-eligibility-policy/v1', currency: 'USD',

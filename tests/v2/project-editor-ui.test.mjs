@@ -622,7 +622,7 @@ test('W22 the editor reads go through the coordinator and the review failure sta
   assert.match(projectEditorSource, /data-testid="review-unavailable"/, 'a failed review read is rendered as its own block')
   assert.match(projectEditorSource, /data-testid="review-unavailable-code"/, 'the block names the error code and request id')
   assert.match(projectEditorSource, /data-testid="review-retry"/, 'the retry is localised to the review read')
-  assert.match(projectEditorSource, /loadReview\(false, workspaceVersionId, true\)/, 'review retry is explicit')
+  assert.match(projectEditorSource, /loadReview\(false, manuallySelectedReviewVersionId\.current \?\? review\?\.session\.projectVersionId \?\? workspaceVersionId, true\)/, 'review retry explicitly preserves the selected version, then the loaded session, then the workspace version')
   assert.match(projectEditorSource, /loadProxyReview\(false, workspaceVersionId, true\)/, 'proxy review retry is explicit')
   assert.match(projectEditorSource, /disabled=\{reviewLoading \|\| reviewFailure !== null \|\| reviewSaving/, 'saving an annotation is disabled while the review is loading or failed')
   assert.doesNotMatch(projectEditorSource, /\}, \[projectId, router, uploadPhase\]\)/, 'loadWorkspace no longer changes identity on every upload phase')

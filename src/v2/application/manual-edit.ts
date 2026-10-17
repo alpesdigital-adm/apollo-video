@@ -17,7 +17,7 @@ import {
   type PersistedManualEditPayload,
 } from '../domain/manual-editing.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { transitionManualEditOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createManualCommandImpact } from '../domain/command-impact.ts'
 import {
@@ -93,7 +93,7 @@ export function readArtifactInvalidationsService(dependencies: {
 export function applyManualEditService(dependencies: {
   repository: ManualEditRepository
   clock: () => Date
-  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot') => string
+  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot' | 'project-output-state' | 'output-materialization') => string
   createEventId: () => string
 }) {
   return async function execute(request: {
@@ -212,7 +212,7 @@ export function applyManualEditService(dependencies: {
     }
     if (request.action === 'undo') {
       assertDomain(
-        context.version.parentVersionId === targetVersionId,
+        ('parentVersionId' in context.version ? context.version.parentVersionId : undefined) === targetVersionId,
         'INVALID_ARGUMENT',
         'Undo must restore the direct parent of the current version',
       )
@@ -235,6 +235,7 @@ export function applyManualEditService(dependencies: {
     const commandId = dependencies.createId('edit-command')
     const versionId = dependencies.createId('project-version')
     const snapshotId = dependencies.createId('project-snapshot')
+    const stateId = dependencies.createId('project-output-state')
     const editPlan = request.action === 'apply'
       ? materializeManualEditPlan({
           editPlan: context.editPlan,
@@ -308,27 +309,18 @@ export function applyManualEditService(dependencies: {
       contentHash: editPlanHash,
       createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: context.version.sequence + 1,
-      parentVersionId: context.version.id,
-      snapshotRefs: { ...context.version.snapshotRefs, editPlan: snapshotId },
-      baseHash: calculateVersionHash({
-        projectId,
-        sequence: context.version.sequence + 1,
-        parentVersionId: context.version.id,
-        previousBaseHash: context.version.baseHash,
-        commandId,
-        editPlanHash,
-        action: request.action,
-        targetVersionId: targetVersionId ?? null,
-      }),
-      createdBy: authenticationAudit.clientId,
-      commandId,
-      createdAt,
+    // The Command's own action decides the origin: a render-free selection inherits, undo/redo/restore return to
+    // an exact factual target, any other operation is a child Command that recompiles the plan.
+    const bundle = transitionManualEditOutputState({
+      parent: context.bundle, restoreTarget: request.action === 'apply' ? null : context.targetVersion!.bundle,
+      command, audit: authenticationAudit, requestFingerprint, editPlanSnapshot: snapshot,
+      allocation: {
+        workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: context.version.id,
+        sequence: context.version.sequence + 1, createdBy: authenticationAudit.clientId, createdAt,
+      },
+      createMaterializationId: () => dependencies.createId('output-materialization'),
     })
+    const version = bundle.version
     const comparison = Object.freeze({
       beforeVersionId: context.version.id,
       afterVersionId: version.id,
@@ -369,11 +361,7 @@ export function applyManualEditService(dependencies: {
       },
     })
     return dependencies.repository.commitOrReplay({
-      command,
-      authenticationAudit,
-      requestFingerprint,
-      snapshot,
-      version,
+      bundle,
       event,
       comparison,
       impact,

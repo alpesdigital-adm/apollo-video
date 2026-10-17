@@ -1,463 +1,116 @@
-import {
-  Prisma,
-  type PrismaClient,
-} from '../../../../generated/prisma-v2/index.js'
-
-import type {
-  EditorialCommandCommit,
-  EditorialCommandContext,
-  EditorialCommandRepository,
-  EditorialCommandResult,
-} from '../../application/ports/editorial-command-repository.ts'
-import type {
-  EditorialCutEditPlan,
-  RemoveSpokenContentPayload,
-} from '../../application/apply-editorial-cut-command.ts'
-import { stableSerialize } from '../../application/version-hash.ts'
-import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
+import type { EditorialCommandCommit, EditorialCommandContext, EditorialCommandRepository, EditorialCommandResult } from '../../application/ports/editorial-command-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
-import { createEditorialCutInvalidations, parseEditorialCutImpact } from '../../domain/editorial-cut-impact.ts'
-import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
+import { operationalBundlePlanV3, type OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import { createEditorialCutInvalidations } from '../../domain/editorial-cut-impact.ts'
+import { readEditorialMaterializedPlanV3 } from '../../domain/editorial-cut-impact.ts'
+import type { EditorialSourceBindingBodyV1, SealedOutputNormalizationV3 } from '../../domain/output-materialization.ts'
+import { PrismaOperationalOutputBundleRepositoryV3 } from './output-version-bundle-repository.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { readOutputNormalizationsV3 } from './output-version-materializer.ts'
+import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
-import {
-  editCommandExternalActorAuditData,
-  hydrateEditCommandExternalActorAudit,
-} from './edit-command-actor-audit.ts'
 
-type StoredCommand = Prisma.V2EditCommandGetPayload<{
-  include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true }
-}>
-
-function parseRecord(value: string, field: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid')
-    return parsed as Record<string, unknown>
-  } catch {
-    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
-  }
+export function editorialResultV3(bundle:OperationalOutputVersionBundleV3,replayed:boolean):EditorialCommandResult {
+  if(bundle.origin.kind!=='editorial-cut-command')throw new DomainError('PERSISTENCE_CONFLICT','Editorial result requires its explicit Command3 producer')
+  const command=bundle.origin.command,editPlan=readEditorialMaterializedPlanV3(JSON.parse(bundle.editPlanSnapshot.contentJson))
+  return Object.freeze({command,version:bundle.version,editPlan,exclusions:command.payload.exclusions,
+    retainedSourceRanges:editPlan.editorial.retainedSourceRanges,impact:command.payload.impact,
+    invalidations:createEditorialCutInvalidations({impact:command.payload.impact,createdAt:command.createdAt}),outputBundle:bundle,replayed})
 }
-
-function parseArray(value: string, field: string): readonly unknown[] {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    if (!Array.isArray(parsed)) throw new Error('invalid')
-    return parsed
-  } catch {
-    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
-  }
-}
-
-function hydrateStoredCommand(row: StoredCommand, replayed: boolean): EditorialCommandResult {
-  hydrateEditCommandExternalActorAudit(row)
-  if (!row.resultVersion) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial command result version is missing')
-  const scope = parseRecord(row.scopeJson, 'editorial command scope') as EditScope
-  const payload = parseRecord(row.payloadJson, 'editorial command payload') as unknown as RemoveSpokenContentPayload
-  const impact = parseEditorialCutImpact(payload.impact)
-  if (
-    row.type !== 'remove-spoken-content' || payload.schemaVersion !== 2 ||
-    impact.commandId !== row.id || impact.baseVersionId !== row.baseVersionId ||
-    impact.resultVersionId !== row.resultVersion.id ||
-    impact.sourceTranscriptId !== payload.sourceTranscriptId
-  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored editorial command impact is inconsistent')
-  const command = createEditCommand<RemoveSpokenContentPayload>({
-    id: row.id,
-    workspaceId: row.workspaceId,
-    projectId: row.projectId,
-    baseVersionId: row.baseVersionId,
-    baseHash: row.baseHash,
-    author: {
-      type: row.actorType as 'user' | 'director' | 'system' | 'api-client',
-      id: row.actorId,
-      ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
-    },
-    type: row.type,
-    scope,
-    payload,
-    ...(row.reason ? { reason: row.reason } : {}),
-    idempotencyKey: row.idempotencyKey,
-    createdAt: row.createdAt.toISOString(),
-  })
-  const versionRow = row.resultVersion
-  const version = createProjectVersion({
-    id: versionRow.id,
-    workspaceId: versionRow.workspaceId,
-    projectId: versionRow.projectId,
-    sequence: versionRow.sequence,
-    parentVersionId: versionRow.parentVersionId ?? undefined,
-    snapshotRefs: {
-      brief: versionRow.briefSnapshotId,
-      editPlan: versionRow.editPlanSnapshotId,
-      policies: versionRow.policiesSnapshotId,
-    },
-    baseHash: versionRow.baseHash,
-    createdBy: versionRow.createdBy,
-    commandId: versionRow.commandId ?? undefined,
-    createdAt: versionRow.createdAt.toISOString(),
-  })
-  const editPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'editorial EditPlan') as unknown as EditorialCutEditPlan
-  if (
-    editPlan.schemaVersion !== 2 ||
-    editPlan.state !== 'compiled' ||
-    editPlan.projectVersionId !== version.id ||
-    !editPlan.editorial ||
-    editPlan.editorial.commandType !== 'remove-spoken-content'
-  ) {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored editorial EditPlan is inconsistent')
-  }
-  const expectedInvalidations = createEditorialCutInvalidations({ impact, createdAt: row.createdAt.toISOString() })
-    .toSorted((left, right) => left.id.localeCompare(right.id))
-  const invalidations = row.artifactInvalidations.map((item) => parseCommandArtifactInvalidation({
-    schemaVersion: 'command-artifact-invalidation/v1', id: item.id, status: item.status,
-    commandId: item.commandId, baseVersionId: item.baseVersionId,
-    resultVersionId: item.resultVersionId, artifactId: item.artifactId,
-    kind: item.kind, variantId: item.variantId,
-    dependencyTypes: parseArray(item.dependencyTypesJson, 'editorial invalidation dependencies'),
-    affectedRanges: parseArray(item.affectedRangesJson, 'editorial invalidation ranges'),
-    impactHash: item.impactHash, createdAt: item.createdAt.toISOString(),
-  })).toSorted((left, right) => left.id.localeCompare(right.id))
-  if (stableSerialize(expectedInvalidations) !== stableSerialize(invalidations)) {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored editorial invalidations are inconsistent')
-  }
-  return Object.freeze({
-    command,
-    version,
-    editPlan: Object.freeze(editPlan),
-    exclusions: Object.freeze(editPlan.editorial.exclusions),
-    retainedSourceRanges: Object.freeze(editPlan.editorial.retainedSourceRanges),
-    impact,
-    invalidations: Object.freeze(invalidations),
-    replayed,
-  })
-}
-
-function isPrismaCode(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code
-}
-
+/** Exactly one writer: complete State/Version/Command/CAS/outbox in the shared
+ * operational owner. Historical unsealed Commands remain audit-only. */
 export class PrismaEditorialCommandRepository implements EditorialCommandRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
-
-  async findIdempotentResult(input: {
-    workspaceId: string
-    projectId: string
-    idempotencyKey: string
-    actorContextHash: string
-  }) {
-    const row = await this.client.v2EditCommand.findUnique({
-      where: {
-        workspaceId_projectId_idempotencyKey: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          idempotencyKey: input.idempotencyKey,
-        },
-      },
-      include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
-    })
-    if (!row) return null
-    if (
-      hydrateEditCommandExternalActorAudit(row).contextHash !==
-      input.actorContextHash
-    ) {
-      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Editorial command replay belongs to another authentication context')
-    }
-    return Object.freeze({
-      requestFingerprint: row.requestFingerprint,
-      result: hydrateStoredCommand(row, true),
-    })
+  private readonly client:PrismaClient
+  constructor(client:PrismaClient=getV2PostgresClient()){this.client=client}
+  async findIdempotentResult(input:Parameters<EditorialCommandRepository['findIdempotentResult']>[0]) {
+    const row=await this.client.v2EditCommand.findUnique({where:{workspaceId_projectId_idempotencyKey:{
+      workspaceId:input.workspaceId,projectId:input.projectId,idempotencyKey:input.idempotencyKey}}})
+    if(!row)return null
+    if(row.type!=='remove-spoken-content'||hydrateEditCommandExternalActorAudit(row).contextHash!==input.actorContextHash)
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH','Editorial replay key belongs to another actor or Command')
+    const children=await this.client.v2ProjectVersion.findMany({where:{commandId:row.id,workspaceId:input.workspaceId,projectId:input.projectId},take:2,select:{id:true}})
+    if(children.length!==1)throw new DomainError('PERSISTENCE_CONFLICT','Editorial replay lacks one exact committed child')
+    const bundle=await readPersistedOperationalOutputBundleV3(this.client,{workspaceId:input.workspaceId,projectId:input.projectId,versionId:children[0]!.id})
+    if(bundle?.schemaVersion!=='operational-output-version-bundle/v3'||bundle.origin.kind!=='editorial-cut-command'||bundle.origin.command.id!==row.id||
+      bundle.origin.requestFingerprint!==row.requestFingerprint)throw new DomainError('PERSISTENCE_CONFLICT','Editorial replay stored receipt differs')
+    return {requestFingerprint:row.requestFingerprint,result:editorialResultV3(bundle,true)}
   }
-
-  async readContext(input: {
-    workspaceId: string
-    projectId: string
-    transcriptId: string
-  }): Promise<Readonly<EditorialCommandContext> | null> {
-    const [project, transcriptRow] = await Promise.all([
-      this.client.v2Project.findFirst({
-        where: { id: input.projectId, workspaceId: input.workspaceId },
-        include: { currentVersion: { include: { editPlanSnapshot: true } } },
-      }),
-      this.client.v2MediaTranscript.findFirst({
-        where: { id: input.transcriptId, projectId: input.projectId, workspaceId: input.workspaceId },
-      }),
-    ])
-    if (!project?.currentVersion || !transcriptRow) return null
-    const [artifact, manifests, proxyOutputs, finalOutputs] = await Promise.all([
-      this.client.v2MediaArtifact.findFirst({
-        where: { id: transcriptRow.sourceArtifactId, workspaceId: input.workspaceId, status: 'available' },
-      }),
-      this.client.v2MediaArtifactManifest.findMany({
-        where: {
-          artifactId: transcriptRow.sourceArtifactId,
-          workspaceId: input.workspaceId,
-        },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: 32,
-      }),
-      this.client.v2ProjectProxyRenderOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true },
-      }),
-      this.client.v2ProjectFinalExportOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true, outputAspectRatio: true },
-      }),
-    ])
-    if (!artifact || manifests.length === 0) throw new DomainError('PERSISTENCE_CONFLICT', 'Transcript source artifact or manifest is missing')
-    const transcriptInput = parseRecord(transcriptRow.transcriptJson, 'aligned transcript') as unknown as {
-      language: string
-      text: string
-      words: { word: string; start: number; end: number }[]
-      segments: { id: number; start: number; end: number; text: string; confidence?: number }[]
-      provider: string
-      model: string
+  async readContext(input:Parameters<EditorialCommandRepository['readContext']>[0]):Promise<Readonly<EditorialCommandContext>|null> {
+    const project=await this.client.v2Project.findFirst({where:{id:input.projectId,workspaceId:input.workspaceId}})
+    if(!project?.currentVersionId)return null
+    if(project.status==='archived')throw new DomainError('PRECONDITION_REQUIRED','Editorial target is archived')
+    const parent=await readPersistedOperationalOutputBundleV3(this.client,{workspaceId:input.workspaceId,projectId:input.projectId,versionId:project.currentVersionId})
+    if(!parent)return null
+    if(!parent.state.document.entries.some(e=>e.variantId===input.variantId))throw new DomainError('PRECONDITION_REQUIRED','Editorial stable variant is absent from exact State')
+    const plan=JSON.parse(operationalBundlePlanV3(parent).contentJson)
+    if(plan.retimedTranscript?.sourceTranscriptId!==input.transcriptId)throw new DomainError('PRECONDITION_REQUIRED','Editorial transcript is not the actual parent alignment')
+    let authority:EditorialSourceBindingBodyV1['authority'];let observations:readonly SealedOutputNormalizationV3[];let manifestRefs:ReadonlyMap<string,{id:string;hash:string}>
+    if(parent.schemaVersion==='project-creation-output-bundle/v2') {
+      const fork=parent.command.payload.forkDerivation
+      if(fork?.schemaVersion!=='project-fork-derivation/v3'||fork.document.kernel.document.source.bundle.schemaVersion!=='operational-output-version-bundle/v3')
+        throw new DomainError('PRECONDITION_REQUIRED','Creation2 editorial requires a real observed source3 fork derivation')
+      const source=fork.document.kernel.document.source
+      authority={kind:'fork-derivation3',sourceProjectId:source.version.projectId,sourceVersionId:source.version.id,sourceBaseHash:source.version.baseHash,
+        sourceStateId:source.state.document.id,sourceStateHash:source.state.stateHash,forkRootVersionId:parent.version.id,
+        forkRootStateId:parent.state.document.id,forkRootStateHash:parent.state.stateHash,derivationId:fork.document.id,derivationHash:fork.derivationHash}
+      observations=source.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[])
+      manifestRefs=new Map(fork.document.sourceReferences.map(r=>[r.artifactId,{id:r.manifestFacts.id,hash:r.manifestFacts.manifestHash}]))
+    } else {
+      const previous=parent.origin.kind==='editorial-cut-command'?parent.origin.command.payload.sourceBinding.document:null
+      authority=previous?.authority??{kind:'same-project-state3',sourceProjectId:parent.version.projectId,sourceVersionId:parent.version.id,
+        sourceBaseHash:parent.version.baseHash,sourceStateId:parent.state.document.id,sourceStateHash:parent.state.stateHash,
+        forkRootVersionId:null,forkRootStateId:null,forkRootStateHash:null,derivationId:null,derivationHash:null}
+      observations=parent.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[])
+      manifestRefs=previous?new Map(previous.inventory.map(i=>[i.artifactId,{id:i.manifestId,hash:i.manifestHash}])):
+        new Map(observations.flatMap(n=>[n.document.source,n.document.derivative]).map(f=>[f.artifactId,{id:f.manifestId,hash:f.manifest.manifestHash}]))
     }
-    const transcript = createMediaTranscript({
-      language: transcriptInput.language,
-      text: transcriptInput.text,
-      words: transcriptInput.words,
-      segments: transcriptInput.segments,
-      provider: transcriptInput.provider,
-      model: transcriptInput.model,
-    })
-    if (transcript.transcriptHash !== transcriptRow.transcriptHash) {
-      throw new DomainError('PERSISTENCE_CONFLICT', 'Aligned transcript hash does not match persisted identity')
+    const originals=new Map(observations.map(n=>[n.document.id,n]))
+    if(!originals.size)throw new DomainError('PRECONDITION_REQUIRED','Editorial source normalization authority is absent')
+    const normalizations:SealedOutputNormalizationV3[]=[]
+    for(const n of originals.values()) {
+      const actual=await readOutputNormalizationsV3(this.client,{workspaceId:input.workspaceId,projectId:n.document.projectId,ids:[n.document.id],lock:false})
+      if(actual[0]!.receiptHash!==n.receiptHash)throw new DomainError('PERSISTENCE_CONFLICT','Editorial original receipt changed')
+      normalizations.push(actual[0]!)
     }
-    const probeRecord = manifests.flatMap((candidate) => {
-      const record = parseRecord(candidate.manifestJson, 'source media manifest')
-      const probe = record.probe
-      return typeof probe === 'object' && probe !== null && !Array.isArray(probe)
-        ? [probe as Record<string, unknown>]
-        : []
-    }).find((probe) => Number.isFinite(Number(probe.duration)) && Number.isFinite(Number(probe.fps)))
-    if (!probeRecord) throw new DomainError('PERSISTENCE_CONFLICT', 'Source media manifests have no probe evidence')
-    const sourceDurationSeconds = Number(probeRecord.duration)
-    const sourceFps = Number(probeRecord.fps)
-    if (!Number.isFinite(sourceDurationSeconds) || sourceDurationSeconds <= 0 || !Number.isFinite(sourceFps) || sourceFps <= 0) {
-      throw new DomainError('PERSISTENCE_CONFLICT', 'Source media duration or frame rate is invalid')
+    const t=await this.client.v2MediaTranscript.findFirst({where:{id:input.transcriptId,projectId:authority.sourceProjectId,workspaceId:input.workspaceId}})
+    if(!t)throw new DomainError('PRECONDITION_REQUIRED','Editorial original transcript producer is absent')
+    const transcript=JSON.parse(t.transcriptJson),{schemaVersion:_schema,transcriptHash:_hash,...body}=transcript
+    if(createMediaTranscript(body).transcriptHash!==t.transcriptHash||transcript.transcriptHash!==plan.retimedTranscript.sourceTranscriptHash)
+      throw new DomainError('PERSISTENCE_CONFLICT','Editorial original transcript seal differs')
+    const sourceNormalization=normalizations.find(n=>n.document.source.artifactId===t.sourceArtifactId&&n.document.source.manifestId===t.sourceManifestId)
+    if(!sourceNormalization)throw new DomainError('PRECONDITION_REQUIRED','Editorial transcript lacks its exact observed source clock')
+    const probe=sourceNormalization.document.sourceProbe
+    const sourceDurationSeconds=Number(probe.endPts)*Number(probe.timeBase.numerator)/Number(probe.timeBase.denominator)-
+      Number(probe.originSeconds.numerator)/Number(probe.originSeconds.denominator)
+    if(!Number.isFinite(sourceDurationSeconds)||sourceDurationSeconds<=0||!Number.isFinite(plan.fps)||plan.fps<=0)
+      throw new DomainError('PERSISTENCE_CONFLICT','Editorial source clock is invalid')
+    const links=await this.client.v2ProjectMediaAsset.findMany({where:{workspaceId:input.workspaceId,projectId:input.projectId},orderBy:{id:'asc'}})
+    const inventory:EditorialSourceBindingBodyV1['inventory'][number][]=[]
+    for(const link of links) {
+      const artifact=await this.client.v2MediaArtifact.findFirst({where:{id:link.artifactId,workspaceId:input.workspaceId},include:{currentRightsSnapshot:true}}),manifest=manifestRefs.get(link.artifactId)
+      if(!artifact||!manifest)throw new DomainError('PRECONDITION_REQUIRED','Editorial inventory has no explicit immutable manifest authority')
+      inventory.push({linkId:link.id,artifactId:link.artifactId,role:link.role,manifestId:manifest.id,manifestHash:manifest.hash,
+        artifactSha256:artifact.sha256,rightsSnapshotId:artifact.currentRightsSnapshotId,rightsHash:artifact.currentRightsSnapshot?.snapshotHash??null,rightsRevision:artifact.rightsRevision})
     }
-    const versionRow = project.currentVersion
-    const currentEditPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'current editorial base EditPlan')
-    const currentDurationFrames = Number(currentEditPlan.durationFrames)
-    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames <= 0) {
-      throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan duration is invalid')
-    }
-    return Object.freeze({
-      projectId: project.id,
-      workspaceId: project.workspaceId,
-      currentVersion: createProjectVersion({
-        id: versionRow.id,
-        workspaceId: versionRow.workspaceId,
-        projectId: versionRow.projectId,
-        sequence: versionRow.sequence,
-        parentVersionId: versionRow.parentVersionId ?? undefined,
-        snapshotRefs: {
-          brief: versionRow.briefSnapshotId,
-          editPlan: versionRow.editPlanSnapshotId,
-          policies: versionRow.policiesSnapshotId,
-        },
-        baseHash: versionRow.baseHash,
-        createdBy: versionRow.createdBy,
-        commandId: versionRow.commandId ?? undefined,
-        createdAt: versionRow.createdAt.toISOString(),
-      }),
-      transcriptId: transcriptRow.id,
-      transcript,
-      sourceArtifactId: transcriptRow.sourceArtifactId,
-      sourceDurationSeconds,
-      sourceFps,
-      currentDurationFrames,
-      proxyVariantId: project.format ?? '9:16',
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: versionRow.id, variantId: project.format ?? '9:16' })),
-        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: versionRow.id, variantId: output.outputAspectRatio })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
-    })
+    const finals=await this.client.v2ProjectFinalExportOperation.count({where:{projectId:input.projectId,workspaceId:input.workspaceId,projectVersionId:parent.version.id,operation:{status:'succeeded'}}})
+    if(finals)throw new DomainError('PRECONDITION_REQUIRED','Editorial final invalidation lacks explicit stable variant authority')
+    const outputs=await this.client.v2ProjectProxyRenderOperation.findMany({where:{projectId:input.projectId,workspaceId:input.workspaceId,
+      projectVersionId:parent.version.id,operation:{status:'succeeded'}},select:{outputArtifactId:true,renderableVariantId:true}})
+    if(outputs.some(o=>!o.renderableVariantId))throw new DomainError('PRECONDITION_REQUIRED','Editorial proxy lacks explicit stable variant authority')
+    return Object.freeze({projectId:input.projectId,workspaceId:input.workspaceId,currentVersion:parent.version,parent,transcriptId:t.id,transcript,
+      sourceArtifactId:t.sourceArtifactId,sourceDurationSeconds,sourceFps:plan.fps,currentDurationFrames:plan.durationFrames,variantId:input.variantId,
+      normalizations,sourceBindingFacts:{schemaVersion:'editorial-source-binding/v1' as const,canonicalPolicyVersion:'output-canonical-json/v1' as const,
+        workspaceId:input.workspaceId,projectId:input.projectId,authority,
+        transcript:{id:t.id,workspaceId:t.workspaceId,projectId:t.projectId,sourceArtifactId:t.sourceArtifactId,sourceManifestId:t.sourceManifestId,document:transcript,createdAt:t.createdAt.toISOString()},
+        normalizationRefs:normalizations.map(n=>({id:n.document.id,projectId:n.document.projectId,receiptHash:n.receiptHash})),inventory},
+      outputReferences:outputs.map(o=>({artifactId:o.outputArtifactId,kind:'proxy' as const,sourceVersionId:parent.version.id,variantId:o.renderableVariantId!}))})
   }
-
-  async commitOrReplay(bundle: EditorialCommandCommit, serializationAttempt = 1): Promise<EditorialCommandResult> {
-    try {
-      return await this.client.$transaction(async (transaction) => {
-        const key = {
-          workspaceId_projectId_idempotencyKey: {
-            workspaceId: bundle.command.workspaceId,
-            projectId: bundle.command.projectId,
-            idempotencyKey: bundle.command.idempotencyKey,
-          },
-        }
-        const existing = await transaction.v2EditCommand.findUnique({
-          where: key,
-          include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
-        })
-        if (existing) {
-          if (existing.requestFingerprint !== bundle.requestFingerprint) {
-            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different editorial command')
-          }
-          if (hydrateEditCommandExternalActorAudit(existing).contextHash !== bundle.authenticationAudit.contextHash) {
-            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Editorial command replay belongs to another authentication context')
-          }
-          return hydrateStoredCommand(existing, true)
-        }
-        const [project, transcript] = await Promise.all([
-          transaction.v2Project.findFirst({
-            where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId },
-            include: { currentVersion: true },
-          }),
-          transaction.v2MediaTranscript.findFirst({
-            where: {
-              id: bundle.sourceEvidence.transcriptId,
-              projectId: bundle.command.projectId,
-              workspaceId: bundle.command.workspaceId,
-              sourceArtifactId: bundle.sourceEvidence.sourceArtifactId,
-              transcriptHash: bundle.sourceEvidence.transcriptHash,
-            },
-          }),
-        ])
-        if (!project?.currentVersion || !transcript) {
-          throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial command source evidence disappeared before commit')
-        }
-        if (
-          project.currentVersion.id !== bundle.command.baseVersionId ||
-          project.currentVersion.baseHash !== bundle.command.baseHash ||
-          bundle.version.parentVersionId !== project.currentVersion.id ||
-          bundle.version.sequence !== project.currentVersion.sequence + 1
-        ) {
-          throw new DomainError('VERSION_CONFLICT', 'Project version changed before editorial command commit', {
-            currentVersionId: project.currentVersion.id,
-            currentBaseHash: project.currentVersion.baseHash,
-          })
-        }
-        const [proxyOutputs, finalOutputs] = await Promise.all([
-          transaction.v2ProjectProxyRenderOperation.findMany({
-            where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true },
-          }),
-          transaction.v2ProjectFinalExportOperation.findMany({
-            where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true, outputAspectRatio: true },
-          }),
-        ])
-        const currentOutputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
-          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
-        if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
-          throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before editorial impact commit')
-        }
-        await transaction.v2EditCommand.create({
-          data: {
-            id: bundle.command.id,
-            workspaceId: bundle.command.workspaceId,
-            projectId: bundle.command.projectId,
-            baseVersionId: bundle.command.baseVersionId,
-            baseHash: bundle.command.baseHash,
-            type: bundle.command.type,
-            scopeJson: stableSerialize(bundle.command.scope),
-            payloadJson: stableSerialize(bundle.command.payload),
-            reason: bundle.command.reason,
-            actorType: bundle.command.author.type,
-            actorId: bundle.command.author.id,
-            delegatedUserId: bundle.command.author.delegatedUserId,
-            ...editCommandExternalActorAuditData(
-              bundle.authenticationAudit,
-              bundle.command.workspaceId,
-              bundle.command.author,
-            ),
-            idempotencyKey: bundle.command.idempotencyKey,
-            requestFingerprint: bundle.requestFingerprint,
-            createdAt: new Date(bundle.command.createdAt),
-          },
-        })
-        await transaction.v2ProjectSnapshot.create({
-          data: {
-            id: bundle.snapshot.id,
-            workspaceId: bundle.snapshot.workspaceId,
-            projectId: bundle.snapshot.projectId,
-            kind: bundle.snapshot.kind,
-            schemaVersion: bundle.snapshot.contentSchemaVersion,
-            contentJson: bundle.snapshot.contentJson,
-            contentHash: bundle.snapshot.contentHash,
-            createdAt: new Date(bundle.snapshot.createdAt),
-          },
-        })
-        await transaction.v2ProjectVersion.create({
-          data: {
-            id: bundle.version.id,
-            workspaceId: bundle.version.workspaceId,
-            projectId: bundle.version.projectId,
-            sequence: bundle.version.sequence,
-            parentVersionId: bundle.version.parentVersionId,
-            briefSnapshotId: bundle.version.snapshotRefs.brief!,
-            editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
-            policiesSnapshotId: bundle.version.snapshotRefs.policies,
-            baseHash: bundle.version.baseHash,
-            createdBy: bundle.version.createdBy,
-            commandId: bundle.command.id,
-            createdAt: new Date(bundle.version.createdAt),
-          },
-        })
-        const invalidations = createEditorialCutInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
-        if (invalidations.length > 0) {
-          await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
-            id: item.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
-            commandId: item.commandId, baseVersionId: item.baseVersionId, resultVersionId: item.resultVersionId,
-            artifactId: item.artifactId, kind: item.kind, variantId: item.variantId, status: item.status,
-            dependencyTypesJson: stableSerialize(item.dependencyTypes), affectedRangesJson: stableSerialize(item.affectedRanges),
-            impactHash: item.impactHash, createdAt: new Date(item.createdAt),
-          })) })
-        }
-        const updated = await transaction.v2Project.updateMany({
-          where: {
-            id: bundle.command.projectId,
-            workspaceId: bundle.command.workspaceId,
-            currentVersionId: bundle.command.baseVersionId,
-          },
-          data: { currentVersionId: bundle.version.id },
-        })
-        if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project current version changed during editorial command commit')
-        await transaction.v2PublicEventOutbox.create({
-          data: {
-            id: bundle.event.id,
-            workspaceId: bundle.event.workspaceId,
-            type: bundle.event.type,
-            version: bundle.event.version,
-            occurredAt: new Date(bundle.event.occurredAt),
-            sequence: bundle.event.sequence,
-            actorClientId: bundle.event.actor?.clientId,
-            actorUserId: bundle.event.actor?.userId,
-            resourceType: bundle.event.resource.type,
-            resourceId: bundle.event.resource.id,
-            dataJson: stableSerialize(bundle.event.data),
-          },
-        })
-        const stored = await transaction.v2EditCommand.findUniqueOrThrow({
-          where: { id: bundle.command.id },
-          include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
-        })
-        return hydrateStoredCommand(stored, false)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-    } catch (error) {
-      if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
-        return this.commitOrReplay(bundle, serializationAttempt + 1)
-      }
-      if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentResult({
-          workspaceId: bundle.command.workspaceId,
-          projectId: bundle.command.projectId,
-          idempotencyKey: bundle.command.idempotencyKey,
-          actorContextHash: bundle.authenticationAudit.contextHash,
-        })
-        if (existing) {
-          if (existing.requestFingerprint !== bundle.requestFingerprint) {
-            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different editorial command')
-          }
-          return Object.freeze({ ...existing.result, replayed: true })
-        }
-        throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial command collided with persisted immutable state')
-      }
-      throw error
-    }
+  async commitOrReplay(input:EditorialCommandCommit):Promise<EditorialCommandResult> {
+    const committed=await new PrismaOperationalOutputBundleRepositoryV3(this.client).persistChild({proposal:input.proposal,
+      audit:input.authenticationAudit,versionEventId:input.event.id,operationEventId:null,ingestFacts:null,
+      recompose:({parent,normalizations})=>({...input.proposal,parent,normalizations})})
+    return editorialResultV3(committed.bundle,committed.replayed)
   }
 }

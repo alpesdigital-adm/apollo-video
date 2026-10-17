@@ -3,20 +3,21 @@ import type {
   PersistedManualEditPayload,
   TimelineViewModel,
 } from '../../domain/manual-editing.ts'
-import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { ProjectVersionV2, ProjectVersionV3 } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type {
   CommandArtifactInvalidationV1,
   CommandImpactOutputReference,
   CommandImpactV1,
 } from '../../domain/command-impact.ts'
-import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface ManualEditVersionRecord {
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV2 | ProjectVersionV3>
   editPlan: Readonly<Record<string, unknown>>
   editPlanHash: string
+  /** The sealed output bundle behind this Version: the exact parent (or restore target) a manual edit is born from. */
+  bundle: OperationalOutputParentV3
 }
 
 export interface ManualEditContext extends ManualEditVersionRecord {
@@ -38,7 +39,7 @@ export interface ManualEditContext extends ManualEditVersionRecord {
 
 export interface ManualEditResult {
   command: Readonly<EditCommand<PersistedManualEditPayload>>
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV3>
   editPlan: Readonly<Record<string, unknown>>
   timeline: Readonly<TimelineViewModel>
   comparison: Readonly<{
@@ -55,11 +56,8 @@ export interface ManualEditResult {
 }
 
 export interface ManualEditCommit {
-  command: Readonly<EditCommand<PersistedManualEditPayload>>
-  authenticationAudit: Readonly<ApiAccessAuditContext>
-  requestFingerprint: string
-  snapshot: Readonly<ProjectSnapshot>
-  version: Readonly<ProjectVersion>
+  /** Version, State, EditPlan, Command and credential audit, sealed together by the manual-edit transition. */
+  bundle: Readonly<OperationalOutputVersionBundleV3>
   event: Readonly<PublicEvent>
   comparison: ManualEditResult['comparison']
   impact: Readonly<CommandImpactV1>

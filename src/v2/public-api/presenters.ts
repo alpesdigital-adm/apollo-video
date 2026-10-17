@@ -293,8 +293,10 @@ export function presentProjectWorkspaceV7(
   const compatibleOperationIds = new Set(
     compatibleOperations.map((operation) => operation.id),
   )
+  const { reviewAvailability: _reviewAvailability, ...historicalWorkspace } = workspace
+  void _reviewAvailability
   return Object.freeze({
-    ...workspace,
+    ...historicalWorkspace,
     operationIds: Object.freeze(
       workspace.operationIds.filter((operationId) =>
         compatibleOperationIds.has(operationId)),
@@ -311,6 +313,10 @@ export function presentProjectWorkspaceV7(
     operations: Object.freeze(compatibleOperations.map((operation) =>
       presentPublicOperationV2(operation))),
   })
+}
+
+export function presentProjectWorkspaceV13(workspace: Readonly<ProjectWorkspaceRecord>) {
+  return Object.freeze({ ...presentProjectWorkspaceV7(workspace), reviewAvailability: workspace.reviewAvailability })
 }
 
 export function presentMediaColorProbe(

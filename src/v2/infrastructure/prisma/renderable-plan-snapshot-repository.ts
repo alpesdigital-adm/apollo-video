@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
+import type { Prisma, PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   RenderablePlanSnapshot,
@@ -124,9 +124,9 @@ const SNAPSHOT_SELECT = {
 } as const
 
 export class PrismaRenderablePlanSnapshotRepository implements RenderablePlanSnapshotRepository {
-  private readonly client: PrismaClient
+  private readonly client: PrismaClient | Prisma.TransactionClient
 
-  constructor(client: PrismaClient = getV2PostgresClient()) {
+  constructor(client: PrismaClient | Prisma.TransactionClient = getV2PostgresClient()) {
     this.client = client
   }
 

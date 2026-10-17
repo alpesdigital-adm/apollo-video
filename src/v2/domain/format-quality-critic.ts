@@ -3,7 +3,7 @@ import { assertDomain } from './errors.ts'
 import { readOutputFormatPreset } from './output-format-registry.ts'
 import { OUTPUT_ASPECT_RATIOS, type NormalizedBounds, type OutputAspectRatio } from './output-spec.ts'
 import type { RenderElementMap } from './review-system.ts'
-import type { SubtitleAnchorPlanV1 } from './subtitle-anchor-plan.ts'
+import type { SubtitleAnchorPlan } from './subtitle-anchor-plan.ts'
 
 export const FORMAT_QUALITY_CODES = [
   'OUTPUT_CLIPPING', 'OUTPUT_SAFE_AREA', 'SUBJECT_NOT_VISIBLE',
@@ -11,6 +11,7 @@ export const FORMAT_QUALITY_CODES = [
   // F1.036 / FR-173: the anchor decision reports into the variant's own report, so a cue that had
   // nowhere safe to go blocks *this* output instead of being discovered by eye on the MP4.
   'NO_SAFE_SUBTITLE_REGION', 'SUBTITLE_ANCHOR_FALLBACK', 'SUBTITLE_ANCHOR_UNSTABLE',
+  'FACE_PERCEPTION_UNAVAILABLE',
 ] as const
 export type FormatQualityCode = (typeof FORMAT_QUALITY_CODES)[number]
 
@@ -120,7 +121,7 @@ export function critiqueOutputFormat(input: Readonly<{
    * into this report so the variant verdict already carries them: a suppressed cue is a hard block,
    * a relaxed band or a forced early move is a warning the reviewer can see next to the pixels.
    */
-  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
+  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null
 }>): Readonly<FormatQualityReportV2> {
   assertDomain(ID.test(input.outputSpecId) && OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_OUTPUT_SPEC', 'Format critic output identity is invalid')
   assertDomain(SHA256.test(input.proxyHash) && input.map.proxyHash === input.proxyHash, 'INVALID_RENDER_INPUT', 'Format critic proxy evidence is inconsistent')

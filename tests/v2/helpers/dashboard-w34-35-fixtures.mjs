@@ -97,6 +97,35 @@ export async function setProjectStatus(client, projectId, status) {
  * lease, retry and actor-audit CHECKs for the render types (total 4, unit
  * `render`). `completed` is the persisted progress counter.
  */
+
+/** Raw PostgreSQL CHECK rejection, not an API/presenter synthetic success. */
+export async function proveRejectedProgressWithoutTotal(client, { workspaceId, projectId, operationId }) {
+  const before = await client.v2PublicOperation.findUnique({ where: { id: operationId } })
+  assert.ok(before); assert.equal(before.workspaceId, workspaceId); assert.equal(before.projectId, projectId)
+  assert.equal(before.progressCompleted, 1); assert.equal(before.progressTotal, 4); assert.equal(before.progressUnit, 'render')
+  const countBefore = await client.v2PublicOperation.count({ where: { workspaceId } })
+  let sqlstate, constraint
+  await assert.rejects(() => client.$executeRawUnsafe(
+    'UPDATE "public_operations" SET "progressCompleted" = 1, "progressTotal" = NULL, "progressUnit" = NULL WHERE "id" = $1 AND "workspaceId"::text = $2 AND "projectId"::text = $3',
+    operationId, workspaceId, projectId,
+  ), (error) => {
+    sqlstate = error.meta?.code
+    const message = error.meta?.message
+    constraint = typeof message === 'string' && message.includes('public_operations_progress_check')
+      ? 'public_operations_progress_check' : null
+    return error.code === 'P2010' && sqlstate === '23514' && constraint === 'public_operations_progress_check'
+  }, 'counter-without-total must be rejected by the exact PostgreSQL CHECK')
+  const after = await client.v2PublicOperation.findUnique({ where: { id: operationId } })
+  const countAfter = await client.v2PublicOperation.count({ where: { workspaceId } })
+  assert.deepEqual(after, before, 'the rejected statement must leave every operation column unchanged')
+  assert.equal(countAfter, countBefore, 'the rejected statement must have zero row-count effects')
+  return { origin: 'raw-postgresql-check-rejection', operationId, workspaceId, projectId,
+    sqlstate, constraint, attemptedProgress: { completed: 1, total: null, unit: null },
+    persistedProgressBefore: { completed: before.progressCompleted, total: before.progressTotal, unit: before.progressUnit },
+    persistedProgressAfter: { completed: after.progressCompleted, total: after.progressTotal, unit: after.progressUnit },
+    rowUnchanged: true, countBefore, countAfter, statementRollbackReadback: true }
+}
+
 export async function seedOperation(client, {
   workspaceId, clientId, projectId, id, type = 'project-proxy-render',
   status, phase, completed, createdAt, updatedAt, targetId,

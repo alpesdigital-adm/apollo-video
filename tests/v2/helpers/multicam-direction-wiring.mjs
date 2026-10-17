@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto'
 
 import { createExternalAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
 import { createDesiredAction, createDesiredActionReference } from '../../../src/v2/domain/desired-action.ts'
+import { operationalBundlePlanV3 } from '../../../src/v2/domain/output-version-bundle.ts'
+import { childCommandOf, transitionProjectOutputState } from '../../../src/v2/domain/project-output-state-transition.ts'
 import { createEditorialAudioTimelineHash } from '../../../src/v2/domain/production-modes.ts'
+import { createProjectSnapshot } from '../../../src/v2/domain/project-snapshot.ts'
 import {
   deriveMulticamEvidenceService,
   directMulticamSessionService,
 } from '../../../src/v2/application/multicam-direction.ts'
 import { buildDirectableMulticamWorld, fixtureSeconds as sec } from '../wave20-fixtures.mjs'
+import { ingestedWorld, worldActor } from './output-world.mjs'
 
 /**
  * The direction COMMAND, wired to in-memory doubles.
@@ -27,6 +32,15 @@ export const WORKSPACE = 'workspace-multicam'
 export const PROJECT = 'project-multicam'
 export const SESSION = 'session-multicam'
 export const CLIENT = 'client-director'
+
+// The project's head is a real sealed Version3/State3 of the shared output world (root, explicit variant, controlled
+// ingest), named after this suite's workspace, project and client. Its State observes ONE recording; see
+// `sealOnObservedSource` for what that means for a cut over several.
+const outputWorld = await ingestedWorld({
+  actor: worldActor({ workspaceId: WORKSPACE, clientId: CLIENT, credentialId: 'credential-director', environment: 'sandbox' }),
+  ids: { project: PROJECT },
+})
+export const HEAD = outputWorld.parent
 
 export function actor(overrides = {}) {
   const identity = {
@@ -172,21 +186,11 @@ export function memoryDirections() {
   }
 }
 
-export function memoryCommands({ world, versionId = 'project-version-1', baseHash = 'a'.repeat(64), mediaLinks }) {
+export function memoryCommands({ world, mediaLinks }) {
   const commands = new Map()
   const calls = { readContext: 0, commitOrReplay: 0 }
-  const currentVersion = Object.freeze({
-    schemaVersion: 1,
-    id: versionId,
-    workspaceId: WORKSPACE,
-    projectId: PROJECT,
-    sequence: 4,
-    parentVersionId: 'project-version-0',
-    snapshotRefs: Object.freeze({ brief: 'snapshot-brief', editPlan: 'snapshot-plan', policies: 'snapshot-policies' }),
-    baseHash,
-    createdBy: CLIENT,
-    createdAt: '2029-04-01T09:00:00.000Z',
-  })
+  const committed = []
+  const currentVersion = HEAD.version
   const links = mediaLinks ?? world.session.tracks.map((track) => ({
     artifactId: track.sourceAssetId,
     role: track.trackId === 'track-camera-a' ? 'source-master' : 'selected-insert',
@@ -196,6 +200,7 @@ export function memoryCommands({ world, versionId = 'project-version-1', baseHas
   }))
   return {
     calls,
+    committed,
     currentVersion,
     async findIdempotentResult({ workspaceId, projectId, idempotencyKey, actorContextHash }) {
       return commands.get([workspaceId, projectId, idempotencyKey, actorContextHash].join('|')) ?? null
@@ -207,27 +212,32 @@ export function memoryCommands({ world, versionId = 'project-version-1', baseHas
         workspaceId,
         projectId,
         objective: 'warming',
+        parent: HEAD,
         currentVersion,
-        currentPlan: baseDirectedPlan({ versionId }),
+        // The plan the direction re-cuts is the Director plan below, not the head's ingest plan: the world's head only
+        // lends its sealed Version and State, and the cut is sealed on top of them by `sealOnObservedSource`.
+        currentPlan: baseDirectedPlan({ versionId: currentVersion.id }),
         currentDurationFrames: 900,
         proxyVariantId: '9:16',
         outputReferences: Object.freeze([]),
         mediaLinks: Object.freeze(links),
       }
     },
-    async commitOrReplay(bundle) {
+    async commitOrReplay(input) {
       calls.commitOrReplay += 1
+      committed.push(input)
+      const sealed = childCommandOf(input.bundle)
       const result = Object.freeze({
-        command: bundle.command,
-        version: bundle.version,
-        editPlan: bundle.editPlan,
-        impact: bundle.command.payload.impact,
+        command: sealed.command,
+        version: input.bundle.version,
+        editPlan: input.editPlan,
+        impact: sealed.command.payload.impact,
         invalidations: Object.freeze([]),
         replayed: false,
       })
       commands.set(
-        [bundle.command.workspaceId, bundle.command.projectId, bundle.command.idempotencyKey, bundle.authenticationAudit.contextHash].join('|'),
-        { requestFingerprint: bundle.requestFingerprint, result },
+        [sealed.command.workspaceId, sealed.command.projectId, sealed.command.idempotencyKey, sealed.audit.contextHash].join('|'),
+        { requestFingerprint: sealed.requestFingerprint, result },
       )
       return result
     },
@@ -356,6 +366,30 @@ export function fakeDiarization({ segments } = {}) {
   }
 }
 
+/**
+ * The output transition, for a world that observes fewer recordings than a multicam session records.
+ *
+ * The shared world's State observes the one source it ingested. A direction cuts several camera files and a master
+ * audio bed, and the real transition refuses a plan over a recording nobody has observed (State3 cannot yet hold more
+ * than one observed source). This seals the SAME Command, audit, request fingerprint and allocation through the real
+ * transition, over a stand-in plan: the head's own plan, re-identified as the cut. The Version and State are therefore
+ * genuine; the plan they were materialized from is not the one the service compiled. `wire({ sealOutput: null })`
+ * drives the real transition instead.
+ */
+export function sealOnObservedSource(input) {
+  const base = operationalBundlePlanV3(input.parent)
+  const incoming = JSON.parse(input.editPlanSnapshot.contentJson)
+  const standIn = { ...JSON.parse(base.contentJson), id: incoming.id, projectVersionId: incoming.projectVersionId, createdAt: incoming.createdAt }
+  return transitionProjectOutputState({
+    ...input,
+    editPlanSnapshot: createProjectSnapshot({
+      workspaceId: input.editPlanSnapshot.workspaceId, projectId: input.editPlanSnapshot.projectId, id: input.editPlanSnapshot.id,
+      kind: 'edit-plan', contentSchemaVersion: base.contentSchemaVersion, contentJson: stableSerialize(standIn),
+      contentHash: calculateCanonicalHash(standIn), createdAt: input.editPlanSnapshot.createdAt,
+    }),
+  })
+}
+
 export function wire(options = {}) {
   const world = options.world ?? buildDirectableMulticamWorld({ workspaceId: WORKSPACE, sessionId: SESSION, projectId: PROJECT })
   const directions = memoryDirections()
@@ -403,6 +437,7 @@ export function wire(options = {}) {
     clock: () => new Date('2029-04-01T09:06:00.000Z'),
     createId: (prefix) => `${prefix}-${(issued += 1)}`,
     createEventId: () => randomUUID(),
+    ...(options.sealOutput === null ? {} : { sealOutput: options.sealOutput ?? sealOnObservedSource }),
   })
   return { world, directions, commands, visual, media, deriveEvidence, execute }
 }
@@ -412,8 +447,8 @@ export function request(overrides = {}) {
     workspaceId: WORKSPACE,
     projectId: PROJECT,
     sessionId: SESSION,
-    baseVersionId: 'project-version-1',
-    baseHash: 'a'.repeat(64),
+    baseVersionId: HEAD.version.id,
+    baseHash: HEAD.version.baseHash,
     format: { aspectRatio: '16:9' },
     range: { sessionStartTicks: sec(1).toString(), sessionEndTicks: sec(280).toString() },
     actor: actor(),

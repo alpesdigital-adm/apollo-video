@@ -167,22 +167,377 @@ const gatesTheBuild = (step) =>
   !isLiteral(step.job?.attrs.get('if'), 'false') &&
   !isLiteral(step.job?.attrs.get('continue-on-error'), 'true')
 
+const PERCEPTION_SUITES = [
+  'tesseract-ocr-video-adapter', 'ffmpeg-temporal-video-analyzer',
+  'prisma-perception-producer-admission', 'prisma-perception-producer-worker',
+  'prisma-perception-producer-http', 'prisma-director-ocr',
+  'prisma-temporal-producer', 'prisma-face-producer',
+]
+
+function verifyNamespaceConfigurationGuard(workflow) {
+  const { jobs, steps } = parseWorkflow(workflow)
+  const command = 'python3 -I -S -B tests/v2/perception-namespace-config.test.py'
+  for (const [jobId, stepName] of [
+    ['quality', 'Require Python 3.12 or newer for disposable operations tests'],
+    ['perception', 'Prepare owned PostgreSQL and OCR dependencies'],
+  ]) {
+    const job = jobs.find((entry) => entry.id === jobId)
+    assert.ok(job, `${jobId} is required for namespace configuration parity`)
+    assert.equal(job.attrs.get('if'), undefined)
+    assert.equal(job.attrs.get('continue-on-error'), undefined)
+    const matches = steps.filter((step) => step.job === job && step.name === stepName)
+    assert.equal(matches.length, 1)
+    const step = matches[0]
+    assert.equal(step.attrs.get('if'), undefined)
+    assert.equal(step.attrs.get('continue-on-error'), undefined)
+    assert.ok(gatesTheBuild(step))
+    const lines = step.body.split('\n').map((line) => line.trim())
+    assert.equal(lines.filter((line) => line === command).length, 1, 'Pure Python parity/negative gate cannot be removed, guarded or swallowed')
+    const prerequisite = jobId === 'quality' ? lines.indexOf('fi')
+      : lines.indexOf('sudo apt-get install -y tesseract-ocr tesseract-ocr-eng postgresql-client python3')
+    assert.ok(prerequisite >= 0 && prerequisite < lines.indexOf(command), 'Existing Python prerequisite must precede pure guard')
+  }
+}
+
+test('namespace Python configuration parity and strict negatives are mandatory in existing CI owners', async () => {
+  const workflow = await read('.github/workflows/ci.yml')
+  verifyNamespaceConfigurationGuard(workflow)
+  const guards = await read('tests/v2/perception-namespace-config.test.py')
+  assert.match(guards, /class CgroupConfiguration\(unittest\.TestCase\)/)
+  for (const name of ['test_actual_closed_environment_matches_node_owner',
+    'test_arbitrary_names_types_nul_and_aggregate_bytes_are_rejected', 'test_consumer_and_faults_are_fixed_not_exec_rpc'])
+    assert.ok(guards.includes(`def ${name}(`), 'Fixed CI configuration command must include cgroup parity/strict guards')
+  const command = '          python3 -I -S -B tests/v2/perception-namespace-config.test.py\n'
+  for (const replacement of ['', '          echo parity-removed\n',
+    '          python3 -I -S -B tests/v2/perception-namespace-config.test.py || true\n']) {
+    assert.throws(() => verifyNamespaceConfigurationGuard(workflow.replace(command, replacement)))
+  }
+  for (const name of ['Require Python 3.12 or newer for disposable operations tests', 'Prepare owned PostgreSQL and OCR dependencies']) {
+    for (const modifier of ['        if: false\n', '        continue-on-error: true\n']) {
+      assert.throws(() => verifyNamespaceConfigurationGuard(workflow.replace(`      - name: ${name}\n`, `      - name: ${name}\n${modifier}`)))
+    }
+  }
+})
+
+function verifyPerceptionWiring(workflow) {
+  const { jobs, steps } = parseWorkflow(workflow)
+  const job = jobs.find((entry) => entry.id === 'perception')
+  assert.ok(job, 'perception job is mandatory')
+  assert.equal(job.attrs.get('if'), undefined)
+  assert.equal(job.attrs.get('continue-on-error'), undefined)
+  const block = workflow.split(/^  perception:\s*$/m)[1]?.split(/^  [a-zA-Z][\w-]*:\s*$/m)[0]
+  assert.ok(block)
+  for (const gate of ['APOLLO_OCR_VIDEO_E2E', 'APOLLO_PERCEPTION_HTTP_E2E',
+    'APOLLO_TEMPORAL_VIDEO_E2E', 'APOLLO_TEMPORAL_HTTP_E2E']) {
+    assert.match(block, new RegExp(`^ {6}${gate}: ['"]1['"]\\s*$`, 'm'))
+  }
+  assert.match(block, /^ {6}V2_DATABASE_URL: .*127\.0\.0\.1.*apollo_v2_perception.*application_name=apollo-video-e2e-perception-.*connection_limit=2.*pool_timeout=10.*connect_timeout=10/m)
+  assert.match(block, /sha256sum.*binary-provenance\.sha256/)
+  assert.match(block, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*18 \* 60 \* 1000/)
+  const rendererInstalls = steps.filter((step) => step.job === job && step.attrs.get('run') === 'npm ci --prefix remotion')
+  assert.equal(rendererInstalls.length, 1, 'perception requires one locked Remotion dependency installation')
+  const rendererInstall = rendererInstalls[0]
+  assert.equal(rendererInstall.attrs.get('if'), undefined)
+  assert.equal(rendererInstall.attrs.get('continue-on-error'), undefined)
+  assert.ok(gatesTheBuild(rendererInstall))
+  const productionBuild = steps.find((step) => step.job === job && step.attrs.get('run') === 'npm run build')
+  assert.ok(productionBuild && steps.indexOf(rendererInstall) < steps.indexOf(productionBuild),
+    'locked Remotion dependencies must be installed before the unchanged production build')
+  const composed = steps.filter((step) => step.job === job &&
+    step.attrs.get('run') === 'node scripts/validation/perception-consumer-cgroup.mjs gates tests/v2/perception-namespace-observer.integration.mjs')
+  assert.equal(composed.length, 1, 'Real Linux namespace observer composed gate is mandatory')
+  const cgroupGate = steps.filter((step) => step.job === job && step.name === 'Linux cgroup containment controlled gate')
+  assert.equal(cgroupGate.length, 1, 'Real Linux cgroup owner-death/containment gate is mandatory')
+  assert.equal(cgroupGate[0].attrs.get('run'), 'node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates')
+  assert.equal(cgroupGate[0].attrs.get('timeout-minutes'), '3')
+  assert.equal(cgroupGate[0].attrs.get('if'), undefined); assert.equal(cgroupGate[0].attrs.get('continue-on-error'), undefined)
+  assert.ok(gatesTheBuild(cgroupGate[0]))
+  assert.ok(steps.indexOf(productionBuild) < steps.indexOf(cgroupGate[0]) && steps.indexOf(cgroupGate[0]) < steps.indexOf(composed[0]))
+  assert.equal(composed[0].attrs.get('if'), undefined)
+  assert.equal(composed[0].attrs.get('continue-on-error'), undefined)
+  assert.ok(gatesTheBuild(composed[0]))
+  assert.ok(steps.indexOf(productionBuild) < steps.indexOf(composed[0]))
+  const addonBuilds = steps.filter((step) => step.job === job && step.name === 'Build unprivileged CI pidfd addon')
+  assert.equal(addonBuilds.length, 1, 'Perception namespace requires its normal UID native pidfd prerequisite')
+  assert.equal(addonBuilds[0].attrs.get('run'), 'bash scripts/validation/build-perception-pidfd.sh')
+  assert.equal(addonBuilds[0].attrs.get('timeout-minutes'), '2')
+  assert.equal(addonBuilds[0].attrs.get('if'), undefined)
+  assert.equal(addonBuilds[0].attrs.get('continue-on-error'), undefined)
+  assert.ok(steps.indexOf(addonBuilds[0]) < steps.indexOf(composed[0]))
+  assert.doesNotMatch(block, /setcap|sudo\s+(?:npm|node)\b|sudoers|sysctl/)
+  for (const name of PERCEPTION_SUITES) {
+    const suite = `tests/v2/${name}.integration.mjs`
+    const matches = steps.filter((step) => step.job === job && step.suiteFiles.includes(suite))
+    assert.equal(matches.length, 1, `${suite} has exactly one supervised mandatory run`)
+    const step = matches[0]
+    assert.equal(step.attrs.get('if'), undefined)
+    assert.equal(step.attrs.get('continue-on-error'), undefined)
+    assert.ok(gatesTheBuild(step))
+    const invocation = `node scripts/validation/perception-consumer-cgroup.mjs namespace ${suite}`
+    assert.ok(step.body.includes(invocation))
+    assert.ok(steps.indexOf(composed[0]) < steps.indexOf(step), 'Namespace gate must precede all eight proofs')
+    if (name === 'prisma-face-producer') {
+      assert.ok(step.body.includes(`${invocation} 'publish-race|face control'`))
+    } else {
+      assert.ok(step.body.split('\n').some((line) => line.trim() === invocation || line.trim() === `run: ${invocation}`))
+    }
+  }
+}
+
+test('W61 perception CI preserves supervised mandatory coverage and its exact facial limitation', async () => {
+  const workflow = await read('.github/workflows/ci.yml')
+  verifyPerceptionWiring(workflow)
+  const cgroupStep = '      - name: Linux cgroup containment controlled gate\n        timeout-minutes: 3\n        run: node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates\n'
+  assert.ok(workflow.includes(cgroupStep))
+  for (const replacement of ['', cgroupStep.replace('        run:', '        if: false\n        run:'),
+    cgroupStep.replace('        run:', '        continue-on-error: true\n        run:'),
+    cgroupStep.replace('timeout-minutes: 3', 'timeout-minutes: 4'),
+    cgroupStep.replace('--controlled-gates', '--arbitrary')]) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(cgroupStep, replacement)))
+  }
+  for (const replacement of ['    if: false\n', '    continue-on-error: true\n']) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace('  perception:\n', `  perception:\n${replacement}`)))
+  }
+  for (const name of PERCEPTION_SUITES) {
+    const invocation = `node scripts/validation/perception-consumer-cgroup.mjs namespace tests/v2/${name}.integration.mjs`
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(invocation, 'echo removed')))
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(invocation,
+      invocation.replace('perception-consumer-cgroup.mjs namespace', 'run-perception-ci-namespace.mjs'))))
+  }
+  for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace('      - name: Real OCR and temporal media adapters\n', `      - name: Real OCR and temporal media adapters\n${replacement}`)))
+  }
+  assert.throws(() => verifyPerceptionWiring(workflow.replace("APOLLO_TEMPORAL_HTTP_E2E: '1'", "APOLLO_TEMPORAL_HTTP_E2E: '0'")))
+  assert.throws(() => verifyPerceptionWiring(workflow.replace(" 'publish-race|face control'", '')))
+  const composedStep = '      - name: Linux namespace observer composed gate\n        run: node scripts/validation/perception-consumer-cgroup.mjs gates tests/v2/perception-namespace-observer.integration.mjs\n'
+  assert.ok(workflow.includes(composedStep))
+  assert.throws(() => verifyPerceptionWiring(workflow.replace(composedStep, '')))
+  for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(composedStep,
+      composedStep.replace('        run:', `${replacement}        run:`))))
+  }
+  const rendererStep = '      - name: Install locked renderer dependencies for perception build\n        run: npm ci --prefix remotion\n'
+  assert.ok(workflow.includes(rendererStep))
+  assert.throws(() => verifyPerceptionWiring(workflow.replace(rendererStep, '')))
+  for (const replacement of ['        if: false\n', '        continue-on-error: true\n']) {
+    assert.throws(() => verifyPerceptionWiring(workflow.replace(rendererStep,
+      rendererStep.replace('        run:', `${replacement}        run:`))))
+  }
+  const face = await read('tests/v2/prisma-face-producer.integration.mjs')
+  const selected = [...face.matchAll(/^test\('([^']+)'/gm)].map((match) => match[1]).filter((name) => /publish-race|face control/.test(name))
+  assert.deepEqual(selected, [
+    'W61 publish-race fixture hydrates a real child and rights expiry offline',
+    'W61 publish-race matcher checks typed codes, not error prose',
+    'W61 face control uses scoped canonical audit before the repository transaction',
+  ])
+})
+
+test('CI pidfd prerequisite remains unprivileged and mandatory under Node 22 quality and Node 24 perception', async () => {
+  const workflow = await read('.github/workflows/ci.yml')
+  const verify = (source) => {
+    const { steps } = parseWorkflow(source)
+    for (const job of ['quality', 'perception']) {
+      const builds = steps.filter((step) => step.job.id === job && step.name === 'Build unprivileged CI pidfd addon')
+      assert.equal(builds.length, 1)
+      const build = builds[0]
+      assert.equal(build.attrs.get('run'), 'bash scripts/validation/build-perception-pidfd.sh')
+      assert.equal(build.attrs.get('if'), undefined); assert.equal(build.attrs.get('continue-on-error'), undefined)
+      assert.equal(build.attrs.get('timeout-minutes'), '2'); assert.ok(gatesTheBuild(build))
+      const consumer = steps.find((step) => step.job.id === job && step.attrs.get('run') ===
+        (job === 'quality' ? 'node scripts/validation/perception-consumer-cgroup.mjs unit' : 'node scripts/validation/perception-consumer-cgroup.mjs gates tests/v2/perception-namespace-observer.integration.mjs'))
+      assert.ok(consumer && steps.indexOf(build) < steps.indexOf(consumer))
+      const cleanup = steps.filter((step) => step.job.id === job && step.attrs.get('run') === 'node scripts/validation/cleanup-perception-pidfd.mjs')
+      assert.equal(cleanup.length, 1); assert.equal(cleanup[0].attrs.get('if'), 'always()')
+      assert.equal(cleanup[0].attrs.get('continue-on-error'), undefined)
+      assert.ok(steps.indexOf(consumer) < steps.indexOf(cleanup[0]))
+      const archives = steps.filter((step) => step.job.id === job && step.name === 'Publish pidfd prerequisite and consumer lifecycle evidence')
+      assert.equal(archives.length, 1); assert.equal(archives[0].attrs.get('if'), 'always()')
+      assert.equal(archives[0].attrs.get('continue-on-error'), undefined)
+      assert.ok(steps.indexOf(cleanup[0]) < steps.indexOf(archives[0]))
+    }
+    const quality = source.split(/^  quality:\s*$/m)[1]?.split(/^  [a-zA-Z][\w-]*:\s*$/m)[0]
+    const perception = source.split(/^  perception:\s*$/m)[1]?.split(/^  [a-zA-Z][\w-]*:\s*$/m)[0]
+    assert.match(quality, /node-version: 22/); assert.match(perception, /node-version: 24/)
+  }
+  verify(workflow)
+  const step = '      - name: Build unprivileged CI pidfd addon\n        timeout-minutes: 2\n        run: bash scripts/validation/build-perception-pidfd.sh\n'
+  assert.equal(workflow.split(step).length - 1, 2)
+  for (const replacement of ['', step.replace('        run:', '        if: false\n        run:'),
+    step.replace('        run:', '        continue-on-error: true\n        run:'),
+    step.replace('run: bash', 'run: sudo bash')]) {
+    assert.throws(() => verify(workflow.replace(step, replacement)))
+  }
+  for (const invocation of ['node scripts/validation/perception-consumer-cgroup.mjs unit',
+    'node scripts/validation/perception-consumer-cgroup.mjs gates', 'node scripts/validation/cleanup-perception-pidfd.mjs']) {
+    assert.throws(() => verify(workflow.replace(invocation, 'echo omitted')))
+  }
+})
+
+function verifyLocalizationProxyMediaWiring(workflow, gate) {
+  const { steps } = parseWorkflow(workflow)
+  const matches = steps.filter((step) => step.npmScripts.includes('test:integration:localization-media-proxy'))
+  assert.equal(matches.length, 1, 'localized media proxy must have exactly one mandatory CI run')
+  const step = matches[0]
+  assert.equal(step.job.id, 'local-infrastructure')
+  assert.equal(step.attrs.get('id'), 'localization-media-proxy')
+  assert.equal(step.attrs.get('if'), undefined)
+  assert.equal(step.attrs.get('continue-on-error'), undefined)
+  assert.equal(step.job.attrs.get('if'), undefined)
+  assert.equal(step.job.attrs.get('continue-on-error'), undefined)
+  assert.ok(gatesTheBuild(step))
+  assert.ok(isLiteral(step.env.get(gate), '1'), 'the proxy persistence gate must run rather than skip')
+  assert.match(step.env.get('V2_DATABASE_URL'), /127\.0\.0\.1:55432\/apollo_video_v2_e2e.*application_name=apollo-video-e2e-localization-media-proxy-ci.*connection_limit=5.*pool_timeout=10.*connect_timeout=10/)
+  assert.equal(step.env.get('APOLLO_WAVE21_EVIDENCE_DIR'), '${{ runner.temp }}/localization-proxy-${{ github.run_id }}-${{ github.run_attempt }}')
+  for (const required of [
+    'set -euo pipefail',
+    'ffmpeg="$(node -p \'require("ffmpeg-static")\')"',
+    'ffprobe="$(node -p \'require("ffprobe-static").path\')"',
+    'test -x "$ffmpeg" && test -x "$ffprobe"',
+    'export APOLLO_V2_FFMPEG_PATH="$ffmpeg" FFPROBE_BIN="$ffprobe"',
+    '"$ffmpeg" -version > "$APOLLO_WAVE21_EVIDENCE_DIR/ffmpeg-version.txt"',
+    '"$ffprobe" -version > "$APOLLO_WAVE21_EVIDENCE_DIR/ffprobe-version.txt"',
+    'sha256sum "$ffmpeg" "$ffprobe" package-lock.json > "$APOLLO_WAVE21_EVIDENCE_DIR/binary-provenance.sha256"',
+    'sha256sum tests/v2/localization-snapshot-proxy.pg.integration.mjs tests/v2/helpers/localization-pg.mjs tests/v2/helpers/capture-journey.mjs > "$APOLLO_WAVE21_EVIDENCE_DIR/input-provenance.sha256"',
+    'manifest="$(find "$APOLLO_WAVE21_EVIDENCE_DIR" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print -quit)"',
+    'test -n "$manifest" && test -s "$manifest"',
+    'find "$APOLLO_WAVE21_EVIDENCE_DIR" -type f ! -name evidence-files.sha256 -print0 | sort -z | xargs -0 sha256sum > "$APOLLO_WAVE21_EVIDENCE_DIR/evidence-files.sha256"',
+  ]) assert.ok(step.body.includes(required), `localized media proxy lost its executable/evidence contract: ${required}`)
+  const publication = steps.find((entry) => entry.job === step.job && entry.name === 'Publish localization proxy media and binary provenance')
+  assert.ok(publication && gatesTheBuild(publication))
+  assert.equal(publication.attrs.get('uses'), 'actions/upload-artifact@v4')
+  assert.equal(publication.attrs.get('if'), "always() && steps.localization-media-proxy.conclusion != 'skipped'")
+  assert.match(publication.body, /path: \$\{\{ runner\.temp \}\}\/localization-proxy-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/)
+  assert.match(publication.body, /if-no-files-found: error/)
+  return step
+}
+
+test('localization media proxy CI resolves explicit locked media binaries and retains measured evidence', async () => {
+  const [workflow, packageJson, source] = await Promise.all([
+    read('.github/workflows/ci.yml'), read('package.json'), read('tests/v2/localization-snapshot-proxy.pg.integration.mjs'),
+  ])
+  assert.match(JSON.parse(packageJson).scripts['test:integration:localization-media-proxy'], /tests\/v2\/localization-snapshot-proxy\.pg\.integration\.mjs$/)
+  const gate = /const enabled = process\.env\.(APOLLO_[A-Z0-9_]+) === '1'/.exec(source)?.[1]
+  assert.ok(gate)
+  const step = verifyLocalizationProxyMediaWiring(workflow, gate)
+  for (const required of [
+    'require("ffprobe-static").path', 'test -x "$ffprobe"', 'FFPROBE_BIN="$ffprobe"',
+    'ffprobe-version.txt', 'binary-provenance.sha256', 'input-provenance.sha256',
+    'test -n "$manifest" && test -s "$manifest"', 'evidence-files.sha256',
+  ]) {
+    const changed = workflow.replace(step.body, step.body.replaceAll(required, 'removed'))
+    assert.notEqual(changed, workflow)
+    assert.throws(() => verifyLocalizationProxyMediaWiring(changed, gate), undefined, required)
+  }
+  for (const disabled of ['        if: false\n', '        continue-on-error: true\n']) {
+    assert.throws(() => verifyLocalizationProxyMediaWiring(workflow.replace(step.body,
+      step.body.replace('        id:', `${disabled}        id:`)), gate))
+  }
+  assert.throws(() => verifyLocalizationProxyMediaWiring(workflow.replace(step.body,
+    step.body.replace(`${gate}: "1"`, `${gate}: "0"`)), gate))
+  for (const disabled of ['    if: false\n', '    continue-on-error: true\n']) {
+    assert.throws(() => verifyLocalizationProxyMediaWiring(workflow.replace('  local-infrastructure:\n',
+      `  local-infrastructure:\n${disabled}`), gate))
+  }
+  const publication = parseWorkflow(workflow).steps.find((entry) => entry.name === 'Publish localization proxy media and binary provenance')
+  assert.throws(() => verifyLocalizationProxyMediaWiring(workflow.replace(publication.body,
+    publication.body.replace('if-no-files-found: error', 'if-no-files-found: warn')), gate))
+})
+
 const singleTestFileOf = (command) => {
   const files = [...command.matchAll(SUITE_FILE)].map((match) => match[0])
   return files.length === 1 ? files[0] : null
 }
 
+function verifyDashboardCftWiring(workflow, consumer, bootstrap) {
+  const { steps } = parseWorkflow(workflow)
+  const jobEnvironment = /^ {4}env:\r?\n((?: {6}[^\n]*\n)*)/m.exec(workflow)?.[1]
+  assert.ok(jobEnvironment, 'Dashboard job environment must be scoped explicitly')
+  assert.ok(!/\$\{\{\s*runner[.\[]/.test(jobEnvironment), 'runner context is unavailable in jobs.env')
+  assert.ok(!jobEnvironment.includes('APOLLO_DASHBOARD_CFT157_LINUX_ROOT:'), 'CfT root belongs to its mandatory preparation step')
+  const preparations = steps.filter((entry) => entry.name === 'Declare owned Linux CfT root in step context')
+  assert.equal(preparations.length, 1)
+  const preparation = preparations[0]
+  assert.ok(gatesTheBuild(preparation))
+  assert.equal(preparation.env.get('APOLLO_DASHBOARD_CFT157_LINUX_ROOT'), '${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}')
+  const declaration = "printf 'APOLLO_DASHBOARD_CFT157_LINUX_ROOT=%s\\n' \"$APOLLO_DASHBOARD_CFT157_LINUX_ROOT\" >> \"$GITHUB_ENV\""
+  assert.equal(preparation.body.split('\n').filter((line) => line.trim() === declaration).length, 1)
+  const required = [
+    ['Build unprivileged CI pidfd addon', 'bash scripts/validation/build-perception-pidfd.sh', '2'],
+    ['Acquire official CfT 157 Linux under owned cgroup', 'node scripts/validation/perception-consumer-cgroup.mjs acquisition', '5'],
+    ['Worker transitions and pipeline events through HTTP and Chromium', 'node scripts/validation/perception-consumer-cgroup.mjs dashboard', '8'],
+  ]
+  const selected = required.map(([name, invocation, timeout]) => {
+    const matches = steps.filter((entry) => entry.name === name)
+    assert.equal(matches.length, 1); const entry = matches[0]
+    assert.ok(gatesTheBuild(entry)); assert.equal(entry.attrs.get('timeout-minutes'), timeout)
+    const lines = entry.body.split('\n').map((line) => line.trim())
+    assert.equal(lines.filter((line) => line === invocation || line === 'run: ' + invocation).length, 1)
+    return entry
+  })
+  assert.ok(steps.indexOf(selected[0]) < steps.indexOf(selected[1]) && steps.indexOf(selected[1]) < steps.indexOf(selected[2]))
+  assert.ok(steps.indexOf(preparation) < steps.indexOf(selected[0]))
+  assert.match(selected[1].body, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*300000/)
+  assert.match(selected[2].body, /APOLLO_PERCEPTION_JOB_DEADLINE_MS=.*445000/)
+  const pure = steps.find((entry) => entry.name === 'Verify fixed Linux CfT acquisition and closed consumer contracts')
+  assert.ok(pure && gatesTheBuild(pure))
+  assert.ok(pure.body.includes('python3 -I -S -B tests/validation/test_dashboard_cft157_linux.py'))
+  assert.ok(pure.body.includes('python3 -I -S -B tests/v2/perception-namespace-config.test.py CgroupConfiguration'))
+  assert.ok(pure.body.includes('node --test tests/v2/owned-browser-cleanup.test.mjs'))
+  const cleanup = steps.find((entry) => entry.name === 'Close admission and authenticate consumer cgroups before removing prerequisite')
+  assert.ok(cleanup); assert.equal(cleanup.attrs.get('if'), 'always()')
+  assert.equal(cleanup.attrs.get('continue-on-error'), undefined)
+  assert.equal(cleanup.attrs.get('run'), 'node scripts/validation/cleanup-perception-pidfd.mjs')
+  assert.ok(steps.indexOf(selected[2]) < steps.indexOf(cleanup))
+  assert.ok(!workflow.includes('/usr/bin/google-chrome') && !workflow.includes('PLAYWRIGHT_CHROME_EXECUTABLE:'))
+  const publication = steps.find((entry) => entry.name === 'Publish version-bound dashboard runtime evidence')
+  assert.ok(publication); assert.equal(publication.attrs.get('if'), 'always()')
+  assert.ok(publication.body.includes('${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}'),
+    'Evidence path must remain exact even when preparation failed before GITHUB_ENV publication')
+  assert.ok(consumer.includes("'dashboard', 'acquisition'"))
+  assert.match(consumer, /export const DASHBOARD_CI_ARGV = Object.freeze\(\['--experimental-transform-types',\s*'--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--test', '--test-reporter=tap',\s*'tests\/v2\/dashboard-runtime-journey.e2e.mjs'\]\)/)
+  assert.ok(bootstrap.includes("mode === 'dashboard' || mode === 'acquisition'"))
+  assert.ok(bootstrap.includes('argv = [...DASHBOARD_CI_ARGV]'))
+  assert.ok(bootstrap.includes('spawn(executable, argv,'))
+  assert.ok(bootstrap.includes('const sourcePath = mode ==='))
+  assert.ok(bootstrap.includes("'scripts/validation/acquire-dashboard-cft157-linux.py'"))
+  assert.ok(bootstrap.includes("argv = ['-I', '-S', '-B', source"))
+  return selected[2]
+}
 test('dashboard runtime journey cannot silently skip or stop gating CI', async () => {
   const suite = 'tests/v2/dashboard-runtime-journey.e2e.mjs'
-  const [workflow, source] = await Promise.all([
-    read('.github/workflows/dashboard-runtime-ci.yml'), read(suite),
+  const [workflow, source, consumer, bootstrap] = await Promise.all([
+    read('.github/workflows/dashboard-runtime-ci.yml'), read(suite), read('scripts/validation/run-perception-addon-consumer.mjs'),
+    read('scripts/validation/perception-ci-child-bootstrap.mjs'),
   ])
   const gate = /process\.env\.(APOLLO_[A-Z_]+_E2E)\s*!==\s*'1'/.exec(source)?.[1]
   assert.ok(gate, 'derive the opt-in gate from the runtime journey')
-  const step = parseWorkflow(workflow).steps.find((entry) => entry.suiteFiles.includes(suite))
+  const step = verifyDashboardCftWiring(workflow, consumer, bootstrap)
   assert.ok(step && gatesTheBuild(step), 'the real worker journey must fail CI when it fails')
   assert.match(workflow, new RegExp(`^ {6}${gate}: ['\"]?1['\"]?\\s*$`, 'm'))
   assert.match(workflow, /^ {6}V2_DATABASE_URL: .*apollo_v2_e2e_dashboard.*connection_limit=1/m)
+})
+test('Linux CfT wiring refuses removed acquisition, disabled owners, host browser and broken exact argv', async () => {
+  const [workflow, consumer, bootstrap] = await Promise.all([read('.github/workflows/dashboard-runtime-ci.yml'),
+    read('scripts/validation/run-perception-addon-consumer.mjs'), read('scripts/validation/perception-ci-child-bootstrap.mjs')])
+  verifyDashboardCftWiring(workflow, consumer, bootstrap)
+  for (const name of ['Declare owned Linux CfT root in step context', 'Acquire official CfT 157 Linux under owned cgroup', 'Worker transitions and pipeline events through HTTP and Chromium']) {
+    const entry = parseWorkflow(workflow).steps.find((entry) => entry.name === name)
+    for (const replacement of ['', entry.body.replace('        run:', '        if: false\n        run:'),
+      entry.body.replace('        run:', '        continue-on-error: true\n        run:')]) {
+      assert.throws(() => verifyDashboardCftWiring(workflow.replace(entry.body, replacement), consumer, bootstrap))
+    }
+  }
+  for (const change of [workflow.replace('300000', '360000'), workflow.replace('445000', '500000'),
+    workflow.replace('perception-consumer-cgroup.mjs dashboard', 'perception-consumer-cgroup.mjs unit'),
+    workflow.replace('APOLLO_DASHBOARD_CFT157_LINUX_ROOT:', 'PLAYWRIGHT_CHROME_EXECUTABLE:')]) {
+    assert.throws(() => verifyDashboardCftWiring(change, consumer, bootstrap))
+  }
+  assert.throws(() => verifyDashboardCftWiring(workflow, consumer.replace('--test-reporter=tap', '--test-reporter=dot'), bootstrap))
+  assert.throws(() => verifyDashboardCftWiring(workflow, consumer, bootstrap.replace('argv = [...DASHBOARD_CI_ARGV]', 'argv = process.argv')))
+  const forbiddenJobContext = workflow.replace('      CI: true',
+    '      APOLLO_DASHBOARD_CFT157_LINUX_ROOT: ${{ runner.temp }}/apollo-dashboard-cft157-${{ github.run_id }}-${{ github.run_attempt }}\n      CI: true')
+  assert.throws(() => verifyDashboardCftWiring(forbiddenJobContext, consumer, bootstrap), /runner context is unavailable/)
+  assert.throws(() => verifyDashboardCftWiring(workflow.replace('>> "$GITHUB_ENV"', '> /tmp/unowned-env'), consumer, bootstrap))
 })
 
 test('T-F4.016 every mandatory product journey has a CI step, its own gate and a database', async () => {
@@ -356,6 +711,8 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
 const PAID_PROVIDERS = 'calls paid providers, which the owner’s briefing forbids in CI'
 const PHASE_1_3 = 'Phase 1-3 suite with an npm script and no CI step'
 const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means writing one first'
+const W66_SUPERVISED_PG = 'W66 PostgreSQL proof that runs only under the local supervised harness (disposable cluster, frozen source/inputs); not a hosted CI step until the writer cutover'
+const W69_PINNED_TOOLCHAIN = 'W69 subtitle clock proof that needs an externally pinned FFmpeg/font toolchain or a real Chromium and has no download or skip fallback; local only until pinned in hosted CI'
 
 /**
  * Suite files that no CI step runs, each with a reason and with every document
@@ -381,6 +738,11 @@ const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means
  * reason that has nothing to do with coverage.
  */
 const KNOWN_UNRUN_SUITES = [
+  {
+    file: 'tests/v2/prisma-face-producer-http.integration.mjs',
+    reason: 'W61 diagnostic face HTTP requires the licensed, hash-pinned development video/landing/lineage, YuNet model/license and local Python/OpenCV runtime; local result face-http-resume-v1-39bfb5da SHA256 1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 is a controlled proof, not CI coverage or approved facial quality. Face producer integration is wired only for three offline audit/fixture cases; its PG and runner cases are likewise local, with faceSafety unknown and holdout closed.',
+    citedBy: ['docs/quality/w61-yunet-cpu-adapter.md'],
+  },
   { file: 'tests/v2/recovery-master-live.e2e.mjs', reason: 'requires the private owner-selected Imersão master, authorized live Groq credential/cost cap and supervised editorial/visual review; local proof is separate from hosted CI', citedBy: ['docs/quality/w51-60-integration.md'] },
   { file: 'tests/v2/contamination-golden-fixtures.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/contiguous-evaluation-repository.integration.mjs', reason: NO_SCRIPT },
@@ -458,6 +820,18 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/visual-montage-render.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/wave10-combined-journey.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/wave9-combined-journeys.integration.mjs', reason: PHASE_1_3 },
+  // W66 PostgreSQL proofs: opt-in by APOLLO_RUN_W66_* variables, run only by the local supervisor
+  // (frozen source and inputs, disposable cluster, backend accounting). CI seeds are not yet canonical,
+  // so wiring them waits for the writer cutover; the supervised results are the proof until then.
+  { file: 'tests/v2/project-creation-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  { file: 'tests/v2/project-operational-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  { file: 'tests/v2/project-output-commands.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  { file: 'tests/v2/project-output-state.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  // W69 subtitle clock proofs need an externally pinned toolchain or a real Chromium; there is no
+  // download or skip fallback, so they run locally with their pins and are not hosted CI steps yet.
+  { file: 'tests/v2/ass-emission-clock-pixels.integration.mjs', reason: W69_PINNED_TOOLCHAIN },
+  { file: 'tests/v2/ffmpeg-subtitle-clock-collector.integration.mjs', reason: W69_PINNED_TOOLCHAIN },
+  { file: 'tests/v2/subtitle-vtt-native.integration.mjs', reason: W69_PINNED_TOOLCHAIN },
 ]
 
 const listSuiteFiles = async () => {
@@ -490,16 +864,110 @@ const listMarkdown = async () => {
  * `npm test` finds `*.test.mjs` on its own; it finds neither `*.integration.mjs`
  * nor `*.e2e.mjs`, which is the whole reason a suite can exist and never run.
  */
-const suiteFilesRunByCi = (steps, scripts) => {
+const suiteFilesRunByCi = (steps, scripts, cgroupSource, consumerSource = '', bootstrapSource = '') => {
   const gating = steps.filter(gatesTheBuild)
   const runByCi = new Set(gating.flatMap((step) => step.npmScripts))
   const files = new Set(gating.flatMap((step) => step.suiteFiles))
+  // This fixed owner chooses a source-pinned suite internally, instead of
+  // taking a test path from argv. Count only its real mandatory invocation and
+  // its actual literal -> fixed file -> spawn -> CLI dispatch bindings.
+  const cgroupOwners = gating.filter((entry) => entry.job.id === 'perception' &&
+    entry.name === 'Linux cgroup containment controlled gate' &&
+    entry.attrs.get('run') === 'node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates' &&
+    entry.attrs.get('timeout-minutes') === '3' && entry.attrs.get('if') === undefined &&
+    entry.attrs.get('continue-on-error') === undefined && entry.job.attrs.get('if') === undefined &&
+    entry.job.attrs.get('continue-on-error') === undefined)
+  if (cgroupOwners.length) {
+    assert.equal(cgroupOwners.length, 1, 'Exactly one fixed cgroup owner may attest this suite')
+    const declaration = /^export const CGROUP_GATE_SUITE = '(tests\/v2\/[A-Za-z0-9._-]+\.integration\.mjs)'$/m.exec(cgroupSource)
+    assert.ok(declaration, 'Fixed cgroup gate suite must be an actual literal')
+    assert.ok(cgroupSource.includes('const file = join(CI_ROOT, CGROUP_GATE_SUITE)'))
+    assert.ok(cgroupSource.includes('spawn(process.execPath, [file],'))
+    assert.ok(cgroupSource.includes("if (mode === '--controlled-gates')"))
+    assert.ok(cgroupSource.includes('await runControlledCgroupGate()).success'))
+    files.add(declaration[1])
+  }
+  const dashboardOwners = gating.filter((entry) => entry.job.id === 'dashboard-runtime' &&
+    entry.body.split('\n').some((line) => line.trim() === 'node scripts/validation/perception-consumer-cgroup.mjs dashboard'))
+  if (dashboardOwners.length) {
+    assert.equal(dashboardOwners.length, 1)
+    assert.match(consumerSource, /export const DASHBOARD_CI_ARGV = Object.freeze\(\['--experimental-transform-types',\s*'--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--test', '--test-reporter=tap',\s*'tests\/v2\/dashboard-runtime-journey.e2e.mjs'\]\)/)
+    assert.ok(bootstrapSource.includes('argv = [...DASHBOARD_CI_ARGV]') && bootstrapSource.includes('spawn(executable, argv,'))
+    files.add('tests/v2/dashboard-runtime-journey.e2e.mjs')
+  }
   for (const [name, command] of Object.entries(scripts)) {
     if (!runByCi.has(name)) continue
     for (const match of command.matchAll(SUITE_FILE)) files.add(match[0])
   }
   return { runByCi, files }
 }
+
+test('suite inventory follows the real cgroup owner; removed, bypassed or non-gating calls do not count', async () => {
+  const [workflow, source] = await Promise.all([read('.github/workflows/ci.yml'),
+    read('scripts/validation/perception-consumer-cgroup.mjs')])
+  const suite = 'tests/v2/perception-consumer-cgroup.integration.mjs'
+  const counted = (value, owner = source) => suiteFilesRunByCi(parseWorkflow(value).steps, {}, owner).files.has(suite)
+  assert.equal(counted(workflow), true)
+  const step = '      - name: Linux cgroup containment controlled gate\n        timeout-minutes: 3\n        run: node scripts/validation/perception-consumer-cgroup.mjs --controlled-gates\n'
+  assert.ok(workflow.includes(step))
+  for (const replacement of ['', step.replace('        run:', '        if: false\n        run:'),
+    step.replace('        run:', '        continue-on-error: true\n        run:'),
+    step.replace('--controlled-gates', '--arbitrary'), step.replace('timeout-minutes: 3', 'timeout-minutes: 4')]) {
+    assert.equal(counted(workflow.replace(step, replacement)), false)
+  }
+  for (const attribute of ['    if: false\n', '    continue-on-error: true\n'])
+    assert.equal(counted(workflow.replace('  perception:\n', '  perception:\n' + attribute)), false)
+  for (const [actual, broken] of [
+    ['export const CGROUP_GATE_SUITE =', 'export const UNRELATED_SUITE ='],
+    ['const file = join(CI_ROOT, CGROUP_GATE_SUITE)', 'const file = unrelatedFile'],
+    ['spawn(process.execPath, [file],', 'spawn(process.execPath, [unrelatedFile],'],
+    ["if (mode === '--controlled-gates')", "if (mode === '--arbitrary')"],
+    ['await runControlledCgroupGate()).success', 'await unrelatedGate()).success'],
+  ]) {
+    assert.ok(source.includes(actual))
+    assert.throws(() => counted(workflow, source.replace(actual, broken)))
+  }
+})
+
+test('workspace review availability PG proof is admitted, bounded and cannot be waived', async () => {
+  const workflow = await read('.github/workflows/ci.yml')
+  const name = 'Run workspace review availability snapshot and integrity PostgreSQL proof'
+  const suite = 'tests/v2/prisma-workspace-review-availability.integration.mjs'
+  const verify = (candidate) => {
+    const matches = parseWorkflow(candidate).steps.filter((step) => step.name === name)
+    assert.equal(matches.length, 1)
+    const step = matches[0]
+    assert.ok(gatesTheBuild(step))
+    assert.equal(step.attrs.get('if'), undefined)
+    assert.equal(step.attrs.get('continue-on-error'), undefined)
+    assert.equal(step.attrs.get('timeout-minutes'), '3')
+    assert.ok(isLiteral(step.env.get('APOLLO_WORKSPACE_REVIEW_AVAILABILITY_PG'), '1'))
+    assert.match(step.env.get('V2_DATABASE_URL'), /\/apollo_v2_review_availability\?schema=public&application_name=apollo-video-e2e-review-availability-.*&connection_limit=2&pool_timeout=10&connect_timeout=10$/)
+    const lines = step.body.split('\n').map((line) => line.trim())
+    const migrate = 'timeout --signal=TERM --kill-after=5s 60s npm run db:v2:migrate:deploy || status=$?'
+    const execute = `timeout --signal=TERM --kill-after=5s 90s node --experimental-transform-types --test ${suite} || status=$?`
+    assert.equal(lines.filter((line) => line === execute).length, 1)
+    assert.ok(lines.indexOf(migrate) >= 0 && lines.indexOf(migrate) < lines.indexOf(execute))
+    assert.ok(lines.includes('administer "create database apollo_v2_review_availability"'))
+    assert.ok(lines.includes('if test "$status" = 0; then'))
+    assert.ok(lines.includes('if test "$status" != 0; then exit "$status"; fi'))
+    assert.ok(lines.includes('test "$orphans" = 0'))
+    assert.match(step.body, /select count\(\*\) from pg_stat_activity where datname = 'apollo_v2_review_availability'/)
+    return step
+  }
+  const step = verify(workflow)
+  for (const replacement of [
+    '', step.body.replace('        run:', '        if: false\n        run:'),
+    step.body.replace('        run:', '        continue-on-error: true\n        run:'),
+    step.body.replace('APOLLO_WORKSPACE_REVIEW_AVAILABILITY_PG: "1"', 'APOLLO_WORKSPACE_REVIEW_AVAILABILITY_PG: "0"'),
+    step.body.replace(suite, 'tests/v2/unrelated.integration.mjs'),
+    step.body.replace('connection_limit=2', 'connection_limit=6'),
+    step.body.replace('timeout-minutes: 3', 'timeout-minutes: 4'),
+    step.body.replace('if test "$status" != 0; then exit "$status"; fi', 'true'),
+    step.body.replace('test "$orphans" = 0', 'true'),
+    step.body.replace('npm run db:v2:migrate:deploy', 'true'),
+  ]) assert.throws(() => verify(workflow.replace(step.body, replacement)))
+})
 
 async function inventoryCiSteps() {
   const [central, library, dashboard] = await Promise.all([
@@ -517,14 +985,16 @@ async function inventoryCiSteps() {
 }
 
 test('T-F4.016 no integration or e2e suite file goes unrun by CI without being declared', async () => {
-  const [rawPackage, workflow, present] = await Promise.all([
+  const [rawPackage, workflow, present, cgroupSource, consumerSource, bootstrapSource] = await Promise.all([
     read('package.json'),
     inventoryCiSteps(),
     listSuiteFiles(),
+    read('scripts/validation/perception-consumer-cgroup.mjs'),
+    read('scripts/validation/run-perception-addon-consumer.mjs'), read('scripts/validation/perception-ci-child-bootstrap.mjs'),
   ])
   const { scripts } = JSON.parse(rawPackage)
   const steps = workflow
-  const { files: filesRunByCi } = suiteFilesRunByCi(steps, scripts)
+  const { files: filesRunByCi } = suiteFilesRunByCi(steps, scripts, cgroupSource, consumerSource, bootstrapSource)
 
   assert.ok(present.length > 0, 'found no integration or e2e suite files under tests/; the glob and the tree have diverged')
 
@@ -557,9 +1027,11 @@ test('T-F4.016 no integration or e2e suite file goes unrun by CI without being d
 })
 
 test('T-F4.016 every npm integration or e2e script either runs in CI or runs a declared suite', async () => {
-  const [rawPackage, steps] = await Promise.all([read('package.json'), inventoryCiSteps()])
+  const [rawPackage, steps, cgroupSource, consumerSource, bootstrapSource] = await Promise.all([read('package.json'), inventoryCiSteps(),
+    read('scripts/validation/perception-consumer-cgroup.mjs'), read('scripts/validation/run-perception-addon-consumer.mjs'),
+    read('scripts/validation/perception-ci-child-bootstrap.mjs')])
   const { scripts } = JSON.parse(rawPackage)
-  const { runByCi, files: filesRunByCi } = suiteFilesRunByCi(steps, scripts)
+  const { runByCi, files: filesRunByCi } = suiteFilesRunByCi(steps, scripts, cgroupSource, consumerSource, bootstrapSource)
 
   const declared = new Set(KNOWN_UNRUN_SUITES.map((entry) => entry.file))
 

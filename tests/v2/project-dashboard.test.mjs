@@ -402,10 +402,11 @@ test('W34 one inconsistent row rejects the whole page so no partial or invented 
   )
 })
 
-test('W34 operation progress without a total stays a contract shape and never gains a percentage', async () => {
-  // PostgreSQL canonical progress CHECK makes every persisted operation
-  // measured (proved by the W35 E2E). The Prisma port is still the boundary
-  // that must not invent a total or a percentage when a row would lack one.
+test('W34 synthetic port progress without a total never gains a percentage', async () => {
+  // Synthetic Prisma-port/domain/contract defense only: these injected partial
+  // rows cannot satisfy the canonical PostgreSQL CHECK. This is not a PG/API
+  // journey or an observed browser proof; the source guard separately pins UI
+  // no-percent/no-progressbar handling. No persisted no-total state is claimed.
   const [record] = await w34List([w34Row({
     status: 'rendering-proxy',
     publicOperations: [w34Operation({

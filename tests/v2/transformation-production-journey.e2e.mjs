@@ -112,7 +112,8 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
   }
   try {
     await cleanup()
-    const { createProjectService } = await import('../../src/v2/application/create-project.ts')
+    const { createProjectService, createProjectOutputVariantService } = await import('../../src/v2/application/create-project.ts')
+    const { variantBody } = await import('./helpers/output-world.mjs')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
     const { requestTransformationJobService } = await import('../../src/v2/application/transformation-jobs.ts')
@@ -131,7 +132,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
     const { PrismaNoveltyBudgetRepository } = await import('../../src/v2/infrastructure/prisma/novelty-budget-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2, PrismaOperationalOutputBundleRepositoryV3 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
@@ -169,9 +170,14 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const auditContext = createExternalAuditContext({ clientId, credentialId: issued.credential.id, workspaceId, environment: 'production' })
     const actor = Object.freeze({ ...auditContext, scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext })
     let entity = 0
-    const created = await createProjectService({ repository: new PrismaProjectCreationRepository(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ workspaceId, name: 'Advanced cleanup production journey', objective: 'awareness', format: '16:9', actor, idempotency: { clientId, key: 'transformation-production-project' } })
-    const projectId = created.project.id
-    const projectVersionId = created.version.id
+    const created = await createProjectService({ repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ workspaceId, name: 'Advanced cleanup production journey', objective: 'awareness', actor, idempotencyKey: 'transformation-production-project' })
+    const projectId = created.projectAtCreation.id
+    // The journey cleans a 16:9 source. A project no longer carries a canvas, so the 16:9 output is created explicitly:
+    // the root is followed by an output variant, and that Version (not the empty root) is the head the journey works on.
+    const variant = await createProjectOutputVariantService({ repository: new PrismaOperationalOutputBundleRepositoryV3(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ ...variantBody(), workspaceId, projectId, baseVersionId: created.creationVersion.id, baseHash: created.creationVersion.baseHash, actor, idempotencyKey: 'transformation-production-variant' })
+    assert.equal(variant.bundle.state.document.entries.some((entry) => entry.spec.output.aspectRatio === '16:9'), true)
+    const headVersion = variant.bundle.version
+    const projectVersionId = headVersion.id
 
     const storage = new LocalMediaUploadStorage(artifactRoot)
     const artifacts = new PrismaMediaArtifactRepository(client)
@@ -200,7 +206,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
       sourceArtifactId,
       sourceManifestId,
     }]
-    await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: created.version.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, colorPipelineBindingsJson: stableSerialize(proxyColorBindings), inputHash: createHash('sha256').update('proxy-input').digest('hex'), outputArtifactId: sourceArtifactId, outputManifestId: sourceManifestId, originalFileName: 'source.mp4', createdAt: at(1) } })
+    await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: headVersion.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, colorPipelineBindingsJson: stableSerialize(proxyColorBindings), inputHash: createHash('sha256').update('proxy-input').digest('hex'), outputArtifactId: sourceArtifactId, outputManifestId: sourceManifestId, originalFileName: 'source.mp4', createdAt: at(1) } })
     const seededProxyOperation = await new PrismaPublicOperationRepository(client).findById(workspaceId, proxyOperationId)
     assert.equal(seededProxyOperation?.operation.result?.resource.manifestId, sourceManifestId)
 

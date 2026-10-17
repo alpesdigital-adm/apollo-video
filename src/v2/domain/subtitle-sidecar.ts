@@ -16,7 +16,8 @@ import type { RenderElementMap } from './review-system.ts'
  */
 export const SUBTITLE_SIDECAR_SCHEMA_VERSION = 'subtitle-sidecar/v1'
 export const SUBTITLE_SIDECAR_RECIPE_ID = 'subtitle-sidecar'
-export const SUBTITLE_SIDECAR_RECIPE_VERSION = '1.0.0'
+export const SUBTITLE_SIDECAR_RECIPE_VERSION = '1.1.0'
+export const SUBTITLE_SIDECAR_TEXT_POLICY = 'vtt-literal-single-decode/v1'
 export const SUBTITLE_SIDECAR_ELEMENT_PREFIX = 'subtitle:'
 export const SUBTITLE_SIDECAR_FORMATS = Object.freeze(['srt', 'vtt'] as const)
 export type SubtitleSidecarFormat = (typeof SUBTITLE_SIDECAR_FORMATS)[number]
@@ -245,7 +246,10 @@ export function renderSubtitleSidecarText(
   const blocks = cues.map((cue, index) => {
     const header = format === 'srt' ? `${index + 1}${eol}` : ''
     const timing = `${stamp(cue.startMs, format)} --> ${stamp(cue.endMs, format)}`
-    return `${header}${timing}${eol}${cue.text.split('\n').join(eol)}`
+    const literal = format === 'vtt'
+      ? cue.text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+      : cue.text
+    return `${header}${timing}${eol}${literal.split('\n').join(eol)}`
   })
   const head = format === 'vtt' ? `WEBVTT${eol}${eol}` : ''
   return `${head}${blocks.join(`${eol}${eol}`)}${eol}`
@@ -345,7 +349,10 @@ export function parseSubtitleSidecar(
     }
     const timing = lines[timingIndex]?.split(' --> ')
     assertDomain(timing?.length === 2, 'INVALID_ARGUMENT', 'Subtitle sidecar cue timing is invalid')
-    const text = lines.slice(timingIndex + 1).join('\n')
+    const encoded = lines.slice(timingIndex + 1).join('\n')
+    // One pass only: encoded &amp;lt; is literal &lt;, never a tag.
+    const text = format === 'vtt' ? encoded.replace(/&(amp|lt|gt);/g,
+      (_entity, name: string) => name === 'amp' ? '&' : name === 'lt' ? '<' : '>') : encoded
     assertDomain(text.length > 0, 'INVALID_ARGUMENT', 'Subtitle sidecar cue text is empty')
     return Object.freeze({
       startMs: parseStamp(timing![0]!, format),
@@ -392,5 +399,8 @@ export function subtitleSidecarLineageHash(lineage: Readonly<SubtitleSidecarLine
     'INVALID_ARGUMENT',
     'Subtitle sidecar lineage is incomplete',
   )
-  return createHash('sha256').update(stableSerialize(lineage)).digest('hex')
+  return createHash('sha256').update(stableSerialize({
+    ...lineage, recipeVersion: SUBTITLE_SIDECAR_RECIPE_VERSION,
+    textPolicy: SUBTITLE_SIDECAR_TEXT_POLICY,
+  })).digest('hex')
 }

@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises'
 
 import {
   advanceVersionThroughApi, archiveThroughApi, createRealProject, readAggregateOracle,
-  seedAnnotations, seedFinalExportChain, seedOperation, setProjectStatus,
+  seedAnnotations, seedFinalExportChain, seedOperation, setProjectStatus, proveRejectedProgressWithoutTotal,
 } from './dashboard-w34-35-fixtures.mjs'
 import {
   assertCard, awaitProjectList, closeBrowser, evidenceDirectory, expectedCard,
@@ -13,11 +13,11 @@ import {
 } from './dashboard-w34-35-browser.mjs'
 
 export const W34_PREFIX = 'w34-'
-export const W34_SCHEMA = 'w34-dashboard-aggregate/v1'
+export const W34_SCHEMA = 'w34-dashboard-aggregate/v2'
 export const W34_MANIFEST = 'w34-manifest.json'
 export const W34_SCREENSHOTS = ['w34-desktop-aggregate.png', 'w34-mobile-aggregate.png']
 // The fixture names are fixed so the guard can pin the expected aggregate.
-export const W34_FIXTURES = ['w34-bare', 'w34-versioned', 'w34-complete', 'w34-failed-op', 'w34-unmeasured', 'w34-archived']
+export const W34_FIXTURES = ['w34-bare', 'w34-versioned', 'w34-complete', 'w34-failed-op', 'w34-archived']
 
 async function databaseCounts(client, workspaceId) {
   const where = { workspaceId }
@@ -195,38 +195,18 @@ export async function proveDashboardAggregate({
       },
     }
 
-    // 5. unmeasured: PostgreSQL accepts an operation with a counter but no
-    //    total (its progress CHECK is NULL-permissive); product code never
-    //    writes one, so this is a seed and not a runtime transition.
-    const unmeasured = await make('w34-unmeasured')
-    await client.v2PublicOperation.create({ data: {
-      id: 'w34-unmeasured-op', workspaceId, projectId: unmeasured.project.id,
-      clientId: apiClientId, type: 'project-proxy-render', status: 'running',
-      phase: 'rendering', targetType: 'media-artifact', targetId: sourceArtifactId,
-      progressCompleted: 1, progressTotal: null, progressUnit: null,
-      cancelable: true, retryable: false, attempt: 1, maxAttempts: 3,
-      idempotencyKey: 'w34-unmeasured-op-key', requestFingerprint: 'e'.repeat(64),
-      actorCredentialId: audit.credentialId, actorEnvironment: 'production',
-      actorAuthenticationKind: 'bearer', actorContextHash: audit.contextHash,
-      createdAt: at(20), updatedAt: at(10), startedAt: at(19),
-      leaseOwner: 'w34-controlled-seed', heartbeatAt: at(10),
-      leaseExpiresAt: new Date(now + 300_000),
-    } })
-    await setProjectStatus(client, unmeasured.project.id, 'rendering-proxy')
-    fixtures['w34-unmeasured'] = {
-      projectId: unmeasured.project.id,
-      origins: {
-        project: origin('real-api', 'POST /v1/projects'),
-        currentVersion: origin('real-api', 'POST /v1/projects (sequence 1)'),
-        latestOperation: origin('controlled-pg-seed', 'running project-proxy-render with progressCompleted 1 and NULL total/unit; shape accepted by PostgreSQL, never written by product code'),
-        openReviewIssues: origin('absent', 'no annotation exists'),
-        outputs: origin('absent', 'no final export exists'),
-        administration: origin('real-api', 'default revision 1'),
-        status: origin('controlled-pg-seed', 'rendering-proxy'),
-      },
+    // A partial counter is forbidden in PostgreSQL. Test the exact rejection
+    // against the existing canonical positive operation; do not invent a total.
+    evidence.progressConstraint = await proveRejectedProgressWithoutTotal(client, {
+      workspaceId, projectId: versioned.project.id, operationId: 'w34-versioned-op-new',
+    })
+    evidence.partialProgressCoverage = {
+      origin: 'synthetic-unit-only', source: 'tests/v2/project-dashboard.test.mjs',
+      test: 'W34 synthetic port progress without a total never gains a percentage',
+      postgresAccepted: false, browserObserved: false,
     }
 
-    // 6. archived: the administrative fence is produced by the real API.
+    // 5. archived: the administrative fence is produced by the real API.
     const archivedProject = await make('w34-archived')
     const archivedResult = await archiveThroughApi({
       baseUrl, authorization, projectId: archivedProject.project.id,
@@ -270,7 +250,6 @@ export async function proveDashboardAggregate({
     assert.equal(pinned('w34-complete').latestOperation.id, 'w34-complete-v2-final-operation-3')
     assert.equal(pinned('w34-complete').latestOperation.status, 'succeeded')
     assert.deepEqual(pinned('w34-failed-op').latestOperation.error, { code: 'render-failed', retryable: true })
-    assert.deepEqual(pinned('w34-unmeasured').latestOperation.progress, { completed: 1 })
     assert.equal(pinned('w34-archived').administrationRevision, 2)
     assert.equal(pinned('w34-archived').archivedFromStatus, 'draft')
     const projectRows = await client.v2Project.findMany({

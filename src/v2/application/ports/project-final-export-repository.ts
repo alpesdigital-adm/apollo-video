@@ -45,11 +45,17 @@ export interface ProjectFinalExportAttemptHistory {
     error?: Readonly<{
       code: string
       message: string
+      stage?: ProjectFinalExportFailureStage
     }>
     startedAt: string
     completedAt: string
   }>[]
 }
+
+export type ProjectFinalExportFailureStage =
+  | 'source-read' | 'color-plan' | 'color-bindings' | 'lut-materialization'
+  | 'input-validation' | 'rights' | 'source-materialization' | 'render'
+  | 'output-verification' | 'output-promotion' | 'artifact-persistence'
 
 export interface ProjectFinalExportRepository {
   readApprovedCurrentSource(input: {
@@ -119,6 +125,7 @@ export interface ProjectFinalExportRepository {
     error?: Readonly<{
       code: string
       message: string
+      stage?: ProjectFinalExportFailureStage
     }>
     startedAt: string
     completedAt: string

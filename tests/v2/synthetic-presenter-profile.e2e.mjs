@@ -113,7 +113,7 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
 
     if (storageDriver === 's3') {
       const aws = await import('@aws-sdk/client-s3')
@@ -141,12 +141,12 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     let entity = 0
     let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(),
       createId: (kind) => `${kind}-presenter-e2e-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(300_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Projeto do presenter', objective: 'awareness', format: '9:16', actor, idempotency: { clientId: issued.client.id, key: 'presenter-e2e-project' } })
-    const projectId = project.project.id
-    const projectVersionId = project.version.id
+    })({ workspaceId, name: 'Projeto do presenter', objective: 'awareness', actor, idempotencyKey: 'presenter-e2e-project' })
+    const projectId = project.projectAtCreation.id
+    const projectVersionId = project.creationVersion.id
 
     for (const [artifactId, character] of [['presenter-e2e-consent-1', 'a'], ['presenter-e2e-consent-2', 'b']]) {
       await client.v2MediaArtifact.create({

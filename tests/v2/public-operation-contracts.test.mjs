@@ -21,6 +21,12 @@ import {
   publicSchemaDocument,
   publicSchemaExamples,
 } from '../../src/v2/public-api/schema-examples.ts'
+import {
+  advancePublicOperationPhase,
+  createQueuedPublicOperation,
+  startPublicOperationAttempt,
+} from '../../src/v2/domain/public-operation.ts'
+import { presentPublicOperationV2 } from '../../src/v2/public-api/presenters.ts'
 
 const root = resolve(import.meta.dirname, '../..')
 const openApi = createOpenApiDocument()
@@ -104,7 +110,25 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 380)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 387)
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.perception-producer-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.perception-producer-operations.create',
+      'apollo.projects.perception-producer-operations.read',
+    ])
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.temporal-producer-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.temporal-producer-operations.create',
+      'apollo.projects.temporal-producer-operations.read',
+    ])
+  assert.deepEqual(FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.id.startsWith('apollo.projects.face-producer-operations.'))
+    .map((capability) => capability.id).sort(), [
+      'apollo.projects.face-producer-operations.create',
+      'apollo.projects.face-producer-operations.read',
+    ])
   const endpoints = new Set()
 
   for (const capability of FOUNDATION_CAPABILITIES) {
@@ -195,6 +219,76 @@ test('T-FR-241 every public operation has an executable, versioned contract test
 
   assert.equal(endpoints.size, FOUNDATION_CAPABILITIES.length)
   assert.equal(Object.keys(DIRECT_PUBLIC_API_BOUNDARIES).length, 6)
+})
+
+test('perception producer public responses accept each real stage and reject unrelated domain phases', () => {
+  for (const [name, type, phases] of [
+    ['perception', 'perception-producer-run', ['probing', 'transcribing', 'verifying', 'persisting']],
+    ['temporal', 'perception-temporal-run', ['probing', 'analyzing', 'verifying', 'persisting']],
+    ['face', 'perception-face-run', ['probing', 'analyzing', 'verifying', 'persisting']],
+  ]) {
+    const created = ajv.getSchema(`apollo://schemas/${name}-producer-operation-created/v1`)
+    const read = ajv.getSchema(`apollo://schemas/${name}-producer-operation-read/v1`)
+    assert.ok(created)
+    assert.ok(read)
+    let operation = startPublicOperationAttempt(createQueuedPublicOperation({
+      id: `operation-${name}-stages-1`, workspaceId: 'workspace-stages-1',
+      projectId: 'project-stages-1', clientId: 'client-stages-1', type,
+      target: { type: 'project-version', id: 'version-stages-1' },
+      createdAt: '2026-10-08T00:00:00.000Z',
+    }), '2026-10-08T00:00:01.000Z')
+    for (const [index, phase] of phases.entries()) {
+      operation = advancePublicOperationPhase(operation, phase, `2026-10-08T00:00:0${index + 2}.000Z`)
+      assert.deepEqual(operation.progress, { completed: index, total: 4, unit: 'stage' })
+      const presented = presentPublicOperationV2(operation)
+      assert.equal(read({ data: { operation: presented }, meta: { apiVersion: 'v1' } }), true,
+        `${name}/${phase}: ${ajv.errorsText(read.errors)}`)
+      assert.equal(created({ data: { operation: presented, replayed: true }, meta: { apiVersion: 'v1' } }), true,
+        `${name}/${phase} replay: ${ajv.errorsText(created.errors)}`)
+    }
+    for (const forbidden of ['rendering', 'directing', name === 'perception' ? 'analyzing' : 'transcribing']) {
+      assert.throws(() => advancePublicOperationPhase(operation, forbidden, '2026-10-08T00:00:09.000Z'),
+        (error) => error.code === 'INVALID_PUBLIC_OPERATION')
+    }
+    const unknown = structuredClone(presentPublicOperationV2(operation))
+    unknown.phase = 'detecting-faces'
+    assert.equal(read({ data: { operation: unknown }, meta: { apiVersion: 'v1' } }), false)
+  }
+})
+
+test('diagnostic face capabilities require scoped auth and do not accept caller safety authority', () => {
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]))
+  const create = capabilities.get('apollo.projects.face-producer-operations.create')
+  const read = capabilities.get('apollo.projects.face-producer-operations.read')
+  assert.equal(create.version, '1.0.0')
+  assert.equal(create.authMode, 'required')
+  assert.deepEqual(create.requiredScopes, ['projects:write'])
+  assert.equal(create.idempotency, 'required')
+  assert.equal(create.inputSchemaRef, 'apollo://schemas/face-producer-run-request/v1')
+  assert.equal(create.outputSchemaRef, 'apollo://schemas/face-producer-operation-created/v1')
+  assert.deepEqual(create.endpoint, { method: 'POST', path: '/v1/projects/{projectId}/face-producer-operations' })
+  assert.deepEqual(create.successStatuses, [202, 200])
+  assert.equal(read.version, '1.0.0')
+  assert.equal(read.authMode, 'required')
+  assert.deepEqual(read.requiredScopes, ['projects:read'])
+  assert.equal(read.outputSchemaRef, 'apollo://schemas/face-producer-operation-read/v1')
+  assert.deepEqual(read.endpoint, { method: 'GET', path: '/v1/projects/{projectId}/face-producer-operations/{operationId}' })
+
+  const request = ajv.getSchema(create.inputSchemaRef)
+  assert.ok(request)
+  const valid = { projectVersionId: 'version-face-1', sourceArtifactId: 'artifact-face-1', sampleIntervalFrames: 30 }
+  assert.equal(request(valid), true, ajv.errorsText(request.errors))
+  for (const extra of [{ faceSafety: 'verified' }, { authority: 'server-produced' }, { producer: 'trusted-detector' }]) {
+    assert.equal(request({ ...valid, ...extra }), false)
+  }
+  for (const sampleIntervalFrames of [0, 301]) assert.equal(request({ ...valid, sampleIntervalFrames }), false)
+  const response = ajv.getSchema(read.outputSchemaRef)
+  assert.ok(response)
+  const queued = structuredClone(publicSchemaExamples(getPublicSchema(read.outputSchemaRef))[0])
+  assert.equal(response(queued), true, ajv.errorsText(response.errors))
+  queued.data.operation.status = 'succeeded'
+  queued.data.operation.phase = 'completed'
+  assert.equal(response(queued), false, 'successful diagnostic operation must include its sealed envelope')
 })
 
 test('T-F4.015 each renderable-plan compiler is reached by its own route and by no other', () => {

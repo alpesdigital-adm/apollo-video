@@ -2,69 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { ProjectMediaRepository } from '../../application/ports/media-ingest.ts'
-import {
-  calculateCanonicalHash,
-  stableSerialize,
-} from '../../domain/canonical-hash.ts'
+import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
-import type { MediaColorProbe } from '../../domain/color-and-export.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { PrismaOperationalOutputBundleRepositoryV3 } from './output-version-bundle-repository.ts'
 import { mediaLibrarySearchField } from '../../domain/media-library.ts'
-
-function colorProbeData(probe: Readonly<MediaColorProbe>) {
-  const { probeHash, ...content } = probe
-  if (calculateCanonicalHash(content) !== probeHash) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Media color probe hash is invalid',
-    )
-  }
-  return {
-    id: probe.id,
-    workspaceId: probe.workspaceId,
-    artifactId: probe.artifactId,
-    manifestId: probe.manifestId,
-    schemaVersion: probe.schemaVersion,
-    state: probe.detection.state,
-    metadataJson: stableSerialize(
-      probe.detection.state === 'ready'
-        ? probe.detection.metadata
-        : null,
-    ),
-    pixelFormat: probe.detection.pixelFormat ?? null,
-    hdrMode: probe.detection.state === 'ready'
-      ? probe.detection.hdrMode
-      : null,
-    reasonsJson: stableSerialize(
-      probe.detection.state === 'unavailable'
-        ? probe.detection.reasons
-        : [],
-    ),
-    producerProvider: probe.producer.provider,
-    producerVersion: probe.producer.version,
-    producerBinaryDigest: probe.producer.binaryDigest,
-    createdAt: new Date(probe.createdAt),
-    probeHash,
-  }
-}
-
-function storedColorProbeMatches(
-  stored: object,
-  expected: ReturnType<typeof colorProbeData>,
-) {
-  return Object.entries(expected).every(([key, value]) => {
-    // A content-addressed artifact + manifest can be observed again by a later
-    // ingest operation. The evidence and producer must still match exactly,
-    // while the observation timestamp (and the hash that includes it) belongs
-    // to the first persisted observation.
-    if (key === 'createdAt' || key === 'probeHash') return true
-    const actual = (stored as Record<string, unknown>)[key]
-    return value instanceof Date && actual instanceof Date
-      ? value.getTime() === actual.getTime()
-      : actual === value
-  })
-}
+import { validateOutputNormalizationV3 } from '../../domain/output-materialization.ts'
+import { serializeOutputCanonicalJson } from '../../domain/output-canonical-policy.ts'
 
 export class PrismaProjectMediaRepository implements ProjectMediaRepository {
   private readonly client: PrismaClient
@@ -73,252 +18,30 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
     this.client = client
   }
 
-  async readProject(input: { workspaceId: string; projectId: string }) {
-    const project = await this.client.v2Project.findFirst({
-      where: { id: input.projectId, workspaceId: input.workspaceId },
-      include: { currentVersion: true },
-    })
-    if (!project?.currentVersion) return null
-    const version = project.currentVersion
-    if (!version.briefSnapshotId || !version.policiesSnapshotId) {
-      throw new DomainError('PERSISTENCE_CONFLICT', 'Ingest project version is missing foundation snapshots')
-    }
-    return Object.freeze({
-      id: project.id,
-      locale: project.locale ?? 'pt-BR',
-      currentVersion: createProjectVersion({
-        id: version.id,
-        workspaceId: version.workspaceId,
-        projectId: version.projectId,
-        sequence: version.sequence,
-        ...(version.parentVersionId ? { parentVersionId: version.parentVersionId } : {}),
-        snapshotRefs: {
-          brief: version.briefSnapshotId,
-          ...(version.treatmentSnapshotId ? { treatment: version.treatmentSnapshotId } : {}),
-          ...(version.storySnapshotId ? { story: version.storySnapshotId } : {}),
-          editPlan: version.editPlanSnapshotId,
-          policies: version.policiesSnapshotId,
-        },
-        baseHash: version.baseHash,
-        createdBy: version.createdBy,
-        ...(version.commandId ? { commandId: version.commandId } : {}),
-        createdAt: version.createdAt.toISOString(),
-      }),
-    })
+  async readIngestRequestFingerprint(input:{workspaceId:string;projectId:string;operationId:string}) {
+    const row=await this.client.v2PublicOperation.findFirst({where:{id:input.operationId,workspaceId:input.workspaceId,
+      projectId:input.projectId,type:'media-ingest'},select:{requestFingerprint:true}})
+    if(!row||!/^[a-f0-9]{64}$/.test(row.requestFingerprint))throw new DomainError('PERSISTENCE_CONFLICT','Ingest request fingerprint missing')
+    return row.requestFingerprint
   }
-
-  async persistCompletedIngest(input: Parameters<ProjectMediaRepository['persistCompletedIngest']>[0]): Promise<void> {
-    const transcriptJson = stableSerialize(input.transcript)
-    const sourceColorProbe = colorProbeData(input.sourceColorProbe)
-    const proxyColorProbe = colorProbeData(input.proxyColorProbe)
-    await this.client.$transaction(async (transaction) => {
-      const [project, source, proxy, sourceManifest, proxyManifest, upload] = await Promise.all([
-        transaction.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true, currentVersionId: true } }),
-        transaction.v2MediaArtifact.findFirst({ where: { id: input.sourceArtifactId, workspaceId: input.workspaceId }, select: { id: true } }),
-        transaction.v2MediaArtifact.findFirst({ where: { id: input.proxyArtifactId, workspaceId: input.workspaceId }, select: { id: true } }),
-        transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.sourceManifestId, workspaceId: input.workspaceId, artifactId: input.sourceArtifactId }, select: { id: true, manifestHash: true } }),
-        transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.proxyManifestId, workspaceId: input.workspaceId, artifactId: input.proxyArtifactId }, select: { id: true, manifestHash: true } }),
-        transaction.v2MediaUpload.findFirst({ where: { id: input.uploadId, workspaceId: input.workspaceId, projectId: input.projectId, status: 'verified', rightsConfirmed: true }, select: { id: true } }),
-      ])
-      if (!project || !source || !proxy || !sourceManifest || !proxyManifest || !upload || sourceManifest.manifestHash !== input.sourceManifest.manifestHash || proxyManifest.manifestHash !== input.proxyManifest.manifestHash) {
-        throw new DomainError('PERSISTENCE_CONFLICT', 'Completed ingest references are not internally consistent')
-      }
-      const { snapshot, version, event } = input.initialPlan
-      if (
-        snapshot.workspaceId !== input.workspaceId || snapshot.projectId !== input.projectId ||
-        snapshot.kind !== 'edit-plan' || snapshot.id !== version.snapshotRefs.editPlan ||
-        version.workspaceId !== input.workspaceId || version.projectId !== input.projectId ||
-        !version.parentVersionId ||
-        !version.snapshotRefs.brief || !version.snapshotRefs.policies ||
-        event.workspaceId !== input.workspaceId || event.resource.type !== 'project-version' ||
-        event.resource.id !== version.id || event.sequence !== version.sequence ||
-        (project.currentVersionId !== version.parentVersionId && project.currentVersionId !== version.id)
-      ) {
-        throw new DomainError('PERSISTENCE_CONFLICT', 'Initial ingest EditPlan lineage is invalid')
-      }
-      if (
-        sourceColorProbe.workspaceId !== input.workspaceId ||
-        sourceColorProbe.artifactId !== input.sourceArtifactId ||
-        sourceColorProbe.manifestId !== input.sourceManifestId ||
-        proxyColorProbe.workspaceId !== input.workspaceId ||
-        proxyColorProbe.artifactId !== input.proxyArtifactId ||
-        proxyColorProbe.manifestId !== input.proxyManifestId
-      ) {
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          'Completed ingest color probe identity is invalid',
-        )
-      }
-      for (const probe of [sourceColorProbe, proxyColorProbe]) {
-        const existing = await transaction.v2MediaColorProbe.findUnique({
-          where: {
-            workspaceId_artifactId_manifestId: {
-              workspaceId: probe.workspaceId,
-              artifactId: probe.artifactId,
-              manifestId: probe.manifestId,
-            },
-          },
-        })
-        if (existing) {
-          if (!storedColorProbeMatches(existing, probe)) {
-            throw new DomainError(
-              'PERSISTENCE_CONFLICT',
-              'Media color probe identity collided with different evidence',
-            )
-          }
-        } else {
-          await transaction.v2MediaColorProbe.create({ data: probe })
-        }
-      }
-      for (const asset of [
-        { artifactId: input.sourceArtifactId, role: 'source-master' },
-        { artifactId: input.proxyArtifactId, role: 'editing-proxy' },
-      ] as const) {
-        await transaction.v2ProjectMediaAsset.upsert({
-          where: { projectId_artifactId_role: { projectId: input.projectId, artifactId: asset.artifactId, role: asset.role } },
-          create: {
-            id: randomUUID(), workspaceId: input.workspaceId, projectId: input.projectId,
-            artifactId: asset.artifactId, uploadId: input.uploadId, role: asset.role,
-            originalFileName: input.originalFileName, createdAt: new Date(input.createdAt),
-          },
-          update: {},
-        })
-      }
-      const emptyPeople = mediaLibrarySearchField([], 'people')
-      const emptyTopics = mediaLibrarySearchField([], 'topics')
-      await transaction.v2MediaLibraryEntry.upsert({
-        where: { artifactId: input.sourceArtifactId },
-        create: {
-          artifactId: input.sourceArtifactId, workspaceId: input.workspaceId,
-          label: input.originalFileName, peopleJson: stableSerialize(emptyPeople.values), peopleSearch: emptyPeople.search,
-          topicsJson: stableSerialize(emptyTopics.values), topicsSearch: emptyTopics.search,
-          originType: 'upload', createdAt: new Date(input.createdAt),
-        },
-        update: {},
-      })
-      const existingTranscript = await transaction.v2MediaTranscript.findUnique({ where: { id: input.transcriptId } })
-      if (existingTranscript) {
-        if (
-          existingTranscript.workspaceId !== input.workspaceId || existingTranscript.projectId !== input.projectId ||
-          existingTranscript.sourceArtifactId !== input.sourceArtifactId || existingTranscript.sourceManifestId !== input.sourceManifestId ||
-          existingTranscript.transcriptHash !== input.transcript.transcriptHash || existingTranscript.transcriptJson !== transcriptJson
-        ) throw new DomainError('PERSISTENCE_CONFLICT', 'Transcript identity collided with different content')
-      } else {
-        await transaction.v2MediaTranscript.create({ data: {
-          id: input.transcriptId, workspaceId: input.workspaceId, projectId: input.projectId,
-          sourceArtifactId: input.sourceArtifactId, sourceManifestId: input.sourceManifestId,
-          schemaVersion: input.transcript.schemaVersion, language: input.transcript.language,
-          provider: input.transcript.provider, model: input.transcript.model,
-          transcriptHash: input.transcript.transcriptHash, transcriptJson, createdAt: new Date(input.createdAt),
-        } })
-      }
-      const storedSnapshot = await transaction.v2ProjectSnapshot.findUnique({
-        where: { id: snapshot.id },
-      })
-      if (storedSnapshot) {
-        if (
-          storedSnapshot.workspaceId !== snapshot.workspaceId ||
-          storedSnapshot.projectId !== snapshot.projectId ||
-          storedSnapshot.kind !== snapshot.kind ||
-          storedSnapshot.schemaVersion !== snapshot.contentSchemaVersion ||
-          storedSnapshot.contentJson !== snapshot.contentJson ||
-          storedSnapshot.contentHash !== snapshot.contentHash
-        ) {
-          throw new DomainError('PERSISTENCE_CONFLICT', 'Initial ingest EditPlan snapshot collided')
-        }
-      } else {
-        await transaction.v2ProjectSnapshot.create({
-          data: {
-            id: snapshot.id,
-            workspaceId: snapshot.workspaceId,
-            projectId: snapshot.projectId,
-            kind: snapshot.kind,
-            schemaVersion: snapshot.contentSchemaVersion,
-            contentJson: snapshot.contentJson,
-            contentHash: snapshot.contentHash,
-            createdAt: new Date(snapshot.createdAt),
-          },
-        })
-      }
-      const storedVersion = await transaction.v2ProjectVersion.findUnique({
-        where: { id: version.id },
-      })
-      if (storedVersion) {
-        if (
-          storedVersion.workspaceId !== version.workspaceId ||
-          storedVersion.projectId !== version.projectId ||
-          storedVersion.sequence !== version.sequence ||
-          storedVersion.parentVersionId !== version.parentVersionId ||
-          storedVersion.editPlanSnapshotId !== version.snapshotRefs.editPlan ||
-          storedVersion.baseHash !== version.baseHash
-        ) {
-          throw new DomainError('PERSISTENCE_CONFLICT', 'Initial ingest ProjectVersion collided')
-        }
-      } else {
-        await transaction.v2ProjectVersion.create({
-          data: {
-            id: version.id,
-            workspaceId: version.workspaceId,
-            projectId: version.projectId,
-            sequence: version.sequence,
-            parentVersionId: version.parentVersionId,
-            briefSnapshotId: version.snapshotRefs.brief!,
-            treatmentSnapshotId: version.snapshotRefs.treatment,
-            storySnapshotId: version.snapshotRefs.story,
-            editPlanSnapshotId: version.snapshotRefs.editPlan,
-            policiesSnapshotId: version.snapshotRefs.policies,
-            baseHash: version.baseHash,
-            createdBy: version.createdBy,
-            createdAt: new Date(version.createdAt),
-          },
-        })
-      }
-      const storedEvent = await transaction.v2PublicEventOutbox.findUnique({
-        where: { id: event.id },
-      })
-      const eventDataJson = stableSerialize(event.data)
-      if (storedEvent) {
-        if (
-          storedEvent.workspaceId !== event.workspaceId ||
-          storedEvent.type !== event.type ||
-          storedEvent.resourceId !== event.resource.id ||
-          storedEvent.dataJson !== eventDataJson
-        ) {
-          throw new DomainError('PERSISTENCE_CONFLICT', 'Initial ingest event collided')
-        }
-      } else {
-        await transaction.v2PublicEventOutbox.create({
-          data: {
-            id: event.id,
-            workspaceId: event.workspaceId,
-            type: event.type,
-            version: event.version,
-            occurredAt: new Date(event.occurredAt),
-            sequence: event.sequence,
-            actorClientId: event.actor?.clientId,
-            actorUserId: event.actor?.userId,
-            resourceType: event.resource.type,
-            resourceId: event.resource.id,
-            dataJson: eventDataJson,
-          },
-        })
-      }
-      const updatedProject = await transaction.v2Project.updateMany({
-        where: {
-          id: input.projectId, workspaceId: input.workspaceId,
-          status: { in: projectStatusTransitionPath('ingesting', 'draft', { includeSame: true }) },
-          currentVersionId: { in: [version.parentVersionId, version.id] },
-        },
-        data: { status: 'draft', currentVersionId: version.id },
-      })
-      if (updatedProject.count !== 1) {
-        throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot complete ingest from its current status')
-      }
-    })
+  async readProject(input:{workspaceId:string;projectId:string}) {
+    const project=await this.client.v2Project.findFirst({where:{id:input.projectId,workspaceId:input.workspaceId},select:{id:true,locale:true,currentVersionId:true}})
+    if(!project?.currentVersionId)return null
+    const bundle=await readPersistedOperationalOutputBundleV3(this.client,{...input,versionId:project.currentVersionId})
+    if(!bundle||bundle.schemaVersion!=='operational-output-version-bundle/v3'||bundle.state.document.entries.length===0)
+      throw new DomainError('PRECONDITION_REQUIRED','Ingest requires an explicit operational output variant')
+    if(!project.locale)throw new DomainError('PERSISTENCE_CONFLICT','Ingest project locale missing')
+    return Object.freeze({id:project.id,locale:project.locale,currentVersion:bundle.version,outputBundle:bundle})
+  }
+  async persistCompletedIngest(input:Parameters<ProjectMediaRepository['persistCompletedIngest']>[0]):Promise<void> {
+    if(input.proposal.origin.kind!=='ingest-operation'||input.ingestFacts===null)
+      throw new DomainError('PERSISTENCE_CONFLICT','Ingest requires typed facts and an operation fence')
+    await new PrismaOperationalOutputBundleRepositoryV3(this.client).persistChild(input)
   }
 
   async persistCatalogedInput(input: Parameters<ProjectMediaRepository['persistCatalogedInput']>[0]): Promise<void> {
     await this.client.$transaction(async (transaction) => {
+      if((input.mediaType==='audio')!==(input.normalization!==null))throw new DomainError('PERSISTENCE_CONFLICT','Catalog audio normalization authority missing or unexpected')
       const [project, upload, artifact, manifest] = await Promise.all([
         transaction.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true } }),
         transaction.v2MediaUpload.findFirst({ where: {
@@ -338,6 +61,22 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
         },
         update: {},
       })
+      if(input.normalization) {
+        const n=validateOutputNormalizationV3(input.normalization),d=n.document
+        if(d.kind!=='ffprobe-original-audio'||d.workspaceId!==input.workspaceId||d.projectId!==input.projectId||
+          d.source.artifactId!==input.artifactId||d.source.manifestId!==input.manifestId)
+          throw new DomainError('PERSISTENCE_CONFLICT','Catalog observed audio scope differs')
+        await transaction.$queryRawUnsafe('SELECT id FROM media_artifacts WHERE id=$1 AND "workspaceId"=$2 FOR UPDATE',input.artifactId,input.workspaceId)
+        await transaction.$queryRawUnsafe('SELECT 1 AS verified FROM w66_assert_artifact_fact_v3($1::jsonb,$2)',serializeOutputCanonicalJson(d.source),input.workspaceId)
+        const data={id:d.id,workspaceId:d.workspaceId,projectId:d.projectId,operationId:d.operationId,sourceArtifactId:d.source.artifactId,
+          sourceManifestId:d.source.manifestId,sourceManifestHash:d.source.manifest.manifestHash,derivativeArtifactId:d.derivative.artifactId,
+          derivativeManifestId:d.derivative.manifestId,derivativeManifestHash:d.derivative.manifest.manifestHash,
+          receiptJson:serializeOutputCanonicalJson(d),receiptHash:n.receiptHash,createdAt:new Date(d.createdAt)}
+        const existing=await transaction.v2OutputNormalizationReceipt.findUnique({where:{id:d.id}})
+        if(existing) {
+          if(existing.receiptJson!==data.receiptJson||existing.receiptHash!==data.receiptHash)throw new DomainError('PERSISTENCE_CONFLICT','Catalog normalization collision')
+        } else await transaction.v2OutputNormalizationReceipt.create({data})
+      }
       const emptyPeople = mediaLibrarySearchField([], 'people')
       const emptyTopics = mediaLibrarySearchField([], 'topics')
       await transaction.v2MediaLibraryEntry.upsert({

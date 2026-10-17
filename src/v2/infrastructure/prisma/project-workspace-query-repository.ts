@@ -1,7 +1,11 @@
-import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
+import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
-import type { ProjectWorkspaceQueryRepository, ProjectWorkspaceMediaRecord } from '../../application/ports/project-workspace-query-repository.ts'
+import type { ProjectWorkspaceQueryRepository, ProjectWorkspaceMediaRecord, ProjectReviewAvailability } from '../../application/ports/project-workspace-query-repository.ts'
+import { readReviewPreviewContext, readStoredProjectionManifest } from './review-annotation-repository.ts'
+import { readCurrentProxyReview } from './proxy-review-repository.ts'
+import { readPublicOperation } from './public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import type { MediaArtifactManifest } from '../../domain/media-artifact.ts'
 import {
   classifyConfidence,
   createDecisionConfidence,
@@ -73,13 +77,8 @@ export function projectConfidenceUncertainties(values: readonly unknown[]) {
   }
 }
 
-function probeFromManifest(value: string): ProjectWorkspaceMediaRecord['probe'] {
-  const manifest = parseJson(value, 'media manifest')
-  const probe = manifest.probe
-  if (typeof probe !== 'object' || probe === null || Array.isArray(probe)) return undefined
-  const candidate = probe as Record<string, unknown>
-  if (![candidate.width, candidate.height, candidate.duration, candidate.fps].every((item) => typeof item === 'number' && Number.isFinite(item) && item > 0)) return undefined
-  return { width: candidate.width as number, height: candidate.height as number, duration: candidate.duration as number, fps: candidate.fps as number }
+function probeFromManifest(manifest: Readonly<MediaArtifactManifest>): ProjectWorkspaceMediaRecord['probe'] {
+  return manifest.probe ? { ...manifest.probe } : undefined
 }
 
 export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQueryRepository {
@@ -90,167 +89,222 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
   }
 
   async read(input: { workspaceId: string; projectId: string }) {
-    const project = await this.client.v2Project.findFirst({
-      where: { id: input.projectId, workspaceId: input.workspaceId },
-      include: {
-        currentVersion: { include: { briefSnapshot: true, editPlanSnapshot: true } },
-        editCommands: {
-          orderBy: { createdAt: 'desc' },
-          take: 20,
-          include: { resultVersion: { select: { id: true } } },
-        },
-        directorRuns: {
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-          include: { qualitySnapshot: true, editPlanSnapshot: true },
-        },
-        mediaAssets: {
-          orderBy: { createdAt: 'asc' },
-          include: {
-            artifact: {
-              include: {
-                currentRightsSnapshot: { select: { status: true } },
-                manifests: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 },
+    return this.client.$transaction(async (transaction) => {
+      const project = await transaction.v2Project.findFirst({
+        where: { id: input.projectId, workspaceId: input.workspaceId },
+        include: {
+          currentVersion: { include: { briefSnapshot: true, editPlanSnapshot: true } },
+          editCommands: {
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+            include: { resultVersion: { select: { id: true } } },
+          },
+          directorRuns: {
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+            include: { qualitySnapshot: true, editPlanSnapshot: true },
+          },
+          mediaAssets: {
+            orderBy: { createdAt: 'asc' },
+            include: {
+              artifact: {
+                include: {
+                  currentRightsSnapshot: { select: { status: true } },
+                  manifests: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
+                    include: { recipeParameters: true, renderInput: true } },
+                },
               },
             },
           },
+          mediaTranscripts: { orderBy: { createdAt: 'desc' } },
+          mediaIngestOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
+          proxyRenderOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
+          finalExportOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
         },
-        mediaTranscripts: { orderBy: { createdAt: 'desc' } },
-        mediaIngestOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
-        proxyRenderOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
-        finalExportOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
-      },
-    })
-    if (!project) return null
-    const media = project.mediaAssets.map((link) => {
-      const manifest = link.artifact.manifests[0]
-      if (!manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Project media artifact has no manifest')
-      return Object.freeze({
-        id: link.id,
-        role: link.role as 'source-master' | 'editing-proxy' | 'editorial-proxy' | 'final-output',
-        originalFileName: link.originalFileName,
-        artifactId: link.artifactId,
-        manifestId: manifest.id,
-        mediaType: link.artifact.mediaType as 'video' | 'audio' | 'image',
-        container: link.artifact.container,
-        byteSize: link.artifact.byteSize.toString(),
-        sha256: link.artifact.sha256,
-        status: link.artifact.status,
-        ...(link.artifact.currentRightsSnapshot ? { rightsStatus: link.artifact.currentRightsSnapshot.status } : {}),
-        ...(probeFromManifest(manifest.manifestJson) ? { probe: probeFromManifest(manifest.manifestJson) } : {}),
-        createdAt: link.createdAt.toISOString(),
       })
-    })
-    const transcripts = project.mediaTranscripts.map((row) => {
-      const transcript = parseJson(row.transcriptJson, 'media transcript')
-      return Object.freeze({
-        id: row.id, sourceArtifactId: row.sourceArtifactId, language: row.language,
-        provider: row.provider, model: row.model, transcriptHash: row.transcriptHash,
-        text: typeof transcript.text === 'string' ? transcript.text : '',
-        wordCount: Array.isArray(transcript.words) ? transcript.words.length : 0,
-        segmentCount: Array.isArray(transcript.segments) ? transcript.segments.length : 0,
-        createdAt: row.createdAt.toISOString(),
-      })
-    })
-    const editPlan = project.currentVersion
-      ? parseJson(project.currentVersion.editPlanSnapshot.contentJson, 'project EditPlan')
-      : undefined
-    const brief = project.currentVersion
-      ? parseJson(project.currentVersion.briefSnapshot.contentJson, 'project brief')
-      : undefined
-    if (brief) {
-      brief.productionBrief = parseProductionBrief(brief.productionBrief)
-      if (brief.briefCompilation !== undefined) {
-        brief.briefCompilation = parseBriefCompilation(brief.briefCompilation)
+      if (!project) return null
+      if (Boolean(project.currentVersionId) !== Boolean(project.currentVersion) || (project.currentVersionId && (
+        !project.currentVersion || project.currentVersion.id !== project.currentVersionId ||
+        project.currentVersion.projectId !== input.projectId || project.currentVersion.workspaceId !== input.workspaceId
+      ))) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace current version is inconsistent')
+      const requestedVersionId = project.currentVersionId
+      const [preview, report] = requestedVersionId
+        ? await Promise.all([
+            readReviewPreviewContext(transaction, { ...input, projectVersionId: requestedVersionId }),
+            readCurrentProxyReview(transaction, { ...input, projectVersionId: requestedVersionId }),
+          ])
+        : [null, null]
+      if (preview && (preview.currentProjectVersionId !== requestedVersionId || preview.projectVersionId !== requestedVersionId)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace preview version is inconsistent')
       }
-    }
-    const videoTracks = editPlan && Array.isArray(editPlan.videoTracks) ? editPlan.videoTracks : []
-    const clipCount = videoTracks.reduce((total, track) => {
-      if (typeof track !== 'object' || track === null || Array.isArray(track)) return total
-      const clips = (track as Record<string, unknown>).clips
-      return total + (Array.isArray(clips) ? clips.length : 0)
-    }, 0)
-    const markers = editPlan && Array.isArray(editPlan.markers) ? editPlan.markers : []
-    const movementPolicy = editPlan && typeof editPlan.movementPolicy === 'object' && editPlan.movementPolicy !== null && !Array.isArray(editPlan.movementPolicy)
-      ? editPlan.movementPolicy as Record<string, unknown>
-      : {}
-    const subtitlePolicy = editPlan && typeof editPlan.subtitlePolicy === 'object' && editPlan.subtitlePolicy !== null && !Array.isArray(editPlan.subtitlePolicy)
-      ? editPlan.subtitlePolicy as Record<string, unknown>
-      : {}
-    const directorRuns = project.directorRuns.map((run) => {
-      const quality = parseJson(run.qualitySnapshot.contentJson, 'Director quality report')
-      const directedPlan = parseJson(run.editPlanSnapshot.contentJson, 'Director EditPlan')
-      const decisions = parseJsonArray(run.decisionsJson, 'Director decisions')
-      const assumptions = parseJsonArray(run.assumptionsJson, 'Director assumptions')
-      const subtitleTracks = Array.isArray(directedPlan.subtitleTracks) ? directedPlan.subtitleTracks : []
-      const subtitleCueCount = subtitleTracks.reduce((total, track) => {
-        if (typeof track !== 'object' || track === null || Array.isArray(track)) return total
-        const cues = (track as Record<string, unknown>).cues
-        return total + (Array.isArray(cues) ? cues.length : 0)
-      }, 0)
-      return Object.freeze({
-        id: run.id,
-        status: run.status,
-        plannerVersion: run.plannerVersion,
-        criticVersion: run.criticVersion,
-        objective: run.objective,
-        objectiveVersion: run.objectiveVersion,
-        rubricRef: run.rubricRef,
-        ...(run.supersedesRunId ? { supersedesRunId: run.supersedesRunId } : {}),
-        baseVersionId: run.baseVersionId,
-        resultVersionId: run.resultVersionId,
-        treatmentSnapshotId: run.treatmentSnapshotId,
-        storySnapshotId: run.storySnapshotId,
-        qualitySnapshotId: run.qualitySnapshotId,
-        qualityStatus: typeof quality.status === 'string' ? quality.status : 'unknown',
-        qualityScore: typeof quality.score === 'number' ? quality.score : 0,
-        decisionCount: decisions.length,
-        assumptionCount: assumptions.length,
-        uncertainties: projectConfidenceUncertainties(decisions),
-        subtitleCueCount,
-        transitionCount: Array.isArray(directedPlan.transitions) ? directedPlan.transitions.length : 0,
-        automaticZoom: typeof directedPlan.movementPolicy === 'object' && directedPlan.movementPolicy !== null && !Array.isArray(directedPlan.movementPolicy)
-          ? (directedPlan.movementPolicy as Record<string, unknown>).automaticZoom === true
-          : false,
-        createdAt: run.createdAt.toISOString(),
+      if (report) {
+        const published = await transaction.v2ProjectProxyRenderOperation.findFirst({
+          where: { operationId: report.operationId, ...input },
+          include: { operation: true },
+        })
+        const [artifact, manifest] = await Promise.all([
+          transaction.v2MediaArtifact.findFirst({ where: { id: report.proxyArtifactId, workspaceId: input.workspaceId } }),
+          transaction.v2MediaArtifactManifest.findFirst({ where: { id: report.proxyManifestId, artifactId: report.proxyArtifactId, workspaceId: input.workspaceId },
+            include: { recipeParameters: true, renderInput: true } }),
+        ])
+        if (report.projectVersionId !== requestedVersionId || !published ||
+          published.projectVersionId !== requestedVersionId || published.operation.workspaceId !== input.workspaceId ||
+          published.operation.projectId !== input.projectId || published.operation.status !== 'succeeded' ||
+          published.outputArtifactId !== report.proxyArtifactId || published.outputManifestId !== report.proxyManifestId ||
+          !artifact || artifact.status !== 'available' || !manifest || published.inputHash !== report.inputHash
+        ) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace proxy review publication is inconsistent')
+        readStoredProjectionManifest(input.workspaceId, artifact, manifest)
+      }
+      const reviewAvailability: Readonly<ProjectReviewAvailability> = Object.freeze({
+        schemaVersion: 'project-review-availability/v1', requestedVersionId,
+        annotations: preview
+          ? Object.freeze({ state: 'available', sourceVersionId: preview.sourceVersionId,
+              proxyArtifactId: preview.proxyArtifactId, proxyHash: preview.proxyHash, stale: preview.stale })
+          : Object.freeze({ state: 'unavailable', reason: requestedVersionId ? 'no-proxy' : 'no-version' }),
+        proxyReview: report
+          ? Object.freeze({ state: 'available', sourceVersionId: report.projectVersionId,
+              reviewId: report.id, proxyArtifactId: report.proxyArtifactId, reviewHash: report.reviewHash })
+          : Object.freeze({ state: 'unavailable', reason: requestedVersionId ? 'no-report' : 'no-version' }),
       })
-    })
-    return Object.freeze({
-      project: Object.freeze({
-        id: project.id, workspaceId: project.workspaceId, name: project.name,
-        status: hydrateProjectStatus(project.status),
-        ...(project.objective ? { objective: project.objective } : {}), ...(project.format ? { format: project.format } : {}),
-        ...(project.locale ? { locale: project.locale } : {}), ...(project.currentVersionId ? { currentVersionId: project.currentVersionId } : {}),
-        createdAt: project.createdAt.toISOString(),
-      }),
-      ...(project.currentVersion ? { version: Object.freeze({ id: project.currentVersion.id, sequence: project.currentVersion.sequence, baseHash: project.currentVersion.baseHash, createdAt: project.currentVersion.createdAt.toISOString() }) } : {}),
-      ...(brief ? { brief: Object.freeze(brief) } : {}),
-      ...(editPlan ? { editPlan: Object.freeze({
-        id: typeof editPlan.id === 'string' ? editPlan.id : project.currentVersion!.editPlanSnapshotId,
-        state: typeof editPlan.state === 'string' ? editPlan.state : 'unknown',
-        fps: typeof editPlan.fps === 'number' ? editPlan.fps : 0,
-        durationFrames: typeof editPlan.durationFrames === 'number' ? editPlan.durationFrames : 0,
-        clipCount,
-        cutCount: markers.filter((marker) => typeof marker === 'object' && marker !== null && !Array.isArray(marker) && (marker as Record<string, unknown>).kind === 'editorial-cut').length,
-        automaticZoom: movementPolicy.automaticZoom === true,
-        subtitleFaceProtection: subtitlePolicy.faceProtection === true,
-      }) } : {}),
-      commands: Object.freeze(project.editCommands.map((command) => Object.freeze({
-        id: command.id,
-        type: command.type,
-        baseVersionId: command.baseVersionId,
-        ...(command.resultVersion ? { resultVersionId: command.resultVersion.id } : {}),
-        ...(command.reason ? { reason: command.reason } : {}),
-        createdAt: command.createdAt.toISOString(),
-      }))),
-      directorRuns: Object.freeze(directorRuns),
-      media: Object.freeze(media),
-      transcripts: Object.freeze(transcripts),
-      operationIds: Object.freeze([
-        ...project.finalExportOperations,
-        ...project.proxyRenderOperations,
-        ...project.mediaIngestOperations,
-      ].toSorted((left, right) => right.createdAt.getTime() - left.createdAt.getTime()).map((item) => item.operationId)),
-    })
+      const operationIds = Object.freeze([
+        ...project.finalExportOperations, ...project.proxyRenderOperations, ...project.mediaIngestOperations,
+      ].toSorted((left, right) => right.createdAt.getTime() - left.createdAt.getTime()).map((item) => item.operationId))
+      const operations = await Promise.all(operationIds.map(async (operationId) => {
+        const record = await readPublicOperation(transaction, input.workspaceId, operationId)
+        if (!record || record.operation.workspaceId !== input.workspaceId || record.operation.projectId !== input.projectId)
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace operation is missing or belongs to another project')
+        return record.operation
+      }))
+      const media = project.mediaAssets.map((link) => {
+        const storedManifest = link.artifact.manifests[0]
+        if (!storedManifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Project media artifact has no manifest')
+        const manifest = readStoredProjectionManifest(input.workspaceId, link.artifact, storedManifest)
+        const probe = probeFromManifest(manifest)
+        return Object.freeze({
+          id: link.id,
+          role: link.role as 'source-master' | 'editing-proxy' | 'editorial-proxy' | 'final-output',
+          originalFileName: link.originalFileName,
+          artifactId: link.artifactId,
+          manifestId: storedManifest.id,
+          mediaType: link.artifact.mediaType as 'video' | 'audio' | 'image',
+          container: link.artifact.container,
+          byteSize: link.artifact.byteSize.toString(),
+          sha256: link.artifact.sha256,
+          status: link.artifact.status,
+          ...(link.artifact.currentRightsSnapshot ? { rightsStatus: link.artifact.currentRightsSnapshot.status } : {}),
+          ...(probe ? { probe } : {}),
+          createdAt: link.createdAt.toISOString(),
+        })
+      })
+      const transcripts = project.mediaTranscripts.map((row) => {
+        const transcript = parseJson(row.transcriptJson, 'media transcript')
+        return Object.freeze({
+          id: row.id, sourceArtifactId: row.sourceArtifactId, language: row.language,
+          provider: row.provider, model: row.model, transcriptHash: row.transcriptHash,
+          text: typeof transcript.text === 'string' ? transcript.text : '',
+          wordCount: Array.isArray(transcript.words) ? transcript.words.length : 0,
+          segmentCount: Array.isArray(transcript.segments) ? transcript.segments.length : 0,
+          createdAt: row.createdAt.toISOString(),
+        })
+      })
+      const editPlan = project.currentVersion
+        ? parseJson(project.currentVersion.editPlanSnapshot.contentJson, 'project EditPlan')
+        : undefined
+      const brief = project.currentVersion
+        ? parseJson(project.currentVersion.briefSnapshot.contentJson, 'project brief')
+        : undefined
+      if (brief) {
+        brief.productionBrief = parseProductionBrief(brief.productionBrief)
+        if (brief.briefCompilation !== undefined) {
+          brief.briefCompilation = parseBriefCompilation(brief.briefCompilation)
+        }
+      }
+      const videoTracks = editPlan && Array.isArray(editPlan.videoTracks) ? editPlan.videoTracks : []
+      const clipCount = videoTracks.reduce((total, track) => {
+        if (typeof track !== 'object' || track === null || Array.isArray(track)) return total
+        const clips = (track as Record<string, unknown>).clips
+        return total + (Array.isArray(clips) ? clips.length : 0)
+      }, 0)
+      const markers = editPlan && Array.isArray(editPlan.markers) ? editPlan.markers : []
+      const movementPolicy = editPlan && typeof editPlan.movementPolicy === 'object' && editPlan.movementPolicy !== null && !Array.isArray(editPlan.movementPolicy)
+        ? editPlan.movementPolicy as Record<string, unknown>
+        : {}
+      const subtitlePolicy = editPlan && typeof editPlan.subtitlePolicy === 'object' && editPlan.subtitlePolicy !== null && !Array.isArray(editPlan.subtitlePolicy)
+        ? editPlan.subtitlePolicy as Record<string, unknown>
+        : {}
+      const directorRuns = project.directorRuns.map((run) => {
+        const quality = parseJson(run.qualitySnapshot.contentJson, 'Director quality report')
+        const directedPlan = parseJson(run.editPlanSnapshot.contentJson, 'Director EditPlan')
+        const decisions = parseJsonArray(run.decisionsJson, 'Director decisions')
+        const assumptions = parseJsonArray(run.assumptionsJson, 'Director assumptions')
+        const subtitleTracks = Array.isArray(directedPlan.subtitleTracks) ? directedPlan.subtitleTracks : []
+        const subtitleCueCount = subtitleTracks.reduce((total, track) => {
+          if (typeof track !== 'object' || track === null || Array.isArray(track)) return total
+          const cues = (track as Record<string, unknown>).cues
+          return total + (Array.isArray(cues) ? cues.length : 0)
+        }, 0)
+        return Object.freeze({
+          id: run.id,
+          status: run.status,
+          plannerVersion: run.plannerVersion,
+          criticVersion: run.criticVersion,
+          objective: run.objective,
+          objectiveVersion: run.objectiveVersion,
+          rubricRef: run.rubricRef,
+          ...(run.supersedesRunId ? { supersedesRunId: run.supersedesRunId } : {}),
+          baseVersionId: run.baseVersionId,
+          resultVersionId: run.resultVersionId,
+          treatmentSnapshotId: run.treatmentSnapshotId,
+          storySnapshotId: run.storySnapshotId,
+          qualitySnapshotId: run.qualitySnapshotId,
+          qualityStatus: typeof quality.status === 'string' ? quality.status : 'unknown',
+          qualityScore: typeof quality.score === 'number' ? quality.score : 0,
+          decisionCount: decisions.length,
+          assumptionCount: assumptions.length,
+          uncertainties: projectConfidenceUncertainties(decisions),
+          subtitleCueCount,
+          transitionCount: Array.isArray(directedPlan.transitions) ? directedPlan.transitions.length : 0,
+          automaticZoom: typeof directedPlan.movementPolicy === 'object' && directedPlan.movementPolicy !== null && !Array.isArray(directedPlan.movementPolicy)
+            ? (directedPlan.movementPolicy as Record<string, unknown>).automaticZoom === true
+            : false,
+          createdAt: run.createdAt.toISOString(),
+        })
+      })
+      return Object.freeze({
+        reviewAvailability,
+        operations: Object.freeze(operations),
+        project: Object.freeze({
+          id: project.id, workspaceId: project.workspaceId, name: project.name,
+          status: hydrateProjectStatus(project.status),
+          ...(project.objective ? { objective: project.objective } : {}), ...(project.format ? { format: project.format } : {}),
+          ...(project.locale ? { locale: project.locale } : {}), ...(project.currentVersionId ? { currentVersionId: project.currentVersionId } : {}),
+          createdAt: project.createdAt.toISOString(),
+        }),
+        ...(project.currentVersion ? { version: Object.freeze({ id: project.currentVersion.id, sequence: project.currentVersion.sequence, baseHash: project.currentVersion.baseHash, createdAt: project.currentVersion.createdAt.toISOString() }) } : {}),
+        ...(brief ? { brief: Object.freeze(brief) } : {}),
+        ...(editPlan ? { editPlan: Object.freeze({
+          id: typeof editPlan.id === 'string' ? editPlan.id : project.currentVersion!.editPlanSnapshotId,
+          state: typeof editPlan.state === 'string' ? editPlan.state : 'unknown',
+          fps: typeof editPlan.fps === 'number' ? editPlan.fps : 0,
+          durationFrames: typeof editPlan.durationFrames === 'number' ? editPlan.durationFrames : 0,
+          clipCount,
+          cutCount: markers.filter((marker) => typeof marker === 'object' && marker !== null && !Array.isArray(marker) && (marker as Record<string, unknown>).kind === 'editorial-cut').length,
+          automaticZoom: movementPolicy.automaticZoom === true,
+          subtitleFaceProtection: subtitlePolicy.faceProtection === true,
+        }) } : {}),
+        commands: Object.freeze(project.editCommands.map((command) => Object.freeze({
+          id: command.id,
+          type: command.type,
+          baseVersionId: command.baseVersionId,
+          ...(command.resultVersion ? { resultVersionId: command.resultVersion.id } : {}),
+          ...(command.reason ? { reason: command.reason } : {}),
+          createdAt: command.createdAt.toISOString(),
+        }))),
+        directorRuns: Object.freeze(directorRuns),
+        media: Object.freeze(media),
+        transcripts: Object.freeze(transcripts),
+        operationIds,
+      })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 5_000, timeout: 10_000 })
   }
 }

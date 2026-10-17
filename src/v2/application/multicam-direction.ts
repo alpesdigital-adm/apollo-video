@@ -31,7 +31,7 @@ import {
 import { resolveSourceTick, type PiecewiseClockMap } from '../domain/piecewise-clock-map.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
   convertTick,
@@ -886,6 +886,12 @@ export interface DirectMulticamSessionDependencies {
   clock: () => Date
   createId: (prefix: string) => string
   createEventId: () => string
+  /**
+   * The output state transition that seals the direction's Version. Production never sets it: the real transition
+   * refuses a cut over a recording the project's State has not observed. A test whose world observes fewer
+   * recordings than a multicam session records replaces it, and says so where it does.
+   */
+  sealOutput?: typeof transitionProjectOutputState
 }
 
 function isDirected(plan: MulticamDirectionCommandContext['currentPlan']): plan is Readonly<DirectedEditPlan> {
@@ -1372,6 +1378,7 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
     const commandId = dependencies.createId('edit-command')
     const versionId = dependencies.createId('project-version')
     const snapshotId = dependencies.createId('project-snapshot')
+    const stateId = dependencies.createId('project-output-state')
     const editPlan = buildMulticamEditPlan({
       base,
       planId: `edit-plan-${versionId}`,
@@ -1411,30 +1418,21 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
       contentHash: editPlanHash,
       createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: context.currentVersion.sequence + 1,
-      parentVersionId: context.currentVersion.id,
-      snapshotRefs: {
-        brief: context.currentVersion.snapshotRefs.brief,
-        editPlan: snapshotId,
-        policies: context.currentVersion.snapshotRefs.policies,
+    // The re-cut EditPlan is this Command's own; every output member re-materializes from it and from the observed
+    // sources the parent already holds. A cut that consumes a recording nobody has observed is refused here.
+    const bundle = (dependencies.sealOutput ?? transitionProjectOutputState)({
+      parent: context.parent,
+      command: built.command,
+      audit: authenticationAudit,
+      requestFingerprint,
+      editPlanSnapshot: snapshot,
+      allocation: {
+        workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: context.currentVersion.id,
+        sequence: context.currentVersion.sequence + 1, createdBy: authenticationAudit.clientId, createdAt,
       },
-      baseHash: calculateVersionHash({
-        projectId,
-        sequence: context.currentVersion.sequence + 1,
-        parentVersionId: context.currentVersion.id,
-        previousBaseHash: context.currentVersion.baseHash,
-        commandId,
-        editPlanHash,
-        resultBaseHash: built.resultBaseHash,
-      }),
-      createdBy: authenticationAudit.clientId,
-      commandId,
-      createdAt,
+      createMaterializationId: () => dependencies.createId('output-materialization'),
     })
+    const version = bundle.version
     const event = createPublicEvent({
       id: dependencies.createEventId(),
       type: 'project.version.created',
@@ -1464,11 +1462,7 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
       },
     })
     const committed = await dependencies.commands.commitOrReplay({
-      command: built.command,
-      authenticationAudit,
-      requestFingerprint,
-      snapshot,
-      version,
+      bundle,
       editPlan,
       event,
       directionEvidence: {

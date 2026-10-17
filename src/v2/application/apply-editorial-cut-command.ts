@@ -3,9 +3,12 @@ import {
   createEditCommand,
   type EditCommand,
 } from '../domain/edit-command.ts'
-import type { MediaTranscript, TranscriptWord } from '../domain/media-transcript.ts'
+import { createMediaTranscript, type MediaTranscript, type TranscriptWord } from '../domain/media-transcript.ts'
+import type { DirectedSubtitleCue } from '../domain/director-run.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { createEditorialSourceBindingV1 } from '../domain/output-materialization.ts'
+import { materializeEditorialCutPlanV3, createEditorialAudioProjectionV1, createEditorialCutImpactV2, type EditorialCutPayloadV3 } from '../domain/editorial-cut-impact.ts'
+import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3 } from '../domain/output-version-bundle.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import type {
   EditorialCommandRepository,
@@ -21,7 +24,7 @@ import {
 } from './recovery-project-acceptance.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ManualCropRegion } from '../domain/manual-editing.ts'
-import { createEditorialCutImpact, type EditorialCutImpactV1 } from '../domain/editorial-cut-impact.ts'
+import type { EditorialCutImpactV1 } from '../domain/editorial-cut-impact.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -78,6 +81,44 @@ export interface RetimedTranscriptWord {
   timelineEndFrame: number
 }
 
+/** Alignment content only. This intent never configures output subtitles or
+ * claims a rendered clock, face-safe anchor, Director approval or ASR execution. */
+export interface SourceTranscriptCueIntent {
+  schemaVersion: 'source-transcript-cue-intent/v1'
+  kind: 'alignment-only'
+  emission: 'suppressed-missing-visual-clock-authority'
+  trackId: string
+  cueIdPrefix: string
+}
+export interface AlignedSourceSubtitleCue extends Pick<DirectedSubtitleCue, 'id' | 'startFrame' | 'endFrame' | 'text'> {
+  clipId: string
+  sourceSegmentId: number
+  sourceWordIndices: readonly number[]
+}
+export interface AlignedSourceSubtitleTrack {
+  schemaVersion: 'source-transcript-cue-track/v1'
+  id: string
+  kind: 'captions'
+  authority: 'aligned-source-transcript-only'
+  emission: 'suppressed-missing-visual-clock-authority'
+  sourceTranscriptId: string
+  sourceTranscriptHash: string
+  cues: readonly Readonly<AlignedSourceSubtitleCue>[]
+}
+export type SourceTranscriptCueUnavailableReason = 'word-alignment-unavailable' | 'segment-alignment-unavailable' |
+  'timeline-clock-unsupported' | 'source-coverage-unavailable' | 'segment-partition-unsupported' |
+  'segment-identity-unsupported' | 'word-frame-coverage-unavailable'
+export type SourceTranscriptCueProjection = Readonly<{
+  schemaVersion: 'source-transcript-cue-projection/v1'
+  capability: 'aligned-source-word-cues'
+  sourceTranscriptId: string
+  sourceTranscriptHash: string
+  emission: 'suppressed-missing-visual-clock-authority'
+} & (
+  {status:'available';cueCount:number} |
+  {status:'unavailable';reasons:readonly SourceTranscriptCueUnavailableReason[]}
+)>
+
 export interface EditorialCutEditPlan {
   schemaVersion: 2
   state: 'compiled'
@@ -98,7 +139,8 @@ export interface EditorialCutEditPlan {
     clips: readonly Readonly<EditorialCutClip>[]
   }>[]
   overlayTracks: readonly never[]
-  subtitleTracks: readonly never[]
+  subtitleTracks: readonly Readonly<AlignedSourceSubtitleTrack>[]
+  sourceTranscriptCueProjection?: SourceTranscriptCueProjection
   audioTracks: readonly never[]
   effectTracks: readonly never[]
   markers: readonly Readonly<{
@@ -135,6 +177,7 @@ export interface EditorialCutEditPlan {
 }
 
 export interface ApplyEditorialCutCommandRequest {
+  variantId: string
   workspaceId: string
   projectId: string
   baseVersionId: string
@@ -197,7 +240,7 @@ function normalizeExclusionOverrides(input: {
 export interface ApplyEditorialCutCommandDependencies {
   repository: EditorialCommandRepository
   clock: () => Date
-  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot') => string
+  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot' | 'output-state' | 'output-materialization' | 'editorial-source-binding') => string
   createEventId: () => string
 }
 
@@ -295,6 +338,97 @@ function retimeTranscriptWords(input: {
   }))
 }
 
+function compileAlignedSourceSubtitleProjection(input: {
+  intent: Readonly<SourceTranscriptCueIntent>
+  transcriptId: string
+  transcript: Readonly<MediaTranscript>
+  words: readonly Readonly<RetimedTranscriptWord>[]
+  clips: readonly Readonly<EditorialCutClip>[]
+  sourceDurationSeconds: number
+  durationFrames: number
+  fps: number
+}): Readonly<{projection:SourceTranscriptCueProjection;tracks:readonly Readonly<AlignedSourceSubtitleTrack>[]}> {
+  const intent = input.intent, id = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
+  assertDomain(intent !== null && typeof intent === 'object' && !Array.isArray(intent) &&
+    (Object.getPrototypeOf(intent) === Object.prototype || Object.getPrototypeOf(intent) === null) &&
+    Object.getOwnPropertySymbols(intent).length === 0 && Object.values(Object.getOwnPropertyDescriptors(intent))
+      .every(descriptor => 'value' in descriptor && descriptor.enumerable) &&
+    Object.keys(intent).sort().join('|') === ['schemaVersion','kind','emission','trackId','cueIdPrefix'].sort().join('|') &&
+    intent.schemaVersion === 'source-transcript-cue-intent/v1' && intent.kind === 'alignment-only' &&
+    intent.emission === 'suppressed-missing-visual-clock-authority' && typeof intent.trackId === 'string' && id.test(intent.trackId) &&
+    typeof intent.cueIdPrefix === 'string' && id.test(intent.cueIdPrefix) && intent.cueIdPrefix.length <= 96 &&
+    typeof input.transcriptId === 'string' && id.test(input.transcriptId),
+  'INVALID_COMMAND', 'Initial transcript cue intent must be explicit non-emitting alignment')
+  const {schemaVersion,transcriptHash,...body} = input.transcript
+  const fresh = createMediaTranscript(body)
+  assertDomain(schemaVersion === fresh.schemaVersion && transcriptHash === fresh.transcriptHash &&
+    stableSerialize(fresh) === stableSerialize(input.transcript), 'INVALID_COMMAND', 'Initial cue transcript seal differs')
+  const common = {schemaVersion:'source-transcript-cue-projection/v1' as const,capability:'aligned-source-word-cues' as const,
+    sourceTranscriptId:input.transcriptId,sourceTranscriptHash:transcriptHash,emission:intent.emission}
+  const unavailable = (reason:SourceTranscriptCueUnavailableReason) => Object.freeze({
+    projection:Object.freeze({...common,status:'unavailable' as const,reasons:Object.freeze([reason])}),tracks:Object.freeze([]),
+  })
+  const segments = input.transcript.segments
+  assertDomain(input.clips.length === 1 &&
+    input.clips[0].timelineInFrame === 0 && input.clips[0].timelineOutFrame === input.durationFrames &&
+    input.clips[0].rate === 1 && intent.trackId !== 'track-primary-video' &&
+    intent.trackId !== input.transcriptId && !input.clips.some(clip => clip.id === intent.trackId || clip.sourceArtifactId === intent.trackId),
+  'INVALID_COMMAND', 'Initial cue intent requires independent identities and the actual full-source clip')
+  // The transcript contract permits segment-only/partial/overlapping alignment.
+  // A valid transcript can lack this cue projection capability; its original
+  // content/hash and full-source plan remain intact, with explicit suppression.
+  if (input.transcript.words.length === 0) return unavailable('word-alignment-unavailable')
+  if (segments.length === 0) return unavailable('segment-alignment-unavailable')
+  if (!Number.isFinite(input.fps) || input.fps <= 0 ||
+    !Number.isSafeInteger(input.durationFrames) || input.durationFrames <= 0) return unavailable('timeline-clock-unsupported')
+  if (input.words.length !== input.transcript.words.length) return unavailable('source-coverage-unavailable')
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index]
+    if (!Number.isSafeInteger(segment.id)) return unavailable('segment-identity-unsupported')
+    if (segment.start < 0 || segment.end > input.sourceDurationSeconds) return unavailable('source-coverage-unavailable')
+    if (segment.end === segment.start || index > 0 && segments[index - 1].end > segment.start)
+      return unavailable('segment-partition-unsupported')
+  }
+  const clip = input.clips[0], groups: {id:string;startFrame:number;endFrame:number;clipId:string;
+    sourceSegmentId:number;sourceWordIndices:number[];texts:string[]}[] = []
+  let segmentIndex = 0, previousEndFrame = 0
+  for (let index = 0; index < input.words.length; index++) {
+    const word = input.words[index], sourceWord = input.transcript.words[index]
+    while (segmentIndex + 1 < segments.length && sourceWord.start >= segments[segmentIndex].end) segmentIndex++
+    const segment = segments[segmentIndex]
+    assertDomain(word.text === sourceWord.word && word.sourceStartSeconds === sourceWord.start && word.sourceEndSeconds === sourceWord.end,
+    'INVALID_COMMAND', 'Initial cue retimed transcript contradicts the sealed source words')
+    if (sourceWord.start < segment.start || sourceWord.end > segment.end ||
+      sourceWord.start < 0 || sourceWord.end > input.sourceDurationSeconds) return unavailable('source-coverage-unavailable')
+    if (sourceWord.end === sourceWord.start || !Number.isSafeInteger(word.timelineStartFrame) || !Number.isSafeInteger(word.timelineEndFrame) || !(
+      word.timelineStartFrame >= clip.timelineInFrame && word.timelineEndFrame > word.timelineStartFrame &&
+      word.timelineEndFrame <= clip.timelineOutFrame)) return unavailable('word-frame-coverage-unavailable')
+    const previous = groups[groups.length - 1]
+    if (previous?.sourceSegmentId === segment.id) {
+      const endFrame = Math.max(previous.endFrame, word.timelineEndFrame)
+      previous.startFrame = Math.min(previous.startFrame, word.timelineStartFrame)
+      previous.endFrame = endFrame
+      previous.texts.push(word.text); previous.sourceWordIndices.push(index)
+      previousEndFrame = endFrame
+    } else {
+      const cueId = intent.cueIdPrefix + '-' + segment.id
+      assertDomain(id.test(cueId) && cueId !== intent.trackId && cueId !== clip.id,
+        'INVALID_COMMAND', 'Initial cue identity differs from its explicit intent')
+      if (word.timelineStartFrame < previousEndFrame) return unavailable('word-frame-coverage-unavailable')
+      groups.push({id:cueId,startFrame:word.timelineStartFrame,endFrame:word.timelineEndFrame,
+        texts:[word.text],clipId:clip.id,sourceSegmentId:segment.id,sourceWordIndices:[index]})
+      previousEndFrame = word.timelineEndFrame
+    }
+  }
+  const cues = groups.map(({texts,sourceWordIndices,...cue}) => Object.freeze({...cue,
+    text:texts.join(' '),sourceWordIndices:Object.freeze(sourceWordIndices)}))
+  const track:Readonly<AlignedSourceSubtitleTrack> = Object.freeze({schemaVersion:'source-transcript-cue-track/v1',id:intent.trackId,kind:'captions',
+    authority:'aligned-source-transcript-only',emission:intent.emission,sourceTranscriptId:input.transcriptId,
+    sourceTranscriptHash:input.transcript.transcriptHash,cues:Object.freeze(cues)})
+  return Object.freeze({projection:Object.freeze({...common,status:'available' as const,cueCount:cues.length}),
+    tracks:Object.freeze([track])})
+}
+
 function compileEditPlan(input: {
   id: string
   projectVersionId: string
@@ -307,6 +441,7 @@ function compileEditPlan(input: {
   retainedSourceRanges: readonly SourceTimeRange[]
   createdAt: string
   commandType?: 'remove-spoken-content' | 'source-ingest'
+  sourceTranscriptCueIntent?: Readonly<SourceTranscriptCueIntent>
 }): Readonly<EditorialCutEditPlan> {
   const { clips, durationFrames } = compileClips({
     ranges: input.retainedSourceRanges,
@@ -324,6 +459,10 @@ function compileEditPlan(input: {
     sourceEndSeconds: exclusion.sourceEndSeconds,
     ruleIds: Object.freeze([...exclusion.ruleIds]),
   }))
+  const retimedWords = retimeTranscriptWords({transcript:input.transcript,ranges:input.retainedSourceRanges,fps:input.fps})
+  const cueProjection = input.sourceTranscriptCueIntent === undefined ? null :
+    compileAlignedSourceSubtitleProjection({intent:input.sourceTranscriptCueIntent,transcriptId:input.transcriptId,
+      transcript:input.transcript,words:retimedWords,clips,sourceDurationSeconds:input.sourceDurationSeconds,durationFrames,fps:input.fps})
   return Object.freeze({
     schemaVersion: 2 as const,
     state: 'compiled' as const,
@@ -344,7 +483,8 @@ function compileEditPlan(input: {
       clips,
     })]),
     overlayTracks: Object.freeze([]),
-    subtitleTracks: Object.freeze([]),
+    subtitleTracks: cueProjection?.tracks ?? Object.freeze([]),
+    ...(cueProjection ? {sourceTranscriptCueProjection:cueProjection.projection} : {}),
     audioTracks: Object.freeze([]),
     effectTracks: Object.freeze([]),
     markers: Object.freeze(markers.map((marker) => Object.freeze(marker))),
@@ -360,11 +500,7 @@ function compileEditPlan(input: {
     retimedTranscript: Object.freeze({
       sourceTranscriptId: input.transcriptId,
       sourceTranscriptHash: input.transcript.transcriptHash,
-      words: retimeTranscriptWords({
-        transcript: input.transcript,
-        ranges: input.retainedSourceRanges,
-        fps: input.fps,
-      }),
+      words: retimedWords,
     }),
     movementPolicy: Object.freeze({
       automaticZoom: false as const,
@@ -384,6 +520,7 @@ export function compileInitialSourceEditPlan(input: {
   sourceDurationSeconds: number
   fps: number
   createdAt: string
+  sourceTranscriptCueIntent?: Readonly<SourceTranscriptCueIntent>
 }): Readonly<EditorialCutEditPlan> {
   assertDomain(
     Number.isFinite(input.sourceDurationSeconds) && input.sourceDurationSeconds > 0,
@@ -407,6 +544,8 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
     const projectId = request.projectId.trim()
     const baseVersionId = request.baseVersionId.trim()
     const sourceTranscriptId = request.sourceTranscriptId.trim()
+    const variantId = request.variantId?.trim()
+    assertDomain(typeof variantId==='string'&&variantId.length>=3,'INVALID_COMMAND','Editorial Command requires an explicit stable variant identity')
     const idempotencyKey = request.idempotency.key.trim()
     assertDomain(workspaceId.length >= 3 && projectId.length >= 3, 'INVALID_COMMAND', 'Editorial command scope is invalid')
     assertDomain(baseVersionId.length >= 3 && /^[a-f0-9]{64}$/.test(request.baseHash), 'INVALID_COMMAND', 'Editorial command base version is invalid')
@@ -433,6 +572,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       baseVersionId,
       baseHash: request.baseHash,
       sourceTranscriptId,
+      variantId,
       rules: normalizedRules,
       exclusionOverrides: request.exclusionOverrides ?? null,
       reason: request.reason?.trim() || null,
@@ -450,7 +590,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       }
       return Object.freeze({ ...existing.result, replayed: true })
     }
-    const context = await dependencies.repository.readContext({ workspaceId, projectId, transcriptId: sourceTranscriptId })
+    const context = await dependencies.repository.readContext({ workspaceId, projectId, transcriptId: sourceTranscriptId, variantId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project or aligned transcript was not found')
     if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Editorial command base version is stale', {
@@ -477,21 +617,15 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
     const commandId = dependencies.createId('edit-command')
     const versionId = dependencies.createId('project-version')
     const snapshotId = dependencies.createId('project-snapshot')
-    const editPlan = compileEditPlan({
-      id: `edit-plan-${versionId}`,
-      projectVersionId: versionId,
-      transcriptId: context.transcriptId,
-      transcript: context.transcript,
-      sourceArtifactId: context.sourceArtifactId,
-      sourceDurationSeconds: context.sourceDurationSeconds,
-      fps: context.sourceFps,
-      exclusions,
-      retainedSourceRanges,
-      createdAt,
-    })
+    const stateId=dependencies.createId('output-state')
+    const sourceBinding=createEditorialSourceBindingV1({...context.sourceBindingFacts,
+      id:dependencies.createId('editorial-source-binding'),parentVersionId:context.currentVersion.id,
+      parentStateId:context.parent.state.document.id,parentStateHash:context.parent.state.stateHash,resultVersionId:versionId,createdAt})
+    const editPlan=materializeEditorialCutPlanV3({before:JSON.parse(operationalBundlePlanV3(context.parent).contentJson),
+      versionId,planId:'edit-plan-'+versionId,commandId,createdAt,sourceBinding,exclusions})
     const editPlanJson = stableSerialize(editPlan)
     const editPlanHash = calculateVersionHash(editPlan)
-    const impact = createEditorialCutImpact({
+    const impact = createEditorialCutImpactV2({
       commandId,
       baseVersionId,
       resultVersionId: versionId,
@@ -499,10 +633,11 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       sourceTranscriptHash: context.transcript.transcriptHash,
       affectedEndFrame: Math.max(context.currentDurationFrames, editPlan.durationFrames),
       renderEndFrame: editPlan.durationFrames,
-      proxyVariantId: context.proxyVariantId,
+      proxyVariantId: variantId,
+      variantIds:context.parent.state.document.entries.map(e=>e.variantId),
       outputReferences: context.outputReferences,
     })
-    const command = createEditCommand<RemoveSpokenContentPayload>({
+    const command = createEditCommand<EditorialCutPayloadV3>({
       id: commandId,
       workspaceId,
       projectId,
@@ -518,8 +653,9 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       type: 'remove-spoken-content',
       scope: { project: true },
       payload: Object.freeze({
-        schemaVersion: 2,
+        schemaVersion: 3,
         sourceTranscriptId: context.transcriptId,
+        variantId,sourceBinding,editPlanHash,audioProjection:createEditorialAudioProjectionV1(editPlan),
         sourceArtifactId: context.sourceArtifactId,
         rules: Object.freeze(normalizedRules.map((rule) => Object.freeze(rule))),
         exclusions,
@@ -540,29 +676,12 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       contentHash: editPlanHash,
       createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: context.currentVersion.sequence + 1,
-      parentVersionId: context.currentVersion.id,
-      snapshotRefs: {
-        brief: context.currentVersion.snapshotRefs.brief,
-        editPlan: snapshotId,
-        policies: context.currentVersion.snapshotRefs.policies,
-      },
-      baseHash: calculateVersionHash({
-        projectId,
-        sequence: context.currentVersion.sequence + 1,
-        parentVersionId: context.currentVersion.id,
-        previousBaseHash: context.currentVersion.baseHash,
-        commandId,
-        editPlanHash,
-      }),
-      createdBy: authenticationAudit.clientId,
-      commandId,
-      createdAt,
-    })
+    const proposal={allocation:{workspaceId,projectId,resultVersionId:versionId,stateId,parentVersionId:context.currentVersion.id,
+      sequence:context.currentVersion.sequence+1,createdBy:authenticationAudit.clientId,createdAt},parent:context.parent,
+      origin:{kind:'editorial-cut-command' as const,command,audit:authenticationAudit,requestFingerprint},restoreTarget:null,
+      editPlanSnapshot:snapshot,normalizations:context.normalizations,
+      materializationIds:Object.fromEntries(context.parent.state.document.entries.map(e=>[e.variantId,dependencies.createId('output-materialization')]))}
+    const outputBundle=buildOperationalOutputVersionBundleV3(proposal),version=outputBundle.version
     const event = createPublicEvent({
       id: dependencies.createEventId(),
       type: 'project.version.created',
@@ -591,6 +710,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       },
     })
     return dependencies.repository.commitOrReplay({
+      proposal,
       command,
       authenticationAudit,
       requestFingerprint,

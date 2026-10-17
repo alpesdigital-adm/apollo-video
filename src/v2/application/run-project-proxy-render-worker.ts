@@ -19,7 +19,6 @@ import {
 } from './ports/editorial-proxy-renderer.ts'
 import type { PerceptionTimelineRepository } from './ports/perception-timeline-repository.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
-import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
@@ -35,6 +34,8 @@ import {
 } from './color-critic.ts'
 import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
 import { projectProxyRenderInputHash } from './project-render-sources.ts'
+import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
+import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -54,13 +55,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   storage: VerifiedMediaStorage
   renderer: EditorialProxyRenderer
   renderElementMaps: RenderElementMapRepository
-  /**
-   * F1.036 / FR-173. The worker reads the persisted perception timeline of the project so the
-   * subtitle anchor is decided from real observations. It is a repository, not a payload: nothing
-   * the render request carries can substitute for the evidence actually stored.
-   */
+  /** Reserved for a future server-verified producer; caller PUT timelines cannot authorize face safety. */
   perceptionTimelines: PerceptionTimelineRepository
-  proxyReviews: ProxyReviewRepository
   colorPipelines: ColorPipelineCompilationRepository
   colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
@@ -98,7 +94,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       cameraIds: readonly string[]
     }) => Promise<string | null>
   }>
-  catalogOutput: (target: { workspaceId: string; artifactId: string; manifestId: string }) => Promise<unknown>
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
@@ -172,6 +167,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         dependencies.operations.advancePhase({ ...command(clock()), phase }))
       if (!entered) { leaseLost = true; abortController.abort(); throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost') }
     }
+    let verifyCommittedCompletion: (() => Promise<void>) | undefined
     try {
       scheduleHeartbeat()
       const source = context.renderableSnapshot
@@ -215,7 +211,20 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
-      const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
+      const cueTracks = emittedSubtitleTracks(source.editPlan.subtitleTracks).filter(
+        (track) => track.cues.length > 0,
+      )
+      const subtitleResolution = source.subtitleResolution
+      // An explicitly disabled style must never leak the EditPlan's cues into FFmpeg.
+      // A renderable snapshot can have cues without a style resolution; its persisted
+      // track preset only reserves geometry for the unknown-face review plan.
+      const subtitleCues = subtitleResolution?.enabled === false
+        ? [] : cueTracks.flatMap((track) => track.cues)
+      const subtitlePresetId = subtitleResolution?.enabled
+        ? subtitleResolution.presetId : subtitleCues.length ? cueTracks[0]?.presetId : null
+      if (subtitleCues.length && (!subtitlePresetId || cueTracks.some(
+        (track) => track.presetId !== subtitlePresetId,
+      ))) throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cues require one consistent persisted preset')
       const ctaOverlays = (source.editPlan.overlayTracks ?? []).filter(
         (track) => 'kind' in track && track.kind === 'cta',
       )
@@ -229,7 +238,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       // ---- Materialized geometry, decided and validated before the renderer is asked to run ----
       const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
       const durationFrames = source.editPlan.durationFrames
-      const subtitleResolution = source.subtitleResolution
       if (subtitleResolution?.enabled) {
         // Fail closed on coherence between the identity the resolution carries and the tokens it
         // carries. When the resolution names the *current* registry, the tokens must still be the
@@ -254,32 +262,47 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
         timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
       }))
-      // Perception evidence for *this* version. A timeline recorded against another version is not
-      // evidence about these frames, so it is ignored rather than approximated — the anchor then
-      // falls back to the reserved bottom band, which is the Director's face-safe fallback.
-      const persistedPerception = subtitleResolution?.enabled && subtitleCues.length
-        ? await dependencies.perceptionTimelines.findLatest({ workspaceId: operation.workspaceId, projectId: context.projectId })
-        : null
-      const perceptionTimeline = persistedPerception && persistedPerception.projectVersionId === context.projectVersionId
-        ? persistedPerception.timeline
-        : undefined
+      // Only the repository-resolved, scoped OCR envelope can supply text obstacles.
+      // It does not establish facial coverage; every cue stays review-required.
+      const perceptionTimeline = source.trustedOcr?.timeline
       const placementPlan = createRenderPlacementPlan({
         format: source.format as OutputAspectRatio,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
         durationFrames,
         // The subtitle band is reserved from the *resolved* preset, so a CTA is never solved into
         // the rows the subtitles already own — and never from a rectangle authored here.
-        subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null,
+        subtitlePresetId,
         elements: placementElements,
-        ...(subtitleResolution?.enabled && subtitleCues.length ? {
+        ...(subtitleCues.length ? {
           subtitleAnchor: {
             fps: source.editPlan.fps,
             cues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+            faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
+            ...(source.trustedOcr ? { ocrEvidence: {
+              envelopeId: source.trustedOcr.envelopeId,
+              envelopeHash: source.trustedOcr.envelopeHash,
+              inputVersionId: source.trustedOcr.inputVersionId,
+              timeMapHash: source.trustedOcr.timeMapHash,
+            } } : {}),
             ...(perceptionTimeline ? { perceptionTimeline } : {}),
           },
         } : {}),
       })
       validateRenderPlacementPlan(placementPlan)
+      const ocrReceipt = source.trustedOcr ? Object.freeze({
+        envelopeId: source.trustedOcr.envelopeId,
+        envelopeHash: source.trustedOcr.envelopeHash,
+        inputVersionId: source.trustedOcr.inputVersionId,
+        timeMapHash: source.trustedOcr.timeMapHash,
+        timelineHash: source.trustedOcr.timeline.timelineHash,
+        sourceArtifactId: source.sourceArtifactId,
+        sourceManifestId: source.sourceManifestId,
+        sourceSha256: source.sourceSha256,
+        editPlanHash: source.editPlanHash,
+      }) : null
+      if (context.renderableSnapshot && ocrReceipt) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot cannot inherit Director OCR coordinates')
+      }
       const reframePlan = source.reframePlan
       if (reframePlan) {
         validateRenderReframePlan(reframePlan)
@@ -425,9 +448,45 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const toolDigest = createHash('sha256')
         .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`)
         .digest('hex')
+      const recipeParameters = Object.freeze({
+        assEmissionPolicy: ASS_EMISSION_POLICY,
+        inputHash: context.inputHash, audioTimelineHash,
+        projectVersionId: context.projectVersionId,
+        editPlanSnapshotId: context.editPlanSnapshotId,
+        format: source.format,
+        colorPipelineBindings: context.colorPipelineBindings,
+        colorPlanHash: colorPlan?.plan.planHash ?? null,
+        compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null,
+        rangeReuse: source.rangeReuse ? {
+          schemaVersion: source.rangeReuse.schemaVersion,
+          commandId: source.rangeReuse.commandId,
+          impactHash: source.rangeReuse.impactHash,
+          baseVersionId: source.rangeReuse.baseVersionId,
+          ranges: source.rangeReuse.ranges,
+          artifactId: source.rangeReuse.artifactId,
+          manifestId: source.rangeReuse.manifestId,
+          sha256: source.rangeReuse.sha256,
+          byteSize: source.rangeReuse.byteSize,
+        } : null,
+        projectLutSelectionId: materializedLut.selectionId,
+        projectLutSelectionHash: materializedLut.selectionHash,
+        materializedCubeHash: materializedLut.materializedCubeHash ?? null,
+        materializedCubeHashes: materializedLut.materializedCubeHashes ?? [],
+        placementPlanHash: placementPlan.placementPlanHash,
+        reframePlanHash: reframePlan?.reframePlanHash ?? null,
+        subtitleRegistryHash: subtitleResolution?.registryHash ?? null,
+        subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null,
+        subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null,
+        subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null,
+        subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null,
+        subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null,
+        perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null,
+        ocrReceipt,
+      })
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, colorPlanHash: colorPlan?.plan.planHash ?? null, compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, materializedCubeHashes: materializedLut.materializedCubeHashes ?? [], placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null, subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null, perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+          parameters: recipeParameters },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,
@@ -467,21 +526,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         map: rendered.renderElementMap,
         createdAt: clock().toISOString(),
       })
-      if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
-      const attachOutput = context.renderableSnapshot
-        ? dependencies.projects.attachCompletedSnapshotOutput({
-            workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
-            variantId: context.renderableSnapshot.variantId, outputArtifactId: context.outputArtifactId,
-            outputManifestId: context.outputManifestId, originalFileName: context.originalFileName,
-            createdAt: clock().toISOString(),
-          })
-        : dependencies.projects.attachCompletedOutput({
-        workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
-        projectVersionId: context.projectVersionId, variantId: source.format,
-        outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
-        originalFileName: context.originalFileName, createdAt: clock().toISOString(),
-      })
-      await attachOutput
       const reviewedAt = clock().toISOString()
       const review = evaluateRenderedProxy({
         projectVersionId: context.projectVersionId,
@@ -499,6 +543,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         map: rendered.renderElementMap,
         ...('composition' in source.editPlan
           ? {
+              // Existing geometry field describes reserved layout, not verified face clearance.
               faceSafeRegion: source.editPlan.composition.faceSafeFallback,
               subtitleSafeRegion: source.editPlan.composition.subtitleSafeRegion,
             }
@@ -518,23 +563,38 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           subtitleAnchorPlan: placementPlan.subtitleAnchorPlan,
         },
       })
-      await dependencies.proxyReviews.persistGenerated({
-        id: `proxy-review-${createHash('sha256').update(operation.id).digest('hex').slice(0, 32)}`,
-        workspaceId: operation.workspaceId,
-        projectId: context.projectId,
-        operationId: operation.id,
-        review,
-        createdAt: reviewedAt,
+      if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
+      const completion = {
         lease: { owner: leaseOwner, attempt, now: clock().toISOString() },
-      })
-      await dependencies.catalogOutput({ workspaceId: operation.workspaceId, artifactId: persisted.artifactId, manifestId: persisted.manifestId })
+        review,
+        workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
+        outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
+        originalFileName: context.originalFileName, createdAt: reviewedAt, recipeParameters,
+      }
+      verifyCommittedCompletion = () => (context.renderableSnapshot
+        ? dependencies.projects.attachCompletedSnapshotOutput({
+            ...completion, variantId: context.renderableSnapshot.variantId, ocrReceipt: null,
+          })
+        : dependencies.projects.attachCompletedOutput({
+            ...completion, projectVersionId: context.projectVersionId,
+            variantId: source.format, ocrReceipt,
+          }))
+      await verifyCommittedCompletion()
       stopHeartbeat()
-      const succeeded = await withLeaseCommand(() =>
-        dependencies.operations.succeed(command(clock())))
-      if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
     } catch (error) {
       stopHeartbeat()
+      // A connection can fail after the database committed. The repository's
+      // succeeded replay verifies the complete sealed identity without writes.
+      if (verifyCommittedCompletion) {
+        try {
+          const committed = await dependencies.operations.findById(operation.workspaceId, operation.id)
+          if (committed?.operation.status === 'succeeded') {
+            await verifyCommittedCompletion()
+            return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
+          }
+        } catch { /* Preserve the original failure for the normal lease path. */ }
+      }
       dependencies.onFailureDiagnostic?.(Object.freeze({ operationId: operation.id, error }))
       if (leaseLost) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       const failedAt = clock()

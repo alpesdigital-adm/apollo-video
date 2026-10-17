@@ -37,6 +37,12 @@ model V2Workspace {
   imageAnalyses                          V2ImageAnalysis[]
   imageReuseReferences                   V2ImageReuseReference[]
   perceptionTimelines                    V2PerceptionTimeline[]
+  perceptionProducerEnvelopes            V2PerceptionProducerEnvelope[]
+  perceptionProducerOperations           V2PerceptionProducerOperation[]
+  temporalProducerEnvelopes              V2TemporalProducerEnvelope[]
+  temporalProducerOperations             V2TemporalProducerOperation[]
+  faceProducerEnvelopes                  V2FaceProducerEnvelope[]
+  faceProducerOperations                 V2FaceProducerOperation[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
   mediaUploads                           V2MediaUpload[]
   mediaUploadAuditEntries                V2MediaUploadAuditEntry[]
@@ -639,6 +645,15 @@ model V2ProjectCreationCommand {
   actorWorkspaceRole       String?  @db.VarChar(32)
   requestFingerprint       String   @db.Char(64)
   commandHash              String   @db.Char(64)
+  schemaVersion            Int      @default(1)
+  canonicalPolicyVersion   String?  @db.VarChar(64)
+  commandJson              String?  @db.Text
+  commandBodyJson          String?  @db.Text
+  payloadJson              String?  @db.Text
+  payloadHash              String?  @db.Char(64)
+  requestJson              String?  @db.Text
+  forkDerivationId         String?  @db.VarChar(128)
+  forkDerivationHash       String?  @db.Char(64)
   createdAt                DateTime @db.Timestamptz(3)
 
   workspace   V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -646,6 +661,11 @@ model V2ProjectCreationCommand {
   version     V2ProjectVersion @relation(fields: [versionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   actorClient V2ApiClient      @relation("ProjectCreationCommandActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
+  outputStatesV2 V2ProjectOutputState[] @relation("Creation2OutputState")
+  consumedForkDerivation V2ProjectForkDerivation? @relation("Creation2ForkSeal", fields: [forkDerivationId, projectId, workspaceId, forkDerivationHash], references: [id, targetProjectId, workspaceId, derivationHash], onDelete: Restrict, onUpdate: Restrict, map: "creation_v2_derivation_seal_fk")
+  createdForkDerivations V2ProjectForkDerivation[] @relation("Creation2ForkIdentity")
+  forkCropDecisions V2ProjectForkCropDecision[]
+  @@unique([id, projectId, workspaceId, versionId, commandHash], map: "project_creation_commands_v2_scope_key")
   @@unique([projectId, workspaceId])
   @@unique([versionId, projectId, workspaceId])
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
@@ -664,6 +684,7 @@ model V2Project {
   ownerId                 String?  @db.VarChar(128)
   currentVersionId        String?  @db.VarChar(128)
   duplicatedFromProjectId String?  @db.VarChar(128)
+  creationContractVersion Int      @default(1)
   administrationRevision  Int      @default(1)
   archivedFromStatus      String?  @db.VarChar(32)
   createdByType           String   @db.VarChar(32)
@@ -674,6 +695,8 @@ model V2Project {
   workspace                              V2Workspace                               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   versions                               V2ProjectVersion[]                        @relation("ProjectVersions")
   snapshots                              V2ProjectSnapshot[]
+  outputVariants                         V2OutputVariant[]
+  outputStates                           V2ProjectOutputState[]
   currentVersion                         V2ProjectVersion?                         @relation("CurrentProjectVersion", fields: [currentVersionId, id, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   duplicatedFromProject                  V2Project?                                @relation("ProjectDuplicateSource", fields: [duplicatedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   duplicates                             V2Project[]                               @relation("ProjectDuplicateSource")
@@ -776,6 +799,12 @@ model V2Project {
   creationCommand                        V2ProjectCreationCommand?
   administrationCommands                 V2ProjectAdministrationCommand[]
   perceptionTimelines                    V2PerceptionTimeline[]
+  perceptionProducerEnvelopes            V2PerceptionProducerEnvelope[]
+  perceptionProducerOperations           V2PerceptionProducerOperation[]
+  temporalProducerEnvelopes              V2TemporalProducerEnvelope[]
+  temporalProducerOperations             V2TemporalProducerOperation[]
+  faceProducerEnvelopes                  V2FaceProducerEnvelope[]
+  faceProducerOperations                 V2FaceProducerOperation[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
   syntheticAudioMasters                  V2SyntheticAudioMaster[]
   syntheticProductionRenderOperations   V2SyntheticProductionRenderOperation[]
@@ -898,9 +927,17 @@ model V2ProjectSnapshot {
   finalExportOperations   V2ProjectFinalExportOperation[] @relation("FinalExportQualitySnapshot")
   syntheticEditPlanRuns   V2SyntheticProductionRun[]      @relation("SyntheticEditPlanSnapshot")
   syntheticRenderOperations V2SyntheticProductionRenderOperation[] @relation("SyntheticProductionRenderEditPlanSnapshot")
+  perceptionProducerEnvelopes V2PerceptionProducerEnvelope[] @relation("PerceptionProducerEditPlanSnapshot")
+  perceptionProducerOperations V2PerceptionProducerOperation[] @relation("PerceptionProducerOperationEditPlanSnapshot")
+  outputStateEditPlans V2ProjectOutputState[] @relation("OutputStateEditPlan")
+  temporalProducerEnvelopes V2TemporalProducerEnvelope[] @relation("TemporalProducerEditPlanSnapshot")
+  temporalProducerOperations V2TemporalProducerOperation[] @relation("TemporalProducerOperationEditPlanSnapshot")
+  faceProducerEnvelopes V2FaceProducerEnvelope[] @relation("FaceProducerEditPlanSnapshot")
+  faceProducerOperations V2FaceProducerOperation[] @relation("FaceProducerOperationEditPlanSnapshot")
 
   @@unique([id, projectId, workspaceId])
   @@unique([projectId, kind, contentHash])
+  @@unique([id, projectId, workspaceId, contentHash], map: "project_snapshots_output_seal_key")
   @@index([workspaceId, kind])
   @@map("project_snapshots")
 }
@@ -968,8 +1005,16 @@ model V2ProjectVersion {
   createdBy           String   @db.VarChar(128)
   commandId           String?  @db.VarChar(128)
   createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  // Contract 0 is migration-only audit history, never an operational fallback.
+  outputContractVersion Int    @default(1)
+  outputStateId         String? @db.VarChar(128)
+  outputStateHash       String? @db.Char(64)
+  outputBaseHashJson    String? @db.Text
+  outputVersionJson     String? @db.Text
 
   project                          V2Project                           @relation("ProjectVersions", fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  outputState                      V2ProjectOutputState?               @relation("VersionOutputState", fields: [id, outputStateId, projectId, workspaceId, outputStateHash], references: [resultVersionId, id, projectId, workspaceId, stateHash], onDelete: Restrict, onUpdate: Restrict, map: "project_versions_exact_output_state_fk")
+  outputStatesBasedOn              V2ProjectOutputState[]              @relation("OutputStateParentVersion")
   currentForProjects               V2Project[]                         @relation("CurrentProjectVersion")
   parent                           V2ProjectVersion?                   @relation("VersionParent", fields: [parentVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   children                         V2ProjectVersion[]                  @relation("VersionParent")
@@ -1002,6 +1047,12 @@ model V2ProjectVersion {
   assetSelections                  V2AssetSelection[]
   qualityIterations                V2QualityIteration[]
   perceptionTimelines              V2PerceptionTimeline[]
+  perceptionProducerEnvelopes      V2PerceptionProducerEnvelope[]
+  perceptionProducerOperations     V2PerceptionProducerOperation[]
+  temporalProducerEnvelopes        V2TemporalProducerEnvelope[]
+  temporalProducerOperations       V2TemporalProducerOperation[]
+  faceProducerEnvelopes            V2FaceProducerEnvelope[]
+  faceProducerOperations           V2FaceProducerOperation[]
   renderablePlanSnapshots          V2RenderablePlanSnapshot[]          @relation("RenderablePlanSnapshotVersion")
   mvpCoreGatesAsPrimary            V2MvpCoreGate[]                     @relation("MvpCoreGatePrimaryVersion")
   mvpCoreGatesAsCompanion          V2MvpCoreGate[]                     @relation("MvpCoreGateCompanionVersion")
@@ -1033,13 +1084,201 @@ model V2ProjectVersion {
   colorCriticReports               V2ColorCriticReport[]
   localizationCanonicalScripts     V2LocalizationCanonicalScript[]
 
+  forkDerivationsAsSource V2ProjectForkDerivation[] @relation("Fork2SourceVersion")
+  forkDerivationsAsTarget V2ProjectForkDerivation[] @relation("Fork2TargetVersion")
+  forkCandidates V2ProjectForkRenderableCandidate[]
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
   @@unique([id, projectId, workspaceId])
   @@unique([commandId, workspaceId])
+  @@unique([id, outputStateId, projectId, workspaceId, outputStateHash], map: "project_versions_output_binding_key")
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, forkedFromProjectId, forkedFromVersionId])
   @@map("project_versions")
+}
+
+// W66: append-only, scoped identities. SQL deferred triggers validate provenance
+// and JSON/row reciprocity without a reverse FK to the future result Version.
+model V2OutputVariant {
+  id                String   @id @db.VarChar(128)
+  projectId         String   @db.VarChar(128)
+  workspaceId       String   @db.VarChar(128)
+  createdCommandKind String  @db.VarChar(32)
+  createdCommandId  String   @db.VarChar(128)
+  createdCommandHash String  @db.Char(64)
+  createdAt         DateTime @db.Timestamptz(3)
+
+  project   V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  revisions V2OutputSpecRevision[]
+
+  @@unique([id, projectId, workspaceId], map: "output_variants_scope_key")
+  @@index([workspaceId, projectId])
+  @@map("output_variants")
+}
+
+model V2OutputSpecRevision {
+  id                 String   @id @db.VarChar(128)
+  variantId          String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  revisionNumber     Int
+  schemaVersion      String   @db.VarChar(64)
+  canonicalPolicyVersion String @db.VarChar(64)
+  specJson           String   @db.Text
+  specHash           String   @db.Char(64)
+  createdCommandKind String   @db.VarChar(32)
+  createdCommandId   String   @db.VarChar(128)
+  createdCommandHash String   @db.Char(64)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  variant V2OutputVariant @relation(fields: [variantId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "output_spec_revisions_variant_fk")
+  entries V2ProjectOutputStateEntry[]
+
+  @@unique([variantId, revisionNumber, projectId, workspaceId], map: "output_spec_revisions_number_key")
+  @@unique([id, variantId, projectId, workspaceId, specHash], map: "output_spec_revisions_seal_key")
+  @@map("output_spec_revisions")
+}
+
+model V2ProjectOutputState {
+  id                  String   @id @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  resultVersionId     String   @db.VarChar(128)
+  parentVersionId     String?  @db.VarChar(128)
+  parentStateId       String?  @db.VarChar(128)
+  parentStateHash     String?  @db.Char(64)
+  schemaVersion       String   @db.VarChar(64)
+  canonicalPolicyVersion String @db.VarChar(64)
+  transition          String   @db.VarChar(32)
+  transitionPolicyVersion String @db.VarChar(64)
+  producerKind        String   @db.VarChar(32)
+  producerId          String   @db.VarChar(128)
+  provenanceHash      String   @db.Char(64)
+  producerEditCommandId String? @db.VarChar(128)
+  ingestOperationId   String?  @db.VarChar(128)
+  ingestSourceArtifactId String? @db.VarChar(128)
+  ingestSourceManifestId String? @db.VarChar(128)
+  ingestSourceManifestHash String? @db.Char(64)
+  ingestTranscriptId  String? @db.VarChar(128)
+  ingestTranscriptHash String? @db.Char(64)
+  producerHash        String   @db.Char(64)
+  producerJson        String   @db.Text
+  editPlanSnapshotId  String   @db.VarChar(128)
+  editPlanHash        String   @db.Char(64)
+  editPlanAuthorityJson String @db.Text
+  editPlanAuthorityHash String @db.Char(64)
+  renderablePlanSnapshotId String? @db.VarChar(200)
+  renderablePlanId    String?  @db.VarChar(200)
+  renderablePlanHash  String?  @db.Char(64)
+  renderablePlanAuthorityJson String? @db.Text
+  renderablePlanAuthorityHash String? @db.Char(64)
+  creationCommandV2Id String? @db.VarChar(128)
+  forkRenderableCandidateId String? @db.VarChar(200)
+  consumptionStatus   String @default("historical-v1") @db.VarChar(32)
+  consumptionJson     String? @db.Text
+  stateJson           String   @db.Text
+  stateHash           String   @db.Char(64)
+  createdAt           DateTime @db.Timestamptz(3)
+
+  project       V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  editPlan      V2ProjectSnapshot @relation("OutputStateEditPlan", fields: [editPlanSnapshotId, projectId, workspaceId, editPlanHash], references: [id, projectId, workspaceId, contentHash], onDelete: Restrict, onUpdate: Restrict, map: "project_output_states_edit_plan_seal_fk")
+  producerEditCommand V2EditCommand? @relation("OutputStateProducerCommand", fields: [producerEditCommandId, projectId, workspaceId, provenanceHash], references: [id, projectId, workspaceId, commandHash], onDelete: Restrict, onUpdate: Restrict, map: "project_output_states_edit_command_seal_fk")
+  ingestOperation V2PublicOperation? @relation("OutputStateIngestOperation", fields: [ingestOperationId, projectId, workspaceId, provenanceHash], references: [id, projectId, workspaceId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict, map: "project_output_states_ingest_operation_seal_fk")
+  ingestContext V2MediaIngestOperation? @relation("OutputStateIngestContext", fields: [ingestOperationId, projectId, workspaceId, ingestSourceArtifactId, ingestSourceManifestId], references: [operationId, projectId, workspaceId, sourceArtifactId, sourceManifestId], onDelete: Restrict, onUpdate: Restrict, map: "project_output_states_ingest_context_seal_fk")
+  ingestManifest V2MediaArtifactManifest? @relation("OutputStateIngestManifest", fields: [ingestSourceManifestId, ingestSourceArtifactId, workspaceId, ingestSourceManifestHash], references: [id, artifactId, workspaceId, manifestHash], onDelete: Restrict, onUpdate: Restrict, map: "project_output_states_ingest_manifest_seal_fk")
+  ingestTranscript V2MediaTranscript? @relation("OutputStateIngestTranscript", fields: [ingestTranscriptId, projectId, workspaceId, ingestSourceArtifactId, ingestSourceManifestId, ingestTranscriptHash], references: [id, projectId, workspaceId, sourceArtifactId, sourceManifestId, transcriptHash], onDelete: Restrict, onUpdate: Restrict, map: "project_output_states_ingest_transcript_seal_fk")
+  parentVersion V2ProjectVersion? @relation("OutputStateParentVersion", fields: [parentVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  parentState   V2ProjectOutputState? @relation("OutputStateParent", fields: [parentVersionId, parentStateId, projectId, workspaceId, parentStateHash], references: [resultVersionId, id, projectId, workspaceId, stateHash], onDelete: Restrict, onUpdate: Restrict, map: "project_output_states_parent_seal_fk")
+  children      V2ProjectOutputState[] @relation("OutputStateParent")
+  version       V2ProjectVersion? @relation("VersionOutputState")
+  entries       V2ProjectOutputStateEntry[]
+
+  creationCommandV2 V2ProjectCreationCommand? @relation("Creation2OutputState", fields: [creationCommandV2Id, projectId, workspaceId, resultVersionId, provenanceHash], references: [id, projectId, workspaceId, versionId, commandHash], onDelete: Restrict, onUpdate: Restrict, map: "states_creation_v2_seal_fk")
+  forkRenderableCandidate V2ProjectForkRenderableCandidate? @relation(fields: [forkRenderableCandidateId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "states_fork_candidate_fk")
+  forkDerivationsAsSource V2ProjectForkDerivation[] @relation("Fork2SourceState")
+  forkDerivationsAsTarget V2ProjectForkDerivation[] @relation("Fork2TargetState")
+  @@unique([resultVersionId, id, projectId, workspaceId], map: "project_output_states_target_identity_key")
+  @@unique([id, projectId, workspaceId], map: "project_output_states_scope_key")
+  @@unique([resultVersionId, projectId, workspaceId], map: "project_output_states_result_key")
+  @@unique([producerKind, producerId, workspaceId], map: "project_output_states_producer_key")
+  @@unique([resultVersionId, id, projectId, workspaceId, stateHash], map: "project_output_states_version_seal_key")
+  @@map("project_output_states")
+}
+
+model V2ProjectOutputStateEntry {
+  stateId              String @db.VarChar(128)
+  variantId            String @db.VarChar(128)
+  projectId            String @db.VarChar(128)
+  workspaceId          String @db.VarChar(128)
+  outputSpecRevisionId String @db.VarChar(128)
+  specHash             String @db.Char(64)
+  canonicalPolicyVersion String @db.VarChar(64)
+  geometryStatus       String @db.VarChar(16)
+  geometryProjectionHash String? @db.Char(64)
+  materializationId     String? @db.VarChar(128)
+  entryJson            String @db.Text
+  entryHash            String @db.Char(64)
+
+  state    V2ProjectOutputState @relation(fields: [stateId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "project_output_entries_state_fk")
+  revision V2OutputSpecRevision @relation(fields: [outputSpecRevisionId, variantId, projectId, workspaceId, specHash], references: [id, variantId, projectId, workspaceId, specHash], onDelete: Restrict, onUpdate: Restrict, map: "project_output_entries_revision_seal_fk")
+  overlays V2ProjectOutputStateOverlay[]
+  invalidations V2ProjectOutputStateInvalidation[]
+
+  forkCropDecisions V2ProjectForkCropDecision[]
+  forkInvalidationLineage V2ProjectForkInvalidationLineage[]
+  @@id([stateId, variantId])
+  @@unique([stateId, variantId, projectId, workspaceId], map: "project_output_entries_scope_key")
+  @@map("project_output_state_entries")
+}
+
+model V2ProjectOutputStateOverlay {
+  id                  String @db.VarChar(128)
+  stateId             String @db.VarChar(128)
+  variantId           String @db.VarChar(128)
+  projectId           String @db.VarChar(128)
+  workspaceId         String @db.VarChar(128)
+  // W66 v1 accepts only crop. Placement requires its own cue/policy bindings.
+  kind                String @db.VarChar(32)
+  canonicalPolicyVersion String @db.VarChar(64)
+  clipId              String @db.VarChar(128)
+  startFrame          Int
+  endFrame            Int
+  status              String @db.VarChar(16)
+  originalCommandId   String @db.VarChar(128)
+  originalCommandHash String @db.Char(64)
+  overlayJson         String @db.Text
+  overlayHash         String @db.Char(64)
+
+  entry V2ProjectOutputStateEntry @relation(fields: [stateId, variantId, projectId, workspaceId], references: [stateId, variantId, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "project_output_overlays_entry_fk")
+  originalCommand V2EditCommand @relation("OutputStateOverlayCommand", fields: [originalCommandId, projectId, workspaceId, originalCommandHash], references: [id, projectId, workspaceId, commandHash], onDelete: Restrict, onUpdate: Restrict, map: "project_output_overlays_command_seal_fk")
+
+  @@id([stateId, id])
+  @@index([stateId, variantId, clipId, startFrame, endFrame])
+  @@map("project_output_state_overlays")
+}
+
+model V2ProjectOutputStateInvalidation {
+  id                 String @db.VarChar(128)
+  stateId            String @db.VarChar(128)
+  variantId          String @db.VarChar(128)
+  projectId          String @db.VarChar(128)
+  workspaceId        String @db.VarChar(128)
+  overlayId          String? @db.VarChar(128)
+  kind               String @db.VarChar(32)
+  canonicalPolicyVersion String @db.VarChar(64)
+  reasonCode         String @db.VarChar(80)
+  previousDependencyHash String @db.Char(64)
+  nextDependencyHash String @db.Char(64)
+  causedByKind       String @db.VarChar(32)
+  causedById         String @db.VarChar(128)
+  causedByHash       String @db.Char(64)
+  invalidationJson   String @db.Text
+  invalidationHash   String @db.Char(64)
+
+  entry V2ProjectOutputStateEntry @relation(fields: [stateId, variantId, projectId, workspaceId], references: [stateId, variantId, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "project_output_invalidations_entry_fk")
+
+  @@id([stateId, id])
+  @@map("project_output_state_invalidations")
 }
 
 model V2EditCommand {
@@ -1063,6 +1302,12 @@ model V2EditCommand {
   actorWorkspaceRole       String?  @db.VarChar(32)
   idempotencyKey           String   @db.VarChar(128)
   requestFingerprint       String   @db.Char(64)
+  // Historical commands remain audit records; state provenance requires this seal.
+  commandHash              String?  @db.Char(64)
+  commandJson              String?  @db.Text
+  // Output intent has its own new seal; Command v1 authority remains historical.
+  outputPayloadJson        String?  @db.Text
+  outputPayloadHash        String?  @db.Char(64)
   createdAt                DateTime @db.Timestamptz(3)
 
   workspace               V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -1075,10 +1320,13 @@ model V2EditCommand {
   subtitleConfiguration   V2ProjectSubtitleConfiguration?
   subtitleSegmentOverride V2SubtitleSegmentOverride?
   artifactInvalidations   V2CommandArtifactInvalidation[]
+  outputStatesAsProducer  V2ProjectOutputState[] @relation("OutputStateProducerCommand")
+  outputStateOverlays     V2ProjectOutputStateOverlay[] @relation("OutputStateOverlayCommand")
   proxyReuseOperations    V2ProjectProxyRenderOperation[] @relation("ProjectProxyReuseCommand")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([id, projectId, workspaceId, commandHash], map: "edit_commands_output_seal_key")
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, baseVersionId])
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
@@ -1727,6 +1975,12 @@ model V2MediaArtifact {
   mediaSegments                V2MediaSegment[]
   mediaSegmentDerivatives      V2MediaSegmentMaterialization[]           @relation("MediaSegmentDerivativeArtifact")
   imageAnalyses                V2ImageAnalysis[]                         @relation("ImageAnalysisSourceArtifact")
+  perceptionProducerEnvelopes V2PerceptionProducerEnvelope[]
+  perceptionProducerOperations V2PerceptionProducerOperation[]
+  temporalProducerEnvelopes   V2TemporalProducerEnvelope[]
+  temporalProducerOperations  V2TemporalProducerOperation[]
+  faceProducerEnvelopes       V2FaceProducerEnvelope[]
+  faceProducerOperations      V2FaceProducerOperation[]
   imageAnalysisThumbnails      V2ImageAnalysis[]                         @relation("ImageAnalysisThumbnailArtifact")
   imageAnalysisPreviews        V2ImageAnalysis[]                         @relation("ImageAnalysisPreviewArtifact")
   imageReuseSources            V2ImageReuseReference[]                   @relation("ImageReuseSourceArtifact")
@@ -2029,6 +2283,178 @@ model V2PerceptionTimeline {
   @@map("perception_timelines")
 }
 
+model V2PerceptionProducerEnvelope {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  operationId          String   @unique @db.VarChar(128)
+  operationAttempt     Int
+  operationFenceHash   String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceSha256         String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  timeMapHash          String   @db.Char(64)
+  modality             String   @db.VarChar(16)
+  contentJson          String   @db.Text
+  envelopeHash         String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation        V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("PerceptionProducerEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, sourceSha256])
+  @@map("perception_producer_envelopes")
+}
+
+model V2PerceptionProducerOperation {
+  operationId          String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  projectVersionHash   String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceSha256         String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  sampleIntervalFrames Int
+  requestHash          String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation        V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("PerceptionProducerOperationEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectId, projectVersionId])
+  @@map("perception_producer_operations")
+}
+
+model V2TemporalProducerEnvelope {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  operationId          String   @unique @db.VarChar(128)
+  operationAttempt     Int
+  operationFenceHash   String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceSha256         String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  timeMapHash          String   @db.Char(64)
+  contentJson          String   @db.Text
+  envelopeHash         String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation        V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("TemporalProducerEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, sourceSha256])
+  @@map("temporal_producer_envelopes")
+}
+
+model V2TemporalProducerOperation {
+  operationId          String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  projectVersionHash   String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceSha256         String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  requestHash          String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation        V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("TemporalProducerOperationEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectId, projectVersionId])
+  @@map("temporal_producer_operations")
+}
+
+model V2FaceProducerEnvelope {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  operationId          String   @unique @db.VarChar(128)
+  operationAttempt     Int
+  operationFenceHash   String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceSha256         String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  timeMapHash          String   @db.Char(64)
+  detectorConfigHash   String   @db.Char(64)
+  contentJson          String   @db.Text
+  envelopeHash         String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation        V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("FaceProducerEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, sourceSha256])
+  @@map("face_producer_envelopes")
+}
+
+model V2FaceProducerOperation {
+  operationId          String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  projectVersionHash   String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceSha256         String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  editPlanSnapshotHash String   @db.Char(64)
+  sampleIntervalFrames Int
+  requestHash          String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation        V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("FaceProducerOperationEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectId, projectVersionId])
+  @@map("face_producer_operations")
+}
+
 model V2MediaArtifactLifecycleTransition {
   id                      String   @id @db.Uuid
   workspaceId             String   @db.VarChar(128)
@@ -2124,6 +2550,7 @@ model V2MediaArtifactManifest {
   materializations           V2MaterializationAuthorization[]
   renderOperations           V2ArtifactRenderOperation[]
   transcriptSources          V2MediaTranscript[]
+  outputStatesAsIngestManifest V2ProjectOutputState[] @relation("OutputStateIngestManifest")
   proxyReviews               V2ProxyReview[]
   longFormIndexRuns          V2LongFormIndexRun[]
   longFormIndexWorkflows     V2LongFormIndexWorkflow[]
@@ -2152,6 +2579,7 @@ model V2MediaArtifactManifest {
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, recipeParametersRef])
   @@index([workspaceId, renderInputRef])
+  @@unique([id, artifactId, workspaceId, manifestHash], map: "media_manifests_output_seal_key")
   @@map("media_artifact_manifests")
 }
 
@@ -3087,6 +3515,7 @@ model V2PublicOperation {
   deadLetteredAt          DateTime? @db.Timestamptz(3)
 
   workspace                        V2Workspace                               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  outputStatesAsIngestOperation     V2ProjectOutputState[] @relation("OutputStateIngestOperation")
   project                          V2Project?                                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   client                           V2ApiClient                               @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   artifactRender                   V2ArtifactRenderOperation?
@@ -3097,6 +3526,12 @@ model V2PublicOperation {
   sourceCleanupPlan                V2SourceCleanupPlan?
   longFormIndexWorkflow            V2LongFormIndexWorkflow?
   projectDirectorRun               V2ProjectDirectorOperation?
+  perceptionProducerEnvelope       V2PerceptionProducerEnvelope?
+  perceptionProducerOperation      V2PerceptionProducerOperation?
+  temporalProducerEnvelope         V2TemporalProducerEnvelope?
+  temporalProducerOperation        V2TemporalProducerOperation?
+  faceProducerEnvelope             V2FaceProducerEnvelope?
+  faceProducerOperation            V2FaceProducerOperation?
   longFormIndexRunsAsOrigin        V2LongFormIndexRun[]                      @relation("LongFormIndexRunOriginOperation")
   hierarchicalRunsAsOrigin         V2HierarchicalProcessingRun[]             @relation("HierarchicalRunOriginOperation")
   speakerDiarizationRunsAsOrigin   V2SpeakerDiarizationRun[]                 @relation("SpeakerDiarizationRunOriginOperation")
@@ -3119,6 +3554,7 @@ model V2PublicOperation {
   @@index([workspaceId, targetType, targetId])
   @@index([status, leaseExpiresAt, createdAt])
   @@index([status, nextAttemptAt, createdAt])
+  @@unique([id, projectId, workspaceId, requestFingerprint], map: "public_operations_output_seal_key")
   @@map("public_operations")
 }
 
@@ -3470,6 +3906,7 @@ model V2MediaIngestOperation {
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
 
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  outputStates V2ProjectOutputState[] @relation("OutputStateIngestContext")
   operation V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   upload    V2MediaUpload     @relation(fields: [uploadId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -3478,6 +3915,7 @@ model V2MediaIngestOperation {
   @@unique([uploadId, workspaceId])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId])
+  @@unique([operationId, projectId, workspaceId, sourceArtifactId, sourceManifestId], map: "media_ingest_output_context_key")
   @@map("media_ingest_operations")
 }
 
@@ -3686,6 +4124,7 @@ model V2ProjectFinalExportAttempt {
   outputByteSize   BigInt?
   errorCode        String?  @db.VarChar(64)
   errorMessage     String?  @db.VarChar(500)
+  errorStage       String?  @db.VarChar(32)
   startedAt        DateTime @db.Timestamptz(3)
   completedAt      DateTime @db.Timestamptz(3)
 
@@ -5256,6 +5695,7 @@ model V2MediaTranscript {
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
 
   workspace                        V2Workspace                          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  outputStatesAsIngestTranscript    V2ProjectOutputState[] @relation("OutputStateIngestTranscript")
   project                          V2Project                            @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   sourceArtifact                   V2MediaArtifact                      @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   sourceManifest                   V2MediaArtifactManifest              @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -5274,6 +5714,7 @@ model V2MediaTranscript {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId])
   @@index([workspaceId, sourceArtifactId, provider, model, providerVersion])
+  @@unique([id, projectId, workspaceId, sourceArtifactId, sourceManifestId, transcriptHash], map: "media_transcripts_output_seal_key")
   @@map("media_transcripts")
 }
 
@@ -11230,4 +11671,153 @@ model V2MusicMontageRun {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, musicAnalysisId])
   @@map("music_montage_runs")
+}
+
+// These scope/seal relationships are declared as deferred composite FKs in
+// migration 20261013160000. Scalars permit the cyclic bundle's insert order;
+// they are never nullable authority or an operational compatibility path.
+model V2ProjectForkDerivation {
+  id String @id @db.VarChar(128)
+  workspaceId String @db.VarChar(128)
+  sourceProjectId String @db.VarChar(128)
+  sourceVersionId String @db.VarChar(128)
+  sourceStateId String @db.VarChar(128)
+  sourceStateHash String @db.Char(64)
+  sourceBaseHash String @db.Char(64)
+  targetProjectId String @db.VarChar(128)
+  targetVersionId String @db.VarChar(128)
+  targetStateId String @db.VarChar(128)
+  creationCommandId String @db.VarChar(128)
+  schemaVersion String @db.VarChar(64)
+  canonicalPolicyVersion String @db.VarChar(64)
+  derivationJson String @db.Text
+  derivationHash String @db.Char(64)
+  createdAt DateTime @db.Timestamptz(3)
+  sourceVersion V2ProjectVersion @relation("Fork2SourceVersion", fields: [sourceVersionId, sourceProjectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  targetVersion V2ProjectVersion @relation("Fork2TargetVersion", fields: [targetVersionId, targetProjectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  sourceState V2ProjectOutputState @relation("Fork2SourceState", fields: [sourceVersionId, sourceStateId, sourceProjectId, workspaceId, sourceStateHash], references: [resultVersionId, id, projectId, workspaceId, stateHash], onDelete: Restrict, onUpdate: Restrict)
+  targetState V2ProjectOutputState @relation("Fork2TargetState", fields: [targetVersionId, targetStateId, targetProjectId, workspaceId], references: [resultVersionId, id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  creationCommand V2ProjectCreationCommand @relation("Creation2ForkIdentity", fields: [creationCommandId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  consumedByCommands V2ProjectCreationCommand[] @relation("Creation2ForkSeal")
+  candidates V2ProjectForkRenderableCandidate[]
+  @@unique([id, targetProjectId, workspaceId, derivationHash], map: "project_fork_derivations_seal_key")
+  @@unique([creationCommandId, workspaceId])
+  @@unique([targetVersionId, targetProjectId, workspaceId])
+  @@map("project_fork_derivations")
+}
+model V2ProjectForkRenderableCandidate {
+  id String @id @db.VarChar(200)
+  workspaceId String @db.VarChar(128)
+  projectId String @db.VarChar(128)
+  projectVersionId String @db.VarChar(128)
+  derivationId String @db.VarChar(128)
+  derivationHash String @db.Char(64)
+  planId String @db.VarChar(200)
+  planHash String @db.Char(64)
+  planHashJson String @db.Text
+  candidateJson String @db.Text
+  candidateHash String @db.Char(64)
+  createdAt DateTime @db.Timestamptz(3)
+  version V2ProjectVersion @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  derivation V2ProjectForkDerivation @relation(fields: [derivationId, projectId, workspaceId, derivationHash], references: [id, targetProjectId, workspaceId, derivationHash], onDelete: Restrict, onUpdate: Restrict)
+  states V2ProjectOutputState[]
+  @@unique([id, projectId, workspaceId], map: "project_fork_renderable_candidates_scope_key")
+  @@unique([projectVersionId, projectId, workspaceId])
+  @@map("project_fork_renderable_candidates")
+}
+model V2ProjectForkCropDecision {
+  id String @id @db.VarChar(128)
+  stateId String @db.VarChar(128)
+  workspaceId String @db.VarChar(128)
+  projectId String @db.VarChar(128)
+  variantId String @db.VarChar(128)
+  clipId String @db.VarChar(128)
+  creationCommandId String @db.VarChar(128)
+  sourceOverlayId String @db.VarChar(128)
+  sourceOverlayHash String @db.Char(64)
+  status String @db.VarChar(64)
+  decisionJson String @db.Text
+  decisionHash String @db.Char(64)
+  createdAt DateTime @db.Timestamptz(3)
+  entry V2ProjectOutputStateEntry @relation(fields: [stateId, variantId, projectId, workspaceId], references: [stateId, variantId, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  creationCommand V2ProjectCreationCommand @relation(fields: [creationCommandId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  @@map("project_fork_crop_decisions")
+}
+model V2ProjectForkInvalidationLineage {
+  id String @id @db.VarChar(128)
+  stateId String @db.VarChar(128)
+  workspaceId String @db.VarChar(128)
+  projectId String @db.VarChar(128)
+  variantId String @db.VarChar(128)
+  sourceId String @db.VarChar(128)
+  sourceHash String @db.Char(64)
+  lineageJson String @db.Text
+  lineageHash String @db.Char(64)
+  entry V2ProjectOutputStateEntry @relation(fields: [stateId, variantId, projectId, workspaceId], references: [stateId, variantId, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  @@map("project_fork_invalidation_lineage")
+}
+
+
+// State3 uses real scoped source facts. Raw probe JSON and execution receipt are
+// authoritative producer outputs; the SQL migration binds their dependencies.
+model V2OutputNormalizationReceipt {
+  id                   String @id @db.VarChar(128)
+  workspaceId          String @db.VarChar(128)
+  projectId            String @db.VarChar(128)
+  operationId          String @db.VarChar(128)
+  sourceArtifactId     String @db.VarChar(128)
+  sourceManifestId     String @db.VarChar(128)
+  sourceManifestHash   String @db.Char(64)
+  derivativeArtifactId String @db.VarChar(128)
+  derivativeManifestId String @db.VarChar(128)
+  derivativeManifestHash String @db.Char(64)
+  receiptJson          String @db.Text
+  receiptHash          String @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  @@unique([id, projectId, workspaceId, receiptHash], map: "output_normalization_seal_key")
+  @@map("output_normalization_receipts")
+}
+model V2OutputMaterialization {
+  id                   String @id @db.VarChar(128)
+  workspaceId          String @db.VarChar(128)
+  projectId            String @db.VarChar(128)
+  resultVersionId      String @db.VarChar(128)
+  variantId            String @db.VarChar(128)
+  outputSpecRevisionId String @db.VarChar(128)
+  specHash             String @db.Char(64)
+  planSnapshotId       String @db.VarChar(128)
+  planHash             String @db.Char(64)
+  materializationJson  String @db.Text
+  materializationHash  String @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  @@unique([id, projectId, workspaceId, materializationHash], map: "output_materialization_seal_key")
+  @@unique([resultVersionId, variantId, projectId, workspaceId])
+  @@map("output_materializations")
+}
+model V2OutputMaterializationNormalization {
+  materializationId String @db.VarChar(128)
+  normalizationId   String @db.VarChar(128)
+  normalizationHash String @db.Char(64)
+  workspaceId       String @db.VarChar(128)
+  projectId         String @db.VarChar(128)
+
+  @@id([materializationId, normalizationId])
+  @@map("output_materialization_normalizations")
+}
+model V2OutputOperationalBundle {
+  versionId   String @id @db.VarChar(128)
+  workspaceId String @db.VarChar(128)
+  projectId   String @db.VarChar(128)
+  stateId     String @db.VarChar(128)
+  bundleJson  String @db.Text
+  bundleHash  String @db.Char(64)
+  originJson  String @db.Text
+  producerPayloadJson String? @db.Text
+  producerPayloadHash String? @db.Char(64)
+  originHash  String @db.Char(64)
+
+  @@unique([stateId, projectId, workspaceId])
+  @@map("output_operational_bundles")
 }

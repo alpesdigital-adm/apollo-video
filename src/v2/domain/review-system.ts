@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { DomainError, assertDomain } from './errors.ts'
-import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from './subtitle-anchor-plan.ts'
+import { subtitleAnchorDecisionFor, type SubtitleAnchorPlan } from './subtitle-anchor-plan.ts'
 
 export interface PreviewSession {
   projectVersionId: string
@@ -270,7 +270,7 @@ export function buildRenderElementMap(input: {
    * rectangle the pixels occupy instead of a second, independent guess. Suppressed cues produce no
    * element, because no cue was drawn.
    */
-  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
+  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlan> | null
 }): Readonly<RenderElementMap> {
   assertDomain(
     Number.isFinite(input.fps) && input.fps > 0 &&

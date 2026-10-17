@@ -167,6 +167,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one empty draft project with no provider or external side effect.',
     },
+    'apollo.projects.output-variants.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one stable output variant and an immutable ProjectVersion against an exact base version and hash; it starts no render or provider work and the prior version stays restorable.',
+    },
     'apollo.projects.duplicates.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible copy-on-write project while sharing immutable snapshots and artifact bytes.',
@@ -737,6 +741,18 @@ export function createFoundationAgentToolSafety(
     'apollo.projects.music-montages.compile': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Compiles a deterministic edit from persisted analysis and current media authority, atomically publishing its renderer snapshot without provider dispatch.',
+    },
+    'apollo.projects.perception-producer-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues sampled local OCR only for one current rights-approved source version, under fixed sample and worker deadlines; facial safety remains unknown.',
+    },
+    'apollo.projects.temporal-producer-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues at most 300 observed frames of pinned local FFmpeg measurement for one current rights-approved unit-rate source; no hard-cut, motion semantic or face approval is inferred.',
+    },
+    'apollo.projects.face-producer-operations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues sampled local YuNet candidate boxes for one current rights-approved source under a fixed worker deadline; the model failed quality gates and cannot approve face safety.',
     },
     'apollo.projects.music-analyses.request': { impact: 'bounded', confirmation: 'none', reason: 'Queues local deterministic FFmpeg analysis only after current project, byte identity and music rights authority are bound.' },
     'apollo.projects.music-analyses.cancel': { impact: 'bounded', confirmation: 'none', reason: 'Stops one bounded analysis request and invalidates its worker lease without modifying source media.' },

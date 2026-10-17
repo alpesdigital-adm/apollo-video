@@ -10,6 +10,7 @@ import {
 import { DomainError } from "../../domain/errors.ts";
 import {
   beginLocalizationMediaRun,
+  collectLocalizationDependentPlanIds,
   LOCALIZATION_MEDIA_RUN_SCHEMA_VERSION,
   type LocalizationMediaRun,
 } from "../../domain/localization-media-run.ts";
@@ -375,7 +376,7 @@ export class PrismaLocalizationMediaRunRepository implements LocalizationMediaRu
         const source = await tx.v2MediaArtifact.findFirst({ where: { id: input.run.source.artifactId, workspaceId: input.run.workspaceId, sha256: input.run.source.artifactSha256, currentRightsSnapshotId: input.run.source.rightsSnapshotId, status: "available" }, include: { currentRightsSnapshot: true } });
         const sourceDecision = source?.currentRightsSnapshot ? evaluateAssetUse(hydrateAssetRights(source.currentRightsSnapshot), { workspaceId: input.run.workspaceId, use: "localization", locale: currentVariant.targetLocale, ...(currentVariant.market ? { market: currentVariant.market } : {}) }, new Date(input.run.updatedAt)) : null;
         if (!sourceDecision || sourceDecision.outcome !== "allow") throw new DomainError("ASSET_RIGHTS_BLOCKED", "Localization media source rights changed before approval");
-        const semanticIds = { captionIds: [] as string[], clipIds: [] as string[], brollIds: [] as string[], eventIds: [] as string[] };
+        const semanticPlans: DirectedEditPlan[] = [];
         const proxyProofs = await Promise.all(evidence.renderablePlans.map(async (item) => {
           const operation = await tx.v2ProjectProxyRenderOperation.findFirst({
             where: {
@@ -400,10 +401,7 @@ export class PrismaLocalizationMediaRunRepository implements LocalizationMediaRu
           if (review.projectVersionId !== operation.renderableSnapshot.projectVersionId || review.proxyArtifactId !== operation.outputArtifactId || review.proxyManifestId !== operation.outputManifestId || review.status !== "ready-for-final" || !review.finalAllowed || [...technicalIssues, ...criticIssues].some((issue) => issue.severity === "hard") || calculateProxyReviewHash(reviewBody as Parameters<typeof calculateProxyReviewHash>[0]) !== review.reviewHash) return null;
           const plan = JSON.parse(operation.renderableSnapshot.planJson) as DirectedEditPlan;
           if (calculateRenderablePlanHash(plan) !== operation.renderableSnapshot.planHash || plan.projectVersionId !== review.projectVersionId || (plan.formatVariantRefs as readonly string[]).length !== 1 || (plan.formatVariantRefs as readonly string[])[0] !== item.format || plan.subtitleTracks.length === 0 || plan.videoTracks.every((track) => track.clips.length === 0)) return null;
-          semanticIds.captionIds.push(...plan.subtitleTracks.flatMap((track) => track.cues.map((cue) => cue.id)));
-          semanticIds.clipIds.push(...plan.videoTracks.filter((track) => track.kind === "base-video").flatMap((track) => track.clips.map((clip) => clip.id)));
-          semanticIds.brollIds.push(...plan.videoTracks.filter((track) => track.kind !== "base-video").flatMap((track) => track.clips.map((clip) => clip.id)));
-          semanticIds.eventIds.push(...plan.transitions.map((event) => event.id));
+          semanticPlans.push(plan);
           return tx.v2MediaArtifact.findFirst({
             where: { id: operation.outputArtifactId, workspaceId: input.run.workspaceId, status: "available" },
             select: { manifests: { where: { id: operation.outputManifestId }, select: { id: true }, take: 1 } },
@@ -415,18 +413,13 @@ export class PrismaLocalizationMediaRunRepository implements LocalizationMediaRu
             "Localization approval requires completed snapshot-bound proxy renders",
           );
         }
-        if (semanticIds.captionIds.length === 0 || semanticIds.clipIds.length === 0) throw new DomainError("PRECONDITION_REQUIRED", "Localization approval requires persisted caption and clip identities");
+        const dependentPlan = collectLocalizationDependentPlanIds(semanticPlans);
         const mediaPatch = {
           updatedAt: input.run.updatedAt,
           localizedAudioAssetId: evidence.audioArtifactId,
           alignment: evidence.words,
           durationDeviation: { totalRatio: evidence.durationDeviation.totalRatio, byBlock: evidence.durationDeviation.byBlock },
-          dependentPlan: {
-            captionIds: [...new Set(semanticIds.captionIds)].sort(),
-            clipIds: [...new Set(semanticIds.clipIds)].sort(),
-            brollIds: [...new Set(semanticIds.brollIds)].sort(),
-            eventIds: [...new Set(semanticIds.eventIds)].sort(),
-          },
+          dependentPlan,
         };
         const visualVariant = transitionLocalizationVariant(currentVariant, "visual", { ...mediaPatch, stage: "media-rendered" });
         const reviewVariant = transitionLocalizationVariant(visualVariant, "review", { ...mediaPatch, stage: "media-proxy-reviewed" });

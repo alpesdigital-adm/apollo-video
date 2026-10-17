@@ -2,6 +2,8 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { outputStateArchitectureViolations } from './output-state-architecture-rules.mjs'
+
 import {
   boundaryStateOwnershipViolations,
   transformationArchitectureViolations,
@@ -142,6 +144,7 @@ for (const file of await files(v2Root)) {
   v2Sources.push({ rel: normalized(relative(v2Root, file)), source: await readFile(file, 'utf8') })
 }
 violations.push(...transformationArchitectureViolations(v2Sources))
+violations.push(...outputStateArchitectureViolations(v2Sources))
 
 const boundarySources = []
 for (const root of [publicRoutesRoot, join(v2Root, 'public-api')]) {

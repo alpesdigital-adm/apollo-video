@@ -1,7 +1,7 @@
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { PatchImpact, PatchOperation, PatchSet, ReviewAnnotation } from '../../domain/review-system.ts'
-import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { ProjectVersionV2, ProjectVersionV3 } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { ReviewPatchProposal } from './review-patch-repository.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactV1 } from '../../domain/command-impact.ts'
@@ -52,7 +52,9 @@ export interface ReviewPatchBatch {
 }
 
 export interface ReviewPatchBatchProposalContext {
-  currentVersion: Readonly<ProjectVersion>
+  /** The sealed output bundle of the current head: the exact parent an applied batch's Version is born from. */
+  parent: OperationalOutputParentV3
+  currentVersion: Readonly<ProjectVersionV2 | ProjectVersionV3>
   editPlan: Readonly<Record<string, unknown>>
   editPlanHash: string
   availableAssetIds: readonly string[]
@@ -69,10 +71,8 @@ export interface ReviewPatchBatchCommit {
   batchId: string
   applyIdempotencyKey: string
   applyRequestFingerprint: string
-  command: Readonly<EditCommand>
-  authenticationAudit: Readonly<ApiAccessAuditContext>
-  snapshot: Readonly<ProjectSnapshot>
-  version: Readonly<ProjectVersion>
+  /** Version, State, patched EditPlan, Command and credential audit, sealed together by the child-command transition. */
+  bundle: Readonly<OperationalOutputVersionBundleV3>
   event: Readonly<PublicEvent>
   comparison: NonNullable<ReviewPatchBatch['comparison']>
   impact: Readonly<CommandImpactV1>
@@ -81,7 +81,7 @@ export interface ReviewPatchBatchCommit {
 export interface ReviewPatchBatchApplyResult {
   batch: Readonly<ReviewPatchBatch>
   command: Readonly<EditCommand>
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV3>
   editPlan: Readonly<Record<string, unknown>>
   comparison: NonNullable<ReviewPatchBatch['comparison']>
   impact: Readonly<CommandImpactV1>

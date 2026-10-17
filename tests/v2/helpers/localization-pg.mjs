@@ -185,6 +185,7 @@ export async function createLocalizationPgFixture(
           "subtitles-only",
           "translation",
           "project-render",
+          "rendering",
           "script-alignment",
           "editorial-reuse",
         ],
@@ -192,6 +193,12 @@ export async function createLocalizationPgFixture(
         consent: { status: "not-required", allowedUses: [] },
       },
     });
+    const persistedRights = await rights.findCurrent(workspaceId, artifactId);
+    assert.ok(persistedRights?.snapshot);
+    assert.equal(persistedRights.revision, rightsResult.revision);
+    assert.equal(persistedRights.snapshot.snapshotHash, rightsResult.snapshot.snapshotHash);
+    assert.deepEqual(persistedRights.snapshot.allowedUses, rightsResult.snapshot.allowedUses);
+    assert.ok(persistedRights.snapshot.allowedUses.includes("rendering"));
     const text = "Nina tem 10 exemplos.";
     const transcript = createMediaTranscript({
       language: "pt-BR",

@@ -482,6 +482,29 @@ test('mutable agent tools have exhaustive trusted safety gates', () => {
   )
 })
 
+test('diagnostic face tool keeps scope, idempotency and explicit bounded safety', () => {
+  const create = FOUNDATION_CAPABILITIES.find((capability) =>
+    capability.id === 'apollo.projects.face-producer-operations.create')
+  const read = FOUNDATION_CAPABILITIES.find((capability) =>
+    capability.id === 'apollo.projects.face-producer-operations.read')
+  assert.ok(create && read)
+  assert.deepEqual(create.requiredScopes, ['projects:write'])
+  assert.deepEqual(read.requiredScopes, ['projects:read'])
+  assert.equal(create.idempotency, 'required')
+  assert.equal(create.costClass, 'low')
+  assert.deepEqual(FOUNDATION_AGENT_TOOL_SAFETY[create.id] && {
+    impact: FOUNDATION_AGENT_TOOL_SAFETY[create.id].impact,
+    confirmation: FOUNDATION_AGENT_TOOL_SAFETY[create.id].confirmation,
+  }, { impact: 'bounded', confirmation: 'none' })
+  assert.match(FOUNDATION_AGENT_TOOL_SAFETY[create.id].reason, /rights-approved/i)
+  assert.match(FOUNDATION_AGENT_TOOL_SAFETY[create.id].reason, /failed quality gates/i)
+  const request = getPublicSchema(create.inputSchemaRef).schema
+  assert.equal(request.additionalProperties, false)
+  assert.deepEqual(request.required, ['projectVersionId', 'sourceArtifactId'])
+  assert.deepEqual(agentToolsForCapabilities([create, read]).map((tool) => tool.name),
+    [create.toolName, read.toolName])
+})
+
 test('agent gate rejects model-supplied absence, mismatch and expired evidence', () => {
   const capability = FOUNDATION_CAPABILITIES.find(
     (candidate) => candidate.id === 'apollo.artifacts.rights.set',

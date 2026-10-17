@@ -12,7 +12,8 @@ import {
   OUTPUT_PRESETS,
   createOutputSpec,
 } from '../../src/v2/domain/output-spec.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { createProjectVersionV3 } from '../../src/v2/domain/project-version.ts'
+import { ingestedWorld } from './helpers/output-world.mjs'
 import {
   PROJECT_STATUSES,
   PROJECT_STATUS_TRANSITIONS,
@@ -2275,30 +2276,31 @@ test('safe areas are normalized and cannot overlap the canvas', () => {
   )
 })
 
+// Versions are the sealed ones of the shared output world (root, explicit variant, controlled ingest): the same
+// documents the Prisma writers store, with their real ids, sequences, parent links and base hashes.
+const sealedWorld = await ingestedWorld()
+const [rootVersion, variantVersion, ingestVersion] = sealedWorld.chain.map((bundle) => bundle.version)
+
 test('project versions are immutable and require a parent after sequence one', () => {
-  const first = createProjectVersion({
-    id: 'version-1',
-    workspaceId: 'workspace-1',
-    projectId: 'project-1',
-    sequence: 1,
-    snapshotRefs: { editPlan: 'edit-plan-1', policies: 'policy-1' },
-    baseHash: 'hash-1',
-    createdBy: 'user-1',
-    createdAt: '2026-07-12T12:00:00.000Z',
-  })
+  assert.equal(rootVersion.sequence, 1)
+  assert.equal(rootVersion.parentVersionId, undefined, 'only the first version omits its parent')
+  assert.equal(variantVersion.parentVersionId, rootVersion.id)
+  assert.equal(ingestVersion.parentVersionId, variantVersion.id)
+  assert.deepEqual([rootVersion, variantVersion, ingestVersion].map((version) => version.sequence), [1, 2, 3])
+  for (const version of [rootVersion, variantVersion, ingestVersion]) {
+    assert.equal(version.schemaVersion, 1)
+    assert.ok(Object.isFrozen(version))
+    assert.ok(Object.isFrozen(version.snapshotRefs))
+    assert.throws(() => { version.baseHash = 'tampered' }, TypeError)
+  }
 
-  assert.equal(first.schemaVersion, 1)
-  assert.ok(Object.isFrozen(first))
-  assert.ok(Object.isFrozen(first.snapshotRefs))
-
+  // A Version cannot be sealed under a parent other than the one its State descends from.
+  const sealed = sealedWorld.chain[2]
   expectDomainError(
-    () =>
-      createProjectVersion({
-        ...first,
-        id: 'version-2',
-        sequence: 2,
-        baseHash: 'hash-2',
-      }),
+    () => createProjectVersionV3({
+      state: sealed.state, parent: rootVersion, snapshotRefs: sealed.version.snapshotRefs,
+      createdBy: sealed.version.createdBy, commandId: sealed.version.commandId ?? null,
+    }),
     'INVALID_PROJECT_VERSION',
   )
 })
@@ -2393,21 +2395,11 @@ test('command scopes reject empty and contradictory targets', () => {
 })
 
 test('commands accept the exact base and reject stale versions', () => {
-  const current = createProjectVersion({
-    id: 'version-2',
-    workspaceId: 'workspace-1',
-    projectId: 'project-1',
-    sequence: 2,
-    parentVersionId: 'version-1',
-    snapshotRefs: { editPlan: 'edit-plan-2', policies: 'policy-1' },
-    baseHash: 'hash-current',
-    createdBy: 'user-1',
-    createdAt: '2026-07-12T12:01:00.000Z',
-  })
+  const current = variantVersion
   const command = createEditCommand({
     id: 'command-1',
-    workspaceId: 'workspace-1',
-    projectId: 'project-1',
+    workspaceId: current.workspaceId,
+    projectId: current.projectId,
     baseVersionId: current.id,
     baseHash: current.baseHash,
     author: { type: 'api-client', id: 'client-1' },
@@ -2422,7 +2414,7 @@ test('commands accept the exact base and reject stale versions', () => {
   expectDomainError(
     () =>
       assertCommandMatchesVersion(
-        { ...command, baseVersionId: 'version-1', baseHash: 'hash-old' },
+        { ...command, baseVersionId: rootVersion.id, baseHash: rootVersion.baseHash },
         current,
       ),
     'VERSION_CONFLICT',
@@ -2430,19 +2422,10 @@ test('commands accept the exact base and reject stale versions', () => {
 })
 
 test('stale commands auto-rebase only across complete non-overlapping history', () => {
-  const baseVersion = createProjectVersion({
-    id: 'version-rebase-1', workspaceId: 'workspace-1', projectId: 'project-1',
-    sequence: 1, snapshotRefs: { editPlan: 'edit-plan-1', policies: 'policy-1' },
-    baseHash: 'hash-rebase-1', createdBy: 'user-1', createdAt: '2026-07-12T12:00:00.000Z',
-  })
-  const currentVersion = createProjectVersion({
-    id: 'version-rebase-3', workspaceId: 'workspace-1', projectId: 'project-1',
-    sequence: 3, parentVersionId: 'version-rebase-2',
-    snapshotRefs: { editPlan: 'edit-plan-3', policies: 'policy-1' },
-    baseHash: 'hash-rebase-3', createdBy: 'user-2', createdAt: '2026-07-12T12:02:00.000Z',
-  })
+  const baseVersion = rootVersion
+  const currentVersion = ingestVersion
   const command = createEditCommand({
-    id: 'command-rebase', workspaceId: 'workspace-1', projectId: 'project-1',
+    id: 'command-rebase', workspaceId: baseVersion.workspaceId, projectId: baseVersion.projectId,
     baseVersionId: baseVersion.id, baseHash: baseVersion.baseHash,
     author: { type: 'api-client', id: 'client-1' }, type: 'manual-edit',
     scope: { clipIds: ['clip-1'], frameRange: { startFrame: 10, endFrame: 20 } },
@@ -2451,14 +2434,14 @@ test('stale commands auto-rebase only across complete non-overlapping history', 
   })
   const interveningEdits = [
     {
-      versionId: 'version-rebase-2', parentVersionId: baseVersion.id,
+      versionId: variantVersion.id, parentVersionId: baseVersion.id,
       sequence: 2, commandId: 'command-other-1',
       scope: { clipIds: ['clip-2'] },
       changes: [{ category: 'visual', target: 'clip:clip-2', summary: 'Crop adjusted.' }],
       invalidatedArtifacts: ['artifact-proxy-2'], estimatedCostDelta: 0.25,
     },
     {
-      versionId: currentVersion.id, parentVersionId: 'version-rebase-2',
+      versionId: currentVersion.id, parentVersionId: variantVersion.id,
       sequence: 3, commandId: 'command-other-2',
       scope: { clipIds: ['clip-3'] },
       changes: [{ category: 'audio', target: 'clip:clip-3', summary: 'Gain adjusted.' }],
@@ -2499,19 +2482,10 @@ test('stale commands auto-rebase only across complete non-overlapping history', 
 })
 
 test('overlapping stale commands return semantic targets and bounded diff', () => {
-  const baseVersion = createProjectVersion({
-    id: 'version-conflict-1', workspaceId: 'workspace-1', projectId: 'project-1',
-    sequence: 1, snapshotRefs: { editPlan: 'edit-plan-1', policies: 'policy-1' },
-    baseHash: 'hash-conflict-1', createdBy: 'user-1', createdAt: '2026-07-12T12:00:00.000Z',
-  })
-  const currentVersion = createProjectVersion({
-    id: 'version-conflict-2', workspaceId: 'workspace-1', projectId: 'project-1',
-    sequence: 2, parentVersionId: baseVersion.id,
-    snapshotRefs: { editPlan: 'edit-plan-2', policies: 'policy-1' },
-    baseHash: 'hash-conflict-2', createdBy: 'user-2', createdAt: '2026-07-12T12:01:00.000Z',
-  })
+  const baseVersion = rootVersion
+  const currentVersion = variantVersion
   const command = createEditCommand({
-    id: 'command-conflict', workspaceId: 'workspace-1', projectId: 'project-1',
+    id: 'command-conflict', workspaceId: baseVersion.workspaceId, projectId: baseVersion.projectId,
     baseVersionId: baseVersion.id, baseHash: baseVersion.baseHash,
     author: { type: 'api-client', id: 'client-1' }, type: 'manual-edit',
     scope: { trackId: 'subtitle-track', frameRange: { startFrame: 10, endFrame: 20 } },

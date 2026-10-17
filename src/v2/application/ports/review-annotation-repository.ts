@@ -16,6 +16,7 @@ export interface ReviewSceneRecord {
 export interface ReviewPreviewContext {
   currentProjectVersionId: string
   projectVersionId: string
+  sourceVersionId: string | null
   proxyArtifactId: string
   proxyHash: string
   fps: number

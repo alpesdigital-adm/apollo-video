@@ -36,6 +36,10 @@ async function waitForServer(baseUrl, child) {
 test('review annotations persist idempotently without mutating the project version', async () => {
   const { createProjectService } = await import('../../src/v2/application/create-project.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createColorPipelineCompilationService } = await import('../../src/v2/application/color-pipeline-compilations.ts')
+  const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
+  const { calculateCanonicalHash, stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
+  const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
   const { createExternalAuditContext, materializeActorAuditContext } = await import(
     '../../src/v2/application/authenticate-api-client.ts'
   )
@@ -43,8 +47,8 @@ test('review annotations persist idempotently without mutating the project versi
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
   )
-  const { PrismaProjectCreationRepository } = await import(
-    '../../src/v2/infrastructure/prisma/project-creation-repository.ts'
+  const { PrismaCreationOutputBundleRepositoryV2 } = await import(
+    '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
   )
   const { PrismaReviewAnnotationRepository } = await import(
     '../../src/v2/infrastructure/prisma/review-annotation-repository.ts'
@@ -53,6 +57,7 @@ test('review annotations persist idempotently without mutating the project versi
     '../../src/v2/infrastructure/prisma/render-element-map-repository.ts'
   )
   const { buildRenderElementMap } = await import('../../src/v2/domain/review-system.ts')
+  const { createMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
   )
@@ -64,7 +69,7 @@ test('review annotations persist idempotently without mutating the project versi
   const workspaceId = 'review-integration-workspace'
   const artifactId = 'review-integration-proxy'
   const proxyHash = 'a'.repeat(64)
-  const createdAt = '2026-07-19T14:30:00.000Z'
+  const createdAt = new Date().toISOString() // Observed run instant; service TTLs follow the PG run.
   let server
 
   const cleanup = async () => {
@@ -72,6 +77,8 @@ test('review annotations persist idempotently without mutating the project versi
     await client.v2RenderElementMap.deleteMany({ where: { workspaceId } })
     await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
+    await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
+    await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
@@ -124,7 +131,7 @@ test('review annotations persist idempotently without mutating the project versi
     let entityCounter = 0
     let eventCounter = 0
     const projectResult = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client),
       clock: () => new Date(createdAt),
       createId: (kind) => `${kind}-review-integration-${++entityCounter}`,
       createEventId: () => `00000000-0000-4000-8000-${String(++eventCounter).padStart(12, '0')}`,
@@ -132,7 +139,6 @@ test('review annotations persist idempotently without mutating the project versi
       workspaceId,
       name: 'Projeto de revisão',
       objective: 'discovery',
-      format: '9:16',
       actor: projectActor,
       idempotency: { clientId: 'review-integration-client', key: 'review-integration-project' },
     })
@@ -150,17 +156,17 @@ test('review annotations persist idempotently without mutating the project versi
         createdAt: new Date(createdAt),
       },
     })
+    // Controlled metadata-only fixture: constructor integrity is not proof of
+    // MP4 bytes, rendering, facial perception or editorial approval.
+    const proxyManifest = createMediaArtifactManifest({ artifactKey: 'review-integration/proxy.mp4',
+      artifactSha256: proxyHash, byteSize: 2048, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'review-proxy', version: 'v1', parameters: { fixture: 'review-annotation' } },
+      probe: { width: 1080, height: 1920, duration: 3, fps: 30 } })
     await client.v2MediaArtifactManifest.create({
       data: {
-        id: 'review-integration-manifest',
-        workspaceId,
-        artifactId,
-        schemaVersion: 'media-artifact-manifest/v1',
-        manifestHash: 'b'.repeat(64),
-        recipeId: 'review-proxy',
-        recipeVersion: 'v1',
-        parametersHash: 'c'.repeat(64),
-        manifestJson: JSON.stringify({ probe: { width: 1080, height: 1920, duration: 3, fps: 30 } }),
+        id: 'review-integration-manifest', workspaceId, artifactId, schemaVersion: proxyManifest.schemaVersion,
+        manifestHash: proxyManifest.manifestHash, recipeId: proxyManifest.recipe.id, recipeVersion: proxyManifest.recipe.version,
+        parametersHash: proxyManifest.recipe.parametersHash, manifestJson: JSON.stringify(proxyManifest),
         createdAt: new Date(createdAt),
       },
     })
@@ -168,20 +174,55 @@ test('review annotations persist idempotently without mutating the project versi
       data: {
         id: randomUUID(),
         workspaceId,
-        projectId: projectResult.project.id,
+        projectId: projectResult.projectAtCreation.id,
         artifactId,
         role: 'editing-proxy',
         originalFileName: 'proxy.mp4',
         createdAt: new Date(createdAt),
       },
     })
+    // Controlled metadata-only color facts: producer fields satisfy the typed
+    // fixture contract; no ffprobe invocation/binary attestation, rendered color
+    // or quality approval is claimed. Binding hashes come from the persisted
+    // domain compilation, never arbitrary hashes or a missing compilation row.
+    const fixtureColorMetadata = Object.freeze({ colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
+      matrix: 'bt709', range: 'limited', bitDepth: 8 })
+    const colorProbe = createMediaColorProbe({ id: 'review-integration-color-probe', workspaceId, artifactId,
+      manifestId: 'review-integration-manifest',
+      detection: { state: 'ready', metadata: fixtureColorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+      producer: { provider: 'ffprobe', version: 'controlled-metadata-v1',
+        binaryDigest: calculateCanonicalHash({ schemaVersion: 'review-color-fixture/v1', metadata: fixtureColorMetadata }) },
+      createdAt })
+    await client.v2MediaColorProbe.create({ data: { id: colorProbe.id, workspaceId, artifactId,
+      manifestId: colorProbe.manifestId, schemaVersion: colorProbe.schemaVersion, state: colorProbe.detection.state,
+      metadataJson: stableSerialize(colorProbe.detection.metadata), pixelFormat: colorProbe.detection.pixelFormat,
+      hdrMode: colorProbe.detection.hdrMode, reasonsJson: '[]', producerProvider: colorProbe.producer.provider,
+      producerVersion: colorProbe.producer.version, producerBinaryDigest: colorProbe.producer.binaryDigest,
+      probeHash: colorProbe.probeHash, createdAt: new Date(createdAt) } })
+    const implementation = (provider, parameters) => Object.freeze({ provider, version: 'v1', parameters: Object.freeze(parameters),
+      parametersHash: calculateCanonicalHash(parameters) })
+    const colorRepository = new PrismaColorPipelineCompilationRepository(client)
+    const compiled = await createColorPipelineCompilationService({ repository: colorRepository,
+      createId: () => 'review-integration-color-compilation', clock: () => new Date(createdAt) })({ workspaceId,
+      projectId: projectResult.projectAtCreation.id, sourceArtifactId: artifactId, sourceManifestId: colorProbe.manifestId,
+      outputMetadata: fixtureColorMetadata, actor: projectActor, idempotencyKey: 'review-integration-color-compilation',
+      stages: [
+        { id: 'review-technical', kind: 'technical', version: 'v1', enabled: true, output: fixtureColorMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+        { id: 'review-match', kind: 'match', version: 'v1', enabled: false, output: fixtureColorMetadata, implementation: implementation('apollo-match', { mode: 'bypass' }) },
+        { id: 'review-creative', kind: 'creative-lut', version: 'v1', enabled: false, output: fixtureColorMetadata, implementation: implementation('apollo-lut', { mode: 'none' }) },
+        { id: 'review-output', kind: 'output', version: 'v1', enabled: true, output: fixtureColorMetadata, implementation: implementation('ffmpeg-zscale', { dither: false }) },
+      ] })
+    const compilation = compiled.value.compilation
+    const persistedCompilation = await colorRepository.read({ workspaceId, projectId: projectResult.projectAtCreation.id, compilationId: compilation.id })
+    assert.deepEqual(persistedCompilation.compilation, compilation, 'Color binding must read back the exact persisted domain compilation')
+    const colorBinding = { sourceArtifactId: compilation.sourceArtifactId, sourceManifestId: compilation.sourceManifestId,
+      compilationId: compilation.id, compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }
     await client.v2PublicOperation.create({
       data: {
         id: 'review-integration-operation',
         workspaceId,
-        projectId: projectResult.project.id,
+        projectId: projectResult.projectAtCreation.id,
         clientId: issued.client.id,
-        actorClientId: projectAuthenticationAudit.clientId,
         actorCredentialId: projectAuthenticationAudit.credentialId,
         actorEnvironment: projectAuthenticationAudit.environment,
         actorAuthenticationKind: projectAuthenticationAudit.authenticationKind,
@@ -189,12 +230,13 @@ test('review annotations persist idempotently without mutating the project versi
         type: 'project-proxy-render',
         status: 'succeeded',
         phase: 'completed',
+        progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
         targetType: 'media-artifact',
         targetId: artifactId,
         cancelable: false,
         retryable: false,
         attempt: 1,
-        resultJson: JSON.stringify({ artifactId }),
+        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: artifactId, manifestId: 'review-integration-manifest' } }),
         idempotencyKey: 'review-integration-render',
         requestFingerprint: 'd'.repeat(64),
         createdAt: new Date(createdAt),
@@ -207,11 +249,12 @@ test('review annotations persist idempotently without mutating the project versi
       data: {
         operationId: 'review-integration-operation',
         workspaceId,
-        projectId: projectResult.project.id,
-        projectVersionId: projectResult.version.id,
-        editPlanSnapshotId: projectResult.version.snapshotRefs.editPlan,
+        projectId: projectResult.projectAtCreation.id,
+        projectVersionId: projectResult.creationVersion.id,
+        editPlanSnapshotId: projectResult.creationVersion.snapshotRefs.editPlan,
         sourceArtifactId: artifactId,
         sourceManifestId: 'review-integration-manifest',
+        colorPipelineBindingsJson: stableSerialize([colorBinding]),
         inputHash: 'e'.repeat(64),
         outputArtifactId: artifactId,
         outputManifestId: 'review-integration-manifest',
@@ -231,8 +274,8 @@ test('review annotations persist idempotently without mutating the project versi
     })
     await new PrismaRenderElementMapRepository(client).persistOrReplay({
       workspaceId,
-      projectId: projectResult.project.id,
-      projectVersionId: projectResult.version.id,
+      projectId: projectResult.projectAtCreation.id,
+      projectVersionId: projectResult.creationVersion.id,
       proxyArtifactId: artifactId,
       map: renderElementMap,
       createdAt,
@@ -253,11 +296,11 @@ test('review annotations persist idempotently without mutating the project versi
     })
     await waitForServer(baseUrl, server)
     const authorization = `Bearer ${issued.token}`
-    const reviewUrl = `${baseUrl}/v1/projects/${projectResult.project.id}/annotations`
+    const reviewUrl = `${baseUrl}/v1/projects/${projectResult.projectAtCreation.id}/annotations`
     const initialResponse = await fetch(`${reviewUrl}?limit=10`, { headers: { authorization } })
     const initialPayload = await initialResponse.json()
     assert.equal(initialResponse.status, 200, JSON.stringify(initialPayload))
-    assert.equal(initialPayload.data.session.projectVersionId, projectResult.version.id)
+    assert.equal(initialPayload.data.session.projectVersionId, projectResult.creationVersion.id)
     assert.equal(initialPayload.data.session.proxyArtifactId, artifactId)
     assert.equal(initialPayload.data.session.proxyHash, proxyHash)
     assert.equal(initialPayload.data.session.stale, false)
@@ -267,7 +310,7 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(initialPayload.data.annotations.length, 0)
 
     const elementQuery = new URLSearchParams({
-      projectVersionId: projectResult.version.id,
+      projectVersionId: projectResult.creationVersion.id,
       proxyArtifactId: artifactId,
       proxyHash,
       frame: '30',
@@ -276,7 +319,7 @@ test('review annotations persist idempotently without mutating the project versi
       displayWidth: '540',
       displayHeight: '960',
     })
-    const elementUrl = `${baseUrl}/v1/projects/${projectResult.project.id}/render-elements?${elementQuery.toString()}`
+    const elementUrl = `${baseUrl}/v1/projects/${projectResult.projectAtCreation.id}/render-elements?${elementQuery.toString()}`
     const elementResponse = await fetch(elementUrl, { headers: { authorization } })
     const elementPayload = await elementResponse.json()
     assert.equal(elementResponse.status, 200, JSON.stringify(elementPayload))
@@ -284,13 +327,13 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(elementPayload.data.chooserRequired, true)
     assert.deepEqual(elementPayload.data.candidates.map((item) => item.type), ['subtitle', 'background'])
     elementQuery.set('proxyHash', 'f'.repeat(64))
-    const mismatchResponse = await fetch(`${baseUrl}/v1/projects/${projectResult.project.id}/render-elements?${elementQuery.toString()}`, { headers: { authorization } })
+    const mismatchResponse = await fetch(`${baseUrl}/v1/projects/${projectResult.projectAtCreation.id}/render-elements?${elementQuery.toString()}`, { headers: { authorization } })
     const mismatchPayload = await mismatchResponse.json()
     assert.equal(mismatchResponse.status, 409)
     assert.equal(mismatchPayload.error.code, 'VERSION_CONFLICT')
 
     const annotationRequest = {
-      projectVersionId: projectResult.version.id,
+      projectVersionId: projectResult.creationVersion.id,
       proxyArtifactId: artifactId,
       proxyHash,
       frame: 30,
@@ -341,7 +384,7 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(regionalEvents.length, 1)
     assert.equal(regionalEvents[0].actorClientId, issued.client.id)
     const regionalEventData = JSON.parse(regionalEvents[0].dataJson)
-    assert.equal(regionalEventData.projectId, projectResult.project.id)
+    assert.equal(regionalEventData.projectId, projectResult.projectAtCreation.id)
     assert.equal(regionalEventData.status, 'open')
     assert.equal('text' in regionalEventData, false)
     assert.equal('screenshotRef' in regionalEventData, false)
@@ -380,12 +423,12 @@ test('review annotations persist idempotently without mutating the project versi
 
     const stored = await repository.list({
       workspaceId,
-      projectId: projectResult.project.id,
-      projectVersionId: projectResult.version.id,
+      projectId: projectResult.projectAtCreation.id,
+      projectVersionId: projectResult.creationVersion.id,
       limit: 10,
     })
     const projectAfterReview = await client.v2Project.findUnique({
-      where: { id: projectResult.project.id },
+      where: { id: projectResult.projectAtCreation.id },
       include: { versions: true },
     })
 
@@ -400,7 +443,7 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal((await client.v2PublicEventOutbox.count({
       where: { workspaceId, type: 'annotation.created' },
     })), 2)
-    assert.equal(projectAfterReview.currentVersionId, projectResult.version.id)
+    assert.equal(projectAfterReview.currentVersionId, projectResult.creationVersion.id)
     assert.equal(projectAfterReview.versions.length, 1)
   } finally {
     if (server && server.exitCode === null) {

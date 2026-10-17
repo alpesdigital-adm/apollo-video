@@ -15,7 +15,10 @@ import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
-import { createProjectVersion, type ProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3, type ProjectVersionRowFacts } from '../../domain/project-version-row.ts'
+import type { ProjectVersionV3 } from '../../domain/project-version.ts'
 import { createReviewAnnotation, type ReviewAnnotation, type ReviewScope } from '../../domain/review-system.ts'
 import {
   createCommandArtifactInvalidations,
@@ -24,10 +27,9 @@ import {
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
-import {
-  editCommandExternalActorAuditData,
-  hydrateEditCommandExternalActorAudit,
-} from './edit-command-actor-audit.ts'
+import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
 import {
   externalActorAuditData,
   hydrateExternalActorAudit,
@@ -98,29 +100,9 @@ export function hydrateReviewAnnotation(row: {
   })
 }
 
-export function hydrateReviewPatchVersion(row: {
-  id: string; workspaceId: string; projectId: string; sequence: number; parentVersionId: string | null
-  briefSnapshotId: string; treatmentSnapshotId: string | null; storySnapshotId: string | null; editPlanSnapshotId: string
-  policiesSnapshotId: string; baseHash: string; createdBy: string; commandId: string | null; createdAt: Date
-}): Readonly<ProjectVersion> {
-  return createProjectVersion({
-    id: row.id,
-    workspaceId: row.workspaceId,
-    projectId: row.projectId,
-    sequence: row.sequence,
-    ...(row.parentVersionId ? { parentVersionId: row.parentVersionId } : {}),
-    snapshotRefs: {
-      brief: row.briefSnapshotId,
-      ...(row.treatmentSnapshotId ? { treatment: row.treatmentSnapshotId } : {}),
-      ...(row.storySnapshotId ? { story: row.storySnapshotId } : {}),
-      editPlan: row.editPlanSnapshotId,
-      policies: row.policiesSnapshotId,
-    },
-    baseHash: row.baseHash,
-    createdBy: row.createdBy,
-    ...(row.commandId ? { commandId: row.commandId } : {}),
-    createdAt: row.createdAt.toISOString(),
-  })
+/** A patched Version is operational (contract 3); it is read from its sealed document, never rebuilt from columns. */
+export function hydrateReviewPatchVersion(row: ProjectVersionRowFacts): Readonly<ProjectVersionV3> {
+  return hydrateProjectVersionRowV3(row)
 }
 
 type ProposalRow = Prisma.V2ReviewPatchProposalGetPayload<{ include: { renderOperation: true } }>
@@ -202,7 +184,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       include: {
         project: {
           include: {
-            currentVersion: { include: { editPlanSnapshot: true, policiesSnapshot: true } },
+            currentVersion: { include: { policiesSnapshot: true } },
             mediaAssets: { where: { artifact: { status: 'available' } }, select: { artifactId: true } },
           },
         },
@@ -210,7 +192,10 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     })
     const version = annotation?.project.currentVersion
     if (!annotation || !version) return null
-    const editPlan = parseJson<Record<string, unknown>>(version.editPlanSnapshot.contentJson, 'review patch EditPlan')
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: version.id })
+    if (!parent) return null
+    const editPlanSnapshot = operationalBundlePlanV3(parent)
+    const editPlan = parseJson<Record<string, unknown>>(editPlanSnapshot.contentJson, 'review patch EditPlan')
     const policies = parseJson<Record<string, unknown>>(version.policiesSnapshot.contentJson, 'review patch policies')
     const hydratedAnnotation = hydrateReviewAnnotation(annotation)
     const renderVariantIds = Object.freeze([
@@ -241,9 +226,10 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     ])
     return Object.freeze({
       annotation: hydratedAnnotation,
-      currentVersion: hydrateReviewPatchVersion(version),
+      parent,
+      currentVersion: parent.version,
       editPlan: Object.freeze(editPlan),
-      editPlanHash: version.editPlanSnapshot.contentHash,
+      editPlanHash: editPlanSnapshot.contentHash,
       policies: Object.freeze(policies),
       availableAssetIds: Object.freeze([...new Set(annotation.project.mediaAssets.map((asset) => asset.artifactId))]),
       renderVariantIds,
@@ -368,6 +354,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       idempotencyKey: commandRow.idempotencyKey,
       createdAt: commandRow.createdAt.toISOString(),
     })
+    if (commandRow.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored review patch command seal is invalid')
     return Object.freeze({
       proposal: hydrateReviewPatchProposal(proposal),
       command,
@@ -380,7 +367,17 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     })
   }
 
-  async commitOrReplay(bundle: ReviewPatchCommit, serializationAttempt = 1): Promise<Readonly<ReviewPatchApplyResult>> {
+  async commitOrReplay(input: ReviewPatchCommit, serializationAttempt = 1): Promise<Readonly<ReviewPatchApplyResult>> {
+    const sealed = childCommandOf(input.bundle)
+    if (!sealed.audit) throw new DomainError('AUTH_INVALID', 'Review patch application requires an authenticated external actor')
+    // Local view with the names the transaction below was written against.
+    const bundle = {
+      proposalId: input.proposalId, applyIdempotencyKey: input.applyIdempotencyKey, applyRequestFingerprint: input.applyRequestFingerprint,
+      command: sealed.command, authenticationAudit: sealed.audit, version: input.bundle.version, event: input.event, comparison: input.comparison, impact: input.impact,
+    }
+    if (bundle.command.type !== 'apply-review-patch' || bundle.version.commandId !== bundle.command.id || bundle.version.parentVersionId !== bundle.command.baseVersionId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Review patch Version does not belong to its Command')
+    }
     const replay = await this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash })
     if (replay) return replay
     try {
@@ -392,7 +389,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
           if (proposal.applyIdempotencyKey !== bundle.applyIdempotencyKey || proposal.applyRequestFingerprint !== bundle.applyRequestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Patch proposal was already applied by another request')
           return
         }
-        if (proposal.status !== 'ready' || project.currentVersion.id !== proposal.baseVersionId || bundle.version.parentVersionId !== project.currentVersion.id || bundle.version.sequence !== project.currentVersion.sequence + 1) {
+        if (proposal.status !== 'ready' || project.currentVersion.id !== proposal.baseVersionId || bundle.version.parentVersionId !== project.currentVersion.id || bundle.version.sequence !== project.currentVersion.sequence + 1 || input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash) {
           throw new DomainError('VERSION_CONFLICT', 'Project version changed before review patch commit', { currentVersionId: project.currentVersion.id })
         }
         const payload = bundle.command.payload as Readonly<{ schemaVersion?: unknown; impact?: unknown }>
@@ -433,24 +430,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
         if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
           throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before review patch impact commit')
         }
-        await transaction.v2EditCommand.create({ data: {
-          id: bundle.command.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
-          baseVersionId: bundle.command.baseVersionId, baseHash: bundle.command.baseHash, type: bundle.command.type,
-          scopeJson: stableSerialize(bundle.command.scope), payloadJson: stableSerialize(bundle.command.payload), reason: bundle.command.reason,
-          actorType: bundle.command.author.type, actorId: bundle.command.author.id, delegatedUserId: bundle.command.author.delegatedUserId,
-          ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
-          idempotencyKey: bundle.command.idempotencyKey, requestFingerprint: bundle.applyRequestFingerprint, createdAt: new Date(bundle.command.createdAt),
-        } })
-        await transaction.v2ProjectSnapshot.create({ data: {
-          id: bundle.snapshot.id, workspaceId: bundle.snapshot.workspaceId, projectId: bundle.snapshot.projectId, kind: bundle.snapshot.kind,
-          schemaVersion: bundle.snapshot.contentSchemaVersion, contentJson: bundle.snapshot.contentJson, contentHash: bundle.snapshot.contentHash, createdAt: new Date(bundle.snapshot.createdAt),
-        } })
-        await transaction.v2ProjectVersion.create({ data: {
-          id: bundle.version.id, workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, sequence: bundle.version.sequence,
-          parentVersionId: bundle.version.parentVersionId, briefSnapshotId: bundle.version.snapshotRefs.brief!, treatmentSnapshotId: bundle.version.snapshotRefs.treatment,
-          storySnapshotId: bundle.version.snapshotRefs.story, editPlanSnapshotId: bundle.version.snapshotRefs.editPlan, policiesSnapshotId: bundle.version.snapshotRefs.policies,
-          baseHash: bundle.version.baseHash, createdBy: bundle.version.createdBy, commandId: bundle.command.id, createdAt: new Date(bundle.version.createdAt),
-        } })
+        await commitProjectVersionWithOutputState(transaction, input.bundle)
         const invalidations = createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt })
         if (invalidations.length > 0) {
           await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((invalidation) => ({
@@ -500,7 +480,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
         ])
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(bundle, serializationAttempt + 1)
+      if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(input, serializationAttempt + 1)
       if (!isPrismaCode(error, 'P2002')) throw error
     }
     const result = await this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash })

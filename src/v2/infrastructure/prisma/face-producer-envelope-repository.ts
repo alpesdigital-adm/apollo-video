@@ -1,0 +1,505 @@
+import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
+import { randomUUID } from 'node:crypto'
+
+import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
+import { evaluatePerceptionSourceAnalysisRights } from '../../domain/perception-source-rights.ts'
+import { createFaceProducerEnvelope, type FaceProducerEnvelope, type FaceProducerEnvelopeInput } from '../../domain/face-producer-envelope.ts'
+import { DomainError } from '../../domain/errors.ts'
+import { startPublicOperationAttempt } from '../../domain/public-operation.ts'
+import { createPublicOperationProgressEvents } from '../../domain/public-operation-event.ts'
+import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { persistPublicEvents } from './public-event-outbox.ts'
+import { lockProducerPublishOperation, lockProducerPublishProject, lockProducerPublishSource, producerPublishClock } from './producer-publish-fence.ts'
+import { hydratePublicOperationRecord, OPERATION_INCLUDE, persistOperationStatusEvents,
+  type StoredOperation } from './public-operation-repository.ts'
+
+function conflict(message: string): never { throw new DomainError('PERSISTENCE_CONFLICT', message) }
+
+/** This first producer is pinned to the failed-gate V5 diagnosis, never a quality approval. */
+function assertDiagnosticProducer(envelope: FaceProducerEnvelope) {
+  const config = envelope.detectorConfig
+  const producer = envelope.producer
+  if (config.inputWidth !== 640 || config.inputHeight !== 640 || config.longestSide !== 640 ||
+      config.scoreThreshold !== 0.5 || config.nmsThreshold !== 0.3 ||
+      producer.name !== 'yunet-cpu' ||
+      producer.modelSha256 !== '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4' ||
+      producer.assessment.status !== 'failed-gate' ||
+      producer.assessment.preregistrationSha256 !== 'e9de632da25f730b884ab6128830be99656836688e6d20cdec26c756aa48bba6' ||
+      producer.assessment.developmentReportSha256 !== '55c4f6e3f639db80a1a02ceed2b249fba84492d0bbea53b50d53a3c222d8191d' ||
+      producer.assessment.calibrationReportSha256 !== 'd29c1ca49344d027048e785d4baef0b2ce127f2f831223b7b5d63da9c8108b8b') {
+    conflict('Face producer must retain the failed-gate V5 runtime and assessment')
+  }
+}
+
+async function emitOperationTransition(transaction: Prisma.TransactionClient,
+  previous: StoredOperation, operationId: string) {
+  const next = await transaction.v2PublicOperation.findUnique({
+    where: { id: operationId }, include: OPERATION_INCLUDE,
+  })
+  if (!next) conflict('Producer operation disappeared during transition')
+  const before = hydratePublicOperationRecord(previous).operation
+  const after = hydratePublicOperationRecord(next).operation
+  await persistPublicEvents(transaction, createPublicOperationProgressEvents({
+    previous: before, operation: after, createEventId: randomUUID,
+  }))
+  await persistOperationStatusEvents(transaction, before.status, after, randomUUID)
+}
+
+function sourceMap(contentJson: string, sourceArtifactId: string) {
+  let plan: unknown
+  try { plan = JSON.parse(contentJson) } catch { conflict('Stored edit plan JSON is invalid') }
+  const value = plan as Record<string, unknown>
+  if (!value || !Array.isArray(value.videoTracks)) conflict('Stored edit plan has no video tracks')
+  const clips = value.videoTracks.flatMap((track: unknown) => {
+    const item = track as Record<string, unknown>
+    return Array.isArray(item?.clips) ? item.clips : []
+  })
+  if (clips.length !== 1 || (clips[0] as Record<string, unknown>)?.sourceArtifactId !== sourceArtifactId) {
+    conflict('Face producer requires exactly one source clip')
+  }
+  return clips.map((clip: unknown) => {
+    const item = clip as Record<string, unknown>
+    if (typeof item.id !== 'string' ||
+        ![item.sourceInFrame, item.sourceOutFrame, item.timelineInFrame,
+          item.timelineOutFrame].every((number) => Number.isSafeInteger(number) && Number(number) >= 0) ||
+        Number(item.sourceOutFrame) <= Number(item.sourceInFrame) ||
+        Number(item.sourceOutFrame) - Number(item.sourceInFrame) !==
+          Number(item.timelineOutFrame) - Number(item.timelineInFrame) ||
+        item.rate !== 1) {
+      conflict('Stored edit plan source-to-timeline range is invalid')
+    }
+    return {
+      clipId: item.id as string, sourceInFrame: item.sourceInFrame as number,
+      sourceOutFrame: item.sourceOutFrame as number,
+      timelineInFrame: item.timelineInFrame as number,
+      timelineOutFrame: item.timelineOutFrame as number, rate: 1 as const,
+    }
+  })
+}
+
+function hydrateContent(contentJson: string, expectedHash: string): FaceProducerEnvelope {
+  let parsed: unknown
+  try { parsed = JSON.parse(contentJson) } catch { conflict('Stored producer envelope JSON is invalid') }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) conflict('Stored producer envelope is invalid')
+  const record = parsed as Record<string, unknown>
+  if (Object.keys(record).sort().join('|') !== [
+    'schemaVersion', 'authority', 'coverage', 'faceSafety', 'identity',
+    'timeMapHash', 'detectorConfigHash', 'envelopeHash',
+    'id', 'workspaceId', 'projectId', 'projectVersionId', 'operationId', 'operationAttempt',
+    'operationFenceHash', 'sourceArtifactId', 'sourceSha256', 'editPlanSnapshotId',
+    'editPlanSnapshotHash', 'timelineDurationFrames', 'timeMap', 'timelineFps',
+    'sourceFps', 'sourceTimebase', 'sourceClock', 'sourcePtsStart', 'sourcePtsRounding',
+    'sourceWidth', 'sourceHeight', 'sourceOrientation', 'detectorConfig', 'producer',
+    'samplePolicy', 'samples', 'gaps', 'createdAt',
+  ].sort().join('|')) conflict('Stored producer envelope fields are invalid')
+  const { schemaVersion, authority, coverage, faceSafety, identity, timeMapHash,
+    detectorConfigHash, envelopeHash, ...input } = record
+  if (schemaVersion !== 'face-producer-envelope/v1' || authority !== 'server-produced' ||
+      coverage !== 'sampled-only' || faceSafety !== 'unknown' || identity !== 'not-performed' ||
+      typeof timeMapHash !== 'string' || typeof detectorConfigHash !== 'string' ||
+      typeof envelopeHash !== 'string') {
+    conflict('Stored producer envelope authority is invalid')
+  }
+  let rebuilt: FaceProducerEnvelope
+  try { rebuilt = createFaceProducerEnvelope(input as FaceProducerEnvelopeInput) }
+  catch { conflict('Stored producer envelope content is invalid') }
+  if (rebuilt.timeMapHash !== timeMapHash || rebuilt.detectorConfigHash !== detectorConfigHash ||
+      rebuilt.envelopeHash !== envelopeHash ||
+      rebuilt.envelopeHash !== expectedHash || stableSerialize(rebuilt) !== stableSerialize(record)) {
+    conflict('Stored producer envelope failed integrity validation')
+  }
+  assertDiagnosticProducer(rebuilt)
+  return rebuilt
+}
+
+export class PrismaFaceProducerEnvelopeRepository {
+  private readonly client: PrismaClient
+  constructor(client: PrismaClient) { this.client = client }
+
+  async currentFenceHash(input: { operationId: string; attempt: number; leaseOwner: string; now: Date }) {
+    const operation = await this.client.v2PublicOperation.findFirst({ where: {
+      id: input.operationId, type: 'perception-face-run', status: 'running',
+      attempt: input.attempt, leaseOwner: input.leaseOwner,
+      leaseExpiresAt: { gt: input.now },
+    }, select: { id: true } })
+    if (!operation) conflict('Producer operation fence is no longer held')
+    return calculateCanonicalHash({ operationId: operation.id, attempt: input.attempt, leaseOwner: input.leaseOwner })
+  }
+
+  async claimNext(input: { leaseOwner: string; now: Date; leaseMs: number }) {
+    if (!input.leaseOwner.trim() || !Number.isSafeInteger(input.leaseMs) ||
+        input.leaseMs < 10_000 || input.leaseMs > 300_000) {
+      throw new DomainError('INVALID_ARGUMENT', 'Producer worker lease is invalid')
+    }
+    return this.client.$transaction(async (transaction) => {
+      const candidates = await transaction.v2PublicOperation.findMany({
+        where: { type: 'perception-face-run',
+          OR: [{ status: 'queued' }, { status: 'retrying', nextAttemptAt: { lte: input.now } },
+            { status: 'running', leaseExpiresAt: { lte: input.now } }] },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: OPERATION_INCLUDE,
+        take: 20,
+      })
+      for (const exhausted of candidates.filter((row) => row.status === 'running' &&
+        row.attempt >= row.maxAttempts)) {
+        const terminal = await transaction.v2PublicOperation.updateMany({
+          where: { id: exhausted.id, status: 'running', attempt: exhausted.attempt,
+            leaseOwner: exhausted.leaseOwner, leaseExpiresAt: { lte: input.now } },
+          data: { status: 'failed', phase: 'failed', cancelable: false, retryable: false,
+            leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, nextAttemptAt: null,
+            completedAt: input.now, deadLetteredAt: input.now,
+            errorCode: 'worker_lease_expired', errorMessage: 'Operation exhausted its available attempts',
+            errorRetryable: false, updatedAt: input.now },
+        })
+        if (terminal.count === 1) await emitOperationTransition(transaction, exhausted, exhausted.id)
+      }
+      const candidate = candidates.find((row) => row.attempt < row.maxAttempts && row.faceProducerOperation)
+      if (!candidate || !candidate.faceProducerOperation) return null
+      const claimed = startPublicOperationAttempt(
+        hydratePublicOperationRecord(candidate).operation, input.now.toISOString())
+      const nextAttempt = claimed.attempt
+      const updated = await transaction.v2PublicOperation.updateMany({
+        where: { id: candidate.id, status: candidate.status, attempt: candidate.attempt,
+          leaseOwner: candidate.leaseOwner, leaseExpiresAt: candidate.leaseExpiresAt },
+        data: { status: claimed.status, phase: claimed.phase, attempt: claimed.attempt,
+          progressCompleted: claimed.progress?.completed, progressTotal: claimed.progress?.total,
+          progressUnit: claimed.progress?.unit, cancelable: claimed.cancelable,
+          retryable: claimed.retryable,
+          leaseOwner: input.leaseOwner, leaseExpiresAt: new Date(input.now.getTime() + input.leaseMs),
+          heartbeatAt: input.now, startedAt: new Date(claimed.startedAt as string),
+          nextAttemptAt: null, completedAt: null, deadLetteredAt: null,
+          errorCode: null, errorMessage: null, errorRetryable: null, resultJson: null,
+          updatedAt: input.now },
+      })
+      if (updated.count !== 1) return null
+      let source: NonNullable<Awaited<ReturnType<typeof transaction.v2MediaArtifact.findFirst>>>
+      let plan: Record<string, unknown>
+      let timeMap: ReturnType<typeof sourceMap>
+      try {
+      await lockProducerPublishProject(transaction, candidate.faceProducerOperation.projectId, candidate.workspaceId)
+      await lockProducerPublishSource(transaction, candidate.faceProducerOperation.sourceArtifactId, candidate.workspaceId)
+      const foundSource = await transaction.v2MediaArtifact.findFirst({
+        where: { id: candidate.faceProducerOperation.sourceArtifactId,
+          workspaceId: candidate.workspaceId, status: 'available', mediaType: 'video' },
+        include: { currentRightsSnapshot: true },
+      })
+      if (!foundSource || foundSource.byteSize > BigInt(Number.MAX_SAFE_INTEGER) ||
+          foundSource.sha256 !== candidate.faceProducerOperation.sourceSha256) {
+        conflict('Producer source artifact is unavailable')
+      }
+      source = foundSource
+      const project = await transaction.v2Project.findFirst({
+        where: { id: candidate.faceProducerOperation.projectId,
+          workspaceId: candidate.workspaceId,
+          currentVersionId: candidate.faceProducerOperation.projectVersionId },
+        select: { locale: true },
+      })
+      const attached = await transaction.v2ProjectMediaAsset.findFirst({
+        where: { workspaceId: candidate.workspaceId,
+          projectId: candidate.faceProducerOperation.projectId,
+          artifactId: source.id, role: 'source-master' }, select: { id: true },
+      })
+      if (!project || !attached) conflict('Producer source is not current and attached')
+      const rights = foundSource.currentRightsSnapshot ? hydrateAssetRights(foundSource.currentRightsSnapshot) : null
+      const checkedAt = await producerPublishClock(transaction)
+      if (new Date(input.now.getTime() + input.leaseMs) <= checkedAt) conflict('Producer lease expired during claim')
+      if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: candidate.workspaceId,
+        locale: project.locale ?? 'und' }, checkedAt).outcome !== 'allow') {
+        throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights are not approved')
+      }
+      const version = await transaction.v2ProjectVersion.findFirst({
+        where: { id: candidate.faceProducerOperation.projectVersionId,
+          projectId: candidate.faceProducerOperation.projectId,
+          workspaceId: candidate.workspaceId },
+        include: { editPlanSnapshot: true },
+      })
+      if (!version || version.editPlanSnapshot.kind !== 'edit-plan' ||
+          version.baseHash !== candidate.faceProducerOperation.projectVersionHash ||
+          version.editPlanSnapshotId !== candidate.faceProducerOperation.editPlanSnapshotId ||
+          version.editPlanSnapshot.contentHash !== candidate.faceProducerOperation.editPlanSnapshotHash) {
+        conflict('Producer operation source version is unavailable')
+      }
+      try { plan = JSON.parse(version.editPlanSnapshot.contentJson) as Record<string, unknown> }
+      catch { conflict('Producer edit plan JSON is invalid') }
+      if (calculateCanonicalHash(plan) !== version.editPlanSnapshot.contentHash ||
+          !Number.isSafeInteger(plan.fps) || Number(plan.fps) < 1 ||
+          !Number.isSafeInteger(plan.durationFrames) || Number(plan.durationFrames) < 1) {
+        conflict('Producer edit plan timing is invalid')
+      }
+      timeMap = sourceMap(version.editPlanSnapshot.contentJson, source.id)
+      if (timeMap.length !== 1 || timeMap[0]!.timelineInFrame !== 0 ||
+          timeMap[0]!.timelineOutFrame !== Number(plan.durationFrames) ||
+          timeMap.some((range, index) => range.rate !== 1 ||
+            range.sourceOutFrame > 300 || (index > 0 &&
+            range.timelineInFrame !== timeMap[index - 1]!.timelineOutFrame)) ||
+          Number(plan.durationFrames) > 300 ||
+          candidate.faceProducerOperation.sampleIntervalFrames < 1 ||
+          candidate.faceProducerOperation.sampleIntervalFrames > 300) {
+        conflict('Producer source does not cover the current timeline as one ordered source')
+      }
+      } catch (error) {
+        if (!(error instanceof DomainError)) throw error
+        const terminal = await transaction.v2PublicOperation.updateMany({
+          where: { id: candidate.id, status: 'running', attempt: nextAttempt,
+            leaseOwner: input.leaseOwner },
+          data: { status: 'failed', phase: 'failed', cancelable: false, retryable: false,
+            leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, nextAttemptAt: null,
+            completedAt: input.now, deadLetteredAt: null, errorCode: 'invalid_producer_context',
+            errorMessage: 'Producer input context is invalid', errorRetryable: false, updatedAt: input.now },
+        })
+        if (terminal.count === 1) await emitOperationTransition(transaction, candidate, candidate.id)
+        return null
+      }
+      await emitOperationTransition(transaction, candidate, candidate.id)
+      return Object.freeze({ operationId: candidate.id, workspaceId: candidate.workspaceId,
+        projectId: candidate.faceProducerOperation.projectId,
+        projectVersionId: candidate.faceProducerOperation.projectVersionId,
+        sourceArtifactId: source.id, sourceSha256: source.sha256, artifactKey: source.artifactKey,
+        sourceByteSize: Number(source.byteSize),
+        editPlanSnapshotId: candidate.faceProducerOperation.editPlanSnapshotId,
+        editPlanSnapshotHash: candidate.faceProducerOperation.editPlanSnapshotHash,
+        timeMap, timelineDurationFrames: Number(plan.durationFrames),
+        timelineFps: Object.freeze({ num: Number(plan.fps), den: 1 }),
+        sampleIntervalFrames: candidate.faceProducerOperation.sampleIntervalFrames,
+        attempt: nextAttempt, leaseOwner: input.leaseOwner,
+        leaseExpiresAt: new Date(input.now.getTime() + input.leaseMs),
+      })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  }
+
+  async heartbeat(input: { operationId: string; attempt: number; leaseOwner: string; now: Date; leaseMs: number }) {
+    const count = await this.client.v2PublicOperation.updateMany({
+      where: { id: input.operationId, type: 'perception-face-run', status: 'running',
+        attempt: input.attempt, leaseOwner: input.leaseOwner, leaseExpiresAt: { gt: input.now } },
+      data: { heartbeatAt: input.now, leaseExpiresAt: new Date(input.now.getTime() + input.leaseMs) },
+    })
+    return count.count === 1
+  }
+
+  async advancePhase(input: { operationId: string; attempt: number; leaseOwner: string;
+    now: Date; phase: 'analyzing' | 'verifying' | 'persisting' }) {
+    const phases = ['probing', 'analyzing', 'verifying', 'persisting'] as const
+    const completed = phases.indexOf(input.phase)
+    const previous = phases[completed - 1]
+    return this.client.$transaction(async (transaction) => {
+    const before = await transaction.v2PublicOperation.findUnique({
+      where: { id: input.operationId }, include: OPERATION_INCLUDE,
+    })
+    if (!before) return false
+    const updated = await transaction.v2PublicOperation.updateMany({
+      where: { id: input.operationId, type: 'perception-face-run', status: 'running',
+        phase: previous, attempt: input.attempt, leaseOwner: input.leaseOwner,
+        leaseExpiresAt: { gt: input.now } },
+      data: { phase: input.phase, progressCompleted: completed, updatedAt: input.now },
+    })
+    if (updated.count === 1) await emitOperationTransition(transaction, before, input.operationId)
+    return updated.count === 1
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  }
+
+  async failAttempt(input: { operationId: string; attempt: number; leaseOwner: string;
+    now: Date; errorCode: string; errorMessage: string; retryable: boolean }) {
+    return this.client.$transaction(async (transaction) => {
+    const row = await transaction.v2PublicOperation.findUnique({
+      where: { id: input.operationId }, include: OPERATION_INCLUDE,
+    })
+    if (!row || row.type !== 'perception-face-run' || row.status !== 'running' ||
+        row.attempt !== input.attempt || row.leaseOwner !== input.leaseOwner) return false
+    const terminal = !input.retryable || row.attempt >= row.maxAttempts
+    const updated = await transaction.v2PublicOperation.updateMany({
+      where: { id: row.id, type: 'perception-face-run', status: 'running',
+        attempt: input.attempt, leaseOwner: input.leaseOwner, leaseExpiresAt: row.leaseExpiresAt },
+      data: { status: terminal ? 'failed' : 'retrying', phase: terminal ? 'failed' : 'retrying',
+        cancelable: !terminal, retryable: !terminal,
+        leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null,
+        // PublicOperation only permits an error payload on a terminal failure.
+        errorCode: terminal ? input.errorCode.toLowerCase().replaceAll('_', '-').slice(0, 64) : null,
+        errorMessage: terminal ? input.errorMessage.slice(0, 500) : null,
+        errorRetryable: terminal ? false : null,
+        nextAttemptAt: terminal ? null : new Date(input.now.getTime() + 1000),
+        completedAt: terminal ? input.now : null,
+        deadLetteredAt: terminal && input.retryable ? input.now : null,
+        updatedAt: input.now },
+    })
+    if (updated.count === 1) await emitOperationTransition(transaction, row, input.operationId)
+    return updated.count === 1
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  }
+
+  async publish(input: { envelope: Readonly<FaceProducerEnvelope>; leaseOwner: string; now: Date }) {
+    const envelope = hydrateContent(stableSerialize(input.envelope), input.envelope.envelopeHash)
+    const { leaseOwner } = input
+    return this.client.$transaction(async (transaction) => {
+      await lockProducerPublishOperation(transaction, envelope.operationId, envelope.workspaceId)
+      const lockedAt = await producerPublishClock(transaction)
+      const operation = await transaction.v2PublicOperation.findUnique({
+        where: { id: envelope.operationId }, include: OPERATION_INCLUDE,
+      })
+      if (!operation || operation.workspaceId !== envelope.workspaceId || operation.projectId !== envelope.projectId ||
+          operation.type !== 'perception-face-run' || operation.targetType !== 'project-version' ||
+          operation.targetId !== envelope.projectVersionId ||
+          operation.status !== 'running' || operation.phase !== 'persisting' ||
+          operation.attempt !== envelope.operationAttempt ||
+          operation.leaseOwner !== leaseOwner || !operation.leaseExpiresAt || operation.leaseExpiresAt <= lockedAt) {
+        conflict('Producer operation is not held by the current fenced attempt')
+      }
+      const expectedFenceHash = calculateCanonicalHash({
+        operationId: operation.id, attempt: operation.attempt, leaseOwner,
+      })
+      if (envelope.operationFenceHash !== expectedFenceHash) conflict('Producer operation fence differs')
+      const run = await transaction.v2FaceProducerOperation.findUnique({
+        where: { operationId: operation.id },
+      })
+      if (!run || run.workspaceId !== envelope.workspaceId || run.projectId !== envelope.projectId ||
+          run.projectVersionId !== envelope.projectVersionId || run.sourceArtifactId !== envelope.sourceArtifactId ||
+          run.sourceSha256 !== envelope.sourceSha256 || run.editPlanSnapshotId !== envelope.editPlanSnapshotId ||
+          run.editPlanSnapshotHash !== envelope.editPlanSnapshotHash ||
+          run.sampleIntervalFrames !== envelope.samplePolicy.intervalFrames ||
+          envelope.samplePolicy.maxSamples !== 30 ||
+          run.requestHash !== operation.requestFingerprint) {
+        conflict('Producer request context differs from the sealed result')
+      }
+      await lockProducerPublishProject(transaction, envelope.projectId, envelope.workspaceId)
+      const project = await transaction.v2Project.findFirst({
+        where: { id: envelope.projectId, workspaceId: envelope.workspaceId },
+        select: { currentVersionId: true, locale: true },
+      })
+      const version = await transaction.v2ProjectVersion.findFirst({
+        where: { id: envelope.projectVersionId, projectId: envelope.projectId, workspaceId: envelope.workspaceId },
+        include: { editPlanSnapshot: true },
+      })
+      if (!project || project.currentVersionId !== envelope.projectVersionId || !version ||
+          version.baseHash !== run.projectVersionHash ||
+          version.editPlanSnapshotId !== envelope.editPlanSnapshotId ||
+          version.editPlanSnapshot.contentHash !== envelope.editPlanSnapshotHash ||
+          calculateCanonicalHash(JSON.parse(version.editPlanSnapshot.contentJson)) !== envelope.editPlanSnapshotHash ||
+          calculateCanonicalHash(sourceMap(version.editPlanSnapshot.contentJson, envelope.sourceArtifactId)) !== envelope.timeMapHash) {
+        conflict('Producer input version or source-to-timeline map changed')
+      }
+      await lockProducerPublishSource(transaction, envelope.sourceArtifactId, envelope.workspaceId)
+      const artifact = await transaction.v2MediaArtifact.findFirst({
+        where: { id: envelope.sourceArtifactId, workspaceId: envelope.workspaceId },
+        include: { currentRightsSnapshot: true },
+      })
+      const attached = await transaction.v2ProjectMediaAsset.findFirst({
+        where: { workspaceId: envelope.workspaceId, projectId: envelope.projectId,
+          artifactId: envelope.sourceArtifactId, role: 'source-master' },
+        select: { id: true },
+      })
+      if (!artifact || !attached || artifact.sha256 !== envelope.sourceSha256 ||
+          artifact.status !== 'available' || artifact.mediaType !== 'video') {
+        conflict('Producer source artifact is unavailable or changed')
+      }
+      const rights = artifact.currentRightsSnapshot ? hydrateAssetRights(artifact.currentRightsSnapshot) : null
+      const committedAt = await producerPublishClock(transaction)
+      if (operation.leaseExpiresAt <= committedAt) conflict('Producer lease expired before publication')
+      if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: envelope.workspaceId, locale: project.locale ?? 'und' }, committedAt).outcome !== 'allow') {
+        throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights are not approved')
+      }
+      const updated = await transaction.v2PublicOperation.updateMany({
+        where: { id: operation.id, workspaceId: envelope.workspaceId, status: 'running', phase: 'persisting',
+          attempt: envelope.operationAttempt, leaseOwner,
+          leaseExpiresAt: { equals: operation.leaseExpiresAt, gt: committedAt } },
+        data: { status: 'succeeded', phase: 'completed', completedAt: committedAt, updatedAt: committedAt,
+          cancelable: false, retryable: false, leaseOwner: null,
+          leaseExpiresAt: null, heartbeatAt: null, nextAttemptAt: null,
+          errorCode: null, errorMessage: null, errorRetryable: null,
+          progressCompleted: 4, progressTotal: 4, progressUnit: 'stage',
+          resultJson: stableSerialize({ resource: { type: 'project-version', id: envelope.projectVersionId } }) },
+      })
+      if (updated.count !== 1) conflict('Producer operation fence was lost at commit')
+      await transaction.v2FaceProducerEnvelope.create({ data: {
+        id: envelope.id, workspaceId: envelope.workspaceId, projectId: envelope.projectId,
+        projectVersionId: envelope.projectVersionId, operationId: envelope.operationId,
+        operationAttempt: envelope.operationAttempt, operationFenceHash: expectedFenceHash,
+        sourceArtifactId: envelope.sourceArtifactId, sourceSha256: envelope.sourceSha256,
+        editPlanSnapshotId: envelope.editPlanSnapshotId, editPlanSnapshotHash: envelope.editPlanSnapshotHash,
+        timeMapHash: envelope.timeMapHash, detectorConfigHash: envelope.detectorConfigHash,
+        contentJson: stableSerialize(envelope), envelopeHash: envelope.envelopeHash,
+        createdAt: new Date(envelope.createdAt),
+      } })
+      await emitOperationTransition(transaction, operation, operation.id)
+      const returnedAt = await producerPublishClock(transaction)
+      if (operation.leaseExpiresAt <= returnedAt) conflict('Producer lease expired during publication')
+      if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: envelope.workspaceId, locale: project.locale ?? 'und' }, returnedAt).outcome !== 'allow') {
+        throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights expired during publication')
+      }
+      return envelope
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  }
+
+  async read(input: { id: string; workspaceId: string; projectId: string; inputVersionId: string; now: Date }) {
+    return readFaceProducerEnvelope(this.client, input)
+  }
+}
+
+/** Fenced diagnostic read for GET; this does not authorize Director or export quality. */
+export async function readFaceProducerEnvelope(client: Prisma.TransactionClient, input: {
+  id: string; workspaceId: string; projectId: string; inputVersionId: string; now: Date
+}) {
+    const row = await client.v2FaceProducerEnvelope.findFirst({
+      where: { id: input.id, workspaceId: input.workspaceId, projectId: input.projectId,
+        projectVersionId: input.inputVersionId },
+      include: { operation: { include: { faceProducerOperation: true } },
+        sourceArtifact: { include: { currentRightsSnapshot: true } },
+        projectVersion: { include: { editPlanSnapshot: true, project: true } } },
+    })
+    if (!row) return null
+    const envelope = hydrateContent(row.contentJson, row.envelopeHash)
+    if (row.workspaceId !== envelope.workspaceId || row.projectId !== envelope.projectId ||
+        row.projectVersionId !== envelope.projectVersionId || row.operationId !== envelope.operationId ||
+        row.operationAttempt !== envelope.operationAttempt || row.operationFenceHash !== envelope.operationFenceHash ||
+        row.sourceArtifactId !== envelope.sourceArtifactId || row.sourceSha256 !== envelope.sourceSha256 ||
+        row.editPlanSnapshotId !== envelope.editPlanSnapshotId || row.editPlanSnapshotHash !== envelope.editPlanSnapshotHash ||
+        row.timeMapHash !== envelope.timeMapHash ||
+        row.detectorConfigHash !== envelope.detectorConfigHash ||
+        row.createdAt.toISOString() !== envelope.createdAt) conflict('Producer envelope columns differ from sealed content')
+    let result: Record<string, unknown>
+    try { result = JSON.parse(row.operation.resultJson ?? '') as Record<string, unknown> }
+    catch { conflict('Producer operation result is invalid') }
+    const run = row.operation.faceProducerOperation
+    if (!run || run.workspaceId !== envelope.workspaceId || run.projectId !== envelope.projectId ||
+        run.projectVersionId !== envelope.projectVersionId || run.projectVersionHash !== row.projectVersion.baseHash ||
+        run.sourceArtifactId !== envelope.sourceArtifactId || run.sourceSha256 !== envelope.sourceSha256 ||
+        run.editPlanSnapshotId !== envelope.editPlanSnapshotId ||
+        run.editPlanSnapshotHash !== envelope.editPlanSnapshotHash ||
+        run.sampleIntervalFrames !== envelope.samplePolicy.intervalFrames ||
+        envelope.samplePolicy.maxSamples !== 30 ||
+        run.requestHash !== row.operation.requestFingerprint ||
+        Object.keys(result).sort().join('|') !== 'resource' ||
+        !result.resource || typeof result.resource !== 'object' ||
+        Object.keys(result.resource).sort().join('|') !== 'id|type' ||
+        (result.resource as Record<string, unknown>).type !== 'project-version' ||
+        (result.resource as Record<string, unknown>).id !== envelope.projectVersionId ||
+        row.operation.workspaceId !== envelope.workspaceId || row.operation.projectId !== envelope.projectId ||
+        row.operation.targetType !== 'project-version' || row.operation.targetId !== envelope.projectVersionId ||
+        row.operation.status !== 'succeeded' || row.operation.phase !== 'completed' ||
+        row.operation.type !== 'perception-face-run' || row.operation.attempt !== envelope.operationAttempt ||
+        row.operation.progressCompleted !== 4 || row.operation.progressTotal !== 4 ||
+        row.operation.progressUnit !== 'stage') {
+      conflict('Producer operation did not publish this fenced envelope')
+    }
+    const version = row.projectVersion
+    const attached = await client.v2ProjectMediaAsset.findFirst({
+      where: { workspaceId: envelope.workspaceId, projectId: envelope.projectId,
+        artifactId: envelope.sourceArtifactId, role: 'source-master' }, select: { id: true },
+    })
+    let editPlanHash: string
+    try { editPlanHash = calculateCanonicalHash(JSON.parse(version.editPlanSnapshot.contentJson)) }
+    catch { conflict('Stored edit plan JSON is invalid') }
+    if (version.editPlanSnapshotId !== envelope.editPlanSnapshotId ||
+        version.editPlanSnapshot.contentHash !== envelope.editPlanSnapshotHash ||
+        editPlanHash !== envelope.editPlanSnapshotHash ||
+        calculateCanonicalHash(sourceMap(version.editPlanSnapshot.contentJson, envelope.sourceArtifactId)) !== envelope.timeMapHash ||
+        !attached || row.sourceArtifact.sha256 !== envelope.sourceSha256 ||
+        row.sourceArtifact.status !== 'available' || row.sourceArtifact.mediaType !== 'video') {
+      conflict('Producer source or time-map no longer matches the sealed input')
+    }
+    const rights = row.sourceArtifact.currentRightsSnapshot ? hydrateAssetRights(row.sourceArtifact.currentRightsSnapshot) : null
+    const checkedAt = await producerPublishClock(client)
+    if (evaluatePerceptionSourceAnalysisRights(rights, { workspaceId: input.workspaceId,
+      locale: version.project.locale ?? 'und' }, checkedAt).outcome !== 'allow') {
+      throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Producer source rights are no longer approved')
+    }
+    return envelope
+}

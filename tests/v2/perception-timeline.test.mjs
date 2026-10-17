@@ -107,8 +107,16 @@ test('T-FR-050 application put is credential-bound, idempotent and range-readabl
   assert.equal(created.replayed, false)
   assert.equal(created.timeline.authenticationAudit.contextHash, createApiAccessAuditContext({ clientId: 'client-perception', credentialId: 'credential-perception', workspaceId: 'workspace-perception', environment: 'production', authenticationKind: 'bearer' }).contextHash)
   assert.equal(created.timeline.recordHash, calculateCanonicalHash(Object.fromEntries(Object.entries(created.timeline).filter(([key]) => key !== 'recordHash'))))
+  assert.deepEqual(created.timeline.origin, { kind: 'manual-controlled', trust: 'unverified', suppliedByClientId: 'client-perception' })
+  assert.equal(created.timeline.timeline.observations[0].provenance.source, request.observations[0].provenance.source)
   assert.equal((await put(request)).replayed, true)
   await assert.rejects(put({ ...request, durationMs: 2_001 }), (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH')
   const read = await readPerceptionTimelineRangeService({ repository })({ workspaceId: request.workspaceId, projectId: request.projectId, startMs: 0, endMs: 1_500, kinds: ['speaker', 'face'] })
   assert.deepEqual(read.result.coverage.map((item) => item.state), ['complete', 'absent'])
+  assert.deepEqual(read.origin, created.timeline.origin)
+  await assert.rejects(put({ ...request, idempotencyKey: 'perception-spoof-0002', origin: { kind: 'server-produced' } }),
+    (error) => error.code === 'INVALID_ARGUMENT')
+  await assert.rejects(put({ ...request, idempotencyKey: 'perception-spoof-0003', observations: [{
+    ...request.observations[0], producerAuthority: 'server-produced',
+  }] }), (error) => error.code === 'INVALID_ARGUMENT')
 })

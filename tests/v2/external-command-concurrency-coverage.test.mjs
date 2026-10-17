@@ -249,6 +249,9 @@ const coverage = Object.freeze({
   'apollo.projects.duplicates.create': {
     mode: 'durable-covered', evidence: 'F1-051 serializable source-version binding, shared immutable artifacts and idempotent public API E2E',
   },
+  'apollo.projects.output-variants.create': {
+    mode: 'durable-covered', evidence: 'W66 serializable operational bundle transaction locks the project, moves currentVersionId only from the exact base and replays one actor-bound idempotent key (project-output-commands.pg.integration.mjs, project-output-command-contract.test.mjs)',
+  },
   'apollo.projects.rename': {
     mode: 'durable-covered', evidence: 'F1.003 serializable administration revision CAS, actor-bound idempotency and immutable command plus public-event audit',
   },
@@ -407,6 +410,15 @@ const coverage = Object.freeze({
   },
   'apollo.projects.perception.put': {
     mode: 'durable-covered', evidence: 'F1.016 actor-bound idempotency plus serializable baseRevision CAS over the latest immutable PerceptionTimeline',
+  },
+  'apollo.projects.perception-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W61 request fingerprint binds actor/key, current ProjectVersion, source SHA, edit-plan snapshot and sample interval; PostgreSQL concurrency proof remains pending',
+  },
+  'apollo.projects.temporal-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W63 actor/key request fingerprint binds current ProjectVersion, source SHA and edit-plan snapshot; PostgreSQL operation admission and fenced claim are exercised',
+  },
+  'apollo.projects.face-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W61 actor/key request fingerprint binds current ProjectVersion, source SHA, edit-plan snapshot and sample interval; serializable admission and fenced claim are exercised in PostgreSQL, while HTTP concurrency remains pending',
   },
   'apollo.media.segments.create': {
     mode: 'durable-covered', evidence: 'F1.013 serializable source/parent recheck, immutable content hash, database range constraints and natural replay identity',
@@ -597,7 +609,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    181,
+    182,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

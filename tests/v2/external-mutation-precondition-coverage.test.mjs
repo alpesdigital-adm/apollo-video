@@ -259,6 +259,9 @@ const coverage = Object.freeze({
   'apollo.projects.duplicates.create': {
     mode: 'idempotent-create', evidence: 'request additionally binds the source current version and hash; serializable persistence rechecks the source snapshots and media before creating the copy-on-write fork',
   },
+  'apollo.projects.output-variants.create': {
+    mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId and baseHash before the serializable operational bundle transaction; a stale base is VERSION_CONFLICT',
+  },
   'apollo.projects.rename': {
     mode: 'revision-bound-action', evidence: 'F1.003 requires baseRevision and applies a serializable exact-state CAS before the immutable administration command and event are committed',
   },
@@ -411,6 +414,15 @@ const coverage = Object.freeze({
   },
   'apollo.projects.perception.put': {
     mode: 'explicit-precondition', mechanism: 'body-revision', evidence: 'baseRevision is null only for the first timeline and otherwise must equal the latest immutable timelineHash inside the serializable transaction',
+  },
+  'apollo.projects.perception-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W61 body binds current projectVersionId and sourceArtifactId; server resolves source SHA, edit snapshot, rights and actor-bound Idempotency-Key before admission',
+  },
+  'apollo.projects.temporal-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W63 body contains only projectVersionId and sourceArtifactId; server resolves unit-rate map, source SHA, edit snapshot, rights and actor-bound Idempotency-Key',
+  },
+  'apollo.projects.face-producer-operations.create': {
+    mode: 'idempotent-create', evidence: 'W61 body contains only projectVersionId, sourceArtifactId and bounded sample interval; server resolves source SHA, immutable edit snapshot, current rights and actor-bound Idempotency-Key before admission',
   },
   'apollo.media.segments.create': {
     mode: 'natural-idempotent-create', evidence: 'content-addressed segment identity and hash converge while the serializable transaction rechecks immutable source duration and optional parent bounds',
@@ -811,13 +823,13 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 72,
+    'idempotent-create': 75,
     'identity-bound-action': 11,
     'natural-idempotent-create': 10,
     'state-machine-action': 20,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 26,
+    'base-version-bound-action': 27,
     'fenced-natural-idempotent-action': 5,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

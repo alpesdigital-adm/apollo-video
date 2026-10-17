@@ -12,26 +12,28 @@ import { projectStatusTransitionPath } from '../../domain/project.ts'
 import { readOutputFormatPreset } from '../../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../../domain/output-spec.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
+import { parseDirectorQualityReport } from './director-run-repository.ts'
+import { PrismaPerceptionProducerEnvelopeRepository } from './perception-producer-envelope-repository.ts'
 
-function parseQuality(value: string): { status: string; score: number } {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid')
-    const quality = parsed as Record<string, unknown>
-    if (typeof quality.status !== 'string' || typeof quality.score !== 'number' || !Number.isFinite(quality.score)) throw new Error('invalid')
-    return { status: quality.status, score: quality.score }
-  } catch {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export QualityReport is invalid')
-  }
+const FAILURE_STAGES = new Set([
+  'source-read', 'color-plan', 'color-bindings', 'lut-materialization',
+  'input-validation', 'rights', 'source-materialization', 'render',
+  'output-verification', 'output-promotion', 'artifact-persistence',
+])
+
+export function parseFinalExportQuality(input: Parameters<typeof parseDirectorQualityReport>[0]) {
+  return parseDirectorQualityReport(input)
 }
 
 export class PrismaProjectFinalExportRepository implements ProjectFinalExportRepository {
   private readonly sourceReader: PrismaProjectProxyRenderRepository
+  private readonly perceptionEvidence: PrismaPerceptionProducerEnvelopeRepository
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient) {
     this.client = client
     this.sourceReader = new PrismaProjectProxyRenderRepository(client)
+    this.perceptionEvidence = new PrismaPerceptionProducerEnvelopeRepository(client)
   }
 
   private async readApproval(input: {
@@ -97,8 +99,21 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     const proxyReview = project?.proxyReviews[0]
     if (!project || !version || !directorRun || !proxyReview) return null
     if (input.qualitySnapshotHash && directorRun.qualitySnapshot.contentHash !== input.qualitySnapshotHash) return null
-    const quality = parseQuality(directorRun.qualitySnapshot.contentJson)
+    const quality = parseFinalExportQuality({
+      contentJson: directorRun.qualitySnapshot.contentJson,
+      contentHash: directorRun.qualitySnapshot.contentHash,
+      contentSchemaVersion: directorRun.qualitySnapshot.schemaVersion,
+      objective: directorRun.objective, rubricRef: directorRun.rubricRef,
+    })
     if (!['approved', 'approved-with-warnings'].includes(quality.status)) return null
+    if (quality.faceSafety.status !== 'verified') return null
+    for (const reference of quality.faceSafety.evidenceRefs) {
+      const evidence = await this.perceptionEvidence.read({ id: reference,
+        workspaceId: input.workspaceId, projectId: input.projectId,
+        inputVersionId: directorRun.baseVersionId, now: new Date() })
+      // OCR is source-authenticated but carries no facial clearance. No face producer is authorized yet.
+      if (!evidence || String(evidence.modality) !== 'face') return null
+    }
     return Object.freeze({
       locale: project.locale ?? 'pt-BR',
       directorRunId: directorRun.id,
@@ -308,7 +323,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         input.output !== undefined ||
         !input.error ||
         input.error.code.trim().length < 1 ||
-        input.error.message.trim().length < 1
+        input.error.message.trim().length < 1 ||
+        (input.error.stage !== undefined && !FAILURE_STAGES.has(input.error.stage))
       ))
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'Final export attempt is invalid')
     const validatorsJson = stableSerialize(input.validators)
@@ -332,6 +348,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           existing.outputByteSize === (input.output ? BigInt(input.output.byteSize) : null) &&
           existing.errorCode === (input.error?.code ?? null) &&
           existing.errorMessage === (input.error?.message ?? null) &&
+          existing.errorStage === (input.error?.stage ?? null) &&
           existing.startedAt.getTime() === startedAt.getTime() &&
           existing.completedAt.getTime() === completedAt.getTime()
         if (!converged) {
@@ -368,6 +385,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           outputByteSize: input.output ? BigInt(input.output.byteSize) : undefined,
           errorCode: input.error?.code,
           errorMessage: input.error?.message,
+          errorStage: input.error?.stage,
           startedAt,
           completedAt,
         },
@@ -437,6 +455,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       if (byteSize !== undefined && (!Number.isSafeInteger(byteSize) || byteSize < 1)) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export byte size is invalid')
       }
+      if (attempt.errorStage !== null && !FAILURE_STAGES.has(attempt.errorStage)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export failure stage is invalid')
+      }
       return Object.freeze({
         attempt: attempt.attempt,
         status: attempt.status as 'failed' | 'promoted',
@@ -452,7 +473,8 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
             }
           : {}),
         ...(attempt.errorCode && attempt.errorMessage
-          ? { error: Object.freeze({ code: attempt.errorCode, message: attempt.errorMessage }) }
+          ? { error: Object.freeze({ code: attempt.errorCode, message: attempt.errorMessage,
+              ...(attempt.errorStage ? { stage: attempt.errorStage as NonNullable<ProjectFinalExportAttemptHistory['attempts'][number]['error']>['stage'] } : {}) }) }
           : {}),
         startedAt: attempt.startedAt.toISOString(),
         completedAt: attempt.completedAt.toISOString(),

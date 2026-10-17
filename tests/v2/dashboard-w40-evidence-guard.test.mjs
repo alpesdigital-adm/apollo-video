@@ -11,8 +11,8 @@ const commit = 'a'.repeat(40)
 const context = { sourceCommit: commit, ciRunId: '4321', applicationName: 'apollo-video-e2e-w29-ci' }
 const SIBLINGS = {
   29: 'w29-lut-browser-proof/v1', 30: 'w30-dashboard-browser-proof/v1', 31: 'w31-dashboard-combined-filters/v1',
-  32: 'w32-dashboard-pagination/v1', 33: 'w33-dashboard-workspace-isolation/v1', 34: 'w34-dashboard-aggregate/v1',
-  35: 'w35-dashboard-states/v1', 36: 'w36-dashboard-events/v1', 37: 'w37-rename-from-card/v1',
+  32: 'w32-dashboard-pagination/v1', 33: 'w33-dashboard-workspace-isolation/v1', 34: 'w34-dashboard-aggregate/v2',
+  35: 'w35-dashboard-states/v2', 36: 'w36-dashboard-events/v1', 37: 'w37-rename-from-card/v1',
   38: 'w38-archive-restore/v1', 39: 'w39-duplicate-copy-on-write/v1',
 }
 const SCREENSHOTS = [
@@ -263,6 +263,29 @@ test('W40 guard rejects a sibling manifest from another commit, another run or a
     writeFileSync(join(directory, 'w40-desktop-baseline.png'), Buffer.from('tampered'.repeat(40)))
     assert.throws(() => verifyW40Evidence(directory, context, { siblings }))
   } finally { cleanup() }
+})
+
+test('W40 accepts only W34/W35 v2 and rejects historical or mixed sibling versions', () => {
+  for (const versions of [
+    { 34: 'w34-dashboard-aggregate/v1' },
+    { 35: 'w35-dashboard-states/v1' },
+    { 34: 'w34-dashboard-aggregate/v1', 35: 'w35-dashboard-states/v1' },
+    { 34: 'w34-dashboard-aggregate/v3' },
+    { 35: 'w35-dashboard-states/v3' },
+  ]) {
+    const { directory, siblings, cleanup } = world()
+    try {
+      assert.doesNotThrow(() => verifyJourneyManifests(siblings, context))
+      for (const [wave, schemaVersion] of Object.entries(versions)) {
+        const path = join(siblings[wave], `w${wave}-manifest.json`)
+        const sibling = JSON.parse(readFileSync(path, 'utf8'))
+        sibling.schemaVersion = schemaVersion
+        writeFileSync(path, JSON.stringify(sibling))
+      }
+      assert.throws(() => verifyJourneyManifests(siblings, context))
+      assert.throws(() => verifyW40Evidence(directory, context, { siblings }))
+    } finally { cleanup() }
+  }
 })
 
 test('W40 guard rejects proof code that could fake the feed chain with a synthetic event', () => {

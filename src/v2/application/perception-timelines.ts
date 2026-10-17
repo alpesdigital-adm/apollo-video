@@ -33,6 +33,10 @@ export function putPerceptionTimelineService(dependencies: {
     idempotencyKey: string
     actor: Readonly<AuthenticatedExternalActor>
   }) => {
+    if (Object.keys(request).some((key) => ![
+      'workspaceId', 'projectId', 'projectVersionId', 'baseRevision', 'durationMs',
+      'observations', 'coverage', 'idempotencyKey', 'actor',
+    ].includes(key))) throw new DomainError('INVALID_ARGUMENT', 'Perception PUT cannot assert observation origin')
     requireScope(request.actor, 'projects:write')
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
@@ -50,8 +54,9 @@ export function putPerceptionTimelineService(dependencies: {
       coverage: request.coverage,
     })
     const requestFingerprint = calculateCanonicalHash({
-      schemaVersion: 'put-perception-timeline-request/v1',
+      schemaVersion: 'put-perception-timeline-request/v2',
       workspaceId, projectId, projectVersionId, baseRevision: request.baseRevision, timeline,
+      origin: Object.freeze({ kind: 'manual-controlled' as const, trust: 'unverified' as const, suppliedByClientId: authenticationAudit.clientId }),
       actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({
@@ -65,9 +70,10 @@ export function putPerceptionTimelineService(dependencies: {
     const createdAt = dependencies.clock().toISOString()
     if (Number.isNaN(Date.parse(createdAt))) throw new DomainError('INVALID_ARGUMENT', 'Perception clock is invalid')
     const content = Object.freeze({
-      schemaVersion: 'persisted-perception-timeline/v1' as const,
+      schemaVersion: 'persisted-perception-timeline/v2' as const,
       id: identity(dependencies.createId(), 'perceptionTimelineId'),
       workspaceId, projectId, projectVersionId, baseRevision: request.baseRevision, timeline,
+      origin: Object.freeze({ kind: 'manual-controlled' as const, trust: 'unverified' as const, suppliedByClientId: authenticationAudit.clientId }),
       requestFingerprint, idempotencyKey, authenticationAudit,
       createdByClientId: authenticationAudit.clientId, createdAt,
     })
@@ -99,6 +105,7 @@ export function readPerceptionTimelineRangeService(dependencies: {
       workspaceId: persisted.workspaceId,
       projectId: persisted.projectId,
       projectVersionId: persisted.projectVersionId,
+      origin: persisted.origin,
       createdAt: persisted.createdAt,
       result: queryPerceptionRange(persisted.timeline, { startMs, endMs, kinds: request.kinds }),
     })

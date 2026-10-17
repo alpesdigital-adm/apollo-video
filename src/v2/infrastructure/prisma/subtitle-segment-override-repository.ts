@@ -4,18 +4,21 @@ import type {
   SubtitleSegmentOverrideRepository,
   SubtitleSegmentOverrideResult,
 } from '../../application/ports/subtitle-segment-override-repository.ts'
-import { type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { parseCommandImpact } from '../../domain/command-impact.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import {
   createSubtitleSegmentOverride,
   type SubtitleSegmentOverride,
 } from '../../domain/subtitle-segment-override.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
 
 const include = Prisma.validator<Prisma.V2SubtitleSegmentOverrideInclude>()({ command: true, resultVersion: true })
 type Stored = Prisma.V2SubtitleSegmentOverrideGetPayload<{ include: typeof include }>
@@ -31,30 +34,7 @@ function parse(value: string, field: string): Record<string, unknown> {
 }
 
 function version(row: V2ProjectVersion) {
-  return createProjectVersion({
-    id: row.id, workspaceId: row.workspaceId, projectId: row.projectId, sequence: row.sequence,
-    ...(row.parentVersionId ? { parentVersionId: row.parentVersionId } : {}),
-    snapshotRefs: {
-      brief: row.briefSnapshotId,
-      ...(row.treatmentSnapshotId ? { treatment: row.treatmentSnapshotId } : {}),
-      ...(row.storySnapshotId ? { story: row.storySnapshotId } : {}),
-      editPlan: row.editPlanSnapshotId,
-      policies: row.policiesSnapshotId,
-    },
-    baseHash: row.baseHash, createdBy: row.createdBy,
-    ...(row.commandId ? { commandId: row.commandId } : {}),
-    createdAt: row.createdAt.toISOString(),
-  })
-}
-
-function commandAuditData(audit: Readonly<ApiAccessAuditContext> | undefined) {
-  return audit
-    ? {
-        actorCredentialId: audit.credentialId, actorEnvironment: audit.environment,
-        actorAuthenticationKind: audit.authenticationKind, actorContextHash: audit.contextHash,
-        actorDelegatedIdentityId: audit.delegatedIdentityId, actorWorkspaceRole: audit.workspaceRole,
-      }
-    : {}
+  return hydrateProjectVersionRowV3(row)
 }
 
 type OverrideRow = Pick<
@@ -114,6 +94,7 @@ function hydrate(row: Stored, replayed: boolean): Readonly<SubtitleSegmentOverri
     idempotencyKey: commandRow.idempotencyKey, createdAt: commandRow.createdAt.toISOString(),
   })
   const resultVersion = version(row.resultVersion)
+  if (commandRow.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored subtitle segment override command seal is invalid')
   if (
     impact.impactHash !== row.impactHash
     || stableSerialize(impact) !== row.impactJson
@@ -210,12 +191,12 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
   }
 
   async readContext(input: { workspaceId: string; projectId: string; variantId: string; segmentId: string }) {
-    const project = await this.client.v2Project.findFirst({
-      where: { id: input.projectId, workspaceId: input.workspaceId },
-      include: { currentVersion: { include: { editPlanSnapshot: true } } },
-    })
-    if (!project?.currentVersion) return null
-    const editPlan = parse(project.currentVersion.editPlanSnapshot.contentJson, 'subtitle segment override EditPlan')
+    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId } })
+    if (!project?.currentVersionId) return null
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
+    if (!parent) return null
+    const currentVersionId = parent.version.id
+    const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'subtitle segment override EditPlan')
     const durationFrames = Number(editPlan.durationFrames)
     if (!Number.isSafeInteger(durationFrames) || durationFrames < 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Subtitle segment override render context is incomplete')
@@ -224,7 +205,7 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
       this.client.v2ProjectProxyRenderOperation.findMany({
         where: {
           workspaceId: input.workspaceId, projectId: input.projectId,
-          projectVersionId: project.currentVersion.id,
+          projectVersionId: currentVersionId,
           operation: { status: 'succeeded', phase: 'completed' },
         },
         select: { outputArtifactId: true },
@@ -232,7 +213,7 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
       this.client.v2ProjectFinalExportOperation.findMany({
         where: {
           workspaceId: input.workspaceId, projectId: input.projectId,
-          projectVersionId: project.currentVersion.id,
+          projectVersionId: currentVersionId,
           operation: { status: 'succeeded', phase: 'completed' },
         },
         select: { outputArtifactId: true, outputAspectRatio: true },
@@ -247,18 +228,18 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
       [...new Set([...declared, proxyVariantId, ...final.map((item) => item.outputAspectRatio)])].toSorted(),
     )
     return Object.freeze({
-      currentVersion: version(project.currentVersion),
+      parent,
       durationFrames,
       segments: segmentsOf(editPlan, input.variantId),
       variantIds,
       outputReferences: Object.freeze([
         ...proxy.map((item) => Object.freeze({
           artifactId: item.outputArtifactId, kind: 'proxy' as const,
-          sourceVersionId: project.currentVersion!.id, variantId: proxyVariantId,
+          sourceVersionId: currentVersionId, variantId: proxyVariantId,
         })),
         ...final.map((item) => Object.freeze({
           artifactId: item.outputArtifactId, kind: 'final' as const,
-          sourceVersionId: project.currentVersion!.id, variantId: item.outputAspectRatio,
+          sourceVersionId: currentVersionId, variantId: item.outputAspectRatio,
         })),
       ]),
       currentOverride: chain.currentOverride,
@@ -291,17 +272,27 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
     input: Parameters<SubtitleSegmentOverrideRepository['commitOrReplay']>[0],
     attempt = 1,
   ): Promise<Readonly<SubtitleSegmentOverrideResult>> {
+    const sealed = childCommandOf<SubtitleSegmentOverrideResult['command']['payload']>(input.bundle)
+    const command = sealed.command, requestFingerprint = sealed.requestFingerprint, bundleVersion = input.bundle.version
+    if (
+      command.type !== 'apply-subtitle-segment-override' || bundleVersion.commandId !== command.id
+      || input.subtitleOverride.commandId !== command.id || input.subtitleOverride.resultVersionId !== bundleVersion.id
+      || input.subtitleOverride.baseVersionId !== command.baseVersionId
+      || input.subtitleOverride.workspaceId !== command.workspaceId || input.subtitleOverride.projectId !== command.projectId
+      || bundleVersion.parentVersionId !== command.baseVersionId
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Subtitle segment override does not belong to the Command that produced its Version')
     try {
       return await this.client.$transaction(async (tx) => {
         const project = await tx.v2Project.findFirst({
-          where: { id: input.command.projectId, workspaceId: input.command.workspaceId },
+          where: { id: command.projectId, workspaceId: command.workspaceId },
           include: { currentVersion: true },
         })
         if (
           !project?.currentVersion
-          || project.currentVersion.id !== input.command.baseVersionId
-          || project.currentVersion.baseHash !== input.command.baseHash
-          || input.version.sequence !== project.currentVersion.sequence + 1
+          || project.currentVersion.id !== command.baseVersionId
+          || project.currentVersion.baseHash !== command.baseHash
+          || bundleVersion.sequence !== project.currentVersion.sequence + 1
+          || input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash
         ) throw new DomainError('VERSION_CONFLICT', 'Project changed before subtitle segment override commit')
         const headKey = {
           projectId: input.subtitleOverride.projectId, workspaceId: input.subtitleOverride.workspaceId,
@@ -313,27 +304,7 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
         if ((head?.overrideId ?? null) !== input.subtitleOverride.previousOverrideId) {
           throw new DomainError('VERSION_CONFLICT', 'Subtitle segment override head changed before commit')
         }
-        await tx.v2EditCommand.create({
-          data: {
-            id: input.command.id, workspaceId: input.command.workspaceId, projectId: input.command.projectId,
-            baseVersionId: input.command.baseVersionId, baseHash: input.command.baseHash, type: input.command.type,
-            scopeJson: stableSerialize(input.command.scope), payloadJson: stableSerialize(input.command.payload),
-            reason: input.command.reason, actorType: input.command.author.type, actorId: input.command.author.id,
-            delegatedUserId: input.command.author.delegatedUserId, ...commandAuditData(input.authenticationAudit),
-            idempotencyKey: input.command.idempotencyKey, requestFingerprint: input.requestFingerprint,
-            createdAt: new Date(input.command.createdAt),
-          },
-        })
-        await tx.v2ProjectVersion.create({
-          data: {
-            id: input.version.id, workspaceId: input.version.workspaceId, projectId: input.version.projectId,
-            sequence: input.version.sequence, parentVersionId: input.version.parentVersionId,
-            briefSnapshotId: input.version.snapshotRefs.brief!, treatmentSnapshotId: input.version.snapshotRefs.treatment,
-            storySnapshotId: input.version.snapshotRefs.story, editPlanSnapshotId: input.version.snapshotRefs.editPlan,
-            policiesSnapshotId: input.version.snapshotRefs.policies, baseHash: input.version.baseHash,
-            createdBy: input.version.createdBy, commandId: input.command.id, createdAt: new Date(input.version.createdAt),
-          },
-        })
+        await commitProjectVersionWithOutputState(tx, input.bundle)
         await tx.v2SubtitleSegmentOverride.create({
           data: {
             id: input.subtitleOverride.id, workspaceId: input.subtitleOverride.workspaceId,
@@ -355,10 +326,10 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
         })
         const updated = await tx.v2Project.updateMany({
           where: {
-            id: input.command.projectId, workspaceId: input.command.workspaceId,
-            currentVersionId: input.command.baseVersionId,
+            id: command.projectId, workspaceId: command.workspaceId,
+            currentVersionId: command.baseVersionId,
           },
-          data: { currentVersionId: input.version.id },
+          data: { currentVersionId: bundleVersion.id },
         })
         if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project changed during subtitle segment override commit')
         return hydrate(
@@ -372,10 +343,10 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const replay = await this.findIdempotent({
-          workspaceId: input.command.workspaceId, projectId: input.command.projectId,
-          idempotencyKey: input.command.idempotencyKey,
+          workspaceId: command.workspaceId, projectId: command.projectId,
+          idempotencyKey: command.idempotencyKey,
         })
-        if (replay?.requestFingerprint === input.requestFingerprint) return replay.result
+        if (replay?.requestFingerprint === requestFingerprint) return replay.result
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was reused with another subtitle segment override')
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) {

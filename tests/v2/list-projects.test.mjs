@@ -12,8 +12,10 @@ import {
   presentProjectV2,
   presentProjectVersionV2,
   presentProjectWorkspaceV7,
+  presentProjectWorkspaceV13,
 } from '../../src/v2/public-api/presenters.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
+import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
 import { PrismaProjectWorkspaceQueryRepository } from '../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts'
 
 function project(id, createdAt) {
@@ -183,12 +185,12 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   assert.equal(publicProject.visibleState.label, 'draft')
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  assert.equal(capabilities.get('apollo.projects.list').version, '4.0.0')
-  assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v6')
+  assert.equal(capabilities.get('apollo.projects.list').version, '6.0.0')
+  assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v9')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v5').ref, 'apollo://schemas/project-list/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v4').ref, 'apollo://schemas/project-list/v4')
-  assert.equal(capabilities.get('apollo.projects.create').version, '5.0.0')
-  assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v4')
+  assert.equal(capabilities.get('apollo.projects.create').version, '6.0.0')
+  assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v3').ref, 'apollo://schemas/project-list/v3')
   assert.equal(getPublicSchema('apollo://schemas/project-created/v2').ref, 'apollo://schemas/project-created/v2')
 
@@ -204,10 +206,10 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   assert.equal(validate(invalidAction), false)
 })
 
-test('T-FR-236 exposes the current version state on create and duplicate responses', () => {
+test('T-FR-236 preserves historical create/duplicate visible states and exposes new creation as a sealed receipt', () => {
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  assert.equal(capabilities.get('apollo.projects.create').version, '5.0.0')
-  assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v4')
+  assert.equal(capabilities.get('apollo.projects.create').version, '6.0.0')
+  assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v5')
   assert.equal(capabilities.get('apollo.projects.duplicates.create').version, '2.0.0')
   assert.equal(capabilities.get('apollo.projects.duplicates.create').outputSchemaRef, 'apollo://schemas/project-duplicated/v2')
   assert.equal(getPublicSchema('apollo://schemas/project-created/v3').ref, 'apollo://schemas/project-created/v3')
@@ -228,6 +230,12 @@ test('T-FR-236 exposes the current version state on create and duplicate respons
   const validateCreate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
     .compile(getPublicSchema('apollo://schemas/project-created/v4').schema)
   assert.equal(validateCreate(createBody), true, JSON.stringify(validateCreate.errors))
+  const currentDefinition = getPublicSchema('apollo://schemas/project-created/v5')
+  const validateReceipt = addFormats(new Ajv2020({ strict: false, allErrors: true })).compile(currentDefinition.schema)
+  const receipt = structuredClone(publicSchemaExamples(currentDefinition)[0])
+  assert.equal(validateReceipt(receipt), true, JSON.stringify(validateReceipt.errors))
+  receipt.data.projectAtCreation.currentVersionId = receipt.data.creationVersion.id
+  assert.equal(validateReceipt(receipt), false, 'a creation receipt cannot claim the current head')
 
   const duplicateBody = structuredClone(createBody)
   duplicateBody.data.project.duplicatedFromProjectId = 'project-source-visible-1'
@@ -263,13 +271,16 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
   assert.equal(Object.isFrozen(publicWorkspace.version.visibleState), true)
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  for (const id of ['apollo.projects.workspace.read', 'apollo.projects.workspace.current.read']) {
-    assert.equal(capabilities.get(id).version, '10.0.0')
-    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v11')
+  for (const [id, version] of [
+    ['apollo.projects.workspace.read', '13.0.0'],
+    ['apollo.projects.workspace.current.read', '12.0.0'],
+  ]) {
+    assert.equal(capabilities.get(id).version, version)
+    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v13')
   }
   assert.equal(getPublicSchema('apollo://schemas/project-workspace/v6').ref, 'apollo://schemas/project-workspace/v6')
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-    .compile(getPublicSchema('apollo://schemas/project-workspace/v11').schema)
+    .compile(getPublicSchema('apollo://schemas/project-workspace/v12').schema)
   const validBody = { data: publicWorkspace, meta: { apiVersion: 'v1' } }
   assert.equal(validate(validBody), true, JSON.stringify(validate.errors))
   const mismatch = structuredClone(validBody)
@@ -309,6 +320,11 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
   assert.equal(Object.isFrozen(currentVersion), true)
 
   const repository = new PrismaProjectWorkspaceQueryRepository({
+    async $transaction(action, options) {
+      assert.equal(options.isolationLevel, 'RepeatableRead')
+      assert.equal(options.timeout, 10_000)
+      return action(this)
+    },
     v2Project: {
       async findFirst() {
         return {
@@ -326,4 +342,81 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
     () => repository.read({ workspaceId: 'workspace-projects-1', projectId: 'project-workspace-corrupt-1' }),
     /Stored project status is invalid/,
   )
+})
+
+test('project list v9 accepts measured perception stages without widening historical list contracts', () => {
+  const ajv = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/project-list/v9').schema)
+  const cases = [
+    ['perception-producer-run', 'transcribing', 7],
+    ['perception-temporal-run', 'analyzing', 8],
+    ['perception-face-run', 'analyzing', 9],
+  ]
+  for (const [type, middlePhase, firstVersion] of cases) {
+    const historical = ajv.compile(getPublicSchema(`apollo://schemas/project-list/v${firstVersion - 1}`).schema)
+    for (const [completed, phase] of ['probing', middlePhase, 'verifying', 'persisting'].entries()) {
+      const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-list/v6'))
+        .find((example) => example.data.projects.length > 0))
+      body.data.projects[0].dashboard.latestOperation = {
+        id: 'operation-perception-dashboard-1', type, status: 'running', phase,
+        progress: { completed, total: 4, unit: 'stage' }, updatedAt: '2026-10-08T00:00:00.000Z',
+      }
+      assert.equal(validate(body), true, `${type}/${phase}: ${JSON.stringify(validate.errors)}`)
+      assert.equal(historical(body), false, `list v${firstVersion - 1} must not admit ${type}`)
+      const inventedPhase = structuredClone(body)
+      inventedPhase.data.projects[0].dashboard.latestOperation.phase = 'detecting-faces'
+      assert.equal(validate(inventedPhase), false)
+      const fabricatedSafety = structuredClone(body)
+      fabricatedSafety.data.projects[0].dashboard.latestOperation.faceSafety = 'verified'
+      assert.equal(validate(fabricatedSafety), false)
+    }
+  }
+})
+
+test('workspace v12 exposes Director review-required without promoting it to approval', () => {
+  const ajv = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v12').schema)
+  const historical = ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v11').schema)
+  const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-workspace/v12'))[0])
+  assert.equal(body.data.directorRuns[0].qualityStatus, 'review-required')
+  assert.equal(validate(body), true, JSON.stringify(validate.errors))
+  assert.equal(historical(body), false, 'v11 remains closed over its published quality states')
+  const inventedApproval = structuredClone(body)
+  inventedApproval.data.directorRuns[0].qualityStatus = 'face-safe-approved'
+  assert.equal(validate(inventedApproval), false)
+})
+test('workspace v13 compiles strictly, requires explicit review availability and preserves historical v12', () => {
+  const ajv = addFormats(new Ajv2020({ strict: true, allErrors: true }))
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v13').schema)
+  const old = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-workspace/v12'))[0])
+  assert.equal(validate(old), false, 'absence must not hydrate an operational fallback')
+  const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-workspace/v13'))[0])
+  assert.equal(validate(body), true, JSON.stringify(validate.errors))
+  assert.equal(ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v12').schema)(body), false)
+  for (const unavailable of [false, true]) {
+    const sample = structuredClone(body)
+    if (!unavailable) {
+      sample.data.reviewAvailability.annotations = { state: 'available', sourceVersionId: null,
+        proxyArtifactId: 'artifact-editing-proxy-1', proxyHash: 'a'.repeat(64), stale: true }
+      sample.data.reviewAvailability.proxyReview = { state: 'available', sourceVersionId: sample.data.version.id,
+        reviewId: 'review-workspace-1', proxyArtifactId: 'artifact-editorial-proxy-1', reviewHash: 'b'.repeat(64) }
+    }
+    assert.equal(validate(sample), true, JSON.stringify(validate.errors))
+    const projected = presentProjectWorkspaceV13(sample.data)
+    assert.deepEqual(projected.reviewAvailability, sample.data.reviewAvailability)
+    for (const field of ['requestedVersionId', 'annotations', 'proxyReview']) {
+      const missing = structuredClone(sample)
+      delete missing.data.reviewAvailability[field]
+      assert.equal(validate(missing), false, field)
+    }
+    sample.data.reviewAvailability.proxyReview.fakeApproval = true
+    assert.equal(validate(sample), false)
+  }
+  const noVersion = structuredClone(body)
+  delete noVersion.data.version
+  noVersion.data.reviewAvailability = { schemaVersion: 'project-review-availability/v1', requestedVersionId: null,
+    annotations: { state: 'unavailable', reason: 'no-version' }, proxyReview: { state: 'unavailable', reason: 'no-version' } }
+  assert.equal(validate(noVersion), true, JSON.stringify(validate.errors))
+  noVersion.data.reviewAvailability.annotations.reason = 'no-proxy'
+  assert.equal(validate(noVersion), false)
 })

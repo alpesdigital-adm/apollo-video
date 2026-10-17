@@ -93,7 +93,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
@@ -139,19 +139,19 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     let entity = 0
     let event = 0
     const createProject = createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-cacheinv-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(700_000 + ++event).padStart(12, '0')}`,
     })
     const main = await createProject({
-      workspaceId, name: 'Invalidação precisa', objective: 'awareness', format: '9:16', actor,
-      idempotency: { clientId, key: 'cacheinv-project-main' },
+      workspaceId, name: 'Invalidação precisa', objective: 'awareness', actor,
+      idempotencyKey: 'cacheinv-project-main',
     })
     // A second project in the same workspace: the cache address is workspace
     // wide, so this is where two independent requests can collide on one key.
     const twin = await createProject({
-      workspaceId, name: 'Projeto gêmeo', objective: 'awareness', format: '9:16', actor,
-      idempotency: { clientId, key: 'cacheinv-project-twin' },
+      workspaceId, name: 'Projeto gêmeo', objective: 'awareness', actor,
+      idempotencyKey: 'cacheinv-project-twin',
     })
 
     await client.v2MediaArtifact.create({
@@ -379,7 +379,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
         .filter(({ id }) => !knownDecisionIds.has(id))
 
     const created = await createPlan({
-      workspaceId, projectId: main.project.id, projectVersionId: main.version.id,
+      workspaceId, projectId: main.projectAtCreation.id, projectVersionId: main.creationVersion.id,
       profileSnapshotId: profileV1.profile.profileSnapshotId, locale: 'pt-BR',
       scriptText: 'Alfa primeira frase. Beta segunda frase. Gama terceira frase. Delta quarta frase.',
       actor, idempotencyKey: 'cacheinv-plan-create',
@@ -387,12 +387,12 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const planId = created.plan.head.id
     let head = created.plan
     const mainArguments = () => ({
-      workspaceId, projectId: main.project.id, projectVersionId: main.version.id,
+      workspaceId, projectId: main.projectAtCreation.id, projectVersionId: main.creationVersion.id,
       planId, use: 'ads', market: 'BRA', actor,
     })
     const mutate = async (mutation, idempotencyKey) => {
       head = (await mutatePlan({
-        workspaceId, projectId: main.project.id, projectVersionId: main.version.id, planId,
+        workspaceId, projectId: main.projectAtCreation.id, projectVersionId: main.creationVersion.id, planId,
         baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
         mutation, actor, idempotencyKey,
       })).plan
@@ -406,7 +406,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     // provider, so no HTTP traffic exists before a worker leases the job.
     assert.equal(providerCalls.length, 0, 'ensure must not call the provider inside its own work')
     await drainWorkers()
-    assert.deepEqual((await settle({ workspaceId, projectId: main.project.id, planId, actor })).map(({ outcome }) => outcome), ['approved', 'approved', 'approved', 'approved'])
+    assert.deepEqual((await settle({ workspaceId, projectId: main.projectAtCreation.id, planId, actor })).map(({ outcome }) => outcome), ['approved', 'approved', 'approved', 'approved'])
     assert.equal(providerCalls.length, 4)
     await grantRights(planId)
     const blocks = head.version.blockSequence
@@ -442,7 +442,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     assert.deepEqual(added.map(({ reasonCode }) => reasonCode), ['CACHE_MISS_NO_CANDIDATE'])
     assert.notEqual(added[0].cacheKey, beforeRewrite.cacheKey, 'changed bytes must land on a different cache address')
     await drainWorkers()
-    await settle({ workspaceId, projectId: main.project.id, planId, actor })
+    await settle({ workspaceId, projectId: main.projectAtCreation.id, planId, actor })
     assert.equal(providerCalls.length, 5)
     assert.equal(await jobCount(), jobsBefore + 1)
     // Nothing was destroyed to invalidate: the previous attempt keeps its
@@ -496,14 +496,14 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     // both still there: eligibility changed, history did not.
     assert.equal((await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: driftedArtifactId } })).status, 'available')
     assert.equal(
-      (await resultArtifactRepository.listByJob({ workspaceId, projectId: main.project.id, jobId: driftedGeneration.providerJobId }))
+      (await resultArtifactRepository.listByJob({ workspaceId, projectId: main.projectAtCreation.id, jobId: driftedGeneration.providerJobId }))
         .find(({ role }) => role === 'primary-audio').artifactSha256,
       driftedBefore.sha256,
       'the registered checksum is the evidence and is never rewritten',
     )
     assert.equal((await client.v2SyntheticBlockGeneration.findUniqueOrThrow({ where: { id: driftedGeneration.id } })).status, 'approved')
     await drainWorkers()
-    await settle({ workspaceId, projectId: main.project.id, planId, actor })
+    await settle({ workspaceId, projectId: main.projectAtCreation.id, planId, actor })
     assert.equal(providerCalls.length, 6)
     assert.equal(await jobCount(), jobsBefore + 1)
     await client.v2MediaArtifact.update({ where: { id: driftedArtifactId }, data: { sha256: driftedBefore.sha256 } })
@@ -528,7 +528,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     assert.deepEqual(added.map(({ reasonCode }) => reasonCode), ['CANDIDATE_OUTPUT_MISMATCH'])
     assert.equal((await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: mismatchedArtifactId } })).status, 'available')
     await drainWorkers()
-    await settle({ workspaceId, projectId: main.project.id, planId, actor })
+    await settle({ workspaceId, projectId: main.projectAtCreation.id, planId, actor })
     assert.equal(providerCalls.length, 7)
     assert.equal(await jobCount(), jobsBefore + 1)
     await client.v2SyntheticBlockGeneration.update({ where: { id: mismatchedGeneration.id }, data: { outputFormat: 'mp3' } })
@@ -568,7 +568,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       'blocking reuse must never delete the artifact whose rights changed',
     )
     await drainWorkers()
-    await settle({ workspaceId, projectId: main.project.id, planId, actor })
+    await settle({ workspaceId, projectId: main.projectAtCreation.id, planId, actor })
     assert.equal(providerCalls.length, 8)
     assert.equal(await jobCount(), jobsBefore + 1)
 
@@ -582,7 +582,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const forcedTarget = head.version.impact.createdBlockIds[0]
     assert.equal((await ensure(mainArguments())).filter(({ action }) => action === 'enqueued').length, 1)
     await drainWorkers()
-    await settle({ workspaceId, projectId: main.project.id, planId, actor })
+    await settle({ workspaceId, projectId: main.projectAtCreation.id, planId, actor })
     assert.equal(providerCalls.length, 9)
 
     marker = await markLedger()
@@ -613,7 +613,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     assert.match(added[0].reason, new RegExp(clientId), 'the ledger records who authorized the spend')
     assert.equal(added[0].avoidedCostMinorUnits, 0, 'a forced regeneration avoids nothing')
     await drainWorkers()
-    await settle({ workspaceId, projectId: main.project.id, planId, actor })
+    await settle({ workspaceId, projectId: main.projectAtCreation.id, planId, actor })
     assert.equal(providerCalls.length, 10)
     assert.equal(await jobCount(), jobsBefore + 1)
 
@@ -622,7 +622,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     // one submission happens; the other waits instead of paying twice.
     // ------------------------------------------------------------------
     const twinPlan = await createPlan({
-      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      workspaceId, projectId: twin.projectAtCreation.id, projectVersionId: twin.creationVersion.id,
       profileSnapshotId: profileV1.profile.profileSnapshotId, locale: 'pt-BR',
       scriptText: 'Zeta frase disputada.',
       actor, idempotencyKey: 'cacheinv-twin-plan',
@@ -634,7 +634,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     jobsBefore = await jobCount()
     const callsBefore = providerCalls.length
     const twinArguments = {
-      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      workspaceId, projectId: twin.projectAtCreation.id, projectVersionId: twin.creationVersion.id,
       planId: twinPlan.plan.head.id, use: 'ads', market: 'BRA', actor,
     }
     const [mainPass, twinPass] = await Promise.all([
@@ -669,8 +669,8 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     assert.equal(providerCalls.length, callsBefore + 1, 'the contended address is paid for exactly once')
 
     // The loser reuses the winner's work once it settles, still for free.
-    await settle({ workspaceId, projectId: main.project.id, planId, actor })
-    await settle({ workspaceId, projectId: twin.project.id, planId: twinPlan.plan.head.id, actor })
+    await settle({ workspaceId, projectId: main.projectAtCreation.id, planId, actor })
+    await settle({ workspaceId, projectId: twin.projectAtCreation.id, planId: twinPlan.plan.head.id, actor })
     await grantRights(twinPlan.plan.head.id)
     await grantRights(planId)
     const afterLoserSettled = await ensure(contendedRequests[loserIndex].args)
@@ -680,12 +680,12 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     assert.equal(providerCalls.length, callsBefore + 1, 'the deferred duplicate reuses instead of paying')
 
     // The ledger never carries the script it decided about.
-    const everyDecision = await cacheDecisions.listByProject({ workspaceId, projectId: main.project.id, limit: 500 })
+    const everyDecision = await cacheDecisions.listByProject({ workspaceId, projectId: main.projectAtCreation.id, limit: 500 })
     assert.doesNotMatch(JSON.stringify(everyDecision), /Alfa|Beta|Gama|Delta|Zeta/)
     // Replaying a pass that changes nothing books no new economy.
-    const beforeReplay = await cacheDecisions.summarize({ workspaceId, projectId: main.project.id })
+    const beforeReplay = await cacheDecisions.summarize({ workspaceId, projectId: main.projectAtCreation.id })
     await ensure(mainArguments())
-    assert.deepEqual(await cacheDecisions.summarize({ workspaceId, projectId: main.project.id }), beforeReplay)
+    assert.deepEqual(await cacheDecisions.summarize({ workspaceId, projectId: main.projectAtCreation.id }), beforeReplay)
 
     // ------------------------------------------------------------------
     // Origin consent — profile B intentionally shares A's voice address,
@@ -695,7 +695,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     // ------------------------------------------------------------------
     const originText = 'Delta quarta frase.'
     const consentReusePlan = await createPlan({
-      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      workspaceId, projectId: twin.projectAtCreation.id, projectVersionId: twin.creationVersion.id,
       profileSnapshotId: profileB.profile.profileSnapshotId, locale: 'pt-BR',
       scriptText: originText,
       actor, idempotencyKey: 'cacheinv-origin-consent-hit-plan',
@@ -704,7 +704,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const jobsBeforeConsentHit = await jobCount()
     await markLedger()
     const consentHit = await ensure({
-      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      workspaceId, projectId: twin.projectAtCreation.id, projectVersionId: twin.creationVersion.id,
       planId: consentReusePlan.plan.head.id, use: 'ads', market: 'BRA', actor,
     })
     assert.deepEqual(consentHit.map(({ action }) => action), ['reused'])
@@ -737,7 +737,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     assert.equal(headB.current.snapshot.consent.revokedAt ?? null, null, 'revoking A must not mutate destination profile B')
 
     const postRevocationPlan = await createPlan({
-      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      workspaceId, projectId: twin.projectAtCreation.id, projectVersionId: twin.creationVersion.id,
       profileSnapshotId: profileB.profile.profileSnapshotId, locale: 'pt-BR',
       scriptText: originText,
       actor, idempotencyKey: 'cacheinv-origin-consent-miss-plan',
@@ -745,7 +745,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     await markLedger()
     const jobsBeforeRevokedOrigin = await jobCount()
     const postRevocation = await ensure({
-      workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+      workspaceId, projectId: twin.projectAtCreation.id, projectVersionId: twin.creationVersion.id,
       planId: postRevocationPlan.plan.head.id, use: 'ads', market: 'BRA', actor,
     })
     assert.deepEqual(postRevocation.map(({ action }) => action), ['enqueued'])
@@ -767,7 +767,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const mastersBeforeRevokedCompile = await client.v2SyntheticAudioMaster.count({ where: { workspaceId } })
     await assert.rejects(
       compile({
-        workspaceId, projectId: twin.project.id, projectVersionId: twin.version.id,
+        workspaceId, projectId: twin.projectAtCreation.id, projectVersionId: twin.creationVersion.id,
         planId: consentReusePlan.plan.head.id,
         baseVersionId: consentReusePlan.plan.version.id,
         baseHash: consentReusePlan.plan.version.planVersionHash,

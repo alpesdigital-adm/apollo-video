@@ -4,11 +4,15 @@ import type { ProjectLutSelectionCommandPayloadV2, ProjectLutSelectionCommit, Pr
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
+import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProjectLutSelection, type ProjectLutSelection, type ProjectLutSelectionRequest } from '../../domain/project-lut-selection.ts'
-import { createProjectVersion } from '../../domain/project-version.ts'
+import { childCommandOf } from '../../domain/project-output-state-transition.ts'
+import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { commitProjectVersionWithOutputState } from './project-version-commit.ts'
 import { createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../domain/project-lut-selection-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
@@ -83,53 +87,17 @@ function hydrateCommandAuthenticationAudit(
   }
 }
 
-function commandAuditData(audit: Readonly<ApiAccessAuditContext> | undefined) {
-  return audit ? {
-    actorCredentialId: audit.credentialId,
-    actorEnvironment: audit.environment,
-    actorAuthenticationKind: audit.authenticationKind,
-    actorContextHash: audit.contextHash,
-    actorDelegatedIdentityId: audit.delegatedIdentityId,
-    actorWorkspaceRole: audit.workspaceRole,
-  } : {}
-}
-
-function assertCommandAuditBinding(input: Readonly<ProjectLutSelectionCommit>): void {
-  const audit = hydrateCommandAuthenticationAudit({
-    workspaceId: input.command.workspaceId,
-    actorType: input.command.author.type,
-    actorId: input.command.author.id,
-    delegatedUserId: input.command.author.delegatedUserId ?? null,
-    actorCredentialId: input.authenticationAudit?.credentialId ?? null,
-    actorEnvironment: input.authenticationAudit?.environment ?? null,
-    actorAuthenticationKind: input.authenticationAudit?.authenticationKind ?? null,
-    actorContextHash: input.authenticationAudit?.contextHash ?? null,
-    actorDelegatedIdentityId: input.authenticationAudit?.delegatedIdentityId ?? null,
-    actorWorkspaceRole: input.authenticationAudit?.workspaceRole ?? null,
-  })
+/** The bundle already proves its Command, audit and Version belong together; this proves the LUT row belongs to that Command. */
+function assertSelectionBinding(input: Readonly<ProjectLutSelectionCommit>) {
+  const { command, requestFingerprint } = childCommandOf<ProjectLutSelectionCommandPayloadV2>(input.bundle)
+  const version = input.bundle.version, selection = input.selection
   if (
-    audit && (
-      audit.clientId !== input.command.author.id ||
-      audit.workspaceId !== input.command.workspaceId ||
-      audit.delegatedUserId !== input.command.author.delegatedUserId
-    )
-  ) {
-    throw new DomainError('AUTH_INVALID', 'Project LUT command audit does not match its author')
-  }
-}
-
-function assertEditPlanSnapshotBinding(input: Readonly<ProjectLutSelectionCommit>): void {
-  const snapshot = input.editPlanSnapshot
-  const editPlan = parse(snapshot.contentJson, 'project LUT result EditPlan')
-  if (
-    snapshot.workspaceId !== input.version.workspaceId ||
-    snapshot.projectId !== input.version.projectId ||
-    snapshot.kind !== 'edit-plan' ||
-    snapshot.id !== input.version.snapshotRefs.editPlan ||
-    editPlan.projectVersionId !== input.version.id ||
-    editPlan.schemaVersion !== snapshot.contentSchemaVersion ||
-    calculateCanonicalHash(editPlan) !== snapshot.contentHash
-  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT result EditPlan snapshot is inconsistent')
+    command.type !== 'set-project-lut-selection' || version.commandId !== command.id || selection.commandId !== command.id ||
+    selection.resultVersionId !== version.id || selection.baseVersionId !== command.baseVersionId ||
+    selection.workspaceId !== command.workspaceId || selection.projectId !== command.projectId ||
+    version.workspaceId !== command.workspaceId || version.projectId !== command.projectId || version.parentVersionId !== command.baseVersionId
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT selection does not belong to the Command that produced its Version')
+  return { command, requestFingerprint }
 }
 
 function validateWorkspaceLutAuthenticationAudit(row: V2WorkspaceLutVersion): void {
@@ -173,14 +141,7 @@ function parseArray(value: string, field: string): unknown[] {
 }
 
 function hydrateVersion(row: V2ProjectVersion) {
-  return createProjectVersion({
-    id: row.id, workspaceId: row.workspaceId, projectId: row.projectId, sequence: row.sequence,
-    ...(row.parentVersionId ? { parentVersionId: row.parentVersionId } : {}),
-    ...(row.forkedFromProjectId ? { forkedFromProjectId: row.forkedFromProjectId } : {}),
-    ...(row.forkedFromVersionId ? { forkedFromVersionId: row.forkedFromVersionId } : {}),
-    snapshotRefs: { brief: row.briefSnapshotId, ...(row.treatmentSnapshotId ? { treatment: row.treatmentSnapshotId } : {}), ...(row.storySnapshotId ? { story: row.storySnapshotId } : {}), editPlan: row.editPlanSnapshotId, policies: row.policiesSnapshotId },
-    baseHash: row.baseHash, createdBy: row.createdBy, ...(row.commandId ? { commandId: row.commandId } : {}), createdAt: row.createdAt.toISOString(),
-  })
+  return hydrateProjectVersionRowV3(row)
 }
 
 function hydrateLut(row: V2WorkspaceLutVersion) {
@@ -229,6 +190,7 @@ function hydrate(row: StoredSelection, replayed: boolean): Readonly<ProjectLutSe
     ...(commandRow.reason ? { reason: commandRow.reason } : {}), idempotencyKey: commandRow.idempotencyKey, createdAt: commandRow.createdAt.toISOString(),
   })
   const version = hydrateVersion(row.resultVersion)
+  if (commandRow.commandHash !== command.commandHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT command seal is invalid')
   const expectedPayload = { schemaVersion: 2, ...selection.requested, intensity: selection.intensity, impact }
   if (
     command.type !== 'set-project-lut-selection' || stableSerialize(command.payload) !== stableSerialize(expectedPayload) ||
@@ -295,38 +257,36 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
   }
 
   async readContext(input: { workspaceId: string; projectId: string; requested: ProjectLutSelectionRequest }): Promise<Readonly<ProjectLutSelectionContext> | null> {
-    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, include: { currentVersion: { include: { editPlanSnapshot: true } } } })
-    if (!project?.currentVersion) return null
-    const [resolved, proxyOutputs, finalOutputs] = await Promise.all([
+    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId } })
+    if (!project?.currentVersionId) return null
+    const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
+    if (!parent) return null
+    const currentVersionId = parent.version.id
+        const [resolved, proxyOutputs, finalOutputs] = await Promise.all([
       resolve(this.client, { workspaceId: input.workspaceId, requested: input.requested }),
       this.client.v2ProjectProxyRenderOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
         select: { outputArtifactId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
         select: { outputArtifactId: true, outputAspectRatio: true },
       }),
     ])
-    const editPlan = parse(project.currentVersion.editPlanSnapshot.contentJson, 'current project LUT EditPlan')
-    if (
-      editPlan.projectVersionId !== project.currentVersion.id ||
-      calculateCanonicalHash(editPlan) !== project.currentVersion.editPlanSnapshot.contentHash
-    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Current project LUT EditPlan identity is invalid')
+    const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'current project LUT EditPlan')
+    if (editPlan.projectVersionId !== currentVersionId) throw new DomainError('PERSISTENCE_CONFLICT', 'Current project LUT EditPlan identity is invalid')
     const currentDurationFrames = Number(editPlan.durationFrames)
     if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !project.format) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT render context is incomplete')
     if (currentDurationFrames === 0 && (proxyOutputs.length > 0 || finalOutputs.length > 0)) throw new DomainError('PERSISTENCE_CONFLICT', 'Project outputs exist before a renderable timeline')
     return Object.freeze({
-      currentVersion: hydrateVersion(project.currentVersion),
-      currentEditPlan: Object.freeze(editPlan),
-      currentEditPlanSchemaVersion: project.currentVersion.editPlanSnapshot.schemaVersion,
+      parent,
       ...(resolved.workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision: resolved.workspaceDefaultRevision } : {}),
       ...(resolved.lut ? { resolvedLutVersion: resolved.lut } : {}),
       currentDurationFrames,
       proxyVariantId: project.format,
       outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: project.currentVersion!.id, variantId: project.format! })),
-        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: project.currentVersion!.id, variantId: output.outputAspectRatio })),
+        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: project.format! })),
+        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
       ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
     })
   }
@@ -369,65 +329,38 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
   }
 
   async commitOrReplay(input: Readonly<ProjectLutSelectionCommit>, serializationAttempt = 1): Promise<Readonly<ProjectLutSelectionResult>> {
-    assertCommandAuditBinding(input)
-    assertEditPlanSnapshotBinding(input)
+    const { command, requestFingerprint } = assertSelectionBinding(input)
+    const version = input.bundle.version
     try {
       return await this.client.$transaction(async (transaction) => {
         const project = await transaction.v2Project.findFirst({
-          where: { id: input.command.projectId, workspaceId: input.command.workspaceId },
-          include: { currentVersion: { include: { editPlanSnapshot: true } } },
+          where: { id: command.projectId, workspaceId: command.workspaceId },
+          include: { currentVersion: true },
         })
-        if (!project?.currentVersion || project.currentVersion.id !== input.command.baseVersionId || project.currentVersion.baseHash !== input.command.baseHash || input.version.parentVersionId !== project.currentVersion.id || input.version.sequence !== project.currentVersion.sequence + 1) throw new DomainError('VERSION_CONFLICT', 'Project version changed before LUT selection commit')
-        const baseEditPlan = parse(project.currentVersion.editPlanSnapshot.contentJson, 'project LUT base EditPlan')
-        const expectedResultEditPlan = { ...baseEditPlan, projectVersionId: input.version.id }
         if (
-          baseEditPlan.projectVersionId !== project.currentVersion.id ||
-          baseEditPlan.schemaVersion !== project.currentVersion.editPlanSnapshot.schemaVersion ||
-          calculateCanonicalHash(baseEditPlan) !== project.currentVersion.editPlanSnapshot.contentHash ||
-          input.editPlanSnapshot.contentSchemaVersion !== project.currentVersion.editPlanSnapshot.schemaVersion ||
-          stableSerialize(expectedResultEditPlan) !== input.editPlanSnapshot.contentJson
-        ) throw new DomainError('VERSION_CONFLICT', 'Project LUT base EditPlan changed before commit')
-        const resolved = await resolve(transaction, { workspaceId: input.command.workspaceId, requested: input.selection.requested })
+          !project?.currentVersion || project.currentVersion.id !== command.baseVersionId || project.currentVersion.baseHash !== command.baseHash ||
+          version.parentVersionId !== project.currentVersion.id || version.sequence !== project.currentVersion.sequence + 1 ||
+          input.bundle.state.document.parentStateHash !== project.currentVersion.outputStateHash
+        ) throw new DomainError('VERSION_CONFLICT', 'Project version changed before LUT selection commit')
+        const resolved = await resolve(transaction, { workspaceId: command.workspaceId, requested: input.selection.requested })
         const expectedLut = input.selection.resolved.mode === 'lut-version' ? input.selection.resolved.lut : undefined
         if ((resolved.workspaceDefaultRevision ?? undefined) !== input.selection.workspaceDefaultRevision || resolved.lut?.id !== expectedLut?.versionId || resolved.lut?.recordHash !== expectedLut?.recordHash) throw new DomainError('VERSION_CONFLICT', 'Project LUT selection resolution changed before commit')
         const [proxyOutputs, finalOutputs] = await Promise.all([
           transaction.v2ProjectProxyRenderOperation.findMany({
-            where: { workspaceId: input.command.workspaceId, projectId: input.command.projectId, projectVersionId: input.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+            where: { workspaceId: command.workspaceId, projectId: command.projectId, projectVersionId: command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
             select: { outputArtifactId: true },
           }),
           transaction.v2ProjectFinalExportOperation.findMany({
-            where: { workspaceId: input.command.workspaceId, projectId: input.command.projectId, projectVersionId: input.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+            where: { workspaceId: command.workspaceId, projectId: command.projectId, projectVersionId: command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
             select: { outputArtifactId: true, outputAspectRatio: true },
           }),
         ])
         const currentOutputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: input.command.baseVersionId, variantId: project.format ?? '9:16' })),
-          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: input.command.baseVersionId, variantId: output.outputAspectRatio })),
+          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: command.baseVersionId, variantId: project.format ?? '9:16' })),
+          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: command.baseVersionId, variantId: output.outputAspectRatio })),
         ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
-        if (stableSerialize(currentOutputs) !== stableSerialize(input.command.payload.impact.affectedArtifacts)) throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before LUT selection impact commit')
-        await transaction.v2EditCommand.create({ data: {
-          id: input.command.id, workspaceId: input.command.workspaceId, projectId: input.command.projectId, baseVersionId: input.command.baseVersionId, baseHash: input.command.baseHash,
-          type: input.command.type, scopeJson: stableSerialize(input.command.scope), payloadJson: stableSerialize(input.command.payload), reason: input.command.reason,
-          actorType: input.command.author.type, actorId: input.command.author.id, delegatedUserId: input.command.author.delegatedUserId,
-          ...commandAuditData(input.authenticationAudit),
-          idempotencyKey: input.command.idempotencyKey, requestFingerprint: input.requestFingerprint, createdAt: new Date(input.command.createdAt),
-        } })
-        await transaction.v2ProjectSnapshot.create({ data: {
-          id: input.editPlanSnapshot.id,
-          workspaceId: input.editPlanSnapshot.workspaceId,
-          projectId: input.editPlanSnapshot.projectId,
-          kind: input.editPlanSnapshot.kind,
-          schemaVersion: input.editPlanSnapshot.contentSchemaVersion,
-          contentJson: input.editPlanSnapshot.contentJson,
-          contentHash: input.editPlanSnapshot.contentHash,
-          createdAt: new Date(input.editPlanSnapshot.createdAt),
-        } })
-        await transaction.v2ProjectVersion.create({ data: {
-          id: input.version.id, workspaceId: input.version.workspaceId, projectId: input.version.projectId, sequence: input.version.sequence, parentVersionId: input.version.parentVersionId,
-          briefSnapshotId: input.version.snapshotRefs.brief!, treatmentSnapshotId: input.version.snapshotRefs.treatment, storySnapshotId: input.version.snapshotRefs.story,
-          editPlanSnapshotId: input.version.snapshotRefs.editPlan, policiesSnapshotId: input.version.snapshotRefs.policies, baseHash: input.version.baseHash,
-          createdBy: input.version.createdBy, commandId: input.command.id, createdAt: new Date(input.version.createdAt),
-        } })
+        if (stableSerialize(currentOutputs) !== stableSerialize(command.payload.impact.affectedArtifacts)) throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before LUT selection impact commit')
+        await commitProjectVersionWithOutputState(transaction, input.bundle)
         await transaction.v2ProjectLutSelection.create({ data: {
           id: input.selection.id, workspaceId: input.selection.workspaceId, projectId: input.selection.projectId, commandId: input.selection.commandId,
           baseVersionId: input.selection.baseVersionId, resultVersionId: input.selection.resultVersionId, requestedMode: input.selection.requested.mode,
@@ -437,10 +370,10 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
           workspaceDefaultRevision: input.selection.workspaceDefaultRevision, intensity: input.selection.intensity,
           selectionJson: stableSerialize(input.selection), selectionHash: input.selection.selectionHash, createdAt: new Date(input.selection.createdAt),
         } })
-        const invalidations = createProjectLutSelectionInvalidations({ impact: input.command.payload.impact, createdAt: input.command.createdAt })
+        const invalidations = createProjectLutSelectionInvalidations({ impact: command.payload.impact, createdAt: command.createdAt })
         if (invalidations.length > 0) {
           await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
-            id: item.id, workspaceId: input.command.workspaceId, projectId: input.command.projectId,
+            id: item.id, workspaceId: command.workspaceId, projectId: command.projectId,
             commandId: item.commandId, baseVersionId: item.baseVersionId, resultVersionId: item.resultVersionId,
             artifactId: item.artifactId, kind: item.kind, variantId: item.variantId, status: item.status,
             dependencyTypesJson: stableSerialize(item.dependencyTypes), affectedRangesJson: stableSerialize(item.affectedRanges),
@@ -452,7 +385,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
           create: { projectId: input.selection.projectId, workspaceId: input.selection.workspaceId, selectionId: input.selection.id, updatedAt: new Date(input.selection.createdAt) },
           update: { selectionId: input.selection.id, updatedAt: new Date(input.selection.createdAt) },
         })
-        const updated = await transaction.v2Project.updateMany({ where: { id: input.command.projectId, workspaceId: input.command.workspaceId, currentVersionId: input.command.baseVersionId }, data: { currentVersionId: input.version.id } })
+        const updated = await transaction.v2Project.updateMany({ where: { id: command.projectId, workspaceId: command.workspaceId, currentVersionId: command.baseVersionId }, data: { currentVersionId: version.id } })
         if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project current version changed during LUT selection')
         await transaction.v2PublicEventOutbox.create({ data: {
           id: input.event.id, workspaceId: input.event.workspaceId, type: input.event.type, version: input.event.version, occurredAt: new Date(input.event.occurredAt), sequence: input.event.sequence,
@@ -463,8 +396,8 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const replay = await this.findIdempotent({ workspaceId: input.command.workspaceId, projectId: input.command.projectId, idempotencyKey: input.command.idempotencyKey })
-        if (replay?.requestFingerprint === input.requestFingerprint) return replay.result
+        const replay = await this.findIdempotent({ workspaceId: command.workspaceId, projectId: command.projectId, idempotencyKey: command.idempotencyKey })
+        if (replay?.requestFingerprint === requestFingerprint) return replay.result
         if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another project LUT selection')
         throw new DomainError('VERSION_CONFLICT', 'Project LUT selection conflicted with another write')
       }

@@ -339,9 +339,9 @@ function changeMatches(
 }
 
 export class PrismaAssetRightsRepository implements AssetRightsRepository {
-  private readonly client: PrismaClient
+  private readonly client: PrismaClient | Prisma.TransactionClient
 
-  constructor(client: PrismaClient) {
+  constructor(client: PrismaClient | Prisma.TransactionClient) {
     this.client = client
   }
 
@@ -431,7 +431,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Asset rights change does not match its snapshot')
     }
     try {
-      return await this.client.$transaction(async (transaction) => {
+      const execute = async (transaction: Prisma.TransactionClient) => {
         const artifact = await transaction.v2MediaArtifact.findFirst({
           where: { id: prototype.artifactId, workspaceId: prototype.workspaceId },
         })
@@ -546,8 +546,13 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
           snapshot: hydrateAssetRights(selected),
           replayed: false,
         }
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }
+      return await ('$transaction' in this.client
+        ? this.client.$transaction(execute, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+        : execute(this.client))
     } catch (error) {
+      // An enclosing transaction owns retries; never retry inside its aborted snapshot.
+      if (!('$transaction' in this.client)) throw error
       if (isSerializationConflict(error)) {
         if (serializationAttempt < 3) {
           return this.setCurrent(prototype, baseRevision, change, serializationAttempt + 1)

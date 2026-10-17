@@ -7,7 +7,7 @@ import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import { createEditCommand } from '../domain/edit-command.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createReviewPatchCommandImpact, type CommandImpactV1 } from '../domain/command-impact.ts'
 import {
@@ -199,7 +199,7 @@ export function readReviewPatchBatchService(dependencies: { repository: ReviewPa
 export function applyReviewPatchBatchService(dependencies: {
   repository: ReviewPatchBatchRepository
   clock: () => Date
-  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot') => string
+  createId: (kind: 'edit-command' | 'project-version' | 'project-snapshot' | 'project-output-state' | 'output-materialization') => string
   createEventId: () => string
 }) {
   return async function apply(request: {
@@ -237,6 +237,7 @@ export function applyReviewPatchBatchService(dependencies: {
     const commandId = dependencies.createId('edit-command')
     const versionId = dependencies.createId('project-version')
     const snapshotId = dependencies.createId('project-snapshot')
+    const stateId = dependencies.createId('project-output-state')
     const patch = context.batch.patch!
     const editPlan = materializePatchEditPlan({
       editPlan: context.editPlan,
@@ -302,26 +303,17 @@ export function applyReviewPatchBatchService(dependencies: {
       contentHash: editPlanHash,
       createdAt,
     })
-    const version = createProjectVersion({
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: context.currentVersion.sequence + 1,
-      parentVersionId: context.currentVersion.id,
-      snapshotRefs: { ...context.currentVersion.snapshotRefs, editPlan: snapshotId },
-      baseHash: calculateVersionHash({
-        projectId,
-        sequence: context.currentVersion.sequence + 1,
-        parentVersionId: context.currentVersion.id,
-        previousBaseHash: context.currentVersion.baseHash,
-        commandId,
-        batchId,
-        editPlanHash,
-      }),
-      createdBy: authenticationAudit.clientId,
-      commandId,
-      createdAt,
+    // The patched EditPlan is this Command's own; every output member re-materializes from it and from the
+    // parent's exact normalization observations.
+    const bundle = transitionProjectOutputState({
+      parent: context.parent, command, audit: authenticationAudit, requestFingerprint: applyRequestFingerprint, editPlanSnapshot: snapshot,
+      allocation: {
+        workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: context.currentVersion.id,
+        sequence: context.currentVersion.sequence + 1, createdBy: authenticationAudit.clientId, createdAt,
+      },
+      createMaterializationId: () => dependencies.createId('output-materialization'),
     })
+    const version = bundle.version
     const comparison = Object.freeze({
       beforeVersionId: context.currentVersion.id,
       afterVersionId: versionId,
@@ -357,10 +349,7 @@ export function applyReviewPatchBatchService(dependencies: {
       batchId,
       applyIdempotencyKey: idempotencyKey,
       applyRequestFingerprint,
-      command,
-      authenticationAudit,
-      snapshot,
-      version,
+      bundle,
       event,
       comparison,
       impact,

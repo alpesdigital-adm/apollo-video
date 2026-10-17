@@ -196,6 +196,7 @@ export async function encodeRecording({
   videoInput = null,
   videoInputs = null,
   videoFilter = null,
+  x264Params = null,
   filterComplex = null,
   pcmPath = null,
   sampleRate = SAMPLE_RATE,
@@ -212,6 +213,7 @@ export async function encodeRecording({
     ...(filterComplex && pcmPath ? ['-map', `${pictures.length}:a:0`] : []),
     ...(videoFilter ? ['-vf', videoFilter] : []),
     '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    ...(x264Params ? ['-x264-params', x264Params] : []),
     // Tagged, not left to a reader's guess: an untagged h264 stream probes as
     // `unknown` colorimetry, and a colour pipeline compiled over `unknown`
     // would hand zscale a token it refuses. These four are what ffprobe is then

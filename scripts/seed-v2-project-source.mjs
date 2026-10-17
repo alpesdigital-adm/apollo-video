@@ -17,7 +17,7 @@ import { receiveMediaUploadContentService } from '../src/v2/application/receive-
 import { calculateFileSha256 } from '../src/v2/infrastructure/media/local-artifact-manifest.ts'
 import { LocalMediaUploadStorage } from '../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { PrismaMediaTransferRepository } from '../src/v2/infrastructure/prisma/media-transfer-repository.ts'
-import { PrismaProjectCreationRepository } from '../src/v2/infrastructure/prisma/project-creation-repository.ts'
+import { PrismaCreationOutputBundleRepositoryV2 } from '../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
 import { PrismaPublicOperationRepository } from '../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { createMediaUploadSessionSignerFromEnvironment } from '../src/v2/infrastructure/security/media-upload-session-signer.ts'
 
@@ -155,8 +155,10 @@ export async function seedV2ProjectSource({
   if (!storageRoot) throw new Error('APOLLO_V2_ARTIFACT_ROOT is required')
   const storage = new LocalMediaUploadStorage(storageRoot)
   const signer = createMediaUploadSessionSignerFromEnvironment(environment)
+  // A project has no format any more: it is created empty and sealed. input.format is kept as an option for the
+  // output variant that ingest requires, which this script does not create yet (shared output world, slice S2b).
   const project = await createProjectService({
-    repository: new PrismaProjectCreationRepository(client),
+    repository: new PrismaCreationOutputBundleRepositoryV2(client),
     clock,
     createId: (kind) => `${kind}-${randomUUID()}`,
     createEventId: randomUUID,
@@ -164,18 +166,17 @@ export async function seedV2ProjectSource({
     workspaceId: input.workspaceId,
     name: input.projectName,
     objective: input.objective,
-    format: input.format,
     locale: input.locale,
     ...(input.briefing ? { briefing: input.briefing } : {}),
     actor,
-    idempotency: { clientId: input.clientId, key: `seed-project:${input.seedId}` },
+    idempotencyKey: `seed-project:${input.seedId}`,
   })
 
   const transfers = new PrismaMediaTransferRepository(client)
   const begun = await beginMediaUploadService({ repository: transfers, clock })({
     workspaceId: input.workspaceId,
     actor,
-    projectId: project.project.id,
+    projectId: project.projectAtCreation.id,
     fileName: basename(input.sourceFile),
     rightsConfirmed: true,
     idempotencyKey: `seed-upload:${input.seedId}`,
@@ -239,7 +240,7 @@ export async function seedV2ProjectSource({
     clock,
   })({ upload: verifiedUpload, actor })
   const brief = await client.v2ProjectSnapshot.findUnique({
-    where: { id: project.version.snapshotRefs.brief },
+    where: { id: project.creationVersion.snapshotRefs.brief },
     select: { contentJson: true, contentHash: true },
   })
   if (!brief) throw new Error('Persisted project brief snapshot was not found')
@@ -259,7 +260,7 @@ export async function seedV2ProjectSource({
     throw new Error(`Ingest operation ${operation.operation.id} ended as ${completedOperation.operation.status}`)
   }
   const assets = await client.v2ProjectMediaAsset.findMany({
-    where: { workspaceId: input.workspaceId, projectId: project.project.id, uploadId: verifiedUpload.id },
+    where: { workspaceId: input.workspaceId, projectId: project.projectAtCreation.id, uploadId: verifiedUpload.id },
     orderBy: { role: 'asc' },
     select: { artifactId: true, role: true },
   })
@@ -269,7 +270,7 @@ export async function seedV2ProjectSource({
   const sourceFingerprint = createHash('sha256').update(`${sourceMetadata.size}:${checksum}`).digest('hex')
   return Object.freeze({
     workspaceId: input.workspaceId,
-    project: { id: project.project.id, versionId: project.version.id, replayed: project.replayed },
+    project: { id: project.projectAtCreation.id, versionId: project.creationVersion.id, replayed: project.replayed },
     outputSpec: { ...outputSpec, snapshotHash: brief.contentHash },
     source: { uploadId: verifiedUpload.id, artifactId: sourceAsset.artifactId, proxyArtifactId: proxyAsset.artifactId, checksum, byteSize: sourceMetadata.size.toString(), fingerprint: sourceFingerprint },
     ingestOperation: { id: completedOperation.operation.id, status: completedOperation.operation.status, replayed: operation.replayed },

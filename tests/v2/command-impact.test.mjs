@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 
-import {
-  applyManualEditService,
-  readArtifactInvalidationsService,
-} from '../../src/v2/application/manual-edit.ts'
+import { readArtifactInvalidationsService } from '../../src/v2/application/manual-edit.ts'
 import {
   materializeManualEditPlan,
   timelineViewModelFromEditPlan,
@@ -19,11 +17,14 @@ import {
   parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
-import { applyReviewPatchService } from '../../src/v2/application/review-patch.ts'
-import { applyReviewPatchBatchService } from '../../src/v2/application/review-patch-batch.ts'
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
-import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
+import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
+import { buildRenderElementMap, materializePatchEditPlan, renderElementMapHash } from '../../src/v2/domain/review-system.ts'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 import {
   presentArtifactInvalidationViewV2,
@@ -48,6 +49,71 @@ const resultVersionId = 'project-version-impact-2'
 const commandId = 'edit-command-impact-1'
 const createdAt = '2026-07-31T19:00:00.000Z'
 
+function controlledSourceRightsRow(artifactId) {
+  const rights = createAssetRightsSnapshot({ id: `rights-${artifactId}`, workspaceId,
+    artifactId, sequence: 1,
+    draft: { status: 'approved', allowedUses: ['rendering'], prohibitedUses: [],
+      consent: { status: 'not-required', allowedUses: [] } },
+    createdBy: { type: 'user', id: 'owner-impact' }, createdAt })
+  return { ...rights, allowedUsesJson: '["rendering"]', prohibitedUsesJson: '[]',
+    allowedWorkspaceIdsJson: JSON.stringify(rights.allowedWorkspaceIds),
+    consentStatus: rights.consent.status, allowedMarketsJson: null, allowedLocalesJson: null,
+    allowedSyntheticOperationsJson: null, consentAllowedUsesJson: '[]',
+    consentAllowedMarketsJson: null, consentAllowedLocalesJson: null,
+    consentSyntheticOperationsJson: null, consentExpiresAt: null,
+    consentDocumentArtifactId: null, createdByType: 'user', createdById: 'owner-impact',
+    createdAt: new Date(createdAt), expiresAt: null, owner: null, license: null,
+    sourceNote: null }
+}
+
+function controlledReusableProxyFixture({
+  operationId = 'operation-proxy-9x16',
+  manifestId = 'manifest-proxy-9x16',
+  artifactKey = 'editorial-proxies/base.mp4',
+  onOperationLookup = () => {},
+} = {}) {
+  const artifactId = 'artifact-proxy-9x16'
+  const sha256 = 'd'.repeat(64)
+  const rendererDigest = createHash('sha256')
+    .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex')
+  const createManifest = ({ recipeVersion = EDITORIAL_PROXY_RECIPE_VERSION, digest = rendererDigest } = {}) =>
+    createMediaArtifactManifestV2({
+      artifactKey, artifactSha256: sha256, byteSize: 8_192, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'editorial-proxy', version: recipeVersion,
+        parameters: { inputHash: 'b'.repeat(64), projectVersionId: baseVersionId,
+          editPlanSnapshotId: 'snapshot-edit-1', ocrReceipt: null } },
+      sources: [{ artifactKey: 'masters/source.mp4', sha256: 'c'.repeat(64),
+        role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest } } }],
+    })
+  const manifest = createManifest()
+  // This controlled proxy has no drawn captions; it does not assert face approval.
+  const map = buildRenderElementMap({
+    proxyHash: sha256, fps: 30, durationFrames: 180,
+    canvas: { width: 540, height: 960 }, source: { width: 1920, height: 1080 },
+    clips: plan().videoTracks[0].clips, subtitleCues: [],
+  })
+  const rows = {
+    operation: { operationId, outputArtifactId: artifactId, outputManifestId: manifestId },
+    artifact: { id: artifactId, workspaceId, status: 'available', artifactKey,
+      sha256, byteSize: 8_192n, manifests: [{ id: manifestId, workspaceId, artifactId,
+        manifestHash: manifest.manifestHash, manifestJson: JSON.stringify(manifest) }] },
+    map: { id: `map-${operationId}`, workspaceId, projectId, projectVersionId: baseVersionId,
+      proxyArtifactId: artifactId, proxyHash: sha256, schemaVersion: map.schemaVersion,
+      fps: map.fps, durationFrames: map.durationFrames,
+      canvasWidth: map.canvas.width, canvasHeight: map.canvas.height,
+      mapHash: renderElementMapHash(map), elementsJson: JSON.stringify(map.elements),
+      createdAt: new Date(createdAt) },
+  }
+  return { rows, map, createManifest, persistence: {
+    v2ProjectProxyRenderOperation: { async findFirst(query) {
+      onOperationLookup(query)
+      return rows.operation
+    } },
+    v2MediaArtifact: { async findFirst() { return rows.artifact } },
+    v2RenderElementMap: { async findFirst() { return rows.map } },
+  } }
+}
+
 function impactActor() {
   const auditContext = createExternalAuditContext({
     clientId: 'client-impact-1', credentialId: 'credential-impact-1',
@@ -63,20 +129,22 @@ function impactActor() {
 
 test('T-FR-236 exposes the resulting Command version as the current project head', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.commands.apply')
-  assert.equal(capability.version, '9.0.0')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v7')
+  assert.equal(capability.version, '10.0.0')
+  assert.equal(capability.inputSchemaRef, 'apollo://schemas/apply-project-edit-command-request/v7')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v8')
   for (const previousRef of [
     'apollo://schemas/project-edit-command-applied/v3',
     'apollo://schemas/project-edit-command-applied/v4',
     'apollo://schemas/project-edit-command-applied/v5',
     'apollo://schemas/project-edit-command-applied/v6',
+    'apollo://schemas/project-edit-command-applied/v7',
   ]) {
     assert.equal(getPublicSchema(previousRef).ref, previousRef)
   }
 
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v7').schema)
-  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v7'))) {
+    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v8').schema)
+  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v8'))) {
     const body = structuredClone(example)
     body.data.version = presentProjectVersionV2(
       body.data.version,
@@ -87,6 +155,32 @@ test('T-FR-236 exposes the resulting Command version as the current project head
     mismatched.data.version.visibleState.label = 'superseded'
     assert.equal(validate(mismatched), false)
   }
+})
+
+test('apollo.projects.commands.apply 10.0.0 names the output variant a spoken-content removal edits and states only sealed exclusions', () => {
+  const ajv = () => addFormats(new Ajv2020({ strict: false, allErrors: true }))
+  const request = ajv().compile(getPublicSchema('apollo://schemas/apply-project-edit-command-request/v7').schema)
+  const [removal, replacement, direction] = publicSchemaExamples(getPublicSchema('apollo://schemas/apply-project-edit-command-request/v7'))
+  for (const example of [removal, replacement, direction]) assert.equal(request(example), true, JSON.stringify(request.errors))
+
+  const { variantId: _variantId, ...withoutVariant } = removal
+  assert.equal(request(withoutVariant), false, 'a removal that does not name its variant is not a command')
+  assert.equal(request({ ...replacement, variantId: removal.variantId }), false, 'only the removal edits a variant')
+  assert.equal(request({ ...direction, variantId: removal.variantId }), false, 'only the removal edits a variant')
+
+  const response = ajv().compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v8').schema)
+  const [editorial] = publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v8'))
+  assert.equal(editorial.data.command.type, 'remove-spoken-content')
+  const present = (body) => {
+    const copy = structuredClone(body)
+    copy.data.version = presentProjectVersionV2(copy.data.version, { current: true, previewAvailable: false })
+    return copy
+  }
+  assert.equal(response(present(editorial)), true, JSON.stringify(response.errors))
+  const promised = structuredClone(editorial)
+  promised.data.editorial.exclusions[0].labels = ['31 de janeiro']
+  promised.data.editorial.exclusions[0].matchedText = '31 de janeiro'
+  assert.equal(response(present(promised)), false, 'the response does not promise labels or matchedText the seal does not carry')
 })
 
 test('T-FR-236 exposes manual apply, undo, redo and restore result versions as current', () => {
@@ -341,178 +435,25 @@ test('T-FR-233 persisted impact is content-addressed and rejects tampering', () 
   )
 })
 
-test('T-FR-233 manual Command persists the impact in payload v2 and binds it to the outbox event', async () => {
-  let committed
+// The Command a manual crop persists, rebuilt here from the same domain constructors the service uses. The apply
+// service and the repository against a sealed Version3 parent are covered by manual-edit-apply.test.mjs; this test
+// is about what the proxy repositories do with the persisted result.
+test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged proxy only with the attested base proxy map', async () => {
   const basePlan = plan()
-  const service = applyManualEditService({
-    repository: {
-      async findIdempotentResult() { return null },
-      async readContext() {
-        return {
-          version: {
-            id: baseVersionId, workspaceId, projectId, sequence: 1,
-            snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-1', policies: 'snapshot-policy-1' },
-            baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', createdAt,
-          },
-          editPlan: basePlan,
-          editPlanHash: 'b'.repeat(64),
-          availableAssetIds: ['source-1'],
-          renderVariantIds: ['9:16'],
-          outputReferences: outputs,
-          history: [],
-        }
-      },
-      async commitOrReplay(bundle) {
-        committed = bundle
-        return {
-          command: bundle.command,
-          version: bundle.version,
-          editPlan: JSON.parse(bundle.snapshot.contentJson),
-          timeline: timelineViewModelFromEditPlan({
-            editPlan: JSON.parse(bundle.snapshot.contentJson),
-            versionId: bundle.version.id,
-            revision: bundle.version.sequence,
-            selectedClipId: 'clip-1',
-          }),
-          comparison: bundle.comparison,
-          impact: bundle.impact,
-          invalidations: createCommandArtifactInvalidations({
-            impact: bundle.impact,
-            createdAt: bundle.command.createdAt,
-          }),
-          replayed: false,
-        }
-      },
-    },
-    clock: () => new Date('2026-07-31T19:01:00.000Z'),
-    createId: (kind) => ({
-      'edit-command': commandId,
-      'project-version': resultVersionId,
-      'project-snapshot': 'project-snapshot-impact-2',
-    })[kind],
-    createEventId: () => '8c196f8c-5da2-4ac7-9c51-7a4cf42575f1',
-  })
-  const result = await service({
-    workspaceId, projectId, baseVersionId, baseHash: 'a'.repeat(64), expectedRevision: 1,
-    action: 'apply', variantId: '9:16', targetId: 'clip-1',
-    operation: {
-      kind: 'crop', clipId: 'clip-1',
-      crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
-    },
-    actor: impactActor(),
-    idempotencyKey: 'command-impact-test-1',
-  })
-  assert.equal(committed.command.payload.schemaVersion, 2)
-  assert.equal(committed.command.payload.impact.impactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.commandImpactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.invalidatedArtifactCount, 2)
-  assert.equal(committed.event.data.minimalRenderCount, 1)
-  assert.equal(committed.command.payload.impact.changeKinds[0], 'crop')
-  assert.deepEqual(JSON.parse(committed.snapshot.contentJson).videoTracks[0].clips[0].crop, {
-    x: 0.2, y: 0, width: 0.6, height: 1,
-  })
-  await assert.rejects(
-    () => service({
-      workspaceId, projectId, baseVersionId, baseHash: 'a'.repeat(64), expectedRevision: 1,
-      action: 'apply', variantId: '16:9', targetId: 'clip-1',
-      operation: { kind: 'inspect', clipId: 'clip-1', patch: { layout: 'unsafe-scope' } },
-      actor: impactActor(),
-      idempotencyKey: 'command-impact-invalid-variant',
-    }),
-    (error) => error.code === 'INVALID_ARGUMENT' && /variant/.test(error.message),
-  )
-  const driftRepository = new PrismaManualEditRepository({
-    async $transaction(callback) {
-      return callback({
-        v2EditCommand: { async findUnique() { return null } },
-        v2Project: { async findFirst() { return {
-          format: '9:16',
-          currentVersion: { id: baseVersionId, baseHash: 'a'.repeat(64), sequence: 1 },
-        } } },
-        v2ProjectProxyRenderOperation: { async findMany() { return [
-          { outputArtifactId: 'artifact-proxy-9x16' },
-          { outputArtifactId: 'artifact-proxy-concurrent' },
-        ] } },
-        v2ProjectFinalExportOperation: { async findMany() { return [
-          { outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' },
-        ] } },
-      })
-    },
-  })
-  await assert.rejects(
-    () => driftRepository.commitOrReplay(committed),
-    (error) => error.code === 'VERSION_CONFLICT' && /outputs changed/.test(error.message),
-  )
-
-  let persistedInvalidations = []
-  const baseVersionRow = {
-    id: baseVersionId, workspaceId, projectId, sequence: 1, parentVersionId: null,
-    briefSnapshotId: 'snapshot-brief-1', treatmentSnapshotId: null, storySnapshotId: null,
-    editPlanSnapshotId: 'snapshot-edit-1', policiesSnapshotId: 'snapshot-policy-1',
-    baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', commandId: null,
-    createdAt: new Date(createdAt),
-    editPlanSnapshot: { contentJson: JSON.stringify(basePlan), contentHash: 'b'.repeat(64) },
+  const operation = { kind: 'crop', clipId: 'clip-1', crop: { x: 0.2, y: 0, width: 0.6, height: 1 } }
+  const afterPlan = materializeManualEditPlan({ editPlan: basePlan, operation, newVersionId: resultVersionId, createdAt,
+    availableAssetIds: ['source-1'], variantId: '9:16' })
+  const cropImpact = createManualCommandImpact({ commandId, baseVersionId, resultVersionId, variantId: '9:16', targetId: 'clip-1',
+    action: 'apply', operation, beforeEditPlan: basePlan, afterEditPlan: afterPlan, outputReferences: outputs })
+  const committed = {
+    command: { id: commandId, payload: { schemaVersion: 2, action: 'apply', expectedRevision: 1, variantId: '9:16', targetId: 'clip-1', operation, impact: cropImpact } },
+    version: { snapshotRefs: { editPlan: 'project-snapshot-impact-2' } },
+    snapshot: { contentJson: stableSerialize(afterPlan), contentHash: calculateVersionHash(afterPlan) },
   }
-  const resultPlan = JSON.parse(committed.snapshot.contentJson)
-  const resultVersionRow = {
-    id: committed.version.id, workspaceId, projectId, sequence: committed.version.sequence,
-    parentVersionId: committed.version.parentVersionId,
-    briefSnapshotId: committed.version.snapshotRefs.brief,
-    treatmentSnapshotId: null, storySnapshotId: null,
-    editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
-    policiesSnapshotId: committed.version.snapshotRefs.policies,
-    baseHash: committed.version.baseHash, createdBy: committed.version.createdBy,
-    commandId: committed.command.id, createdAt: new Date(committed.version.createdAt),
-    editPlanSnapshot: {
-      contentJson: JSON.stringify(resultPlan), contentHash: committed.snapshot.contentHash,
-    },
-  }
-  const persistedRepository = new PrismaManualEditRepository({
-    async $transaction(callback) {
-      const transaction = {
-        v2EditCommand: {
-          async findUnique() { return null },
-          async create() {},
-          async findUniqueOrThrow() {
-            return {
-              id: committed.command.id, workspaceId, projectId,
-              baseVersionId, baseHash: committed.command.baseHash,
-              type: 'manual-edit', scopeJson: JSON.stringify(committed.command.scope),
-              payloadJson: JSON.stringify(committed.command.payload), reason: null,
-              actorType: committed.command.author.type, actorId: committed.command.author.id,
-              delegatedUserId: null, idempotencyKey: committed.command.idempotencyKey,
-              actorCredentialId: committed.authenticationAudit.credentialId,
-              actorEnvironment: committed.authenticationAudit.environment,
-              actorAuthenticationKind: committed.authenticationAudit.authenticationKind,
-              actorContextHash: committed.authenticationAudit.contextHash,
-              actorDelegatedIdentityId: null, actorWorkspaceRole: null,
-              requestFingerprint: committed.requestFingerprint,
-              createdAt: new Date(committed.command.createdAt),
-              baseVersion: baseVersionRow, resultVersion: resultVersionRow,
-              artifactInvalidations: persistedInvalidations,
-            }
-          },
-        },
-        v2Project: {
-          async findFirst() { return {
-            format: '9:16', currentVersion: { id: baseVersionId, baseHash: 'a'.repeat(64), sequence: 1 },
-          } },
-          async updateMany() { return { count: 1 } },
-        },
-        v2ProjectProxyRenderOperation: { async findMany() { return [{ outputArtifactId: 'artifact-proxy-9x16' }] } },
-        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' }] } },
-        v2ProjectSnapshot: { async create() {} },
-        v2ProjectVersion: { async create() {} },
-        v2CommandArtifactInvalidation: { async createMany({ data }) { persistedInvalidations = data } },
-        v2PublicEventOutbox: { async create() {} },
-      }
-      return callback(transaction)
-    },
-  })
-  const persisted = await persistedRepository.commitOrReplay(committed)
-  assert.deepEqual(persisted.invalidations.map((item) => item.artifactId).toSorted(), [
-    'artifact-final-9x16', 'artifact-proxy-9x16',
-  ])
+  const persistedInvalidations = createCommandArtifactInvalidations({ impact: cropImpact, createdAt }).map((item) => ({
+    ...item, workspaceId, projectId, dependencyTypesJson: JSON.stringify(item.dependencyTypes),
+    affectedRangesJson: JSON.stringify(item.affectedRanges), createdAt: new Date(item.createdAt),
+  }))
   assert.equal(persistedInvalidations.length, 2)
   assert.ok(persistedInvalidations.every((item) => item.status === 'stale'))
   assert.ok(persistedInvalidations.every((item) => item.resultVersionId === resultVersionId))
@@ -539,6 +480,9 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
   })
 
   let proxyLookup
+  const reusableProxyFixture = controlledReusableProxyFixture({
+    onOperationLookup: (query) => { proxyLookup = query },
+  })
   const reusableProxyRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
@@ -565,6 +509,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
         artifact: {
           id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4',
           sha256: 'c'.repeat(64), byteSize: 4_096n,
+          currentRightsSnapshot: controlledSourceRightsRow('source-1'),
           manifests: [{
             id: 'manifest-source-1',
             manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }),
@@ -572,31 +517,22 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
         },
       }],
     } } },
-    v2ProjectProxyRenderOperation: { async findFirst(query) {
-      proxyLookup = query
-      return {
-        operationId: 'operation-proxy-9x16',
-        outputArtifactId: 'artifact-proxy-9x16',
-        outputManifestId: 'manifest-proxy-9x16',
-      }
-    } },
-    v2MediaArtifact: { async findFirst() { return {
-      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8_192n,
-      manifests: [{
-        id: 'manifest-proxy-9x16',
-        manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/base.mp4' } }),
-      }],
-    } } },
+    ...reusableProxyFixture.persistence,
   })
   const reusableSource = await reusableProxyRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(reusableSource.projectVersionId, resultVersionId)
   assert.equal(reusableSource.rangeReuse.commandId, commandId)
   assert.deepEqual(reusableSource.rangeReuse.ranges, [{ startFrame: 0, endFrame: 90 }])
   assert.equal(reusableSource.rangeReuse.artifactId, 'artifact-proxy-9x16')
   assert.deepEqual(proxyLookup.where.operation, { status: 'succeeded', phase: 'completed' })
+  assert.equal(proxyLookup.where.projectVersionId, baseVersionId)
+  assert.equal(proxyLookup.where.operationId, 'operation-proxy-9x16')
+  assert.equal(reusableProxyFixture.rows.map.projectVersionId, baseVersionId)
 
   const selectionImpact = impact({
     operation: { kind: 'select', clipId: 'clip-1' },
   })
+  const selectionFixture = controlledReusableProxyFixture()
   const selectionRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
@@ -620,6 +556,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
         artifact: {
           id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4',
           sha256: 'c'.repeat(64), byteSize: 4_096n,
+          currentRightsSnapshot: controlledSourceRightsRow('source-1'),
           manifests: [{
             id: 'manifest-source-1',
             manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }),
@@ -627,35 +564,115 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
         },
       }],
     } } },
-    v2ProjectProxyRenderOperation: { async findFirst() { return {
-      operationId: 'operation-proxy-9x16',
-      outputArtifactId: 'artifact-proxy-9x16',
-      outputManifestId: 'manifest-proxy-9x16',
-    } } },
-    v2MediaArtifact: { async findFirst() { return {
-      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8_192n,
-      manifests: [{
-        id: 'manifest-proxy-9x16',
-        manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/base.mp4' } }),
-      }],
-    } } },
+    ...selectionFixture.persistence,
   })
   const selectionSource = await selectionRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(selectionSource.projectVersionId, resultVersionId)
   assert.equal(selectionSource.unchangedReuseRequired, true)
   assert.equal(selectionSource.unchangedReuse.operationId, 'operation-proxy-9x16')
   assert.equal(selectionSource.unchangedReuse.artifactId, 'artifact-proxy-9x16')
   assert.equal(selectionSource.unchangedReuse.impactHash, selectionImpact.impactHash)
+
+  for (const [repository, fixture, reuseKind] of [
+    [reusableProxyRepository, reusableProxyFixture, 'rangeReuse'],
+    [selectionRepository, selectionFixture, 'unchangedReuse'],
+  ]) {
+    const validArtifact = fixture.rows.artifact
+    const validMap = fixture.rows.map
+    const withManifest = (manifest) => ({ ...validArtifact, manifests: [{
+      ...validArtifact.manifests[0], manifestHash: manifest.manifestHash,
+      manifestJson: JSON.stringify(manifest),
+    }] })
+    const tamperedManifest = JSON.parse(validArtifact.manifests[0].manifestJson)
+    tamperedManifest.recipe.parametersHash = 'e'.repeat(64)
+    const tamperedElements = JSON.parse(validMap.elementsJson)
+    tamperedElements[0].opacity = 0.5
+    const subtitleMap = { ...fixture.map, elements: [...fixture.map.elements, {
+      ...fixture.map.elements[0], type: 'subtitle', elementId: 'subtitle:cue-1',
+    }] }
+    const cases = [
+      ['missing map', () => { fixture.rows.map = null }],
+      ['missing manifest', () => { fixture.rows.artifact = { ...validArtifact, manifests: [] } }],
+      ['tampered manifest', () => { fixture.rows.artifact = withManifest(tamperedManifest) }],
+      ['substituted output checksum', () => {
+        fixture.rows.artifact = { ...validArtifact, sha256: 'e'.repeat(64) }
+      }],
+      ['tampered map hash', () => { fixture.rows.map = { ...validMap, mapHash: 'e'.repeat(64) } }],
+      ['tampered map content', () => {
+        fixture.rows.map = { ...validMap, elementsJson: JSON.stringify(tamperedElements) }
+      }],
+      ['map bound to result instead of base version', () => {
+        fixture.rows.map = { ...validMap, projectVersionId: resultVersionId }
+      }],
+      ['manifest from another workspace', () => {
+        fixture.rows.artifact = { ...validArtifact, manifests: [{
+          ...validArtifact.manifests[0], workspaceId: 'workspace-other',
+        }] }
+      }],
+      ['old recipe with a valid manifest hash', () => {
+        fixture.rows.artifact = withManifest(fixture.createManifest({ recipeVersion: '1.12.0' }))
+      }],
+      ['wrong renderer provenance with a valid manifest hash', () => {
+        fixture.rows.artifact = withManifest(fixture.createManifest({ digest: 'f'.repeat(64) }))
+      }],
+      ['authenticated map with drawn subtitles', () => {
+        fixture.rows.map = { ...validMap, mapHash: renderElementMapHash(subtitleMap),
+          elementsJson: JSON.stringify(subtitleMap.elements) }
+      }],
+    ]
+    for (const [reason, mutate] of cases) {
+      fixture.rows.artifact = validArtifact
+      fixture.rows.map = validMap
+      mutate()
+      const rejected = await repository.readCurrentSource({ workspaceId, projectId })
+      assert.equal(rejected[reuseKind], undefined, `${reuseKind}: ${reason}`)
+      if (reuseKind === 'unchangedReuse') assert.equal(rejected.unchangedReuseRequired, true, reason)
+    }
+    fixture.rows.artifact = validArtifact
+    fixture.rows.map = validMap
+    assert.equal((await repository.readCurrentSource({ workspaceId, projectId }))[reuseKind].artifactId,
+      validArtifact.id, `${reuseKind}: intact receipt remains reusable`)
+  }
 })
 
 test('T-FR-233 completed proxy atomically records scoped invalidation resolutions', async () => {
   let invalidationQuery
   const resolutionUpserts = []
+  const recipeParameters = { ocrReceipt: null, inputHash: 'a'.repeat(64), format: '9:16',
+    projectVersionId: resultVersionId, editPlanSnapshotId: 'edit-plan-proxy-2' }
+  const outputManifest = createMediaArtifactManifestV2({
+    artifactKey: 'proxies/replacement.mp4', artifactSha256: 'd'.repeat(64),
+    byteSize: 8_192, mediaType: 'video', container: 'mp4',
+    recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+      parameters: recipeParameters },
+    sources: [{ artifactKey: 'source/proxy-2.mp4', sha256: 'c'.repeat(64),
+      role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static',
+        digest: 'f'.repeat(64) } } }],
+  })
+  const sourceArtifactId = 'source-proxy-2'
+  const sourceManifestId = 'source-manifest-proxy-2'
+  const sourceSha256 = 'c'.repeat(64)
+  const sourcePlan = { schemaVersion: 2, state: 'compiled', videoTracks: [{ kind: 'base-video',
+    clips: [{ sourceArtifactId, sourceInFrame: 0, sourceOutFrame: 30,
+      timelineInFrame: 0, timelineOutFrame: 30, rate: 1 }] }], audioTracks: [] }
+  const rights = createAssetRightsSnapshot({ id: 'rights-proxy-2', workspaceId,
+    artifactId: sourceArtifactId, sequence: 1,
+    draft: { status: 'approved', allowedUses: ['rendering'], prohibitedUses: [],
+      consent: { status: 'not-required', allowedUses: [] } },
+    createdBy: { type: 'user', id: 'owner-proxy-2' }, createdAt })
   const repository = new PrismaProjectProxyRenderRepository({
     async $transaction(callback) {
       return callback({
-        v2ProjectProxyRenderOperation: { async findFirst() { return { operationId: 'operation-proxy-2' } } },
-        v2MediaArtifact: { async findFirst() { return { id: 'artifact-proxy-replacement' } } },
-        v2MediaArtifactManifest: { async findFirst() { return { id: 'manifest-proxy-replacement' } } },
+        v2ProjectProxyRenderOperation: { async findFirst() { return {
+          operationId: 'operation-proxy-2', inputHash: recipeParameters.inputHash,
+          projectVersionId: resultVersionId, editPlanSnapshotId: recipeParameters.editPlanSnapshotId,
+          sourceArtifactId, sourceManifestId,
+        } } },
+        v2MediaArtifact: { async findFirst() { return { id: 'artifact-proxy-replacement',
+          artifactKey: 'proxies/replacement.mp4', sha256: 'd'.repeat(64), byteSize: 8_192n,
+          mediaType: 'video', container: 'mp4' } } },
+        v2MediaArtifactManifest: { async findFirst() { return { id: 'manifest-proxy-replacement',
+          manifestHash: outputManifest.manifestHash, manifestJson: JSON.stringify(outputManifest) } } },
         v2ProjectMediaAsset: { async upsert() {} },
         v2CommandArtifactInvalidation: { async findMany(query) {
           invalidationQuery = query
@@ -666,12 +683,40 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
       })
     },
   })
+  // The unit checks invalidation writes; its current source is controlled context. PostgreSQL
+  // integration separately exercises the real scoped reader and transactional rights check.
+  repository.assertCompletionLease = async () => new Date(createdAt)
+  repository.lockCompletionSources = async () => new Date(createdAt)
+  repository.completeProxyTransaction = async () => {}
+  repository.queryProject = async () => ({ id: projectId, workspaceId, locale: 'pt-BR',
+    format: '9:16', currentVersionId: resultVersionId,
+    versions: [{ id: resultVersionId, editPlanSnapshotId: recipeParameters.editPlanSnapshotId,
+      editPlanSnapshot: { workspaceId, projectId, contentJson: JSON.stringify(sourcePlan),
+        contentHash: calculateVersionHash(sourcePlan) }, directorRunAsResult: null }],
+    mediaAssets: [{ artifactId: sourceArtifactId, role: 'source-master',
+      originalFileName: 'source.mp4', createdAt: new Date(createdAt), upload: null,
+      artifact: { id: sourceArtifactId, sha256: sourceSha256, byteSize: 1_024n,
+        mediaType: 'video', container: 'mp4', status: 'available',
+        currentRightsSnapshot: { ...rights, allowedUsesJson: '["rendering"]',
+          prohibitedUsesJson: '[]', allowedWorkspaceIdsJson: JSON.stringify(rights.allowedWorkspaceIds),
+          consentStatus: rights.consent.status,
+          allowedMarketsJson: null, allowedLocalesJson: null,
+          allowedSyntheticOperationsJson: null, consentAllowedUsesJson: '[]',
+          consentAllowedMarketsJson: null, consentAllowedLocalesJson: null,
+          consentSyntheticOperationsJson: null, consentExpiresAt: null,
+          consentDocumentArtifactId: null, createdByType: 'user', createdById: 'owner-proxy-2',
+          createdAt: new Date(createdAt), expiresAt: null, owner: null, license: null,
+          sourceNote: null },
+        manifests: [{ id: sourceManifestId,
+          manifestJson: JSON.stringify({ artifact: { artifactKey: 'source/proxy-2.mp4' } }) }] } }],
+  })
   await repository.attachCompletedOutput({
     workspaceId, operationId: 'operation-proxy-2', projectId,
     projectVersionId: resultVersionId, variantId: '9:16',
     outputArtifactId: 'artifact-proxy-replacement',
     outputManifestId: 'manifest-proxy-replacement',
-    originalFileName: 'replacement.mp4', createdAt,
+    originalFileName: 'replacement.mp4', createdAt, recipeParameters, ocrReceipt: null,
+    lease: { owner: 'controlled-unit', attempt: 1, now: createdAt }, review: {},
   })
   assert.deepEqual(invalidationQuery.where, {
     workspaceId, projectId, resultVersionId,
@@ -689,47 +734,65 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
   ])
 })
 
-test('T-FR-233 Prisma context discovers only completed proxy/final outputs for the immutable base', async () => {
-  const queries = []
-  const currentVersion = {
-    id: baseVersionId, workspaceId, projectId, sequence: 1, parentVersionId: null,
-    briefSnapshotId: 'snapshot-brief-1', treatmentSnapshotId: null, storySnapshotId: null,
-    editPlanSnapshotId: 'snapshot-edit-1', policiesSnapshotId: 'snapshot-policy-1',
-    baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', commandId: null,
-    createdAt: new Date(createdAt),
-    editPlanSnapshot: {
-      id: 'snapshot-edit-1', contentJson: JSON.stringify(plan()), contentHash: 'b'.repeat(64),
-    },
-  }
-  const repository = new PrismaManualEditRepository({
-    v2Project: { async findFirst() { return {
-      id: projectId, workspaceId, format: '9:16', currentVersion,
-      mediaAssets: [{ artifactId: 'source-1' }], versions: [currentVersion],
-    } } },
-    v2ProjectProxyRenderOperation: { async findMany(query) {
-      queries.push(query)
-      return [{ outputArtifactId: 'artifact-proxy-9x16' }]
-    } },
-    v2ProjectFinalExportOperation: { async findMany(query) {
-      queries.push(query)
-      return [
-        { outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' },
-        { outputArtifactId: 'artifact-final-16x9', outputAspectRatio: '16:9' },
-      ]
-    } },
+test('W65 renderable snapshot attachment accepts only its own sealed null-OCR recipe', async () => {
+  const inputHash = 'a'.repeat(64)
+  const planHash = '7'.repeat(64)
+  const snapshotId = 'snapshot-renderable-proxy-2'
+  const artifactId = 'artifact-snapshot-proxy-2'
+  const manifestId = 'manifest-snapshot-proxy-2'
+  const sourceArtifactId = 'source-snapshot-proxy-2'
+  const sourceManifestId = 'source-manifest-snapshot-proxy-2'
+  const sourceKey = 'source/snapshot-proxy-2.mp4'
+  const sourceSha256 = 'c'.repeat(64)
+  const parameters = { inputHash, projectVersionId: resultVersionId,
+    editPlanSnapshotId: snapshotId, format: '9:16', ocrReceipt: null }
+  const manifest = createMediaArtifactManifestV2({
+    artifactKey: 'proxies/snapshot-proxy-2.mp4', artifactSha256: 'd'.repeat(64),
+    byteSize: 2_048, mediaType: 'video', container: 'mp4',
+    recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION,
+      parameters },
+    sources: [{ artifactKey: sourceKey, sha256: sourceSha256, role: 'source-master',
+      execution: { tool: { id: 'ffmpeg', version: 'static', digest: 'f'.repeat(64) } } }],
   })
-  const context = await repository.readContext({ workspaceId, projectId })
-  assert.deepEqual(context.renderVariantIds, ['9:16'])
-  assert.deepEqual(context.outputReferences.map((item) => item.artifactId), [
-    'artifact-final-16x9', 'artifact-final-9x16', 'artifact-proxy-9x16',
-  ])
-  assert.equal(queries.length, 2)
-  for (const query of queries) {
-    assert.equal(query.where.workspaceId, workspaceId)
-    assert.equal(query.where.projectId, projectId)
-    assert.equal(query.where.projectVersionId, baseVersionId)
-    assert.deepEqual(query.where.operation, { status: 'succeeded', phase: 'completed' })
-  }
+  let attached = 0
+  const repository = new PrismaProjectProxyRenderRepository({
+    async $transaction(callback) {
+      return callback({
+        v2ProjectProxyRenderOperation: { async findFirst() { return {
+          inputHash, projectVersionId: resultVersionId, editPlanSnapshotId: snapshotId,
+          sourceArtifactId, sourceManifestId, renderablePlanId: 'plan-snapshot-proxy-2',
+          renderablePlanHash: planHash, renderableVariantId: '9:16', renderableFormat: '9:16',
+        } } },
+        v2MediaArtifact: { async findFirst() { return { artifactKey: 'proxies/snapshot-proxy-2.mp4',
+          sha256: 'd'.repeat(64), byteSize: 2_048n, mediaType: 'video', container: 'mp4' } } },
+        v2MediaArtifactManifest: { async findFirst() { return {
+          manifestJson: JSON.stringify(manifest), manifestHash: manifest.manifestHash } } },
+        v2ProjectMediaAsset: { async upsert() { attached += 1 } },
+      })
+    },
+  })
+  repository.readRenderableSnapshotSource = async () => ({
+    projectVersionId: resultVersionId, editPlanSnapshotId: snapshotId,
+    editPlanHash: planHash, sourceArtifactId, sourceManifestId,
+    renderSources: [{ artifactKey: sourceKey, sha256: sourceSha256, role: 'source-master' }],
+  })
+  // Isolate recipe/source binding here; transaction fencing is covered by PostgreSQL.
+  repository.assertCompletionLease = async () => new Date(createdAt)
+  repository.lockCompletionSources = async () => new Date(createdAt)
+  repository.completeProxyTransaction = async () => {}
+  const attach = (recipeParameters, ocrReceipt) => repository.attachCompletedSnapshotOutput({
+    workspaceId, operationId: 'operation-snapshot-proxy-2', projectId,
+    variantId: '9:16', outputArtifactId: artifactId, outputManifestId: manifestId,
+    originalFileName: 'snapshot-proxy.mp4', createdAt,
+    recipeParameters, ocrReceipt,
+    lease: { owner: 'controlled-unit', attempt: 1, now: createdAt }, review: {},
+  })
+  await assert.rejects(attach({ ...parameters, ocrReceipt: { envelopeId: 'forged' } }, null),
+    /receipt|recipe/i)
+  await assert.rejects(attach(parameters, { envelopeId: 'forged' }), /receipt|recipe/i)
+  assert.equal(attached, 0)
+  await attach(parameters, null)
+  assert.equal(attached, 1)
 })
 
 test('T-FR-233 stale ranges are canonicalized into an ordered, strictly disjoint list', () => {
@@ -1045,154 +1108,30 @@ test('T-FR-233 batch review preserves disjoint canonical ranges under its own co
   assert.deepEqual(parseCommandImpact(JSON.parse(JSON.stringify(value))), value)
 })
 
-test('T-FR-233 applied review batch persists impact v2 and normalized invalidations', async () => {
-  let committed
-  const patch = {
-    id: 'patch-batch-impact-1', baseVersionId,
-    operations: [
-      { op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1500] },
-      { op: 'update-text', targetId: 'subtitle:cue-1', value: { text: 'Texto revisado' }, rangeMs: [4000, 4500] },
-    ],
-    annotationIds: ['annotation-batch-impact-1', 'annotation-batch-impact-2'],
-    estimatedCost: 0,
-    invalidatedRanges: [[1000, 1500], [4000, 4500]],
-  }
-  const service = applyReviewPatchBatchService({
-    repository: {
-      async readApplyContext() {
-        return {
-          currentVersion: {
-            id: baseVersionId, workspaceId, projectId, sequence: 1,
-            snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-1', policies: 'snapshot-policy-1' },
-            baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', createdAt,
-          },
-          editPlan: plan(), editPlanHash: 'b'.repeat(64), availableAssetIds: ['source-1'],
-          renderVariantIds: ['9:16'], outputReferences: outputs,
-          entries: [],
-          batch: {
-            id: 'review-patch-batch-impact-1', workspaceId, projectId, baseVersionId,
-            mode: 'all-or-nothing', status: 'ready', patch,
-            impact: { operationCount: 2, cost: 0, invalidatedRanges: patch.invalidatedRanges, changedTargets: ['subtitle:cue-1'], expectedScoreDelta: 2, invalidatedArtifacts: ['proxy', 'final'] },
-            conflicts: [],
-            items: patch.annotationIds.map((annotationId, index) => ({
-              id: `review-patch-batch-item-impact-${index + 1}`, annotationId,
-              proposalId: `review-patch-proposal-impact-${index + 1}`, status: 'included',
-              operation: patch.operations[index], conflictIds: [], createdAt, updatedAt: createdAt,
-            })),
-            createdAt, updatedAt: createdAt,
-          },
-        }
-      },
-      async commitOrReplay(bundle) {
-        committed = bundle
-        return {
-          batch: { id: bundle.batchId }, command: bundle.command, version: bundle.version,
-          editPlan: JSON.parse(bundle.snapshot.contentJson), comparison: bundle.comparison,
-          impact: bundle.impact,
-          invalidations: createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt }),
-          replayed: false,
-        }
-      },
-    },
-    clock: () => new Date('2026-08-01T02:00:00.000Z'),
-    createId: (kind) => ({
-      'edit-command': 'edit-command-review-batch-impact-2',
-      'project-version': resultVersionId,
-      'project-snapshot': 'project-snapshot-review-batch-impact-2',
-    })[kind],
-    createEventId: () => '4e0a7962-5347-4bef-a810-95ab71340456',
-  })
-  const result = await service({
-    workspaceId, projectId, batchId: 'review-patch-batch-impact-1', confirmed: true,
-    actor: impactActor(), idempotencyKey: 'review-batch-impact-apply-1',
-  })
-  assert.equal(committed.command.payload.schemaVersion, 2)
-  assert.equal(result.impact.commandType, 'apply-review-patch-batch')
-  assert.equal(committed.command.payload.impact.impactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.commandImpactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.artifactInvalidationCount, 2)
-  assert.deepEqual(result.impact.affectedRanges, [
-    { startFrame: 30, endFrame: 45 },
-    { startFrame: 120, endFrame: 135 },
-  ])
-  assert.equal(result.invalidations.length, 2)
-})
+// The batch apply service (against a sealed Version3 parent) is covered by review-patch-batch-apply.test.mjs.
 
-test('T-FR-233 applied review patch persists impact v2 and normalized invalidations', async () => {
-  let committed
-  const service = applyReviewPatchService({
-    repository: {
-      async readApplyContext() {
-        return {
-          annotation: {
-            id: 'annotation-impact-1', projectVersionId: baseVersionId, frame: 30,
-            timeRangeMs: [1000, 1000], screenshotRef: 'screenshot-impact-1', scope: 'point',
-            targetIds: ['subtitle:cue-1'], applicationScope: { kind: 'frame', targetIds: ['subtitle:cue-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: [], global: false },
-            affectedCount: 1, text: 'Mover legenda', author: { id: 'client-impact-1', name: 'Client', type: 'api-client' }, status: 'open', createdAt,
-          },
-          currentVersion: {
-            id: baseVersionId, workspaceId, projectId, sequence: 1,
-            snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-1', policies: 'snapshot-policy-1' },
-            baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', createdAt,
-          },
-          editPlan: plan(), editPlanHash: 'b'.repeat(64), policies: {}, availableAssetIds: ['source-1'],
-          renderVariantIds: ['9:16'], outputReferences: outputs,
-          proposal: {
-            id: 'review-proposal-impact-1', workspaceId, projectId, annotationId: 'annotation-impact-1', baseVersionId,
-            status: 'ready', interpretationVersion: 'review-patch-interpreter/1.0.0', choices: [],
-            patch: { id: 'patch-impact-1', baseVersionId, operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1000] }], annotationIds: ['annotation-impact-1'], estimatedCost: 0, invalidatedRanges: [[1000, 1000]] },
-            impact: { operationCount: 1, cost: 0, invalidatedRanges: [[1000, 1000]], changedTargets: ['subtitle:cue-1'], expectedScoreDelta: 3, invalidatedArtifacts: ['proxy', 'final'] },
-            gates: [], createdAt, updatedAt: createdAt,
-          },
-        }
-      },
-      async commitOrReplay(bundle) {
-        committed = bundle
-        return {
-          proposal: { id: bundle.proposalId }, command: bundle.command, version: bundle.version,
-          editPlan: JSON.parse(bundle.snapshot.contentJson), comparison: bundle.comparison,
-          impact: bundle.impact,
-          invalidations: createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt }),
-          replayed: false,
-        }
-      },
-    },
-    clock: () => new Date('2026-08-01T01:00:00.000Z'),
-    createId: (kind) => ({
-      'edit-command': 'edit-command-review-impact-4',
-      'project-version': resultVersionId,
-      'project-snapshot': 'project-snapshot-review-impact-2',
-    })[kind],
-    createEventId: () => '3e0a7962-5347-4bef-a810-95ab71340456',
+// The Command a review patch apply persists, rebuilt here from the same domain constructors the service uses.
+// The apply service itself (against a sealed Version3 parent) is covered by review-patch-apply.test.mjs.
+test('T-FR-233 a review patch result reuses proxy ranges only with the attested base proxy map', async () => {
+  const patch = {
+    id: 'patch-impact-1', baseVersionId,
+    operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1000] }],
+    annotationIds: ['annotation-impact-1'], estimatedCost: 0, invalidatedRanges: [[1000, 1000]],
+  }
+  const patchedPlan = materializePatchEditPlan({ editPlan: plan(), patch, newVersionId: resultVersionId, createdAt, availableAssetIds: ['source-1'] })
+  const reviewImpact = createReviewPatchCommandImpact({
+    commandId: 'edit-command-review-impact-4', baseVersionId, resultVersionId, variantIds: ['9:16'],
+    operations: patch.operations, invalidatedRangesMs: patch.invalidatedRanges,
+    beforeEditPlan: plan(), afterEditPlan: patchedPlan, outputReferences: outputs,
   })
-  const result = await service({
-    workspaceId, projectId, proposalId: 'review-proposal-impact-1', confirmed: true,
-    actor: impactActor(), idempotencyKey: 'review-impact-apply-1',
-  })
-  assert.equal(committed.command.payload.schemaVersion, 2)
-  assert.equal(committed.command.payload.impact.impactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.commandImpactHash, result.impact.impactHash)
-  assert.equal(committed.event.data.artifactInvalidationCount, 2)
+  const committed = {
+    command: { id: 'edit-command-review-impact-4', payload: { schemaVersion: 2, proposalId: 'review-proposal-impact-1', annotationIds: patch.annotationIds, patch, impact: reviewImpact } },
+    version: { snapshotRefs: { editPlan: 'project-snapshot-review-impact-2' } },
+    snapshot: { contentJson: stableSerialize(patchedPlan), contentHash: calculateVersionHash(patchedPlan) },
+  }
+  const result = { impact: reviewImpact, invalidations: createCommandArtifactInvalidations({ impact: reviewImpact, createdAt }) }
   assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 30, endFrame: 31 }])
   assert.equal(result.invalidations.length, 2)
-
-  const driftRepository = new PrismaReviewPatchRepository({
-    v2ReviewPatchProposal: { async findFirst() { return null } },
-    async $transaction(callback) {
-      return callback({
-        v2ReviewPatchProposal: { async findFirst() { return { id: committed.proposalId, status: 'ready', baseVersionId } } },
-        v2Project: { async findFirst() { return { format: '9:16', currentVersion: { id: baseVersionId, sequence: 1 } } } },
-        v2ProjectProxyRenderOperation: { async findMany() { return [
-          { outputArtifactId: 'artifact-proxy-9x16' }, { outputArtifactId: 'artifact-proxy-concurrent' },
-        ] } },
-        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' }] } },
-      })
-    },
-  })
-  await assert.rejects(
-    () => driftRepository.commitOrReplay(committed),
-    (error) => error.code === 'VERSION_CONFLICT' && /outputs changed/.test(error.message),
-  )
 
   const persistedInvalidations = result.invalidations.map((invalidation) => ({
     ...invalidation,
@@ -1201,6 +1140,10 @@ test('T-FR-233 applied review patch persists impact v2 and normalized invalidati
     createdAt: new Date(invalidation.createdAt),
     resolutions: [],
   }))
+  const rangeFixture = controlledReusableProxyFixture({
+    operationId: 'operation-review-base-1', manifestId: 'manifest-review-base-1',
+    artifactKey: 'editorial-proxies/review-base.mp4',
+  })
   const rangeRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
@@ -1217,20 +1160,27 @@ test('T-FR-233 applied review patch persists impact v2 and normalized invalidati
         role: 'source-master', artifactId: 'source-1', originalFileName: 'source.mp4', createdAt: new Date(createdAt), upload: null,
         artifact: {
           id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4', sha256: 'c'.repeat(64), byteSize: 4096n,
+          currentRightsSnapshot: controlledSourceRightsRow('source-1'),
           manifests: [{ id: 'manifest-source-1', manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }) }],
         },
       }],
     } } },
-    v2ProjectProxyRenderOperation: { async findFirst() { return {
-      operationId: 'operation-review-base-1', outputArtifactId: 'artifact-proxy-9x16', outputManifestId: 'manifest-review-base-1',
-    } } },
-    v2MediaArtifact: { async findFirst() { return {
-      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8192n,
-      manifests: [{ id: 'manifest-review-base-1', manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/review-base.mp4' } }) }],
-    } } },
+    ...rangeFixture.persistence,
   })
   const rangeSource = await rangeRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(rangeSource.projectVersionId, resultVersionId)
   assert.equal(rangeSource.rangeReuse.commandId, committed.command.id)
   assert.deepEqual(rangeSource.rangeReuse.ranges, [{ startFrame: 30, endFrame: 31 }])
   assert.equal(rangeSource.rangeReuse.artifactId, 'artifact-proxy-9x16')
+  assert.equal(rangeFixture.rows.map.projectVersionId, baseVersionId)
+  const validMap = rangeFixture.rows.map
+  rangeFixture.rows.map = null
+  assert.equal((await rangeRepository.readCurrentSource({ workspaceId, projectId })).rangeReuse, undefined,
+    'a review patch cannot reuse ranges without the base proxy map')
+  rangeFixture.rows.map = { ...validMap, proxyHash: 'e'.repeat(64) }
+  assert.equal((await rangeRepository.readCurrentSource({ workspaceId, projectId })).rangeReuse, undefined,
+    'a review patch cannot reuse a map attesting different MP4 bytes')
+  rangeFixture.rows.map = validMap
+  assert.equal((await rangeRepository.readCurrentSource({ workspaceId, projectId })).rangeReuse.artifactId,
+    'artifact-proxy-9x16')
 })

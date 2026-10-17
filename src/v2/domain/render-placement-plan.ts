@@ -13,7 +13,9 @@ import {
   createSubtitleAnchorPlan,
   validateSubtitleAnchorPlan,
   type SubtitleAnchorCueV1,
+  type SubtitleAnchorPlan,
   type SubtitleAnchorPlanV1,
+  type SubtitleAnchorPlanV2,
   type SubtitleAnchorPolicyV1,
 } from './subtitle-anchor-plan.ts'
 import { deriveSubtitleRegion, type SubtitleRegionV1 } from './subtitle-region.ts'
@@ -42,8 +44,7 @@ export interface RenderPlacementV1 {
   timeRange: Readonly<{ startFrame: number; endFrame: number }>
 }
 
-export interface RenderPlacementPlanV1 {
-  schemaVersion: 'render-placement-plan/v1'
+interface RenderPlacementPlanBase {
   outputSpecId: string
   outputPresetHash: string
   format: OutputAspectRatio
@@ -55,11 +56,21 @@ export interface RenderPlacementPlanV1 {
    * placements below — the only two trustworthy descriptions of what is on screen. `null` when the
    * render carries no cues (or no subtitles at all), which is itself evidence.
    */
-  subtitleAnchorPlan: Readonly<SubtitleAnchorPlanV1> | null
+  subtitleAnchorPlan: Readonly<SubtitleAnchorPlan> | null
   placements: readonly Readonly<RenderPlacementV1>[]
   issues: readonly Readonly<PlacementIssue>[]
   placementPlanHash: string
 }
+
+export type RenderPlacementPlanV1 = Readonly<RenderPlacementPlanBase & {
+  schemaVersion: 'render-placement-plan/v1'
+  subtitleAnchorPlan: Readonly<SubtitleAnchorPlanV1> | null
+}>
+export type RenderPlacementPlanV2 = Readonly<RenderPlacementPlanBase & {
+  schemaVersion: 'render-placement-plan/v2'
+  subtitleAnchorPlan: Readonly<SubtitleAnchorPlanV2>
+}>
+export type RenderPlacementPlan = RenderPlacementPlanV1 | RenderPlacementPlanV2
 
 const SHA256 = /^[a-f0-9]{64}$/
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
@@ -122,8 +133,10 @@ export function createRenderPlacementPlan(input: Readonly<{
     cues: readonly Readonly<SubtitleAnchorCueV1>[]
     perceptionTimeline?: Readonly<PerceptionTimeline>
     policy?: Partial<SubtitleAnchorPolicyV1>
+    faceSafety: Readonly<{ status: 'unknown'; reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' }>
+    ocrEvidence?: Readonly<{ envelopeId: string; envelopeHash: string; inputVersionId: string; timeMapHash: string }>
   }>
-}>): Readonly<RenderPlacementPlanV1> {
+}>): Readonly<RenderPlacementPlan> {
   assertDomain(OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_RENDER_INPUT', 'Placement plan format is not registered')
   const preset = readOutputFormatPreset(input.format)
   assertDomain(
@@ -197,10 +210,13 @@ export function createRenderPlacementPlan(input: Readonly<{
         ...(input.subtitleAnchor.perceptionTimeline ? { perceptionTimeline: input.subtitleAnchor.perceptionTimeline } : {}),
         placements: orderedPlacements,
         ...(input.subtitleAnchor.policy ? { policy: input.subtitleAnchor.policy } : {}),
+        faceSafety: input.subtitleAnchor.faceSafety,
+        ...(input.subtitleAnchor.ocrEvidence ? { ocrEvidence: input.subtitleAnchor.ocrEvidence } : {}),
       })
     : null
   const body = Object.freeze({
-    schemaVersion: 'render-placement-plan/v1' as const,
+    schemaVersion: subtitleAnchorPlan?.schemaVersion === 'subtitle-anchor-plan/v2'
+      ? 'render-placement-plan/v2' as const : 'render-placement-plan/v1' as const,
     outputSpecId: preset.spec.id,
     outputPresetHash: preset.presetHash,
     format: input.format,
@@ -211,7 +227,7 @@ export function createRenderPlacementPlan(input: Readonly<{
     placements: orderedPlacements,
     issues: Object.freeze([...(solved?.issues ?? [])]),
   })
-  const plan = Object.freeze({ ...body, placementPlanHash: calculateCanonicalHash(body) })
+  const plan = Object.freeze({ ...body, placementPlanHash: calculateCanonicalHash(body) }) as Readonly<RenderPlacementPlan>
   validateRenderPlacementPlan(plan)
   return plan
 }
@@ -221,8 +237,13 @@ export function createRenderPlacementPlan(input: Readonly<{
  * the preset identity from the registry, the subtitle region from the resolved preset, and the
  * plan hash from the plan body itself.
  */
-export function validateRenderPlacementPlan(plan: Readonly<RenderPlacementPlanV1>): void {
-  assertDomain(plan.schemaVersion === 'render-placement-plan/v1', 'INVALID_RENDER_INPUT', 'Placement plan schema version is unsupported')
+export function validateRenderPlacementPlan(plan: Readonly<RenderPlacementPlan>): void {
+  assertDomain(plan.schemaVersion === 'render-placement-plan/v1' || plan.schemaVersion === 'render-placement-plan/v2',
+    'INVALID_RENDER_INPUT', 'Placement plan schema version is unsupported')
+  assertDomain(plan.schemaVersion === 'render-placement-plan/v2'
+    ? plan.subtitleAnchorPlan?.schemaVersion === 'subtitle-anchor-plan/v2'
+    : String(plan.subtitleAnchorPlan?.schemaVersion) !== 'subtitle-anchor-plan/v2',
+  'INVALID_RENDER_INPUT', 'Placement and anchor plan versions are inconsistent')
   assertDomain(OUTPUT_ASPECT_RATIOS.includes(plan.format), 'INVALID_RENDER_INPUT', 'Placement plan format is not registered')
   const preset = readOutputFormatPreset(plan.format)
   assertDomain(plan.outputSpecId === preset.spec.id && plan.outputPresetHash === preset.presetHash, 'INVALID_RENDER_INPUT', 'Placement plan output identity drifted from the registry')

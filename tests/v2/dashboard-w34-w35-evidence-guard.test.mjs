@@ -12,6 +12,16 @@ const commit = 'a'.repeat(40)
 const context = { sourceCommit: commit, ciRunId: '1234', applicationName: 'apollo-video-e2e-w29-ci' }
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const clone = (value) => structuredClone(value)
+
+const syntheticPartialCoverage = { origin: 'synthetic-unit-only', source: 'tests/v2/project-dashboard.test.mjs',
+  test: 'W34 synthetic port progress without a total never gains a percentage', postgresAccepted: false, browserObserved: false }
+function rejectedProgress(operationId, projectId) {
+  return { origin: 'raw-postgresql-check-rejection', operationId, projectId, workspaceId: 'controlled-workspace',
+    sqlstate: '23514', constraint: 'public_operations_progress_check', attemptedProgress: { completed: 1, total: null, unit: null },
+    persistedProgressBefore: { completed: 1, total: 4, unit: 'render' }, persistedProgressAfter: { completed: 1, total: 4, unit: 'render' },
+    rowUnchanged: true, statementRollbackReadback: true, countBefore: 7, countAfter: 7 }
+}
+
 const TILE_LABELS = ['Em configuração', 'Em produção', 'Aguardando revisão', 'Concluídos']
 const tiles = (values) => values.map((value, index) => ({ label: TILE_LABELS[index], value }))
 
@@ -77,9 +87,6 @@ function w34Manifest(directory) {
     ['w34-failed-op', 'failed', 'Requer atenção', dashboard({
       latestOperation: operation('w34-failed-op-op', 'failed', 'failed', { completed: 2, total: 4, unit: 'render' }, { error: { code: 'render-failed', retryable: true } }),
     }), origins({ latestOperation: { origin: 'controlled-pg-seed' } }), { phase: 'Etapa com falha', measure: '50%', percent: 50, error: 'render-failed · recuperável' }],
-    ['w34-unmeasured', 'rendering-proxy', 'Renderizando proxy', dashboard({
-      latestOperation: operation('w34-unmeasured-op', 'running', 'rendering', { completed: 1 }),
-    }), origins({ latestOperation: { origin: 'controlled-pg-seed' } }), { phase: 'Renderizando', measure: 'sem total medido', percent: null }],
     ['w34-archived', 'archived', 'Arquivado', dashboard({ administrationRevision: 2, archivedFromStatus: 'draft' }),
       origins({ administration: { origin: 'real-api' } }), null],
   ]
@@ -103,15 +110,17 @@ function w34Manifest(directory) {
     }
   })
   const manifest = {
-    schemaVersion: 'w34-dashboard-aggregate/v1', outcome: 'passed', sourceCommit: commit, ciRunId: '1234',
+    schemaVersion: 'w34-dashboard-aggregate/v2', outcome: 'passed', sourceCommit: commit, ciRunId: '1234',
     runId: '11111111-1111-4111-8111-111111111111',
     database: { applicationName: context.applicationName },
     filter: { text: 'w34-' },
+    progressConstraint: rejectedProgress('w34-versioned-op-new', fixtures.find((item) => item.name === 'w34-versioned').projectId),
+    partialProgressCoverage: clone(syntheticPartialCoverage),
     browser: { pid: 321, mutatingRequests: 0, mobileOverflowPx: 0, desktopOverflowPx: 0 },
     postflight: { browserProcessTerminal: true, cleanupErrors: [] },
     counts: { before: counts(), after: counts() },
     requests: { desktop: { projectGets: 1, mutating: 0 }, mobile: { projectGets: 1, mutating: 0 } },
-    tiles: tiles([1, 2, 0, 1]),
+    tiles: tiles([1, 1, 0, 1]),
     expectedOrder: fixtures.map((item) => item.projectId).reverse(),
     fixtures,
     screenshots: writeShots(directory, ['w34-desktop-aggregate.png', 'w34-mobile-aggregate.png']),
@@ -137,6 +146,19 @@ test('W34 guard accepts a coherent manifest and binds it to the commit, run and 
 
 test('W34 guard rejects every drift between PostgreSQL rows, API projection, card and provenance', () => {
   const mutations = {
+    'legacy evidence schema': (m) => { m.schemaVersion = m.schemaVersion.replace('/v2', '/v1') },
+    'persisted partial progress invented': (m) => {
+      const entry = (m.fixtures ?? m.states).find((item) => item.name.endsWith('processing-25') || item.name === 'w34-versioned')
+      entry.persisted.latestOperation.progress = { completed: 1 }; entry.api = clone(entry.persisted)
+    },
+    'missing SQL negative': (m) => { delete m.progressConstraint },
+    'wrong SQLSTATE': (m) => { m.progressConstraint.sqlstate = '23503' },
+    'wrong CHECK': (m) => { m.progressConstraint.constraint = 'other_check' },
+    'SQL row changed': (m) => { m.progressConstraint.rowUnchanged = false },
+    'SQL count changed': (m) => { m.progressConstraint.countAfter++ },
+    'rollback unobserved': (m) => { m.progressConstraint.statementRollbackReadback = false },
+    'synthetic partial progress claims PG': (m) => { m.partialProgressCoverage.postgresAccepted = true },
+    'synthetic partial progress claims browser': (m) => { m.partialProgressCoverage.browserObserved = true },
     'API differs from the persisted rows': (m) => { m.fixtures[2].api.outputCount = 3 },
     'bare version invented': (m) => { m.fixtures[0].persisted.currentVersion.sequence = 2; m.fixtures[0].api.currentVersion.sequence = 2 },
     'bare operation invented': (m) => { m.fixtures[0].persisted.latestOperation = operation('x', 'queued', 'queued', { completed: 0, total: 4 }); m.fixtures[0].api = clone(m.fixtures[0].persisted) },
@@ -144,9 +166,7 @@ test('W34 guard rejects every drift between PostgreSQL rows, API projection, car
     'superseded annotation counted': (m) => { m.fixtures[1].persisted.openReviewIssueCount = 3; m.fixtures[1].api = clone(m.fixtures[1].persisted) },
     'failed export counted as output': (m) => { m.fixtures[2].persisted.outputs.push({ artifactId: 'artifact-c', aspectRatio: '1:1' }); m.fixtures[2].persisted.outputCount = 3; m.fixtures[2].api = clone(m.fixtures[2].persisted) },
     'error code lost': (m) => { m.fixtures[3].persisted.latestOperation.error = { code: 'other', retryable: true }; m.fixtures[3].api = clone(m.fixtures[3].persisted) },
-    'unmeasured operation gains a total': (m) => { m.fixtures[4].persisted.latestOperation.progress = { completed: 1, total: 4, unit: 'render' }; m.fixtures[4].api = clone(m.fixtures[4].persisted) },
-    'unmeasured card shows a bar': (m) => { m.fixtures[4].card.desktop.bar = { now: '25', width: 'width: 25%;' } },
-    'archived fence lost': (m) => { m.fixtures[5].persisted.archivedFromStatus = null; m.fixtures[5].api = clone(m.fixtures[5].persisted) },
+    'archived fence lost': (m) => { m.fixtures[4].persisted.archivedFromStatus = null; m.fixtures[4].api = clone(m.fixtures[4].persisted) },
     'card facts drift': (m) => { m.fixtures[1].card.mobile.facts.Pendências = '9' },
     'card phase drift': (m) => { m.fixtures[1].card.desktop.phase = 'Na fila' },
     'unlabelled provenance': (m) => { delete m.fixtures[2].origins.outputs },
@@ -181,7 +201,6 @@ const STATES = [
   ['w35-queued', 'rendering-proxy', 'Renderizando proxy', 'info', 'view-progress', 'Acompanhar →', 'controlled-pg-seed', { phase: 'Na fila', percent: 0, op: { completed: 0, total: 4, unit: 'render' } }],
   ['w35-processing-25', 'rendering-proxy', 'Renderizando proxy', 'info', 'view-progress', 'Acompanhar →', 'controlled-pg-seed', { phase: 'Renderizando', percent: 25, op: { completed: 1, total: 4, unit: 'render' } }],
   ['w35-processing-75', 'rendering-final', 'Exportando final', 'info', 'view-progress', 'Acompanhar →', 'controlled-pg-seed', { phase: 'Salvando resultado', percent: 75, op: { completed: 3, total: 4, unit: 'render' } }],
-  ['w35-unmeasured', 'rendering-proxy', 'Renderizando proxy', 'info', 'view-progress', 'Acompanhar →', 'controlled-pg-seed', { phase: 'Renderizando', percent: null, op: { completed: 1 } }],
   ['w35-review', 'reviewing-proxy', 'Revisar proxy', 'warning', 'review-output', 'Revisar agora →', 'controlled-pg-seed', { phase: 'Etapa concluída', percent: 100, op: { completed: 4, total: 4, unit: 'render' } }],
   ['w35-failed', 'failed', 'Requer atenção', 'danger', 'inspect-error', 'Ver erro →', 'controlled-pg-seed', { phase: 'Etapa com falha', percent: 50, op: { completed: 2, total: 4, unit: 'render' } }],
   ['w35-completed', 'completed', 'Concluído', 'success', 'open-result', 'Abrir workspace →', 'controlled-pg-seed', { phase: 'Etapa concluída', percent: 100, op: { completed: 4, total: 4, unit: 'render' } }],
@@ -223,15 +242,17 @@ function w35Manifest(directory) {
   })
   states.find((item) => item.name === 'w35-processing-75').status = 'rendering-final'
   return {
-    schemaVersion: 'w35-dashboard-states/v1', outcome: 'passed', sourceCommit: commit, ciRunId: '1234',
+    schemaVersion: 'w35-dashboard-states/v2', outcome: 'passed', sourceCommit: commit, ciRunId: '1234',
     runId: '22222222-2222-4222-8222-222222222222',
     database: { applicationName: context.applicationName },
     filter: { text: 'w35-' },
+    progressConstraint: rejectedProgress('w35-processing-25-op', states.find((item) => item.name === 'w35-processing-25').projectId),
+    partialProgressCoverage: clone(syntheticPartialCoverage),
     browser: { pid: 654, mutatingRequests: 0, mobileOverflowPx: 0, desktopOverflowPx: 0 },
     postflight: { browserProcessTerminal: true, cleanupErrors: [] },
     counts: { before: counts(), after: counts() },
     requests: { desktop: { projectGets: 12, mutating: 0 }, mobile: { projectGets: 1, mutating: 0 } },
-    tiles: tiles([1, 4, 1, 1]),
+    tiles: tiles([1, 3, 1, 1]),
     expectedOrder: states.map((item) => item.projectId).reverse(),
     states,
     empty: {
@@ -261,6 +282,15 @@ test('W35 guard accepts a coherent manifest and binds it to the commit, run and 
 test('W35 guard rejects wrong label, tone, action, destination, progress, provenance and empty state', () => {
   const state = (manifest, name) => manifest.states.find((item) => item.name === name)
   const mutations = {
+    'legacy evidence schema': (m) => { m.schemaVersion = m.schemaVersion.replace('/v2', '/v1') },
+    'missing SQL negative': (m) => { delete m.progressConstraint },
+    'wrong SQLSTATE': (m) => { m.progressConstraint.sqlstate = '23503' },
+    'wrong CHECK': (m) => { m.progressConstraint.constraint = 'other_check' },
+    'SQL row changed': (m) => { m.progressConstraint.rowUnchanged = false },
+    'SQL count changed': (m) => { m.progressConstraint.countAfter++ },
+    'rollback unobserved': (m) => { m.progressConstraint.statementRollbackReadback = false },
+    'synthetic partial progress claims PG': (m) => { m.partialProgressCoverage.postgresAccepted = true },
+    'synthetic partial progress claims browser': (m) => { m.partialProgressCoverage.browserObserved = true },
     'wrong visible label': (m) => { state(m, 'w35-failed').visibleState.label = 'completed' },
     'wrong tone': (m) => { state(m, 'w35-review').visibleState.tone = 'info' },
     'wrong primary action': (m) => { state(m, 'w35-failed').visibleState.primaryAction = 'open-result' },
@@ -270,8 +300,6 @@ test('W35 guard rejects wrong label, tone, action, destination, progress, proven
     'review destination lost': (m) => { delete state(m, 'w35-review').destination.review },
     'W40 primary review action without review mode': (m) => { state(m, 'w35-review').destination.primary.search = '' },
     'W40 non-review primary action with review mode': (m) => { state(m, 'w35-draft').destination.primary.search = '?mode=review' },
-    'unmeasured shows a bar': (m) => { state(m, 'w35-unmeasured').card.desktop.bar = { now: '10', width: 'width: 10%;' } },
-    'unmeasured shows a percentage': (m) => { state(m, 'w35-unmeasured').card.mobile.percentTexts = ['10%'] },
     'measured shows the wrong number': (m) => { state(m, 'w35-processing-25').card.desktop.bar.now = '40' },
     'measured shows no bar': (m) => { state(m, 'w35-processing-75').card.desktop.bar = null },
     'bar without an operation': (m) => { state(m, 'w35-draft').card.desktop.bar = { now: '0', width: 'width: 0%;' } },

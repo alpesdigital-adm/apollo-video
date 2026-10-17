@@ -312,7 +312,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
-    const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
+    const { PrismaCreationOutputBundleRepositoryV2 } = await import('../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
     const { PrismaProviderJobRepository } = await import('../../src/v2/infrastructure/prisma/provider-job-repository.ts')
     const { PrismaProviderResultArtifactRepository } = await import('../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts')
@@ -386,10 +386,10 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     let entity = 0
     let event = 0
     const project = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client), clock: () => new Date(at(0)),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
       createId: (kind) => `${kind}-provider-journey-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(900_000 + ++event).padStart(12, '0')}`,
-    })({ workspaceId, name: 'Jornada TTS para avatar', objective: 'awareness', format: '9:16', actor, idempotency: { clientId, key: 'provider-journey-project' } })
+    })({ workspaceId, name: 'Jornada TTS para avatar', objective: 'awareness', actor, idempotencyKey: 'provider-journey-project' })
 
     await client.v2MediaArtifact.create({
       data: {
@@ -520,7 +520,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       resolveAvatarCriticBinding: async ({ audioMaster, audioRange, profileSnapshotId, use, market, locale }) => {
         assert.equal(audioMaster.source.kind, 'tts')
         const generation = await generations.findByProviderJob({
-          workspaceId, projectId: project.project.id, providerJobId: audioMaster.source.providerJobId,
+          workspaceId, projectId: project.projectAtCreation.id, providerJobId: audioMaster.source.providerJobId,
         })
         assert.ok(generation)
         const block = await client.v2SyntheticScriptBlock.findUniqueOrThrow({ where: { id: generation.blockId } })
@@ -536,7 +536,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       plans, projects: projectsQuery, profiles: syntheticRepository,
       clock: () => new Date(at(1)), createId: (kind) => `${kind}-provider-journey-${++entity}`,
     })({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.profileSnapshotId, locale: 'pt-BR', scriptText: SCRIPT,
       actor, idempotencyKey: 'provider-journey-script-plan',
     })
@@ -572,14 +572,14 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       enqueueProviderJob: enqueue, clock: () => new Date(at(1)),
     })
     const [ttsGenerationOutcome] = await ensureTts({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       planId, use: 'ads', market: 'BRA', actor,
     })
     assert.equal(ttsGenerationOutcome.action, 'enqueued')
     const [pendingGeneration] = await generations.listByPlan({ workspaceId, planId, statuses: ['pending'] })
     assert.ok(pendingGeneration?.providerJobId)
     const ttsJobId = pendingGeneration.providerJobId
-    const ttsEnqueued = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: ttsJobId })
+    const ttsEnqueued = await providerRepository.read({ workspaceId, projectId: project.projectAtCreation.id, jobId: ttsJobId })
     assert.equal(ttsEnqueued.job.status, 'planned')
 
     // A real PostgreSQL CAS keeps long media work fenced: renewal extends the
@@ -680,7 +680,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       })(`journey-tts-worker-${tick}`)
     }
     for (let stage = 0; stage < 6; stage += 1) await runFreshTtsWorkerOnce()
-    const ttsDone = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: ttsJobId })
+    const ttsDone = await providerRepository.read({ workspaceId, projectId: project.projectAtCreation.id, jobId: ttsJobId })
     const ttsReport = ttsDone.job.criticResultHash
       ? await criticReports.readByHash({ workspaceId, reportHash: ttsDone.job.criticResultHash })
       : null
@@ -695,13 +695,13 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     await settleSyntheticBlockGenerationsService({
       generations, providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
       criticReports, clock: () => new Date(at(8)),
-    })({ workspaceId, projectId: project.project.id, planId, actor })
+    })({ workspaceId, projectId: project.projectAtCreation.id, planId, actor })
     const [settledGeneration] = await generations.listByPlan({ workspaceId, planId, statuses: ['approved'] })
     assert.equal(settledGeneration.providerJobId, ttsJobId)
     // A restarted worker after approval finds nothing to do.
     assert.equal(await runFreshTtsWorkerOnce(), null)
 
-    const ledger = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: ttsJobId })
+    const ledger = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: ttsJobId })
     assert.deepEqual(ledger.map(({ role }) => role), ['alignment-evidence', 'primary-audio'])
     const audioEntry = ledger.find((entry) => entry.role === 'primary-audio')
     const alignmentEntry = ledger.find((entry) => entry.role === 'alignment-evidence')
@@ -722,7 +722,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
 
     // Replay is byte-identical and charges nothing new.
     const ttsReplayed = await ensureTts({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       planId, use: 'ads', market: 'BRA', actor,
     })
     assert.deepEqual(ttsReplayed.map(({ action }) => action), ['up-to-date'])
@@ -757,7 +757,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       clock: () => new Date(at(10)), createId: () => 'journey-audio-master',
     })
     const audioMasterRequest = {
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.profileSnapshotId,
       source: { kind: 'tts', text: SCRIPT, providerJobId: ttsJobId },
       audioArtifactId: audioEntry.artifactId, alignmentEvidenceArtifactId: alignmentEntry.artifactId,
@@ -782,7 +782,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
 
     // Avatar leg: the approved master's exact audio is the only allowed input.
     const avatarEnqueued = await enqueue({
-      workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
+      workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.profileSnapshotId, operation: 'audio-avatar',
       adapterId: 'controlled-avatar', adapterVersion: '1.0.0',
       providerInput: { aspectRatio: '9:16' },
@@ -832,7 +832,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       })(`journey-avatar-worker-${tick}`)
     }
     for (let stage = 0; stage < 8; stage += 1) await runFreshAvatarWorkerOnce()
-    const avatarDone = await providerRepository.read({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
+    const avatarDone = await providerRepository.read({ workspaceId, projectId: project.projectAtCreation.id, jobId: avatarJobId })
     const avatarReport = avatarDone.job.criticResultHash
       ? await criticReports.readByHash({ workspaceId, reportHash: avatarDone.job.criticResultHash })
       : null
@@ -843,10 +843,10 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     )
     assert.equal(avatarDone.job.providerJobId, 'controlled-avatar:journey-avatar-key')
     assert.ok(avatarDone.job.resultArtifact, 'approved provider result must remain bound to the job')
-    const avatarEvidence = await provenanceRepository.listEvidenceByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
+    const avatarEvidence = await provenanceRepository.listEvidenceByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: avatarJobId })
     const avatarSubmitEvidence = avatarEvidence.filter((evidence) => evidence.phase === 'submit')
     const avatarRetrieveEvidence = avatarEvidence.filter((evidence) => evidence.phase === 'retrieve')
-    const avatarReceipt = await provenanceRepository.readReceiptByJob({ workspaceId, projectId: project.project.id, jobId: avatarJobId })
+    const avatarReceipt = await provenanceRepository.readReceiptByJob({ workspaceId, projectId: project.projectAtCreation.id, jobId: avatarJobId })
     assert.equal(avatarSubmitEvidence.length, 1)
     assert.equal(avatarRetrieveEvidence.length, 1)
     assert.ok(avatarReceipt, 'avatar execution receipt must exist before critic terminal state')
@@ -854,7 +854,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     assert.equal(avatarReceipt.retrieveEvidenceId, avatarRetrieveEvidence[0].id)
     assert.equal(new Set([avatarSubmitEvidence[0].leaseToken, avatarRetrieveEvidence[0].leaseToken, avatarReceipt.leaseToken]).size, 3, 'submit, retrieve and receipt must retain their distinct legitimate worker leases')
     const avatarLedger = await resultArtifactRepository.listByJob({
-      workspaceId, projectId: project.project.id, jobId: avatarJobId,
+      workspaceId, projectId: project.projectAtCreation.id, jobId: avatarJobId,
     })
     assert.deepEqual(avatarLedger.map(({ role }) => role), ['output-speech-evidence', 'primary-video'])
     assert.deepEqual(avatarReceipt.results.map(({ role }) => role).toSorted(), ['output-speech-evidence', 'primary-video'])
@@ -1049,7 +1049,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       },
     })({
       workspaceId,
-      projectId: project.project.id,
+      projectId: project.projectAtCreation.id,
       providerJobId: avatarJobId,
       profileSnapshotId: registered.profile.profileSnapshotId,
       scriptText: SCRIPT,
@@ -1116,7 +1116,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     assert.equal(catalogued.segments[0].masterHash, promoted.master.masterHash)
 
     const consumerProject = await createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
+      repository: new PrismaCreationOutputBundleRepositoryV2(client),
       clock: () => new Date(at(15)),
       createId: (kind) => `${kind}-consumer-b-${++entity}`,
       createEventId: () => `00000000-0000-4000-8000-${String(900_000 + ++event).padStart(12, '0')}`,
@@ -1124,9 +1124,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       workspaceId,
       name: 'Consumo canônico com composição B',
       objective: 'awareness',
-      format: '9:16',
       actor,
-      idempotency: { clientId, key: 'journey-consumer-project-b' },
+      idempotencyKey: 'journey-consumer-project-b',
     })
     const reuseRepository = new PrismaSyntheticMasterReuseRepository({ client, alignment })
     const currentAuthorizationClock = () => new Date()
@@ -1168,7 +1167,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     })
     const productionBody = {
       workspaceId,
-      projectVersionId: project.version.id,
+      projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.profileSnapshotId,
       audio: {
         artifactId: audioEntry.artifactId,
@@ -1194,21 +1193,21 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     }
     const sourceRun = await createRun({
       ...productionBody,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: project.projectAtCreation.id,
+      projectVersionId: project.creationVersion.id,
       bRoll: [],
       captions: true,
       idempotencyKey: 'journey-production-source-a',
     })
     assert.equal(sourceRun.replayed, false)
     assert.equal(await reuseRepository.readByRun({
-      workspaceId, consumerProjectId: project.project.id, productionRunId: sourceRun.run.plan.id,
+      workspaceId, consumerProjectId: project.projectAtCreation.id, productionRunId: sourceRun.run.plan.id,
     }), null, 'the source project stays on normal production rather than booking cross-project reuse')
 
     const consumerRun = await createRun({
       ...productionBody,
-      projectId: consumerProject.project.id,
-      projectVersionId: consumerProject.version.id,
+      projectId: consumerProject.projectAtCreation.id,
+      projectVersionId: consumerProject.creationVersion.id,
       bRoll: [{
         id: 'journey-consumer-b-broll-insert',
         rangeMs: [500, 1_500],
@@ -1241,26 +1240,26 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     ])
     const consumption = await reuseRepository.readByRun({
       workspaceId,
-      consumerProjectId: consumerProject.project.id,
+      consumerProjectId: consumerProject.projectAtCreation.id,
       productionRunId: consumerRun.run.plan.id,
     })
     assert.ok(consumption)
     assert.equal(consumption.sourceMasterId, promoted.master.id)
-    assert.equal(consumption.observationOpenedAt, consumerProject.project.createdAt)
+    assert.equal(consumption.observationOpenedAt, consumerProject.projectAtCreation.createdAt)
     const reuseDecision = await client.v2SyntheticCacheDecision.findUniqueOrThrow({
       where: { id: consumption.cacheDecisionId },
     })
     assert.equal(reuseDecision.outcome, 'hit')
     assert.equal(reuseDecision.avoidedCostMinorUnits, 0)
-    assert.equal(await client.v2ProviderJob.count({ where: { workspaceId, projectId: consumerProject.project.id } }), 0)
-    assert.equal(await client.v2DirectorBudgetReservation.count({ where: { workspaceId, projectId: consumerProject.project.id } }), 0)
-    assert.equal(await client.v2ProviderTransportEvidence.count({ where: { workspaceId, projectId: consumerProject.project.id, phase: 'submit' } }), 0)
+    assert.equal(await client.v2ProviderJob.count({ where: { workspaceId, projectId: consumerProject.projectAtCreation.id } }), 0)
+    assert.equal(await client.v2DirectorBudgetReservation.count({ where: { workspaceId, projectId: consumerProject.projectAtCreation.id } }), 0)
+    assert.equal(await client.v2ProviderTransportEvidence.count({ where: { workspaceId, projectId: consumerProject.projectAtCreation.id, phase: 'submit' } }), 0)
 
     fallbackFixture = await prepareControlledTransformationFallbackFixture({
       runId: process.env.APOLLO_WAVE24_RUN_ID,
       workspaceId,
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: project.projectAtCreation.id,
+      projectVersionId: project.creationVersion.id,
       actor,
       client,
       storage,
@@ -1333,7 +1332,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       idempotencyKey: `synthetic-wave24-fallback-${uiSuffix}`,
       approveReview: async ({ ledger, action, signal }) => {
         const response = await boundedFetch(
-          `${baseUrl}/v1/projects/${encodeURIComponent(project.project.id)}/transformation-fallbacks/${encodeURIComponent(ledger.id)}/actions`,
+          `${baseUrl}/v1/projects/${encodeURIComponent(project.projectAtCreation.id)}/transformation-fallbacks/${encodeURIComponent(ledger.id)}/actions`,
           {
             method: 'POST',
             headers: {
@@ -1555,7 +1554,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       assertSyntheticPhaseGateBrowser,
       summarizeSyntheticPhaseGateCoverage,
     } = await import('./helpers/assert-synthetic-phase-gate-browser.mjs')
-    const gateEndpoint = `${baseUrl}/v1/projects/${encodeURIComponent(project.project.id)}/synthetic-phase-gates`
+    const gateEndpoint = `${baseUrl}/v1/projects/${encodeURIComponent(project.projectAtCreation.id)}/synthetic-phase-gates`
     const expectedMissingLiveChecks = [
       'elevenlabs-audio-alignment-live',
       'heygen-generated-audio-avatar-live',
@@ -1571,8 +1570,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
         method: 'POST',
         headers: { ...bearerHeaders, 'idempotency-key': idempotencyKey },
         body: JSON.stringify({
-          projectVersionId: project.version.id,
-          projectVersionHash: project.version.baseHash,
+          projectVersionId: project.creationVersion.id,
+          projectVersionHash: project.creationVersion.baseHash,
         }),
       }, t.signal),
       label,
@@ -1588,8 +1587,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       `${JSON.stringify(preRenderGate, null, 2)}\n`,
       'utf8',
     )
-    assert.equal(preRenderGate.projectVersionId, project.version.id)
-    assert.equal(preRenderGate.projectVersionHash, project.version.baseHash)
+    assert.equal(preRenderGate.projectVersionId, project.creationVersion.id)
+    assert.equal(preRenderGate.projectVersionHash, project.creationVersion.baseHash)
     assert.equal(preRenderGate.report.approved, false)
     assert.deepEqual([preRenderGate.report.passed, preRenderGate.report.total], [1, 4])
     assert.deepEqual([...preRenderGate.report.missing].sort(), ['F3-GATE-001', 'F3-GATE-004'])
@@ -1605,15 +1604,15 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       'the pre-render gate must declare the reuse evidence it does not have')
 
     const sourceRender = await renderOne({
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
+      projectId: project.projectAtCreation.id,
+      projectVersionId: project.creationVersion.id,
       runId: sourceRun.run.plan.id,
       idempotencyKey: 'synthetic-wave24-render-source-a',
       evidenceName: 'project-a-final',
     })
     const consumerRender = await renderOne({
-      projectId: consumerProject.project.id,
-      projectVersionId: consumerProject.version.id,
+      projectId: consumerProject.projectAtCreation.id,
+      projectVersionId: consumerProject.creationVersion.id,
       runId: consumerRun.run.plan.id,
       idempotencyKey: 'synthetic-wave24-render-consumer-b',
       evidenceName: 'project-b-final',
@@ -1628,16 +1627,16 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       consumerRender.terminal.checkpoint.outputSha256,
       'project B B-roll composition must produce different final bytes from project A',
     )
-    assert.equal(await client.v2ProviderJob.count({ where: { workspaceId, projectId: consumerProject.project.id } }), 0)
-    assert.equal(await client.v2DirectorBudgetReservation.count({ where: { workspaceId, projectId: consumerProject.project.id } }), 0)
-    assert.equal(await client.v2ProviderTransportEvidence.count({ where: { workspaceId, projectId: consumerProject.project.id, phase: 'submit' } }), 0)
+    assert.equal(await client.v2ProviderJob.count({ where: { workspaceId, projectId: consumerProject.projectAtCreation.id } }), 0)
+    assert.equal(await client.v2DirectorBudgetReservation.count({ where: { workspaceId, projectId: consumerProject.projectAtCreation.id } }), 0)
+    assert.equal(await client.v2ProviderTransportEvidence.count({ where: { workspaceId, projectId: consumerProject.projectAtCreation.id, phase: 'submit' } }), 0)
 
     const gateResponse = await boundedFetch(gateEndpoint, {
       method: 'POST',
       headers: { ...bearerHeaders, 'idempotency-key': 'synthetic-wave24-phase-gate' },
       body: JSON.stringify({
-        projectVersionId: project.version.id,
-        projectVersionHash: project.version.baseHash,
+        projectVersionId: project.creationVersion.id,
+        projectVersionHash: project.creationVersion.baseHash,
       }),
     }, t.signal)
     const gate = (await readExpectedPublicResponse(
@@ -1710,16 +1709,16 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       preRenderGate.recordHash,
     ])
     for (const historyGate of historyGates) {
-      assert.equal(historyGate.projectVersionId, project.version.id)
-      assert.equal(historyGate.projectVersionHash, project.version.baseHash)
+      assert.equal(historyGate.projectVersionId, project.creationVersion.id)
+      assert.equal(historyGate.projectVersionHash, project.creationVersion.baseHash)
     }
     await writeFile(join(evidenceRoot, 'phase-gate-history-api.json'), `${JSON.stringify({
       mode: 'real',
       endpoint: 'GET /v1/projects/{projectId}/synthetic-phase-gates?limit=20',
       actor: 'journey API client (bearer)',
-      projectId: project.project.id,
-      projectVersionId: project.version.id,
-      projectVersionHash: project.version.baseHash,
+      projectId: project.projectAtCreation.id,
+      projectVersionId: project.creationVersion.id,
+      projectVersionHash: project.creationVersion.baseHash,
       gates: historyGates.map((historyGate) => ({
         id: historyGate.id,
         createdAt: historyGate.createdAt,
@@ -1735,14 +1734,14 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       })),
     }, null, 2)}\n`, 'utf8')
 
-    assert.equal(typeof project.project.name, 'string')
-    assert.equal(typeof consumerProject.project.name, 'string')
+    assert.equal(typeof project.projectAtCreation.name, 'string')
+    assert.equal(typeof consumerProject.projectAtCreation.name, 'string')
     // W27: the journey actor's own read of the critic report the gate
     // references (the viewer is compared with this record), and the persisted
     // rows the read-only viewer must never add to or remove.
     const readTransformationCriticReportAsJourneyActor = async (reportId) => (await readExpectedPublicResponse(
       await boundedFetch(
-        `${baseUrl}/v1/projects/${encodeURIComponent(project.project.id)}/transformation-critic-reports/${encodeURIComponent(reportId)}`,
+        `${baseUrl}/v1/projects/${encodeURIComponent(project.projectAtCreation.id)}/transformation-critic-reports/${encodeURIComponent(reportId)}`,
         { headers: { authorization: `Bearer ${issued.token}`, accept: 'application/json' } },
         t.signal,
       ),
@@ -1760,7 +1759,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     })
     const browserEvidence = await assertSyntheticPhaseGateBrowser({
       baseUrl,
-      projectId: project.project.id,
+      projectId: project.projectAtCreation.id,
       login: { username: uiUsername, password: uiPassword },
       evidence: {
         screenshotPath: join(evidenceRoot, 'synthetic-phase-gate.png'),
@@ -1777,14 +1776,14 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       history: {
         canonicalGates: historyGates,
         readCanonicalGates: readCanonicalGateHistory,
-        currentVersion: { id: project.version.id, hash: project.version.baseHash },
+        currentVersion: { id: project.creationVersion.id, hash: project.creationVersion.baseHash },
         olderGateId: preRenderGate.id,
-        projectName: project.project.name,
+        projectName: project.projectAtCreation.name,
         secondProject: {
-          id: consumerProject.project.id,
-          name: consumerProject.project.name,
-          versionId: consumerProject.version.id,
-          versionHash: consumerProject.version.baseHash,
+          id: consumerProject.projectAtCreation.id,
+          name: consumerProject.projectAtCreation.name,
+          versionId: consumerProject.creationVersion.id,
+          versionHash: consumerProject.creationVersion.baseHash,
         },
       },
       criticViewer: {
@@ -1823,8 +1822,8 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
     assert.equal(criticViewerCountsAfterBrowser.syntheticPhaseGates, historyGates.length + 1)
     await writeFile(join(evidenceRoot, 'result.json'), `${JSON.stringify({
       runId: process.env.APOLLO_WAVE24_RUN_ID,
-      sourceProjectId: project.project.id,
-      consumerProjectId: consumerProject.project.id,
+      sourceProjectId: project.projectAtCreation.id,
+      consumerProjectId: consumerProject.projectAtCreation.id,
       sourceMasterId: promoted.master.id,
       consumptionId: consumption.id,
       sourceRender: {
@@ -1846,7 +1845,7 @@ test('W24.3 controlled provider to canonical cross-project render and phase-gate
       checks: { covered: 5, total: 8 },
       phaseGateHistory: {
         mode: 'real',
-        projectVersionId: project.version.id,
+        projectVersionId: project.creationVersion.id,
         evaluations: historyAfterBrowser.map((historyGate) => ({
           id: historyGate.id,
           createdAt: historyGate.createdAt,

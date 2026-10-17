@@ -8,7 +8,8 @@ import LogoutButton from '@/components/LogoutButton'
 import SyntheticPhaseGatePanel from '@/components/SyntheticPhaseGatePanel'
 import TransformationReviewPanel from '@/components/TransformationReviewPanel'
 import type { VisibleState } from '@/v2/domain/visible-state'
-import { createEditorReads, createLatestReadFence, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
+import type { ProjectReviewAvailability } from '@/v2/application/ports/project-workspace-query-repository'
+import { createEditorReads, createLatestReadFence, workspaceReviewReadTargets, type EditorReads, type ReadFailure } from '@/app/_operator/editor-reads'
 
 /** What the operator is told about a read that failed — never a stack, a body or a token. */
 function describeReviewFailure(failure: ReadFailure): string {
@@ -601,7 +602,7 @@ interface ContiguousExtractionData {
 interface DirectorRunSummary {
   id: string; status: 'planned' | 'rendering' | 'succeeded' | 'failed'; plannerVersion: string; criticVersion: string;
   baseVersionId: string; resultVersionId: string; treatmentSnapshotId: string; storySnapshotId: string; qualitySnapshotId: string;
-  qualityStatus: 'approved' | 'approved-with-warnings' | 'blocked'; qualityScore: number; decisionCount: number; assumptionCount: number;
+  qualityStatus: 'approved' | 'approved-with-warnings' | 'review-required' | 'blocked'; qualityScore: number; decisionCount: number; assumptionCount: number;
   uncertainties: readonly {
     id: string; label: string; type: string; band: 'review' | 'block'; value: number;
     reasonCodes: readonly string[]; calibrationVersion: string; evidenceCount: number
@@ -610,6 +611,7 @@ interface DirectorRunSummary {
   objective: StrategicObjectiveId; objectiveVersion: number; rubricRef: string; supersedesRunId?: string
 }
 interface WorkspaceData {
+  reviewAvailability: Readonly<ProjectReviewAvailability>
   project: { id: string; name: string; status: string; objective?: string; format?: string; locale?: string; createdAt: string }
   version?: { id: string; sequence: number; baseHash: string; createdAt: string }
   brief?: Record<string, unknown>
@@ -1107,6 +1109,7 @@ export default function ProjectWorkspacePage() {
   const previewSeekSamples = useRef<number[]>([])
   const preservedPreviewTimeMs = useRef<number | null>(null)
   const selectedReviewVersionId = useRef<string | null>(null)
+  const manuallySelectedReviewVersionId = useRef<string | null>(null)
   const sourceCleanupIdempotencyKeys = useRef(new Map<string, string>())
   const validationDecisionIdempotencyKeys =
     useRef(new Map<string, string>())
@@ -1293,6 +1296,8 @@ export default function ProjectWorkspacePage() {
         throw new Error(result.failure.message)
       }
       if (!workspaceRead.ok || !policyRead.ok) return
+      if (workspaceRead.data.project.id !== projectId) throw new Error('O workspace retornou outro projeto.')
+      workspaceReviewReadTargets(workspaceRead.data.version?.id ?? null, workspaceRead.data.reviewAvailability, null)
       setWorkspace(workspaceRead.data)
       setProjectPolicy(policyRead.data)
       const latest = workspaceRead.data.operations[0]
@@ -1316,8 +1321,9 @@ export default function ProjectWorkspacePage() {
         const total = latest.progress?.total ?? 6
         setUploadProgress(80 + Math.round((completed / total) * 20))
       }
+      return workspaceRead.data
     } catch (error) {
-      if (!quiet) setNotice(error instanceof Error ? error.message : 'Não foi possível carregar o workspace.')
+      setNotice(error instanceof Error ? error.message : 'Não foi possível carregar o workspace.')
     } finally {
       if (!quiet) setLoading(false)
     }
@@ -1353,6 +1359,11 @@ export default function ProjectWorkspacePage() {
   useEffect(() => { uploadPhaseRef.current = uploadPhase }, [uploadPhase])
   useEffect(() => {
     reads.setScope({ projectId, sessionEpoch: sessionEpochRef.current })
+    manuallySelectedReviewVersionId.current = null
+    selectedReviewVersionId.current = null
+    setWorkspace(null)
+    setReview(null)
+    setProxyReview(null)
     reviewReadFenceRef.current.invalidate()
     proxyReviewReadFenceRef.current.invalidate()
   }, [projectId, reads])
@@ -1797,16 +1808,6 @@ export default function ProjectWorkspacePage() {
       if (!proxyReviewReadFenceRef.current.isCurrent(readTicket)) return
       if (!result.ok && result.failure.dropped) return
       if (!result.ok && result.failure.kind === 'auth') { router.replace('/login'); return }
-      if (!result.ok && result.failure.kind === 'not-found') {
-        // The API answers PROJECT_NOT_FOUND both for "no proxy review yet" and for a
-        // project this session cannot see, so the code alone cannot tell them apart.
-        // This loader only runs after the workspace read of the same project succeeded
-        // in this session (see the effect below), which is what makes 404 here mean
-        // "no report for this version" rather than "nothing to show".
-        setProxyReview(null)
-        setProxyReviewFailure(null)
-        return
-      }
       if (!result.ok) {
         setProxyReview(null)
         setProxyReviewFailure(result.failure)
@@ -1824,12 +1825,35 @@ export default function ProjectWorkspacePage() {
   }, [projectId, reads, router])
 
   const workspaceVersionId = workspace?.version?.id
-  const workspaceHasMedia = (workspace?.media.length ?? 0) > 0
+  const refreshWorkspaceReviews = useCallback(async (snapshot: WorkspaceData, quiet = true) => {
+    if (snapshot.project.id !== projectId) return
+    const { annotationsVersionId, proxyReviewVersionId: reportVersionId } = workspaceReviewReadTargets(
+      snapshot.version?.id ?? null, snapshot.reviewAvailability, manuallySelectedReviewVersionId.current,
+    )
+    if (!annotationsVersionId) {
+      reviewReadFenceRef.current.invalidate()
+      setReview(null)
+      setReviewLoading(false)
+      setReviewFailure(null)
+    }
+    if (!reportVersionId) {
+      proxyReviewReadFenceRef.current.invalidate()
+      setProxyReview(null)
+      setProxyReviewLoading(false)
+      setProxyReviewFailure(null)
+    }
+    await Promise.all([
+      ...(annotationsVersionId ? [loadReview(quiet, annotationsVersionId)] : []),
+      ...(reportVersionId ? [loadProxyReview(quiet, reportVersionId)] : []),
+    ])
+  }, [loadReview, loadProxyReview, projectId])
+  const reviewAvailabilityKey = JSON.stringify(workspace?.reviewAvailability ?? null)
+  const reviewWorkspaceRef = useRef(workspace)
+  reviewWorkspaceRef.current = workspace
   useEffect(() => {
-    if (!workspaceVersionId || !workspaceHasMedia) return
-    void loadReview(false, workspaceVersionId)
-    void loadProxyReview(true, workspaceVersionId)
-  }, [loadProxyReview, loadReview, workspaceVersionId, workspaceHasMedia])
+    const snapshot = reviewWorkspaceRef.current
+    if (snapshot) void refreshWorkspaceReviews(snapshot, false)
+  }, [refreshWorkspaceReviews, reviewAvailabilityKey])
 
   const activeOperation = workspace?.operations[0]
   const operationActive = Boolean(activeOperation && !activeOperation.visibleState.terminal)
@@ -1842,15 +1866,14 @@ export default function ProjectWorkspacePage() {
     // the previous one settled, so a slow server never stacks rounds, and the
     // coordinator pauses the cycle while the tab is hidden.
     const handle = reads.poll(async () => {
+      const snapshot = await loadWorkspace(true)
       await Promise.all([
-        loadWorkspace(true),
-        loadReview(true, selectedReviewVersionId.current ?? undefined),
-        loadProxyReview(true, workspaceVersionId),
+        ...(snapshot ? [refreshWorkspaceReviews(snapshot)] : []),
         loadSourceCleanups(true),
       ])
     }, { intervalMs: 2500, isTerminal: () => activeOperationTerminalRef.current })
     return () => handle.stop()
-  }, [activeOperationId, activeOperationTerminal, loadProxyReview, loadReview, loadSourceCleanups, loadWorkspace, reads, workspaceVersionId])
+  }, [activeOperationId, activeOperationTerminal, refreshWorkspaceReviews, loadSourceCleanups, loadWorkspace, reads])
 
   const finalOutput = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'final-output'), [workspace])
   const editingProxy = useMemo(() => {
@@ -2223,9 +2246,9 @@ export default function ProjectWorkspacePage() {
           : `${input.action === 'undo' ? 'Undo' : 'Redo'} registrado como versão ${result.version.sequence}.`,
       )
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await loadWorkspace(true)
+      const refreshedWorkspace = await loadWorkspace(true)
       await loadManualTimeline(true)
-      await loadReview(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       preservedPreviewTimeMs.current = null
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar a edição manual.')
@@ -2436,9 +2459,9 @@ export default function ProjectWorkspacePage() {
       setVersionComparison(null)
       setComparePreviews({})
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await loadWorkspace(true)
+      const refreshedWorkspace = await loadWorkspace(true)
       await loadManualTimeline(true)
-      await loadReview(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível registrar a decisão da comparação.')
       await loadManualTimeline(true)
@@ -2521,6 +2544,7 @@ export default function ProjectWorkspacePage() {
     setReviewVersionLoading(true)
     setNotice(null)
     resetReviewElementResolution()
+    manuallySelectedReviewVersionId.current = version.id
     const loaded = await loadReview(false, version.id)
     if (!loaded) preservedPreviewTimeMs.current = null
     setReviewVersionLoading(false)
@@ -2799,7 +2823,8 @@ export default function ProjectWorkspacePage() {
       setReviewPatch(result.proposal)
       setNotice(`Versão ${result.version.sequence} criada. O novo preview entrou na fila de renderização.`)
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await Promise.all([loadWorkspace(true), loadReview(true)])
+      const refreshedWorkspace = await loadWorkspace(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar o ajuste.')
     } finally {
@@ -2879,7 +2904,8 @@ export default function ProjectWorkspacePage() {
       setReviewBatchSelection([])
       setNotice(`Versão ${result.version.sequence} criada com ${result.batch.items.filter((item) => item.status === 'applied').length} ajustes atômicos. O preview entrou na fila.`)
       reads.invalidate('workspace', 'policy-overrides', 'annotations', 'proxy-reviews')
-      await Promise.all([loadWorkspace(true), loadReview(true)])
+      const refreshedWorkspace = await loadWorkspace(true)
+      if (refreshedWorkspace) await refreshWorkspaceReviews(refreshedWorkspace)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar o lote de revisão.')
     } finally {
@@ -3079,7 +3105,7 @@ export default function ProjectWorkspacePage() {
       !latestDirectorRun ||
       latestDirectorRun.resultVersionId !== workspace.version.id ||
       latestDirectorRun.status !== 'succeeded' ||
-      latestDirectorRun.qualityStatus === 'blocked' ||
+      !['approved', 'approved-with-warnings'].includes(latestDirectorRun.qualityStatus) ||
       reviewLoading ||
       reviewFailure !== null ||
       proxyReviewFailure !== null ||
@@ -3447,7 +3473,7 @@ export default function ProjectWorkspacePage() {
           </div>
           <div className="mt-5 rounded-xl border border-[#6962de]/15 bg-[#6962de]/[0.045] p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#8c85e8]">Gate atual</p>
-            <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : 'aprovado com ressalvas'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
+            <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'review-required' ? 'aguardando revisão de segurança facial' : latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : latestDirectorRun.qualityStatus === 'approved-with-warnings' ? 'aprovado com ressalvas' : 'bloqueado'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
             {latestDirectorRun?.uncertainties.length ? (
               <div className="mt-3 flex flex-wrap gap-1.5" data-testid="director-confidence-uncertainties">
                 {latestDirectorRun.uncertainties.map((uncertainty) => (
@@ -3465,7 +3491,7 @@ export default function ProjectWorkspacePage() {
             {workspace.editPlan?.state === 'compiled' ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Zoom automático {workspace.editPlan.automaticZoom ? 'ativo' : 'desativado'}</span><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Proteção facial {workspace.editPlan.subtitleFaceProtection ? 'ativa' : 'pendente'}</span></div> : null}
             {latestDirectorRun ? <div className="mt-3 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.subtitleCueCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">blocos de legenda</span></div><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.transitionCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">transições</span></div></div> : null}
             {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || exportRunning || operationActive} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
-            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || reviewLoading || reviewFailure !== null || proxyReviewFailure !== null || proxyReviewLoading || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || operationActive} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : reviewLoading || reviewFailure || proxyReviewFailure || proxyReviewLoading ? 'Laudo indisponível' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
+            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && ['approved', 'approved-with-warnings'].includes(latestDirectorRun.qualityStatus) ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || reviewLoading || reviewFailure !== null || proxyReviewFailure !== null || proxyReviewLoading || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || operationActive} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : reviewLoading || reviewFailure || proxyReviewFailure || proxyReviewLoading ? 'Laudo indisponível' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
             {finalOutput ? <a className="mt-2 block w-full rounded-lg border border-white/[0.08] px-3 py-2.5 text-center text-xs text-[#aaa49a] transition hover:border-white/[0.16] hover:text-white" download={finalOutput.originalFileName} href={`/v1/artifacts/${encodeURIComponent(finalOutput.artifactId)}/content`}>Baixar MP4 final</a> : null}
           </div>
           {workspace.version ? <SyntheticPhaseGatePanel
@@ -3515,10 +3541,15 @@ export default function ProjectWorkspacePage() {
                 </div>
                 {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].length ? (
                   <div className="mt-3 space-y-1.5" data-testid="proxy-review-issues">
-                    {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].slice(0, 4).map((issue) => (
-                      <div className="flex items-start gap-2 border-l border-white/[0.09] pl-2 text-[9px] leading-4 text-[#8e8980]" key={`${issue.code}:${issue.targetId ?? 'proxy'}`}>
+                    {[
+                      ...[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'),
+                      ...[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.code !== 'FACE_PERCEPTION_UNAVAILABLE').slice(0, 4),
+                    ].map((issue) => (
+                      <div className="flex items-start gap-2 border-l border-white/[0.09] pl-2 text-[9px] leading-4 text-[#8e8980]" key={`${issue.code}:${issue.targetId ?? 'proxy'}:${issue.evidenceRange?.startFrame ?? 'all'}`}>
                         <span className={issue.severity === 'hard' ? 'text-[#dc7777]' : 'text-[#d5ae52]'}>{issue.severity === 'hard' ? '!' : '△'}</span>
-                        <span><span className="font-mono text-[#aaa49a]">{issue.outputSpecId ?? proxyReview.outputSpecId}</span> · {issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
+                        <span><span className="font-mono text-[#aaa49a]">{issue.outputSpecId ?? proxyReview.outputSpecId}</span> · {issue.code === 'FACE_PERCEPTION_UNAVAILABLE'
+                          ? `Legenda ${issue.targetId?.replace(/^subtitle:/, '') ?? 'do trecho'} omitida: cobertura facial desconhecida; variante bloqueada para exportação.`
+                          : issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
                       </div>
                     ))}
                   </div>
@@ -4091,7 +4122,7 @@ export default function ProjectWorkspacePage() {
               aria-live="polite"
             >
               <p className="font-semibold text-[#e7a59b]">
-                Revisão indisponível{workspaceHasMedia ? ' — a mídia já autorizada continua inspecionável abaixo' : ''}.
+                Não foi possível carregar a revisão solicitada.
               </p>
               <p className="mt-1">{describeReviewFailure(reviewFailure)}</p>
               <p className="mt-1 font-mono text-[10px] text-[#b7857d]" data-testid="review-unavailable-code">
@@ -4101,7 +4132,7 @@ export default function ProjectWorkspacePage() {
                 type="button"
                 data-testid="review-retry"
                 disabled={reviewRetryWaitMs > 0}
-                onClick={() => { void loadReview(false, workspaceVersionId, true) }}
+                onClick={() => { void loadReview(false, manuallySelectedReviewVersionId.current ?? review?.session.projectVersionId ?? workspaceVersionId, true) }}
                 className="mt-2 rounded-lg border border-[#d46f63]/40 px-3 py-1.5 text-[11px] font-semibold text-[#e7a59b] disabled:opacity-50"
               >
                 {reviewRetryWaitMs > 0 ? `Tentar novamente em ${Math.ceil(reviewRetryWaitMs / 1000)} s` : 'Tentar novamente'}
@@ -4112,7 +4143,7 @@ export default function ProjectWorkspacePage() {
           {reviewEntry && !review ? (
             <section ref={reviewEntryTarget} tabIndex={-1} data-testid="review-entry-panel" data-entry-mode="review" aria-label="Mesa de revisão editorial" className="mt-5 scroll-mt-6 border-y border-white/[0.08] py-5">
               <p className="text-sm font-semibold text-[#c9c3b9]">Mesa de revisão</p>
-              <p className="mt-1 text-xs text-[#88847d]">{workspaceHasMedia ? 'A revisão será exibida quando um proxy autorizado estiver disponível.' : 'Este projeto ainda não possui mídia e proxy disponíveis para revisão.'}</p>
+              <p className="mt-1 text-xs text-[#88847d]">{!workspace ? 'Aguardando a disponibilidade de revisão do workspace.' : workspace.reviewAvailability.annotations.state === 'available' ? 'Há um proxy registrado para revisão. A mesa será exibida após uma leitura válida.' : workspace.reviewAvailability.annotations.reason === 'no-version' ? 'Este projeto ainda não possui uma versão para revisão.' : 'O workspace ainda não registra um proxy disponível para revisão desta versão.'}</p>
             </section>
           ) : null}
           {review ? (

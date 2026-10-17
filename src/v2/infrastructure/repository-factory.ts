@@ -46,6 +46,9 @@ import {
 } from '../application/run-synthetic-phase-gate.ts'
 import { SpecializedSyntheticProviderResultCritic } from '../application/synthetic-provider-critic.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
+import { runNextPerceptionProducerOperationService } from '../application/run-perception-producer-worker.ts'
+import { runNextTemporalProducerOperationService } from '../application/run-temporal-producer-worker.ts'
+import { runNextFaceProducerOperationService } from '../application/run-face-producer-worker.ts'
 import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
@@ -463,7 +466,7 @@ import { PrismaPerceptionTimelineRepository } from './prisma/perception-timeline
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
-import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
+import { PrismaCreationOutputBundleRepositoryV2, PrismaOperationalOutputBundleRepositoryV3 } from './prisma/output-version-bundle-repository.ts'
 import { PrismaProjectDuplicationRepository } from './prisma/project-duplication-repository.ts'
 import { PrismaProjectAdministrationRepository } from './prisma/project-administration-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
@@ -490,6 +493,16 @@ import { PrismaProxyReviewRepository } from './prisma/proxy-review-repository.ts
 import { PrismaProjectFinalExportRepository } from './prisma/project-final-export-repository.ts'
 import { PrismaExportMatrixRepository } from './prisma/export-matrix-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
+import { PrismaPerceptionProducerRequestContextRepository,
+  PrismaTemporalProducerRequestContextRepository,
+  PrismaFaceProducerRequestContextRepository } from './prisma/perception-producer-request-context-repository.ts'
+import { PrismaPerceptionProducerEnvelopeRepository } from './prisma/perception-producer-envelope-repository.ts'
+import { PrismaTemporalProducerEnvelopeRepository } from './prisma/temporal-producer-envelope-repository.ts'
+import { PrismaFaceProducerEnvelopeRepository } from './prisma/face-producer-envelope-repository.ts'
+import { TesseractOcrVideoAdapter } from './perception/tesseract-ocr-video-adapter.ts'
+import { FfmpegTemporalVideoAnalyzer } from './perception/ffmpeg-temporal-video-analyzer.ts'
+import { FfmpegYunetFaceVideoAnalyzer } from './perception/ffmpeg-yunet-face-video-analyzer.ts'
+import { YunetCpuFaceDetector } from './perception/yunet-cpu-face-detector.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { CompositeOperationTelemetry, StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
 import {
@@ -2013,6 +2026,119 @@ export function createPublicOperationRepository(
   )
 }
 
+export function createPerceptionProducerRequestContextRepository() {
+  return new PrismaPerceptionProducerRequestContextRepository(resolveV2Client())
+}
+
+export function createTemporalProducerRequestContextRepository() {
+  return new PrismaTemporalProducerRequestContextRepository(resolveV2Client())
+}
+
+export function createFaceProducerRequestContextRepository() {
+  return new PrismaFaceProducerRequestContextRepository(resolveV2Client())
+}
+
+export function createPerceptionProducerEnvelopeRepository() {
+  return new PrismaPerceptionProducerEnvelopeRepository(resolveV2Client())
+}
+
+export function createTemporalProducerEnvelopeRepository() {
+  return new PrismaTemporalProducerEnvelopeRepository(resolveV2Client())
+}
+
+export function createFaceProducerEnvelopeRepository() {
+  return new PrismaFaceProducerEnvelopeRepository(resolveV2Client())
+}
+
+/** Diagnostic-only YuNet/V5 composition; every binary and model is pinned at execution. */
+export function createFaceProducerWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for face diagnosis`)
+    return value
+  }
+  const detector = new YunetCpuFaceDetector({
+    pythonExecutable: required('APOLLO_V2_FACE_PYTHON_BIN'),
+    pythonExecutableSha256: required('APOLLO_V2_FACE_PYTHON_SHA256'),
+    pythonModulePath: required('APOLLO_V2_FACE_PYTHON_MODULE_DIR'),
+    modelPath: required('APOLLO_V2_FACE_MODEL_BIN'),
+    bridgePath: required('APOLLO_V2_FACE_BRIDGE_SCRIPT'),
+    bridgeSha256: required('APOLLO_V2_FACE_BRIDGE_SHA256'),
+    opencvBinaryPath: required('APOLLO_V2_FACE_OPENCV_BINARY'),
+    opencvBinarySha256: required('APOLLO_V2_FACE_OPENCV_SHA256'),
+    timeoutMs: 30_000,
+  })
+  return runNextFaceProducerOperationService({
+    repository: createFaceProducerEnvelopeRepository(),
+    materializer: createArtifactSourceMaterializer(environment),
+    analyzer: new FfmpegYunetFaceVideoAnalyzer({
+      ffmpeg: { path: required('APOLLO_V2_FACE_FFMPEG_BIN'),
+        sha256: required('APOLLO_V2_FACE_FFMPEG_SHA256') },
+      ffprobe: { path: required('APOLLO_V2_FACE_FFPROBE_BIN'),
+        sha256: required('APOLLO_V2_FACE_FFPROBE_SHA256') },
+      modelLicense: { path: required('APOLLO_V2_FACE_MODEL_LICENSE'),
+        sha256: required('APOLLO_V2_FACE_MODEL_LICENSE_SHA256') },
+    }, detector),
+    clock,
+  })
+}
+
+export function createTemporalProducerWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for temporal producer`)
+    return value
+  }
+  return runNextTemporalProducerOperationService({
+    repository: createTemporalProducerEnvelopeRepository(),
+    materializer: createArtifactSourceMaterializer(environment),
+    analyzer: new FfmpegTemporalVideoAnalyzer({
+      ffmpegBinary: required('APOLLO_V2_TEMPORAL_FFMPEG_BIN'),
+      ffprobeBinary: required('APOLLO_V2_TEMPORAL_FFPROBE_BIN'),
+      expectedFFmpegSha256: required('APOLLO_V2_TEMPORAL_FFMPEG_SHA256'),
+      expectedFFprobeSha256: required('APOLLO_V2_TEMPORAL_FFPROBE_SHA256'),
+    }),
+    clock,
+  })
+}
+
+export function createPerceptionProducerWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const required = (key: string) => {
+    const value = environment[key]?.trim()
+    if (!value) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${key} is required for OCR producer`)
+    return value
+  }
+  const tessdataDirectory = required('APOLLO_V2_OCR_TESSDATA_DIR')
+  const licensePath = required('APOLLO_V2_OCR_TESSDATA_LICENSE')
+  const languages = required('APOLLO_V2_OCR_LANGUAGES').split(',').map((value) => value.trim())
+  if (languages.length < 1 || languages.some((value) => value !== 'por' && value !== 'eng') ||
+      new Set(languages).size !== languages.length) {
+    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'OCR languages must be unique por/eng values')
+  }
+  return runNextPerceptionProducerOperationService({
+    repository: createPerceptionProducerEnvelopeRepository(),
+    materializer: createArtifactSourceMaterializer(environment),
+    adapter: new TesseractOcrVideoAdapter({
+      ffmpegBinary: required('APOLLO_V2_OCR_FFMPEG_BIN'),
+      ffprobeBinary: required('APOLLO_V2_OCR_FFPROBE_BIN'),
+      tesseractBinary: required('APOLLO_V2_OCR_TESSERACT_BIN'),
+      tessdataDirectory,
+      traineddata: languages.map((language) => ({ language: language as 'por' | 'eng',
+        path: join(tessdataDirectory, `${language}.traineddata`), licensePath })),
+    }),
+    clock,
+  })
+}
+
 function createConfiguredOperationTelemetry(environment: NodeJS.ProcessEnv = process.env): OperationTelemetrySink {
   const persistent = new PrismaOperationTelemetryRepository(resolveV2Client())
   return new AlertingOperationTelemetry(
@@ -2609,8 +2735,6 @@ export function createProjectProxyRenderWorker(
     sources: createArtifactSourceMaterializer(environment), clock,
     renderElementMaps: createRenderElementMapRepository(),
     perceptionTimelines: createPerceptionTimelineRepository(),
-    proxyReviews: createProxyReviewRepository(),
-    catalogOutput: createAutomaticCatalogService(clock),
     colorPipelines: createColorPipelineCompilationRepository(),
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
@@ -2757,7 +2881,11 @@ export function createSourceCleanupWorker(
 }
 
 export function createProjectCreationRepository(): ProjectCreationRepository {
-  return new PrismaProjectCreationRepository(resolveV2Client())
+  return new PrismaCreationOutputBundleRepositoryV2(resolveV2Client())
+}
+
+export function createProjectOutputVariantRepository() {
+  return new PrismaOperationalOutputBundleRepositoryV3(resolveV2Client())
 }
 
 export function createProjectDuplicationRepository(): ProjectDuplicationRepository {

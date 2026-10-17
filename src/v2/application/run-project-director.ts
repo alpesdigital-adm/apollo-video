@@ -22,9 +22,10 @@ import {
   type DesiredActionInput,
 } from '../domain/desired-action.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
-import { createPerceptionTimeline, type PerceptionObservation } from '../domain/perception-timeline.ts'
+import { createPerceptionTimeline, PERCEPTION_KINDS, type PerceptionObservation } from '../domain/perception-timeline.ts'
+import type { PerceptionProducerEnvelope } from '../domain/perception-producer-envelope.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
-import { createProjectVersion } from '../domain/project-version.ts'
+import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
   bindDirectorObjective,
@@ -43,6 +44,7 @@ import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createTreatmentPlan } from '../domain/treatment-plan.ts'
 import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
+import { bindDirectorSnapshotIdentities } from './director-snapshot-identity.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
 import { parseProductionBrief } from '../domain/production-brief.ts'
@@ -55,8 +57,8 @@ import {
   type AuthenticatedExternalActor,
 } from './authenticate-api-client.ts'
 
-export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v1'
-export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v1'
+export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v2'
+export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v2'
 const SUBTITLE_MAX_CHARACTERS = 32
 
 export interface RunProjectDirectorRequest {
@@ -115,7 +117,7 @@ export function projectDirectorRequestFingerprint(input: {
 export interface RunProjectDirectorDependencies {
   repository: DirectorRunRepository
   clock: () => Date
-  createId: (kind: 'director-run' | 'edit-command' | 'project-version' | 'project-snapshot') => string
+  createId: (kind: 'director-run' | 'edit-command' | 'project-version' | 'project-snapshot' | 'project-output-state' | 'output-materialization') => string
   createEventId: () => string
   compileBrief: (input: {
     text: string
@@ -144,6 +146,7 @@ function mergeCoverage(ranges: readonly (readonly [number, number])[]): number {
 
 function buildPerception(input: {
   id: string
+  inputVersionId: string
   durationFrames: number
   fps: number
   transcript: {
@@ -159,6 +162,7 @@ function buildPerception(input: {
     timelineStartFrame: number
     timelineEndFrame: number
   }>[]
+  ocrEnvelope?: Readonly<PerceptionProducerEnvelope>
 }): Readonly<DirectorPerceptionSnapshot> {
   const durationMs = Math.max(1, Math.ceil(input.durationFrames / input.fps * 1000))
   const observations: PerceptionObservation[] = input.words.map((word, index) => ({
@@ -180,18 +184,52 @@ function buildPerception(input: {
   })).map((observation) => observation.endMs <= observation.startMs
     ? { ...observation, endMs: Math.min(durationMs, observation.startMs + 1) }
     : observation)
-  const timeline = createPerceptionTimeline({ durationMs, observations })
+  const sampleRanges = (input.ocrEnvelope?.samples ?? []).map((sample) => {
+    const startMs = Math.min(durationMs - 1, Math.round(sample.timelineFrame / input.fps * 1_000))
+    return [startMs, Math.min(durationMs, Math.max(startMs + 1,
+      Math.round((sample.timelineFrame + 1) / input.fps * 1_000)))] as const
+  })
+  for (const [sampleIndex, sample] of (input.ocrEnvelope?.samples ?? []).entries()) {
+    const [startMs, endMs] = sampleRanges[sampleIndex]!
+    for (const [regionIndex, region] of sample.ocr.entries()) observations.push({
+      id: `ocr-${sample.timelineFrame}-${regionIndex}-${input.ocrEnvelope!.envelopeHash.slice(0, 12)}`,
+      kind: 'ocr', startMs, endMs,
+      value: Object.freeze({ text: region.text, language: region.language, box: region.box,
+        confidence: region.confidence, sourceFrame: sample.sourceFrame,
+        sourcePts: sample.sourcePts, timelineFrame: sample.timelineFrame,
+        sampleImageSha256: sample.imageSha256 }),
+      provenance: Object.freeze({ source: input.ocrEnvelope!.id, model: 'tesseract',
+        version: input.ocrEnvelope!.envelopeHash, confidence: region.confidence }),
+    })
+  }
+  const coverage = PERCEPTION_KINDS.map((kind) => ({ kind,
+    ranges: kind === 'ocr' ? sampleRanges : kind === 'transcript-word'
+      ? observations.filter((item) => item.kind === 'transcript-word')
+        .map((item) => [item.startMs, item.endMs] as const) : [],
+  }))
+  const timeline = createPerceptionTimeline({ durationMs, observations, coverage })
   const speechMs = mergeCoverage(timeline.observations
     .filter((item) => item.kind === 'transcript-word')
     .map((item) => [item.startMs, item.endMs] as const))
   return Object.freeze({
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     id: input.id,
+    inputVersionId: input.inputVersionId,
+    ...(input.ocrEnvelope ? { ocrEvidence: Object.freeze({
+      envelopeId: input.ocrEnvelope.id,
+      envelopeHash: input.ocrEnvelope.envelopeHash,
+      sourceArtifactId: input.ocrEnvelope.sourceArtifactId,
+      sourceSha256: input.ocrEnvelope.sourceSha256,
+      timeMapHash: input.ocrEnvelope.timeMapHash,
+      sampledTimelineFrames: Object.freeze(input.ocrEnvelope.samples.map((sample) => sample.timelineFrame)),
+      emptyTextTimelineFrames: Object.freeze(input.ocrEnvelope.samples.filter((sample) =>
+        sample.ocr.length === 0).map((sample) => sample.timelineFrame)),
+    }) } : {}),
     timeline,
     summary: Object.freeze({
       id: `${input.id}-summary`,
       speechCoverage: Number(Math.min(1, speechMs / durationMs).toFixed(4)),
-      visualCoverage: 'partial' as const,
+      visualCoverage: (sampleRanges.length ? 'partial' : 'absent') as 'partial' | 'absent',
       faceCoverage: 'absent' as const,
       confidence: 0.82,
       sourceTranscriptId: input.transcript.id,
@@ -322,6 +360,8 @@ function buildDecisions(input: {
   hasSelectedInsert: boolean
   briefCompilationRef?: string
   mediaOnly: boolean
+  ocrEnvelopeRef?: string
+  ocrLowerRiskCount: number
 }): readonly Readonly<DirectorDecision>[] {
   const decisions: readonly DirectorDecisionInput[] = [
     {
@@ -345,9 +385,12 @@ function buildDecisions(input: {
       alternatives: ['center-crop', 'top-aligned-inset'],
     },
     {
-      id: 'decision-subtitle-bottom', category: 'subtitle', choice: 'bottom-face-safe-clean',
-      reason: 'Face observations are unavailable, so captions use a conservative region below the inset instead of covering the eyes.',
-      evidenceRefs: [input.transcriptRef, input.policyRef], confidence: 0.96,
+      id: 'decision-subtitle-bottom', category: 'subtitle', choice: 'reserved-bottom-review-required',
+      reason: input.ocrLowerRiskCount > 0
+        ? `Face observations are unavailable. ${input.ocrLowerRiskCount} sampled OCR frame(s) include text in the lower source region; source-to-canvas placement requires localized review. Facial safety remains unknown.`
+        : 'Face observations are unavailable. Captions use the reserved bottom region for proxy review; facial safety remains unknown.',
+      evidenceRefs: [input.transcriptRef, input.policyRef,
+        ...(input.ocrEnvelopeRef ? [input.ocrEnvelopeRef] : [])], confidence: 0.5,
       alternatives: ['lower-third-dynamic', 'manual-anchor-review'],
     },
     {
@@ -368,6 +411,20 @@ function buildDecisions(input: {
     },
   ]
   return validateDirectorDecisions(decisions)
+}
+
+type OcrLowerRisk = Readonly<{ envelopeId: string; sourceFrame: number; rangeMs: readonly [number, number] }>
+function ocrLowerSourceRisks(envelope: Readonly<PerceptionProducerEnvelope> | undefined,
+  fps: number, durationFrames: number): readonly OcrLowerRisk[] {
+  if (!envelope) return Object.freeze([])
+  const durationMs = Math.round(durationFrames / fps * 1_000)
+  return Object.freeze(envelope.samples.filter((sample) => sample.ocr.some((region) =>
+    region.box[1] + region.box[3] > 0.7)).map((sample) => {
+    const startMs = Math.min(durationMs - 1, Math.round(sample.timelineFrame / fps * 1_000))
+    return Object.freeze({ envelopeId: envelope.id, sourceFrame: sample.sourceFrame,
+      rangeMs: Object.freeze([startMs, Math.min(durationMs, Math.max(startMs + 1,
+        Math.round((sample.timelineFrame + 1) / fps * 1_000)))] as const) })
+  }))
 }
 
 function normalizedSpeech(value: string): string {
@@ -422,6 +479,7 @@ function buildQualityReport(input: {
       }
   >
   evaluatedAt: string
+  ocrLowerRisks: readonly OcrLowerRisk[]
 }): Readonly<DirectorQualityReport> {
   const cues = input.plan.subtitleTracks.flatMap((track) => track.cues)
   const allSubtitleText = normalizedSpeech(cues.map((cue) => cue.text).join(' '))
@@ -431,7 +489,8 @@ function buildQualityReport(input: {
   const hardChecks = Object.freeze({
     openingMotionProtected: input.plan.movementPolicy.protectedOpeningFrames >= Math.round(input.plan.fps * 4) && input.plan.effectTracks.length === 0,
     automaticZoomDisabled: input.plan.movementPolicy.automaticZoom === false,
-    subtitlesFaceSafe: cues.every((cue) => cue.anchor === 'bottom') && input.plan.subtitlePolicy.faceProtection === true,
+    // Placement intent is not evidence that rendered captions avoid faces.
+    subtitlesFaceSafe: false,
     subtitlesBounded: cues.every((cue) => cue.text.length <= input.plan.subtitlePolicy.maxCharactersPerBlock),
     forbiddenSpeechAbsent,
     timelineContinuous,
@@ -448,7 +507,7 @@ function buildQualityReport(input: {
   const narrativeIntegrity = hardChecks.openingMotionProtected &&
     hardChecks.automaticZoomDisabled && hardChecks.forbiddenSpeechAbsent &&
     hardChecks.timelineContinuous
-  const legibility = hardChecks.subtitlesFaceSafe && hardChecks.subtitlesBounded
+  const legibility = hardChecks.subtitlesBounded
   const structuredCta = input.storyPlan.blocks.some((block) =>
     block.role === 'cta' && block.content.ctaId === input.desiredActionRef.id)
   assertDomain(
@@ -509,8 +568,7 @@ function buildQualityReport(input: {
         `edit-plan:${input.plan.id}:timeline-continuous=${hardChecks.timelineContinuous}`,
       ]],
       legibility: [legibility ? 100 : 0, [
-        `edit-plan:${input.plan.id}:subtitle-face-safe=${hardChecks.subtitlesFaceSafe}`,
-        `edit-plan:${input.plan.id}:subtitle-bounded=${hardChecks.subtitlesBounded}`,
+        `edit-plan:${input.plan.id}:subtitle-bounded=${hardChecks.subtitlesBounded}:text-only`,
       ]],
       'rights-compliance': [rightsPassed ? 100 : 0, [
         input.sourceRights.state === 'present'
@@ -541,14 +599,20 @@ function buildQualityReport(input: {
     evaluatedAt: input.evaluatedAt,
   })
   const baseIssues: DirectorQualityIssue[] = [{
-    code: 'FACE_PERCEPTION_UNAVAILABLE_SAFE_FALLBACK',
+    code: 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED',
     severity: 'warning' as const,
     category: 'editorial' as const,
-    message: 'No face detector evidence is available; the caption track uses the conservative bottom safe region.',
+    message: 'Face detector evidence is unavailable. Caption placement requires review before approval or final export.',
     rangeMs: [0, Math.round(input.plan.durationFrames / input.plan.fps * 1000)] as const,
     targetId: input.plan.subtitleTracks[0]?.id ?? 'subtitle-track',
     correctable: true,
   }]
+  for (const risk of input.ocrLowerRisks.slice(0, 32)) baseIssues.push(Object.freeze({
+    code: 'OCR_SOURCE_LOWER_REGION_REVIEW_REQUIRED',
+    severity: 'warning' as const, category: 'editorial' as const,
+    message: `Server-produced OCR sample ${risk.sourceFrame} has text in the lower source region; output-canvas collision is unverified. Evidence ${risk.envelopeId}.`,
+    rangeMs: risk.rangeMs, targetId: risk.envelopeId, correctable: true,
+  }))
   const gateIssue = {
     'narrative-integrity': ['STRATEGIC_NARRATIVE_INTEGRITY_FAILED', 'integrity'],
     legibility: ['STRATEGIC_LEGIBILITY_FAILED', 'technical'],
@@ -575,12 +639,13 @@ function buildQualityReport(input: {
     }))
   }
   const issues = Object.freeze(baseIssues)
-  const blocked = !strategic.passed || Object.values(hardChecks).some((value) => !value)
+  const blocked = !strategic.passed || Object.entries(hardChecks).some(([key, value]) => key !== 'subtitlesFaceSafe' && !value)
   return Object.freeze({
-    schemaVersion: 'director-quality-report/v2' as const,
+    schemaVersion: 'director-quality-report/v3' as const,
     id: input.id,
     desiredActionRef: input.desiredActionRef,
-    status: blocked ? 'blocked' as const : issues.length ? 'approved-with-warnings' as const : 'approved' as const,
+    status: blocked ? 'blocked' as const : 'review-required' as const,
+    faceSafety: Object.freeze({ status: 'unknown' as const, reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: Object.freeze([] as string[]) }),
     score: strategic.score / 100,
     strategic,
     hardChecks,
@@ -755,6 +820,21 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     )
     const clips = context.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
     assertDomain(clips.length > 0 && context.editPlan.retimedTranscript.words.length > 0, 'INVALID_COMMAND', 'Director requires a compiled editorial timeline and retimed transcript')
+    const ocrEnvelope = context.ocrEnvelope
+    if (ocrEnvelope) {
+      const sourceRanges = context.editPlan.videoTracks.flatMap((track) => track.clips)
+        .filter((clip) => clip.sourceArtifactId === context.transcript.sourceArtifactId)
+        .map((clip) => ({ clipId: clip.id, sourceInFrame: clip.sourceInFrame,
+          sourceOutFrame: clip.sourceOutFrame, timelineInFrame: clip.timelineInFrame,
+          timelineOutFrame: clip.timelineOutFrame, rate: clip.rate }))
+      assertDomain(ocrEnvelope.authority === 'server-produced' && ocrEnvelope.modality === 'ocr' &&
+        ocrEnvelope.faceSafety === 'unknown' && ocrEnvelope.workspaceId === workspaceId &&
+        ocrEnvelope.projectId === projectId && ocrEnvelope.projectVersionId === baseVersionId &&
+        ocrEnvelope.sourceArtifactId === context.transcript.sourceArtifactId &&
+        ocrEnvelope.editPlanSnapshotId === context.currentVersion.snapshotRefs.editPlan &&
+        stableSerialize(ocrEnvelope.timeMap) === stableSerialize(sourceRanges),
+      'PERSISTENCE_CONFLICT', 'Director OCR evidence does not match its input version and source map')
+    }
     const hasSelectedInsert = clips.some(
       (clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId,
     )
@@ -778,16 +858,20 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       'briefSnapshotId',
     )
     const briefChanged = directionChanged || briefCompilation !== undefined
-    const briefSnapshotId = briefChanged
+    const proposedBriefSnapshotId = briefChanged
       ? dependencies.createId('project-snapshot')
       : currentBriefSnapshotId
     const perception = buildPerception({
       id: perceptionId,
+      inputVersionId: baseVersionId,
       durationFrames: context.editPlan.durationFrames,
       fps: context.editPlan.fps,
       transcript: context.transcript,
       words: context.editPlan.retimedTranscript.words,
+      ...(ocrEnvelope ? { ocrEnvelope } : {}),
     })
+    const lowerOcrRisks = ocrLowerSourceRisks(ocrEnvelope,
+      context.editPlan.fps, context.editPlan.durationFrames)
     const mediaOnlyAnalysis = productionBrief.ownerInput
       ? undefined
       : createMediaOnlyAnalysis({
@@ -854,7 +938,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       durationFrames: context.editPlan.durationFrames,
     })
     const decisions = buildDecisions({
-      briefRef: briefSnapshotId,
+      briefRef: proposedBriefSnapshotId,
       transcriptRef: context.transcript.id,
       editPlanRef: context.currentVersion.snapshotRefs.editPlan,
       policyRef: context.currentVersion.snapshotRefs.policies,
@@ -863,9 +947,11 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         ? { briefCompilationRef: briefCompilation.audit.outputHash }
         : {}),
       mediaOnly: Boolean(mediaOnlyTreatment),
+      ...(ocrEnvelope ? { ocrEnvelopeRef: ocrEnvelope.id } : {}),
+      ocrLowerRiskCount: lowerOcrRisks.length,
     })
     const assumptions = Object.freeze([...new Set([
-      'Face detector evidence is unavailable; use a conservative caption-safe region below the source inset.',
+      'Face evidence is unavailable; reserve the bottom caption region for human visual review.',
       hasSelectedInsert
         ? 'The selected insert already passed the asset-selection and rights gates.'
         : 'No rights-approved B-roll candidate is linked; omission is safer than an irrelevant insert.',
@@ -947,6 +1033,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const, maxCharactersPerBlock: SUBTITLE_MAX_CHARACTERS }),
       createdAt,
     }
+    // Source-space OCR remains valid only while the result keeps the input clip map.
+    assertDomain(stableSerialize(editPlan.videoTracks) === stableSerialize(context.editPlan.videoTracks),
+      'PERSISTENCE_CONFLICT', 'Director result changed source mapping before OCR projection')
     validateDirectedEditPlan(editPlan)
     const qualityReport = buildQualityReport({
       id: qualityReportId,
@@ -961,6 +1050,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       transcriptId: context.transcript.id,
       sourceRights: context.sourceRights,
       evaluatedAt: createdAt,
+      ocrLowerRisks: lowerOcrRisks,
     })
     assertDomain(
       qualityReport.status !== 'blocked',
@@ -973,11 +1063,14 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         gateFailures: qualityReport.strategic.gateFailures,
       },
     )
-    const perceptionSnapshotId = dependencies.createId('project-snapshot')
-    const treatmentSnapshotId = dependencies.createId('project-snapshot')
-    const storySnapshotId = dependencies.createId('project-snapshot')
-    const editPlanSnapshotId = dependencies.createId('project-snapshot')
-    const qualitySnapshotId = dependencies.createId('project-snapshot')
+    const proposedPerceptionSnapshotId = dependencies.createId('project-snapshot')
+    const proposedTreatmentSnapshotId = dependencies.createId('project-snapshot')
+    const proposedStorySnapshotId = dependencies.createId('project-snapshot')
+    const proposedEditPlanSnapshotId = dependencies.createId('project-snapshot')
+    const proposedQualitySnapshotId = dependencies.createId('project-snapshot')
+    // Fixed with the rest of the identifiers: a retried owner transaction rebinds references, it never mints new ones.
+    const stateId = dependencies.createId('project-output-state')
+    const materializationIds = context.parent.state.document.entries.map(() => dependencies.createId('output-materialization'))
     const compiledBrief = briefChanged
       ? Object.freeze({
           ...context.brief,
@@ -998,140 +1091,171 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
             : {}),
         })
       : undefined
-    const snapshots = Object.freeze([
-      ...(compiledBrief
-        ? [snapshot({
-            id: briefSnapshotId,
-            workspaceId,
-            projectId,
-            kind: 'brief',
-            contentSchemaVersion: briefCompilation ? 3 : 2,
-            value: compiledBrief,
-            createdAt,
-          })]
-        : []),
-      snapshot({ id: perceptionSnapshotId, workspaceId, projectId, kind: 'perception', contentSchemaVersion: 1, value: perception, createdAt }),
-      snapshot({ id: treatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: treatmentPlan.schemaVersion, value: treatmentPlan, createdAt }),
-      snapshot({ id: storySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
-      snapshot({ id: editPlanSnapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2, value: editPlan, createdAt }),
-      snapshot({ id: qualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 2, value: qualityReport, createdAt }),
-    ])
-    const snapshotRefs = Object.freeze({
-      brief: briefSnapshotId,
-      perception: perceptionSnapshotId,
-      treatment: treatmentSnapshotId,
-      story: storySnapshotId,
-      editPlan: editPlanSnapshotId,
-      quality: qualitySnapshotId,
-    })
-    const impact = createDirectorRunImpact({
-      commandId,
-      baseVersionId,
-      resultVersionId: versionId,
-      sourceTranscriptId: context.transcript.id,
-      sourceTranscriptHash: context.transcript.transcriptHash,
-      plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
-      criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
-      affectedEndFrame: Math.max(context.currentDurationFrames, editPlan.durationFrames),
-      renderEndFrame: editPlan.durationFrames,
-      proxyVariantId: context.proxyVariantId,
-      outputReferences: context.outputReferences,
-    })
-    const commandPayload: RunDirectorCommandPayload = Object.freeze({
-      schemaVersion: 3 as const,
-      directorRunId,
-      previousObjective: context.project.objective,
-      objective: objective.id,
-      objectiveVersion: objectiveBinding.objectiveVersion,
-      rubricRef: objectiveBinding.rubricRef,
-      ...(objectiveBinding.supersedesRunId
-        ? { supersedesRunId: objectiveBinding.supersedesRunId }
-        : {}),
-      plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
-      criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
-      sourceTranscriptId: context.transcript.id,
-      sourceArtifactId: context.transcript.sourceArtifactId,
-      snapshotRefs,
-      impact,
-    })
-    const command = createEditCommand<RunDirectorCommandPayload>({
-      id: commandId, workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
-      author: {
-        type: 'api-client', id: clientId,
-        ...(authenticationAudit.delegatedUserId
-          ? { delegatedUserId: normalizedIdentifier(authenticationAudit.delegatedUserId, 'actor.delegatedUserId') }
-          : {}),
-      }, type: 'run-director', scope: { project: true }, payload: commandPayload,
-      reason: request.reason?.trim() || 'Generate the first complete V2 editorial direction and reviewable proxy.',
-      idempotencyKey, createdAt,
-    })
-    const hashes = Object.fromEntries(snapshots.map((item) => [item.kind, item.contentHash]))
-    const version = createProjectVersion({
-      id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1,
-      parentVersionId: context.currentVersion.id,
-      snapshotRefs: {
+    // Planning, criticism, compiler work, IDs and time are fixed before the
+    // owner transaction. A retry only rebinds canonical references and seals.
+    const plannedDecisions = decisions
+    const plannedEditPlan = editPlan
+    const eventId = dependencies.createEventId()
+    return dependencies.repository.commitWithCanonicalSnapshots({
+      workspaceId, projectId, baseVersionId, baseHash: request.baseHash, resultVersionId: versionId,
+      idempotencyKey, requestFingerprint, actorContextHash: authenticationAudit.contextHash,
+      ...(request.operationFence ? { operationFence: request.operationFence } : {}),
+    }, async (resolveSnapshots) => {
+      const briefCandidate = compiledBrief ? snapshot({
+        id: proposedBriefSnapshotId, workspaceId, projectId, kind: 'brief',
+        contentSchemaVersion: briefCompilation ? 3 : 2, value: compiledBrief, createdAt,
+      }) : undefined
+      const resolvedBrief = briefCandidate
+        ? bindDirectorSnapshotIdentities([briefCandidate], await resolveSnapshots([briefCandidate]))[0]!
+        : undefined
+      const briefSnapshotId = resolvedBrief?.id ?? currentBriefSnapshotId
+      const decisions = validateDirectorDecisions(plannedDecisions.map((decision) => ({
+        id: decision.id, category: decision.category, choice: decision.choice,
+        reason: decision.reason, confidence: decision.confidence,
+        alternatives: decision.alternatives,
+        evidenceRefs: decision.evidenceRefs.map((ref) =>
+          ref === proposedBriefSnapshotId ? briefSnapshotId : ref),
+      })))
+      const editPlan: DirectedEditPlan = Object.freeze({
+        ...plannedEditPlan,
+        director: Object.freeze({ ...plannedEditPlan.director, decisions }),
+      })
+      const candidates = Object.freeze([
+        ...(resolvedBrief ? [resolvedBrief] : []),
+        snapshot({ id: proposedPerceptionSnapshotId, workspaceId, projectId, kind: 'perception', contentSchemaVersion: 2, value: perception, createdAt }),
+        snapshot({ id: proposedTreatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: treatmentPlan.schemaVersion, value: treatmentPlan, createdAt }),
+        snapshot({ id: proposedStorySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
+        snapshot({ id: proposedEditPlanSnapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2, value: editPlan, createdAt }),
+        snapshot({ id: proposedQualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 3, value: qualityReport, createdAt }),
+      ])
+      const snapshots = bindDirectorSnapshotIdentities(candidates, await resolveSnapshots(candidates))
+      const byKind = new Map(snapshots.map((item) => [item.kind, item.id]))
+      const perceptionSnapshotId = byKind.get('perception')!
+      const treatmentSnapshotId = byKind.get('treatment')!
+      const storySnapshotId = byKind.get('story')!
+      const editPlanSnapshotId = byKind.get('edit-plan')!
+      const qualitySnapshotId = byKind.get('quality-report')!
+      const snapshotRefs = Object.freeze({
         brief: briefSnapshotId,
+        perception: perceptionSnapshotId,
         treatment: treatmentSnapshotId,
         story: storySnapshotId,
         editPlan: editPlanSnapshotId,
-        policies: context.currentVersion.snapshotRefs.policies,
-      },
-      baseHash: calculateVersionHash({
-        projectId, sequence: context.currentVersion.sequence + 1, parentVersionId: context.currentVersion.id,
-        previousBaseHash: context.currentVersion.baseHash, commandId, directorRunId, snapshotHashes: hashes,
-      }),
-      createdBy: clientId, commandId, createdAt,
-    })
-    const run: DirectorRun = Object.freeze({
-      schemaVersion: 2 as const, id: directorRunId, workspaceId, projectId, commandId,
-      baseVersionId, resultVersionId: versionId, status: 'planned' as const,
-      plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION, criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
-      objective: objective.id,
-      objectiveVersion: objectiveBinding.objectiveVersion,
-      rubricRef: objectiveBinding.rubricRef,
-      ...(objectiveBinding.supersedesRunId
-        ? { supersedesRunId: objectiveBinding.supersedesRunId }
-        : {}),
-      perception, treatmentPlan, storyPlan, editPlan, qualityReport, decisions, assumptions,
-      initiatedBy: Object.freeze({ type: 'api-client' as const, id: clientId }), createdAt,
-    })
-    const decisionLog = createDirectorDecisionLog({
-      workspaceId,
-      projectId,
-      runId: directorRunId,
-      commandId,
-      resultVersionId: versionId,
-      actor: authenticationAudit.delegatedUserId
-        ? { type: 'user', id: normalizedIdentifier(authenticationAudit.delegatedUserId, 'actor.delegatedUserId') }
-        : { type: 'api-client', id: clientId },
-      storyPlan,
-      decisions,
-      createdAt,
-    })
-    const event = createPublicEvent({
-      id: dependencies.createEventId(), type: 'project.version.created', version: '1.0.0', workspaceId,
-      occurredAt: createdAt, sequence: version.sequence, actor: { clientId },
-      resource: { type: 'project-version', id: version.id },
-      data: {
-        projectId, sequence: version.sequence, parentVersionId: version.parentVersionId,
-        baseHash: version.baseHash, commandId, commandType: command.type, directorRunId,
-        snapshotRefs: version.snapshotRefs, qualityStatus: qualityReport.status, createdAt,
+        quality: qualitySnapshotId,
+      })
+      const impact = createDirectorRunImpact({
+        commandId,
+        baseVersionId,
+        resultVersionId: versionId,
+        sourceTranscriptId: context.transcript.id,
+        sourceTranscriptHash: context.transcript.transcriptHash,
+        plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
+        criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
+        affectedEndFrame: Math.max(context.currentDurationFrames, editPlan.durationFrames),
+        renderEndFrame: editPlan.durationFrames,
+        proxyVariantId: context.proxyVariantId,
+        outputReferences: context.outputReferences,
+      })
+      const commandPayload: RunDirectorCommandPayload = Object.freeze({
+        schemaVersion: 3 as const,
+        directorRunId,
+        previousObjective: context.project.objective,
         objective: objective.id,
         objectiveVersion: objectiveBinding.objectiveVersion,
         rubricRef: objectiveBinding.rubricRef,
-        supersedesRunId: objectiveBinding.supersedesRunId ?? null,
-        commandImpactHash: impact.impactHash,
-        artifactInvalidationCount: impact.affectedArtifacts.length,
-      },
-    })
-    return dependencies.repository.commitOrReplay({
-      command, authenticationAudit, requestFingerprint, snapshots, version, run, decisionLog, event,
-      sourceEvidence: {
-        transcriptId: context.transcript.id,
-        transcriptHash: context.transcript.transcriptHash,
+        ...(objectiveBinding.supersedesRunId
+          ? { supersedesRunId: objectiveBinding.supersedesRunId }
+          : {}),
+        plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
+        criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
+        sourceTranscriptId: context.transcript.id,
         sourceArtifactId: context.transcript.sourceArtifactId,
-      },
-      ...(request.operationFence ? { operationFence: request.operationFence } : {}),
+        snapshotRefs,
+        impact,
+      })
+      const command = createEditCommand<RunDirectorCommandPayload>({
+        id: commandId, workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
+        author: {
+          type: 'api-client', id: clientId,
+          ...(authenticationAudit.delegatedUserId
+            ? { delegatedUserId: normalizedIdentifier(authenticationAudit.delegatedUserId, 'actor.delegatedUserId') }
+            : {}),
+        }, type: 'run-director', scope: { project: true }, payload: commandPayload,
+        reason: request.reason?.trim() || 'Generate the first complete V2 editorial direction and reviewable proxy.',
+        idempotencyKey, createdAt,
+      })
+      // The Version keeps the parent's snapshots except the ones this run replaced. A snapshot the canonical store
+      // resolved to the parent's own row is inherited, not replaced.
+      const resolvedByKind = new Map(snapshots.map((item) => [item.kind, item]))
+      const replacementSnapshots = (['brief', 'story', 'treatment'] as const).flatMap((kind) => {
+        const resolved = resolvedByKind.get(kind)
+        return resolved && resolved.id !== context.currentVersion.snapshotRefs[kind] ? [resolved] : []
+      })
+      let allocatedMaterializations = 0
+      const bundle = transitionProjectOutputState({
+        parent: context.parent, command, audit: authenticationAudit, requestFingerprint,
+        editPlanSnapshot: resolvedByKind.get('edit-plan')!, replacementSnapshots,
+        allocation: {
+          workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: context.currentVersion.id,
+          sequence: context.currentVersion.sequence + 1, createdBy: clientId, createdAt,
+        },
+        createMaterializationId: () => materializationIds[allocatedMaterializations++]!,
+      })
+      const version = bundle.version
+      const run: DirectorRun = Object.freeze({
+        schemaVersion: 2 as const, id: directorRunId, workspaceId, projectId, commandId,
+        baseVersionId, resultVersionId: versionId, status: 'planned' as const,
+        plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION, criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
+        objective: objective.id,
+        objectiveVersion: objectiveBinding.objectiveVersion,
+        rubricRef: objectiveBinding.rubricRef,
+        ...(objectiveBinding.supersedesRunId
+          ? { supersedesRunId: objectiveBinding.supersedesRunId }
+          : {}),
+        perception, treatmentPlan, storyPlan, editPlan, qualityReport, decisions, assumptions,
+        initiatedBy: Object.freeze({ type: 'api-client' as const, id: clientId }), createdAt,
+      })
+      const decisionLog = createDirectorDecisionLog({
+        workspaceId,
+        projectId,
+        runId: directorRunId,
+        commandId,
+        resultVersionId: versionId,
+        actor: authenticationAudit.delegatedUserId
+          ? { type: 'user', id: normalizedIdentifier(authenticationAudit.delegatedUserId, 'actor.delegatedUserId') }
+          : { type: 'api-client', id: clientId },
+        storyPlan,
+        decisions,
+        createdAt,
+      })
+      const event = createPublicEvent({
+        id: eventId, type: 'project.version.created', version: '1.0.0', workspaceId,
+        occurredAt: createdAt, sequence: version.sequence, actor: { clientId },
+        resource: { type: 'project-version', id: version.id },
+        data: {
+          projectId, sequence: version.sequence, parentVersionId: version.parentVersionId,
+          baseHash: version.baseHash, commandId, commandType: command.type, directorRunId,
+          snapshotRefs: version.snapshotRefs, qualityStatus: qualityReport.status, createdAt,
+          objective: objective.id,
+          objectiveVersion: objectiveBinding.objectiveVersion,
+          rubricRef: objectiveBinding.rubricRef,
+          supersedesRunId: objectiveBinding.supersedesRunId ?? null,
+          commandImpactHash: impact.impactHash,
+          artifactInvalidationCount: impact.affectedArtifacts.length,
+        },
+      })
+      return {
+        bundle, snapshots, run, decisionLog, event,
+        sourceEvidence: {
+          transcriptId: context.transcript.id,
+          transcriptHash: context.transcript.transcriptHash,
+          sourceArtifactId: context.transcript.sourceArtifactId,
+          ...(ocrEnvelope ? { ocrEnvelope: Object.freeze({ id: ocrEnvelope.id,
+            envelopeHash: ocrEnvelope.envelopeHash, inputVersionId: baseVersionId,
+            sourceArtifactId: ocrEnvelope.sourceArtifactId, timeMapHash: ocrEnvelope.timeMapHash }) } : {}),
+        },
+        ...(request.operationFence ? { operationFence: request.operationFence } : {}),
+      }
     })
   }
 }

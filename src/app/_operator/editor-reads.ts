@@ -27,6 +27,7 @@
  */
 
 import { classifyConflict, REPEATED_REQUEST_MESSAGE, UNKNOWN_CONFLICT_MESSAGE } from './refusal.ts'
+import type { ProjectReviewAvailability } from '../../v2/application/ports/project-workspace-query-repository.ts'
 
 /** What a refused read is, told apart by the only thing that distinguishes them. */
 export type ReadFailureKind =
@@ -561,4 +562,26 @@ export function createEditorReads(deps: EditorReadsDeps): EditorReads {
   }
 
   return { setScope, read, invalidate, poll, abortAll, snapshot }
+}
+/** Only the current workspace snapshot authorizes automatic review reads. */
+export function workspaceReviewReadTargets(
+  versionId: string | null,
+  availability: Readonly<ProjectReviewAvailability>,
+  manuallySelectedVersionId: string | null,
+): Readonly<{ annotationsVersionId: string | null; proxyReviewVersionId: string | null }> {
+  if (availability.schemaVersion !== 'project-review-availability/v1' ||
+    !['available', 'unavailable'].includes(availability.annotations.state) ||
+    !['available', 'unavailable'].includes(availability.proxyReview.state) ||
+    availability.requestedVersionId !== versionId ||
+    (availability.annotations.state === 'available' && availability.annotations.stale !== (availability.annotations.sourceVersionId !== versionId)) ||
+    (availability.proxyReview.state === 'available' && availability.proxyReview.sourceVersionId !== versionId) ||
+    (!versionId && (availability.annotations.state !== 'unavailable' || availability.annotations.reason !== 'no-version' ||
+      availability.proxyReview.state !== 'unavailable' || availability.proxyReview.reason !== 'no-version')) ||
+    (versionId && ((availability.annotations.state === 'unavailable' && availability.annotations.reason !== 'no-proxy') ||
+      (availability.proxyReview.state === 'unavailable' && availability.proxyReview.reason !== 'no-report')))
+  ) throw new Error('A disponibilidade da revisão está em conflito com a versão do workspace.')
+  return Object.freeze({
+    annotationsVersionId: manuallySelectedVersionId ?? (availability.annotations.state === 'available' ? versionId : null),
+    proxyReviewVersionId: availability.proxyReview.state === 'available' ? versionId : null,
+  })
 }
