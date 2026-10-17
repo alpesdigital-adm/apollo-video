@@ -45,12 +45,14 @@ function defaultActor(){const auditContext=createExternalAuditContext({clientId:
 // Synthetic probe/execution facts exercise domain invariants only. The actual
 // native/persistence proof belongs to the PG owner, never this fixture.
 const sha=text=>createHash('sha256').update(text).digest('hex')
-function observed({derivative=false,nativeFps=30,durationFrames=60,gapAt=-1,gapPts=0,initialPts=0}={}) {
+function observed({derivative=false,nativeFps=30,durationFrames=60,gapAt=-1,gapPts=0,initialPts=0,width,height}={}) {
  const step=90000/nativeFps;assert.ok(Number.isSafeInteger(step))
  const video=Array.from({length:durationFrames},(_,i)=>({media_type:'video',stream_index:0,best_effort_timestamp:initialPts+i*step+(i>=gapAt&&gapAt>=0?gapPts:0),duration:step}))
- const audio=Array.from({length:durationFrames},(_,i)=>({media_type:'audio',stream_index:1,best_effort_timestamp:i*1600,duration:1600}))
+ // One audio packet per video frame: 48000/fps samples (1600 at 30 fps, the legacy value; 1920 at 25, 2000 at 24).
+ const samples=Number.isInteger(48000/nativeFps)?48000/nativeFps:1600
+ const audio=Array.from({length:durationFrames},(_,i)=>({media_type:'audio',stream_index:1,best_effort_timestamp:i*samples,duration:samples}))
  const raw={format:{start_time:'0.000000',duration:String(durationFrames/nativeFps),format_name:'mov,mp4,m4a,3gp,3g2,mj2'},streams:[
-  {index:0,codec_type:'video',codec_name:'h264',width:derivative?1280:320,height:derivative?720:180,avg_frame_rate:nativeFps+'/1',time_base:'1/90000',start_time:'0.000000'},
+  {index:0,codec_type:'video',codec_name:'h264',width:width??(derivative?1280:320),height:height??(derivative?720:180),avg_frame_rate:nativeFps+'/1',time_base:'1/90000',start_time:'0.000000'},
   {index:1,codec_type:'audio',codec_name:'aac',sample_rate:'48000',channels:1,time_base:'1/48000',start_time:'0.000000'}],frames:[...video,...audio]}
  const rawJson=JSON.stringify(raw),timeBase={numerator:'1',denominator:'90000'}
  return traceEditorialFixtureSync(derivative?'probe-derivative':'probe-source',()=>validateOutputObservedProbeV3({schemaVersion:'output-observed-probe/v3',binarySha256:'e'.repeat(64),rawJson,rawSha256:sha(rawJson),streamIndex:0,mediaType:'video',sampleRateHz:null,channels:null,
@@ -77,18 +79,38 @@ function normalization(sourceProjectId,scope,options={}) {
  // A suite whose worker reads the source bytes back names the real file's key, digest and size; every other suite keeps the controlled facts.
  const sourceKey=options.sourceKey??names.sourceKey,sourceSha=options.sourceSha256??names.sourceSha,sourceBytes=options.sourceByteSize??1000
  const sourceProbe=observed(options),derivativeProbe=observed({...options,derivative:true})
- const sourceManifest=createMediaArtifactManifest({artifactKey:sourceKey,artifactSha256:sourceSha,byteSize:sourceBytes,mediaType:'video',container:'mp4',recipe:{id:'direct-upload',version:'1.0.0',parameters:{mimeType:'video/mp4'}},
+ const existing=options.source // {artifactId,manifestId,manifest}: the recording's own persisted facts
+ const sourceManifest=existing?.manifest??createMediaArtifactManifest({artifactKey:sourceKey,artifactSha256:sourceSha,byteSize:sourceBytes,mediaType:'video',container:'mp4',recipe:{id:'direct-upload',version:'1.0.0',parameters:{mimeType:'video/mp4'}},
   probe:{width:sourceProbe.width,height:sourceProbe.height,duration:(options.durationFrames??60)/(options.nativeFps??30),fps:options.nativeFps??30}})
  const derivativeManifest=createMediaArtifactManifestV2({artifactKey:names.derivativeKey,artifactSha256:names.derivativeSha,byteSize:2000,mediaType:'video',container:'mp4',
   recipe:{id:'editing-proxy',version:'1.2.0',parameters:{normalizationPolicy:'output-normalization-receipt/v3',maxWidth:1280,maxHeight:1280,videoCodec:'h264',audioCodec:'aac'}},
   sources:[{artifactKey:sourceManifest.artifact.artifactKey,sha256:sourceManifest.artifact.sha256,role:'source-master',execution:{tool:{id:'ffmpeg',version:'static',digest:'f'.repeat(64)}}}],
   probe:{width:derivativeProbe.width,height:derivativeProbe.height,duration:(options.durationFrames??60)/(options.nativeFps??30),fps:options.nativeFps??30}})
  return traceEditorialFixtureSync('normalization-seal',()=>sealOutputNormalizationV3({canonicalPolicyVersion:'output-canonical-json/v1',schemaVersion:'output-normalization-receipt/v3',id:names.normalizationId,kind:'ffmpeg-video-derivative',workspaceId:scope.workspaceId,projectId:sourceProjectId,operationId:names.operationId,attempt:1,leaseOwner:names.leaseOwner,
-  source:{artifactId:names.sourceArtifactId,manifestId:names.sourceManifestId,manifest:sourceManifest},derivative:{artifactId:names.derivativeArtifactId,manifestId:names.derivativeManifestId,manifest:derivativeManifest},
+  source:{artifactId:existing?.artifactId??names.sourceArtifactId,manifestId:existing?.manifestId??names.sourceManifestId,manifest:sourceManifest},derivative:{artifactId:names.derivativeArtifactId,manifestId:names.derivativeManifestId,manifest:derivativeManifest},
   sourceProbe,derivativeProbe,audioProbes:{source:observedAudioFromVideoProbeV3(sourceProbe),derivative:observedAudioFromVideoProbeV3(derivativeProbe)},
   execution:{provider:'ffmpeg',recipeVersion:'media-normalization-execution/2026-10-14-v3',binarySha256:'f'.repeat(64),argv:['-hide_banner','-loglevel','error','-y','-i','/controlled/'+names.slug+'/source.mp4','-map','0:v:0','-map','0:a:0?',
    '-vf','scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos','-c:v','libx264','-preset','veryfast','-crf','24','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-ar','48000','-movflags','+faststart','/controlled/'+names.slug+'/derivative.mp4'],
-   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:sourceSha,sourceSha256After:sourceSha,derivativeSha256:names.derivativeSha,autorotate:true},createdAt:options.createdAt??'2026-10-14T12:00:02.000Z'}))
+   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:sourceManifest.artifact.sha256,sourceSha256After:sourceManifest.artifact.sha256,derivativeSha256:names.derivativeSha,autorotate:true},createdAt:options.createdAt??'2026-10-14T12:00:02.000Z'}))
+}
+// The observed probe of an audio recording: one packet per 1600 samples at 48 kHz, demux origin read from the format.
+function observedAudio({durationSeconds=2,channels=1}={}) {
+ const packets=Math.max(1,Math.ceil(durationSeconds*48000/1600))
+ const frames=Array.from({length:packets},(_,i)=>({media_type:'audio',stream_index:0,best_effort_timestamp:i*1600,duration:1600}))
+ const raw={format:{start_time:'0.000000',duration:String(packets*1600/48000),format_name:'mov,mp4,m4a,3gp,3g2,mj2'},streams:[
+  {index:0,codec_type:'audio',codec_name:'aac',sample_rate:'48000',channels,time_base:'1/48000',start_time:'0.000000'}],frames}
+ const rawJson=JSON.stringify(raw),timeBase={numerator:'1',denominator:'48000'}
+ return traceEditorialFixtureSync('probe-original-audio',()=>validateOutputObservedProbeV3({schemaVersion:'output-observed-probe/v3',binarySha256:'e'.repeat(64),rawJson,rawSha256:sha(rawJson),streamIndex:0,mediaType:'audio',
+  sampleRateHz:48000,channels,originSource:'format-start-time',originSeconds:{numerator:'0',denominator:'1'},width:0,height:0,fps:null,rotationDegrees:0,timeBase,
+  frames:frames.map((f,frame)=>({frame,pts:String(f.best_effort_timestamp),timeBase})),frameEndPts:frames.map(f=>String(f.best_effort_timestamp+f.duration)),endPts:String(frames.at(-1).best_effort_timestamp+1600)}))
+}
+/** The sealed receipt of an audio recording that is already persisted (`source` = {artifactId, manifestId, manifest}); source and derivative are the same artifact. */
+export function controlledAudioNormalization(projectId,scope,{slug,createdAt,durationSeconds,channels,source}) {
+ const names=recordingNames(slug),probe=observedAudio({durationSeconds,channels}),sha256=source.manifest.artifact.sha256
+ return traceEditorialFixtureSync('audio-normalization-seal',()=>sealOutputNormalizationV3({canonicalPolicyVersion:'output-canonical-json/v1',schemaVersion:'output-normalization-receipt/v3',id:names.normalizationId,kind:'ffprobe-original-audio',
+  workspaceId:scope.workspaceId,projectId,operationId:names.operationId,attempt:1,leaseOwner:names.leaseOwner,source,derivative:source,sourceProbe:probe,derivativeProbe:probe,audioProbes:{source:probe,derivative:probe},
+  execution:{provider:'ffprobe',recipeVersion:'media-normalization-execution/2026-10-14-v3',binarySha256:probe.binarySha256,argv:['-v','error','-show_entries','format=start_time,duration:stream=index,codec_type,sample_rate,channels,time_base,start_time','-show_streams','-show_frames','-show_format','-of','json','/controlled/'+names.slug+'/source.m4a'],
+   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:sha256,sourceSha256After:sha256,derivativeSha256:sha256,autorotate:false},createdAt}))
 }
 export async function prepareEditorialSourceFixture(creation,receipt,options={}) {
  const finishSource=editorialFixturePhaseStart('prepare-source')

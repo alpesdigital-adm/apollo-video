@@ -30,7 +30,7 @@ const { readAdoptableObservationsV3 } = await import('../../../src/v2/infrastruc
 const { readPersistedOperationalOutputBundleV3 } = await import('../../../src/v2/infrastructure/prisma/output-state-consumption.ts')
 const { commitProjectVersionWithOutputState, settleDeferredOutputGuards } = await import('../../../src/v2/infrastructure/prisma/project-version-commit.ts')
 const { PrismaCreationOutputBundleRepositoryV2, PrismaOperationalOutputBundleRepositoryV3 } = await import('../../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts')
-import { controlledNormalization, recordingNames } from './operational-editorial-fixture.mjs'
+import { controlledAudioNormalization, controlledNormalization, recordingNames } from './operational-editorial-fixture.mjs'
 import { recompiledChild, variantBody } from './output-world.mjs'
 
 /** Identities unique to this invocation: `id('project')` is `<prefix>-<run>-project-<n>`. */
@@ -186,6 +186,84 @@ export async function persistRecording(client, {
   return Object.freeze({ slug, names, receipt, sourceRights, proxyRights })
 }
 
+
+/**
+ * The ingest's receipt for a video recording whose artifact and manifest ALREADY exist (a journey that generated and probed real
+ * media registers the rows itself): the controlled normalization takes that manifest verbatim as its source, and this persists
+ * what the rest of an ingest leaves behind - the editing proxy (artifact, manifest, link, approved grant), the succeeded
+ * media-ingest operation and the receipt row - so a child Command can adopt the recording. The source's own grant stays with the
+ * caller (a journey grants rights through the production service).
+ */
+export async function persistReceiptForExistingVideo(client, {
+  workspaceId, projectId, actor, artifactId, createdAt = new Date().toISOString(), nativeFps, durationFrames, width, height,
+}) {
+  const scope = { workspaceId, projectId }
+  const manifestRow = await client.v2MediaArtifactManifest.findFirstOrThrow({ where: { artifactId, workspaceId }, orderBy: { createdAt: 'asc' } })
+  const manifest = JSON.parse(manifestRow.manifestJson)
+  const fps = nativeFps ?? manifest.probe?.fps ?? 30
+  const slug = `existing-${artifactId}`
+  const receipt = controlledNormalization(projectId, scope, { slug, createdAt, nativeFps: fps,
+    durationFrames: durationFrames ?? Math.max(2, Math.round((manifest.probe?.duration ?? 2) * fps)),
+    width: width ?? manifest.probe?.width, height: height ?? manifest.probe?.height,
+    source: { artifactId, manifestId: manifestRow.id, manifest } })
+  const document = receipt.document
+  const audit = materializeActorAuditContext(actor)
+  await new PrismaMediaArtifactRepository(client).persistOrReplay({ workspaceId, artifactId: document.derivative.artifactId,
+    manifestId: document.derivative.manifestId, lineageIds: [artifactId], manifest: document.derivative.manifest, createdAt })
+  await client.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId, projectId, artifactId: document.derivative.artifactId,
+    role: 'editing-proxy', originalFileName: `${slug}-proxy.mp4`, createdAt: new Date(createdAt) } })
+  const queued = createQueuedPublicOperation({ ...scope, id: document.operationId, clientId: actor.clientId, type: 'media-ingest',
+    target: { type: 'media-artifact', id: artifactId, manifestId: manifestRow.id }, createdAt })
+  const operation = succeedPublicOperation(advancePublicOperationPhase(startPublicOperationAttempt(queued, createdAt), 'persisting', createdAt), createdAt)
+  await client.v2PublicOperation.create({ data: { ...scope, id: operation.id, clientId: actor.clientId, ...externalActorAuditData(audit, workspaceId, actor.clientId),
+    type: operation.type, status: operation.status, phase: operation.phase, targetType: operation.target.type, targetId: operation.target.id,
+    progressCompleted: operation.progress.completed, progressTotal: operation.progress.total, progressUnit: operation.progress.unit,
+    cancelable: operation.cancelable, retryable: operation.retryable, attempt: operation.attempt, maxAttempts: operation.maxAttempts,
+    idempotencyKey: `${document.operationId}-key`, requestFingerprint: calculateCanonicalHash({ ingest: slug }),
+    resultJson: stableSerialize(operation.result), createdAt: new Date(operation.createdAt), updatedAt: new Date(operation.updatedAt),
+    startedAt: new Date(operation.startedAt), completedAt: new Date(operation.completedAt) } })
+  await client.v2OutputNormalizationReceipt.create({ data: { id: document.id, workspaceId, projectId, operationId: document.operationId,
+    sourceArtifactId: artifactId, sourceManifestId: manifestRow.id, sourceManifestHash: document.source.manifest.manifestHash,
+    derivativeArtifactId: document.derivative.artifactId, derivativeManifestId: document.derivative.manifestId,
+    derivativeManifestHash: document.derivative.manifest.manifestHash, receiptJson: serializeOutputCanonicalJson(document), receiptHash: receipt.receiptHash,
+    createdAt: new Date(document.createdAt) } })
+  const proxyRights = await persistCurrentRights(client, createAssetRightsSnapshot({
+    id: `rights-${document.derivative.artifactId}-1`, workspaceId, artifactId: document.derivative.artifactId, sequence: 1,
+    draft: { status: 'approved', allowedUses: [...RECORDING_ALLOWED_USES], prohibitedUses: [], sourceNote: `${slug}-proxy`, consent: { status: 'not-required', allowedUses: [] } },
+    createdBy: { type: 'api-client', id: actor.clientId }, createdAt }))
+  return Object.freeze({ slug, receipt, proxyRights, sourceArtifactId: artifactId, sourceManifestId: manifestRow.id })
+}
+
+/**
+ * The receipt an audio upload's ingest leaves (kind ffprobe-original-audio, source = derivative) for an audio recording whose
+ * artifact and manifest already exist: the succeeded media-ingest operation and the sealed receipt row. Grant rights separately.
+ */
+export async function persistReceiptForExistingAudio(client, { workspaceId, projectId, actor, artifactId, createdAt = new Date().toISOString(), durationSeconds, channels }) {
+  const scope = { workspaceId, projectId }
+  const manifestRow = await client.v2MediaArtifactManifest.findFirstOrThrow({ where: { artifactId, workspaceId }, orderBy: { createdAt: 'asc' } })
+  const manifest = JSON.parse(manifestRow.manifestJson)
+  const slug = `existing-${artifactId}`
+  const receipt = controlledAudioNormalization(projectId, scope, { slug, createdAt, channels,
+    durationSeconds: durationSeconds ?? manifest.probe?.duration ?? 2, source: { artifactId, manifestId: manifestRow.id, manifest } })
+  const document = receipt.document
+  const audit = materializeActorAuditContext(actor)
+  const queued = createQueuedPublicOperation({ ...scope, id: document.operationId, clientId: actor.clientId, type: 'media-ingest',
+    target: { type: 'media-artifact', id: artifactId, manifestId: manifestRow.id }, createdAt })
+  const operation = succeedPublicOperation(advancePublicOperationPhase(startPublicOperationAttempt(queued, createdAt), 'persisting', createdAt), createdAt)
+  await client.v2PublicOperation.create({ data: { ...scope, id: operation.id, clientId: actor.clientId, ...externalActorAuditData(audit, workspaceId, actor.clientId),
+    type: operation.type, status: operation.status, phase: operation.phase, targetType: operation.target.type, targetId: operation.target.id,
+    progressCompleted: operation.progress.completed, progressTotal: operation.progress.total, progressUnit: operation.progress.unit,
+    cancelable: operation.cancelable, retryable: operation.retryable, attempt: operation.attempt, maxAttempts: operation.maxAttempts,
+    idempotencyKey: `${document.operationId}-key`, requestFingerprint: calculateCanonicalHash({ ingest: slug }),
+    resultJson: stableSerialize(operation.result), createdAt: new Date(operation.createdAt), updatedAt: new Date(operation.updatedAt),
+    startedAt: new Date(operation.startedAt), completedAt: new Date(operation.completedAt) } })
+  await client.v2OutputNormalizationReceipt.create({ data: { id: document.id, workspaceId, projectId, operationId: document.operationId,
+    sourceArtifactId: artifactId, sourceManifestId: manifestRow.id, sourceManifestHash: document.source.manifest.manifestHash,
+    derivativeArtifactId: artifactId, derivativeManifestId: manifestRow.id, derivativeManifestHash: document.source.manifest.manifestHash,
+    receiptJson: serializeOutputCanonicalJson(document), receiptHash: receipt.receiptHash, createdAt: new Date(document.createdAt) } })
+  return Object.freeze({ slug, receipt, sourceArtifactId: artifactId, sourceManifestId: manifestRow.id })
+}
+
 /**
  * Commits a real child Command onto the project's current head and moves the head to it. The Version's EditPlan is
  * `mutatePlan(parentPlan)`; `adopt` lists source artifact ids whose persisted receipts the child adopts (offers read from the
@@ -194,14 +272,14 @@ export async function persistRecording(client, {
  * head where it was, for a suite that moves the head itself, later and under a lock).
  */
 export async function commitSealedChild(client, {
-  workspaceId, projectId, actor, suffix, mutatePlan = (plan) => plan, createdAt, adopt = [], type = 'apply-review-patch', moveHead = true,
+  workspaceId, projectId, actor, suffix, mutatePlan = (plan) => plan, createdAt, adopt = [], type = 'apply-review-patch', moveHead = true, versionId, snapshotId,
 }) {
   const scope = { workspaceId, projectId }
   const head = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
   const parent = await readPersistedOperationalOutputBundleV3(client, { ...scope, versionId: head.currentVersionId })
   const at = createdAt ?? new Date(Math.max(Date.now(), Date.parse(parent.version.createdAt) + 1000)).toISOString()
   const adoptable = adopt.length ? await readAdoptableObservationsV3(client, { ...scope, sourceArtifactIds: adopt }) : undefined
-  const bundle = recompiledChild(parent, actor, mutatePlan, { suffix, type, createdAt: at, ...(adoptable === undefined ? {} : { adoptable }) })
+  const bundle = recompiledChild(parent, actor, mutatePlan, { suffix, type, createdAt: at, ...(versionId ? { versionId } : {}), ...(snapshotId ? { snapshotId } : {}), ...(adoptable === undefined ? {} : { adoptable }) })
   await client.$transaction(async (tx) => {
     await commitProjectVersionWithOutputState(tx, bundle)
     if (moveHead) {
