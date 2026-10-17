@@ -101,7 +101,7 @@ import { timebaseFromRate } from '../domain/session-time.ts'
 import { createTrackCoverage } from '../domain/track-coverage.ts'
 import {
   presentAngleCandidateListing,
-  presentMulticamDirection,
+  presentDirectedSessionResponse,
   presentMulticamDirectionRead,
   presentShotDecisionListing,
 } from './multicam-direction-contract.ts'
@@ -6698,50 +6698,22 @@ const w20DirectedCommandExample = buildDirectMulticamSessionCommand({
   createdAt: w20At(140),
 })
 
-// Historical W20/v1 facts, never an operational W66 Version. Preserve the
-// original Command-derived base hash without fabricating a new output seal.
+// The response carries five facts of the Version the direction produced; the example states exactly those. The
+// presenter takes the same five-field view, so the example is built by the function the route is, not by a copy of it.
 const w20DirectedProjectVersionExample = Object.freeze({
-  schemaVersion: 1 as const,
   id: 'project-version-panel-8',
-  workspaceId,
-  projectId,
   sequence: 8,
   parentVersionId: 'project-version-panel-7',
-  snapshotRefs: Object.freeze({
-    brief: 'project-snapshot-brief-1',
-    editPlan: 'project-snapshot-edit-plan-8',
-    policies: 'project-snapshot-policies-1',
-  }),
   baseHash: w20DirectedCommandExample.resultBaseHash,
-  createdBy: 'client-editor-console',
-  commandId: 'edit-command-direct-panel',
   createdAt: w20At(140),
 })
 
 const w20DirectedSessionExample = Object.freeze({
-  // Literal projection of multicam-direction-directed/v1. Its historical
-  // projectVersion has five fields, not the current runtime Version contract.
-  direction: presentMulticamDirection(w20DirectionExample),
+  direction: w20DirectionExample,
   directionVersion: w20DirectionVersion,
-  versionRef: directionVersionRef(w20Session, w20DirectionVersion),
-  projectVersion: Object.freeze({
-    id: w20DirectedProjectVersionExample.id,
-    sequence: w20DirectedProjectVersionExample.sequence,
-    parentVersionId: w20DirectedProjectVersionExample.parentVersionId,
-    baseHash: w20DirectedProjectVersionExample.baseHash,
-    createdAt: w20DirectedProjectVersionExample.createdAt,
-  }),
-  command: Object.freeze({
-    id: w20DirectedCommandExample.command.id,
-    type: w20DirectedCommandExample.command.type,
-    impactHash: w20DirectedCommandExample.impact.impactHash,
-    shotCount: w20DirectedCommandExample.impact.shotCount,
-    manualReviewRequired: w20DirectedCommandExample.impact.manualReviewRequired,
-  }),
-  invalidatedArtifacts: w20DirectedCommandExample.impact.affectedArtifacts.map(artifact => Object.freeze({
-    artifactId: artifact.artifactId, kind: artifact.kind, variantId: artifact.variantId, sourceVersionId: artifact.sourceVersionId,
-  })),
-  affectedRanges: w20DirectedCommandExample.impact.affectedRanges.map(range => Object.freeze({ ...range })),
+  version: w20DirectedProjectVersionExample,
+  command: w20DirectedCommandExample.command,
+  impact: w20DirectedCommandExample.impact,
   evidenceReplayed: false,
 })
 
@@ -14941,7 +14913,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/multicam-direction-directed/v1': [
       {
-        data: { directed: w20DirectedSessionExample, replayed: false },
+        data: presentDirectedSessionResponse({ ...w20DirectedSessionExample, replayed: false }),
         meta: { apiVersion: 'v1' },
       },
     ],
