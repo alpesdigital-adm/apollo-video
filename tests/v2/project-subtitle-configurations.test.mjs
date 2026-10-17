@@ -2,9 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { setProjectSubtitleConfigurationService, readProjectSubtitleConfigurationService } from '../../src/v2/application/project-subtitle-configurations.ts'
-import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
 import { materializeRenderInputSubtitles, requirePersistedSubtitleResolution } from '../../src/v2/domain/render-input-subtitles.ts'
 import { parseProjectSubtitleConfigurationImpact, resolveProjectSubtitleRevertTarget } from '../../src/v2/domain/project-subtitle-configuration.ts'
@@ -17,6 +15,7 @@ import {
   validateSubtitleConfig,
 } from '../../src/v2/domain/subtitle-system.ts'
 import { parseSetProjectSubtitleConfigurationBody, presentProjectSubtitleResolution } from '../../src/v2/public-api/project-subtitle-configuration-contract.ts'
+import { ingestedWorld } from './helpers/output-world.mjs'
 
 /** One immutable transcript. Every assertion below re-hashes this exact object. */
 const transcript = Object.freeze({ id: 'transcript-immutable-1', words: Object.freeze([Object.freeze({ text: 'A fala continua', startFrame: 0, endFrame: 30 })]) })
@@ -24,10 +23,13 @@ const TRANSCRIPT_HASH = calculateCanonicalHash(transcript)
 const TRANSCRIPT_BYTES = stableSerialize(transcript)
 const cues = Object.freeze([Object.freeze({ id: 'cue-1', startFrame: 0, endFrame: 30, text: 'A fala continua' })])
 
-const snapshotRefs = Object.freeze({ brief: 'brief-1', treatment: 'treatment-1', story: 'story-1', editPlan: 'edit-1', policies: 'policies-1' })
-const genesis = createProjectVersion({ id: 'version-subtitle-base', workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', sequence: 1, parentVersionId: null, snapshotRefs, baseHash: 'a'.repeat(64), createdBy: 'user-1', commandId: null, createdAt: '2026-08-13T20:00:00.000Z' })
-const auditContext = createExternalAuditContext({ clientId: 'client-subtitle', credentialId: 'credential-subtitle', workspaceId: 'workspace-subtitle', environment: 'sandbox' })
-const actor = Object.freeze({ ...auditContext, scopes: new Set(['projects:write', 'projects:read']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext })
+// Every Command below is born from a real sealed Version3/State3 of the shared output world, and each result
+// becomes the sealed parent of the next one.
+const world = await ingestedWorld()
+const genesis = world.parent.version
+const WORKSPACE = genesis.workspaceId
+const PROJECT = genesis.projectId
+const actor = world.actor
 
 /** Outputs always belong to the version they were rendered from — like the real adapter. */
 const outputsOf = (versionId) => Object.freeze([
@@ -45,9 +47,9 @@ function repository(options = {}) {
   const configurations = new Map()
   const heads = new Map()
   const commands = new Map()
-  let currentVersion = genesis
+  let current = world.parent
   return {
-    get currentVersion() { return currentVersion },
+    get currentVersion() { return current.version },
     get configurations() { return configurations },
     async findIdempotent({ idempotencyKey }) { return commands.get(idempotencyKey) ?? null },
     async readContext({ variantId }) {
@@ -55,34 +57,35 @@ function repository(options = {}) {
       const currentConfiguration = headId ? configurations.get(headId) : null
       const previousConfiguration = currentConfiguration?.previousConfigurationId ? configurations.get(currentConfiguration.previousConfigurationId) : null
       return Object.freeze({
-        currentVersion,
+        parent: current,
         transcript,
         directorPresetId: 'kinetic',
         ...(options.withoutWorkspaceDefault ? {} : { workspaceDefault: { presetId: 'clean-color', revision: 4 } }),
         durationFrames: 90,
-        outputReferences: outputsOf(currentVersion.id),
+        outputReferences: outputsOf(current.version.id),
         currentConfiguration: currentConfiguration ?? null,
         previousConfiguration: previousConfiguration ?? null,
       })
     },
     async commitOrReplay(input) {
-      if (currentVersion.id !== input.command.baseVersionId || currentVersion.baseHash !== input.command.baseHash) {
+      const { command, requestFingerprint } = input.bundle.origin
+      if (current.version.id !== command.baseVersionId || current.version.baseHash !== command.baseHash) {
         throw Object.assign(new Error('VERSION_CONFLICT'), { code: 'VERSION_CONFLICT' })
       }
       const head = heads.get(input.configuration.variantId) ?? null
       assert.equal(head, input.configuration.previousConfigurationId, 'the head must be the configuration the commit says it replaces')
       configurations.set(input.configuration.id, input.configuration)
       heads.set(input.configuration.variantId, input.configuration.id)
-      currentVersion = input.version
-      const result = Object.freeze({ command: input.command, version: input.version, configuration: input.configuration, impact: input.impact, replayed: false })
-      commands.set(input.command.idempotencyKey, Object.freeze({ requestFingerprint: input.requestFingerprint, result: Object.freeze({ ...result, replayed: true }) }))
+      current = input.bundle
+      const result = Object.freeze({ command, version: input.bundle.version, configuration: input.configuration, impact: input.impact, replayed: false })
+      commands.set(command.idempotencyKey, Object.freeze({ requestFingerprint, result: Object.freeze({ ...result, replayed: true }) }))
       return result
     },
     async readCurrent({ variantId }) {
       const headId = heads.get(variantId)
       if (!headId) return null
       const configuration = configurations.get(headId)
-      return Object.freeze({ command: { id: configuration.commandId, type: 'set-project-subtitle-mode', baseVersionId: configuration.baseVersionId, author: { type: 'api-client', id: 'client-subtitle' }, createdAt: configuration.createdAt }, version: currentVersion, configuration, impact: null, replayed: false })
+      return Object.freeze({ command: { id: configuration.commandId, type: 'set-project-subtitle-mode', baseVersionId: configuration.baseVersionId, author: { type: 'api-client', id: actor.clientId }, createdAt: configuration.createdAt }, version: current.version, configuration, impact: null, replayed: false })
     },
   }
 }
@@ -92,7 +95,7 @@ const run = (repo, body, key) => setProjectSubtitleConfigurationService({
   repository: repo,
   createId: (kind) => `subtitle-${kind}-${(sequence += 1).toString().padStart(4, '0')}`,
   clock: () => new Date('2026-08-13T20:01:00.000Z'),
-})({ workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', baseVersionId: repo.currentVersion.id, baseHash: repo.currentVersion.baseHash, variantId: '9:16', actor, idempotencyKey: key, ...body })
+})({ workspaceId: WORKSPACE, projectId: PROJECT, baseVersionId: repo.currentVersion.id, baseHash: repo.currentVersion.baseHash, variantId: '9:16', actor, idempotencyKey: key, ...body })
 
 // 1/9 ------------------------------------------------------------------------
 test('T-FR-171 the union of modes is closed and each mode resolves exactly one origin', () => {
@@ -209,8 +212,8 @@ test('T-FR-171 manual wins only on the target variant and leaves the other varia
   assert.deepEqual(manual.command.scope.outputSpecIds, ['9:16'])
 
   const read = readProjectSubtitleConfigurationService({ repository: repo })
-  assert.equal((await read({ workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', variantId: '9:16' })).configuration.origin, 'project')
-  assert.equal(await read({ workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', variantId: '16:9' }), null, '16:9 stays inherited')
+  assert.equal((await read({ workspaceId: WORKSPACE, projectId: PROJECT, variantId: '9:16' })).configuration.origin, 'project')
+  assert.equal(await read({ workspaceId: WORKSPACE, projectId: PROJECT, variantId: '16:9' }), null, '16:9 stays inherited')
 
   // The impact never widens past the target variant, even though a 16:9 final exists.
   assert.deepEqual(manual.impact.affectedArtifacts.map((item) => item.artifactId), ['proxy-9x16'])
@@ -221,12 +224,12 @@ test('T-FR-171 manual wins only on the target variant and leaves the other varia
 
   // A second variant is configured independently and does not disturb the first.
   const otherVariant = await setProjectSubtitleConfigurationService({ repository: repo, createId: (kind) => `subtitle-${kind}-other-${(sequence += 1)}`, clock: () => new Date('2026-08-13T20:02:00.000Z') })({
-    workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', baseVersionId: repo.currentVersion.id, baseHash: repo.currentVersion.baseHash,
+    workspaceId: WORKSPACE, projectId: PROJECT, baseVersionId: repo.currentVersion.id, baseHash: repo.currentVersion.baseHash,
     variantId: '16:9', action: 'set', requested: { mode: 'none' }, actor, idempotencyKey: 'subtitle-variant-key-2',
   })
   assert.equal(otherVariant.configuration.origin, 'disabled')
   assert.equal(otherVariant.configuration.previousConfigurationId, null, 'the 16:9 head had no predecessor')
-  assert.equal((await read({ workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', variantId: '9:16' })).configuration.resolved.presetId, 'karaoke-box')
+  assert.equal((await read({ workspaceId: WORKSPACE, projectId: PROJECT, variantId: '9:16' })).configuration.resolved.presetId, 'karaoke-box')
 })
 
 // 6/9 ------------------------------------------------------------------------
@@ -339,7 +342,7 @@ test('T-FR-171 replay is idempotent, a reused key with another payload fails and
   // Replaying the identical request returns the identical documents, creates no
   // new version and no second configuration.
   const replayed = await setProjectSubtitleConfigurationService({ repository: repo, createId: () => { throw new Error('replay must not mint identifiers') }, clock: () => new Date('2026-08-13T20:05:00.000Z') })({
-    workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', baseVersionId: genesis.id, baseHash: genesis.baseHash,
+    workspaceId: WORKSPACE, projectId: PROJECT, baseVersionId: genesis.id, baseHash: genesis.baseHash,
     variantId: '9:16', action: 'set', requested: { mode: 'manual', presetId: 'kinetic', presetVersion: 1 }, actor, idempotencyKey: 'subtitle-replay-key-1',
   })
   assert.equal(replayed.replayed, true)
@@ -352,7 +355,7 @@ test('T-FR-171 replay is idempotent, a reused key with another payload fails and
   // The same key with a different mode is a payload mismatch, never a silent overwrite.
   await assert.rejects(
     setProjectSubtitleConfigurationService({ repository: repo, createId: (kind) => `subtitle-${kind}-mismatch`, clock: () => new Date('2026-08-13T20:06:00.000Z') })({
-      workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', baseVersionId: genesis.id, baseHash: genesis.baseHash,
+      workspaceId: WORKSPACE, projectId: PROJECT, baseVersionId: genesis.id, baseHash: genesis.baseHash,
       variantId: '9:16', action: 'set', requested: { mode: 'none' }, actor, idempotencyKey: 'subtitle-replay-key-1',
     }),
     /Idempotency key was used with another subtitle configuration/,
@@ -361,7 +364,7 @@ test('T-FR-171 replay is idempotent, a reused key with another payload fails and
   // A concurrent writer already moved the project forward: the stale base is refused.
   await assert.rejects(
     setProjectSubtitleConfigurationService({ repository: repo, createId: (kind) => `subtitle-${kind}-stale`, clock: () => new Date('2026-08-13T20:07:00.000Z') })({
-      workspaceId: 'workspace-subtitle', projectId: 'project-subtitle', baseVersionId: genesis.id, baseHash: genesis.baseHash,
+      workspaceId: WORKSPACE, projectId: PROJECT, baseVersionId: genesis.id, baseHash: genesis.baseHash,
       variantId: '9:16', action: 'set', requested: { mode: 'auto' }, actor, idempotencyKey: 'subtitle-stale-key-1',
     }),
     /base version is stale/,
