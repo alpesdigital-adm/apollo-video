@@ -1,10 +1,10 @@
-import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { ColorMetadata, ColorPlan, ColorPlanTarget } from '../../domain/color-and-export.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { EditCommand } from '../../domain/edit-command.ts'
 import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
 import type { ProjectColorPlanImpactV1 } from '../../domain/project-color-plan-impact.ts'
-import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { ProjectVersionV3 } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 
 export type ProjectColorPlanCommandPayloadV1 = Readonly<{
@@ -16,7 +16,8 @@ export type ProjectColorPlanCommandPayloadV1 = Readonly<{
 }>
 
 export interface ProjectColorPlanContext {
-  currentVersion: Readonly<ProjectVersion>
+  /** The sealed output bundle of the current head: the exact parent the Command's Version is born from. */
+  parent: OperationalOutputParentV3
   targets: readonly Readonly<ColorPlanTarget>[]
   trustedSourceMetadata: Readonly<Record<string, Readonly<ColorMetadata>>>
   currentDurationFrames: number
@@ -26,7 +27,7 @@ export interface ProjectColorPlanContext {
 
 export interface ProjectColorPlanResult {
   command: Readonly<EditCommand<ProjectColorPlanCommandPayloadV1>>
-  version: Readonly<ProjectVersion>
+  version: Readonly<ProjectVersionV3>
   colorPlan: Readonly<ProjectColorPlan>
   impact: Readonly<ProjectColorPlanImpactV1>
   invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
@@ -34,11 +35,9 @@ export interface ProjectColorPlanResult {
 }
 
 export interface ProjectColorPlanCommit {
-  command: Readonly<EditCommand<ProjectColorPlanCommandPayloadV1>>
-  authenticationAudit?: Readonly<ApiAccessAuditContext>
-  version: Readonly<ProjectVersion>
+  /** Version, State, EditPlan, Command and credential audit, sealed together by the child-command transition. */
+  bundle: Readonly<OperationalOutputVersionBundleV3>
   colorPlan: Readonly<ProjectColorPlan>
-  requestFingerprint: string
   event: Readonly<PublicEvent>
 }
 

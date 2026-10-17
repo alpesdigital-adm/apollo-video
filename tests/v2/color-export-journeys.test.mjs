@@ -4,7 +4,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts';
 import { compileColorPlanTargets, createColorPlan, createExportMatrix, createMediaColorProbe, OUTPUT_FORMATS, parseCube, preflightExports, renderExportCell, resolveColorPlan, SDR_COLOR_FIXTURES, selectWorkspaceLut } from '../../src/v2/domain/color-and-export.ts';
 import { createProjectColorPlan, parseProjectColorPlan } from '../../src/v2/domain/project-color-plan.ts';
 import { createProjectColorPlanImpact, createProjectColorPlanInvalidations, parseProjectColorPlanImpact } from '../../src/v2/domain/project-color-plan-impact.ts';
-import { createProjectVersion } from '../../src/v2/domain/project-version.ts';
+import { ingestedWorld } from './helpers/output-world.mjs';
 import { setProjectColorPlanService } from '../../src/v2/application/project-color-plans.ts';
 import { parseSetProjectColorPlanBody } from '../../src/v2/public-api/project-color-plan-contract.ts';
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts';
@@ -310,34 +310,23 @@ test('T-FR-182 binds ColorPlan, target manifest and full-timeline invalidation t
 });
 
 test('T-FR-182 applies ColorPlan through the shared Command and immutable ProjectVersion model', async () => {
-  const currentVersion = createProjectVersion({
-    id: 'project-version-color-service-1',
-    workspaceId: 'workspace-color-service',
-    projectId: 'project-color-service',
-    sequence: 1,
-    snapshotRefs: {
-      brief: 'snapshot-brief-color-service',
-      editPlan: 'snapshot-edit-color-service',
-      policies: 'snapshot-policy-color-service',
-    },
-    baseHash: '1'.repeat(64),
-    createdBy: 'system-color-service',
-    createdAt: '2026-08-24T11:00:00.000Z',
-  });
+  // The parent is a real sealed Version3/State3; the ColorPlan Command inherits its output members.
+  const { parent } = await ingestedWorld();
+  const currentVersion = parent.version;
   const outputs = [{
     artifactId: 'artifact-color-service-proxy',
     kind: 'proxy',
     sourceVersionId: currentVersion.id,
     variantId: '9:16',
   }];
-  let stored = null;
+  let stored = null, committed = null;
   const repository = {
     async findIdempotent() {
       return stored ? { requestFingerprint: stored.requestFingerprint, result: stored.result } : null;
     },
     async readContext() {
       return {
-        currentVersion,
+        parent,
         targets: [
           { sourceId: 'source-a', segmentId: 'clip-a' },
           { sourceId: 'source-b', cameraId: 'camera-b', segmentId: 'clip-b' },
@@ -352,15 +341,17 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
       };
     },
     async commitOrReplay(commit) {
+      const { command, requestFingerprint } = commit.bundle.origin;
+      committed = commit;
       const result = Object.freeze({
-        command: commit.command,
-        version: commit.version,
+        command,
+        version: commit.bundle.version,
         colorPlan: commit.colorPlan,
-        impact: commit.command.payload.impact,
-        invalidations: createProjectColorPlanInvalidations({ impact: commit.command.payload.impact, createdAt: commit.command.createdAt }),
+        impact: command.payload.impact,
+        invalidations: createProjectColorPlanInvalidations({ impact: command.payload.impact, createdAt: command.createdAt }),
         replayed: false,
       });
-      stored = { requestFingerprint: commit.requestFingerprint, result };
+      stored = { requestFingerprint, result };
       return result;
     },
   };
@@ -368,7 +359,10 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
     command: 'command-color-service-1',
     version: 'project-version-color-service-2',
     'color-plan': 'project-color-plan-service-1',
+    'edit-plan-snapshot': 'snapshot-edit-color-service-2',
+    state: 'state-color-service-2',
   };
+  let materializations = 0;
   const service = setProjectColorPlanService({
     repository,
     luts: {
@@ -380,7 +374,7 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
         return ['lut-film-look-head', 'lut-clip-b-head'].includes(lutId) ? { status: 'active' } : null;
       },
     },
-    createId: (kind) => ids[kind],
+    createId: (kind) => (kind === 'materialization' ? `materialization-color-service-${++materializations}` : ids[kind]),
     createEventId: () => '20000000-0000-4000-8000-000000000001',
     clock: () => new Date('2026-08-24T12:00:00.000Z'),
   });
@@ -409,6 +403,11 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
   const applied = await service(request);
   assert.equal(applied.command.type, 'set-project-color-plan');
   assert.equal(applied.version.parentVersionId, currentVersion.id);
+  assert.equal(applied.version.outputContractVersion, 3);
+  assert.equal(committed.bundle.state.document.transition, 'inherit');
+  assert.equal(committed.bundle.state.document.parentStateHash, parent.state.stateHash);
+  assert.deepEqual(committed.bundle.state.document.entries.map((entry) => entry.variantId), parent.state.document.entries.map((entry) => entry.variantId));
+  assert.equal(committed.bundle.origin.audit, null);
   assert.equal(applied.colorPlan.compiled.targets.length, 2);
   assert.deepEqual(applied.impact.affectedRanges, [{ startFrame: 0, endFrame: 180 }]);
   assert.equal(applied.invalidations.length, 1);
