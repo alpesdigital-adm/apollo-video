@@ -34,7 +34,35 @@ export function childCommandOf<Payload>(bundle: Readonly<OperationalOutputVersio
   return Object.freeze({ command: origin.command as Readonly<EditCommand<Payload>>, audit: origin.audit, requestFingerprint: origin.requestFingerprint })
 }
 
-/** The exact normalization observations a child must reuse: those its parent State already materialized. */
+/** The source artifacts a plan consumes: every video clip (and the audio it names), and every background-music track. */
+export function requiredSourceArtifactIds(plan: Readonly<Record<string, unknown>>): ReadonlySet<string> {
+  const ids = new Set<string>()
+  for (const track of Array.isArray(plan.videoTracks) ? plan.videoTracks as readonly Record<string, unknown>[] : []) {
+    for (const clip of Array.isArray(track.clips) ? track.clips as readonly Record<string, unknown>[] : []) {
+      if (typeof clip.sourceArtifactId === 'string') ids.add(clip.sourceArtifactId)
+      ids.add(typeof clip.audioSourceArtifactId === 'string' ? clip.audioSourceArtifactId : String(clip.sourceArtifactId))
+    }
+  }
+  for (const track of Array.isArray(plan.audioTracks) ? plan.audioTracks as readonly Record<string, unknown>[] : []) {
+    if (track.kind === 'background-music' && typeof track.artifactId === 'string') ids.add(track.artifactId)
+  }
+  return ids
+}
+
+/**
+ * The observations a child plan is materialized from: those its parent State already holds, restricted to the
+ * sources the new plan consumes. A plan that consumes a source nobody has observed cannot be materialized, so
+ * the Command is refused instead of sealing a Version whose outputs could not be rendered.
+ */
+export function observedNormalizationsFor(parent: OperationalOutputParentV3, plan: Readonly<Record<string, unknown>>): readonly SealedOutputNormalizationV3[] {
+  if (plan.durationFrames === 0) return []
+  const available = parentNormalizationsV3(parent), required = requiredSourceArtifactIds(plan)
+  const missing = [...required].filter((id) => !available.some((n) => n.document.source.artifactId === id)).toSorted()
+  assertDomain(missing.length === 0, 'PRECONDITION_REQUIRED', 'The new EditPlan consumes sources that have no observed normalization', { sourceArtifactIds: missing })
+  return available.filter((n) => required.has(n.document.source.artifactId))
+}
+
+/** Every normalization observation the parent State already materialized. */
 export function parentNormalizationsV3(parent: OperationalOutputParentV3): readonly SealedOutputNormalizationV3[] {
   if (parent.state.document.schemaVersion !== 'project-output-state/v3') return []
   const unique = new Map<string, SealedOutputNormalizationV3>()
@@ -72,7 +100,7 @@ export function transitionProjectOutputState(input: Readonly<{
   }).toSorted()
   assertDomain(CHILD_COMMAND_TRANSITIONS[input.command.type as keyof typeof CHILD_COMMAND_TRANSITIONS] !== undefined,
     'INVALID_COMMAND', 'Command type has no declared child output transition')
-  const plan = JSON.parse(input.editPlanSnapshot.contentJson) as { durationFrames?: unknown }
+  const plan = JSON.parse(input.editPlanSnapshot.contentJson) as Record<string, unknown>
   const variantIds = input.parent.state.document.entries.map((entry) => entry.variantId)
   const materializationIds = plan.durationFrames === 0 ? {} :
     Object.fromEntries(variantIds.map((variantId) => [variantId, input.createMaterializationId()]))
@@ -84,7 +112,7 @@ export function transitionProjectOutputState(input: Readonly<{
     restoreTarget: null,
     editPlanSnapshot: input.editPlanSnapshot,
     replacementSnapshots: replacements,
-    normalizations: parentNormalizationsV3(input.parent),
+    normalizations: observedNormalizationsFor(input.parent, plan),
     materializationIds,
   })
 }

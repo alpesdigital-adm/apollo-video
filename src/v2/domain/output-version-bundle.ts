@@ -417,7 +417,8 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     const parentNormalizations=parent.state.document.schemaVersion==='project-output-state/v3'?
       parent.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[]):[]
     const factual=new Map(parentNormalizations.map(n=>[n.document.id,n]))
-    assertDomain(input.normalizations.length===factual.size && new Set(input.normalizations.map(n=>n.document.id)).size===factual.size &&
+    // A child may use fewer sources than its parent but only the parent's exact observations: nothing is invented.
+    assertDomain(new Set(input.normalizations.map(n=>n.document.id)).size===input.normalizations.length &&
       input.normalizations.every(n=>factual.has(n.document.id) && stableSerialize(n)===stableSerialize(factual.get(n.document.id))),
       'INVALID_COMMAND','Child Command must reuse the exact parent normalization observations')
   } else if(origin.kind!=='ingest-operation'&&origin.kind!=='editorial-cut-command')assertDomain(
@@ -428,7 +429,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
   const declaredReplacements:readonly string[]=origin.kind==='child-command'?origin.replaces:[]
   const replacements=(input.replacementSnapshots??[]).map(s=>snapshotV3(s,a.workspaceId,a.projectId))
   assertDomain(replacements.length===declaredReplacements.length && new Set(replacements.map(s=>s.kind)).size===replacements.length &&
-    replacements.every(s=>declaredReplacements.includes(s.kind) && s.createdAt===a.createdAt && !snapshots.some(x=>x.id===s.id) && s.id!==edit.id),
+    replacements.every(s=>declaredReplacements.includes(s.kind) && s.createdAt<=a.createdAt && !snapshots.some(x=>x.id===s.id) && s.id!==edit.id),
     'INVALID_COMMAND','Replacement snapshots differ from the declared child effect')
   snapshots=[...snapshots.filter(s=>!declaredReplacements.includes(s.kind)),...replacements]
   assertDomain(snapshots.some(s=>s.kind==='brief') && snapshots.some(s=>s.kind==='policies'),

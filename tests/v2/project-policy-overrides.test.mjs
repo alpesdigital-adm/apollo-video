@@ -19,6 +19,9 @@ import {
 import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import { ingestedWorld, worldActor } from './helpers/output-world.mjs'
+import { persistedOutputQueries } from './helpers/persisted-output-client.mjs'
+import { readPersistedOperationalOutputBundleV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 
 const workspaceLogo = Object.freeze({
   assetId: 'asset-workspace-logo-1', checksum: 'a'.repeat(64), rightsId: 'rights-workspace-logo-1',
@@ -229,4 +232,15 @@ test('F1.010 public contract, capabilities and examples are exact', () => {
       assert.equal(validate(example), true, `${ref}: ${JSON.stringify(validate.errors)}`)
     }
   }
+})
+
+test('F1.010 a Version that replaced the Policy Snapshot reads back from its sealed rows', async () => {
+  const { parent, actor, chain } = await ingested(), repository = memoryRepository(parent)
+  await service(repository)(request(parent, actor, { logo: { mode: 'none' } }, { idempotencyKey: 'project-policy-read-back-1' }))
+  const { bundle } = repository.commits[0]
+  const client = { $queryRawUnsafe: persistedOutputQueries([...chain, bundle]) }
+  const read = await readPersistedOperationalOutputBundleV3(client, { workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, versionId: bundle.version.id })
+  assert.equal(stableSerialize(read), stableSerialize(bundle))
+  assert.deepEqual(read.origin.replaces, ['policies'])
+  assert.equal(read.version.snapshotRefs.policies, bundle.version.snapshotRefs.policies)
 })

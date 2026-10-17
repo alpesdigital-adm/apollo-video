@@ -88,21 +88,18 @@ BEGIN
  replaced:=ARRAY(SELECT r.kind_name FROM jsonb_array_elements_text(o->'replaces') WITH ORDINALITY AS r(kind_name,item_order) ORDER BY r.item_order);
  IF replaced IS DISTINCT FROM ARRAY(SELECT u.kind_name FROM unnest(replaced) AS u(kind_name) ORDER BY u.kind_name COLLATE "C")
   OR (SELECT count(DISTINCT u.kind_name) FROM unnest(replaced) AS u(kind_name))<>cardinality(replaced)
-  OR EXISTS(SELECT 1 FROM unnest(replaced) AS u(kind_name) WHERE u.kind_name <> ALL(CASE cmd.type WHEN 'run-director' THEN ARRAY['story','treatment'] WHEN 'set-project-policy-overrides' THEN ARRAY['policies'] ELSE ARRAY[]::text[] END)) THEN
+  OR EXISTS(SELECT 1 FROM unnest(replaced) AS u(kind_name) WHERE u.kind_name <> ALL(CASE cmd.type WHEN 'run-director' THEN ARRAY['brief','story','treatment'] WHEN 'set-project-policy-overrides' THEN ARRAY['policies'] ELSE ARRAY[]::text[] END)) THEN
   RAISE EXCEPTION 'W66v3 child Command replacement kinds exceed its declared effect' USING ERRCODE='23514'; END IF;
  IF s.transition IS DISTINCT FROM 'inherit' THEN RAISE EXCEPTION 'W66v3 child Command transition differs' USING ERRCODE='23514'; END IF;
  -- Declared plan effect: these types may only re-identify the parent plan.
  IF cmd.type IN ('attach-media-library-reference','set-project-lut-selection','set-project-color-plan','set-project-subtitle-mode','apply-subtitle-segment-override','set-project-policy-overrides') AND pj-ARRAY['id','projectVersionId','createdAt'] IS DISTINCT FROM bp-ARRAY['id','projectVersionId','createdAt'] THEN
   RAISE EXCEPTION 'W66v3 child Command changed a plan it declared unchanged' USING ERRCODE='23514'; END IF;
  IF EXISTS(SELECT 1 FROM jsonb_array_elements(d->'entries') AS child_entry(element)
-  WHERE child_entry.element#>>'{consumption,status}'='materialized' AND (
-    EXISTS(SELECT 1 FROM jsonb_array_elements(child_entry.element#>'{consumption,materialization,document,normalizations}') AS child_n(element)
-     WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(source_state."stateJson"::jsonb->'entries') AS source_entry(element),
-      LATERAL jsonb_array_elements(CASE WHEN source_entry.element#>>'{consumption,status}'='materialized' THEN source_entry.element#>'{consumption,materialization,document,normalizations}' ELSE '[]'::jsonb END) AS source_n(element)
-      WHERE source_n.element=child_n.element)) OR
-    EXISTS(SELECT 1 FROM jsonb_array_elements(source_state."stateJson"::jsonb->'entries') AS source_entry(element),
+  WHERE child_entry.element#>>'{consumption,status}'='materialized' AND
+   EXISTS(SELECT 1 FROM jsonb_array_elements(child_entry.element#>'{consumption,materialization,document,normalizations}') AS child_n(element)
+    WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(source_state."stateJson"::jsonb->'entries') AS source_entry(element),
      LATERAL jsonb_array_elements(CASE WHEN source_entry.element#>>'{consumption,status}'='materialized' THEN source_entry.element#>'{consumption,materialization,document,normalizations}' ELSE '[]'::jsonb END) AS source_n(element)
-     WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(child_entry.element#>'{consumption,materialization,document,normalizations}') AS child_n(element) WHERE child_n.element=source_n.element)))) THEN
+     WHERE source_n.element=child_n.element))) THEN
   RAISE EXCEPTION 'W66v3 child normalization lineage differs' USING ERRCODE='23514';END IF;
  expected_producer:=jsonb_build_object('schemaVersion','output-child-command-producer/v3','canonicalPolicyVersion','output-canonical-json/v1','kind','child-command',
   'commandId',cmd.id,'commandHash',cmd."commandHash",'payloadHash',ob."producerPayloadHash",'target','null'::jsonb);
@@ -112,13 +109,13 @@ BEGIN
   OR (NOT 'treatment'=ANY(replaced) AND v."treatmentSnapshotId" IS DISTINCT FROM b."treatmentSnapshotId")
   OR (NOT 'story'=ANY(replaced) AND v."storySnapshotId" IS DISTINCT FROM b."storySnapshotId")
   OR ('brief'=ANY(replaced) AND (v."briefSnapshotId" IS NOT DISTINCT FROM b."briefSnapshotId" OR NOT EXISTS(SELECT 1 FROM project_snapshots sx WHERE sx.id=v."briefSnapshotId"
-   AND sx.kind='brief' AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx."createdAt"=v."createdAt")))
+   AND sx.kind='brief' AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx."createdAt"<=v."createdAt")))
   OR ('policies'=ANY(replaced) AND (v."policiesSnapshotId" IS NOT DISTINCT FROM b."policiesSnapshotId" OR NOT EXISTS(SELECT 1 FROM project_snapshots sx WHERE sx.id=v."policiesSnapshotId"
-   AND sx.kind='policies' AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx."createdAt"=v."createdAt")))
+   AND sx.kind='policies' AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx."createdAt"<=v."createdAt")))
   OR ('treatment'=ANY(replaced) AND (v."treatmentSnapshotId" IS NULL OR v."treatmentSnapshotId" IS NOT DISTINCT FROM b."treatmentSnapshotId" OR NOT EXISTS(SELECT 1 FROM project_snapshots sx
-   WHERE sx.id=v."treatmentSnapshotId" AND sx.kind='treatment' AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx."createdAt"=v."createdAt")))
+   WHERE sx.id=v."treatmentSnapshotId" AND sx.kind='treatment' AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx."createdAt"<=v."createdAt")))
   OR ('story'=ANY(replaced) AND (v."storySnapshotId" IS NULL OR v."storySnapshotId" IS NOT DISTINCT FROM b."storySnapshotId" OR NOT EXISTS(SELECT 1 FROM project_snapshots sx
-   WHERE sx.id=v."storySnapshotId" AND sx.kind='story' AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx."createdAt"=v."createdAt")))
+   WHERE sx.id=v."storySnapshotId" AND sx.kind='story' AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx."createdAt"<=v."createdAt")))
   OR NOT EXISTS(SELECT 1 FROM project_snapshots sx WHERE sx.id=v."briefSnapshotId" AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx.kind='brief')
   OR NOT EXISTS(SELECT 1 FROM project_snapshots sx WHERE sx.id=v."policiesSnapshotId" AND sx."projectId"=v."projectId" AND sx."workspaceId"=v."workspaceId" AND sx.kind='policies') THEN
   RAISE EXCEPTION 'W66v3 non-output snapshot effect outside origin' USING ERRCODE='23514';END IF;

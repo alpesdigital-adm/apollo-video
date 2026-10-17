@@ -14,8 +14,10 @@ import type { EditCommandType } from './edit-command-registry.ts'
  * - `recompiles-plan`: the Command's own service produced a different plan. The
  *   state still re-materializes every entry from that plan and the parent's exact
  *   normalization observations, so geometry never survives by copying.
- * - `replaces`: non-output snapshots this Command legitimately replaces. Anything
- *   else about brief/policies/treatment/story is inherited from the parent.
+ * - `replaces`: non-output snapshots this Command legitimately replaces: new ones born with
+ *   the Version, or the canonical earlier row an identical document resolves to (never
+ *   newer than the Version). Anything else about brief/policies/treatment/story is
+ *   inherited from the parent.
  */
 export const CHILD_REPLACEABLE_SNAPSHOT_KINDS = ['brief', 'policies', 'story', 'treatment'] as const
 export type ChildReplaceableSnapshotKind = (typeof CHILD_REPLACEABLE_SNAPSHOT_KINDS)[number]
@@ -30,7 +32,7 @@ export const CHILD_COMMAND_TRANSITIONS: Readonly<Partial<Record<EditCommandType,
   'manual-edit': Object.freeze({ planEffect: 'recompiles-plan', replaces: Object.freeze([]) }),
   'apply-review-patch': Object.freeze({ planEffect: 'recompiles-plan', replaces: Object.freeze([]) }),
   'apply-review-patch-batch': Object.freeze({ planEffect: 'recompiles-plan', replaces: Object.freeze([]) }),
-  'run-director': Object.freeze({ planEffect: 'recompiles-plan', replaces: Object.freeze(['story', 'treatment'] as const) }),
+  'run-director': Object.freeze({ planEffect: 'recompiles-plan', replaces: Object.freeze(['brief', 'story', 'treatment'] as const) }),
   'set-project-lut-selection': Object.freeze({ planEffect: 'preserves-plan', replaces: Object.freeze([]) }),
   'set-project-color-plan': Object.freeze({ planEffect: 'preserves-plan', replaces: Object.freeze([]) }),
   'set-project-subtitle-mode': Object.freeze({ planEffect: 'preserves-plan', replaces: Object.freeze([]) }),

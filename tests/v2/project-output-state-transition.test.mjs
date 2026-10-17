@@ -174,3 +174,15 @@ test('the database guard names exactly the types, plan effects, replacements, or
   assert.ok(body.includes(`'${producer.schemaVersion}'`) && body.includes(`'kind','${producer.kind}'`))
   assert.equal(producer.target, null)
 })
+
+test('a child plan is materialized only from observed sources: an unobserved source is refused, an emptied plan blocks', async () => {
+  const w = await world(), plan = JSON.parse(w.parent.editPlanSnapshot.contentJson)
+  const elsewhere = childInput(w, { suffix: 'unobserved', type: 'apply-review-patch', payload: { schemaVersion: 1 }, planPatch: {
+    videoTracks: [{ ...plan.videoTracks[0], clips: plan.videoTracks[0].clips.map((clip) => ({ ...clip, sourceArtifactId: 'artifact-elsewhere' })) }] } })
+  assert.throws(() => transitionProjectOutputState(elsewhere.input), (error) =>
+    error.code === 'PRECONDITION_REQUIRED' && error.details.sourceArtifactIds.includes('artifact-elsewhere'))
+  const emptied = childInput(w, { suffix: 'emptied', type: 'apply-review-patch', payload: { schemaVersion: 1 }, planPatch: { durationFrames: 0, videoTracks: [] } })
+  const bundle = transitionProjectOutputState(emptied.input)
+  assert.ok(bundle.state.document.entries.length > 0)
+  assert.ok(bundle.state.document.entries.every((entry) => entry.consumption.status === 'blocked' && entry.consumption.reasons[0] === 'empty-project'))
+})
