@@ -16,23 +16,6 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
   timeout: 240_000,
 }, async (t) => {
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
-  const cleanup = async () => {
-    await client.v2ReviewCleanupMask.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewAnnotation.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationBrief.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   let primaryError
   const cleanupErrors = []
@@ -42,7 +25,6 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
       messageBytes: message.length, messageSha256: createHash('sha256').update(message).digest('hex') }
   }
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -235,7 +217,7 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
     await assert.rejects(() => masks.read({ workspaceId, projectId: created.projectAtCreation.id, maskId: refined.persisted.mask.id }), (error) => error.code === 'PERSISTENCE_CONFLICT')
   } catch (error) { primaryError = error }
   finally {
-    try { await cleanup() } catch (error) { cleanupErrors.push({ stage: 'fixture-cleanup', error }) }
+    try { } catch (error) { cleanupErrors.push({ stage: 'fixture-cleanup', error }) }
     try { await client.$disconnect() } catch (error) { cleanupErrors.push({ stage: 'prisma-disconnect', error }) }
     for (const { stage, error } of cleanupErrors) t.diagnostic(JSON.stringify(errorFact(stage, error)))
   }

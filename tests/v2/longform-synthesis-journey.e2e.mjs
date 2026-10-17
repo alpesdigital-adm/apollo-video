@@ -449,11 +449,6 @@ async function driveJourney(t, {
         await client[table].deleteMany({ where: { workspaceId } })
       }
       await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
-      await client.v2Project.deleteMany({ where: { workspaceId } })
-      await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-      await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
     }
 
     t.after(async () => {

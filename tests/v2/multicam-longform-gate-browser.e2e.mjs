@@ -106,16 +106,8 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
   let server
   let browser
 
-  const cleanup = async () => {
-    await client.v2MulticamLongformGate.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await client.v2Workspace.create({
       data: {
         id: workspaceId, slug: workspaceId, name: 'F4.016 browser E2E',
@@ -571,7 +563,6 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
     // Reported, not rethrown: a cleanup failure that masks the real assertion
     // turns one clear defect into two confusing ones.
     try {
-      await cleanup()
     } catch (error) {
       console.error('cleanup failed:', error?.message ?? error)
     } finally {

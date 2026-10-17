@@ -67,8 +67,6 @@ test(
     const reviews = new PrismaProxyReviewRepository(client)
 
     const clean = async () => {
-      await client.v2ProxyReviewDecision.deleteMany({ where: { workspaceId } })
-      await client.v2ProxyReview.deleteMany({ where: { workspaceId } })
       for (const table of [
         client.v2ColorCriticProposedDelta, client.v2ColorCriticIssue,
         client.v2ColorCriticDimensionResult, client.v2ColorCriticReportMeasurement,
@@ -78,18 +76,7 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId } })
       }
-      await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-      await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-      await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-      await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-      await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-      await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
       await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
-      await client.v2Project.deleteMany({ where: { workspaceId } })
-      await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-      await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
     }
 
     t.after(async () => {

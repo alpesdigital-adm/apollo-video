@@ -483,27 +483,6 @@ export async function cleanupDashboardFixtures(client, {
     const finals = await client.v2ProjectFinalExportOperation.findMany({
       where, select: { operationId: true },
     })
-    await client.v2ReviewAnnotation.deleteMany({ where })
-    await client.v2ProjectFinalExportAttempt.deleteMany({
-      where: { workspaceId, operationId: { in: finals.map((row) => row.operationId) } },
-    })
-    await client.v2ProjectFinalExportOperation.deleteMany({ where })
-    await client.v2ProxyReview.deleteMany({ where })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where })
-    await client.v2PublicOperation.deleteMany({ where })
-    await client.v2DirectorRun.deleteMany({ where })
-    await client.v2ProjectLutSelectionHead.deleteMany({ where })
-    await client.v2ProjectLutSelection.deleteMany({ where })
-    await client.v2ProjectAdministrationCommand.deleteMany({ where })
-    await client.v2ProjectCreationCommand.deleteMany({ where })
-  }
-  if (emptyWorkspaceId) {
-    await client.v2UiSession.deleteMany({ where: { workspaceId: emptyWorkspaceId } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: emptyWorkspaceId } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: emptyWorkspaceId } })
-    await client.v2ApiCredential.deleteMany({ where: { workspaceId: emptyWorkspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: emptyWorkspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: emptyWorkspaceId } })
   }
   return { projects: ids.length }
 }

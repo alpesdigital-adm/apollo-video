@@ -44,18 +44,7 @@ export async function seedAnalyzedImageLibrary({ prisma, fixture = 'plain', tess
   let created = false
   const cleanup = async () => {
     if (created) {
-      await prisma.v2ImageReuseReference.deleteMany({ where: { workspaceId } })
-      await prisma.v2ImageAnalysis.deleteMany({ where: { workspaceId } })
-      await prisma.v2MediaLibraryEntry.deleteMany({ where: { workspaceId } })
-      await prisma.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
       await prisma.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null } })
-      await prisma.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
-      await prisma.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
-      await prisma.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
-      await prisma.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-      await prisma.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-      await prisma.v2Project.deleteMany({ where: { workspaceId } })
-      await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
     }
     await rm(root, { recursive: true, force: true })
   }

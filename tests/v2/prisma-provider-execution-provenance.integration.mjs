@@ -30,25 +30,7 @@ test('W24.2 PostgreSQL fences provider transport evidence by job attempt, hash a
   boundedPositive('pool_timeout', 10)
   boundedPositive('connect_timeout', 10)
   const client = new PrismaClient({ datasources: { db: { url: databaseUrl.toString() } } })
-  const cleanup = async () => {
-    await client.v2ProviderExecutionReceiptResult.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransportState.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
   try {
-    await cleanup()
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
@@ -202,6 +184,6 @@ test('W24.2 PostgreSQL fences provider transport evidence by job attempt, hash a
     await assert.rejects(repository.recordEvidence({ evidence: staleEvidence }), (error) => error.code === 'VERSION_CONFLICT')
     assert.equal(await client.v2ProviderTransportEvidence.count({ where: { workspaceId, jobId } }), 1)
   } finally {
-    try { await cleanup() } finally { await client.$disconnect() }
+    try { } finally { await client.$disconnect() }
   }
 })

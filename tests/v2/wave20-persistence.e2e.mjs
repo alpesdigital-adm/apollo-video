@@ -93,10 +93,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
       }
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
-      await client.v2Project.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-      await client.v2Workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } })
     }
 
     t.after(async () => {
@@ -890,10 +886,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId: { in: [A, B] } } })
       }
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2Project.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2Workspace.deleteMany({ where: { id: { in: [A, B] } } })
     }
 
     t.after(async () => {
@@ -1524,10 +1516,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId: W } })
       }
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId: W } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: W } })
-      await client.v2Project.deleteMany({ where: { workspaceId: W } })
-      await client.v2Workspace.deleteMany({ where: { id: W } })
     }
 
     t.after(async () => {

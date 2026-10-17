@@ -244,12 +244,6 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       (error) => error?.code === 'PERSISTENCE_CONFLICT',
     )
   } finally {
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
     await client.$disconnect()
   }
 })

@@ -138,19 +138,8 @@ export async function proveMediaTransferHttp({ baseUrl, client, authorization, w
     assert.deepEqual(await readFile(path), small)
     return evidence
   } finally {
-    await client.v2MediaDownloadGrant.deleteMany({ where: { workspaceId, artifactId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { artifactId } })
-    await client.v2MediaArtifact.deleteMany({ where: { id: artifactId } })
     const operations = await client.v2MediaIngestOperation.findMany({ where: { workspaceId, uploadId: { in: uploads } }, select: { operationId: true } })
     const ids = operations.map((operation) => operation.operationId)
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId, resourceId: { in: ids } } })
-    await client.v2MediaIngestOperation.deleteMany({ where: { workspaceId, uploadId: { in: uploads } } })
-    await client.v2PublicOperation.deleteMany({ where: { id: { in: ids } } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId, resourceId: { in: projects } } })
-    await client.v2MediaUpload.deleteMany({ where: { id: { in: uploads } } })
     await client.v2Project.updateMany({ where: { workspaceId, id: { in: projects } }, data: { currentVersionId: null } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId, projectId: { in: projects } } })
-    await client.v2ProjectVersion.deleteMany({ where: { workspaceId, projectId: { in: projects } } })
-    await client.v2Project.deleteMany({ where: { workspaceId, id: { in: projects } } })
   }
 }

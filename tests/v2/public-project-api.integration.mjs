@@ -187,112 +187,11 @@ test('authenticated public API manages projects, clients and artifact inspection
     // W34/W35 fixtures hold RESTRICT foreign keys; they leave first.
     // W40 seeds an awaiting-review project (operation + annotation) that also holds RESTRICT foreign keys.
     await cleanupDashboardFixtures(client, { workspaceId, prefixes: ['w34-', 'w35-', 'w40-'] })
-    await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: uiThrottleKey } })
-    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiThrottleKey } })
-    await client.v2WebhookDeliveryAttempt.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookDelivery.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookAdministrationCommand.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookSubscription.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookSigningSecretRotation.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookSigningSecretPayload.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookSigningSecret.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2WebhookEndpoint.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ArtifactRenderOperation.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2PublicOperation.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2AssetUseDecision.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MaterializationAuthorization.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ColorPipelineCompilation.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ProjectLutSelectionHead.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ProjectLutSelection.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLutDefault.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLutDefaultVersion.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLutStatusCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLut.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceLutVersion.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ProjectMediaAsset.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaArtifactLineage.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaColorProbe.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaArtifactManifest.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
     await client.v2MediaArtifact.updateMany({
       where: { workspaceId: { in: workspaceIds } },
       data: { currentRightsSnapshotId: null },
     })
-    await client.v2AssetRightsChange.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2AssetRightsSnapshot.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2MediaArtifact.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2RenderInputPayload.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2RecipeParameterPayload.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ProjectAdministrationCommand.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2PublicEventOutbox.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2IdempotencyRecord.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ApiAccessCommand.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2ProjectCreationCommand.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
     // W39: a duplicated project's first version forks from its source (restrictive FK), so duplicates go first.
-    await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds }, duplicatedFromProjectId: { not: null } } })
-    await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2GovernancePolicyCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2HumanIdentity.deleteMany({ where: { issuer: 'urn:apollo:bootstrap', subjectHash: uiSessionSubjectHash(uiUsername, uiEnvironment) } })
-    await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
   }
 
   try {
@@ -3541,9 +3440,6 @@ test('authenticated public API manages projects, clients and artifact inspection
         },
       }), 2)
     } finally {
-      await client.v2PublicOperation.deleteMany({
-        where: { id: { in: anomalyOperationIds } },
-      })
     }
     const anomalyAlertsResponse = await fetch(
       `${baseUrl}/v1/governance/alerts?limit=100`,

@@ -413,7 +413,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId } })
       }
-      await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
     }
 
     t.after(async () => {

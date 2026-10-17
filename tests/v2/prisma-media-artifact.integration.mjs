@@ -49,21 +49,8 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
   const expectDomainCode = async (promise, code) => {
     await assert.rejects(promise, (error) => error instanceof DomainError && error.code === code)
   }
-  const cleanup = async () => {
-    await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2RenderInputPayload.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2RecipeParameterPayload.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
-  }
 
   try {
-    await cleanup()
     const workspaces = new PrismaWorkspaceRepository(client)
     await workspaces.create(
       createWorkspace({
@@ -614,7 +601,6 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
     assert.equal(await client.v2MediaArtifactManifest.count({ where: { workspaceId: workspaceA } }), 7)
     assert.equal(await client.v2MediaArtifactLineage.count({ where: { workspaceId: workspaceA } }), 3)
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

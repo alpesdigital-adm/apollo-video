@@ -464,7 +464,6 @@ test(
 
     const client = new PrismaClient()
     const clean = async () => {
-      await client.v2RenderablePlanSnapshot.deleteMany({ where: { workspaceId: WORKSPACE } })
       for (const table of [
         client.v2PlaybackUncoveredRange, client.v2PlaybackAnchor, client.v2PlaybackPiece,
         client.v2PlaybackMapHead, client.v2PlaybackMap,
@@ -472,15 +471,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId: WORKSPACE } })
       }
-      await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: WORKSPACE } })
-      await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: WORKSPACE } })
-      await client.v2MediaArtifact.deleteMany({ where: { workspaceId: WORKSPACE } })
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId: WORKSPACE } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: WORKSPACE } })
-      await client.v2Project.deleteMany({ where: { workspaceId: WORKSPACE } })
-      await client.v2ApiCredential.deleteMany({ where: { workspaceId: WORKSPACE } })
-      await client.v2ApiClient.deleteMany({ where: { workspaceId: WORKSPACE } })
-      await client.v2Workspace.deleteMany({ where: { id: WORKSPACE } })
     }
 
     t.after(async () => {

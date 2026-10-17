@@ -134,25 +134,11 @@ test(
     const at = (second) => new Date(Date.parse('2029-05-01T09:00:00.000Z') + second * 1_000).toISOString()
     const artifactRoot = await mkdtemp(join(tmpdir(), 'apollo-capture-sync-e2e-'))
 
-    const clean = async () => {
-      await client.v2CaptureTrackCoverage.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureClockMapPiece.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureClockMap.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureSyncEvidence.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureSyncRun.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureSessionClock.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureSessionHead.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureSessionVersion.deleteMany({ where: { workspaceId } })
-      await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-      await client.v2Project.deleteMany({ where: { workspaceId } })
-      await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-    }
 
     t.after(async () => {
       // Reported rather than rethrown: a cleanup failure that masks the real
       // assertion turns one clear defect into two confusing ones.
       try {
-        await clean()
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       }
@@ -162,7 +148,6 @@ test(
       await client.$disconnect()
     })
 
-    await clean()
 
     // ---- the two recordings, generated here and never committed -----------
     const mediaDirectory = join(artifactRoot, 'capture')

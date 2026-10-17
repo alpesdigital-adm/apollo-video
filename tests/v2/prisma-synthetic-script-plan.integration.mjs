@@ -16,24 +16,8 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
 }, async () => {
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
 
-  const cleanup = async () => {
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -265,7 +249,6 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
       (error) => error.code === 'PERSISTENCE_CONFLICT',
     )
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

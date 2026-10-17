@@ -876,7 +876,6 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
           error.code === 'PERSISTENCE_CONFLICT' && /unsupported/i.test(error.message))
       } finally {
-        await db.v2ProjectMediaAsset.delete({ where: { id: secondLinkId } })
         await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: world.rightsId } })
         await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
           data: { contentJson: directedEdit.contentJson, contentHash: directedEdit.contentHash } })

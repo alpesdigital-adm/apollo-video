@@ -49,31 +49,8 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     probe: { width: 1080, height: 1920, duration: 2, fps: 30 },
   })
 
-  const cleanup = async () => {
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2ArtifactRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
-    await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperationControlCommand.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2AssetUseDecision.deleteMany({ where: { workspaceId } })
-    await client.v2MaterializationAuthorization.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2ApiCredential.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await client.v2Workspace.create({
       data: {
         id: workspaceId,
@@ -1161,7 +1138,6 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(retriedLatest.operation.status, 'retrying')
     assert.equal(await projectStatus(), 'rendering-proxy')
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

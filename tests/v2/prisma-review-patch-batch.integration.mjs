@@ -51,22 +51,6 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   let server
   let authenticatedActor
 
-  const cleanup = async () => {
-    await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewPatchBatch.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewPatchProposal.deleteMany({ where: { workspaceId } })
-    await client.v2ReviewAnnotation.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   const seedAnnotationAndProposal = async ({ versionId, targetId, text, operationText }) => {
     const audit = materializeActorAuditContext(authenticatedActor)
@@ -142,7 +126,6 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   })
 
   try {
-    await cleanup()
     const brief = { schemaVersion: 1, objective: 'discovery', createdAt: createdAt.toISOString() }
     const policies = { schemaVersion: 1, state: 'configured', createdAt: createdAt.toISOString() }
     const editPlan = {
@@ -375,7 +358,6 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
     }
-    await cleanup()
     await client.$disconnect()
   }
 })

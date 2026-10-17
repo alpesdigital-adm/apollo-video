@@ -66,45 +66,8 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
   let serverLogs = ''
   let workerLogs = ''
 
-  const cleanup = async () => {
-    const identityIds = (await client.v2WorkspaceMember.findMany({
-      where: { workspaceId }, select: { identityId: true },
-    })).map((member) => member.identityId)
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2SyntheticBlockConcatenation.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2UiSession.deleteMany({ where: { workspaceId } })
-    const { uiLoginThrottleKey, uiSessionSubjectHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
-    const sessionEnvironment = { APOLLO_UI_SESSION_SECRET: uiSessionSecret }
-    await client.v2UiLoginAttempt.deleteMany({ where: { subjectHash: uiSessionSubjectHash(uiUsername, sessionEnvironment) } })
-    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiLoginThrottleKey('direct', uiUsername, sessionEnvironment) } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId } })
-    if (identityIds.length > 0) await client.v2HumanIdentity.deleteMany({ where: { id: { in: identityIds } } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -428,7 +391,6 @@ test('T-FR-103 presenter lifecycle and generation gates hold from the browser to
     await stopProcess(worker)
     await stopProcess(server)
     if (stub) await new Promise((resolve) => stub.close(resolve))
-    await cleanup()
     await client.$disconnect()
     if (objectStore) {
       const versions = await objectStore.client.send(new objectStore.aws.ListObjectVersionsCommand({ Bucket: objectStore.bucket }))

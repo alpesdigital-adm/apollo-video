@@ -148,12 +148,6 @@ test('PostgreSQL seals manual perception origin and rejects stale or altered rec
     await assert.rejects(repository.findLatest({ workspaceId, projectId }),
       (error) => error.code === 'PERSISTENCE_CONFLICT')
   } finally {
-    await client.v2PerceptionTimeline.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
     await client.$disconnect()
   }
 })

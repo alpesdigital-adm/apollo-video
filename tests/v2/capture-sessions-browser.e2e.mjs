@@ -80,21 +80,6 @@ test('E2E-FR-140 the capture sessions page renders a refusal as a refusal', {
   let server
   let browser
 
-  const cleanup = async () => {
-    await client.v2CaptureSyncEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureClockMapPiece.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureClockMap.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureTrackCoverage.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureSyncRun.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureSessionVersion.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureSessionHead.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    // Before the client, not after: the bootstrap login provisions a UI
-    // principal pointing at it, and that relation is onDelete: Restrict.
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   const part = (partId, sourceAssetId) => ({
     partId,
@@ -135,7 +120,6 @@ test('E2E-FR-140 the capture sessions page renders a refusal as a refusal', {
   }
 
   try {
-    await cleanup()
     await client.v2Workspace.create({
       data: {
         id: workspaceId, slug: workspaceId, name: 'Capture sessions E2E',
@@ -306,7 +290,6 @@ test('E2E-FR-140 the capture sessions page renders a refusal as a refusal', {
     // what happened when the cleanup order was wrong: the foreign key error
     // stood in for a failure nobody got to see.
     try {
-      await cleanup()
     } catch (cleanupError) {
       console.error('capture sessions E2E cleanup failed:', cleanupError)
     }

@@ -376,7 +376,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId: WORKSPACE } })
       }
-      await client.v2Workspace.deleteMany({ where: { id: WORKSPACE } })
     }
 
     t.after(async () => {

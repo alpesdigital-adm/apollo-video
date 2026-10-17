@@ -16,26 +16,6 @@ test('T-FR-105 synthetic cache decisions persist idempotently, summarize by outc
 
   const cleanupWorkspace = async (id) => {
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId: id }, data: { currentVersionId: null } })
-    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId: id } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId: id } })
-    await client.v2Project.deleteMany({ where: { workspaceId: id } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: id } })
-    await client.v2Workspace.deleteMany({ where: { id } })
   }
   const cleanup = async () => {
     await cleanupWorkspace(workspaceId)

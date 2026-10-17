@@ -91,11 +91,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const sessionEnvironment = { APOLLO_UI_SESSION_SECRET: uiSessionSecret }
     const loginKeyHash = uiLoginThrottleKey('direct', uiUsername, sessionEnvironment)
     const loginSubjectHash = uiSessionSubjectHash(uiUsername, sessionEnvironment)
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({
-      where: { workspaceId, reusedFromOperationId: { not: null } },
-    })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2DirectorRun.updateMany({
       where: { workspaceId },
       data: { operationId: null, supersedesRunId: null },
@@ -104,42 +99,15 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       where: { workspaceId },
       data: { supersedesRunId: null },
     })
-    await client.v2ProjectDirectorOperation.deleteMany({ where: { workspaceId } })
     const directorRunIds = (await client.v2DirectorRun.findMany({
       where: { workspaceId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: { id: true },
     })).map((run) => run.id)
-    for (const id of directorRunIds) {
-      await client.v2DirectorRun.delete({ where: { id } })
-    }
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
-    await client.v2MediaTranscript.deleteMany({ where: { workspaceId } })
-    await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
-    await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
-    await client.v2RenderElementMap.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2AssetUseDecision.deleteMany({ where: { workspaceId } })
-    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.updateMany({
       where: { workspaceId, currentRightsSnapshotId: { not: null } },
       data: { currentRightsSnapshotId: null },
     })
-    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2UiSession.deleteMany({ where: { workspaceId } })
-    await client.v2UiLoginAttempt.deleteMany({ where: { subjectHash: loginSubjectHash } })
-    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: loginKeyHash } })
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-    if (identityIds.length > 0) {
-      await client.v2HumanIdentity.deleteMany({ where: { id: { in: identityIds } } })
-    }
   }
 
   const execute = (request) => applyManualEditService({

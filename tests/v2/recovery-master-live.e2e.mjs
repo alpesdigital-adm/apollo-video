@@ -36,7 +36,6 @@ async function cleanup(prisma, workspaceId) {
     }
   }
   assert.deepEqual(pending, [])
-  await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
 }
 
 // This is deliberately a live, supervised proof. CI has no private owner

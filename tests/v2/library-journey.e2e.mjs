@@ -49,8 +49,6 @@ async function cleanupWorkspace(prisma, workspaceId) {
     }
   }
   assert.deepEqual(pending, [], 'Owned workspace cleanup left referenced rows')
-  await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  for (const identity of identities) await prisma.v2HumanIdentity.deleteMany({ where: { id: identity.identityId, memberships: { none: {} } } })
 }
 
 test(process.env.APOLLO_W51_S3_ONLY === '1' ? 'W51 transfer uses real HTTP, PostgreSQL and versioned S3 bytes' : 'W50 library uses real HTTP, durable ingest, PostgreSQL, media bytes and Chromium', { skip: process.env.APOLLO_LIBRARY_JOURNEY_E2E !== '1', timeout: 480_000 }, async () => {

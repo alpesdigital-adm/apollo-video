@@ -14,26 +14,8 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
   timeout: 240_000,
 }, async () => {
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
-  const cleanup = async () => {
-    await client.v2TransformationFallbackDispatchRequest.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationFallbackDispatchClaim.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationFallbackAttempt.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationFallbackLedger.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationProviderSelection.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationBrief.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationProviderHealth.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationProviderCapability.deleteMany({ where: { workspaceId } })
-    await client.v2TransformationProviderDefinition.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     const { createProjectService } = await import('../../src/v2/application/create-project.ts')
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -141,7 +123,6 @@ test('T-FR-110/111/112 persists immutable briefs and auditable provider routing 
     await client.v2TransformationBrief.update({ where: { id: brief.id }, data: { briefJson: JSON.stringify({ ...brief, prompt: 'tampered' }) } })
     await assert.rejects(repository.readBrief({ workspaceId, projectId: created.projectAtCreation.id, briefId: brief.id }), (error) => error.code === 'PERSISTENCE_CONFLICT')
   } finally {
-    await cleanup()
     await client.$disconnect()
   }
 })

@@ -126,44 +126,11 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
   let workerLogs = ''
 
   const cleanupWorkspace = async (id) => {
-    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId: id }, data: { currentVersionId: null } })
-    await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticBlockConcatenation.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticSpeechSegment.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId: id } })
     await client.v2MediaArtifact.updateMany({
       where: { workspaceId: id },
       data: { currentRightsSnapshotId: null, rightsRevision: 0 },
     })
-    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId: id } })
-    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId: id } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId: id } })
-    await client.v2Project.deleteMany({ where: { workspaceId: id } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: id } })
-    await client.v2Workspace.deleteMany({ where: { id } })
   }
   const cleanup = async () => {
     await cleanupWorkspace(workspaceId)

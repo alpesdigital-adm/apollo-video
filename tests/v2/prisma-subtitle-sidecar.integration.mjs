@@ -32,14 +32,6 @@ async function reachableClient() {
   }
 }
 
-async function cleanup(client) {
-  await client.v2ProjectSubtitleSidecar.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2ProjectVersion.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2Project.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2MediaArtifact.deleteMany({ where: { workspaceId: WORKSPACE } })
-  await client.v2Workspace.deleteMany({ where: { id: WORKSPACE } })
-}
 
 async function seed(client) {
   await client.v2Workspace.create({
@@ -132,7 +124,6 @@ test('T-FR-175 subtitle sidecars persist with real lineage, replay and idempoten
   )
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
   try {
-    await cleanup(client)
     await seed(client)
     const repository = new PrismaSubtitleSidecarRepository(client)
 
@@ -204,7 +195,6 @@ test('T-FR-175 subtitle sidecars persist with real lineage, replay and idempoten
     )
     assert.equal(typeof DomainError, 'function')
   } finally {
-    await cleanup(client).catch(() => undefined)
     await client.$disconnect()
   }
 })

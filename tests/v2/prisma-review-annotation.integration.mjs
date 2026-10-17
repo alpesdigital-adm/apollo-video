@@ -72,26 +72,8 @@ test('review annotations persist idempotently without mutating the project versi
   const createdAt = new Date().toISOString() // Observed run instant; service TTLs follow the PG run.
   let server
 
-  const cleanup = async () => {
-    await client.v2ReviewAnnotation.deleteMany({ where: { workspaceId } })
-    await client.v2RenderElementMap.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
-    await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await new PrismaWorkspaceRepository(client).create(createWorkspace({
       id: workspaceId,
       slug: workspaceId,
@@ -450,7 +432,6 @@ test('review annotations persist idempotently without mutating the project versi
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
     }
-    await cleanup()
     await client.$disconnect()
   }
 })

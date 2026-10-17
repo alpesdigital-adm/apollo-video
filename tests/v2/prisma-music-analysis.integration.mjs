@@ -312,28 +312,14 @@ test(
           await import("../../src/v2/infrastructure/prisma-postgres/client.ts");
         await disconnectV2PostgresClient();
         const where = { workspaceId };
-        await prisma.v2MusicAnalysisRunAction.deleteMany({ where });
-        await prisma.v2MusicAnalysisRun.deleteMany({ where });
-        await prisma.v2MusicAnalysisAuthorization.deleteMany({ where });
-        await prisma.v2MusicAnalysis.deleteMany({ where });
         await prisma.v2Project.updateMany({
           where,
           data: { currentVersionId: null },
         });
-        await prisma.v2ProjectVersion.deleteMany({ where });
-        await prisma.v2ProjectSnapshot.deleteMany({ where });
-        await prisma.v2ProjectMediaAsset.deleteMany({ where });
-        await prisma.v2Project.deleteMany({ where });
         await prisma.v2MediaArtifact.updateMany({
           where,
           data: { currentRightsSnapshotId: null },
         });
-        await prisma.v2AssetRightsChange.deleteMany({ where });
-        await prisma.v2AssetRightsSnapshot.deleteMany({ where });
-        await prisma.v2MediaArtifact.deleteMany({ where });
-        await prisma.v2ApiCredential.deleteMany({ where });
-        await prisma.v2ApiClient.deleteMany({ where });
-        await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } });
       } catch (cleanupError) {
         if (testFailure)
           throw new AggregateError(

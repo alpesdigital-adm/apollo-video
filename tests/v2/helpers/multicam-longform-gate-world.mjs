@@ -282,15 +282,7 @@ export async function cleanGateWorld({ client, workspaceIds, protocolRowIds = []
   // `sync-diagnostic-persistence.e2e.mjs` asserts that its own first publish is
   // not a replay. Only the rows THIS world created are removed; a protocol
   // another suite published stays where it is.
-  if (protocolRowIds.length > 0) {
-    await client.v2CaptureProtocol.deleteMany({ where: { id: { in: [...protocolRowIds] } } })
-  }
   await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-  await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
-  await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId } })
-  await client.v2Project.deleteMany({ where: { workspaceId } })
-  await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-  await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
 }
 
 export async function buildGateWorld({

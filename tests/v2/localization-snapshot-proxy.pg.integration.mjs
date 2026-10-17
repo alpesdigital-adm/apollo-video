@@ -391,28 +391,6 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
   } catch (error) { failure = error; throw error } finally {
     try {
       if (runtime) await runtime.close()
-      if (fixture) {
-        await prisma.v2LocalizationMediaRunRevision.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2LocalizationMediaRun.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2ProxyReview.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2RenderElementMap.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2OperationTelemetryAlert.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2OperationTelemetryEvent.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2PublicEventOutbox.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2PublicOperation.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2RenderablePlanSnapshot.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2AutomaticCatalogRecord.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2MediaArtifactLineage.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2MediaColorProbe.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: fixture.workspaceId, artifactId: { not: fixture.artifactId } } })
-        await prisma.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: fixture.workspaceId, artifactId: { not: fixture.artifactId } } })
-        await prisma.v2MediaArtifact.deleteMany({ where: { workspaceId: fixture.workspaceId, id: { not: fixture.artifactId } } })
-        await prisma.v2RecipeParameterPayload.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await prisma.v2RenderInputPayload.deleteMany({ where: { workspaceId: fixture.workspaceId } })
-        await fixture.cleanup()
-      }
     } catch (cleanupError) { if (failure) throw new AggregateError([failure, cleanupError]); throw cleanupError }
     finally { await prisma.$disconnect(); await rm(work, { recursive: true, force: true }) }
   }

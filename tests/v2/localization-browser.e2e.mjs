@@ -336,19 +336,6 @@ test(
       } catch (error) {
         cleanupErrors.push(error);
       }
-      if (fixture) {
-        try {
-          await prisma.v2UiSession.deleteMany({
-            where: { workspaceId: fixture.workspaceId },
-          });
-          await prisma.v2WorkspaceUiPrincipal.deleteMany({
-            where: { workspaceId: fixture.workspaceId },
-          });
-          await fixture.cleanup();
-        } catch (error) {
-          cleanupErrors.push(error);
-        }
-      }
       try {
         await prisma.$disconnect();
       } catch (error) {

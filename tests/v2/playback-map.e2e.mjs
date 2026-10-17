@@ -91,13 +91,6 @@ test(
         await table.deleteMany({ where: { workspaceId: { in: [A, B] } } })
       }
       // Links and manifests first: both reference the artifact with RESTRICT.
-      await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2MediaArtifact.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2Project.deleteMany({ where: { workspaceId: { in: [A, B] } } })
-      await client.v2Workspace.deleteMany({ where: { id: { in: [A, B] } } })
     }
 
     t.after(async () => {

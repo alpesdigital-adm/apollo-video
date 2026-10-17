@@ -67,45 +67,6 @@ export async function createLocalizationPgFixture(
     transcriptId = `transcript-${suffix}`,
     batchId = `batch-${suffix}`;
   const where = { workspaceId };
-  const cleanup = async () => {
-    await prisma.v2LocalizationVariantAction.deleteMany({ where });
-    await prisma.v2LocalizationVariantRevision.deleteMany({ where });
-    await prisma.v2LocalizationVariantHead.deleteMany({ where });
-    await prisma.v2LocalizationCanonicalScript.deleteMany({ where });
-    await prisma.v2LocalizationProfile.deleteMany({ where });
-    await prisma.v2ScriptAlignmentReview.deleteMany({ where });
-    await prisma.v2ScriptAlignmentRun.deleteMany({ where });
-    await prisma.v2ProductionBatch.deleteMany({ where });
-    await prisma.v2MediaTranscript.deleteMany({ where });
-    await prisma.v2ProjectLutSelectionHead.deleteMany({ where });
-    await prisma.v2CommandArtifactInvalidation.deleteMany({ where });
-    await prisma.v2ProjectLutSelection.deleteMany({ where });
-    await prisma.v2Project.updateMany({
-      where,
-      data: { currentVersionId: null },
-    });
-    await prisma.v2ProjectVersion.updateMany({
-      where,
-      data: { commandId: null },
-    });
-    await prisma.v2EditCommand.deleteMany({ where });
-    await prisma.v2ProjectVersion.deleteMany({ where });
-    await prisma.v2ProjectSnapshot.deleteMany({ where });
-    await prisma.v2ProjectMediaAsset.deleteMany({ where });
-    await prisma.v2Project.deleteMany({ where });
-    await prisma.v2MediaArtifact.updateMany({
-      where,
-      data: { currentRightsSnapshotId: null },
-    });
-    await prisma.v2AssetRightsChange.deleteMany({ where });
-    await prisma.v2AssetRightsSnapshot.deleteMany({ where });
-    await prisma.v2MediaColorProbe.deleteMany({ where });
-    await prisma.v2MediaArtifactManifest.deleteMany({ where });
-    await prisma.v2MediaArtifact.deleteMany({ where });
-    await prisma.v2ApiCredential.deleteMany({ where });
-    await prisma.v2ApiClient.deleteMany({ where });
-    await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } });
-  };
   try {
     await createWorkspaceRow({
       prisma,
@@ -486,11 +447,9 @@ export async function createLocalizationPgFixture(
       variant,
       alignment,
       rights: rightsResult,
-      cleanup,
     };
   } catch (error) {
     try {
-      await cleanup();
     } catch (cleanupError) {
       throw new AggregateError(
         [error, cleanupError],

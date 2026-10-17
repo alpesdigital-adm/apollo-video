@@ -68,23 +68,8 @@ test('W36 persisted project event feed is authenticated, workspace-scoped, commi
   let server
   let serverDiagnostics = ''
 
-  const cleanup = async () => {
-    const where = { workspaceId: { in: workspaceIds } }
-    await client.v2ProjectAdministrationCommand.deleteMany({ where })
-    await client.v2PublicEventOutbox.deleteMany({ where })
-    await client.v2IdempotencyRecord.deleteMany({ where })
-    await client.v2ApiAccessCommand.deleteMany({ where })
-    await client.v2ProjectCreationCommand.deleteMany({ where })
-    await client.v2Project.deleteMany({ where })
-    await client.v2ApiAdministrationCommand.deleteMany({ where })
-    await client.v2GovernancePolicyCommand.deleteMany({ where })
-    await client.v2ApiCredential.deleteMany({ where })
-    await client.v2ApiClient.deleteMany({ where })
-    await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
-  }
 
   try {
-    await cleanup()
     const workspaces = new PrismaWorkspaceRepository(client)
     for (const [id, name] of [[workspaceA, 'W36 Feed A'], [workspaceB, 'W36 Feed B']]) {
       await workspaces.create(createWorkspace({
@@ -411,7 +396,6 @@ test('W36 persisted project event feed is authenticated, workspace-scoped, commi
   } finally {
     await stopOwnedServer(server)
     for (const extra of extraClients) await extra.$disconnect().catch(() => undefined)
-    await cleanup().catch((error) => console.error('W36 feed cleanup failed', error))
     await client.$disconnect()
   }
 })

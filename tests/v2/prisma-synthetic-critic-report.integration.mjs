@@ -17,24 +17,7 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
 
   const cleanupWorkspace = async (id) => {
-    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId: id }, data: { currentVersionId: null } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId: id } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: id } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId: id } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId: id } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId: id } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId: id } })
-    await client.v2Project.deleteMany({ where: { workspaceId: id } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: id } })
-    await client.v2Workspace.deleteMany({ where: { id } })
   }
   const cleanup = async () => {
     await cleanupWorkspace(workspaceId)

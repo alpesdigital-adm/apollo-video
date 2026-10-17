@@ -76,22 +76,6 @@ test('E2E-FR-147/149 the diagnostic page renders an unmeasured track as unmeasur
   let server
   let browser
 
-  const cleanup = async () => {
-    await client.v2SyncDiagnosticHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyncDiagnostic.deleteMany({ where: { workspaceId } })
-    await client.v2SyncMarkerDetection.deleteMany({ where: { workspaceId } })
-    await client.v2SyncMarker.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureProtocolEvaluation.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureSessionProtocol.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureSessionVersion.deleteMany({ where: { workspaceId } })
-    await client.v2CaptureSessionHead.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    // Before the API client, not after: bootstrap login provisions a UI
-    // principal pointing at it, and that relation is onDelete: Restrict.
-    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   const track = (trackId, role) => ({
     trackId,
@@ -121,7 +105,6 @@ test('E2E-FR-147/149 the diagnostic page renders an unmeasured track as unmeasur
   })
 
   try {
-    await cleanup()
     await client.v2Workspace.create({
       data: {
         id: workspaceId, slug: workspaceId, name: 'Wave 19 browser E2E',
@@ -344,7 +327,6 @@ test('E2E-FR-147/149 the diagnostic page renders an unmeasured track as unmeasur
     // Reported, not rethrown: a cleanup failure that masks the real assertion
     // turns one clear defect into two confusing ones.
     try {
-      await cleanup()
     } catch (error) {
       console.error('cleanup failed:', error?.message ?? error)
     } finally {

@@ -94,42 +94,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const credentialId = 'synthetic-production-integration-credential'
   let primaryError
 
-  const cleanup = async () => {
-    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderExecutionReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderTransportEvidence.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticMasterConsumption.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticProductionAsset.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticProductionRun.deleteMany({ where: { workspaceId } })
-    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
-    await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.updateMany({
-      where: { workspaceId },
-      data: { currentRightsSnapshotId: null, rightsRevision: 0 },
-    })
-    await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })
-    await client.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2StoryPlan.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await new PrismaWorkspaceRepository(client).create(createWorkspace({
       id: workspaceId,
       slug: workspaceId,
@@ -815,7 +781,6 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   } finally {
     let cleanupError
     try {
-      await cleanup()
     } catch (error) {
       cleanupError = error
     }

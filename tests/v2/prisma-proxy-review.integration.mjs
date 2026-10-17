@@ -58,23 +58,8 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
   let server
   let browser
 
-  const cleanup = async () => {
-    await client.v2ProxyReviewDecision.deleteMany({ where: { workspaceId } })
-    await client.v2ProxyReview.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
-    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
-    await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
-    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-  }
 
   try {
-    await cleanup()
     await client.v2Workspace.create({
       data: { id: workspaceId, slug: workspaceId, name: 'Proxy review E2E', status: 'active', createdAt, updatedAt: createdAt },
     })
@@ -419,7 +404,6 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
     }
-    await cleanup()
     await client.$disconnect()
   }
 })

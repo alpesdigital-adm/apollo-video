@@ -61,8 +61,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
       }
-      await client.v2Project.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
-      await client.v2Workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } })
     }
 
     t.after(async () => {
@@ -447,7 +445,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId } })
       }
-      await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
     }
     t.after(async () => {
       const cleanupErrors = []
@@ -994,7 +991,6 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId } })
       }
-      await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
     }
     t.after(async () => {
       try {

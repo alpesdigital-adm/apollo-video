@@ -60,24 +60,11 @@ test(
     const at = (second) =>
       new Date(Date.parse('2029-04-01T09:00:00.000Z') + second * 1_000).toISOString()
 
-    const clean = async () => {
-      await client.v2SyncDiagnosticHead.deleteMany({ where: { workspaceId } })
-      await client.v2SyncDiagnostic.deleteMany({ where: { workspaceId } })
-      await client.v2SyncMarkerDetection.deleteMany({ where: { workspaceId } })
-      await client.v2SyncMarker.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureProtocolEvaluation.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureSessionProtocol.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureSessionHead.deleteMany({ where: { workspaceId } })
-      await client.v2CaptureSessionVersion.deleteMany({ where: { workspaceId } })
-      await client.v2Project.deleteMany({ where: { workspaceId } })
-      await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
-    }
 
     t.after(async () => {
       // Reported rather than rethrown: a cleanup failure that masks the real
       // assertion turns one clear defect into two confusing ones.
       try {
-        await clean()
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       } finally {
@@ -85,7 +72,6 @@ test(
       }
     })
 
-    await clean()
     await new PrismaWorkspaceRepository(client).create(
       createWorkspace({
         id: workspaceId,

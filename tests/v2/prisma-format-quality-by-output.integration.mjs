@@ -59,19 +59,7 @@ test('T-FR-165 persists one independent format verdict per output and blocks onl
 
   const cleanup = async () => {
     for (const scope of [workspaceId, foreignWorkspaceId]) {
-      await client.v2ProxyReviewDecision.deleteMany({ where: { workspaceId: scope } })
-      await client.v2ProxyReview.deleteMany({ where: { workspaceId: scope } })
-      await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId: scope } })
-      await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId: scope } })
-      await client.v2PublicOperation.deleteMany({ where: { workspaceId: scope } })
-      await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: scope } })
-      await client.v2MediaArtifact.deleteMany({ where: { workspaceId: scope } })
       await client.v2Project.updateMany({ where: { workspaceId: scope }, data: { currentVersionId: null } })
-      await client.v2ProjectVersion.deleteMany({ where: { workspaceId: scope } })
-      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: scope } })
-      await client.v2Project.deleteMany({ where: { workspaceId: scope } })
-      await client.v2ApiClient.deleteMany({ where: { workspaceId: scope } })
-      await client.v2Workspace.deleteMany({ where: { id: scope } })
     }
   }
 
