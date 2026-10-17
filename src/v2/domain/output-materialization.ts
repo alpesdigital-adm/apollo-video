@@ -229,8 +229,8 @@ export function validateOutputObservedProbeV3(input: OutputObservedProbeV3): Rea
   if(p.mediaType==='video') {
     check(stream!.width===p.width && stream!.height===p.height && p.width>0 && p.height>0 &&
       p.sampleRateHz===null && p.channels===null && p.fps!==null,'Observed video geometry differs')
-    rational(p.fps)
-    check(stream!.avg_frame_rate===p.fps.numerator+'/'+p.fps.denominator,'Observed video FPS differs')
+    rational(p.fps!)
+    check(stream!.avg_frame_rate===p.fps!.numerator+'/'+p.fps!.denominator,'Observed video FPS differs')
   } else {
     check(p.mediaType==='audio' && p.width===0 && p.height===0 && p.fps===null &&
       Number(stream!.sample_rate)===p.sampleRateHz && integer(p.sampleRateHz)&&p.sampleRateHz>0 &&
@@ -332,8 +332,9 @@ export function sealOutputNormalizationV3(input: OutputNormalizationReceiptV3): 
       d.source.artifactId!==d.derivative.artifactId,'Video derivative execution differs')
     const lineage=d.derivative.manifest.sources.filter(s=>s.artifactKey===d.source.manifest.artifact.artifactKey &&
       s.sha256===d.source.manifest.artifact.sha256 && s.role==='source-master')
-    check(lineage.length===1 && 'execution' in lineage[0]! && lineage[0].execution.tool.id==='ffmpeg' &&
-      lineage[0].execution.tool.digest===e.binarySha256,'Normalization manifest lacks actual FFmpeg lineage')
+    check(lineage.length===1 && 'execution' in lineage[0]! &&
+      (lineage[0] as unknown as {execution:{tool:{id:string;digest:string}}}).execution.tool.id==='ffmpeg' &&
+      (lineage[0] as unknown as {execution:{tool:{id:string;digest:string}}}).execution.tool.digest===e.binarySha256,'Normalization manifest lacks actual FFmpeg lineage')
     for(const [probe,f] of [[a,d.source],[b,d.derivative]] as const) {
       const m=f.manifest.probe
       check(m && m.width===probe.width && m.height===probe.height && probe.fps!==null &&

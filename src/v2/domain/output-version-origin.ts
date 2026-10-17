@@ -363,7 +363,7 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
       command.author.id===allocation.createdBy && command.createdAt===allocation.createdAt,
       'INVALID_COMMAND','Operational Command scope/base/actor/time differs')
     const {schemaVersion:_schema,commandHash:_seal,...body}=command!
-    const fresh=createEditCommand({...body,type:command!.type as Parameters<typeof createEditCommand>[0]['type']})
+    const fresh=createEditCommand({...body,type:command!.type} as unknown as Parameters<typeof createEditCommand>[0])
     assertDomain(fresh.commandHash===command!.commandHash,'INVALID_COMMAND','Operational Command historical hash differs')
     if(result) {
       assertDomain(command!.type===input.kind,'INVALID_COMMAND','Variant origin cannot reinterpret Command type')
@@ -399,15 +399,17 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
     } else {
       exact(input,input.kind==='inherit-command'?['kind','command','audit','requestFingerprint']:['kind','command','audit','requestFingerprint','target'])
       const payload=command!.payload as PersistedManualEditPayload
+      // Control flow cannot see that `result` already consumed the variant kinds; only inherit/restore reach here.
+      const manual=input as Extract<typeof input,{kind:'inherit-command'|'restore-command'}>
       assertDomain(base.version.outputContractVersion===3,'PRECONDITION_REQUIRED','Manual origin requires an operational State3 base')
       assertDomain(command!.schemaVersion===1 && command!.author.type==='api-client' &&
-        input.audit.workspaceId===allocation.workspaceId && input.audit.clientId===allocation.createdBy &&
-        input.audit.delegatedUserId===command!.author.delegatedUserId &&
-        input.requestFingerprint===calculateCanonicalHash({type:'manual-edit',workspaceId:command!.workspaceId,
+        manual.audit.workspaceId===allocation.workspaceId && manual.audit.clientId===allocation.createdBy &&
+        manual.audit.delegatedUserId===command!.author.delegatedUserId &&
+        manual.requestFingerprint===calculateCanonicalHash({type:'manual-edit',workspaceId:command!.workspaceId,
           projectId:command!.projectId,baseVersionId:command!.baseVersionId,baseHash:command!.baseHash,
           expectedRevision:payload.expectedRevision,action:payload.action,variantId:payload.variantId,targetId:payload.targetId,
           operation:payload.operation??null,targetVersionId:payload.restoresVersionId??null,reason:command!.reason?.trim()||null,
-          actorContextHash:input.audit.contextHash}),'INVALID_COMMAND','Manual origin request/audit authority differs')
+          actorContextHash:manual.audit.contextHash}),'INVALID_COMMAND','Manual origin request/audit authority differs')
       assertDomain(command!.type==='manual-edit','INVALID_COMMAND','Only typed manual inheritance/restore admitted by this slice')
       exact(payload,['schemaVersion','action','expectedRevision','variantId','targetId','impact',
         ...(input.kind==='inherit-command'?['operation']:['restoresVersionId'])])

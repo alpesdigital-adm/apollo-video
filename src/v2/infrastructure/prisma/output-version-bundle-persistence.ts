@@ -91,8 +91,8 @@ export async function persistOutputVersionBundleInTransactionV3(tx:OutputBundleT
   const body={...b,origin}
   await insert(tx,'output_operational_bundles',{versionId:v.id,workspaceId:v.workspaceId,projectId:v.projectId,stateId:s.id,
     bundleJson:encode(body),bundleHash:sha(encode(body)),originJson:encode(origin),originHash:sha(encode(origin)),
-    producerPayloadJson:b.origin.kind==='ingest-operation'?null:encode(b.origin.kind==='create-output-variant'||b.origin.kind==='revise-output-spec'?b.origin.result.command.payload:b.origin.command.payload),
-    producerPayloadHash:b.origin.kind==='ingest-operation'?null:sha(encode(b.origin.kind==='create-output-variant'||b.origin.kind==='revise-output-spec'?b.origin.result.command.payload:b.origin.command.payload))})
+    producerPayloadJson:b.origin.kind==='ingest-operation'?null:encode(b.origin.kind==='create-output-variant'||b.origin.kind==='revise-output-spec'?b.origin.result.command.payload:(b.origin as Extract<typeof b.origin,{command:unknown}>).command.payload),
+    producerPayloadHash:b.origin.kind==='ingest-operation'?null:sha(encode(b.origin.kind==='create-output-variant'||b.origin.kind==='revise-output-spec'?b.origin.result.command.payload:(b.origin as Extract<typeof b.origin,{command:unknown}>).command.payload))})
 }
 
 import type { PreparedOperationalIngestV3 } from '../../application/ports/output-version-bundle-repository.ts'

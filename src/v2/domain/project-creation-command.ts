@@ -249,7 +249,8 @@ export function createProjectCreationCommandV2(input: OutputCanonicalPolicy & Re
   assertDomain(audit.workspaceId === input.workspaceId && audit.contextHash === input.audit.contextHash,
     'AUTH_INVALID', 'Creation V2 actor scope or seal mismatch')
   const snapshots = payload.snapshots.map((snapshot) => {
-    creationV2Exact(snapshot, ['schemaVersion', 'id', 'workspaceId', 'projectId', 'kind', 'contentSchemaVersion', 'contentJson', 'contentHash', 'createdAt'])
+    // `as unknown`: the assertion stays a runtime check; it must not narrow the typed snapshot to a record.
+    creationV2Exact(snapshot as unknown, ['schemaVersion', 'id', 'workspaceId', 'projectId', 'kind', 'contentSchemaVersion', 'contentJson', 'contentHash', 'createdAt'])
     const fresh = createProjectSnapshot(snapshot), document = JSON.parse(fresh.contentJson)
     assertDomain(snapshot.schemaVersion === 1 && ID_PATTERN.test(snapshot.id), 'INVALID_COMMAND', 'Creation V2 snapshot identity/schema is invalid')
     assertDomain(fresh.workspaceId === input.workspaceId && fresh.projectId === input.projectId && fresh.createdAt === input.createdAt &&
@@ -298,9 +299,9 @@ export function createProjectCreationCommandV2(input: OutputCanonicalPolicy & Re
       Array.isArray(source.snapshots) && Array.isArray(source.ownedIdentities) && source.ownedIdentities.length >= 2 &&
       source.ownedIdentities.length <= 100_000 && source.snapshots.length >= 3 && source.snapshots.length <= 5,
     'INVALID_COMMAND', 'Creation V2 source identity inventory is invalid')
-    for (const s of source.snapshots) { creationV2Exact(s, ['kind', 'id', 'hash'])
+    for (const s of source.snapshots) { creationV2Exact(s as unknown, ['kind', 'id', 'hash'])
       assertDomain(ID_PATTERN.test(s.id) && HASH_PATTERN.test(s.hash), 'INVALID_COMMAND', 'Creation V2 source snapshot seal is invalid') }
-    for (const i of source.ownedIdentities) { creationV2Exact(i, ['kind', 'id'])
+    for (const i of source.ownedIdentities) { creationV2Exact(i as unknown, ['kind', 'id'])
       assertDomain(FORK_IDENTITY_KINDS_V2.includes(i.kind) && isForkIdentityV2(i.kind, i.id), 'INVALID_COMMAND', 'Creation V2 source member is invalid') }
     const index = indexForkIdentityBijectionV2(source.ownedIdentities, payload.identityMap)
     const excluded = new Set([input.id, input.projectId, input.workspaceId, source.projectId, source.workspaceId])
@@ -401,7 +402,7 @@ export function createProjectCreationOutputCommandV2(input: Readonly<{
   // already have the exact persisted envelope in both root and fork branches.
   assertDomain(Array.isArray(p.snapshots), 'INVALID_COMMAND', 'Operational snapshots must be an explicit array')
   for (const snapshot of p.snapshots) {
-    creationV2Exact(snapshot, ['schemaVersion', 'id', 'workspaceId', 'projectId', 'kind', 'contentSchemaVersion', 'contentJson', 'contentHash', 'createdAt'])
+    creationV2Exact(snapshot as unknown, ['schemaVersion', 'id', 'workspaceId', 'projectId', 'kind', 'contentSchemaVersion', 'contentJson', 'contentHash', 'createdAt'])
     assertDomain(snapshot.schemaVersion === 1, 'INVALID_COMMAND', 'Operational snapshot envelope version mismatch')
     assertDomain(serializeOutputCanonicalJson(snapshot) === serializeOutputCanonicalJson(createProjectSnapshot(snapshot)),
       'INVALID_COMMAND', 'Operational snapshot must not normalize its persisted envelope')

@@ -7,7 +7,7 @@ import type { EditorialSourceBindingBodyV1, SealedOutputNormalizationV3 } from '
 import type { EditorialCutPayloadV3 } from '../../domain/editorial-cut-impact.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { EditorialMaterializedPlanV3 } from '../../domain/editorial-cut-impact.ts'
-import type { EditorialExclusionRange, SourceTimeRange } from '../recovery-project-acceptance.ts'
+import type { SourceTimeRange } from '../recovery-project-acceptance.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { EditorialCutImpactV2 } from '../../domain/editorial-cut-impact.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
@@ -33,7 +33,8 @@ export interface EditorialCommandResult {
   command: Readonly<EditCommand<EditorialCutPayloadV3>>
   version: Readonly<ProjectVersionV3>
   editPlan: Readonly<EditorialMaterializedPlanV3>
-  exclusions: readonly Readonly<EditorialExclusionRange>[]
+  // The persisted Command3 payload is the authority: no labels/matchedText survive the seal.
+  exclusions: EditorialCutPayloadV3['exclusions']
   retainedSourceRanges: readonly Readonly<SourceTimeRange>[]
   impact: Readonly<EditorialCutImpactV2>
   invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]

@@ -174,7 +174,7 @@ async function readOperationalAnchorV3(client:Reader,input:Readonly<{workspaceId
       if(createHash('sha256').update(r.bundleJson).digest('hex')!==r.bundleHash||createHash('sha256').update(r.originJson).digest('hex')!==r.originHash)
         throw new Error('Operational row SHA differs')
       anchor=JSON.parse(r.bundleJson)
-      if(serializeOutputCanonicalJson(anchor)!==r.bundleJson||serializeOutputCanonicalJson(anchor.origin)!==r.originJson)
+      if(serializeOutputCanonicalJson(anchor)!==r.bundleJson||serializeOutputCanonicalJson((anchor as Extract<typeof anchor,{origin:unknown}>).origin)!==r.originJson)
         throw new Error('Operational row raw authority differs')
     }
     if(anchor.version.id!==input.versionId||anchor.version.workspaceId!==input.workspaceId||anchor.version.projectId!==input.projectId||
@@ -239,7 +239,7 @@ export async function readPersistedOutputConsumptionV3(client:Reader,input:Reado
   const b=await readPersistedOperationalOutputBundleV3(client,input)
   if(!b)throw new DomainError('PRECONDITION_REQUIRED','Requested operational output Version missing')
   if(b.schemaVersion==='project-creation-output-bundle/v2')return Object.freeze({status:'blocked',outputContractVersion:2,
-    outputStateId:b.state.document.id,outputStateHash:b.state.stateHash,reasons:b.state.document.consumption.reasons})
+    outputStateId:b.state.document.id,outputStateHash:b.state.stateHash,reasons:(b.state.document.consumption as Extract<typeof b.state.document.consumption,{reasons:unknown}>).reasons})
   const e=b.state.document.entries.find(e=>e.variantId===input.variantId)
   if(!e)throw new DomainError('PRECONDITION_REQUIRED','Requested stable variant is not an exact State member')
   if(e.consumption.status==='blocked')return Object.freeze({status:'blocked',outputContractVersion:3,

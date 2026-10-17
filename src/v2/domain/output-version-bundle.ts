@@ -340,7 +340,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     assertDomain(origin.kind==='restore-command' && t.workspaceId===a.workspaceId && t.projectId===a.projectId &&
       t.id===origin.target.versionId && t.baseHash===origin.target.baseHash && t.outputStateId===origin.target.stateId &&
       t.outputStateHash===origin.target.stateHash && t.sequence<=parent.version.sequence &&
-      (origin.command.payload.action!=='undo'||t.id===parent.version.parentVersionId),'INVALID_COMMAND','Restore target seal/scope differs')
+      (origin.command.payload.action!=='undo'||t.id===(parent.version as Readonly<{parentVersionId?:string}>).parentVersionId),'INVALID_COMMAND','Restore target seal/scope differs')
   }
   if(origin.kind==='editorial-cut-command') {
     const c=origin.command,payload=c.payload,b=createEditorialSourceBindingV1(payload.sourceBinding.document),d=b.document,authority=d.authority
@@ -398,7 +398,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     const before=JSON.parse(operationalBundlePlanV3(parent).contentJson),impact=createManualCommandImpact({
       commandId:origin.command.id,baseVersionId:parent.version.id,resultVersionId:a.resultVersionId,variantId:payload.variantId,
       targetId:payload.targetId,action:payload.action,...(payload.operation?{operation:payload.operation}:{}),
-      beforeEditPlan:before,afterEditPlan:expected,outputReferences:payload.impact.affectedArtifacts})
+      beforeEditPlan:before,afterEditPlan:expected,outputReferences:payload.impact!.affectedArtifacts})
     assertDomain(stableSerialize(impact)===stableSerialize(payload.impact),'INVALID_COMMAND','Manual impact differs from real plan effect')
     const sourceNormalizations=source.state.document.schemaVersion==='project-output-state/v3'?
       source.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[]):[]
@@ -456,7 +456,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
       sourceManifestId:origin.detail.sourceManifestId,transcriptId:origin.transcript.id,
       transcriptHash:origin.transcript.document.transcriptHash}
   } else {
-    const c=origin.command
+    const c=(origin as Extract<typeof origin,{command:unknown}>).command
     provenance={kind:'edit-command',id:c.id,hash:c.commandHash};commandId=c.id
     transition=origin.kind==='restore-command'?'restore':origin.kind==='editorial-cut-command'?'editorial-cut':'inherit'
     producerBody={schemaVersion:origin.kind==='editorial-cut-command'?'output-editorial-derived-producer/v1':'output-child-command-producer/v3',canonicalPolicyVersion:OUTPUT_CANONICAL_POLICY_VERSION,

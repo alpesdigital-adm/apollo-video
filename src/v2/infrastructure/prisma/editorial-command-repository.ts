@@ -101,7 +101,7 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
     if(outputs.some(o=>!o.renderableVariantId))throw new DomainError('PRECONDITION_REQUIRED','Editorial proxy lacks explicit stable variant authority')
     return Object.freeze({projectId:input.projectId,workspaceId:input.workspaceId,currentVersion:parent.version,parent,transcriptId:t.id,transcript,
       sourceArtifactId:t.sourceArtifactId,sourceDurationSeconds,sourceFps:plan.fps,currentDurationFrames:plan.durationFrames,variantId:input.variantId,
-      normalizations,sourceBindingFacts:{schemaVersion:'editorial-source-binding/v1',canonicalPolicyVersion:'output-canonical-json/v1',
+      normalizations,sourceBindingFacts:{schemaVersion:'editorial-source-binding/v1' as const,canonicalPolicyVersion:'output-canonical-json/v1' as const,
         workspaceId:input.workspaceId,projectId:input.projectId,authority,
         transcript:{id:t.id,workspaceId:t.workspaceId,projectId:t.projectId,sourceArtifactId:t.sourceArtifactId,sourceManifestId:t.sourceManifestId,document:transcript,createdAt:t.createdAt.toISOString()},
         normalizationRefs:normalizations.map(n=>({id:n.document.id,projectId:n.document.projectId,receiptHash:n.receiptHash})),inventory},

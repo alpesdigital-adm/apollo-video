@@ -20,7 +20,8 @@ const identical = (a: unknown, b: unknown) => encode(a) === encode(b)
 const retryable = (error: unknown) => error !== null && typeof error === 'object' &&
   ('code' in error && (error.code === 'P2034' || error.code === 'P2010' && 'meta' in error &&
     error.meta !== null && typeof error.meta === 'object' && 'code' in error.meta && error.meta.code === '40001'))
-const conflict = (message: string): never => { throw new DomainError('PERSISTENCE_CONFLICT',message) }
+// A declaration (not an arrow const) so that calls narrow control flow like `throw`.
+function conflict(message: string): never { throw new DomainError('PERSISTENCE_CONFLICT',message) }
 export function assertForkCallerBindingV3(command: CreationOutputBundleWriteV2['proposal'],
   caller: Readonly<import('../../domain/project-fork-derivation.ts').ProjectForkCallerRequestV3>|null): void {
   const fork=command.payload.forkDerivation
@@ -366,12 +367,12 @@ async function assertManualOutputReferencesV3(tx:Tx,b:OperationalOutputVersionBu
   const actual=rows.filter(r=>r.renderableVariantId===c.payload.variantId).map(r=>({artifactId:r.outputArtifactId,kind:'proxy' as const,
     sourceVersionId:c.baseVersionId,variantId:r.renderableVariantId!}))
   const texts=(values:readonly unknown[])=>values.map(v=>stableSerialize(v)).sort()
-  if(stableSerialize(texts(actual))!==stableSerialize(texts(impact.affectedArtifacts)))
+  if(stableSerialize(texts(actual))!==stableSerialize(texts(impact!.affectedArtifacts)))
     throw new DomainError('INVALID_COMMAND','Manual output references differ from persisted base outputs')
 }
 async function persistManualInvalidationsV3(tx:Tx,b:OperationalOutputVersionBundleV3) {
   if(b.origin.kind!=='inherit-command'&&b.origin.kind!=='restore-command')return
-  const c=b.origin.command,rows=createCommandArtifactInvalidations({impact:c.payload.impact,createdAt:c.createdAt})
+  const c=b.origin.command,rows=createCommandArtifactInvalidations({impact:c.payload.impact!,createdAt:c.createdAt})
   if(!rows.length)return
   await tx.v2CommandArtifactInvalidation.createMany({data:rows.map(r=>({id:r.id,workspaceId:b.version.workspaceId,projectId:b.version.projectId,
     commandId:r.commandId,baseVersionId:r.baseVersionId,resultVersionId:r.resultVersionId,artifactId:r.artifactId,kind:r.kind,variantId:r.variantId,

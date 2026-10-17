@@ -639,7 +639,7 @@ export function createProjectForkDerivationV2(input: ProjectForkDerivationBodyV2
   assertDomain(row.schemaVersion === 1 && row.kind === 'edit-plan' &&
     row.id === source.version.snapshotRefs.editPlan && row.id === source.state.document.editPlan.snapshotId &&
     row.workspaceId === source.version.workspaceId && row.projectId === source.version.projectId &&
-    row.contentSchemaVersion === Number(source.facts.editPlanDocument.schemaVersion) &&
+    row.contentSchemaVersion === Number((source.facts.editPlanDocument as unknown as { schemaVersion: unknown }).schemaVersion) &&
     row.contentHash === source.state.document.editPlan.hash &&
     row.contentJson === stableSerialize(source.facts.editPlanDocument) &&
     row.contentHash === createHash('sha256').update(row.contentJson, 'utf8').digest('hex') &&
@@ -882,7 +882,7 @@ export function createProjectForkKernelV3(input: ProjectForkKernelBodyV3): Proje
   const overlays = new Map(source.state.document.overlays.map(overlay => [overlay.id, overlay])), seen = new Set<string>()
   assertDomain(input.cropDecisions.length === overlays.size, 'INVALID_COMMAND', 'Fork3 must retain every crop decision')
   for (const decision of input.cropDecisions) {
-    forkExact(decision, ['sourceOverlayId', 'sourceOverlayHash', 'newOverlayId', 'newVariantId', 'newClipId',
+    forkExact(decision as unknown, ['sourceOverlayId', 'sourceOverlayHash', 'newOverlayId', 'newVariantId', 'newClipId',
       'copiedDocument', 'author', 'createdAt', 'geometryStatus'])
     const original = overlays.get(decision.sourceOverlayId)
     assertDomain(original !== undefined && !seen.has(original.id) && decision.sourceOverlayHash === calculateOutputCanonicalHash(original) &&
@@ -1089,7 +1089,7 @@ function validateForkMediaReferenceFacts(references: readonly Readonly<ForkMedia
   const links = new Set<string>(), targets = new Set<string>(), artifacts = new Set<string>()
   assertDomain(Array.isArray(references), 'INVALID_COMMAND', 'Fork media facts missing')
   for (const ref of references) {
-    forkExact(ref, ['sourceLinkId', 'targetLinkId', 'workspaceId', 'sourceProjectId', 'artifactId', 'role',
+    forkExact(ref as unknown, ['sourceLinkId', 'targetLinkId', 'workspaceId', 'sourceProjectId', 'artifactId', 'role',
       'originalFileName', 'sourceLinkCreatedAt', 'artifactKey', 'artifactSha256', 'artifactByteSize', 'artifactMediaType',
       'artifactContainer', 'artifactLifecycleRevision', 'purpose', 'manifestFacts'])
     assertDomain(ref.workspaceId === project.workspaceId && ref.sourceProjectId === project.id &&
@@ -1105,7 +1105,7 @@ function validateForkMediaReferenceFacts(references: readonly Readonly<ForkMedia
       new Date(ref.sourceLinkCreatedAt).toISOString() === ref.sourceLinkCreatedAt,
       'INVALID_COMMAND', 'Fork media facts identity/scope/purpose mismatch')
     const mf=ref.manifestFacts
-    forkExact(mf,['id','artifactId','workspaceId','schemaVersion','manifestJson','manifestHash','createdAt','recipeId','recipeVersion','parametersHash','recipeParametersRef','renderInputRef','renderInputHash','recipeParameters','renderInput'])
+    forkExact(mf as unknown,['id','artifactId','workspaceId','schemaVersion','manifestJson','manifestHash','createdAt','recipeId','recipeVersion','parametersHash','recipeParametersRef','renderInputRef','renderInputHash','recipeParameters','renderInput'])
     let manifest: import('./media-artifact.ts').MediaArtifactManifest
     try { manifest=JSON.parse(mf.manifestJson); assertMediaArtifactManifest(manifest) }
     catch { assertDomain(false,'INVALID_COMMAND','Fork actual manifest document invalid') }

@@ -457,7 +457,7 @@ export function videoMetadataFromObservedProbeV3(observed:Readonly<OutputObserve
   if(!duration||!codec||!audioCodec||!container)throw new DomainError('RENDER_OUTPUT_INVALID','Observed ingest metadata incomplete')
   return Object.freeze({width:observed.width,height:observed.height,fps:Number(observed.fps!.numerator)/Number(observed.fps!.denominator),
     duration,codec,audioCodec,container,color:detectedColor(video),
-    producer:{provider:'ffprobe',version:'json-v1',binaryDigest:observed.binarySha256}})
+    producer:{provider:'ffprobe' as const,version:'json-v1' as const,binaryDigest:observed.binarySha256}})
 }
 
 /** Audio shares the exact same full ffprobe stdout already authenticated by the

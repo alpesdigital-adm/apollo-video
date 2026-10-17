@@ -330,8 +330,9 @@ export class FfmpegSubtitleClockCollector implements SubtitleClockCollector {
         before.ino === after.ino && before.size === after.size && before.mtimeNs === after.mtimeNs && before.ctimeNs === after.ctimeNs,
       'Clock input bytes or identity changed during authentication')
     }
-    const environment: NodeJS.ProcessEnv = { LC_ALL: 'C', LANG: 'C',
-      FONTCONFIG_FILE: input.toolchain.fontConfig.path, FONTCONFIG_PATH: resolve(input.toolchain.fontConfig.path, '..') }
+    // The deliberately minimal child environment omits NODE_ENV, which the ambient ProcessEnv declaration requires.
+    const environment = { LC_ALL: 'C', LANG: 'C',
+      FONTCONFIG_FILE: input.toolchain.fontConfig.path, FONTCONFIG_PATH: resolve(input.toolchain.fontConfig.path, '..') } as unknown as NodeJS.ProcessEnv
     for (const name of ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'HOME']) {
       if (process.env[name] !== undefined) environment[name] = process.env[name]
     }
