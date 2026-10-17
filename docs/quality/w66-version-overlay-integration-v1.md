@@ -200,3 +200,12 @@ Decisão de Astra, 16/10/2026, registrada na integração da fundação W66. `PO
 - **Sem fallback.** Não há alias, default `9:16`, campo opcional nem leitura de `project.format` para compatibilidade: a regra V2 proíbe contrato legado. Cliente que ainda envia `format` recebe rejeição de schema.
 - **Baseline.** `contracts/v1/public-contract-baseline.json` e o relatório de paridade foram regenerados no mesmo commit: 386 para 387 capabilities e 684 para 688 schemas (v4, v5 e os dois do output variant). A mudança de versão com remoção de campo é declarada, não silenciosa.
 - **Pendente (slices posteriores).** UI, chamadores e testes de ponta a ponta ainda criam projeto com `format` e serão migrados; enquanto isso, a integração fica vermelha em typecheck e testes unitários, e nada disso é empurrado ao PR #81.
+
+## 10. Decisão de contrato: `apollo.projects.commands.apply` 10.0.0
+
+Decisão de Astra, 16/10/2026. Duas correções do mesmo endpoint (`POST /v1/projects/{projectId}/commands`), registradas antes de qualquer push, num único major (9.0.0 para **10.0.0**).
+
+- **`variantId` obrigatório em `remove-spoken-content`.** O corte editorial edita uma saída estável e o servidor nunca a infere do projeto (o serviço já exigia `variantId`), mas o schema publicado (`apply-project-edit-command-request/v6`) não o declarava e a rota rejeitava o campo como desconhecido. Entra `apply-project-edit-command-request/v7` (`variantId` obrigatório nessa ramificação, proibido em `replace-source-transcript` e `run-director`). Campo obrigatório novo é breaking: major.
+- **A resposta não promete dado não selado.** `editorial.exclusions` passa a declarar só o que o Command sela e valida (`sourceStartSeconds`, `sourceEndSeconds`, `ruleIds`): `labels` e `matchedText` saem (não inventamos valor; a rota projeta explicitamente os três campos). Entra `project-edit-command-applied/v8`.
+- **Sem fallback.** Não há aceitação de requisição sem `variantId` nem campo opcional de compatibilidade.
+- **Baseline.** `contracts/v1/public-contract-baseline.json` e o relatório de paridade foram regenerados no mesmo commit: 688 para 690 schemas (request v7 e response v8); capabilities seguem 387. Chamadores e testes de ponta a ponta que enviam `remove-spoken-content` foram atualizados para informar `variantId`.

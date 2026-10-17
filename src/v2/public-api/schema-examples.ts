@@ -13588,6 +13588,74 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/apply-project-edit-command-request/v7': [
+      {
+        type: 'remove-spoken-content', baseVersionId: 'project-version-example-3', baseHash: 'c'.repeat(64),
+        sourceTranscriptId: 'transcript-example-1', variantId: 'variant-example-16x9',
+        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
+      },
+      {
+        type: 'replace-source-transcript', baseVersionId: 'project-version-example-4', baseHash: 'd'.repeat(64),
+        sourceTranscriptId: 'transcript-example-corrected-2', expectedTranscriptHash: '2'.repeat(64),
+        reason: 'Selecionar a retranscrição revisada e recalcular todos os dependentes.',
+      },
+      {
+        type: 'run-director',
+        baseVersionId: 'project-version-example-5',
+        baseHash: 'e'.repeat(64),
+        objective: 'sale',
+        desiredAction: {
+          destination: { type: 'url', value: 'https://checkout.example/oferta' },
+          verbalCta: 'Garanta sua vaga', visualCta: 'Comprar agora',
+          disclosures: ['Condições no site'],
+        },
+        reason: 'A direção aprovada agora precisa conduzir à oferta explícita.',
+      },
+    ],
+    'apollo://schemas/project-edit-command-applied/v8': [
+      {
+        data: {
+          command: {
+            id: editorialCutImpactExample.commandId, type: 'remove-spoken-content',
+            baseVersionId: editorialCutImpactExample.baseVersionId,
+            resultVersionId: editorialCutImpactExample.resultVersionId, createdAt,
+          },
+          version: {
+            id: editorialCutImpactExample.resultVersionId, sequence: 2,
+            parentVersionId: editorialCutImpactExample.baseVersionId, baseHash: 'b'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', editPlan: 'project-snapshot-edit-plan-2',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          editorial: {
+            sourceTranscriptId: editorialCutImpactExample.sourceTranscriptId,
+            sourceArtifactId: artifactId,
+            exclusions: [{
+              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
+              ruleIds: ['date-january-31', 'date-february-1'],
+            }],
+            retainedSourceRanges: [
+              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
+              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+            ],
+            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            protectedOpeningFrames: 120, subtitleFaceProtection: true,
+            impact: editorialCutImpactExample,
+            invalidations: [editorialCutInvalidationExample],
+          },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-edit-command-applied/v7': [
       {
         data: {

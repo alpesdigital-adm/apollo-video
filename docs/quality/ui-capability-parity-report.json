@@ -2191,7 +2191,7 @@
     {
       "uiAction": "src/app/projects/[id]/page.tsx:3068",
       "capabilityId": "apollo.projects.commands.apply",
-      "capabilityVersion": "9.0.0",
+      "capabilityVersion": "10.0.0",
       "endpoint": "POST /v1/projects/{projectId}/commands",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -6055,8 +6055,8 @@
       "capabilityId": "apollo.projects.commands.apply",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/commands",
-      "inputSchemaRef": "apollo://schemas/apply-project-edit-command-request/v6",
-      "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v7",
+      "inputSchemaRef": "apollo://schemas/apply-project-edit-command-request/v7",
+      "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v8",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

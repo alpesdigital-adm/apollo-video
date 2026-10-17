@@ -129,20 +129,22 @@ function impactActor() {
 
 test('T-FR-236 exposes the resulting Command version as the current project head', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.commands.apply')
-  assert.equal(capability.version, '9.0.0')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v7')
+  assert.equal(capability.version, '10.0.0')
+  assert.equal(capability.inputSchemaRef, 'apollo://schemas/apply-project-edit-command-request/v7')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v8')
   for (const previousRef of [
     'apollo://schemas/project-edit-command-applied/v3',
     'apollo://schemas/project-edit-command-applied/v4',
     'apollo://schemas/project-edit-command-applied/v5',
     'apollo://schemas/project-edit-command-applied/v6',
+    'apollo://schemas/project-edit-command-applied/v7',
   ]) {
     assert.equal(getPublicSchema(previousRef).ref, previousRef)
   }
 
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v7').schema)
-  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v7'))) {
+    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v8').schema)
+  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v8'))) {
     const body = structuredClone(example)
     body.data.version = presentProjectVersionV2(
       body.data.version,
@@ -153,6 +155,32 @@ test('T-FR-236 exposes the resulting Command version as the current project head
     mismatched.data.version.visibleState.label = 'superseded'
     assert.equal(validate(mismatched), false)
   }
+})
+
+test('apollo.projects.commands.apply 10.0.0 names the output variant a spoken-content removal edits and states only sealed exclusions', () => {
+  const ajv = () => addFormats(new Ajv2020({ strict: false, allErrors: true }))
+  const request = ajv().compile(getPublicSchema('apollo://schemas/apply-project-edit-command-request/v7').schema)
+  const [removal, replacement, direction] = publicSchemaExamples(getPublicSchema('apollo://schemas/apply-project-edit-command-request/v7'))
+  for (const example of [removal, replacement, direction]) assert.equal(request(example), true, JSON.stringify(request.errors))
+
+  const { variantId: _variantId, ...withoutVariant } = removal
+  assert.equal(request(withoutVariant), false, 'a removal that does not name its variant is not a command')
+  assert.equal(request({ ...replacement, variantId: removal.variantId }), false, 'only the removal edits a variant')
+  assert.equal(request({ ...direction, variantId: removal.variantId }), false, 'only the removal edits a variant')
+
+  const response = ajv().compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v8').schema)
+  const [editorial] = publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v8'))
+  assert.equal(editorial.data.command.type, 'remove-spoken-content')
+  const present = (body) => {
+    const copy = structuredClone(body)
+    copy.data.version = presentProjectVersionV2(copy.data.version, { current: true, previewAvailable: false })
+    return copy
+  }
+  assert.equal(response(present(editorial)), true, JSON.stringify(response.errors))
+  const promised = structuredClone(editorial)
+  promised.data.editorial.exclusions[0].labels = ['31 de janeiro']
+  promised.data.editorial.exclusions[0].matchedText = '31 de janeiro'
+  assert.equal(response(present(promised)), false, 'the response does not promise labels or matchedText the seal does not carry')
 })
 
 test('T-FR-236 exposes manual apply, undo, redo and restore result versions as current', () => {

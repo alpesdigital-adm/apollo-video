@@ -98,7 +98,7 @@ export async function POST(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
     }
     if (typeof body !== 'object' || body === null) throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
-    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'expectedTranscriptHash', 'rules', 'reason', 'exclusionOverrides', 'objective', 'desiredAction'].includes(key))) {
+    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'variantId', 'expectedTranscriptHash', 'rules', 'reason', 'exclusionOverrides', 'objective', 'desiredAction'].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (typeof body.baseVersionId !== 'string' || typeof body.baseHash !== 'string') throw new DomainError('INVALID_ARGUMENT', 'baseVersionId and baseHash must be strings')
@@ -106,7 +106,7 @@ export async function POST(
     if (body.objective !== undefined && typeof body.objective !== 'string') throw new DomainError('INVALID_ARGUMENT', 'objective must be a string')
     const { projectId } = await context.params
     if (body.type === 'run-director') {
-      if (body.sourceTranscriptId !== undefined || body.expectedTranscriptHash !== undefined || body.rules !== undefined || body.exclusionOverrides !== undefined) {
+      if (body.sourceTranscriptId !== undefined || body.variantId !== undefined || body.expectedTranscriptHash !== undefined || body.rules !== undefined || body.exclusionOverrides !== undefined) {
         throw new DomainError('INVALID_ARGUMENT', 'run-director does not accept cut-rule fields')
       }
       const result = await runProjectDirectorService({
@@ -201,6 +201,7 @@ export async function POST(
       if (
         typeof body.sourceTranscriptId !== 'string' ||
         typeof body.expectedTranscriptHash !== 'string' ||
+        body.variantId !== undefined ||
         body.rules !== undefined || body.exclusionOverrides !== undefined ||
         body.objective !== undefined || body.desiredAction !== undefined
       ) throw new DomainError('INVALID_ARGUMENT', 'replace-source-transcript requires only sourceTranscriptId and expectedTranscriptHash')
@@ -309,7 +310,10 @@ export async function POST(
         editorial: {
           sourceTranscriptId: editPlan.retimedTranscript.sourceTranscriptId,
           sourceArtifactId: editPlan.sources[0]!.artifactId,
-          exclusions: result.exclusions,
+          // Only what the Command seals and validates is stated: range and the rules that matched it.
+          exclusions: result.exclusions.map(({ sourceStartSeconds, sourceEndSeconds, ruleIds }) => ({
+            sourceStartSeconds, sourceEndSeconds, ruleIds: [...ruleIds],
+          })),
           retainedSourceRanges: result.retainedSourceRanges,
           outputDurationFrames: editPlan.durationFrames,
           fps: editPlan.fps,

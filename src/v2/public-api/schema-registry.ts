@@ -24466,6 +24466,58 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     ],
     allOf: desiredActionObjectiveRequirements,
   }),
+  defineSchema('apply-project-edit-command-request', 7, 'Typed project edit command that names the output variant a spoken-content removal edits', {
+    type: 'object', additionalProperties: false,
+    required: ['type', 'baseVersionId', 'baseHash'],
+    properties: {
+      type: { enum: ['remove-spoken-content', 'replace-source-transcript', 'run-director'] },
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      sourceTranscriptId: idSchema,
+      variantId: idSchema,
+      expectedTranscriptHash: sha256Schema,
+      objective: strategicObjectiveSchema,
+      desiredAction: desiredActionInputSchema,
+      rules: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['id', 'label', 'alternatives'],
+          properties: {
+            id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' }, label: { type: 'string', minLength: 1, maxLength: 160 },
+            alternatives: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 240 } },
+          },
+        },
+      },
+      exclusionOverrides: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds', 'reason'],
+          properties: {
+            sourceStartSeconds: { type: 'number', minimum: 0 }, sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+            ruleIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' } },
+            reason: { type: 'string', minLength: 1, maxLength: 500 },
+          },
+        },
+      },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    oneOf: [
+      { required: ['sourceTranscriptId', 'rules', 'variantId'], properties: {
+        type: { const: 'remove-spoken-content' }, sourceTranscriptId: {}, rules: {}, variantId: {},
+        expectedTranscriptHash: false, objective: false, desiredAction: false,
+      } },
+      { required: ['sourceTranscriptId', 'expectedTranscriptHash'], properties: {
+        type: { const: 'replace-source-transcript' }, sourceTranscriptId: {}, expectedTranscriptHash: {},
+        rules: false, exclusionOverrides: false, objective: false, desiredAction: false, variantId: false,
+      } },
+      { required: ['objective'], properties: {
+        type: { const: 'run-director' }, objective: {}, desiredAction: {},
+        sourceTranscriptId: false, expectedTranscriptHash: false,
+        rules: false, exclusionOverrides: false, variantId: false,
+      } },
+    ],
+    allOf: desiredActionObjectiveRequirements,
+  }),
   defineSchema('project-edit-command-applied', 1, 'Applied project edit command response',
     successSchema({
       type: 'object', additionalProperties: false,
@@ -24891,6 +24943,122 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               properties: {
                 sourceTranscriptId: idSchema, sourceArtifactId: idSchema,
                 exclusions: { type: 'array', minItems: 1, maxItems: 128 },
+                retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
+                outputDurationFrames: { type: 'integer', minimum: 1 },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
+                impact: editorialCutImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'directorRun', 'operation', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('run-director'),
+            version: currentProjectVersionResultSchema([
+              'brief', 'perception', 'treatment', 'story', 'editPlan', 'quality', 'policies',
+            ]),
+            directorRun: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'id', 'status', 'plannerVersion', 'criticVersion', 'objective',
+                'objectiveVersion', 'rubricRef', 'baseVersionId', 'resultVersionId',
+                'perception', 'treatmentPlan', 'storyPlan', 'editPlan', 'qualityReport',
+                'decisions', 'assumptions', 'impact', 'invalidations', 'createdAt',
+              ],
+              properties: {
+                id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
+                plannerVersion: { type: 'string' }, criticVersion: { type: 'string' },
+                objective: strategicObjectiveSchema,
+                objectiveVersion: { type: 'integer', minimum: 1 },
+                rubricRef: { type: 'string', minLength: 3, maxLength: 128 },
+                supersedesRunId: idSchema,
+                baseVersionId: idSchema, resultVersionId: idSchema,
+                perception: { type: 'object', additionalProperties: false, required: ['snapshotId', 'summary'], properties: { snapshotId: idSchema, summary: { type: 'object' } } },
+                treatmentPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                storyPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                editPlan: {
+                  type: 'object', additionalProperties: false,
+                  required: ['snapshotId', 'id', 'durationFrames', 'fps', 'subtitleCueCount', 'transitionCount', 'automaticZoom'],
+                  properties: {
+                    snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 },
+                    fps: { type: 'number', exclusiveMinimum: 0 }, subtitleCueCount: { type: 'integer', minimum: 1 },
+                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                  },
+                },
+                qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
+                decisions: { type: 'array', minItems: 4, maxItems: 64, items: { type: 'object' } },
+                assumptions: { type: 'array', maxItems: 64, items: { type: 'string' } },
+                impact: directorRunImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                createdAt: dateTimeSchema,
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'sourceTranscript', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('replace-source-transcript'),
+            version: currentProjectVersionResultSchema(['brief', 'treatment', 'story', 'editPlan', 'policies']),
+            sourceTranscript: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'previousTranscriptId', 'previousTranscriptHash', 'replacementTranscriptId',
+                'replacementTranscriptHash', 'impact', 'invalidations', 'nextRequiredCapability',
+              ],
+              properties: {
+                previousTranscriptId: idSchema, previousTranscriptHash: sha256Schema,
+                replacementTranscriptId: idSchema, replacementTranscriptHash: sha256Schema,
+                impact: sourceTranscriptReplacementImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                nextRequiredCapability: { const: 'apollo.projects.commands.apply:run-director' },
+              },
+            },
+            replayed: { type: 'boolean' },
+          },
+        },
+      ],
+    }),
+  ),
+  defineSchema('project-edit-command-applied', 8, 'Applied edit command response whose spoken-content exclusions state only the sealed fields',
+    successSchema({
+      oneOf: [
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'editorial', 'operation', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('remove-spoken-content'),
+            version: currentProjectVersionResultSchema(['brief', 'editPlan', 'policies']),
+            editorial: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'sourceTranscriptId', 'sourceArtifactId', 'exclusions', 'retainedSourceRanges',
+                'outputDurationFrames', 'fps', 'automaticZoom', 'protectedOpeningFrames',
+                'subtitleFaceProtection', 'impact', 'invalidations',
+              ],
+              properties: {
+                sourceTranscriptId: idSchema, sourceArtifactId: idSchema,
+                exclusions: {
+                  type: 'array', minItems: 1, maxItems: 128,
+                  items: {
+                    type: 'object', additionalProperties: false,
+                    required: ['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds'],
+                    properties: {
+                      sourceStartSeconds: { type: 'number', minimum: 0 },
+                      sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+                      ruleIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' } },
+                    },
+                  },
+                },
                 retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
                 outputDurationFrames: { type: 'integer', minimum: 1 },
                 fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },

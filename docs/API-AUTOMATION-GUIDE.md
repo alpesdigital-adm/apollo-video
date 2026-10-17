@@ -35,7 +35,7 @@ O bootstrap administrativo inicial é operacional. Depois dele, criação/rotaç
 
 `GET /v1/projects/{projectId}/workspace` devolve o estado atual usado pela interface, incluindo versão, mídia, transcrições, operações, resumo do EditPlan e Commands persistidos. A consulta exige `projects:read`.
 
-Alterações editoriais usam o mesmo contrato para UI, IA e integrações. `POST /v1/projects/{projectId}/commands`, com scope `projects:write`, aplica atualmente o Command `remove-spoken-content`. A requisição deve informar `Idempotency-Key`, `baseVersionId`, `baseHash`, `sourceTranscriptId` e regras de frases. O servidor rejeita base obsoleta, confirma as frases na transcrição alinhada, cria uma nova `ProjectVersion` imutável e retima o plano sem sobrescrever a versão anterior.
+Alterações editoriais usam o mesmo contrato para UI, IA e integrações. `POST /v1/projects/{projectId}/commands`, com scope `projects:write`, aplica atualmente o Command `remove-spoken-content`. A requisição deve informar `Idempotency-Key`, `baseVersionId`, `baseHash`, `sourceTranscriptId`, `variantId` (a saída estável que o corte edita; o servidor nunca a deduz do projeto) e regras de frases. Em `editorial.exclusions` a resposta traz apenas o que o Command sela: `sourceStartSeconds`, `sourceEndSeconds` e `ruleIds`. O servidor rejeita base obsoleta, confirma as frases na transcrição alinhada, cria uma nova `ProjectVersion` imutável e retima o plano sem sobrescrever a versão anterior.
 
 A resposta de `remove-spoken-content` inclui `editorial.impact`, as relações
 `editorial.invalidations` realmente persistidas e uma `operation` durável de
