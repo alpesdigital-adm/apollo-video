@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { assertDashboardCftBuildBindings, createDashboardRuntimePreparationForTest, prepareDashboardRuntimeJourney, runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.mjs'
 import { dashboardColorProbePersistenceData } from './helpers/dashboard-controlled-export-fixture.mjs'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 // Source bytes, aligned transcript, initial timeline, rights and color probe are
 // controlled inputs. The real Director service materializes canonical snapshots.
@@ -86,7 +87,7 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
   const client = new PrismaClient()
   const databaseName = new URL(process.env.V2_DATABASE_URL).pathname.slice(1)
   assert.match(databaseName, /(?:^|_)e2e(?:_|$)/, 'destructive E2E setup requires an explicitly isolated database')
-  await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+  await resetDisposableDatabase(client)
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `final-export-workspace-${suffix}`
   let projectId

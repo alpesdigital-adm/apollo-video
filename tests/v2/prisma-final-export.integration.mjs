@@ -12,6 +12,7 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { proveCatalogOutputBrowser } from './helpers/catalog-output-browser-proof.mjs'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 // The persisted Director quality is review-required with unknown face safety.
 // The public API must reject it. A separately injected, test-only approval port
@@ -176,7 +177,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
   const client = new PrismaClient()
   const databaseName = new URL(process.env.V2_DATABASE_URL).pathname.slice(1)
   assert.match(databaseName, /(?:^|_)e2e(?:_|$)/, 'destructive E2E setup requires an explicitly isolated database')
-  await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+  await resetDisposableDatabase(client)
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `final-export-workspace-${suffix}`
   const projectId = `final-export-project-${suffix}`

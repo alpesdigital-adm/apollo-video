@@ -6,6 +6,7 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -92,7 +93,7 @@ test('T-FR-046 catalogs scoped historical validation and preflights compatible a
   let serverLogs = ''
 
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await resetDisposableDatabase(client)
     await client.v2Workspace.create({
       data: {
         id: workspaceId,

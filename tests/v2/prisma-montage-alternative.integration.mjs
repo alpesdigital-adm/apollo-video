@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 test('T-FR-062 persists and replays one immutable montage selection in PostgreSQL', {
   skip: process.env.APOLLO_MONTAGE_ALTERNATIVE_E2E !== '1' && 'set APOLLO_MONTAGE_ALTERNATIVE_E2E=1 and use an isolated V2 database',
@@ -22,7 +23,7 @@ test('T-FR-062 persists and replays one immutable montage selection in PostgreSQ
   const clientId = `montage-client-${suffix}`
   const createdAt = new Date('2026-08-13T12:00:00.000Z')
   try {
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await resetDisposableDatabase(client)
     await client.v2Workspace.create({ data: { id: workspaceId, slug: workspaceId, name: 'Montage alternatives E2E', status: 'active', createdAt, updatedAt: createdAt } })
     await client.v2ApiClient.create({ data: { id: clientId, workspaceId, name: 'Montage alternatives E2E', environment: 'development', status: 'active', scopes: ['projects:read', 'projects:write'], createdAt, updatedAt: createdAt } })
     await client.v2Project.create({ data: { id: projectId, workspaceId, name: 'Montage alternatives E2E', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdByType: 'api-client', createdById: clientId, createdAt, updatedAt: createdAt } })

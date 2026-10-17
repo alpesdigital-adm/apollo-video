@@ -10,6 +10,7 @@ import {
   Prisma,
   PrismaClient,
 } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 async function getFreePort() {
   return await new Promise((resolvePort, reject) => {
@@ -152,9 +153,7 @@ test('T-FR-120 deconstructs an exact published Reel through public API and Postg
   let serverLogs = ''
 
   try {
-    await client.$executeRawUnsafe(
-      'TRUNCATE TABLE "workspaces" CASCADE',
-    )
+    await resetDisposableDatabase(client)
     await client.v2Workspace.create({
       data: {
         id: workspaceId,

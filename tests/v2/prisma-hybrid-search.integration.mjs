@@ -6,6 +6,7 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 const BASE_ACTIVE_DOCUMENTS = 4
 // Every corpus write — asset rights and document catalog alike — commits in a
@@ -253,9 +254,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
   let serverLogs = ''
 
   try {
-    await client.$executeRawUnsafe(
-      'TRUNCATE TABLE "workspaces" CASCADE',
-    )
+    await resetDisposableDatabase(client)
     await client.v2Workspace.create({
       data: {
         id: workspaceId,

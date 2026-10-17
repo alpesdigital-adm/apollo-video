@@ -11,6 +11,7 @@ import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -304,7 +305,7 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
 
   try {
     probeRoot = await mkdtemp(join(tmpdir(), 'apollo-matrix-probe-'))
-    await client.$executeRawUnsafe('TRUNCATE TABLE "workspaces" CASCADE')
+    await resetDisposableDatabase(client)
     await mkdir(dirname(sourcePath), { recursive: true })
     await execFileAsync(ffmpegBin, [
       '-hide_banner', '-loglevel', 'error', '-y',
