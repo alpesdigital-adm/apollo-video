@@ -41,16 +41,12 @@ export async function seedAnalyzedImageLibrary({ prisma, fixture = 'plain', tess
   const manifestId = `${workspaceId}-manifest`
   const operationId = `${workspaceId}-analysis`
   const sourcePath = join(root, `${fixture}.png`)
-  let created = false
+  // Sealed and audited rows are never deleted: this owns only the files under its temporary root.
   const cleanup = async () => {
-    if (created) {
-      await prisma.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null } })
-    }
     await rm(root, { recursive: true, force: true })
   }
   try {
     await prisma.v2Workspace.create({ data: { id: workspaceId, slug: workspaceId, name: 'Image proof' } })
-    created = true
     await prisma.v2Project.create({ data: { id: projectId, workspaceId, name: 'Image proof', locale: 'pt-BR', createdByType: 'user', createdById: 'image-proof' } })
     await writeFile(sourcePath, await createImageFixtureBytes(fixture))
     const sourceBytes = await readFile(sourcePath)
