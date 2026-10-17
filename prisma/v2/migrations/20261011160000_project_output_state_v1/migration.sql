@@ -40,12 +40,10 @@ CREATE TABLE "output_variants" (
   "workspaceId" VARCHAR(128) NOT NULL, "createdCommandKind" VARCHAR(32) NOT NULL,
   "createdCommandId" VARCHAR(128) NOT NULL, "createdCommandHash" CHAR(64) NOT NULL,
   "createdAt" TIMESTAMPTZ(3) NOT NULL,
-  CONSTRAINT "output_variants_scope_key" UNIQUE ("id", "projectId", "workspaceId"),
-  CONSTRAINT "output_variants_project_fk" FOREIGN KEY ("projectId", "workspaceId")
-    REFERENCES "projects" ("id", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT,
   CHECK ("createdCommandKind" = 'edit-command'),
   CHECK ("createdCommandHash" ~ '^[a-f0-9]{64}$')
 );
+CREATE UNIQUE INDEX "output_variants_scope_key" ON "output_variants" ("id", "projectId", "workspaceId");
 CREATE INDEX "output_variants_workspaceId_projectId_idx" ON "output_variants" ("workspaceId", "projectId");
 CREATE TABLE "output_spec_revisions" (
   "id" VARCHAR(128) PRIMARY KEY, "variantId" VARCHAR(128) NOT NULL,
@@ -55,10 +53,6 @@ CREATE TABLE "output_spec_revisions" (
   "specJson" TEXT NOT NULL, "specHash" CHAR(64) NOT NULL,
   "createdCommandKind" VARCHAR(32) NOT NULL, "createdCommandId" VARCHAR(128) NOT NULL,
   "createdCommandHash" CHAR(64) NOT NULL, "createdAt" TIMESTAMPTZ(3) NOT NULL,
-  CONSTRAINT "output_spec_revisions_number_key" UNIQUE ("variantId", "revisionNumber", "projectId", "workspaceId"),
-  CONSTRAINT "output_spec_revisions_seal_key" UNIQUE ("id", "variantId", "projectId", "workspaceId", "specHash"),
-  CONSTRAINT "output_spec_revisions_variant_fk" FOREIGN KEY ("variantId", "projectId", "workspaceId")
-    REFERENCES "output_variants" ("id", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT,
   CHECK ("revisionNumber" > 0 AND "schemaVersion" = 'output-spec-revision/v1'),
   CHECK ("canonicalPolicyVersion" = 'output-canonical-json/v1'),
   CHECK (("specJson"::jsonb ->> 'canonicalPolicyVersion') IS NOT DISTINCT FROM "canonicalPolicyVersion"),
@@ -66,6 +60,8 @@ CREATE TABLE "output_spec_revisions" (
   CHECK ("createdCommandHash" ~ '^[a-f0-9]{64}$'),
   CHECK ("specHash" = encode(sha256(convert_to("specJson", 'UTF8')), 'hex'))
 );
+CREATE UNIQUE INDEX "output_spec_revisions_number_key" ON "output_spec_revisions" ("variantId", "revisionNumber", "projectId", "workspaceId");
+CREATE UNIQUE INDEX "output_spec_revisions_seal_key" ON "output_spec_revisions" ("id", "variantId", "projectId", "workspaceId", "specHash");
 CREATE TABLE "project_output_states" (
   "id" VARCHAR(128) PRIMARY KEY, "projectId" VARCHAR(128) NOT NULL,
   "workspaceId" VARCHAR(128) NOT NULL, "resultVersionId" VARCHAR(128) NOT NULL,
@@ -83,29 +79,6 @@ CREATE TABLE "project_output_states" (
   "renderablePlanSnapshotId" VARCHAR(200), "renderablePlanId" VARCHAR(200), "renderablePlanHash" CHAR(64),
   "renderablePlanAuthorityJson" TEXT, "renderablePlanAuthorityHash" CHAR(64),
   "stateJson" TEXT NOT NULL, "stateHash" CHAR(64) NOT NULL, "createdAt" TIMESTAMPTZ(3) NOT NULL,
-  CONSTRAINT "project_output_states_scope_key" UNIQUE ("id", "projectId", "workspaceId"),
-  CONSTRAINT "project_output_states_result_key" UNIQUE ("resultVersionId", "projectId", "workspaceId"),
-  CONSTRAINT "project_output_states_producer_key" UNIQUE ("producerKind", "producerId", "workspaceId"),
-  CONSTRAINT "project_output_states_version_seal_key" UNIQUE ("resultVersionId", "id", "projectId", "workspaceId", "stateHash"),
-  CONSTRAINT "project_output_states_project_fk" FOREIGN KEY ("projectId", "workspaceId")
-    REFERENCES "projects" ("id", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT "project_output_states_edit_plan_seal_fk" FOREIGN KEY ("editPlanSnapshotId", "projectId", "workspaceId", "editPlanHash")
-    REFERENCES "project_snapshots" ("id", "projectId", "workspaceId", "contentHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED,
-  CONSTRAINT "project_output_states_edit_command_seal_fk" FOREIGN KEY ("producerEditCommandId", "projectId", "workspaceId", "provenanceHash")
-    REFERENCES "edit_commands" ("id", "projectId", "workspaceId", "commandHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED,
-  CONSTRAINT "project_output_states_ingest_operation_seal_fk" FOREIGN KEY ("ingestOperationId", "projectId", "workspaceId", "provenanceHash")
-    REFERENCES "public_operations" ("id", "projectId", "workspaceId", "requestFingerprint") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED,
-  CONSTRAINT "project_output_states_ingest_context_seal_fk" FOREIGN KEY ("ingestOperationId", "projectId", "workspaceId", "ingestSourceArtifactId", "ingestSourceManifestId")
-    REFERENCES "media_ingest_operations" ("operationId", "projectId", "workspaceId", "sourceArtifactId", "sourceManifestId") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED,
-  CONSTRAINT "project_output_states_ingest_manifest_seal_fk" FOREIGN KEY ("ingestSourceManifestId", "ingestSourceArtifactId", "workspaceId", "ingestSourceManifestHash")
-    REFERENCES "media_artifact_manifests" ("id", "artifactId", "workspaceId", "manifestHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED,
-  CONSTRAINT "project_output_states_ingest_transcript_seal_fk" FOREIGN KEY ("ingestTranscriptId", "projectId", "workspaceId", "ingestSourceArtifactId", "ingestSourceManifestId", "ingestTranscriptHash")
-    REFERENCES "media_transcripts" ("id", "projectId", "workspaceId", "sourceArtifactId", "sourceManifestId", "transcriptHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED,
-  CONSTRAINT "project_output_states_parent_version_fk" FOREIGN KEY ("parentVersionId", "projectId", "workspaceId")
-    REFERENCES "project_versions" ("id", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT "project_output_states_parent_seal_fk" FOREIGN KEY
-    ("parentVersionId", "parentStateId", "projectId", "workspaceId", "parentStateHash") REFERENCES "project_output_states"
-    ("resultVersionId", "id", "projectId", "workspaceId", "stateHash") ON DELETE RESTRICT ON UPDATE RESTRICT,
   CHECK ("schemaVersion" = 'project-output-state/v1'),
   CHECK ("canonicalPolicyVersion" = 'output-canonical-json/v1'),
   CHECK (("stateJson"::jsonb ->> 'canonicalPolicyVersion') IS NOT DISTINCT FROM "canonicalPolicyVersion"),
@@ -135,6 +108,10 @@ CREATE TABLE "project_output_states" (
   CHECK ("producerHash" = encode(sha256(convert_to("producerJson", 'UTF8')), 'hex')),
   CHECK ("stateHash" = encode(sha256(convert_to("stateJson", 'UTF8')), 'hex'))
 );
+CREATE UNIQUE INDEX "project_output_states_scope_key" ON "project_output_states" ("id", "projectId", "workspaceId");
+CREATE UNIQUE INDEX "project_output_states_result_key" ON "project_output_states" ("resultVersionId", "projectId", "workspaceId");
+CREATE UNIQUE INDEX "project_output_states_producer_key" ON "project_output_states" ("producerKind", "producerId", "workspaceId");
+CREATE UNIQUE INDEX "project_output_states_version_seal_key" ON "project_output_states" ("resultVersionId", "id", "projectId", "workspaceId", "stateHash");
 ALTER TABLE "project_versions" ADD CONSTRAINT "project_versions_output_contract_check" CHECK (
   ("outputContractVersion" = 0 AND "outputStateId" IS NULL AND "outputStateHash" IS NULL AND "outputBaseHashJson" IS NULL) OR
   ("outputContractVersion" = 1 AND "outputStateId" IS NOT NULL AND "outputStateHash" IS NOT NULL AND "outputStateHash" ~ '^[a-f0-9]{64}$'
@@ -152,12 +129,6 @@ CREATE TABLE "project_output_state_entries" (
   "geometryStatus" VARCHAR(16) NOT NULL, "geometryProjectionHash" CHAR(64),
   "entryJson" TEXT NOT NULL, "entryHash" CHAR(64) NOT NULL,
   PRIMARY KEY ("stateId", "variantId"),
-  CONSTRAINT "project_output_entries_scope_key" UNIQUE ("stateId", "variantId", "projectId", "workspaceId"),
-  CONSTRAINT "project_output_entries_state_fk" FOREIGN KEY ("stateId", "projectId", "workspaceId")
-    REFERENCES "project_output_states" ("id", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT "project_output_entries_revision_seal_fk" FOREIGN KEY
-    ("outputSpecRevisionId", "variantId", "projectId", "workspaceId", "specHash") REFERENCES "output_spec_revisions"
-    ("id", "variantId", "projectId", "workspaceId", "specHash") ON DELETE RESTRICT ON UPDATE RESTRICT,
   CHECK (("geometryStatus" = 'unmaterialized' AND "geometryProjectionHash" IS NULL) OR
     ("geometryStatus" = 'verified' AND "geometryProjectionHash" IS NOT NULL AND "geometryProjectionHash" ~ '^[a-f0-9]{64}$')),
   CHECK ("canonicalPolicyVersion" = 'output-canonical-json/v1'),
@@ -166,6 +137,7 @@ CREATE TABLE "project_output_state_entries" (
     ("entryJson"::jsonb #>> '{geometry,projection,canonicalPolicyVersion}') IS NOT DISTINCT FROM "canonicalPolicyVersion"),
   CHECK ("entryHash" = encode(sha256(convert_to("entryJson", 'UTF8')), 'hex'))
 );
+CREATE UNIQUE INDEX "project_output_entries_scope_key" ON "project_output_state_entries" ("stateId", "variantId", "projectId", "workspaceId");
 CREATE TABLE "project_output_state_overlays" (
   "id" VARCHAR(128) NOT NULL, "stateId" VARCHAR(128) NOT NULL, "variantId" VARCHAR(128) NOT NULL,
   "projectId" VARCHAR(128) NOT NULL, "workspaceId" VARCHAR(128) NOT NULL,
@@ -175,10 +147,6 @@ CREATE TABLE "project_output_state_overlays" (
   "originalCommandId" VARCHAR(128) NOT NULL, "originalCommandHash" CHAR(64) NOT NULL,
   "overlayJson" TEXT NOT NULL, "overlayHash" CHAR(64) NOT NULL,
   PRIMARY KEY ("stateId", "id"),
-  CONSTRAINT "project_output_overlays_entry_fk" FOREIGN KEY ("stateId", "variantId", "projectId", "workspaceId")
-    REFERENCES "project_output_state_entries" ("stateId", "variantId", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT "project_output_overlays_command_seal_fk" FOREIGN KEY ("originalCommandId", "projectId", "workspaceId", "originalCommandHash")
-    REFERENCES "edit_commands" ("id", "projectId", "workspaceId", "commandHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED,
   CHECK ("kind" = 'crop'),
   CHECK ("canonicalPolicyVersion" = 'output-canonical-json/v1'),
   CHECK (("overlayJson"::jsonb ->> 'canonicalPolicyVersion') IS NOT DISTINCT FROM "canonicalPolicyVersion"),
@@ -187,7 +155,7 @@ CREATE TABLE "project_output_state_overlays" (
   CHECK ("originalCommandHash" ~ '^[a-f0-9]{64}$'),
   CHECK ("overlayHash" = encode(sha256(convert_to("overlayJson", 'UTF8')), 'hex'))
 );
-CREATE INDEX "project_output_overlays_range_idx" ON "project_output_state_overlays" ("stateId", "variantId", "clipId", "startFrame", "endFrame");
+CREATE INDEX "project_output_state_overlays_stateId_variantId_clipId_star_idx" ON "project_output_state_overlays" ("stateId", "variantId", "clipId", "startFrame", "endFrame");
 CREATE TABLE "project_output_state_invalidations" (
   "id" VARCHAR(128) NOT NULL, "stateId" VARCHAR(128) NOT NULL, "variantId" VARCHAR(128) NOT NULL,
   "projectId" VARCHAR(128) NOT NULL, "workspaceId" VARCHAR(128) NOT NULL,
@@ -197,8 +165,6 @@ CREATE TABLE "project_output_state_invalidations" (
   "causedByKind" VARCHAR(32) NOT NULL, "causedById" VARCHAR(128) NOT NULL, "causedByHash" CHAR(64) NOT NULL,
   "invalidationJson" TEXT NOT NULL, "invalidationHash" CHAR(64) NOT NULL,
   PRIMARY KEY ("stateId", "id"),
-  CONSTRAINT "project_output_invalidations_entry_fk" FOREIGN KEY ("stateId", "variantId", "projectId", "workspaceId")
-    REFERENCES "project_output_state_entries" ("stateId", "variantId", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT,
   CHECK ("causedByKind" IN ('creation-command', 'edit-command', 'media-ingest-operation')),
   CHECK ("kind" IN ('crop', 'render', 'critic', 'sidecar')),
   CHECK ("canonicalPolicyVersion" = 'output-canonical-json/v1'),
@@ -207,6 +173,22 @@ CREATE TABLE "project_output_state_invalidations" (
   CHECK ("previousDependencyHash" ~ '^[a-f0-9]{64}$' AND "nextDependencyHash" ~ '^[a-f0-9]{64}$' AND "causedByHash" ~ '^[a-f0-9]{64}$'),
   CHECK ("invalidationHash" = encode(sha256(convert_to("invalidationJson", 'UTF8')), 'hex'))
 );
+ALTER TABLE "output_variants" ADD CONSTRAINT "output_variants_projectId_workspaceId_fkey" FOREIGN KEY ("projectId", "workspaceId") REFERENCES "projects" ("id", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "output_spec_revisions" ADD CONSTRAINT "output_spec_revisions_variant_fk" FOREIGN KEY ("variantId", "projectId", "workspaceId") REFERENCES "output_variants" ("id", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_projectId_workspaceId_fkey" FOREIGN KEY ("projectId", "workspaceId") REFERENCES "projects" ("id", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_edit_plan_seal_fk" FOREIGN KEY ("editPlanSnapshotId", "projectId", "workspaceId", "editPlanHash") REFERENCES "project_snapshots" ("id", "projectId", "workspaceId", "contentHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_edit_command_seal_fk" FOREIGN KEY ("producerEditCommandId", "projectId", "workspaceId", "provenanceHash") REFERENCES "edit_commands" ("id", "projectId", "workspaceId", "commandHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_ingest_operation_seal_fk" FOREIGN KEY ("ingestOperationId", "projectId", "workspaceId", "provenanceHash") REFERENCES "public_operations" ("id", "projectId", "workspaceId", "requestFingerprint") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_ingest_context_seal_fk" FOREIGN KEY ("ingestOperationId", "projectId", "workspaceId", "ingestSourceArtifactId", "ingestSourceManifestId") REFERENCES "media_ingest_operations" ("operationId", "projectId", "workspaceId", "sourceArtifactId", "sourceManifestId") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_ingest_manifest_seal_fk" FOREIGN KEY ("ingestSourceManifestId", "ingestSourceArtifactId", "workspaceId", "ingestSourceManifestHash") REFERENCES "media_artifact_manifests" ("id", "artifactId", "workspaceId", "manifestHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_ingest_transcript_seal_fk" FOREIGN KEY ("ingestTranscriptId", "projectId", "workspaceId", "ingestSourceArtifactId", "ingestSourceManifestId", "ingestTranscriptHash") REFERENCES "media_transcripts" ("id", "projectId", "workspaceId", "sourceArtifactId", "sourceManifestId", "transcriptHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_parentVersionId_projectId_workspaceI_fkey" FOREIGN KEY ("parentVersionId", "projectId", "workspaceId") REFERENCES "project_versions" ("id", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "project_output_states" ADD CONSTRAINT "project_output_states_parent_seal_fk" FOREIGN KEY ("parentVersionId", "parentStateId", "projectId", "workspaceId", "parentStateHash") REFERENCES "project_output_states" ("resultVersionId", "id", "projectId", "workspaceId", "stateHash") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "project_output_state_entries" ADD CONSTRAINT "project_output_entries_state_fk" FOREIGN KEY ("stateId", "projectId", "workspaceId") REFERENCES "project_output_states" ("id", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "project_output_state_entries" ADD CONSTRAINT "project_output_entries_revision_seal_fk" FOREIGN KEY ("outputSpecRevisionId", "variantId", "projectId", "workspaceId", "specHash") REFERENCES "output_spec_revisions" ("id", "variantId", "projectId", "workspaceId", "specHash") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "project_output_state_overlays" ADD CONSTRAINT "project_output_overlays_entry_fk" FOREIGN KEY ("stateId", "variantId", "projectId", "workspaceId") REFERENCES "project_output_state_entries" ("stateId", "variantId", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "project_output_state_overlays" ADD CONSTRAINT "project_output_overlays_command_seal_fk" FOREIGN KEY ("originalCommandId", "projectId", "workspaceId", "originalCommandHash") REFERENCES "edit_commands" ("id", "projectId", "workspaceId", "commandHash") ON DELETE RESTRICT ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_output_state_invalidations" ADD CONSTRAINT "project_output_invalidations_entry_fk" FOREIGN KEY ("stateId", "variantId", "projectId", "workspaceId") REFERENCES "project_output_state_entries" ("stateId", "variantId", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 CREATE FUNCTION w66_output_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

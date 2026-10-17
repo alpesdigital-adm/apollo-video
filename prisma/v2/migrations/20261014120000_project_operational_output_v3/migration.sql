@@ -1,11 +1,10 @@
 -- Operational W66 children. No activation of the sixteen runtime writers here.
 -- v1/v2 validator bodies and digest policies remain preserved below dispatch.
-CREATE TABLE output_normalization_receipts (
+CREATE TABLE "output_normalization_receipts" (
  id varchar(128) PRIMARY KEY,"workspaceId" varchar(128) NOT NULL,"projectId" varchar(128) NOT NULL,
  "operationId" varchar(128) NOT NULL,"sourceArtifactId" varchar(128) NOT NULL,"sourceManifestId" varchar(128) NOT NULL,
  "sourceManifestHash" char(64) NOT NULL,"derivativeArtifactId" varchar(128) NOT NULL,"derivativeManifestId" varchar(128) NOT NULL,
  "derivativeManifestHash" char(64) NOT NULL,"receiptJson" text NOT NULL,"receiptHash" char(64) NOT NULL,"createdAt" timestamptz(3) NOT NULL,
- CONSTRAINT output_normalization_seal_key UNIQUE(id,"projectId","workspaceId","receiptHash"),
  FOREIGN KEY("projectId","workspaceId") REFERENCES projects(id,"workspaceId") DEFERRABLE INITIALLY DEFERRED,
  FOREIGN KEY("operationId","workspaceId") REFERENCES public_operations(id,"workspaceId") DEFERRABLE INITIALLY DEFERRED,
  FOREIGN KEY("sourceManifestId","sourceArtifactId","workspaceId","sourceManifestHash")
@@ -16,13 +15,12 @@ CREATE TABLE output_normalization_receipts (
  CHECK(("receiptJson"::jsonb->>'schemaVersion') IS NOT DISTINCT FROM 'output-normalization-receipt/v3'),
  CHECK(("receiptJson"::jsonb->>'canonicalPolicyVersion') IS NOT DISTINCT FROM 'output-canonical-json/v1')
 );
-CREATE TABLE output_materializations (
+CREATE UNIQUE INDEX "output_normalization_seal_key" ON "output_normalization_receipts" (id,"projectId","workspaceId","receiptHash");
+CREATE TABLE "output_materializations" (
  id varchar(128) PRIMARY KEY,"workspaceId" varchar(128) NOT NULL,"projectId" varchar(128) NOT NULL,
  "resultVersionId" varchar(128) NOT NULL,"variantId" varchar(128) NOT NULL,"outputSpecRevisionId" varchar(128) NOT NULL,
  "specHash" char(64) NOT NULL,"planSnapshotId" varchar(128) NOT NULL,"planHash" char(64) NOT NULL,
  "materializationJson" text NOT NULL,"materializationHash" char(64) NOT NULL,"createdAt" timestamptz(3) NOT NULL,
- CONSTRAINT output_materialization_seal_key UNIQUE(id,"projectId","workspaceId","materializationHash"),
- UNIQUE("resultVersionId","variantId","projectId","workspaceId"),
  FOREIGN KEY("resultVersionId","projectId","workspaceId") REFERENCES project_versions(id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
  FOREIGN KEY("outputSpecRevisionId","variantId","projectId","workspaceId","specHash")
   REFERENCES output_spec_revisions(id,"variantId","projectId","workspaceId","specHash") DEFERRABLE INITIALLY DEFERRED,
@@ -32,23 +30,25 @@ CREATE TABLE output_materializations (
  CHECK(("materializationJson"::jsonb->>'schemaVersion') IS NOT DISTINCT FROM 'output-materialization/v3'),
  CHECK(("materializationJson"::jsonb->>'canonicalPolicyVersion') IS NOT DISTINCT FROM 'output-canonical-json/v1')
 );
-CREATE TABLE output_materialization_normalizations (
+CREATE UNIQUE INDEX "output_materialization_seal_key" ON "output_materializations" (id,"projectId","workspaceId","materializationHash");
+CREATE UNIQUE INDEX "output_materializations_resultVersionId_variantId_projectId_key" ON "output_materializations" ("resultVersionId","variantId","projectId","workspaceId");
+CREATE TABLE "output_materialization_normalizations" (
  "materializationId" varchar(128) NOT NULL,"normalizationId" varchar(128) NOT NULL,"normalizationHash" char(64) NOT NULL,
  "workspaceId" varchar(128) NOT NULL,"projectId" varchar(128) NOT NULL,PRIMARY KEY("materializationId","normalizationId"),
  FOREIGN KEY("materializationId") REFERENCES output_materializations(id) DEFERRABLE INITIALLY DEFERRED,
  FOREIGN KEY("normalizationId","projectId","workspaceId","normalizationHash")
   REFERENCES output_normalization_receipts(id,"projectId","workspaceId","receiptHash") DEFERRABLE INITIALLY DEFERRED
 );
-CREATE TABLE output_operational_bundles (
+CREATE TABLE "output_operational_bundles" (
  "versionId" varchar(128) PRIMARY KEY,"workspaceId" varchar(128) NOT NULL,"projectId" varchar(128) NOT NULL,"stateId" varchar(128) NOT NULL,
  "bundleJson" text NOT NULL,"bundleHash" char(64) NOT NULL,"originJson" text NOT NULL,"originHash" char(64) NOT NULL,
  "producerPayloadJson" text,"producerPayloadHash" char(64),
- UNIQUE("stateId","projectId","workspaceId"),
  FOREIGN KEY("versionId","stateId","projectId","workspaceId") REFERENCES project_output_states("resultVersionId",id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
  FOREIGN KEY("versionId","projectId","workspaceId") REFERENCES project_versions(id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
  CHECK("bundleHash"=w66_v2_sha("bundleJson") AND "originHash"=w66_v2_sha("originJson")),
  CHECK(("producerPayloadJson" IS NULL AND "producerPayloadHash" IS NULL) OR ("producerPayloadJson" IS NOT NULL AND "producerPayloadHash" IS NOT NULL AND "producerPayloadHash"=w66_v2_sha("producerPayloadJson")))
 );
+CREATE UNIQUE INDEX "output_operational_bundles_stateId_projectId_workspaceId_key" ON "output_operational_bundles" ("stateId","projectId","workspaceId");
 ALTER TABLE project_output_state_entries ADD COLUMN "materializationId" varchar(128);
 ALTER TABLE project_output_state_entries ADD CONSTRAINT output_entry_materialization_seal_fk
  FOREIGN KEY("materializationId","projectId","workspaceId","geometryProjectionHash")

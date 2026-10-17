@@ -11,10 +11,10 @@ ALTER TABLE project_creation_commands ADD COLUMN "schemaVersion" integer NOT NUL
 ALTER TABLE project_output_states ADD COLUMN "creationCommandV2Id" varchar(128),
  ADD COLUMN "forkRenderableCandidateId" varchar(200),
  ADD COLUMN "consumptionStatus" varchar(32) NOT NULL DEFAULT 'historical-v1', ADD COLUMN "consumptionJson" text;
-CREATE UNIQUE INDEX project_creation_commands_v2_scope_key ON project_creation_commands
+CREATE UNIQUE INDEX "project_creation_commands_v2_scope_key" ON "project_creation_commands"
  (id,"projectId","workspaceId","versionId","commandHash");
-CREATE UNIQUE INDEX project_output_states_target_identity_key ON project_output_states ("resultVersionId",id,"projectId","workspaceId");
-CREATE TABLE project_fork_derivations (
+CREATE UNIQUE INDEX "project_output_states_target_identity_key" ON "project_output_states" ("resultVersionId",id,"projectId","workspaceId");
+CREATE TABLE "project_fork_derivations" (
  id varchar(128) PRIMARY KEY, "workspaceId" varchar(128) NOT NULL,
  "sourceProjectId" varchar(128) NOT NULL, "sourceVersionId" varchar(128) NOT NULL,
  "sourceStateId" varchar(128) NOT NULL, "sourceStateHash" char(64) NOT NULL, "sourceBaseHash" char(64) NOT NULL,
@@ -22,52 +22,52 @@ CREATE TABLE project_fork_derivations (
  "creationCommandId" varchar(128) NOT NULL, "schemaVersion" varchar(64) NOT NULL,
  "canonicalPolicyVersion" varchar(64) NOT NULL, "derivationJson" text NOT NULL, "derivationHash" char(64) NOT NULL,
  "createdAt" timestamptz(3) NOT NULL,
- CONSTRAINT project_fork_derivations_seal_key UNIQUE(id,"targetProjectId","workspaceId","derivationHash"),
- UNIQUE("creationCommandId","workspaceId"), UNIQUE("targetVersionId","targetProjectId","workspaceId"),
- FOREIGN KEY("targetVersionId","targetProjectId","workspaceId") REFERENCES project_versions(id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
- FOREIGN KEY("targetVersionId","targetStateId","targetProjectId","workspaceId") REFERENCES project_output_states("resultVersionId",id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
- FOREIGN KEY("sourceVersionId","sourceProjectId","workspaceId") REFERENCES project_versions(id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
- FOREIGN KEY("sourceVersionId","sourceStateId","sourceProjectId","workspaceId","sourceStateHash")
-  REFERENCES project_output_states("resultVersionId",id,"projectId","workspaceId","stateHash") DEFERRABLE INITIALLY DEFERRED,
- FOREIGN KEY("creationCommandId") REFERENCES project_creation_commands(id) DEFERRABLE INITIALLY DEFERRED,
  CHECK("schemaVersion"='project-fork-derivation/v2' AND "canonicalPolicyVersion"='output-canonical-json/v1'),
  CHECK("derivationHash"=encode(sha256(convert_to("derivationJson",'UTF8')),'hex'))
 );
-CREATE TABLE project_fork_renderable_candidates (
+CREATE UNIQUE INDEX "project_fork_derivations_seal_key" ON "project_fork_derivations" (id,"targetProjectId","workspaceId","derivationHash");
+CREATE UNIQUE INDEX "project_fork_derivations_creationCommandId_workspaceId_key" ON "project_fork_derivations" ("creationCommandId","workspaceId");
+CREATE UNIQUE INDEX "project_fork_derivations_targetVersionId_targetProjectId_wo_key" ON "project_fork_derivations" ("targetVersionId","targetProjectId","workspaceId");
+CREATE TABLE "project_fork_renderable_candidates" (
  id varchar(200) PRIMARY KEY, "workspaceId" varchar(128) NOT NULL, "projectId" varchar(128) NOT NULL,
  "projectVersionId" varchar(128) NOT NULL, "derivationId" varchar(128) NOT NULL, "derivationHash" char(64) NOT NULL,
  "planId" varchar(200) NOT NULL, "planHash" char(64) NOT NULL, "planHashJson" text NOT NULL, "candidateJson" text NOT NULL,
  "candidateHash" char(64) NOT NULL, "createdAt" timestamptz(3) NOT NULL,
- CONSTRAINT project_fork_renderable_candidates_scope_key UNIQUE(id,"projectId","workspaceId"),
- UNIQUE("projectVersionId","projectId","workspaceId"),
- FOREIGN KEY("projectVersionId","projectId","workspaceId") REFERENCES project_versions(id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
- FOREIGN KEY("derivationId","projectId","workspaceId","derivationHash") REFERENCES project_fork_derivations(id,"targetProjectId","workspaceId","derivationHash") DEFERRABLE INITIALLY DEFERRED,
  CHECK("planHash"=encode(sha256(convert_to("planHashJson",'UTF8')),'hex')),
  CHECK("candidateHash"=encode(sha256(convert_to("candidateJson",'UTF8')),'hex'))
 );
-CREATE TABLE project_fork_crop_decisions (
+CREATE UNIQUE INDEX "project_fork_renderable_candidates_scope_key" ON "project_fork_renderable_candidates" (id,"projectId","workspaceId");
+CREATE UNIQUE INDEX "project_fork_renderable_candidates_projectVersionId_project_key" ON "project_fork_renderable_candidates" ("projectVersionId","projectId","workspaceId");
+CREATE TABLE "project_fork_crop_decisions" (
  id varchar(128) PRIMARY KEY, "stateId" varchar(128) NOT NULL, "workspaceId" varchar(128) NOT NULL,
  "projectId" varchar(128) NOT NULL, "variantId" varchar(128) NOT NULL, "clipId" varchar(128) NOT NULL,
  "creationCommandId" varchar(128) NOT NULL, "sourceOverlayId" varchar(128) NOT NULL, "sourceOverlayHash" char(64) NOT NULL,
  status varchar(64) NOT NULL, "decisionJson" text NOT NULL, "decisionHash" char(64) NOT NULL, "createdAt" timestamptz(3) NOT NULL,
- FOREIGN KEY("stateId","variantId","projectId","workspaceId") REFERENCES project_output_state_entries("stateId","variantId","projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
- FOREIGN KEY("creationCommandId") REFERENCES project_creation_commands(id) DEFERRABLE INITIALLY DEFERRED,
  CHECK(status='inactive-requires-target-materialization'),
  CHECK("decisionHash"=encode(sha256(convert_to("decisionJson",'UTF8')),'hex'))
 );
-CREATE TABLE project_fork_invalidation_lineage (
+CREATE TABLE "project_fork_invalidation_lineage" (
  id varchar(128) PRIMARY KEY, "stateId" varchar(128) NOT NULL, "workspaceId" varchar(128) NOT NULL,
  "projectId" varchar(128) NOT NULL, "variantId" varchar(128) NOT NULL, "sourceId" varchar(128) NOT NULL,
  "sourceHash" char(64) NOT NULL, "lineageJson" text NOT NULL, "lineageHash" char(64) NOT NULL,
- FOREIGN KEY("stateId","variantId","projectId","workspaceId") REFERENCES project_output_state_entries("stateId","variantId","projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED,
  CHECK("lineageHash"=encode(sha256(convert_to("lineageJson",'UTF8')),'hex'))
 );
-ALTER TABLE project_creation_commands ADD CONSTRAINT creation_v2_derivation_seal_fk FOREIGN KEY
+ALTER TABLE "project_fork_derivations" ADD CONSTRAINT "project_fork_derivations_targetVersionId_targetProjectId_w_fkey" FOREIGN KEY ("targetVersionId","targetProjectId","workspaceId") REFERENCES "project_versions" (id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_derivations" ADD CONSTRAINT "project_fork_derivations_targetVersionId_targetStateId_tar_fkey" FOREIGN KEY ("targetVersionId","targetStateId","targetProjectId","workspaceId") REFERENCES "project_output_states" ("resultVersionId",id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_derivations" ADD CONSTRAINT "project_fork_derivations_sourceVersionId_sourceProjectId_w_fkey" FOREIGN KEY ("sourceVersionId","sourceProjectId","workspaceId") REFERENCES "project_versions" (id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_derivations" ADD CONSTRAINT "project_fork_derivations_sourceVersionId_sourceStateId_sou_fkey" FOREIGN KEY ("sourceVersionId","sourceStateId","sourceProjectId","workspaceId","sourceStateHash") REFERENCES "project_output_states" ("resultVersionId",id,"projectId","workspaceId","stateHash") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_derivations" ADD CONSTRAINT "project_fork_derivations_creationCommandId_fkey" FOREIGN KEY ("creationCommandId") REFERENCES "project_creation_commands" (id) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_renderable_candidates" ADD CONSTRAINT "project_fork_renderable_candidates_projectVersionId_projec_fkey" FOREIGN KEY ("projectVersionId","projectId","workspaceId") REFERENCES "project_versions" (id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_renderable_candidates" ADD CONSTRAINT "project_fork_renderable_candidates_derivationId_projectId__fkey" FOREIGN KEY ("derivationId","projectId","workspaceId","derivationHash") REFERENCES "project_fork_derivations" (id,"targetProjectId","workspaceId","derivationHash") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_crop_decisions" ADD CONSTRAINT "project_fork_crop_decisions_stateId_variantId_projectId_wo_fkey" FOREIGN KEY ("stateId","variantId","projectId","workspaceId") REFERENCES "project_output_state_entries" ("stateId","variantId","projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_crop_decisions" ADD CONSTRAINT "project_fork_crop_decisions_creationCommandId_fkey" FOREIGN KEY ("creationCommandId") REFERENCES "project_creation_commands" (id) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_fork_invalidation_lineage" ADD CONSTRAINT "project_fork_invalidation_lineage_stateId_variantId_projec_fkey" FOREIGN KEY ("stateId","variantId","projectId","workspaceId") REFERENCES "project_output_state_entries" ("stateId","variantId","projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "project_creation_commands" ADD CONSTRAINT "creation_v2_derivation_seal_fk" FOREIGN KEY
  ("forkDerivationId","projectId","workspaceId","forkDerivationHash") REFERENCES project_fork_derivations(id,"targetProjectId","workspaceId","derivationHash") DEFERRABLE INITIALLY DEFERRED;
-ALTER TABLE project_output_states ADD CONSTRAINT states_creation_v2_seal_fk FOREIGN KEY
+ALTER TABLE "project_output_states" ADD CONSTRAINT "states_creation_v2_seal_fk" FOREIGN KEY
  ("creationCommandV2Id","projectId","workspaceId","resultVersionId","provenanceHash")
  REFERENCES project_creation_commands(id,"projectId","workspaceId","versionId","commandHash") DEFERRABLE INITIALLY DEFERRED;
-ALTER TABLE project_output_states ADD CONSTRAINT states_fork_candidate_fk FOREIGN KEY
+ALTER TABLE "project_output_states" ADD CONSTRAINT "states_fork_candidate_fk" FOREIGN KEY
  ("forkRenderableCandidateId","projectId","workspaceId") REFERENCES project_fork_renderable_candidates(id,"projectId","workspaceId") DEFERRABLE INITIALLY DEFERRED;
 -- Existing cyclic relations must not force artificial/null insert order.
 ALTER TABLE project_versions ALTER CONSTRAINT project_versions_exact_output_state_fk DEFERRABLE INITIALLY DEFERRED;

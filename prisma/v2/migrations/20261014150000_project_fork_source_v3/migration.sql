@@ -974,4 +974,3 @@ DECLARE operational_state_id text; state_id text; contract integer; final_projec
  PERFORM w66_assert_creation_bundle_v2(state_id); RETURN NULL;
 EXCEPTION WHEN no_data_found THEN RAISE EXCEPTION 'W66v2 reciprocal bundle missing at COMMIT' USING ERRCODE='23514';
 END $$;
-
