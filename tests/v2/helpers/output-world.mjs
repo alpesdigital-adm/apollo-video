@@ -128,4 +128,3 @@ export async function ingestedRecordings(slugs, { durations = {}, ...options } =
   const adoptable = slugs.filter((slug) => slug !== last).map((slug) => ({ normalization: receipts.get(slug), rights: rightsEvidenceFor(slug) }))
   return { ...world, parent: head, chain, receipts, adoptable, slugs, names: (slug) => recordingNames(slug) }
 }
-
