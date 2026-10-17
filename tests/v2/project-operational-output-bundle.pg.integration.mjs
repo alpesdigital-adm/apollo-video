@@ -15,7 +15,8 @@ import { createProjectOutputStateV3 } from '../../src/v2/domain/project-output-s
 import { createProjectVersionV3,outputBoundVersionHashBodyV3 } from '../../src/v2/domain/project-version.ts'
 import { calculateOutputCanonicalHash,serializeOutputCanonicalJson } from '../../src/v2/domain/output-canonical-policy.ts'
 import { externalActorAuditData } from '../../src/v2/infrastructure/prisma/external-actor-audit.ts'
-import { persistOutputVersionBundleInTransactionV3 } from '../../src/v2/infrastructure/prisma/output-version-bundle-persistence.ts'
+import { persistOutputVersionBundleInTransactionV3,persistOperationalIngestFactsInTransactionV3 } from '../../src/v2/infrastructure/prisma/output-version-bundle-persistence.ts'
+import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { setAssetRightsService } from '../../src/v2/application/set-asset-rights.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createProjectSnapshot } from '../../src/v2/domain/project-snapshot.ts'
@@ -130,7 +131,9 @@ async function publicationSnapshot(db,scope,operationId) {
   'v2ProjectMediaAsset','v2MediaTranscript','v2CommandArtifactInvalidation','v2PublicEventOutbox']
  const counts={}
  for(const model of models)counts[model]=await db[model].count({where:model==='v2PublicEventOutbox'?{workspaceId:scope.workspaceId}:{projectId:scope.projectId}})
- return {counts,project:await db.v2Project.findUnique({where:{id:scope.projectId}}),
+ // Color probes carry no project column: they are counted by workspace, and only the publish TX writes them.
+ return {counts,colorProbes:await db.v2MediaColorProbe.count({where:{workspaceId:scope.workspaceId}}),
+  project:await db.v2Project.findUnique({where:{id:scope.projectId}}),
   operation:operationId?await db.v2PublicOperation.findUnique({where:{id:operationId}}):null}
 }
 function boundedDate(offset=0){return new Date(Date.now()+offset)}
@@ -615,6 +618,37 @@ test(operationalCaseName,
    assert.ok(terminalDetail);assert.equal(terminalDetail.sourceArtifactId,op.operation.target.id)
    assert.equal(terminalDetail.sourceManifestId,op.operation.target.manifestId)
    facts.operationResult={resource:op.operation.result.resource,resultReadback:true,targetReadback:true,detailManifestReadback:true}
+   // Source and proxy color evidence is immutable and written by the same publish TX as the Version: the rollback
+   // proof above counts no probe, this proves both rows exist once the TX commits, that re-persisting the same
+   // facts converges (a re-observation moves neither the row nor its timestamp) and that contradictory evidence
+   // for an already-probed artifact is refused instead of replacing it.
+   {
+    const ingested=preparation.ingestFacts,receipt=ingested.normalization.document
+    const probeRows=async()=>db.v2MediaColorProbe.findMany({where:{workspaceId:scope.workspaceId,artifactId:{in:[receipt.source.artifactId,receipt.derivative.artifactId]}},orderBy:{artifactId:'asc'}})
+    const stored=await probeRows()
+    assert.equal(stored.length,2,'Ingest persists exactly one color probe for the source and one for the proxy')
+    for(const [probe,fact] of [[ingested.sourceColorProbe,receipt.source],[ingested.derivativeColorProbe,receipt.derivative]]) {
+     const row=stored.find(item=>item.artifactId===fact.artifactId)
+     assert.ok(row,'Color probe row for '+fact.artifactId)
+     assert.equal(row.manifestId,fact.manifestId);assert.equal(row.probeHash,probe.probeHash);assert.equal(row.state,probe.detection.state)
+     assert.equal(row.createdAt.toISOString(),probe.createdAt)
+     if(probe.detection.state==='ready')assert.deepEqual(JSON.parse(row.metadataJson),probe.detection.metadata)
+    }
+    const persistFacts=input=>db.$transaction(tx=>persistOperationalIngestFactsInTransactionV3(tx,input))
+    await persistFacts(ingested)
+    const reobservedAt=new Date(Date.parse(ingested.sourceColorProbe.createdAt)+300_000).toISOString()
+    const reobserve=probe=>{const {probeHash:_hash,...body}=probe;return createMediaColorProbe({...body,createdAt:reobservedAt})}
+    await persistFacts({...ingested,sourceColorProbe:reobserve(ingested.sourceColorProbe),derivativeColorProbe:reobserve(ingested.derivativeColorProbe)})
+    const replayed=await probeRows()
+    assert.deepEqual(replayed.map(row=>[row.id,row.probeHash,row.createdAt.toISOString()]),stored.map(row=>[row.id,row.probeHash,row.createdAt.toISOString()]),
+     'Replay and re-observation converge on the first persisted evidence')
+    const {probeHash:_sourceHash,...sourceBody}=ingested.sourceColorProbe
+    const contradicting=createMediaColorProbe({...sourceBody,detection:{state:'unavailable',pixelFormat:'yuv420p',reasons:['missing-transfer']}})
+    await assert.rejects(()=>persistFacts({...ingested,sourceColorProbe:contradicting}),
+     e=>e.code==='PERSISTENCE_CONFLICT'&&e.message==='Ingest color producer/evidence collision')
+    assert.deepEqual((await probeRows()).map(row=>[row.id,row.probeHash,row.state]),stored.map(row=>[row.id,row.probeHash,row.state]),
+     'Contradictory evidence leaves the stored probes untouched')
+   }
    emitEditorialFlush({phase:'ingest-returned'})
    const head=await db.v2Project.findUnique({where:{id:scope.projectId}});assert.equal(head.currentVersionId,persisted.version.id)
    const replayAuditContext=createExternalAuditContext({workspaceId:audit.workspaceId,clientId:audit.clientId,
