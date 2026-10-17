@@ -31,6 +31,7 @@ import {
 import { resolveSourceTick, type PiecewiseClockMap } from '../domain/piecewise-clock-map.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
+import { offeredObservationsFor } from './adoptable-observations.ts'
 import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
@@ -886,12 +887,6 @@ export interface DirectMulticamSessionDependencies {
   clock: () => Date
   createId: (prefix: string) => string
   createEventId: () => string
-  /**
-   * The output state transition that seals the direction's Version. Production never sets it: the real transition
-   * refuses a cut over a recording the project's State has not observed. A test whose world observes fewer
-   * recordings than a multicam session records replaces it, and says so where it does.
-   */
-  sealOutput?: typeof transitionProjectOutputState
 }
 
 function isDirected(plan: MulticamDirectionCommandContext['currentPlan']): plan is Readonly<DirectedEditPlan> {
@@ -1420,7 +1415,11 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
     })
     // The re-cut EditPlan is this Command's own; every output member re-materializes from it and from the observed
     // sources the parent already holds. A cut that consumes a recording nobody has observed is refused here.
-    const bundle = (dependencies.sealOutput ?? transitionProjectOutputState)({
+    // The cut consumes several recordings; the head State observes one. The others are adopted from the receipts their
+    // ingests persisted, and a recording nobody observed refuses the cut, naming it.
+    const adoptable = await offeredObservationsFor(dependencies.commands, context.parent, editPlan as unknown as Record<string, unknown>)
+    const bundle = transitionProjectOutputState({
+      ...(adoptable.length > 0 ? { adoptable } : {}),
       parent: context.parent,
       command: built.command,
       audit: authenticationAudit,

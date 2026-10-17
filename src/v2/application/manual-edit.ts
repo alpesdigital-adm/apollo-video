@@ -17,6 +17,7 @@ import {
   type PersistedManualEditPayload,
 } from '../domain/manual-editing.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
+import { offeredObservationsFor } from './adoptable-observations.ts'
 import { transitionManualEditOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createManualCommandImpact } from '../domain/command-impact.ts'
@@ -311,7 +312,13 @@ export function applyManualEditService(dependencies: {
     })
     // The Command's own action decides the origin: a render-free selection inherits, undo/redo/restore return to
     // an exact factual target, any other operation is a child Command that recompiles the plan.
+    // A replaced asset (or any other apply that consumes a recording the head State does not observe) adopts the
+    // persisted receipt of that recording; undo, redo and restore return to an exact factual target and adopt nothing.
+    const adoptable = request.action === 'apply'
+      ? await offeredObservationsFor(dependencies.repository, context.bundle, JSON.parse(snapshot.contentJson) as Record<string, unknown>)
+      : []
     const bundle = transitionManualEditOutputState({
+      ...(adoptable.length > 0 ? { adoptable } : {}),
       parent: context.bundle, restoreTarget: request.action === 'apply' ? null : context.targetVersion!.bundle,
       command, audit: authenticationAudit, requestFingerprint, editPlanSnapshot: snapshot,
       allocation: {

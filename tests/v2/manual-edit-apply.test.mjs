@@ -7,7 +7,7 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { serializeOutputCanonicalJson } from '../../src/v2/domain/output-canonical-policy.ts'
 import { operationalBundlePlanV3 } from '../../src/v2/domain/output-version-bundle.ts'
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
-import { ingestedWorld, recompiledChild } from './helpers/output-world.mjs'
+import { ingestedRecordings, ingestedWorld, recompiledChild } from './helpers/output-world.mjs'
 import { persistedOutputQueries } from './helpers/persisted-output-client.mjs'
 import { reviewedTimeline } from './helpers/review-timeline.mjs'
 
@@ -31,12 +31,17 @@ function recordOf(bundle) {
 }
 
 /** The repository double a service run needs: the sealed head (and an optional target) as the context, the commit captured. */
-function managedRepository(bundle, { target } = {}) {
-  const captured = { commits: [] }
+function managedRepository(bundle, { target, offered = [], assets = ['artifact-source3'], variant = VARIANT } = {}) {
+  const captured = { commits: [], requested: [] }
   const repository = {
     async findIdempotentResult() { return null },
+    // The persisted receipts of the recordings a plan consumes and the head State does not observe.
+    async readAdoptableObservations({ sourceArtifactIds }) {
+      captured.requested.push([...sourceArtifactIds])
+      return offered.filter((offer) => sourceArtifactIds.includes(offer.normalization.document.source.artifactId))
+    },
     async readContext() {
-      return { ...recordOf(bundle), availableAssetIds: ['artifact-source3'], renderVariantIds: [VARIANT],
+      return { ...recordOf(bundle), availableAssetIds: assets, renderVariantIds: [variant],
         outputReferences: outputsOf(bundle.version.id), history: [], ...(target ? { targetVersion: recordOf(target) } : {}) }
     },
     async commitOrReplay(input) {
@@ -65,6 +70,32 @@ const requestFor = (bundle, overrides) => ({
 })
 
 const crop = { kind: 'crop', clipId: 'clip-1', crop: { x: 0.2, y: 0, width: 0.6, height: 1 } }
+
+// The same project when the replacement recording was ingested before the master: the head State observes the master
+// alone, and the replacement's receipt is the one its own ingest persisted.
+const replacementWorld = await ingestedRecordings(['artifact-replacement', 'ingest3'], { durations: { 'artifact-replacement': 6, ingest3: 6 } })
+const replacementHead = recompiledChild(replacementWorld.parent, replacementWorld.actor, reviewedTimeline, { suffix: 'manual-base-replacement' })
+const replaceClip = { kind: 'replace', clipId: 'clip-1', sourceId: 'artifact-replacement' }
+
+test('T-FR-233 replacing a clip source adopts the persisted receipt of the replacement recording into the child Version', async () => {
+  const variant = replacementHead.state.document.entries[0].variantId
+  const options = { offered: replacementWorld.adoptable, assets: ['artifact-source3', 'artifact-replacement'], variant }
+  const { repository, captured } = managedRepository(replacementHead, options)
+  const request = (key) => ({ ...requestFor(replacementHead, { action: 'apply', targetId: 'clip-1', operation: replaceClip, idempotencyKey: key }),
+    variantId: variant, actor: replacementWorld.actor })
+  await serviceFor(repository)(request('replace-adopt-1'))
+  const { bundle } = captured.commits[0]
+  assert.deepEqual(captured.requested, [['artifact-replacement']], 'only the recording the head State does not observe is read')
+  assert.equal(bundle.origin.kind, 'child-command')
+  assert.deepEqual(bundle.origin.adoptions.map((item) => item.sourceArtifactId), ['artifact-replacement'])
+  assert.deepEqual(bundle.state.document.entries[0].consumption.materialization.document.normalizations.map((n) => n.document.source.artifactId).sort(),
+    ['artifact-replacement', 'artifact-source3'])
+  assert.equal(bundle.state.document.parentStateHash, replacementHead.state.stateHash)
+
+  const { repository: unoffered } = managedRepository(replacementHead, { ...options, offered: [] })
+  await assert.rejects(() => serviceFor(unoffered)(request('replace-adopt-2')),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.sourceArtifactIds[0] === 'artifact-replacement')
+})
 
 test('T-FR-233 manual crop persists the impact in payload v2, binds it to the outbox event and seals a child Version', async () => {
   const { repository, captured } = managedRepository(head)

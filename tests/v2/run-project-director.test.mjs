@@ -12,7 +12,7 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
 import { childCommandOf } from '../../src/v2/domain/project-output-state-transition.ts'
-import { ingestedWorld, recompiledChild, worldActor } from './helpers/output-world.mjs'
+import { ingestedRecordings, ingestedWorld, recompiledChild, worldActor } from './helpers/output-world.mjs'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
@@ -41,6 +41,14 @@ const world = await ingestedWorld({
 const head = recompiledChild(world.parent, world.actor, () => structuredClone(compiledEditorialPlan()),
   { suffix: 'director-base', versionId: 'project-version-4', snapshotId: 'snapshot-edit-4' })
 const baseHash = head.version.baseHash
+
+// The same project when the selected B-roll insert was ingested before the master: the head State observes the master
+// alone, and the insert's receipt is the one its own ingest persisted.
+const insertWorld = await ingestedRecordings(['artifact-selected-insert-1', 'ingest3'], {
+  actor: world.actor, durations: { 'artifact-selected-insert-1': 14, ingest3: 14 },
+})
+const insertHead = recompiledChild(insertWorld.parent, insertWorld.actor, () => structuredClone(compiledEditorialPlan()),
+  { suffix: 'director-base', versionId: 'project-version-4', snapshotId: 'snapshot-edit-4' })
 
 /** The prepared commit with the Command, audit, request fingerprint and Version its sealed bundle carries. */
 function directorView(commit) {
@@ -188,8 +196,16 @@ class InMemoryDirectorRepository {
       { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: '9:16' },
       { artifactId: 'artifact-final-4', kind: 'final', sourceVersionId: 'project-version-4', variantId: '9:16' },
     ]
-    this.parent = head
+    this.parent = options.head ?? head
+    this.offered = options.offered ?? []
+    this.requested = []
     this.records = new Map()
+  }
+
+  /** The persisted receipts of the recordings the plan consumes and the head State does not observe. */
+  async readAdoptableObservations({ sourceArtifactIds }) {
+    this.requested.push([...sourceArtifactIds])
+    return this.offered.filter((offer) => sourceArtifactIds.includes(offer.normalization.document.source.artifactId))
   }
 
   get currentVersion() { return this.parent.version }
@@ -781,6 +797,22 @@ test('Director V2 plans a selected B-roll insert with bound source audio, but ca
   // ...but a Version whose outputs could not be rendered is never sealed: the insert has no normalization authority yet.
   assert.equal(repository.lastBundle, undefined)
   assert.equal(repository.currentVersion.id, 'project-version-4')
+})
+
+test('Director V2 adopts the persisted receipt of a selected B-roll insert and seals the plan that uses it', async () => {
+  const { repository, service } = fixture({ selectedInsert: true, head: insertHead, offered: insertWorld.adoptable })
+  const result = await service(request({ baseHash: insertHead.version.baseHash }))
+  const sealed = repository.lastBundle.bundle
+  assert.deepEqual(repository.requested, [['artifact-selected-insert-1']], 'only the recording the head State does not observe is read')
+  assert.deepEqual(sealed.origin.adoptions.map((item) => item.sourceArtifactId), ['artifact-selected-insert-1'])
+  assert.deepEqual(sealed.state.document.entries[0].consumption.materialization.document.normalizations
+    .map((n) => n.document.source.artifactId).sort(), ['artifact-selected-insert-1', 'artifact-source3'])
+  assert.equal(sealed.state.document.parentStateHash, insertHead.state.stateHash)
+  assert.equal(result.run.editPlan.videoTracks[0].clips[1].sourceArtifactId, 'artifact-selected-insert-1')
+  // The same Command with no persisted receipt for the insert stays refused.
+  const refused = fixture({ selectedInsert: true, head: insertHead, offered: [] })
+  await assert.rejects(refused.service(request({ baseHash: insertHead.version.baseHash, idempotency: { key: 'director-insert-unoffered' } })),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.sourceArtifactIds[0] === 'artifact-selected-insert-1')
 })
 
 test('Director V2 persists an evidence-bound media-only treatment before proxy enqueue', async () => {

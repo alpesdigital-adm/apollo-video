@@ -10,6 +10,7 @@ import {
   CLIENT,
   fakeSilence,
   HEAD,
+  PERSISTED_RECEIPTS,
   PROJECT,
   request,
   SESSION,
@@ -95,19 +96,45 @@ test('T-F4.012 the command derives evidence, direction, plan and version from id
   console.log(`direct shots=${result.direction.shots.length} clips=${clips.length} sources=${result.editPlan.sources.length} frames=${result.editPlan.durationFrames}`)
 })
 
-test('T-F4.012 a cut over recordings the project State has not observed is refused with them named, and commits nothing', async () => {
-  // The real output transition: the shared world's State observes one recording, the session records several.
-  const wired = wire({ sealOutput: null })
+test('T-F4.012 the cut adopts the persisted receipts of the cameras it uses; the head State observes only the master audio', async () => {
+  const wired = wire()
+  const result = await wired.execute(request())
+  const sealed = wired.commands.committed.at(-1).bundle
+  const cutAssets = [...new Set(result.editPlan.videoTracks[0].clips.map((clip) => clip.sourceArtifactId))].sort()
+  assert.ok(cutAssets.length >= 2, 'a multi-camera cut')
+  // Adopted: exactly the recordings the plan cuts to; never the head's own recording, never an offered receipt it does not use.
+  assert.deepEqual(sealed.origin.adoptions.map((item) => item.sourceArtifactId), cutAssets)
+  assert.equal(wired.commands.requested.length, 1)
+  assert.deepEqual(wired.commands.requested[0], [...cutAssets], 'only the unobserved recordings are read')
+  const materialized = sealed.state.document.entries[0].consumption.materialization.document.normalizations.map((n) => n.document.source.artifactId).sort()
+  assert.deepEqual(materialized, [...new Set([...cutAssets, 'asset-master'])].sort())
+  assert.equal(sealed.state.document.parentStateHash, HEAD.state.stateHash)
+  for (const item of sealed.origin.adoptions) {
+    const receipt = PERSISTED_RECEIPTS.find((offer) => offer.normalization.document.source.artifactId === item.sourceArtifactId)
+    assert.equal(item.receiptHash, receipt.normalization.receiptHash)
+    assert.deepEqual(item.rights, receipt.rights)
+  }
+})
+
+test('T-F4.012 a cut over recordings nobody persisted an observation for is refused with them named, and commits nothing', async () => {
+  const wired = wire({ commands: { offered: [] } })
   await assert.rejects(
     () => wired.execute(request()),
     (error) => error.code === 'PRECONDITION_REQUIRED'
       && error.details.sourceArtifactIds.includes('asset-cam-a')
-      && error.details.sourceArtifactIds.includes('asset-master')
-      && !error.details.sourceArtifactIds.includes('artifact-source3'),
+      && !error.details.sourceArtifactIds.includes('asset-master'),
   )
   assert.equal(wired.commands.calls.commitOrReplay, 0, 'no Version was sealed or written')
   // The derivation is evidence in its own right: it stays, exactly as it does when the compile step refuses.
   assert.equal(wired.directions.calls.appendVersion, 1)
+})
+
+test('T-F4.012 a recording without current rights cannot be adopted into the cut', async () => {
+  const withoutRights = PERSISTED_RECEIPTS.map((offer) => (offer.normalization.document.source.artifactId === 'asset-cam-a' ? { ...offer, rights: null } : offer))
+  const wired = wire({ commands: { offered: withoutRights } })
+  await assert.rejects(() => wired.execute(request()),
+    (error) => error.code === 'ASSET_RIGHTS_BLOCKED' && error.details.artifactIds.includes('asset-cam-a'))
+  assert.equal(wired.commands.calls.commitOrReplay, 0)
 })
 
 test('T-F4.012 the cut is a child Command of the head: its Version descends from the head State', async () => {

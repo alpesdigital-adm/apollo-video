@@ -3,6 +3,7 @@ import type { ReviewPatchProposal, ReviewPatchRepository } from './ports/review-
 import { createEditCommand } from '../domain/edit-command.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
+import { offeredObservationsFor } from './adoptable-observations.ts'
 import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createReviewPatchCommandImpact, type CommandImpactV1 } from '../domain/command-impact.ts'
@@ -286,7 +287,9 @@ export function applyReviewPatchService(dependencies: {
     })
     // The patched EditPlan is this Command's own; every output member re-materializes from it and from the
     // parent's exact normalization observations.
+    const adoptable = await offeredObservationsFor(dependencies.repository, context.parent, JSON.parse(snapshot.contentJson) as Record<string, unknown>)
     const bundle = transitionProjectOutputState({
+      ...(adoptable.length > 0 ? { adoptable } : {}),
       parent: context.parent, command, audit: authenticationAudit, requestFingerprint: applyRequestFingerprint, editPlanSnapshot: snapshot,
       allocation: {
         workspaceId, projectId, resultVersionId: versionId, stateId, parentVersionId: context.currentVersion.id,

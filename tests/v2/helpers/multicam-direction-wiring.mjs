@@ -1,18 +1,15 @@
 import { randomUUID } from 'node:crypto'
 
 import { createExternalAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
-import { calculateCanonicalHash, stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
 import { createDesiredAction, createDesiredActionReference } from '../../../src/v2/domain/desired-action.ts'
-import { operationalBundlePlanV3 } from '../../../src/v2/domain/output-version-bundle.ts'
-import { childCommandOf, transitionProjectOutputState } from '../../../src/v2/domain/project-output-state-transition.ts'
+import { childCommandOf } from '../../../src/v2/domain/project-output-state-transition.ts'
 import { createEditorialAudioTimelineHash } from '../../../src/v2/domain/production-modes.ts'
-import { createProjectSnapshot } from '../../../src/v2/domain/project-snapshot.ts'
 import {
   deriveMulticamEvidenceService,
   directMulticamSessionService,
 } from '../../../src/v2/application/multicam-direction.ts'
 import { buildDirectableMulticamWorld, fixtureSeconds as sec } from '../wave20-fixtures.mjs'
-import { ingestedWorld, worldActor } from './output-world.mjs'
+import { ingestedRecordings, worldActor } from './output-world.mjs'
 
 /**
  * The direction COMMAND, wired to in-memory doubles.
@@ -33,14 +30,18 @@ export const PROJECT = 'project-multicam'
 export const SESSION = 'session-multicam'
 export const CLIENT = 'client-director'
 
-// The project's head is a real sealed Version3/State3 of the shared output world (root, explicit variant, controlled
-// ingest), named after this suite's workspace, project and client. Its State observes ONE recording; see
-// `sealOnObservedSource` for what that means for a cut over several.
-const outputWorld = await ingestedWorld({
+// The session records five files; the project ingested the four a cut can use (three cameras and the master audio), one
+// after another. The head is the real sealed Version3/State3 of the LAST ingest, so its State observes the master audio
+// alone; the receipts the earlier ingests persisted are what a direction adopts for the cameras it cuts to.
+export const RECORDINGS = Object.freeze(['asset-cam-a', 'asset-cam-b', 'asset-screen', 'asset-master'])
+const outputWorld = await ingestedRecordings(RECORDINGS, {
   actor: worldActor({ workspaceId: WORKSPACE, clientId: CLIENT, credentialId: 'credential-director', environment: 'sandbox' }),
   ids: { project: PROJECT },
+  durations: Object.fromEntries(RECORDINGS.map((slug) => [slug, 300])),
 })
 export const HEAD = outputWorld.parent
+/** The receipts the earlier ingests persisted, with the rights evidence of their sources. */
+export const PERSISTED_RECEIPTS = outputWorld.adoptable
 
 export function actor(overrides = {}) {
   const identity = {
@@ -186,9 +187,10 @@ export function memoryDirections() {
   }
 }
 
-export function memoryCommands({ world, mediaLinks }) {
+export function memoryCommands({ world, mediaLinks, offered = PERSISTED_RECEIPTS }) {
   const commands = new Map()
-  const calls = { readContext: 0, commitOrReplay: 0 }
+  const calls = { readContext: 0, commitOrReplay: 0, readAdoptableObservations: 0 }
+  const requested = []
   const committed = []
   const currentVersion = HEAD.version
   const links = mediaLinks ?? world.session.tracks.map((track) => ({
@@ -201,7 +203,15 @@ export function memoryCommands({ world, mediaLinks }) {
   return {
     calls,
     committed,
+    requested,
     currentVersion,
+    // The persisted receipts of the recordings the cut consumes and the head State does not observe.
+    async readAdoptableObservations({ workspaceId, projectId, sourceArtifactIds }) {
+      calls.readAdoptableObservations += 1
+      requested.push([...sourceArtifactIds])
+      if (workspaceId !== WORKSPACE || projectId !== PROJECT) return []
+      return offered.filter((offer) => sourceArtifactIds.includes(offer.normalization.document.source.artifactId))
+    },
     async findIdempotentResult({ workspaceId, projectId, idempotencyKey, actorContextHash }) {
       return commands.get([workspaceId, projectId, idempotencyKey, actorContextHash].join('|')) ?? null
     },
@@ -366,30 +376,6 @@ export function fakeDiarization({ segments } = {}) {
   }
 }
 
-/**
- * The output transition, for a world that observes fewer recordings than a multicam session records.
- *
- * The shared world's State observes the one source it ingested. A direction cuts several camera files and a master
- * audio bed, and the real transition refuses a plan over a recording nobody has observed (State3 cannot yet hold more
- * than one observed source). This seals the SAME Command, audit, request fingerprint and allocation through the real
- * transition, over a stand-in plan: the head's own plan, re-identified as the cut. The Version and State are therefore
- * genuine; the plan they were materialized from is not the one the service compiled. `wire({ sealOutput: null })`
- * drives the real transition instead.
- */
-export function sealOnObservedSource(input) {
-  const base = operationalBundlePlanV3(input.parent)
-  const incoming = JSON.parse(input.editPlanSnapshot.contentJson)
-  const standIn = { ...JSON.parse(base.contentJson), id: incoming.id, projectVersionId: incoming.projectVersionId, createdAt: incoming.createdAt }
-  return transitionProjectOutputState({
-    ...input,
-    editPlanSnapshot: createProjectSnapshot({
-      workspaceId: input.editPlanSnapshot.workspaceId, projectId: input.editPlanSnapshot.projectId, id: input.editPlanSnapshot.id,
-      kind: 'edit-plan', contentSchemaVersion: base.contentSchemaVersion, contentJson: stableSerialize(standIn),
-      contentHash: calculateCanonicalHash(standIn), createdAt: input.editPlanSnapshot.createdAt,
-    }),
-  })
-}
-
 export function wire(options = {}) {
   const world = options.world ?? buildDirectableMulticamWorld({ workspaceId: WORKSPACE, sessionId: SESSION, projectId: PROJECT })
   const directions = memoryDirections()
@@ -437,7 +423,6 @@ export function wire(options = {}) {
     clock: () => new Date('2029-04-01T09:06:00.000Z'),
     createId: (prefix) => `${prefix}-${(issued += 1)}`,
     createEventId: () => randomUUID(),
-    ...(options.sealOutput === null ? {} : { sealOutput: options.sealOutput ?? sealOnObservedSource }),
   })
   return { world, directions, commands, visual, media, deriveEvidence, execute }
 }

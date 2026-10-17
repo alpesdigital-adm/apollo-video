@@ -25,6 +25,7 @@ import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createPerceptionTimeline, PERCEPTION_KINDS, type PerceptionObservation } from '../domain/perception-timeline.ts'
 import type { PerceptionProducerEnvelope } from '../domain/perception-producer-envelope.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
+import { offeredObservationsFor } from './adoptable-observations.ts'
 import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import {
@@ -1095,6 +1096,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     // owner transaction. A retry only rebinds canonical references and seals.
     const plannedDecisions = decisions
     const plannedEditPlan = editPlan
+    // The recordings the plan consumes that the head State does not observe (selected inserts, music) are read before
+    // the owner transaction opens; the transition adopts their persisted receipts and nothing else.
+    const adoptable = await offeredObservationsFor(dependencies.repository, context.parent, plannedEditPlan as unknown as Record<string, unknown>)
     const eventId = dependencies.createEventId()
     return dependencies.repository.commitWithCanonicalSnapshots({
       workspaceId, projectId, baseVersionId, baseHash: request.baseHash, resultVersionId: versionId,
@@ -1193,6 +1197,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       })
       let allocatedMaterializations = 0
       const bundle = transitionProjectOutputState({
+        ...(adoptable.length > 0 ? { adoptable } : {}),
         parent: context.parent, command, audit: authenticationAudit, requestFingerprint,
         editPlanSnapshot: resolvedByKind.get('edit-plan')!, replacementSnapshots,
         allocation: {
