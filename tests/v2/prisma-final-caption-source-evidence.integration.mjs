@@ -505,7 +505,7 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
     assert.notEqual(wrongOutcome?.status, 'succeeded', JSON.stringify(wrongOutcome))
     assert.notEqual(wrongAttempt?.status, 'promoted')
     assert.equal(wrongAttempt?.outputArtifactId ?? null, null, 'no final was delivered on the wrong evidence')
-    assert.equal(wrongAttempt?.errorCode, 'RENDER_OUTPUT_INVALID')
+    assert.equal(wrongAttempt?.errorCode, 'render_output_invalid')
     const wrongValidators = JSON.parse(wrongAttempt.validatorsJson)
     const wrongCertification = wrongValidators.find((validator) => validator.code === 'FINAL_CAPTION_CERTIFICATION')
     assert.equal(wrongCertification?.passed, false)
