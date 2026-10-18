@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -454,6 +455,221 @@ test(
       `postgres round trip: protocol ${protocol.protocolId} v${protocol.version}, `
       + `marker ${marker.sessionCode}#${marker.sequence}, detection ${detection.outcome}, `
       + `diagnostic chain ${chain.length} versions, gap ticks ${gap.start}-${gap.end}`,
+    )
+  },
+)
+
+/**
+ * Two workspaces that choose the same session, track, source and protocol
+ * tokens, against the real primary keys and unique constraints.
+ *
+ * Capture-session, track, source and protocol identifiers are the caller's to
+ * choose, so they are unique inside a workspace and nowhere else. Row ids built
+ * from such a token alone were global primary keys: the second workspace's
+ * write collided on them, and the writers that upserted by id (protocol
+ * evaluations, marker detections) replaced the first workspace's row instead.
+ * Every identity here is unique to the run, so the only thing the two
+ * workspaces can collide on is each other.
+ */
+test(
+  'E2E-FR-147/148/149 two workspaces sharing session, track and protocol tokens neither collide nor see each other',
+  { skip: RUN ? false : 'set APOLLO_SYNC_DIAGNOSTIC_E2E=1 with a migrated V2_DATABASE_URL' },
+  async (t) => {
+    const { buildScopeWorld, scopeTokens } = await import('./helpers/capture-scope-world.mjs')
+    const { PrismaCaptureProtocolRepository } = await import(
+      '../../src/v2/infrastructure/prisma/capture-protocol-repository.ts'
+    )
+    const { PrismaCaptureSessionRepository } = await import(
+      '../../src/v2/infrastructure/prisma/capture-session-repository.ts'
+    )
+    const { PrismaSyncDiagnosticRepository } = await import(
+      '../../src/v2/infrastructure/prisma/sync-diagnostic-repository.ts'
+    )
+
+    const client = new PrismaClient()
+    t.after(async () => {
+      await client.$disconnect()
+    })
+
+    const run = randomUUID().slice(0, 8)
+    const shared = scopeTokens(run)
+    const createdAt = new Date('2029-06-01T09:00:00.000Z')
+    const sessions = new PrismaCaptureSessionRepository(client)
+    const protocols = new PrismaCaptureProtocolRepository(client)
+    const diagnostics = new PrismaSyncDiagnosticRepository(client)
+
+    const createWorkspace = async (workspaceId) => {
+      await client.v2Workspace.create({
+        data: {
+          id: workspaceId,
+          slug: workspaceId,
+          name: `Capture scope ${workspaceId}`,
+          status: 'active',
+          createdAt,
+          updatedAt: createdAt,
+        },
+      })
+    }
+
+    const owners = []
+    for (const variant of [0, 1]) {
+      const workspaceId = `scope-ws${variant}-${run}`
+      const projectId = `scope-project${variant}-${run}`
+      await createWorkspace(workspaceId)
+      await client.v2Project.create({
+        data: {
+          id: projectId,
+          workspaceId,
+          name: `Capture scope ${variant}`,
+          status: 'reviewing-proxy',
+          objective: 'discovery',
+          format: '9:16',
+          locale: 'pt-BR',
+          createdByType: 'api-client',
+          createdById: `scope-client-${variant}`,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      })
+      // A marker id is derived from a digest that includes the workspace, so
+      // two workspaces do not share one; every other token is shared.
+      const tokens = { ...shared, markerId: `${shared.markerId}-${variant}` }
+      owners.push({
+        variant,
+        workspaceId,
+        tokens,
+        world: await buildScopeWorld({ workspaceId, projectId, tokens, variant }),
+      })
+    }
+    const stranger = `scope-ws-stranger-${run}`
+    await createWorkspace(stranger)
+
+    const { sessionId, trackId, phoneTrackId, sourceId } = shared
+    for (const { workspaceId, world } of owners) {
+      await sessions.appendVersion({ session: world.session1, occurredAt: world.at(3) })
+      await sessions.appendVersion({ session: world.session2, expectedVersion: 1, occurredAt: world.at(4) })
+      assert.equal(
+        (await sessions.persistClock({ workspaceId, clock: world.clock, createdAt: world.at(5) })).replayed,
+        false,
+      )
+      await sessions.persistClockMap({ map: world.clockMap, createdAt: world.at(5) })
+      assert.equal(
+        (await sessions.persistCoverage({ coverage: world.coverage, sessionId, createdAt: world.at(6) })).coverage,
+        world.coverage,
+      )
+      await sessions.persistSyncEvidence({ workspaceId, record: world.evidence, createdAt: world.at(6) })
+      await protocols.attach({
+        workspaceId,
+        sessionId,
+        protocol: world.protocol,
+        attachedByKind: 'human',
+        attachedById: world.attachedById,
+        attachedAt: world.at(6),
+      })
+      await protocols.persistEvaluation({ evaluation: world.evaluation, createdAt: world.at(7) })
+      await diagnostics.persistMarker({ marker: world.marker, createdAt: world.at(8) })
+      await diagnostics.persistDetection({ workspaceId, detection: world.detection, detectedAt: world.at(10) })
+      await diagnostics.appendVersion({ diagnostic: world.diagnostic, occurredAt: world.at(11) })
+    }
+
+    // Whatever workspace 1 wrote afterwards, workspace 0 still reads its own.
+    for (const { workspaceId, world } of owners) {
+      const head = await sessions.readHead({ workspaceId, sessionId })
+      assert.equal(head?.sessionHash, world.session2.sessionHash, `${workspaceId} does not read its own session`)
+      assert.equal((await sessions.listVersions({ workspaceId, sessionId })).length, 2)
+      assert.equal((await sessions.readClock({ workspaceId, sessionId }))?.clockHash, world.clock.clockHash)
+      const map = await sessions.readClockMap({ workspaceId, sessionId, sourceId })
+      assert.equal(map?.mapHash, world.clockMap.mapHash, `${workspaceId} does not read its own clock map`)
+      assert.equal(map?.pieces.length, 1)
+      assert.equal((await sessions.readCoverage({ workspaceId, trackId }))?.coverageHash, world.coverage.coverageHash)
+      assert.deepEqual(
+        (await sessions.listCoverage({ workspaceId, sessionId })).map((entry) => entry.coverageHash),
+        [world.coverage.coverageHash],
+      )
+      const evidence = await sessions.readSyncEvidence({ workspaceId, sessionId, trackId: phoneTrackId })
+      assert.equal(evidence?.sessionBounds.end, world.evidence.sessionBounds.end)
+      assert.equal((await protocols.readAttachment({ workspaceId, sessionId }))?.attachedById, world.attachedById)
+      assert.equal(
+        (await protocols.readEvaluation({
+          workspaceId,
+          sessionId,
+          sessionVersion: world.session2.version,
+          protocolId: world.protocol.protocolId,
+          protocolVersion: world.protocol.version,
+        }))?.evaluationHash,
+        world.evaluation.evaluationHash,
+        `${workspaceId} lost or does not read its own protocol evaluation`,
+      )
+      assert.deepEqual(
+        (await diagnostics.listDetections({ workspaceId, sessionId })).map((entry) => entry.detectionHash),
+        [world.detection.detectionHash],
+      )
+      assert.equal(
+        (await diagnostics.readHead({ workspaceId, sessionId }))?.diagnosticHash,
+        world.diagnostic.diagnosticHash,
+      )
+    }
+
+    // The same tokens, from a workspace that wrote nothing: nothing to read.
+    assert.equal(await sessions.readHead({ workspaceId: stranger, sessionId }), null)
+    assert.equal(await sessions.readClock({ workspaceId: stranger, sessionId }), null)
+    assert.equal(await sessions.readClockMap({ workspaceId: stranger, sessionId, sourceId }), null)
+    assert.equal(await sessions.readCoverage({ workspaceId: stranger, trackId }), null)
+    assert.deepEqual(await sessions.listCoverage({ workspaceId: stranger, sessionId }), [])
+    assert.equal(await sessions.readSyncEvidence({ workspaceId: stranger, sessionId, trackId: phoneTrackId }), null)
+    assert.equal(await protocols.readAttachment({ workspaceId: stranger, sessionId }), null)
+    assert.deepEqual(await protocols.listEvaluations({ workspaceId: stranger, sessionId }), [])
+    assert.deepEqual(await diagnostics.listDetections({ workspaceId: stranger, sessionId }), [])
+    assert.equal(await diagnostics.readHead({ workspaceId: stranger, sessionId }), null)
+
+    // And in the tables: one row per workspace, none sharing a primary key.
+    const rowsOf = {
+      capture_session_versions: await client.v2CaptureSessionVersion.findMany({ where: { sessionId } }),
+      capture_session_heads: await client.v2CaptureSessionHead.findMany({ where: { sessionId } }),
+      capture_session_clocks: await client.v2CaptureSessionClock.findMany({ where: { sessionId } }),
+      capture_clock_maps: await client.v2CaptureClockMap.findMany({ where: { sessionId } }),
+      capture_track_coverages: await client.v2CaptureTrackCoverage.findMany({ where: { trackId } }),
+      capture_sync_evidence: await client.v2CaptureSyncEvidence.findMany({ where: { sessionId } }),
+      capture_session_protocols: await client.v2CaptureSessionProtocol.findMany({ where: { sessionId } }),
+      capture_protocol_evaluations: await client.v2CaptureProtocolEvaluation.findMany({ where: { sessionId } }),
+      sync_marker_detections: await client.v2SyncMarkerDetection.findMany({ where: { sessionId } }),
+      sync_diagnostics: await client.v2SyncDiagnostic.findMany({ where: { sessionId } }),
+      sync_diagnostic_heads: await client.v2SyncDiagnosticHead.findMany({ where: { sessionId } }),
+    }
+    for (const [tableName, rows] of Object.entries(rowsOf)) {
+      const expected = tableName === 'capture_session_versions' ? 4 : 2
+      assert.equal(rows.length, expected, `${tableName} holds ${rows.length} rows for the shared tokens, expected ${expected}`)
+      assert.equal(new Set(rows.map((row) => row.id)).size, expected, `${tableName} rows share a primary key`)
+      for (const owner of owners) {
+        assert.ok(rows.some((row) => row.workspaceId === owner.workspaceId), `${tableName} has no row for ${owner.workspaceId}`)
+      }
+    }
+    const pieces = await client.v2CaptureClockMapPiece.findMany({
+      where: { workspaceId: { in: owners.map((owner) => owner.workspaceId) } },
+    })
+    assert.equal(pieces.length, 2, 'each clock map keeps exactly its own piece')
+    for (const piece of pieces) {
+      const map = rowsOf.capture_clock_maps.find((entry) => entry.id === piece.mapId)
+      assert.equal(map?.workspaceId, piece.workspaceId, 'a clock map piece points at another workspace\'s map')
+    }
+
+    // A map is replaced through its natural key and takes its pieces with it.
+    const [first] = owners
+    const replacement = await buildScopeWorld({
+      workspaceId: first.workspaceId,
+      projectId: first.world.session1.projectId,
+      tokens: first.tokens,
+      variant: 1,
+    })
+    await sessions.persistClockMap({ map: replacement.clockMap, createdAt: first.world.at(12) })
+    assert.equal(
+      (await sessions.readClockMap({ workspaceId: first.workspaceId, sessionId, sourceId }))?.mapHash,
+      replacement.clockMap.mapHash,
+    )
+    assert.equal(
+      (await sessions.readClockMap({ workspaceId: owners[1].workspaceId, sessionId, sourceId }))?.mapHash,
+      owners[1].world.clockMap.mapHash,
+      'replacing one workspace\'s clock map touched the other\'s',
     )
   },
 )

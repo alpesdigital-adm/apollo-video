@@ -34,6 +34,7 @@ import {
 } from '../../domain/sync-diagnostic.ts'
 import type { SyncCeiling } from '../../domain/capture-protocol.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { scopedRowId, withoutRowId } from './scoped-row-id.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
@@ -243,7 +244,7 @@ export class PrismaSyncDiagnosticRepository implements SyncDiagnosticRepository 
         // identity is unchanged, so attaching the render is not a rewrite.
         if (input.artifact && !stored.artifact) {
           await this.client.v2SyncMarker.update({
-            where: { id: marker.markerId },
+            where: { id_workspaceId: { id: marker.markerId, workspaceId: marker.workspaceId } },
             data: {
               artifactId: input.artifact.artifactId,
               artifactSha256: input.artifact.sha256,
@@ -283,7 +284,7 @@ export class PrismaSyncDiagnosticRepository implements SyncDiagnosticRepository 
   }): Promise<Readonly<{ detection: Readonly<MarkerDetection>; replayed: boolean }>> {
     const { detection } = input
     const data = {
-      id: `${detection.markerId}:${detection.trackId}`,
+      id: scopedRowId('smd', input.workspaceId, detection.markerId, detection.trackId),
       workspaceId: input.workspaceId,
       markerId: detection.markerId,
       sessionId: detection.sessionId,
@@ -305,9 +306,15 @@ export class PrismaSyncDiagnosticRepository implements SyncDiagnosticRepository 
     // Re-detection after better evidence is the normal case; keeping both
     // verdicts would leave callers to decide which one stands.
     const stored = await this.client.v2SyncMarkerDetection.upsert({
-      where: { id: data.id },
+      where: {
+        workspaceId_markerId_trackId: {
+          workspaceId: input.workspaceId,
+          markerId: detection.markerId,
+          trackId: detection.trackId,
+        },
+      },
       create: data,
-      update: data,
+      update: withoutRowId(data),
       select: { detectionHash: true },
     })
     return Object.freeze({ detection, replayed: stored.detectionHash === detection.detectionHash })
@@ -335,7 +342,7 @@ export class PrismaSyncDiagnosticRepository implements SyncDiagnosticRepository 
       await this.client.$transaction(async (transaction) => {
         await transaction.v2SyncDiagnostic.create({
           data: {
-            id: `${diagnostic.sessionId}:d${diagnostic.version}`,
+            id: scopedRowId('sdv', diagnostic.workspaceId, diagnostic.sessionId, diagnostic.version),
             workspaceId: diagnostic.workspaceId,
             sessionId: diagnostic.sessionId,
             referenceTrackId: diagnostic.referenceTrackId,
@@ -367,7 +374,7 @@ export class PrismaSyncDiagnosticRepository implements SyncDiagnosticRepository 
         if (diagnostic.version === 1) {
           await transaction.v2SyncDiagnosticHead.create({
             data: {
-              id: diagnostic.sessionId,
+              id: scopedRowId('sdh', diagnostic.workspaceId, diagnostic.sessionId),
               workspaceId: diagnostic.workspaceId,
               sessionId: diagnostic.sessionId,
               version: 1,

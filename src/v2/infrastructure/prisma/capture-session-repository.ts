@@ -50,6 +50,7 @@ import {
 } from '../../domain/track-coverage.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { parseWithTicks, stringifyWithTicks } from './bigint-json.ts'
+import { scopedRowId, withoutRowId } from './scoped-row-id.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
@@ -95,8 +96,12 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
   }): Promise<Readonly<{ head: Readonly<CaptureSessionHead>; replayed: boolean }>> {
     const { session } = input
     const head = captureSessionHead(session)
+    // Row ids are scoped to the workspace (scoped-row-id.ts): a session id is
+    // the caller's choice, so `${sessionId}:v1` alone would be one global key.
+    // The version id the API shows (`${sessionId}:v${n}`) is derived by the
+    // application layer and is not this column.
     const versionRow = {
-      id: `${session.sessionId}:v${session.version}`,
+      id: scopedRowId('csv', session.workspaceId, session.sessionId, session.version),
       workspaceId: session.workspaceId,
       projectId: session.projectId,
       sessionId: session.sessionId,
@@ -128,7 +133,7 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
         if (session.version === 1) {
           await transaction.v2CaptureSessionHead.create({
             data: {
-              id: session.sessionId,
+              id: scopedRowId('csh', session.workspaceId, session.sessionId),
               workspaceId: session.workspaceId,
               projectId: session.projectId,
               sessionId: session.sessionId,
@@ -321,7 +326,7 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
     try {
       await this.client.v2CaptureSessionClock.create({
         data: {
-          id: `${clock.sessionId}:clock`,
+          id: scopedRowId('csc', input.workspaceId, clock.sessionId),
           workspaceId: input.workspaceId,
           sessionId: clock.sessionId,
           schemaVersion: clock.schemaVersion,
@@ -399,13 +404,15 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
       return Object.freeze({ map: existing, replayed: true })
     }
 
-    const mapId = `${map.sessionId}:${map.sourceId}`
+    const mapId = scopedRowId('ccm', map.workspaceId, map.sessionId, map.sourceId)
     await this.client.$transaction(async (transaction) => {
       // A map is the current answer for one source. Two of them would leave
       // callers to decide which is true, so the old one goes; the evidence that
-      // produced it survives in its sync record.
+      // produced it survives in its sync record. It is found by its natural key
+      // and not by `mapId`, so a map stored under the id format that pre-dates
+      // workspace scoping is replaced too instead of colliding on the key.
       await transaction.v2CaptureClockMap.deleteMany({
-        where: { workspaceId: map.workspaceId, id: mapId },
+        where: { workspaceId: map.workspaceId, sessionId: map.sessionId, sourceId: map.sourceId },
       })
       await transaction.v2CaptureClockMap.create({
         data: {
@@ -427,7 +434,7 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
       })
       await transaction.v2CaptureClockMapPiece.createMany({
         data: map.pieces.map((piece) => ({
-          id: `${mapId}:${piece.pieceId}`,
+          id: scopedRowId('ccp', map.workspaceId, map.sessionId, map.sourceId, piece.pieceId),
           workspaceId: map.workspaceId,
           mapId,
           pieceId: piece.pieceId,
@@ -584,7 +591,8 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
     ).length
 
     const data = {
-      id: `${coverage.trackId}:coverage`,
+      // Coverage is keyed by [workspaceId, trackId], so that is its identity.
+      id: scopedRowId('ctc', coverage.workspaceId, coverage.trackId),
       workspaceId: coverage.workspaceId,
       sessionId: input.sessionId,
       trackId: coverage.trackId,
@@ -618,7 +626,7 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
     const stored = await this.client.v2CaptureTrackCoverage.upsert({
       where: { workspaceId_trackId: { workspaceId: coverage.workspaceId, trackId: coverage.trackId } },
       create: data,
-      update: data,
+      update: withoutRowId(data),
       select: { coverageHash: true },
     })
     return Object.freeze({ coverage, replayed: stored.coverageHash === coverage.coverageHash })
@@ -701,7 +709,7 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
     const { record } = input
     const hash = evidenceHashOf(record)
     const data = {
-      id: `${record.sessionId}:${record.trackId}:sync`,
+      id: scopedRowId('cse', input.workspaceId, record.sessionId, record.trackId),
       workspaceId: input.workspaceId,
       sessionId: record.sessionId,
       trackId: record.trackId,
@@ -744,7 +752,7 @@ export class PrismaCaptureSessionRepository implements CaptureSessionRepository 
         },
       },
       create: data,
-      update: data,
+      update: withoutRowId(data),
       select: { evidenceHash: true },
     })
     return Object.freeze({ record, replayed: stored.evidenceHash === hash })

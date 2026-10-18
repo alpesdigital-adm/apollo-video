@@ -21,6 +21,7 @@ import {
 } from '../../domain/capture-protocol-evaluation.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { scopedRowId, withoutRowId } from './scoped-row-id.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
@@ -195,7 +196,7 @@ export class PrismaCaptureProtocolRepository implements CaptureProtocolRepositor
   }): Promise<Readonly<AttachedCaptureProtocol>> {
     const at = new Date(input.attachedAt)
     const data = {
-      id: `${input.sessionId}:protocol`,
+      id: scopedRowId('csp', input.workspaceId, input.sessionId),
       workspaceId: input.workspaceId,
       sessionId: input.sessionId,
       protocolId: input.protocol.protocolId,
@@ -263,7 +264,14 @@ export class PrismaCaptureProtocolRepository implements CaptureProtocolRepositor
       finding.level === 'required'
       && (finding.outcome === 'unmet' || finding.outcome === 'attestation-missing')).length
     const data = {
-      id: `${evaluation.sessionId}:v${evaluation.sessionVersion}:${evaluation.protocolId}:v${evaluation.protocolVersion}`,
+      id: scopedRowId(
+        'cpe',
+        evaluation.workspaceId,
+        evaluation.sessionId,
+        evaluation.sessionVersion,
+        evaluation.protocolId,
+        evaluation.protocolVersion,
+      ),
       workspaceId: evaluation.workspaceId,
       sessionId: evaluation.sessionId,
       sessionVersion: evaluation.sessionVersion,
@@ -285,9 +293,17 @@ export class PrismaCaptureProtocolRepository implements CaptureProtocolRepositor
     // Re-running the same judgement on the same session version converges: the
     // inputs are identical and so is the answer.
     const stored = await this.client.v2CaptureProtocolEvaluation.upsert({
-      where: { id: data.id },
+      where: {
+        workspaceId_sessionId_sessionVersion_protocolId_protocolVersion: {
+          workspaceId: evaluation.workspaceId,
+          sessionId: evaluation.sessionId,
+          sessionVersion: evaluation.sessionVersion,
+          protocolId: evaluation.protocolId,
+          protocolVersion: evaluation.protocolVersion,
+        },
+      },
       create: data,
-      update: data,
+      update: withoutRowId(data),
       select: { evaluationHash: true },
     })
     return Object.freeze({ evaluation, replayed: stored.evaluationHash === evaluation.evaluationHash })
