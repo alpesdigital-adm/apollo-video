@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
 
+import { calculateCanonicalHash } from '../../../src/v2/domain/canonical-hash.ts'
+import { createFaceProducerEnvelopeV2 } from '../../../src/v2/domain/face-producer-envelope-v2.ts'
+
 import { decodeFace0204Output, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256 } from '../../../src/v2/domain/face-detector-output.ts'
 import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256, FACE_V9_OWNER_ACCEPTANCE_SHA256 } from '../../../src/v2/domain/face-evidence-policy.ts'
 import { ACCEPTED_FACE_PRODUCERS } from '../../../src/v2/domain/face-producer-registry.ts'
@@ -96,4 +99,22 @@ export function envelopeInput({ start = 0, end = 150, samples, timelineDurationF
     samplePolicy: { strategy: 'fixed-interval', intervalFrames: interval, maxSamples: 60 },
     samples: built, gaps, createdAt: '2026-10-18T00:00:00.000Z', ...overrides,
   }
+}
+
+export const expectation = (timelineDurationFrames = 300) => ({
+  workspaceId: 'workspace-1', projectId: 'project-1', projectVersionId: 'version-1', sourceArtifactId: 'source-1',
+  sourceSha256: sha('b'), timelineDurationFrames, timelineFps: { num: 30, den: 1 },
+  timeMapHash: calculateCanonicalHash([{ clipId: 'clip-1', sourceInFrame: 0, sourceOutFrame: timelineDurationFrames,
+    timelineInFrame: 0, timelineOutFrame: timelineDurationFrames, rate: 1 }]),
+})
+
+/** A sealed window envelope. `rowsAt(frame)` returns detector rows, or 'unknown' for a failed frame; default is an empty frame. */
+export function sealedWindow({ start = 0, end = 150, interval = 5, rowsAt = () => [], timelineDurationFrames = 300, id = `face-envelope-${start}`,
+  producer = acceptedProducer(), overrides = {} } = {}) {
+  const samples = []
+  for (let frame = start; frame < end; frame += interval) {
+    const rows = rowsAt(frame)
+    samples.push(rows === 'unknown' ? unknownSample({ timelineFrame: frame }) : observedSample({ timelineFrame: frame, rows }).sample)
+  }
+  return createFaceProducerEnvelopeV2({ ...envelopeInput({ start, end, interval, samples, timelineDurationFrames, producer }), id, ...overrides })
 }
