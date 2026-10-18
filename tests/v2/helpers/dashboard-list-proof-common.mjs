@@ -113,11 +113,40 @@ export function facetsUrlSearch(facets) {
   return value ? `?${value}` : ''
 }
 
-function matchesFacets(row, facets) {
+/**
+ * apollo.projects.list 6.1.0: the `format` facet matches a project that stores that format itself (rows from before 6.0.0, and the
+ * raw rows these proofs insert) OR has an output with that aspect ratio in the State of its current (head) Version. A project
+ * created under 6.0.0 stores no format; it is found by its outputs. The two oracles below read the outputs differently from each
+ * other and from the product (which searches the canonical JSON text): relations plus JSON.parse here, a jsonb path in SQL.
+ */
+async function headOutputRatios(client, workspaceId) {
+  const rows = await client.v2Project.findMany({
+    where: { workspaceId },
+    select: { id: true, currentVersion: { select: { outputState: { select: { entries: { select: { revision: { select: { specJson: true } } } } } } } } },
+  })
+  return new Map(rows.map((row) => [row.id, (row.currentVersion?.outputState?.entries ?? [])
+    .map((entry) => JSON.parse(entry.revision.specJson).output?.aspectRatio)
+    .filter((ratio) => typeof ratio === 'string')]))
+}
+
+async function projectIdsWithFormat(client, workspaceId, format) {
+  const rows = await client.$queryRawUnsafe(
+    `SELECT p.id FROM projects p WHERE p."workspaceId" = $1 AND (p.format = $2 OR EXISTS (
+       SELECT 1 FROM project_versions v
+       JOIN project_output_state_entries e ON e."stateId" = v."outputStateId" AND e."projectId" = v."projectId" AND e."workspaceId" = v."workspaceId"
+       JOIN output_spec_revisions r ON r.id = e."outputSpecRevisionId" AND r."variantId" = e."variantId" AND r."projectId" = e."projectId" AND r."workspaceId" = e."workspaceId"
+       WHERE v.id = p."currentVersionId" AND v."projectId" = p.id AND v."workspaceId" = p."workspaceId"
+         AND r."specJson"::jsonb #>> '{output,aspectRatio}' = $2))`,
+    workspaceId, format)
+  return rows.map((row) => row.id)
+}
+
+function matchesFacets(row, facets, outputRatios) {
   if (facets.text && !row.name.toLowerCase().includes(facets.text.toLowerCase())) return false
-  for (const key of ['status', 'objective', 'format', 'locale', 'ownerId']) {
+  for (const key of ['status', 'objective', 'locale', 'ownerId']) {
     if (facets[key] && row[key] !== facets[key]) return false
   }
+  if (facets.format && row.format !== facets.format && !(outputRatios.get(row.id) ?? []).includes(facets.format)) return false
   if (facets.createdFrom && row.createdAt.getTime() < Date.parse(`${facets.createdFrom}T00:00:00.000Z`)) return false
   if (facets.createdTo && row.createdAt.getTime() > Date.parse(`${facets.createdTo}T23:59:59.999Z`)) return false
   return true
@@ -131,14 +160,16 @@ function matchesFacets(row, facets) {
  */
 export async function oracleProjects(client, workspaceId, facets = EMPTY_FACETS) {
   const rows = await client.v2Project.findMany({ where: { workspaceId }, select: PROJECT_SELECT })
-  const expected = rows.filter((row) => matchesFacets(row, facets)).sort(compareCreatedAtThenId)
+  const outputRatios = facets.format ? await headOutputRatios(client, workspaceId) : new Map()
+  const expected = rows.filter((row) => matchesFacets(row, facets, outputRatios)).sort(compareCreatedAtThenId)
+  const formatIds = facets.format ? await projectIdsWithFormat(client, workspaceId, facets.format) : null
   const pgRows = await client.v2Project.findMany({
     where: {
       workspaceId,
       ...(facets.text ? { name: { contains: facets.text, mode: 'insensitive' } } : {}),
       ...(facets.status ? { status: facets.status } : {}),
       ...(facets.objective ? { objective: facets.objective } : {}),
-      ...(facets.format ? { format: facets.format } : {}),
+      ...(formatIds ? { id: { in: formatIds } } : {}),
       ...(facets.locale ? { locale: facets.locale } : {}),
       ...(facets.ownerId ? { ownerId: facets.ownerId } : {}),
       ...(facets.createdFrom || facets.createdTo ? { createdAt: {

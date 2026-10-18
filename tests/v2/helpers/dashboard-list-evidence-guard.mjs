@@ -123,6 +123,14 @@ export function verifyW31Evidence(directory, context) {
     assert.equal(item.status, 200)
     assert.deepEqual(item.ids, item.oracleIds)
   }
+  // apollo.projects.list 6.1.0: the format facet also finds a project that stores no format by the outputs of its head Version.
+  const outputs = manifest.formatOutputsCase
+  assert.equal(outputs?.status, 200, 'format outputs: status')
+  assert.deepEqual(outputs.query, { limit: '24', format: '9:16' }, 'format outputs: effective request')
+  assert.ok(outputs.outputOnlyIds?.length >= 1 && outputs.outputOnlyIds.every((id) => outputs.ids.includes(id) && !id.startsWith('w31-')),
+    'format outputs: a project that stores no format is in the 9:16 answer')
+  assert.ok(manifest.fixtures.filter((fixture) => fixture.format === '9:16').every((fixture) => outputs.ids.includes(fixture.id)),
+    'format outputs: the fixtures that store 9:16 stay in the answer')
   assert.deepEqual(manifest.boundaryCases?.map((item) => [item.id, item.ids]), [
     ['created-from-inclusive-start', ['w31-edge-start']],
     ['created-from-excludes-one-ms-earlier', []],

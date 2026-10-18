@@ -982,7 +982,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.list',
-    version: '6.0.0',
+    version: '6.1.0',
     title: 'List projects',
     description: 'Lists projects with current-version, latest-operation, review-issue and completed-output dashboard evidence from the authenticated workspace.',
     exposure: 'public',
@@ -1013,7 +1013,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
       { name: 'text', description: 'Case-insensitive project name search.', required: false, schema: { type: 'string', minLength: 1, maxLength: 120 } },
       { name: 'status', description: 'Exact workflow status.', required: false, schema: { type: 'string' } },
       { name: 'objective', description: 'Exact strategic objective.', required: false, schema: { type: 'string', minLength: 1, maxLength: 64 } },
-      { name: 'format', description: 'Exact output aspect ratio.', required: false, schema: { type: 'string', enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] } },
+      { name: 'format', description: 'Exact output aspect ratio. Matches a project that has an output with it in its current Version (a project created without a format is found by its outputs), or that stores it as its own format.', required: false, schema: { type: 'string', enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] } },
       { name: 'locale', description: 'Exact project language tag.', required: false, schema: { type: 'string' } },
       { name: 'createdFrom', description: 'Inclusive ISO creation date lower bound.', required: false, schema: { type: 'string', minLength: 10, maxLength: 35 } },
       { name: 'createdTo', description: 'Inclusive ISO creation date upper bound.', required: false, schema: { type: 'string', minLength: 10, maxLength: 35 } },

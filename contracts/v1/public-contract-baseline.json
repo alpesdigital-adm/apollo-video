@@ -5700,7 +5700,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.list": {
-      "version": "6.0.0",
+      "version": "6.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
@@ -5772,7 +5772,7 @@
         },
         {
           "name": "format",
-          "description": "Exact output aspect ratio.",
+          "description": "Exact output aspect ratio. Matches a project that has an output with it in its current Version (a project created without a format is found by its outputs), or that stores it as its own format.",
           "required": false,
           "schema": {
             "type": "string",

@@ -5453,13 +5453,26 @@ test('authenticated public API manages projects, clients and artifact inspection
       exactProject.data.projects.map((project) => project.id),
       [created.data.project.id],
     )
-    // A project born under 6.0.0 has no format of its own (its outputs are explicit variants), and the `format` facet filters on the
-    // project's own format: it does not match this project. (Whether the facet should look at the outputs is a contract decision.)
-    const formatFacetResponse = await fetch(
-      `${baseUrl}/v1/projects?${new URLSearchParams({ text: 'criado externamente', format: '9:16' })}`,
-      { headers: { authorization } },
-    )
-    assert.deepEqual((await formatFacetResponse.json()).data.projects, [])
+    // apollo.projects.list 6.1.0. A project born under 6.0.0 has no format of its own (its outputs are explicit variants), so the
+    // `format` facet matches the aspect ratio of the outputs in the State of the project's current Version. `created` has the 9:16
+    // variant this proof made (its head has moved since: the State of the head still carries it); the UI-created project has only
+    // its creation Version, which carries no output, so no ratio matches it.
+    const formatFacetIds = async (parameters) => {
+      const response = await fetch(`${baseUrl}/v1/projects?${new URLSearchParams(parameters)}`, { headers: { authorization } })
+      const body = await response.json()
+      assert.equal(response.status, 200, JSON.stringify(body))
+      return body.data.projects.map((project) => project.id)
+    }
+    assert.deepEqual(await formatFacetIds({ text: 'criado externamente', format: '9:16' }), [created.data.project.id])
+    assert.deepEqual(await formatFacetIds({ format: '9:16' }), [created.data.project.id],
+      'the facet finds the project with a 9:16 output and not the one whose Version has no output')
+    assert.deepEqual(await formatFacetIds({ ...Object.fromEntries(exactProjectFilters), format: '9:16' }), [created.data.project.id],
+      'format joins the other seven facets in one conjunction')
+    for (const otherRatio of ['16:9', '4:5', '1:1', '21:9']) {
+      assert.deepEqual(await formatFacetIds({ format: otherRatio }), [], `no project of this workspace has a ${otherRatio} output`)
+      assert.deepEqual(await formatFacetIds({ ...Object.fromEntries(exactProjectFilters), format: otherRatio }), [])
+    }
+    assert.deepEqual(await formatFacetIds({ limit: '1', format: '9:16' }), [created.data.project.id])
     const zeroProjectResponse = await fetch(
       `${baseUrl}/v1/projects?text=${encodeURIComponent('não existe')}`,
       { headers: { authorization } },
