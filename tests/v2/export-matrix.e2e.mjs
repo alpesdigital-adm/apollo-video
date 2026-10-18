@@ -233,7 +233,7 @@ test('export matrix controlled fixture hydrates unknown perception, quality and 
 test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserves five-cell export mechanics through a controlled port', {
   skip: process.env.APOLLO_EXPORT_MATRIX_E2E !== '1' && 'set APOLLO_EXPORT_MATRIX_E2E=1 with an isolated database',
   timeout: 300_000,
-}, async () => {
+}, async (t) => {
   assert.ok(process.env.V2_DATABASE_URL)
   const databaseName = new URL(process.env.V2_DATABASE_URL).pathname.slice(1)
   assert.match(databaseName, /(?:^|_)e2e(?:_|$)/, 'the matrix E2E requires an isolated database')
@@ -636,10 +636,9 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       if (sourceDeclaration.artifactKey !== sourceArtifactKey ||
           sourceDeclaration.sha256 !== evidence.sourceSha256 ||
           sourceDeclaration.byteSize !== sourceBytes.byteLength) return null
-      // The Director's plan carries caption cues, and the final export worker does not hand the renderer the placement plan a rendered cue
-      // requires (INVALID_RENDER_INPUT: "Rendered subtitle cues require a complete unknown-face review plan"). This proof is about export
-      // MECHANICS through a controlled port, so the port renders the cut without its captions; the stored plan and its hash are untouched.
-      return Object.freeze({ ...source, editPlan: Object.freeze({ ...source.editPlan, subtitleTracks: Object.freeze([]) }), projectVersionHash: cell.projectVersionHash,
+      // The Director's plan keeps its caption cues: the final export worker derives the unknown-face review plan they require
+      // from this very source (the same derivation the proxy worker runs), so the real renderer admits them instead of the port rendering the cut without them.
+      return Object.freeze({ ...source, projectVersionHash: cell.projectVersionHash,
         locale: project.locale ?? 'pt-BR', directorRunId: evidence.directorRunId,
         qualitySnapshotId: evidence.qualitySnapshotId,
         qualitySnapshotHash: evidence.qualitySnapshotHash,
@@ -705,12 +704,36 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
     assert.equal(committed.matrix.status, 'queued', JSON.stringify(committed.matrix).slice(0, 3000))
     assert.equal(new Set(committed.matrix.cells.map((cell) => cell.operationId)).size, 5)
 
-    function controlledWorker(ffmpegPath) {
+    // What the real renderer was asked to draw, read back from the render call and from the ASS file it wrote.
+    const renderTrace = []
+    function tracedRenderer(renderer) {
+      return Object.freeze({
+        async render(input) {
+          const result = await renderer.render(input)
+          const ass = await readFile(join(renderWorkRoot, input.operationId, 'captions.ass'), 'utf8').catch(() => '')
+          const plan = input.placementPlan
+          renderTrace.push(Object.freeze({
+            renderKind: input.renderKind, format: input.format,
+            cues: input.subtitleCues?.length ?? 0, ctas: input.ctaOverlays?.length ?? 0,
+            anchorSchema: plan?.subtitleAnchorPlan?.schemaVersion ?? null,
+            decided: plan?.subtitleAnchorPlan?.decisions.length ?? 0,
+            suppressed: plan?.subtitleAnchorPlan?.decisions.filter((decision) => decision.suppressed).length ?? 0,
+            canvas: plan ? `${plan.canvas.width}x${plan.canvas.height}` : null,
+            outputCanvas: `${input.outputSpec.width}x${input.outputSpec.height}`,
+            dialogues: ass.split('\n').filter((line) => line.startsWith('Dialogue:')).length,
+          }))
+          return result
+        },
+        cleanup: (operationId) => renderer.cleanup(operationId),
+      })
+    }
+    function controlledWorker(ffmpegPath, trace = false) {
+      const renderer = createFfmpegEditorialProxyRendererFromEnvironment({ ...workerEnvironment, FFMPEG_PATH: ffmpegPath })
       return runNextProjectFinalExportOperationService({
         operations, projects: controlledProjects, rights,
         artifacts: createMediaArtifactPersistenceRepository(workerEnvironment),
         storage: createLocalMediaUploadStorageFromEnvironment(workerEnvironment),
-        renderer: createFfmpegEditorialProxyRendererFromEnvironment({ ...workerEnvironment, FFMPEG_PATH: ffmpegPath }),
+        renderer: trace ? tracedRenderer(renderer) : renderer,
         renderElementMaps: createRenderElementMapRepository(),
         colorPipelines: createColorPipelineCompilationRepository(),
         colorPlans: createProjectColorPlanRepository(),
@@ -818,7 +841,7 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
     assert.equal(resumed.status, 'retrying')
     await new Promise((resolve) => setTimeout(resolve, 25))
 
-    const worker = controlledWorker(ffmpegBin)
+    const worker = controlledWorker(ffmpegBin, true)
     const assertSucceeded = async (outcome) => {
       const operation = outcome
         ? await client.v2PublicOperation.findUnique({ where: { id: outcome.operationId } })
@@ -871,6 +894,21 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
     assert.deepEqual(ready.data.matrix.cells.map((cell) => cell.attempt).toSorted(), [1, 1, 1, 1, 2])
     assert.equal(new Set(ready.data.matrix.cells.map((cell) => cell.outputArtifactId)).size, 5)
     assert.equal(new Set(ready.data.matrix.cells.map((cell) => cell.outputManifestId)).size, 5)
+
+    // The Director's captions are no longer stripped: every one of the five finals reached the real renderer with its cues and
+    // the unknown-face review plan for them, on the canvas of its own OutputSpec. That plan suppresses a cue while facial coverage
+    // is unknown (the same decision the approved proxy was drawn from), so the ASS file holds the CTA events only.
+    assert.equal(renderTrace.length, 5, stableSerialize(renderTrace))
+    assert.deepEqual(renderTrace.map((trace) => trace.format).toSorted(), [...FORMATS].toSorted())
+    for (const trace of renderTrace) {
+      assert.equal(trace.renderKind, 'final', stableSerialize(trace))
+      assert.ok(trace.cues >= 1, stableSerialize(trace))
+      assert.equal(trace.anchorSchema, 'subtitle-anchor-plan/v2', stableSerialize(trace))
+      assert.equal(trace.decided, trace.cues, stableSerialize(trace))
+      assert.equal(trace.canvas, trace.outputCanvas, stableSerialize(trace))
+      assert.equal(trace.dialogues, trace.cues - trace.suppressed + trace.ctas, stableSerialize(trace))
+    }
+    t.diagnostic(`final render trace: ${stableSerialize(renderTrace)}`)
 
     const formatCritics = await client.v2ProjectFinalExportOperation.findMany({
       where: {

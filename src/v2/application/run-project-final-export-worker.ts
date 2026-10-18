@@ -25,7 +25,7 @@ import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
-import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
+import { deriveEditorialRenderGeometry } from './derive-editorial-render-geometry.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import {
@@ -257,7 +257,15 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       failureStage = 'rights'
       await assertRights(renderSourceIds, source.locale)
       failureStage = 'input-validation'
-      const subtitleCues = emittedSubtitleTracks(source.editPlan.subtitleTracks).flatMap((track) => track.cues)
+      // The geometry the approved proxy was drawn from (cues, CTA overlays, the placement plan with
+      // its unknown-face anchor plan, the persisted reframe plan), derived by the same function from
+      // the same sealed source. Only the canvas is the final's: the OutputSpec the operation approved.
+      // When it cannot be derived the export stops here; the renderer would refuse the cues anyway,
+      // and rendering the cut without its captions is not an option.
+      const { subtitleCues, ctaOverlays, placementPlan, reframePlan } = deriveEditorialRenderGeometry({
+        source,
+        canvas: { width: context.outputSpec.width, height: context.outputSpec.height },
+      })
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       const musicTracks = 'audioTracks' in source.editPlan && Array.isArray(source.editPlan.audioTracks) ? source.editPlan.audioTracks : []
@@ -292,9 +300,12 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         format: source.format,
         outputSpec: context.outputSpec,
         subtitleCues,
+        ...(ctaOverlays.length ? { ctaOverlays } : {}),
         transitions,
         ...(musicTracks[0] ? { backgroundMusic: musicTracks[0] } : {}),
         ...(composition ? { composition } : {}),
+        placementPlan,
+        ...(reframePlan ? { reframePlan } : {}),
         signal: abortController.signal,
       })
       const rendered = dependencies.telemetry
@@ -490,6 +501,10 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             projectLutSelectionHash: materializedLut.selectionHash,
             materializedCubeHash: materializedLut.materializedCubeHash ?? null,
             materializedCubeHashes: materializedLut.materializedCubeHashes ?? [],
+            placementPlanHash: placementPlan.placementPlanHash,
+            reframePlanHash: reframePlan?.reframePlanHash ?? null,
+            subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null,
+            perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null,
           },
         },
         sources: [

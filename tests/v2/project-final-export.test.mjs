@@ -14,8 +14,12 @@ import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { createRenderPlacementPlan, validateRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
+import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
 import { createQualityReport, resolveStrategicRubric } from '../../src/v2/domain/strategic-rubric.ts'
+import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { parseFinalExportQuality, PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
+import { assertRenderedSubtitleCuesAreReviewed } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import {
   advancePublicOperationPhase,
   createQueuedPublicOperation,
@@ -149,7 +153,10 @@ function approvedSource() {
       projectVersionId,
       fps: 30.000000097244733,
       movementPolicy: Object.freeze({ automaticZoom: false, protectedOpeningFrames: 120 }),
-      subtitleTracks: Object.freeze([{ cues: Object.freeze([
+      durationFrames: 300,
+      // A Director plan always carries its captions with their persisted preset, which is what
+      // makes the renderer demand the unknown-face review plan for them.
+      subtitleTracks: Object.freeze([{ presetId: 'kinetic', cues: Object.freeze([
         Object.freeze({ id: 'cue-final-1', startFrame: 0, endFrame: 60, text: 'Legenda final segura', anchor: 'bottom' }),
       ]) }]),
       transitions: Object.freeze([]),
@@ -398,8 +405,12 @@ function workerDependencies(
 ) {
   let now = Date.parse('2026-07-19T01:00:00.000Z')
   const calls = { rights: 0, rendered: 0, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 0, failed: 0, cleaned: 0, lutCleaned: 0, cataloged: 0 }
+  const renderInputs = []
+  const renderErrors = []
   return {
     calls,
+    renderInputs,
+    renderErrors,
     dependencies: {
       async catalogOutput(input) { calls.cataloged += 1; assert.equal(input.artifactId, persistedIdentity.artifactId) },
       operations: operations.repository,
@@ -467,6 +478,13 @@ function workerDependencies(
           )
           const parameters = JSON.parse(input.recipeParameters.canonicalJson)
           assert.match(parameters.audioTimelineHash, /^[a-f0-9]{64}$/)
+          // The geometry that drew the bytes is part of the recipe, as it is for the proxy.
+          const drawn = renderInputs.at(-1)
+          assert.match(drawn.placementPlan.placementPlanHash, /^[a-f0-9]{64}$/)
+          assert.equal(parameters.placementPlanHash, drawn.placementPlan.placementPlanHash)
+          assert.equal(parameters.subtitleAnchorPlanHash, drawn.placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null)
+          assert.equal(parameters.perceptionTimelineHash, drawn.placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null)
+          assert.equal(parameters.reframePlanHash, drawn.reframePlan?.reframePlanHash ?? null)
           assert.equal(parameters.directorRunId, 'director-run-final-export-test')
           assert.equal(parameters.qualitySnapshotId, 'quality-snapshot-final-export-test')
           assert.deepEqual(parameters.outputSpec, {
@@ -487,8 +505,21 @@ function workerDependencies(
       renderer: {
         async render(input) {
           calls.rendered += 1
+          renderInputs.push(input)
           assert.equal(input.renderKind, 'final')
           assert.equal(input.fps, 30)
+          // The controlled port applies the real renderer's admission gate for burned-in captions
+          // (the very function FfmpegEditorialProxyRenderer.render runs before any I/O), so a worker
+          // that hands over cues without their review plan cannot be admitted here either.
+          try {
+            assertRenderedSubtitleCuesAreReviewed(
+              input,
+              input.clips.reduce((total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame, 0),
+            )
+          } catch (error) {
+            renderErrors.push(error.message)
+            throw error
+          }
           assert.match(input.audioTimelineHash, /^[a-f0-9]{64}$/)
           assert.deepEqual(input.lutPaths, {})
           assert.deepEqual(input.sources, [{
@@ -666,4 +697,182 @@ test('final export worker converges content deduplication under the active lease
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
   assert.equal(calls.converged, 1)
   assert.equal(calls.attached, 1)
+})
+
+// ---------------------------------------------------------------------------
+// Captions in the final render: the worker must hand the renderer the same geometry the
+// approved proxy was drawn from (derive-editorial-render-geometry.ts), on the final canvas.
+// ---------------------------------------------------------------------------
+
+const PLAN_FPS = 30.000000097244733
+
+function expectedPlacementPlan(overrides = {}) {
+  return createRenderPlacementPlan({
+    format: '9:16',
+    canvas: { width: 1080, height: 1920 },
+    durationFrames: 300,
+    subtitlePresetId: 'kinetic',
+    elements: [],
+    subtitleAnchor: {
+      fps: PLAN_FPS,
+      cues: [{ id: 'cue-final-1', startFrame: 0, endFrame: 60 }],
+      faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
+    },
+    ...overrides,
+  })
+}
+
+function serveSource(dependencies, change) {
+  const source = approvedSource()
+  const changed = Object.freeze({ ...source, ...change(source) })
+  dependencies.projects.readImmutableApprovedSource = async () => changed
+  return changed
+}
+
+function captureAttempts(dependencies) {
+  const recorded = []
+  const original = dependencies.projects.recordAttempt
+  dependencies.projects.recordAttempt = async (input) => {
+    recorded.push(input)
+    await original(input)
+  }
+  return recorded
+}
+
+test('final export worker hands the renderer the placement plan its captions require, on the OutputSpec canvas', async () => {
+  const operations = createOperations()
+  const { calls, renderInputs, renderErrors, dependencies } = workerDependencies(operations)
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-captions')
+
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' }, JSON.stringify({ renderErrors, error: operations.operation.error ?? null }))
+  assert.equal(calls.rendered, 1)
+  const [input] = renderInputs
+  assert.deepEqual(input.subtitleCues.map((cue) => cue.id), ['cue-final-1'])
+  assert.doesNotThrow(() => validateRenderPlacementPlan(input.placementPlan))
+  assert.equal(input.placementPlan.schemaVersion, 'render-placement-plan/v2')
+  assert.equal(input.placementPlan.format, input.format)
+  assert.deepEqual(input.placementPlan.canvas, { width: input.outputSpec.width, height: input.outputSpec.height })
+  assert.equal(input.placementPlan.durationFrames, 300)
+  assert.equal(input.placementPlan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
+  // Built here straight from the domain, not through the worker: the plan is content-addressed, so
+  // an identical hash means the worker derived exactly the plan the proxy path derives.
+  assert.equal(input.placementPlan.placementPlanHash, expectedPlacementPlan().placementPlanHash)
+  assert.equal(input.reframePlan, undefined)
+  assert.equal(input.ctaOverlays, undefined)
+})
+
+test('final export worker draws the CTA overlays the approved proxy drew and plans them into the placement', async () => {
+  const operations = createOperations()
+  const { renderInputs, dependencies } = workerDependencies(operations)
+  const cta = Object.freeze({ id: 'cta-final-1', kind: 'cta', startFrame: 120, endFrame: 240, text: 'Quero saber mais' })
+  serveSource(dependencies, (source) => ({ editPlan: Object.freeze({ ...source.editPlan, overlayTracks: Object.freeze([cta]) }) }))
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-cta')
+
+  assert.equal(outcome.status, 'succeeded', JSON.stringify(operations.operation.error ?? null))
+  const [input] = renderInputs
+  assert.deepEqual(input.ctaOverlays, [cta])
+  assert.deepEqual(input.placementPlan.placements.filter((placement) => placement.kind === 'cta')
+    .map((placement) => ({ elementId: placement.elementId, timeRange: placement.timeRange })),
+  [{ elementId: 'cta-0-cta-final-1', timeRange: { startFrame: 120, endFrame: 240 } }])
+  assert.equal(input.placementPlan.placementPlanHash, expectedPlacementPlan({
+    elements: [{
+      id: 'cta-0-cta-final-1', kind: 'cta', anchor: 'auto', priority: 80, readingOrder: 0,
+      minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5, timeRange: { startFrame: 120, endFrame: 240 },
+    }],
+  }).placementPlanHash)
+})
+
+test('final export worker keeps a disabled subtitle style disabled, exactly as the proxy does', async () => {
+  const operations = createOperations()
+  const { calls, renderInputs, dependencies } = workerDependencies(operations)
+  serveSource(dependencies, () => ({
+    subtitleResolution: Object.freeze({
+      presetId: 'kinetic', presetHash: subtitlePresetHash('kinetic'),
+      registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: false,
+    }),
+  }))
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-style-disabled')
+
+  assert.equal(outcome.status, 'succeeded', JSON.stringify(operations.operation.error ?? null))
+  assert.equal(calls.rendered, 1)
+  assert.deepEqual(renderInputs[0].subtitleCues, [])
+  assert.equal(renderInputs[0].placementPlan.subtitleAnchorPlan, null)
+})
+
+test('final export worker forwards the persisted reframe plan of the exported Version', async () => {
+  const reframeFor = (durationFrames) => createRenderReframePlan({
+    format: '9:16', variantId: '9:16', fps: 30, durationFrames, source: { width: 1920, height: 1080 },
+    ranges: [{
+      clipId: 'clip-final-1', startFrame: 0, endFrame: durationFrames, interpolation: 'hold',
+      keyframes: [{ frame: 0, crop: { x: 0.3, y: 0, width: 0.31640625, height: 1 } }],
+    }],
+  })
+  const operations = createOperations()
+  const { renderInputs, dependencies } = workerDependencies(operations)
+  const reframePlan = reframeFor(300)
+  serveSource(dependencies, () => ({ reframePlan }))
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-reframe')
+
+  assert.equal(outcome.status, 'succeeded', JSON.stringify(operations.operation.error ?? null))
+  assert.equal(renderInputs[0].reframePlan.reframePlanHash, reframePlan.reframePlanHash)
+
+  const mismatched = createOperations()
+  const refused = workerDependencies(mismatched)
+  serveSource(refused.dependencies, () => ({ reframePlan: reframeFor(299) }))
+  const refusedOutcome = await runNextProjectFinalExportOperationService(refused.dependencies)('worker-final-export-reframe-mismatch')
+  assert.equal(refusedOutcome.status, 'failed')
+  assert.equal(refused.calls.rendered, 0)
+  assert.equal(mismatched.operation.error.code, 'invalid_render_input')
+})
+
+test('final export worker fails closed, without rendering, when the caption review plan cannot be derived', async (t) => {
+  const cue = (id, startFrame) => Object.freeze({ id, startFrame, endFrame: startFrame + 60, text: 'Legenda final segura', anchor: 'bottom' })
+  const cases = [
+    ['captions persisted under two different presets', (source) => ({ editPlan: Object.freeze({
+      ...source.editPlan,
+      subtitleTracks: Object.freeze([
+        { presetId: 'kinetic', cues: Object.freeze([cue('cue-final-1', 0)]) },
+        { presetId: 'caps-stroke', cues: Object.freeze([cue('cue-final-2', 60)]) },
+      ]),
+    }) })],
+    ['a plan that no longer states its duration', (source) => ({ editPlan: Object.freeze({ ...source.editPlan, durationFrames: undefined }) })],
+  ]
+  for (const [name, change] of cases) {
+    await t.test(name, async () => {
+      const operations = createOperations()
+      const { calls, renderInputs, dependencies } = workerDependencies(operations)
+      const attempts = captureAttempts(dependencies)
+      serveSource(dependencies, change)
+      const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-underivable')
+
+      // Not retryable, never rendered, and never rendered "without its captions" either.
+      assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
+      assert.equal(calls.rendered, 0)
+      assert.equal(renderInputs.length, 0)
+      assert.equal(calls.persisted, 0)
+      assert.equal(calls.attached, 0)
+      assert.equal(calls.failed, 1)
+      assert.equal(operations.operation.status, 'failed')
+      assert.equal(operations.operation.error.code, 'invalid_render_input')
+      assert.equal(attempts.length, 1)
+      assert.equal(attempts[0].status, 'failed')
+      assert.equal(attempts[0].error.stage, 'input-validation')
+      assert.equal(attempts[0].error.code, 'invalid_render_input')
+    })
+  }
+})
+
+test('the renderer admission gate still refuses captions that arrive without their review plan', () => {
+  const subtitleCues = [{ id: 'cue-final-1', startFrame: 0, endFrame: 60, text: 'Legenda final segura', anchor: 'bottom' }]
+  assert.throws(
+    () => assertRenderedSubtitleCuesAreReviewed({ subtitleCues, format: '9:16', fps: 30 }, 300),
+    (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT' &&
+      error.message === 'Rendered subtitle cues require a complete unknown-face review plan',
+  )
+  assert.throws(
+    () => assertRenderedSubtitleCuesAreReviewed({ subtitleCues, format: '9:16', fps: 30, placementPlan: expectedPlacementPlan({ durationFrames: 301 }) }, 300),
+    (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT',
+  )
+  assert.doesNotThrow(() => assertRenderedSubtitleCuesAreReviewed({ subtitleCues, format: '9:16', fps: 30, placementPlan: expectedPlacementPlan() }, 300))
+  assert.doesNotThrow(() => assertRenderedSubtitleCuesAreReviewed({ format: '9:16', fps: 30 }, 300))
 })

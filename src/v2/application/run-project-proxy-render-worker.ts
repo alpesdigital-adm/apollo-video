@@ -7,9 +7,6 @@ import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createDirectedAudioTimelineHash } from '../domain/director-run.ts'
 import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
-import { createRenderPlacementPlan, validateRenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
-import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
-import { requireSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../domain/subtitle-system.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import {
@@ -34,8 +31,8 @@ import {
 } from './color-critic.ts'
 import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
 import { projectProxyRenderInputHash } from './project-render-sources.ts'
+import { deriveEditorialRenderGeometry } from './derive-editorial-render-geometry.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
-import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -211,23 +208,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
-      const cueTracks = emittedSubtitleTracks(source.editPlan.subtitleTracks).filter(
-        (track) => track.cues.length > 0,
-      )
-      const subtitleResolution = source.subtitleResolution
-      // An explicitly disabled style must never leak the EditPlan's cues into FFmpeg.
-      // A renderable snapshot can have cues without a style resolution; its persisted
-      // track preset only reserves geometry for the unknown-face review plan.
-      const subtitleCues = subtitleResolution?.enabled === false
-        ? [] : cueTracks.flatMap((track) => track.cues)
-      const subtitlePresetId = subtitleResolution?.enabled
-        ? subtitleResolution.presetId : subtitleCues.length ? cueTracks[0]?.presetId : null
-      if (subtitleCues.length && (!subtitlePresetId || cueTracks.some(
-        (track) => track.presetId !== subtitlePresetId,
-      ))) throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cues require one consistent persisted preset')
-      const ctaOverlays = (source.editPlan.overlayTracks ?? []).filter(
-        (track) => 'kind' in track && track.kind === 'cta',
-      )
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       const musicTracks = 'audioTracks' in source.editPlan && Array.isArray(source.editPlan.audioTracks) ? source.editPlan.audioTracks : []
@@ -236,59 +216,14 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         : createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
       if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before proxy render')
       // ---- Materialized geometry, decided and validated before the renderer is asked to run ----
+      // The same derivation the final export worker runs (one authority: cues, CTA overlays, the
+      // placement plan with its unknown-face anchor plan, and the persisted reframe plan); only the
+      // canvas differs, because a placement plan is addressed against the pixels it is drawn on.
       const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
-      const durationFrames = source.editPlan.durationFrames
-      if (subtitleResolution?.enabled) {
-        // Fail closed on coherence between the identity the resolution carries and the tokens it
-        // carries. When the resolution names the *current* registry, the tokens must still be the
-        // ones the registry holds; when it names an older one, the content-addressed snapshot is
-        // the authority and the render reproduces what it was compiled to draw (FR-172).
-        if (!subtitleResolution.presetSnapshot) {
-          throw new DomainError('INVALID_RENDER_INPUT', 'Enabled subtitle resolution carries no materialized preset snapshot')
-        }
-        const snapshot = requireSubtitlePresetSnapshot(subtitleResolution.presetSnapshot)
-        if (snapshot.presetId !== subtitleResolution.presetId || snapshot.presetHash !== subtitleResolution.presetHash ||
-            snapshot.registryHash !== subtitleResolution.registryHash) {
-          throw new DomainError('INVALID_RENDER_INPUT', 'Persisted subtitle preset snapshot does not match its resolution')
-        }
-        if (subtitleResolution.registryHash === SUBTITLE_STYLE_REGISTRY.registryHash &&
-            subtitleResolution.presetHash !== subtitlePresetHash(subtitleResolution.presetId)) {
-          throw new DomainError('INVALID_RENDER_INPUT', 'Persisted subtitle resolution drifted from the subtitle style registry')
-        }
-      }
-      const placementElements: RenderPlacementRequestV1[] = ctaOverlays.map((overlay, index) => ({
-        id: `cta-${index}-${overlay.id ?? index}`.slice(0, 96),
-        kind: 'cta' as const, anchor: 'auto' as const, priority: 80, readingOrder: index,
-        minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
-        timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
-      }))
-      // Only the repository-resolved, scoped OCR envelope can supply text obstacles.
-      // It does not establish facial coverage; every cue stays review-required.
-      const perceptionTimeline = source.trustedOcr?.timeline
-      const placementPlan = createRenderPlacementPlan({
-        format: source.format as OutputAspectRatio,
+      const { subtitleCues, subtitleResolution, ctaOverlays, placementPlan, reframePlan } = deriveEditorialRenderGeometry({
+        source,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
-        durationFrames,
-        // The subtitle band is reserved from the *resolved* preset, so a CTA is never solved into
-        // the rows the subtitles already own — and never from a rectangle authored here.
-        subtitlePresetId,
-        elements: placementElements,
-        ...(subtitleCues.length ? {
-          subtitleAnchor: {
-            fps: source.editPlan.fps,
-            cues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
-            faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
-            ...(source.trustedOcr ? { ocrEvidence: {
-              envelopeId: source.trustedOcr.envelopeId,
-              envelopeHash: source.trustedOcr.envelopeHash,
-              inputVersionId: source.trustedOcr.inputVersionId,
-              timeMapHash: source.trustedOcr.timeMapHash,
-            } } : {}),
-            ...(perceptionTimeline ? { perceptionTimeline } : {}),
-          },
-        } : {}),
       })
-      validateRenderPlacementPlan(placementPlan)
       const ocrReceipt = source.trustedOcr ? Object.freeze({
         envelopeId: source.trustedOcr.envelopeId,
         envelopeHash: source.trustedOcr.envelopeHash,
@@ -302,16 +237,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       }) : null
       if (context.renderableSnapshot && ocrReceipt) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot cannot inherit Director OCR coordinates')
-      }
-      const reframePlan = source.reframePlan
-      if (reframePlan) {
-        validateRenderReframePlan(reframePlan)
-        if (
-          reframePlan.variantId !== source.format ||
-          reframePlan.format !== source.format ||
-          reframePlan.durationFrames !== durationFrames ||
-          Math.abs(reframePlan.fps - source.editPlan.fps) > 0.01
-        ) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted reframe plan does not describe this render')
       }
       await enter('rendering')
       const materializedSources = await Promise.all(source.renderSources.map((asset) =>

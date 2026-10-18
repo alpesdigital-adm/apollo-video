@@ -28,7 +28,12 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
 // renderer digest and both recipe versions invalidate previous reuse.
 export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.13.0'
 export const EDITORIAL_PROXY_RECIPE_VERSION = '1.14.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.9.0'
+// Final recipe 1.10.0: the final export now receives the same materialized geometry the approved
+// proxy was drawn from (unknown-face subtitle anchor plan, CTA overlays, persisted reframe plan),
+// so a final with captions is admitted by the renderer and draws what the approved proxy drew
+// (CTA overlays now included). Their content addresses are recorded in the recipe parameters
+// like the proxy's.
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.10.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {

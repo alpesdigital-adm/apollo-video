@@ -136,6 +136,33 @@ export function assertEditorialAssEmission(input: Pick<EditorialRenderInput,
   }
 }
 
+/**
+ * Admission gate for burned-in captions. A render that carries cues must carry the complete
+ * unknown-face review plan for exactly this timeline, format and clock, and that plan must have
+ * decided every cue. The gate runs before any I/O and is not relaxable by the caller: a worker that
+ * cannot hand the plan over gets `INVALID_RENDER_INPUT`, never a render without its captions.
+ */
+export function assertRenderedSubtitleCuesAreReviewed(
+  input: Pick<EditorialRenderInput, 'subtitleCues' | 'placementPlan' | 'format' | 'fps'>,
+  fullExpectedFrames: number,
+): void {
+  if (!input.subtitleCues?.length) return
+  const placement = input.placementPlan
+  const anchorPlan = placement?.subtitleAnchorPlan
+  if (!placement || anchorPlan?.schemaVersion !== 'subtitle-anchor-plan/v2' ||
+      placement.format !== input.format ||
+      placement.durationFrames !== fullExpectedFrames ||
+      Math.abs(anchorPlan.fps - input.fps) > 0.01) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Rendered subtitle cues require a complete unknown-face review plan')
+  }
+  for (const cue of input.subtitleCues) {
+    const decision = subtitleAnchorDecisionFor(anchorPlan, cue.id)
+    if (!decision || decision.startFrame !== cue.startFrame || decision.endFrame !== cue.endFrame) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan does not cover every cue of this render')
+    }
+  }
+}
+
 type PartialRange = Readonly<{ startFrame: number; endFrame: number }>
 
 export { assertClipRate }
@@ -377,22 +404,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     // depend on probes and canvas dimensions stay where they are.
     if (input.reframePlan) validateRenderReframePlan(input.reframePlan)
     if (input.placementPlan) validateRenderPlacementPlan(input.placementPlan)
-    if (input.subtitleCues?.length) {
-      const placement = input.placementPlan
-      const anchorPlan = placement?.subtitleAnchorPlan
-      if (!placement || anchorPlan?.schemaVersion !== 'subtitle-anchor-plan/v2' ||
-          placement.format !== input.format ||
-          placement.durationFrames !== fullExpectedFrames ||
-          Math.abs(anchorPlan.fps - input.fps) > 0.01) {
-        throw new DomainError('INVALID_RENDER_INPUT', 'Rendered subtitle cues require a complete unknown-face review plan')
-      }
-      for (const cue of input.subtitleCues) {
-        const decision = subtitleAnchorDecisionFor(anchorPlan, cue.id)
-        if (!decision || decision.startFrame !== cue.startFrame || decision.endFrame !== cue.endFrame) {
-          throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan does not cover every cue of this render')
-        }
-      }
-    }
+    assertRenderedSubtitleCuesAreReviewed(input, fullExpectedFrames)
     const directory = this.directory(input.operationId)
     await mkdir(directory, { recursive: true })
     const colorPlan = input.colorPlan ? parseProjectColorPlan(input.colorPlan) : null
