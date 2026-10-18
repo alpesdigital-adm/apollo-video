@@ -703,11 +703,11 @@ export function createFoundationAgentToolSafety(
     // about the cut — a recompile of an unmoved derivation is the same row.
     'apollo.projects.capture-sessions.playback-map.plan.compile': {
       impact: 'bounded', confirmation: 'none',
-      reason: 'Turns one resolved playback map, named by the exact version and hash the caller read, into a stored renderable plan; every frame number comes from the map and from durations the server measured, and a recompile of the same map returns the same row.',
+      reason: 'Turns one resolved playback map, named by the exact version and hash the caller read, into a stored renderable plan born with a child Version of the project head the caller names (a moved head is refused); every frame number comes from the map and from durations the server measured, and a recompile of the same map on the same head returns the same row.',
     },
     'apollo.projects.editorial-syntheses.render-plan.compile': {
       impact: 'bounded', confirmation: 'none',
-      reason: 'Turns one immutable multi-range synthesis into a stored renderable plan, refusing any master whose bytes are no longer the ones the ranges were selected from; it renders nothing, changes no media and converges on a recompile.',
+      reason: 'Turns one immutable multi-range synthesis into a stored renderable plan born with a child Version of the project head the caller names (a moved head is refused), refusing any master whose bytes are no longer the ones the ranges were selected from; it renders nothing, changes no media and converges on a recompile on the same head.',
     },
     // F4.016. Bounded and unconfirmed, unlike every other Wave 20 command: this
     // one writes an audit record and nothing else. It changes no media, moves no

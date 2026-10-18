@@ -91,7 +91,7 @@ const coverage = Object.freeze({
   },
   'apollo.projects.capture-sessions.playback-map.plan.compile': {
     mode: 'fenced-natural-idempotent-action',
-    evidence: 'Wave20 requires the map version id as <sessionId>:playback:<trackId>:v<n> plus the map hash and refuses a pair the head has moved past, with the current pair in the failure. Publishing this exposed that the compile had no fence at all and that the session check does not stand in for one: a rebuild against a newer session yields a map whose sessionVersion agrees with the session perfectly, so an operator who read version 1 would have been handed a plan for a cut they never saw. No caller key: the plan is content-addressed under (workspace, origin, map, map hash, project version), so a recompile of an unmoved map replays instead of writing a second plan',
+    evidence: 'Wave20 requires the map version id as <sessionId>:playback:<trackId>:v<n> plus the map hash and refuses a pair the head has moved past, with the current pair in the failure. Publishing this exposed that the compile had no fence at all and that the session check does not stand in for one: a rebuild against a newer session yields a map whose sessionVersion agrees with the session perfectly, so an operator who read version 1 would have been handed a plan for a cut they never saw. No caller key: the plan is content-addressed under (workspace, origin, map, map hash, the Version it is born with) and is committed as a child of the head the caller names (a head that has moved is refused VERSION_CONFLICT), so a recompile of an unmoved map on the same head replays instead of writing a second plan',
   },
   'apollo.projects.editorial-syntheses.render-plan.compile': {
     mode: 'natural-idempotent-create',

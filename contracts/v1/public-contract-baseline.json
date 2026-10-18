@@ -3947,7 +3947,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.capture-sessions.playback-map.plan.compile": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
@@ -5367,7 +5367,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.editorial-syntheses.render-plan.compile": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
@@ -6831,7 +6831,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.music-montages.compile": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",

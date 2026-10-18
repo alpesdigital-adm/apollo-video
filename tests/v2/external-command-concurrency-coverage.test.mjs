@@ -90,11 +90,11 @@ const coverage = Object.freeze({
   },
   'apollo.projects.capture-sessions.playback-map.plan.compile': {
     mode: 'durable-covered',
-    evidence: 'Wave20 fences the compile on the map version and hash the caller read and writes the plan under the unique key (workspace, origin, sourceId, sourceHash, projectVersionId) in prisma/renderable-plan-snapshot-repository.ts:139-176, so two operators compiling the same map land on one row: the same cut replays, and a different cut under the same key is refused as PERSISTENCE_CONFLICT rather than overwriting the plan somebody already rendered',
+    evidence: 'Wave20 fences the compile on the map version and hash the caller read and writes the plan as a child Version of the head the caller names (a compile-renderable-plan Command committed with its snapshot row, prisma/renderable-plan-version-commit.ts), so two operators compiling the same map on the same head land on one row: the same cut replays, a head that has moved is refused VERSION_CONFLICT, and a different cut under the same key is refused as PERSISTENCE_CONFLICT rather than overwriting the plan somebody already rendered',
   },
   'apollo.projects.editorial-syntheses.render-plan.compile': {
     mode: 'durable-covered',
-    evidence: 'Wave20 writes the plan under the same unique key as the react compile, and the source half of that key is the immutable synthesis hash, so a recompile converges on one row while a plan compiled from a synthesis whose master bytes changed is refused before the write rather than stored beside the first',
+    evidence: 'Wave20 writes the plan as a child Version of the named head under the same unique key as the react compile, and the source half of that key is the immutable synthesis hash, so a recompile on the same head converges on one row and a head that has moved is refused VERSION_CONFLICT while a plan compiled from a synthesis whose master bytes changed is refused before the write rather than stored beside the first',
   },
   'apollo.projects.multicam-longform-gate.evaluate': {
     mode: 'durable-covered',
