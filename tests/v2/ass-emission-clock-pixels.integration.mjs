@@ -373,7 +373,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
         assert.notDeepEqual(actual, [start], `${fps} fps ${clock} [${startCs},${endCs}) cs lights exactly frame ${start}: the refusal was wrong`)
       }
     }
-    return { centreCs: centre, observedNowMs: Object.fromEntries([...nowByFrame]), pairs: results.length, results }
+    return { centreCs: centre, observedNowMs: Object.fromEntries(indices.map((frame) => [frame, nowByFrame.get(frame)])), pairs: results.length, results }
   }
   const additionalDiagnostics = async () => {
     activeCase = null
