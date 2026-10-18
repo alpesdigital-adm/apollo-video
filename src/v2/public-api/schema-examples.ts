@@ -860,6 +860,10 @@ const queuedFaceProducerOperationVisibleExample = {
   ...queuedPerceptionProducerOperationVisibleExample,
   id: 'operation-face-example-1', type: 'perception-face-run',
 }
+const queuedFaceWindowOperationVisibleExample = {
+  ...queuedFaceProducerOperationVisibleExample,
+  id: 'operation-face-window-example-1',
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -7925,6 +7929,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     }],
     'apollo://schemas/face-producer-operation-read/v1': [{
       data: { operation: queuedFaceProducerOperationVisibleExample },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/face-window-run-request/v1': [{
+      projectVersionId: 'project-version-example-1', sourceArtifactId: 'artifact-source-example-1',
+      window: { startTimelineFrame: 100, endTimelineFrame: 250 },
+    }],
+    'apollo://schemas/face-window-operation-created/v1': [{
+      data: { operation: queuedFaceWindowOperationVisibleExample, replayed: false },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/face-window-operation-read/v1': [{
+      data: { operation: queuedFaceWindowOperationVisibleExample },
       meta: { apiVersion: 'v1' },
     }],
     'apollo://schemas/enqueue-provider-job-request/v1': [{

@@ -872,6 +872,10 @@
         {
           "kind": "owner-acceptance",
           "text": "Aceite global permanece separado; novos MP4s exigem revisão vinculada aos próprios hashes."
+        },
+        {
+          "kind": "deployment",
+          "text": "V9 runtime: execução supervisionada de paridade em Linux (60 imagens de desenvolvimento contra os tensores da V9, sem ajuste de parâmetros) é obrigatória antes de qualquer implantação; sem o recibo o registro não autentica Linux e o worker recusa partir. Também pendentes: execução supervisionada das suítes PostgreSQL e da migração 20261018120000_face_window_v9_profile, medição em vídeo real (jornada W70) e passos de CI. Detalhes em docs/quality/w62-v9-runtime.md."
         }
       ],
       "evidence": [
@@ -993,6 +997,12 @@
           "type": "private",
           "ref": "Apollo/w61-70-20261008/w62-development-pilot-v1-411d4fb7/result.json",
           "scope": "SHAa5ee7bc13bcaa5b2316fffc1f9142265e7d6eac3095d38d73a3df0c85a9e7ca1 FAIL preflight OWNER_DEADLINE30s/infer0/ledger vazio, innerterminalfalse preservado. Admissao b8784a96 operacionalAGENT benchmark-only vinculou60JPEGs/viewAudit/creditos;3563pins pre/post e FPea1e5ea3 iguais. Doischildren closeEOF/19snapshots/2observados ausentes; scratch retido porFAIL. Addendumacaf372c comprova4IDs conhecidos ausentes semnovoHTTP/load/sinal ou inventario global. Nao reprova nem qualifica detector.",
+          "role": "implementation"
+        },
+        {
+          "type": "repo",
+          "ref": "docs/quality/w62-v9-runtime.md",
+          "scope": "Runtime do detector V9 aceito pelo proprietário (OpenVINO face-detection-0204; primeiro plano e orador): envelope v2 com saídas brutas, modelo de primeiro plano, área de legenda em 3 estados, worker, persistência e contrato público, no branch claude/w62-v9-runtime. Testes offline passam; suítes PostgreSQL escritas e não executadas; sem execução em Linux nem em vídeo real. Não é qualificação.",
           "role": "implementation"
         }
       ],

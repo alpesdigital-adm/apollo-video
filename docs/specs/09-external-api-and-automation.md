@@ -1013,6 +1013,21 @@ operação comprova persistência de candidatos amostrados; o envelope conserva
 `faceSafety=unknown`, `identity=not-performed`, lacunas de cobertura e avaliação
 `failed-gate`. Não aprova rosto humano, legenda, crop, Diretor ou exportação.
 
+`POST /v1/projects/{projectId}/face-window-operations` é o recurso do detector V9 aceito pelo proprietário
+(OpenVINO `face-detection-0204`, escopo: rostos em primeiro plano e orador). Recebe apenas `projectVersionId`,
+`sourceArtifactId` e `window` (`startTimelineFrame`, `endTimelineFrame`; no máximo 300 quadros), com
+`projects:write` e `Idempotency-Key`. Cadência (6 Hz), limiares, perfil e produtor são do servidor; o caller não
+informa nenhum deles nem autoridade. O servidor exige um único clip unit-rate que cobre a timeline, vídeo CFR,
+orientação neutra e fps iguais, e recusa janela fora da timeline, maior que a política ou sem quadro amostrado.
+`GET /v1/projects/{projectId}/face-window-operations/{operationId}` exige `projects:read`, isola
+workspace/projeto/perfil e só retorna o envelope `face-producer-envelope/v2` após `succeeded`, revalidando
+source, versão, direitos, integridade e as saídas brutas do detector (5600 bytes por amostra), e devolve ao lado
+dele `producerAuthentication`: o veredito do registro de produtores, recalculado na leitura. Um produtor em
+plataforma sem recibo de paridade (hoje, Linux) é válido como envelope mas não autenticado, e evidência não
+autenticada nunca libera a área de legenda. O aceite do proprietário não é qualificação: o envelope conserva
+`faceSafety=unknown`, `identity=not-performed` e avaliação `owner-accepted-scoped`. Detalhes, limites e
+bloqueios de implantação: `docs/quality/w62-v9-runtime.md`.
+
 `GET /v1/operations/{operationId}/final-export-attempts` passa a capability
 2.0.0 e schema `project-final-export-attempt-history/v2`: tentativas falhas
 novas podem incluir `error.stage` sanitizado, além de código e mensagem seguros.

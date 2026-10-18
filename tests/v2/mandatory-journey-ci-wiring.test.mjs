@@ -740,8 +740,8 @@ const W69_PINNED_TOOLCHAIN = 'W69 subtitle clock proof that needs an externally 
  * reason that has nothing to do with coverage.
  */
 const KNOWN_UNRUN_SUITES = [
-  { file: 'tests/v2/prisma-face-window.integration.mjs', reason: W62_SUPERVISED_PG },
-  { file: 'tests/v2/face-window-composition.integration.mjs', reason: W62_TSX_COMPOSITION },
+  { file: 'tests/v2/prisma-face-window.integration.mjs', reason: W62_SUPERVISED_PG, citedBy: ['docs/quality/w62-v9-runtime.md'] },
+  { file: 'tests/v2/face-window-composition.integration.mjs', reason: W62_TSX_COMPOSITION, citedBy: ['docs/quality/w62-v9-runtime.md'] },
   {
     file: 'tests/v2/prisma-face-producer-http.integration.mjs',
     reason: 'W61 diagnostic face HTTP requires the licensed, hash-pinned development video/landing/lineage, YuNet model/license and local Python/OpenCV runtime; local result face-http-resume-v1-39bfb5da SHA256 1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 is a controlled proof, not CI coverage or approved facial quality. Face producer integration is wired only for three offline audit/fixture cases; its PG and runner cases are likewise local, with faceSafety unknown and holdout closed.',
