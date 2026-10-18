@@ -86,6 +86,8 @@
     "test:e2e:runtime-safety-workers": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/runtime-safety-workers.e2e.mjs",
     "test:e2e:sync-diagnostic-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/sync-diagnostic-journey.e2e.mjs",
     "test:unit:wave20-falsification": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/wave20-falsification.test.mjs",
+    "test:integration:face-window-composition": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/face-window-composition.integration.mjs",
+    "test:integration:face-window-db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env --test tests/v2/prisma-face-window.integration.mjs",
     "test:unit:ffmpeg-binary": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/ffmpeg-binary-resolution.test.mjs",
     "test:integration:marker-robustness": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/marker-robustness.integration.mjs",
     "test:integration:sync-marker-render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/sync-marker-render.integration.mjs",

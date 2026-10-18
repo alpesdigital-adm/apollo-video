@@ -192,6 +192,14 @@ function parseStoredRecord(value: string, field: string): Record<string, unknown
   }
 }
 
+
+/** The YuNet diagnostic has no window; the V9 profile always has a bounded one (mirrors the table CHECK). */
+function validFaceProfileWindow(profile: string, start: number | null, end: number | null): boolean {
+  if (profile === 'yunet-v5-diagnostic') return start === null && end === null
+  return profile === 'openvino-face0204-v9' && start !== null && end !== null && Number.isSafeInteger(start) &&
+    Number.isSafeInteger(end) && start >= 0 && end > start && end - start <= 300
+}
+
 function hydrateSyntheticRenderContext(
   detail: NonNullable<StoredOperation['syntheticProductionRender']>,
 ): Readonly<SyntheticProductionRenderContext> {
@@ -698,7 +706,8 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
       faceDetail.editPlanSnapshotHash, faceDetail.requestHash]
       .every((value) => SHA256_PATTERN.test(value)) ||
     !Number.isSafeInteger(faceDetail.sampleIntervalFrames) ||
-    faceDetail.sampleIntervalFrames < 1 || faceDetail.sampleIntervalFrames > 300
+    faceDetail.sampleIntervalFrames < 1 || faceDetail.sampleIntervalFrames > 300 ||
+    !validFaceProfileWindow(faceDetail.detectorProfile, faceDetail.windowStartTimelineFrame, faceDetail.windowEndTimelineFrame)
   )) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored face producer operation context is invalid', { operationId: row.id })
   }
@@ -1016,6 +1025,10 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         editPlanSnapshotHash: faceDetail!.editPlanSnapshotHash,
         sampleIntervalFrames: faceDetail!.sampleIntervalFrames,
         requestHash: faceDetail!.requestHash,
+        detectorProfile: faceDetail!.detectorProfile as 'yunet-v5-diagnostic' | 'openvino-face0204-v9',
+        ...(faceDetail!.windowStartTimelineFrame !== null && faceDetail!.windowEndTimelineFrame !== null
+          ? { window: Object.freeze({ startTimelineFrame: faceDetail!.windowStartTimelineFrame, endTimelineFrame: faceDetail!.windowEndTimelineFrame }) }
+          : {}),
       } : {
         kind: 'project-director-run' as const,
         projectId: directorDetail!.projectId,
@@ -1547,7 +1560,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           .every((value) => SHA256_PATTERN.test(value)) ||
         faceContext.requestHash !== input.requestFingerprint ||
         !Number.isSafeInteger(faceContext.sampleIntervalFrames) ||
-        faceContext.sampleIntervalFrames < 1 || faceContext.sampleIntervalFrames > 300
+        faceContext.sampleIntervalFrames < 1 || faceContext.sampleIntervalFrames > 300 ||
+        !validFaceProfileWindow(faceContext.detectorProfile ?? 'yunet-v5-diagnostic',
+          faceContext.window?.startTimelineFrame ?? null, faceContext.window?.endTimelineFrame ?? null)
       )) ||
       (renderContext && (input.operation.projectId !== undefined || !SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (syntheticRenderContext && (
@@ -2470,6 +2485,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             editPlanSnapshotHash: faceContext.editPlanSnapshotHash,
             sampleIntervalFrames: faceContext.sampleIntervalFrames,
             requestHash: faceContext.requestHash,
+            detectorProfile: faceContext.detectorProfile ?? 'yunet-v5-diagnostic',
+            windowStartTimelineFrame: faceContext.window?.startTimelineFrame ?? null,
+            windowEndTimelineFrame: faceContext.window?.endTimelineFrame ?? null,
             createdAt: new Date(input.operation.createdAt),
           } })
         } else {

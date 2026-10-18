@@ -2414,6 +2414,12 @@ model V2FaceProducerEnvelope {
   contentJson          String   @db.Text
   envelopeHash         String   @db.Char(64)
   createdAt            DateTime @db.Timestamptz(3)
+  // v1 envelopes (the YuNet diagnostic) cover the whole timeline and carry no window. v2 envelopes (the owner-accepted
+  // V9 detector) cover one window [windowStartTimelineFrame, windowEndTimelineFrame) of the timeline.
+  schemaVersion            String @default("face-producer-envelope/v1") @db.VarChar(64)
+  windowStartTimelineFrame Int?
+  windowEndTimelineFrame   Int?
+  rawOutputs               V2FaceProducerRawOutput[]
 
   workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -2426,7 +2432,27 @@ model V2FaceProducerEnvelope {
   @@unique([operationId, workspaceId])
   @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId, sourceSha256])
+  @@index([workspaceId, projectId, projectVersionId, sourceArtifactId, windowStartTimelineFrame], map: "face_producer_envelopes_window_idx")
   @@map("face_producer_envelopes")
+}
+
+/// The raw 5600-byte detector output of one sampled frame of a v2 envelope, retained so that any threshold can be
+/// re-derived later and so the sealed boxes can be shown to come from it.
+model V2FaceProducerRawOutput {
+  id             String   @id @db.VarChar(128)
+  workspaceId    String   @db.VarChar(128)
+  envelopeId     String   @db.VarChar(128)
+  sampleIndex    Int
+  timelineFrame  Int
+  sha256         String   @db.Char(64)
+  rawBytes       Bytes
+  createdAt      DateTime @db.Timestamptz(3)
+
+  envelope V2FaceProducerEnvelope @relation(fields: [envelopeId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([envelopeId, sampleIndex])
+  @@index([workspaceId, envelopeId])
+  @@map("face_producer_raw_outputs")
 }
 
 model V2FaceProducerOperation {
@@ -2442,6 +2468,10 @@ model V2FaceProducerOperation {
   sampleIntervalFrames Int
   requestHash          String   @db.Char(64)
   createdAt            DateTime @db.Timestamptz(3)
+  // Which server-side detector pipeline claims the operation. Legacy rows are the YuNet diagnostic and have no window.
+  detectorProfile          String @default("yunet-v5-diagnostic") @db.VarChar(64)
+  windowStartTimelineFrame Int?
+  windowEndTimelineFrame   Int?
 
   workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)

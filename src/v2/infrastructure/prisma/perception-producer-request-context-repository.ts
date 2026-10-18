@@ -2,6 +2,7 @@ import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 
 import type {
+  FaceWindowRequestContextRepository,
   PerceptionProducerRequestContextRepository,
 } from '../../application/ports/perception-producer-request-context.ts'
 import { evaluatePerceptionSourceAnalysisRights } from '../../domain/perception-source-rights.ts'
@@ -160,7 +161,59 @@ export class PrismaFaceProducerRequestContextRepository implements PerceptionPro
   }
 
   async readEnvelopeId(input: { workspaceId: string; projectId: string; operationId: string }) {
-    const row = await this.client.v2FaceProducerEnvelope.findFirst({ where: input,
+    const row = await this.client.v2FaceProducerEnvelope.findFirst({
+      where: { ...input, schemaVersion: 'face-producer-envelope/v1' },
+      select: { id: true, projectVersionId: true } })
+    return row ? Object.freeze(row) : null
+  }
+}
+
+/**
+ * Admission of the V9 window profile: one current unit-rate source clip that is the whole timeline. Unlike the YuNet
+ * diagnostic there is no 300-frame cap on the timeline; the bound is the window the operation observes.
+ */
+export class PrismaFaceWindowRequestContextRepository implements FaceWindowRequestContextRepository {
+  private readonly client: PrismaClient
+  private readonly base: PrismaPerceptionProducerRequestContextRepository
+
+  constructor(client: PrismaClient) {
+    this.client = client
+    this.base = new PrismaPerceptionProducerRequestContextRepository(client)
+  }
+
+  async read(input: { workspaceId: string; projectId: string; projectVersionId: string;
+    sourceArtifactId: string }) {
+    const context = await this.base.read(input)
+    if (!context) return null
+    const snapshot = await this.client.v2ProjectSnapshot.findFirst({ where: {
+      id: context.editPlanSnapshotId, workspaceId: input.workspaceId,
+      projectId: input.projectId, kind: 'edit-plan', contentHash: context.editPlanSnapshotHash,
+    }, select: { contentJson: true } })
+    if (!snapshot) return null
+    let plan: Record<string, unknown>
+    try { plan = JSON.parse(snapshot.contentJson) as Record<string, unknown> }
+    catch { return null }
+    if (!plan || calculateCanonicalHash(plan) !== context.editPlanSnapshotHash ||
+        !Number.isSafeInteger(plan.fps) || Number(plan.fps) < 1 ||
+        !Number.isSafeInteger(plan.durationFrames) || Number(plan.durationFrames) < 1 ||
+        !Array.isArray(plan.videoTracks)) return null
+    const clips = plan.videoTracks.flatMap((track: unknown) =>
+      track && typeof track === 'object' && Array.isArray((track as Record<string, unknown>).clips)
+        ? (track as { clips: unknown[] }).clips : [])
+    if (clips.length !== 1 || !clips[0] || typeof clips[0] !== 'object') return null
+    const clip = clips[0] as Record<string, unknown>
+    const numbers = [clip.sourceInFrame, clip.sourceOutFrame, clip.timelineInFrame, clip.timelineOutFrame]
+    if (clip.sourceArtifactId !== input.sourceArtifactId || clip.rate !== 1 ||
+        !numbers.every((value) => Number.isSafeInteger(value) && Number(value) >= 0) ||
+        Number(clip.timelineInFrame) !== 0 || Number(clip.timelineOutFrame) !== Number(plan.durationFrames) ||
+        Number(clip.sourceOutFrame) - Number(clip.sourceInFrame) !== Number(plan.durationFrames)) return null
+    return Object.freeze({ ...context, timelineFps: Number(plan.fps),
+      timelineDurationFrames: Number(plan.durationFrames), clipSourceInFrame: Number(clip.sourceInFrame) })
+  }
+
+  async readEnvelopeId(input: { workspaceId: string; projectId: string; operationId: string }) {
+    const row = await this.client.v2FaceProducerEnvelope.findFirst({
+      where: { ...input, schemaVersion: 'face-producer-envelope/v2' },
       select: { id: true, projectVersionId: true } })
     return row ? Object.freeze(row) : null
   }
