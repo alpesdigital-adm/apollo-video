@@ -19,7 +19,9 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
-import { renderElementMapHash } from '../../src/v2/domain/review-system.ts'
+import { OUTPUT_FORMAT_REGISTRY } from '../../src/v2/domain/output-format-registry.ts'
+import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
+import { buildRenderElementMap, renderElementMapHash } from '../../src/v2/domain/review-system.ts'
 import { parseSubtitleSidecar } from '../../src/v2/domain/subtitle-sidecar.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
@@ -224,8 +226,15 @@ function inMemoryGrants() {
 }
 
 /**
- * Renders one small MP4 with the real editorial renderer and returns the real
- * artifact plus the RenderElementMap the renderer emitted for it.
+ * Renders one small MP4 with the real editorial renderer and returns the real artifact with the persisted cue
+ * alignment its sidecar is derived from.
+ *
+ * Since W65 the renderer requires a complete unknown-face review plan for every rendered cue and, while face coverage is
+ * unknown, draws no caption and emits no subtitle element (see the anchor goldens and `wave10`). The rule is not relaxed
+ * here: the render below satisfies it, and the fixture asserts that the runtime really emitted no subtitle element. The
+ * alignment the sidecar service reads is therefore the controlled one, built with `buildRenderElementMap` for the cues over
+ * that real MP4's exact hash; what stays physical is everything around it (real bytes, hash binding, storage, lineage,
+ * grants, tamper), not caption pixels the product no longer draws.
  */
 async function renderFixture(root, { cues = FIXTURE_CUES, operationId = 'sidecar-render' } = {}) {
   const sourcePath = join(root, `${operationId}-source.mp4`)
@@ -239,19 +248,36 @@ async function renderFixture(root, { cues = FIXTURE_CUES, operationId = 'sidecar
   const renderer = new FfmpegEditorialProxyRenderer({
     workRoot: join(root, 'work', operationId), ffmpegPath,
   })
-  return renderer.render({
+  const clips = [{
+    id: 'clip-1', sourceArtifactId: 'artifact-sidecar-source',
+    sourceInFrame: 0, sourceOutFrame: 90,
+    timelineInFrame: 0, timelineOutFrame: 90, rate: 1,
+  }]
+  const proxy = OUTPUT_FORMAT_REGISTRY.presets['9:16'].exportDefaults.proxy
+  const canvas = { width: proxy.width, height: proxy.height }
+  const placementPlan = createRenderPlacementPlan({
+    format: '9:16', canvas, durationFrames: 90, subtitlePresetId: 'kinetic', elements: [],
+    subtitleAnchor: {
+      fps: 30, cues: cues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+      faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
+    },
+  })
+  const rendered = await renderer.render({
     operationId, renderKind: 'proxy',
     sources: [{
       artifactId: 'artifact-sidecar-source', path: sourcePath, mediaType: 'video',
       colorPipelineCompilation: colorCompilation('artifact-sidecar-source'),
     }],
-    clips: [{
-      id: 'clip-1', sourceArtifactId: 'artifact-sidecar-source',
-      sourceInFrame: 0, sourceOutFrame: 90,
-      timelineInFrame: 0, timelineOutFrame: 90, rate: 1,
-    }],
-    fps: 30, format: '9:16', subtitleCues: cues,
+    clips, fps: 30, format: '9:16', subtitleCues: cues, placementPlan,
   })
+  assert.equal(rendered.renderElementMap.elements.some((element) => element.type === 'subtitle'), false,
+    'unknown face coverage: the runtime draws no caption, so the controlled alignment below is the only subtitle alignment')
+  const renderElementMap = buildRenderElementMap({
+    proxyHash: rendered.sha256, fps: 30, durationFrames: 90, canvas, source: { width: 320, height: 180 },
+    clips: clips.map((clip) => ({ id: clip.id, sourceArtifactId: clip.sourceArtifactId, timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame })),
+    subtitleCues: cues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame, text: cue.text })),
+  })
+  return { ...rendered, renderElementMap }
 }
 
 function alignmentOf(rendered, storedOutput, overrides = {}) {
