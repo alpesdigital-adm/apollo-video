@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 
 import {
-  W35_EMPTY_WORKSPACE_ID, archiveThroughApi, createRealProject, readAggregateOracle,
-  seedAnnotations, seedFinalExportChain, seedOperation, setProjectStatus, proveRejectedProgressWithoutTotal,
+  W35_EMPTY_WORKSPACE_ID, advanceVersionThroughApi, archiveThroughApi, createRealProject, readAggregateOracle,
+  seedAnnotations, seedDirectedProject, seedFinalExportChain, seedOperation, setProjectStatus, proveRejectedProgressWithoutTotal,
 } from './dashboard-w34-35-fixtures.mjs'
 import {
   ARCHIVABLE, assertCard, awaitProjectList, closeBrowser, evidenceDirectory,
@@ -120,7 +120,7 @@ async function enterEmptyWorkspace({
 export async function proveDashboardStates({
   baseUrl, client, workspaceId, apiClientId, authorization, credentialId,
   sessionCookieName, sessionCookieValue, username, password, uiThrottleKey,
-  sourceArtifactId, sourceManifestId,
+  sourceArtifactId,
 }) {
   const evidenceDir = evidenceDirectory('APOLLO_W35_EVIDENCE_DIR', 'w35')
   await mkdir(evidenceDir, { recursive: true })
@@ -217,15 +217,26 @@ export async function proveDashboardStates({
 
     // completed: a succeeded final export is the output.
     const completed = await make('w35-completed')
+    // 6.0.0: output hangs off a REAL Director run, which needs the explicit output variant (API) and an observed source.
+    await advanceVersionThroughApi({
+      baseUrl, authorization, projectId: completed.project.id, version: completed.version,
+      key: 'w35-completed-variant',
+    })
+    const completedWorld = await seedDirectedProject(client, {
+      workspaceId, clientId: apiClientId, credentialId, projectId: completed.project.id, suffix: 'w35-completed',
+    })
     const chain = await seedFinalExportChain(client, {
       workspaceId, clientId: apiClientId, projectId: completed.project.id,
-      versionId: completed.version.id, sourceArtifactId, sourceManifestId, audit,
+      versionId: completedWorld.versions.directed, directed: completedWorld, audit,
       suffix: 'w35-completed', aspectRatio: '9:16', exports: [{ status: 'succeeded' }],
     })
     await setProjectStatus(client, completed.project.id, 'completed')
     record('w35-completed', completed, SEED_STATUS('completed'),
-      origin('controlled-pg-seed', 'succeeded project-final-export 4/4 behind a proxy review and director run'),
-      { outputOperationId: chain.outputs[0].operationId })
+      origin('controlled-pg-seed', 'succeeded project-final-export 4/4 behind a proxy review and a real Director run'),
+      {
+        outputOperationId: chain.outputs[0].operationId,
+        director: { origin: origin('real-service', 'runProjectDirectorService over an observed source (creation, variant, adopted-source child, LUT selection, Director: sequence 5)'), ...completedWorld.director },
+      })
 
     // archived: produced by the real archive API as the journey API client.
     const archivedProject = await make('w35-archived')
@@ -393,7 +404,9 @@ export async function proveDashboardStates({
       assert.deepEqual(after, oracles[name], `${name}: persisted state drifted during the read-only window`)
       evidence.states.push({
         name, projectId: fixtures[name].projectId, status: statusByName[name],
-        origins: fixtures[name].origins, persisted: oracles[name].expected,
+        origins: fixtures[name].origins,
+        ...(fixtures[name].director ? { director: fixtures[name].director } : {}),
+        persisted: oracles[name].expected,
         api: apiById.get(fixtures[name].projectId).dashboard,
         visibleState: apiById.get(fixtures[name].projectId).visibleState,
         expectedCard: wants.get(name), destination: destinations[name],

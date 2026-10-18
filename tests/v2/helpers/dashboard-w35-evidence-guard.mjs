@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const SCREENSHOTS = ['w35-desktop-states.png', 'w35-mobile-states.png', 'w35-desktop-empty.png', 'w35-mobile-empty.png']
-const ORIGINS = new Set(['real-api', 'controlled-pg-seed', 'absent'])
+const ORIGINS = new Set(['real-api', 'real-service', 'controlled-pg-seed', 'absent'])
 
 // Pinned independently of the component: label, tone, primary action, button text.
 const PINNED = {
@@ -103,6 +103,10 @@ export function verifyW35Evidence(directory, { sourceCommit, ciRunId, applicatio
   assert.deepEqual(byName['w35-failed'].persisted.latestOperation.error, { code: 'render-failed', retryable: true })
   assert.equal(byName['w35-failed'].card.desktop.error, 'render-failed · recuperável')
   assert.equal(byName['w35-completed'].persisted.outputCount, 1)
+  // 6.0.0: the completed project's output hangs off a Director run the application wrote (a sealed row cannot be invented).
+  assert.equal(byName['w35-completed'].director?.origin?.origin, 'real-service')
+  assert.ok(typeof byName['w35-completed'].director.runId === 'string' && byName['w35-completed'].director.runId.length > 0)
+  assert.match(byName['w35-completed'].director.qualitySnapshotHash, /^[a-f0-9]{64}$/)
   assert.equal(byName['w35-archived'].persisted.archivedFromStatus, 'draft')
   assert.equal(byName['w35-archived'].persisted.administrationRevision, 2)
   const rejection = manifest.progressConstraint

@@ -224,11 +224,11 @@ export async function proveDashboardEventFeedBrowser({
     }
     const createProject = async (issued, name) => {
       const response = await api(issued, 'POST', '/v1/projects', {
-        name, objective: 'discovery', format: '9:16', locale: 'pt-BR',
+        name, objective: 'discovery', locale: 'pt-BR',
         briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto e natural.',
       }, `${name.replaceAll(' ', '-')}-create`)
       assert.equal(response.status, 201, JSON.stringify(response.body))
-      return response.body.data.project
+      return response.body.data.projectAtCreation
     }
     const rename = async (issued, projectId, baseRevision, name, key) => {
       const response = await api(issued, 'POST', `/v1/projects/${projectId}/rename`, { baseRevision, name }, key)

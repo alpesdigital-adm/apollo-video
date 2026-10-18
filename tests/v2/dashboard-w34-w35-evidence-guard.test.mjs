@@ -22,7 +22,13 @@ function rejectedProgress(operationId, projectId) {
     rowUnchanged: true, statementRollbackReadback: true, countBefore: 7, countAfter: 7 }
 }
 
-const TILE_LABELS = ['Em configuração', 'Em produção', 'Aguardando revisão', 'Concluídos']
+// The Director run the complete projects' outputs hang off (written by the application, not seeded).
+const syntheticDirector = {
+  origin: { origin: 'real-service' }, runId: 'director-run-1', status: 'planned',
+  qualitySnapshotId: 'quality-snapshot-1', qualitySnapshotHash: 'e'.repeat(64),
+}
+
+const TILE_LABELS =['Em configuração', 'Em produção', 'Aguardando revisão', 'Concluídos']
 const tiles = (values) => values.map((value, index) => ({ label: TILE_LABELS[index], value }))
 
 function counts() {
@@ -80,10 +86,10 @@ function w34Manifest(directory) {
       openReviewIssueCount: 2,
     }), origins({ latestOperation: { origin: 'controlled-pg-seed' }, openReviewIssues: { origin: 'controlled-pg-seed' } }), { phase: 'Renderizando', measure: '25%', percent: 25 }],
     ['w34-complete', 'completed', 'Concluído', dashboard({
-      currentVersion: { id: 'version-2', sequence: 2, createdAt: '2026-10-04T11:00:00.000Z' },
+      currentVersion: { id: 'version-5', sequence: 5, createdAt: '2026-10-04T11:00:00.000Z' },
       latestOperation: operation('w34-complete-v2-final-operation-3', 'succeeded', 'completed', { completed: 4, total: 4, unit: 'render' }, { type: 'project-final-export' }),
       outputs: [{ artifactId: 'artifact-a', aspectRatio: '16:9' }, { artifactId: 'artifact-b', aspectRatio: '9:16' }], outputCount: 2,
-    }), origins({ latestOperation: { origin: 'controlled-pg-seed' }, outputs: { origin: 'controlled-pg-seed' } }), { phase: 'Etapa concluída', measure: '100%', percent: 100 }],
+    }), origins({ currentVersion: { origin: 'real-service' }, latestOperation: { origin: 'controlled-pg-seed' }, outputs: { origin: 'controlled-pg-seed' } }), { phase: 'Etapa concluída', measure: '100%', percent: 100 }],
     ['w34-failed-op', 'failed', 'Requer atenção', dashboard({
       latestOperation: operation('w34-failed-op-op', 'failed', 'failed', { completed: 2, total: 4, unit: 'render' }, { error: { code: 'render-failed', retryable: true } }),
     }), origins({ latestOperation: { origin: 'controlled-pg-seed' } }), { phase: 'Etapa com falha', measure: '50%', percent: 50, error: 'render-failed · recuperável' }],
@@ -104,6 +110,7 @@ function w34Manifest(directory) {
     const observed = card(projectId, name, state, badgeText, facts, phase, measure, { ...extra, error: view?.error ?? null })
     return {
       name, projectId, origins: fixtureOrigins, persisted, api: clone(persisted),
+      ...(name === 'w34-complete' ? { director: clone(syntheticDirector) } : {}),
       project: { id: projectId, name, status: state },
       card: { desktop: clone(observed), mobile: clone(observed) },
       expectedCard: { state, badgeText, facts, phase, measure, error: view?.error ?? null },
@@ -170,6 +177,11 @@ test('W34 guard rejects every drift between PostgreSQL rows, API projection, car
     'card facts drift': (m) => { m.fixtures[1].card.mobile.facts.Pendências = '9' },
     'card phase drift': (m) => { m.fixtures[1].card.desktop.phase = 'Na fila' },
     'unlabelled provenance': (m) => { delete m.fixtures[2].origins.outputs },
+    'head Version claimed as an API call': (m) => { m.fixtures[2].origins.currentVersion = { origin: 'real-api' } },
+    'Director run missing': (m) => { delete m.fixtures[2].director },
+    'Director run claimed as a seed': (m) => { m.fixtures[2].director.origin = { origin: 'controlled-pg-seed' } },
+    'Director quality hash not a digest': (m) => { m.fixtures[2].director.qualitySnapshotHash = 'x' },
+    'complete head is not the Director Version': (m) => { m.fixtures[2].persisted.currentVersion.sequence = 2; m.fixtures[2].api = clone(m.fixtures[2].persisted) },
     'every relation is only seeded': (m) => { for (const fixture of m.fixtures) for (const key of Object.keys(fixture.origins)) fixture.origins[key] = { origin: 'controlled-pg-seed' } },
     'mutating requests': (m) => { m.requests.mobile.mutating = 1 },
     'database state changed': (m) => { m.counts.after.projects += 1 },
@@ -226,6 +238,7 @@ function w35Manifest(directory) {
     })
     return {
       name, projectId, status,
+      ...(name === 'w35-completed' ? { director: clone(syntheticDirector) } : {}),
       origins: {
         project: { origin: 'real-api' }, status: { origin: statusOrigin },
         latestOperation: { origin: view ? 'controlled-pg-seed' : 'absent' }, worker: { origin: 'absent' },
@@ -307,6 +320,8 @@ test('W35 guard rejects wrong label, tone, action, destination, progress, proven
     'status provenance claims a real transition': (m) => { state(m, 'w35-review').origins.status.origin = 'real-api' },
     'a worker is claimed': (m) => { state(m, 'w35-review').origins.worker.origin = 'real-api' },
     'archived is not a real API state': (m) => { state(m, 'w35-archived').origins.status.origin = 'controlled-pg-seed' },
+    'completed output without a real Director run': (m) => { delete state(m, 'w35-completed').director },
+    'completed Director run claimed as a seed': (m) => { state(m, 'w35-completed').director.origin = { origin: 'controlled-pg-seed' } },
     'gaps hidden': (m) => { m.gaps = [] },
     'empty workspace has projects': (m) => { m.empty.persistedProjects = 1 },
     'empty state overflows on mobile': (m) => { m.empty.mobile.overflowPx = 30 },

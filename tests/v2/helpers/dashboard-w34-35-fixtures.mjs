@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 
+import { variantBodyFor } from './explicit-project-http.mjs'
+import { commitSealedChild, persistReceiptForExistingVideo, testActor } from './pg-output-world.mjs'
+
 /**
  * Fixtures and independent oracles shared by the W34 aggregate proof and the
  * W35 state proof.
@@ -9,7 +12,12 @@ import { createHash, randomUUID } from 'node:crypto'
  * labelled in the manifest as one of:
  *
  * - `real-api`: produced by the public V2 HTTP API as the journey API client
- *   (project creation, version advance through `lut-selection`, archive).
+ *   (project creation, version advance through `output-variants`, archive).
+ * - `real-service`: produced by the production application services over
+ *   PostgreSQL without HTTP (the ingest receipt adoption, the project LUT
+ *   selection and the Director run that give a project its observed timeline
+ *   and its Director run). A sealed Version, snapshot or Command can only be
+ *   born through those writers, never inserted by hand.
  * - `controlled-pg-seed`: rows written with Prisma, inside the foreign keys and
  *   CHECK constraints of PostgreSQL (operations, annotations, final-export
  *   chain, project status). A seed is controlled state, not an operation that
@@ -21,6 +29,18 @@ import { createHash, randomUUID } from 'node:crypto'
 // A `.mjs` that names a static `.ts` specifier dies at link time under tsx,
 // so the domain arrives through `await import`.
 const { createMediaArtifactManifest } = await import('../../../src/v2/domain/media-artifact.ts')
+const { createMediaTranscript } = await import('../../../src/v2/domain/media-transcript.ts')
+const { assetRightsRevision } = await import('../../../src/v2/domain/asset-rights.ts')
+const { stableSerialize } = await import('../../../src/v2/application/version-hash.ts')
+const { compileInitialSourceEditPlan } = await import('../../../src/v2/application/apply-editorial-cut-command.ts')
+const { setAssetRightsService } = await import('../../../src/v2/application/set-asset-rights.ts')
+const { setProjectLutSelectionService } = await import('../../../src/v2/application/project-lut-selections.ts')
+const { runProjectDirectorService } = await import('../../../src/v2/application/run-project-director.ts')
+const { PrismaMediaArtifactRepository } = await import('../../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
+const { PrismaAssetRightsRepository } = await import('../../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
+const { PrismaProjectLutSelectionRepository } = await import('../../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
+const { PrismaDirectorRunRepository } = await import('../../../src/v2/infrastructure/prisma/director-run-repository.ts')
+const { createEvidenceBoundBriefCompiler } = await import('../../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts')
 
 export const sha = (character) => character.repeat(64)
 export const hashOf = (text) => createHash('sha256').update(text).digest('hex')
@@ -33,35 +53,34 @@ export const RENDER_OPERATION_TYPES = new Set([
 
 // -- Real API fixtures ------------------------------------------------------
 
+// 6.0.0: the project is born at its creation Version (sequence 1, no output); `format` is not part of the request.
 export async function createRealProject({
-  baseUrl, authorization, name, key, objective = 'discovery',
-  format = '9:16', locale = 'pt-BR',
+  baseUrl, authorization, name, key, objective = 'discovery', locale = 'pt-BR',
 }) {
   const response = await fetch(`${baseUrl}/v1/projects`, {
     method: 'POST',
     headers: {
       authorization, 'content-type': 'application/json', 'idempotency-key': key,
     },
-    body: JSON.stringify({ name, objective, format, locale }),
+    body: JSON.stringify({ name, objective, locale }),
   })
   const body = await response.json()
   assert.equal(response.status, 201, `create ${name}: ${JSON.stringify(body)}`)
-  assert.equal(body.data.version.sequence, 1)
-  return { project: body.data.project, version: body.data.version }
+  assert.equal(body.data.creationVersion.sequence, 1)
+  return { project: body.data.projectAtCreation, version: body.data.creationVersion }
 }
 
+// A real second Version through the V2 API: the project's first explicit output variant, built on `version`.
 export async function advanceVersionThroughApi({
-  baseUrl, authorization, projectId, version, key,
+  baseUrl, authorization, projectId, version, key, aspectRatio = '9:16',
 }) {
-  const response = await fetch(`${baseUrl}/v1/projects/${projectId}/lut-selection`, {
+  const response = await fetch(`${baseUrl}/v1/projects/${projectId}/output-variants`, {
     method: 'POST',
     headers: {
       authorization, 'content-type': 'application/json', 'idempotency-key': key,
     },
     body: JSON.stringify({
-      baseVersionId: version.id, baseHash: version.baseHash,
-      selection: { mode: 'none' },
-      reason: 'W34/W35 fixture: a real second version through the V2 API.',
+      ...variantBodyFor({ aspectRatio }), baseVersionId: version.id, baseHash: version.baseHash,
     }),
   })
   const body = await response.json()
@@ -233,72 +252,145 @@ async function storeArtifact(client, { workspaceId, artifactId, role, seed }) {
   return { artifactId, manifestId: `manifest-${artifactId}` }
 }
 
-async function ensureDirectorSnapshots(client, { workspaceId, projectId, suffix }) {
-  const ids = {}
-  for (const kind of ['perception', 'treatment', 'story', 'quality-report']) {
-    const id = `${suffix}-snapshot-${kind}`
-    const existing = await client.v2ProjectSnapshot.findUnique({ where: { id } })
-    if (!existing) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id, workspaceId, projectId, kind, schemaVersion: 1,
-          contentJson: JSON.stringify({ kind, fixture: suffix }),
-          contentHash: hashOf(`${projectId}:${kind}`),
-          createdAt: new Date(Date.now() - 120_000),
-        },
-      })
-    }
-    ids[kind] = id
+// One observed source for every project of these proofs that needs a real Director run. It is a rights-granted ingest source of
+// its own (the journey's shared source keeps the rights history other proofs assert), with probe facts the ingest receipt reads.
+const DIRECTOR_SOURCE = Object.freeze({
+  artifactId: 'w34-w35-director-source-artifact', manifestId: 'w34-w35-director-source-manifest',
+  key: 'workspaces/w34-w35/raw/director-source.mov', durationSeconds: 20, fps: 30,
+})
+
+async function ensureDirectorSource(client, { workspaceId, clientId, createdAt }) {
+  if (!(await client.v2MediaArtifact.findUnique({ where: { id: DIRECTOR_SOURCE.artifactId } }))) {
+    await new PrismaMediaArtifactRepository(client).persistOrReplay({
+      workspaceId, artifactId: DIRECTOR_SOURCE.artifactId, manifestId: DIRECTOR_SOURCE.manifestId, lineageIds: [],
+      manifest: createMediaArtifactManifest({
+        artifactKey: DIRECTOR_SOURCE.key, artifactSha256: hashOf('w34-w35-director-source'), byteSize: 4_096,
+        mediaType: 'video', container: 'mov', recipe: { id: 'ingest-source', version: 'v1', parameters: {} },
+        probe: { width: 1_920, height: 1_080, duration: DIRECTOR_SOURCE.durationSeconds, fps: DIRECTOR_SOURCE.fps },
+      }),
+      createdAt: createdAt.toISOString(),
+    })
+    // Rights current and sufficient before any Version adopts the source: editing, editorial reuse and rendering.
+    await setAssetRightsService({
+      repository: new PrismaAssetRightsRepository(client), clock: () => createdAt,
+      createId: () => 'w34-w35-director-source-rights',
+    })({
+      workspaceId, artifactId: DIRECTOR_SOURCE.artifactId, baseRevision: assetRightsRevision(DIRECTOR_SOURCE.artifactId, 0),
+      draft: {
+        status: 'approved', allowedUses: ['editing', 'editorial-reuse', 'rendering'], prohibitedUses: [],
+        allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] },
+      },
+      actor: { type: 'api-client', id: clientId },
+    })
   }
-  return ids
+  return { artifactId: DIRECTOR_SOURCE.artifactId, manifestId: DIRECTOR_SOURCE.manifestId }
 }
 
 /**
- * The final-export chain the dashboard aggregate reads outputs from: edit
- * command, director run, proxy render (public operation, render row, review),
- * output artifacts, and one final export per requested status. Every row is
- * written inside the real foreign keys. `exports[].status` selects the final
- * public operation state; only `succeeded` becomes a completed output.
+ * Gives an API-created project a REAL Director run. The project is born through the public API (its creation Version and, via
+ * `advanceVersionThroughApi`, its explicit output variant, which must already be the head). From there the same writers the product
+ * uses: the project's own ingest receipt of the observed source (`persistReceiptForExistingVideo`), a child Command that adopts it
+ * and plays it whole (`commitSealedChild`), the neutral project LUT selection (`setProjectLutSelectionService`) and
+ * `runProjectDirectorService` with the evidence-bound brief compiler and the PostgreSQL Director repository. No snapshot, Command or
+ * Director row is invented: a snapshot can only be born with its Version.
+ *
+ * Returns the Versions of that chain (`base`, `lut`, `directed`; `directed` is the new head) and the Director run, which
+ * `seedFinalExportChain` hangs its proxy and final-export rows off.
+ */
+export async function seedDirectedProject(client, {
+  workspaceId, clientId, credentialId, environment = 'production', projectId, suffix,
+}) {
+  const actor = testActor({ workspaceId, clientId, credentialId, environment })
+  const now = Date.now()
+  const source = await ensureDirectorSource(client, { workspaceId, clientId, createdAt: new Date(now - 900_000) })
+  const ingestedAt = new Date(now - 600_000)
+  const id = (kind) => `${suffix}-${kind}`
+  const baseVersionId = id('base-version'), transcriptId = id('transcript')
+  const transcript = createMediaTranscript({
+    language: 'pt-BR', text: `Fonte do painel ${suffix}.`,
+    words: [{ word: 'Fonte', start: 0.1, end: 0.5 }, { word: `${suffix}.`, start: 0.5, end: 0.9 }],
+    segments: [{ id: 0, start: 0.1, end: 0.9, text: `Fonte do painel ${suffix}.` }],
+    provider: 'controlled', model: 'dashboard-fixture-v1',
+  })
+  await client.v2ProjectMediaAsset.create({ data: {
+    id: randomUUID(), workspaceId, projectId, artifactId: source.artifactId, role: 'source-master',
+    originalFileName: 'director-source.mov', createdAt: ingestedAt,
+  } })
+  await client.v2MediaTranscript.create({ data: {
+    id: transcriptId, workspaceId, projectId, sourceArtifactId: source.artifactId, sourceManifestId: source.manifestId,
+    schemaVersion: transcript.schemaVersion, language: transcript.language, provider: transcript.provider, model: transcript.model,
+    providerVersion: 'controlled-v1', transcriptHash: transcript.transcriptHash, transcriptJson: stableSerialize(transcript),
+    createdAt: ingestedAt,
+  } })
+  await persistReceiptForExistingVideo(client, {
+    workspaceId, projectId, actor, artifactId: source.artifactId, createdAt: ingestedAt.toISOString(), slug: id('ingest'),
+  })
+  const basePlan = compileInitialSourceEditPlan({
+    id: id('plan'), projectVersionId: baseVersionId, transcriptId, transcript, sourceArtifactId: source.artifactId,
+    sourceDurationSeconds: DIRECTOR_SOURCE.durationSeconds, fps: DIRECTOR_SOURCE.fps, createdAt: ingestedAt.toISOString(),
+  })
+  const base = await commitSealedChild(client, {
+    workspaceId, projectId, actor, suffix: id('base'), versionId: baseVersionId,
+    mutatePlan: () => basePlan, adopt: [source.artifactId],
+  })
+  const noLut = await setProjectLutSelectionService({
+    repository: new PrismaProjectLutSelectionRepository(client), createId: (kind) => id(`lut-${kind}`),
+    createEventId: randomUUID, clock: () => new Date(),
+  })({
+    workspaceId, projectId, baseVersionId: base.version.id, baseHash: base.version.baseHash,
+    selection: { mode: 'none' }, actor: { type: 'system', id: 'w34-w35-dashboard-fixture' },
+    idempotencyKey: id('lut-none'), reason: 'Keep the dashboard fixture colorimetrically neutral.',
+  })
+  const directed = await runProjectDirectorService({
+    repository: new PrismaDirectorRunRepository(client), clock: () => new Date(), createEventId: randomUUID,
+    compileBrief: createEvidenceBoundBriefCompiler(),
+    createId: (kind) => `${id(kind)}-${randomUUID().slice(0, 8)}`,
+  })({
+    workspaceId, projectId, baseVersionId: noLut.version.id, baseHash: noLut.version.baseHash, actor,
+    idempotency: { key: id('director-request') }, reason: 'Dashboard fixture: a real Director run over an observed source.',
+  })
+  const qualitySnapshotId = directed.command.payload.snapshotRefs.quality
+  const qualityRow = await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: qualitySnapshotId } })
+  const run = await client.v2DirectorRun.findUniqueOrThrow({ where: { id: directed.run.id } })
+  assert.equal(run.projectId, projectId)
+  assert.equal(run.resultVersionId, directed.version.id)
+  assert.equal(run.qualitySnapshotId, qualitySnapshotId)
+  assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId, directed.version.id,
+    'the Director Version is the head of the project')
+  return Object.freeze({
+    projectId, source, versions: Object.freeze({
+      base: base.version.id, lut: noLut.version.id, directed: directed.version.id,
+      directedSequence: directed.version.sequence,
+    }),
+    director: Object.freeze({
+      runId: run.id, status: run.status, qualitySnapshotId, qualitySnapshotHash: qualityRow.contentHash,
+      qualityStatus: directed.run.qualityReport.status, commandId: run.commandId,
+    }),
+  })
+}
+
+/**
+ * The final-export chain the dashboard aggregate reads outputs from: proxy
+ * render (public operation, render row, review), output artifacts, and one
+ * final export per requested status, all hung off the REAL Director run of
+ * `directed` (`seedDirectedProject`) and the source it observed. Every row is
+ * written inside the real foreign keys. `versionId` is the Version the rows are
+ * about (the head, or an earlier Version of the same project, which is then
+ * superseded); its own EditPlan snapshot is the one the rows reference.
+ * `exports[].status` selects the final public operation state; only
+ * `succeeded` becomes a completed output.
  */
 export async function seedFinalExportChain(client, {
-  workspaceId, clientId, projectId, versionId, sourceArtifactId,
-  sourceManifestId, suffix, audit, aspectRatio, exports,
+  workspaceId, clientId, projectId, versionId, directed, suffix, audit, aspectRatio, exports,
 }) {
+  assert.equal(directed.projectId, projectId, 'the Director run belongs to the project the chain is seeded for')
   const version = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: versionId } })
-  const snapshots = await ensureDirectorSnapshots(client, { workspaceId, projectId, suffix: projectId })
-  const commandId = `${suffix}-director-command`
-  const directorRunId = `${suffix}-director-run`
+  assert.equal(version.projectId, projectId)
+  const { artifactId: sourceArtifactId, manifestId: sourceManifestId } = directed.source
+  const directorRunId = directed.director.runId
   const proxyOperationId = `${suffix}-proxy-operation`
   const proxyReviewId = `${suffix}-proxy-review`
   const at = (offsetSeconds) => new Date(Date.now() - 300_000 + offsetSeconds * 1000)
-  await client.v2EditCommand.create({
-    data: {
-      id: commandId, workspaceId, projectId, baseVersionId: versionId,
-      baseHash: version.baseHash, type: 'run-director',
-      scopeJson: JSON.stringify({ kind: 'project' }),
-      payloadJson: JSON.stringify({ reason: 'dashboard fixture director run' }),
-      reason: 'W34/W35 fixture needs a director run to hang the export off',
-      actorType: 'api-client', actorId: clientId,
-      idempotencyKey: `${suffix}-director-key`,
-      requestFingerprint: hashOf(`command:${commandId}`), createdAt: at(1),
-    },
-  })
-  await client.v2DirectorRun.create({
-    data: {
-      id: directorRunId, workspaceId, projectId, commandId,
-      baseVersionId: versionId, resultVersionId: versionId, status: 'succeeded',
-      plannerVersion: 'planner/1.0.0', criticVersion: 'critic/1.0.0',
-      objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1',
-      perceptionSnapshotId: snapshots.perception,
-      treatmentSnapshotId: snapshots.treatment,
-      storySnapshotId: snapshots.story,
-      editPlanSnapshotId: version.editPlanSnapshotId,
-      qualitySnapshotId: snapshots['quality-report'],
-      decisionsJson: JSON.stringify([]), assumptionsJson: JSON.stringify([]),
-      initiatedByType: 'api-client', initiatedById: clientId,
-      createdAt: at(2), updatedAt: at(2),
-    },
-  })
   const proxy = await storeArtifact(client, {
     workspaceId, artifactId: `${suffix}-proxy-artifact`, role: 'editorial-proxy', seed: 'proxy',
   })
@@ -353,7 +445,7 @@ export async function seedFinalExportChain(client, {
         operationId: finalId, workspaceId, projectId, projectVersionId: versionId,
         projectVersionHash: version.baseHash,
         editPlanSnapshotId: version.editPlanSnapshotId, directorRunId,
-        qualitySnapshotId: snapshots['quality-report'], qualitySnapshotHash: sha('1'),
+        qualitySnapshotId: directed.director.qualitySnapshotId, qualitySnapshotHash: directed.director.qualitySnapshotHash,
         proxyReviewId, proxyReviewHash: hashOf(`review:${suffix}`),
         proxyArtifactId: proxy.artifactId, sourceArtifactId, sourceManifestId,
         colorPipelineBindingsJson: JSON.stringify([]),

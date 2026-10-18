@@ -3,6 +3,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 
+import { variantBodyFor } from './explicit-project-http.mjs'
+
 // Actual HTTP routes, signed PUT bytes, local storage and PostgreSQL. The
 // transfer payload is controlled bytes; this does not assert successful ingest
 // or media perception, and the downloadable artifact metadata is a PG seed.
@@ -22,9 +24,13 @@ export async function proveMediaTransferHttp({ baseUrl, client, authorization, w
   }
   const begin = async (bytes, key) => {
     const checksum = createHash('sha256').update(bytes).digest('hex')
-    const created = await call('/v1/projects', { name: `W51 transfer ${key}`, objective: 'discovery', format: '16:9', locale: 'pt-BR' }, `${key}-project`)
+    const created = await call('/v1/projects', { name: `W51 transfer ${key}`, objective: 'discovery', locale: 'pt-BR' }, `${key}-project`)
     assert.equal(created.status, 201, JSON.stringify(created.result))
-    const projectId = created.result.data.project.id
+    const projectId = created.result.data.projectAtCreation.id
+    // A media upload needs the project's explicit output: the 16:9 variant on the creation Version.
+    const variant = await call(`/v1/projects/${projectId}/output-variants`, { ...variantBodyFor({ aspectRatio: '16:9' }),
+      baseVersionId: created.result.data.creationVersion.id, baseHash: created.result.data.creationVersion.baseHash }, `${key}-variant`)
+    assert.equal(variant.status, 201, JSON.stringify(variant.result))
     projects.push(projectId)
     const body = { projectId, fileName: 'controlled-transfer.mp4', rightsConfirmed: true, kind: 'video', size: String(bytes.length), mimeType: 'video/mp4', checksum }
     const first = await call('/v1/media/uploads', body, key)
@@ -138,8 +144,6 @@ export async function proveMediaTransferHttp({ baseUrl, client, authorization, w
     assert.deepEqual(await readFile(path), small)
     return evidence
   } finally {
-    const operations = await client.v2MediaIngestOperation.findMany({ where: { workspaceId, uploadId: { in: uploads } }, select: { operationId: true } })
-    const ids = operations.map((operation) => operation.operationId)
-    await client.v2Project.updateMany({ where: { workspaceId, id: { in: projects } }, data: { currentVersionId: null } })
+    // Nothing to undo: the uploads, projects and sealed Versions of this proof are unique to the run and append-only.
   }
 }

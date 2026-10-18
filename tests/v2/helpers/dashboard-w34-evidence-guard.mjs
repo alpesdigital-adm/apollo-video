@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url'
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const FIXTURES = ['w34-bare', 'w34-versioned', 'w34-complete', 'w34-failed-op', 'w34-archived']
 const SCREENSHOTS = ['w34-desktop-aggregate.png', 'w34-mobile-aggregate.png']
-const ORIGINS = new Set(['real-api', 'controlled-pg-seed', 'absent'])
+// `real-service`: written by the production application services over PostgreSQL (no HTTP): a sealed Version, snapshot or Director
+// run can only be born through them (W66), so the complete project's head Version and its Director run carry this label.
+const ORIGINS = new Set(['real-api', 'real-service', 'controlled-pg-seed', 'absent'])
 const RELATIONS = ['project', 'currentVersion', 'latestOperation', 'openReviewIssues', 'outputs', 'administration']
 
 export function verifyW34Evidence(directory, { sourceCommit, ciRunId, applicationName }) {
@@ -90,7 +92,13 @@ export function verifyW34Evidence(directory, { sourceCommit, ciRunId, applicatio
   assert.deepEqual(versioned.outputs, [])
 
   const complete = byName['w34-complete'].persisted
-  assert.equal(complete.currentVersion.sequence, 2)
+  // creation (1), output variant (2), observed-source child (3), project LUT selection (4), Director Version (5, head).
+  assert.equal(complete.currentVersion.sequence, 5)
+  assert.equal(byName['w34-complete'].origins.currentVersion.origin, 'real-service')
+  const director = byName['w34-complete'].director
+  assert.equal(director?.origin?.origin, 'real-service', 'the outputs hang off a Director run the application wrote')
+  assert.ok(typeof director.runId === 'string' && director.runId.length > 0)
+  assert.match(director.qualitySnapshotHash, /^[a-f0-9]{64}$/)
   assert.equal(complete.latestOperation.status, 'succeeded')
   assert.equal(complete.openReviewIssueCount, 0)
   assert.equal(complete.outputCount, 2)

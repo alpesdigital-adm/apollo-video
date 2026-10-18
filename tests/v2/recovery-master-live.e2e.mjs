@@ -9,6 +9,7 @@ import net from 'node:net'
 import { promisify } from 'node:util'
 import test from 'node:test'
 import { PrismaClient, Prisma } from '../../generated/prisma-v2/index.js'
+import { createProjectWithVariant } from './helpers/explicit-project-http.mjs'
 
 const execute = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -116,7 +117,12 @@ test('W60 raw Imersão master uses live ingest, public commands and reconstructa
       assert.ok(response.ok, `${path}: ${response.status}/${payload.error?.code}`)
       return payload.data
     }
-    const created = await api('/v1/projects', { name: 'Boas-vindas Imersão — recuperação V2', objective: 'discovery', format: '16:9', locale: 'pt-BR' })
+    // 6.0.0: the project is born without an output; the 16:9 output the recovery edits is an explicit variant, so `created.version`
+    // is the variant's Version (the head every later Command builds on).
+    const world = await createProjectWithVariant((path, body) => api(path, body), {
+      project: { name: 'Boas-vindas Imersão — recuperação V2', objective: 'discovery', locale: 'pt-BR' }, aspectRatio: '16:9', key: 'recovery',
+    })
+    const created = { project: world.created.projectAtCreation, version: world.version }
     const projectId = created.project.id
     evidence.projectId = projectId
     evidence.initialVersionId = created.version.id
