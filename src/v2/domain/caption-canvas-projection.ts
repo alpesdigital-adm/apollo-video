@@ -38,6 +38,14 @@ export type ProjectionClip = Readonly<{
   sourceArtifactId: string
   timelineInFrame: number
   timelineOutFrame: number
+  /**
+   * Where the clip plays in its SOURCE (W65b). Face evidence is keyed by the source's own frames, so the projection must know, per
+   * clip, which source frame sits under each timeline frame. Only `rate === 1` with equal-length ranges is a pure frame offset
+   * (`sourceFrame = timelineFrame + sourceInFrame - timelineInFrame`); anything else cannot be proven and is judged `unknown`.
+   */
+  sourceInFrame: number
+  sourceOutFrame: number
+  rate: number
   /** Static normalized crop of the source (`clip.crop`). */
   crop?: Readonly<NormalizedBounds>
   /** The reframe trajectory of the clip. It wins over `crop`, exactly as in the filtergraph. */
@@ -113,6 +121,11 @@ export function createCaptionProjection(input: Readonly<{
       clip.timelineInFrame >= cursor && clip.timelineOutFrame > clip.timelineInFrame,
       'INVALID_RENDER_INPUT', 'Caption projection clip is invalid or overlaps the previous one', { clipId: clip.id },
     )
+    assertDomain(
+      Number.isSafeInteger(clip.sourceInFrame) && Number.isSafeInteger(clip.sourceOutFrame) && clip.sourceInFrame >= 0 &&
+      clip.sourceOutFrame > clip.sourceInFrame && typeof clip.rate === 'number' && Number.isFinite(clip.rate) && clip.rate > 0,
+      'INVALID_RENDER_INPUT', 'Caption projection clip does not say where it plays in its source', { clipId: clip.id },
+    )
     cursor = clip.timelineOutFrame
     if (clip.crop) {
       const { x, y, width, height } = clip.crop
@@ -139,6 +152,7 @@ export function createCaptionProjection(input: Readonly<{
     clips: Object.freeze(clips.map((clip) => Object.freeze({
       id: clip.id, sourceArtifactId: clip.sourceArtifactId,
       timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+      sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame, rate: clip.rate,
       ...(clip.crop ? { crop: Object.freeze({ ...clip.crop }) } : {}),
       ...(clip.reframe ? { reframe: clip.reframe } : {}),
     }))),
@@ -148,6 +162,7 @@ export function createCaptionProjection(input: Readonly<{
     clips: body.clips.map((clip) => ({
       id: clip.id, sourceArtifactId: clip.sourceArtifactId,
       timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+      sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame, rate: clip.rate,
       crop: clip.crop ?? null, reframeRangeHash: clip.reframe ? calculateCanonicalHash(clip.reframe) : null,
     })),
   })

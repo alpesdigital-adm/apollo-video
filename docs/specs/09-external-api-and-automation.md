@@ -1038,6 +1038,22 @@ autenticada nunca libera a área de legenda. O aceite do proprietário não é q
 `faceSafety=unknown`, `identity=not-performed` e avaliação `owner-accepted-scoped`. Detalhes, limites e
 bloqueios de implantação: `docs/quality/w62-v9-runtime.md`.
 
+`POST /v1/projects/{projectId}/face-source-windows` (W65b) é o mesmo detector V9, mas com a evidência ligada
+aos bytes da FONTE e não a uma edição. Recebe apenas `sourceArtifactId` e `window` (`startSourceFrame`,
+`endSourceFrame`, quadros da própria linha do tempo da fonte; no máximo 300), com `projects:write` e
+`Idempotency-Key`; não há Version, intervalo de timeline, cadência ou limiar no pedido. O projeto só diz quem
+pergunta: precisa tocar a fonte (EditPlan atual a referencia), tê-la anexada como `source-master`, e a fonte deve
+estar disponível, ser vídeo com fps inteiro e ter direitos de análise para o locale do projeto. A janela precisa
+terminar na duração da fonte e conter ao menos um quadro amostrado. O envelope `face-producer-envelope/v3`
+(sem projeto, versão, EditPlan ou mapa de tempo; `sourceFps` inteiro) é reutilizável por toda Version e todo
+projeto do workspace que tenha a fonte anexada: a cada uso a identidade da fonte (artefato e SHA-256), os
+direitos do projeto que consome e o veredito do registro do produtor são reavaliados.
+`GET /v1/projects/{projectId}/face-source-windows/{operationId}` exige `projects:read`, isola
+workspace/projeto/perfil `openvino-face0204-v9-source` e só devolve o envelope após `succeeded`, junto de
+`producerAuthentication`. O envelope conserva `faceSafety=unknown` e `identity=not-performed`; a certificação
+de legenda é por cue, depois da projeção da evidência pelos clips da edição (taxa diferente de 1 ou mapa
+inconsistente: `unknown`). Detalhes: `docs/quality/w65b-source-keyed-face-evidence.md`.
+
 `GET /v1/operations/{operationId}/final-export-attempts` passa a capability
 2.0.0 e schema `project-final-export-attempt-history/v2`: tentativas falhas
 novas podem incluir `error.stage` sanitizado, além de código e mensagem seguros.

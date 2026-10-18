@@ -8,9 +8,9 @@ import {
   admitDirectorQualityForFinal, certifyFinalCaptions, FINAL_CAPTION_ANCHOR_POLICY, FINAL_CAPTION_CERTIFICATION_POLICY,
   FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
 } from '../../src/v2/domain/final-caption-certification.ts'
-import { collectFaceEvidenceStream } from '../../src/v2/domain/face-evidence-stream.ts'
+import { collectFaceSourceEvidenceStream } from '../../src/v2/domain/face-source-evidence-stream.ts'
 import { createRenderPlacementPlan, validateRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
-import { expectation, sealedWindow } from './helpers/face-envelope-v2.mjs'
+import { sealedSourceWindow, sourceExpectation } from './helpers/face-source-envelope-v3.mjs'
 
 /**
  * W65b: the final is admissible without ever granting a global face safety. The Director's quality report may stay
@@ -22,9 +22,9 @@ const FPS = 30
 const DURATION = 300
 const LANDSCAPE = Object.freeze({ artifactId: 'source-1', width: 1280, height: 720 })
 const PORTRAIT = Object.freeze({ artifactId: 'source-1', width: 720, height: 1280 })
-const clip = { id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: DURATION }
+const clip = { id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: DURATION, sourceInFrame: 0, sourceOutFrame: DURATION, rate: 1 }
 const CLEAN = [0.9, 0, 0, 0.03, 0.05]
-const cleanStream = collectFaceEvidenceStream([sealedWindow({ start: 0, end: DURATION, rowsAt: () => [CLEAN] })], expectation())
+const cleanStream = collectFaceSourceEvidenceStream([sealedSourceWindow({ start: 0, end: DURATION, rowsAt: () => [CLEAN] })], sourceExpectation({ sourceDurationFrames: DURATION }))
 const CUE_A = { id: 'cue-a', startFrame: 20, endFrame: 60 }
 const CUE_B = { id: 'cue-b', startFrame: 100, endFrame: 130 }
 
@@ -139,8 +139,8 @@ test('a cue that cannot be certified is omitted and listed; the final does not d
 
 test('a mix: the certifiable cue is burned, the other omitted, and both are accounted for', () => {
   // cue-b sits over a frame-filling detection: every band is taken
-  const occupied = sealedWindow({ start: 90, end: 140, rowsAt: () => [[0.9, 0.0, 0.0, 1.0, 1.0]] })
-  const stream = collectFaceEvidenceStream([sealedWindow({ start: 0, end: 90, rowsAt: () => [CLEAN] }), occupied], expectation())
+  const occupied = sealedSourceWindow({ start: 90, end: 140, rowsAt: () => [[0.9, 0.0, 0.0, 1.0, 1.0]] })
+  const stream = collectFaceSourceEvidenceStream([sealedSourceWindow({ start: 0, end: 90, rowsAt: () => [CLEAN] }), occupied], sourceExpectation({ sourceDurationFrames: DURATION }))
   const mixed = plan({ source: PORTRAIT, evidence: [{ sourceArtifactId: 'source-1', stream }] })
   const result = certifyFinalCaptions({ plan: mixed, pixelCheck: completed([]) })
   assert.deepEqual(result.receipt.burned.map((entry) => entry.cueId), ['cue-a'])

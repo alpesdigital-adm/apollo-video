@@ -3,14 +3,14 @@ import test from 'node:test'
 
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { canvasBandSourceAreas, createCaptionProjection } from '../../src/v2/domain/caption-canvas-projection.ts'
-import { collectFaceEvidenceStream } from '../../src/v2/domain/face-evidence-stream.ts'
+import { collectFaceSourceEvidenceStream } from '../../src/v2/domain/face-source-evidence-stream.ts'
 import { FACE_EVIDENCE_POLICY_SHA256 } from '../../src/v2/domain/face-evidence-policy.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
 import { createRenderPlacementPlan, validateRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { deriveSubtitleAnchorBands, subtitleAnchorDecisionFor, validateSubtitleAnchorPlan } from '../../src/v2/domain/subtitle-anchor-plan.ts'
 import { createSubtitleAnchorPlanV3, validateSubtitleAnchorPlanV3 } from '../../src/v2/domain/subtitle-anchor-plan-v3.ts'
 import { deriveSubtitleRegion } from '../../src/v2/domain/subtitle-region.ts'
-import { expectation, sealedWindow } from './helpers/face-envelope-v2.mjs'
+import { sealedSourceWindow, sourceExpectation } from './helpers/face-source-envelope-v3.mjs'
 
 /**
  * W65: the anchor of every cue is decided from the three-state clearance of each of the five bands, per variant canvas.
@@ -24,13 +24,13 @@ const setup = (format) => {
   const region = deriveSubtitleRegion({ spec: preset.spec, presetId: 'kinetic' })
   const canvas = { width: preset.exportDefaults.proxy.width, height: preset.exportDefaults.proxy.height }
   const projection = createCaptionProjection({ layout: { canvas }, sources: [SOURCE],
-    clips: [{ id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: DURATION }] })
+    clips: [{ id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: DURATION, sourceInFrame: 0, sourceOutFrame: DURATION, rate: 1 }] })
   const bands = deriveSubtitleAnchorBands({ region, safeArea: preset.spec.safeArea })
   return { preset, region, canvas, projection, bands }
 }
 const LANDSCAPE = setup('16:9')
 const PORTRAIT = setup('9:16')
-const stream = (rowsAt) => collectFaceEvidenceStream([sealedWindow({ start: 0, end: DURATION, rowsAt })], expectation())
+const stream = (rowsAt) => collectFaceSourceEvidenceStream([sealedSourceWindow({ start: 0, end: DURATION, rowsAt })], sourceExpectation({ sourceDurationFrames: DURATION }))
 const FAR = [0.9, 0.0, 0.0, 0.03, 0.05]
 const evidenceOf = (built) => [{ sourceArtifactId: 'source-1', stream: built }]
 const plan = (world, cues, { evidence = [], projection = world.projection, placements, perceptionTimeline } = {}) => createSubtitleAnchorPlanV3({
@@ -109,7 +109,7 @@ test('when faces own every band the cue is blocked with NO_SAFE_SUBTITLE_REGION;
   validateSubtitleAnchorPlanV3(blocked, expectedFor(LANDSCAPE))
   // faces under four bands, but the evidence stops before the cue ends: the bands that are not occupied could not be
   // certified, so the cue is not "blocked" (a band might still be free) - it needs review, and is not drawn
-  const partial = collectFaceEvidenceStream([sealedWindow({ start: 0, end: 110, rowsAt: (frame) => (frame === 105 ? rows.slice(0, 4) : [FAR]) })], expectation())
+  const partial = collectFaceSourceEvidenceStream([sealedSourceWindow({ start: 0, end: 110, rowsAt: (frame) => (frame === 105 ? rows.slice(0, 4) : [FAR]) })], sourceExpectation({ sourceDurationFrames: DURATION }))
   const review = plan(LANDSCAPE, [CUE_A], { evidence: evidenceOf(partial) })
   const reviewDecision = subtitleAnchorDecisionFor(review, 'cue-a')
   const states = Object.values(reviewDecision.bandAssessments).map((entry) => entry.face.state)

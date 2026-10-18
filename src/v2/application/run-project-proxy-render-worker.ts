@@ -9,7 +9,7 @@ import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { validateRenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
 import { planCaptionPlacement, plannedCaptionsOverKeptFrames } from './plan-caption-placement.ts'
-import type { FaceWindowEvidenceReader } from './ports/face-window-evidence-reader.ts'
+import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
 import { evaluateCaptionPixels, type CaptionPixelIssueV1 } from '../domain/caption-pixel-verdict.ts'
 import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
@@ -69,7 +69,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
    * W65. The sealed face windows of the Version being rendered. Optional: without it no source has evidence, so every band
    * over the picture is unknown and its cue is not drawn.
    */
-  faceEvidence?: FaceWindowEvidenceReader
+  faceEvidence?: FaceSourceWindowEvidenceReader
   /**
    * W65. Measures, on the delivered MP4, where the captions the plan placed really are, against the same render without the burned
    * cues. Optional: a deployment without it ships the plan's decision unverified in pixels. When it is wired and a plan draws a
@@ -278,7 +278,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
       }))
       const { placementPlan } = await planCaptionPlacement({ clock, ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}) }, {
-        workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
+        workspaceId: operation.workspaceId, projectId: context.projectId,
         format: source.format as OutputAspectRatio,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
         editPlan: source.editPlan, clips, ...(composition ? { composition } : {}),
@@ -294,7 +294,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         // coverage: that comes from the sealed face windows of this Version, or the cue is not drawn.
         ...(source.trustedOcr ? { trustedOcr: source.trustedOcr } : {}),
         primarySourceArtifactId: source.sourceArtifactId,
-        faceEvidenceAllowed: !context.renderableSnapshot,
         // W65b. The proxy is what the final is approved from, so it plans under the final's rule: a cue that cannot be certified
         // is left out and LISTED (a warning the reviewer acknowledges), instead of making the whole proxy unapprovable.
         uncertifiedCues: 'omit-and-list',

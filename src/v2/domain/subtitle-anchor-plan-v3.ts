@@ -35,7 +35,8 @@ import type { SubtitleAnchor } from './subtitle-system.ts'
  */
 export const FACE_CLEARANCE_MEANING =
   'free-certified: no trusted detection overlaps the band in the sampled evidence; not a statement that no face is present' as const
-export const FACE_CLEARANCE_EVIDENCE_SCHEMA = 'face-clearance-evidence/v1' as const
+// v2 (W65b): the evidence streams are keyed by SOURCE frames (and may be explicitly unavailable); v1 streams were keyed by the timeline.
+export const FACE_CLEARANCE_EVIDENCE_SCHEMA = 'face-clearance-evidence/v2' as const
 
 export type SubtitleAnchorBandAssessmentV1 = Readonly<{
   face: BandFaceClearanceV1
@@ -60,10 +61,15 @@ export type FaceClearanceEvidenceV1 = Readonly<{
   projectionHash: string | null
   streams: readonly Readonly<{
     sourceArtifactId: string
-    streamHash: string
-    timelineFps: Readonly<{ num: number; den: number }>
+    /** `null` when no stream could be used for this source; `unavailableReason` then says why (never a silent absence). */
+    streamHash: string | null
+    sourceSha256: string | null
+    /** The frame domain of every frame number in this entry and in the plan's `sourceRange`s. */
+    frameDomain: 'source'
+    sourceFps: Readonly<{ num: number; den: number }> | null
+    unavailableReason: string | null
     trustedEnvelopeHashes: readonly string[]
-    untrusted: readonly Readonly<{ envelopeHash: string; startFrame: number; endFrame: number; reasons: readonly string[] }>[]
+    untrusted: readonly Readonly<{ envelopeHash: string; startSourceFrame: number; endSourceFrame: number; reasons: readonly string[] }>[]
   }>[]
   evidenceHash: string
 }>
@@ -79,13 +85,20 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const STATES = Object.freeze(['free-certified', 'occupied', 'unknown'] as const)
 
 function buildFaceClearanceEvidence(projection: Readonly<CaptionProjection> | null, evidence: readonly FaceEvidenceForSource[]): FaceClearanceEvidenceV1 {
-  const streams = Object.freeze(evidence.map((entry) => Object.freeze({
+  const streams = Object.freeze(evidence.map((entry) => Object.freeze(entry.stream === null ? {
+    sourceArtifactId: entry.sourceArtifactId, streamHash: null, sourceSha256: null, frameDomain: 'source' as const, sourceFps: null,
+    unavailableReason: entry.unavailableReason, trustedEnvelopeHashes: Object.freeze([] as string[]),
+    untrusted: Object.freeze([] as { envelopeHash: string; startSourceFrame: number; endSourceFrame: number; reasons: readonly string[] }[]),
+  } : {
     sourceArtifactId: entry.sourceArtifactId,
     streamHash: entry.stream.streamHash,
-    timelineFps: Object.freeze({ ...entry.stream.timelineFps }),
+    sourceSha256: entry.stream.sourceSha256,
+    frameDomain: 'source' as const,
+    sourceFps: Object.freeze({ ...entry.stream.sourceFps }),
+    unavailableReason: null,
     trustedEnvelopeHashes: Object.freeze(entry.stream.trustedWindows.map((window) => window.envelopeHash).toSorted()),
     untrusted: Object.freeze(entry.stream.untrusted.map((item) => Object.freeze({
-      envelopeHash: item.envelopeHash, startFrame: item.startFrame, endFrame: item.endFrame, reasons: Object.freeze([...item.reasons]),
+      envelopeHash: item.envelopeHash, startSourceFrame: item.startSourceFrame, endSourceFrame: item.endSourceFrame, reasons: Object.freeze([...item.reasons]),
     }))),
   })).toSorted((left, right) => left.sourceArtifactId.localeCompare(right.sourceArtifactId)))
   const body = Object.freeze({
@@ -413,10 +426,17 @@ export function validateSubtitleAnchorPlanV3(plan: Readonly<SubtitleAnchorPlanV3
   assertDomain(SHA256.test(evidenceHash) && evidenceHash === calculateCanonicalHash(evidenceBody), 'INVALID_RENDER_INPUT', 'Subtitle anchor face clearance evidence hash is inconsistent')
   const streamIds = new Set<string>()
   for (const stream of evidence.streams) {
+    const available = stream.streamHash !== null
     assertDomain(
-      ID.test(stream.sourceArtifactId) && !streamIds.has(stream.sourceArtifactId) && SHA256.test(stream.streamHash) &&
+      ID.test(stream.sourceArtifactId) && !streamIds.has(stream.sourceArtifactId) && stream.frameDomain === 'source' &&
+      (available
+        ? SHA256.test(stream.streamHash!) && typeof stream.sourceSha256 === 'string' && SHA256.test(stream.sourceSha256) &&
+          stream.sourceFps !== null && Number.isSafeInteger(stream.sourceFps.num) && Number.isSafeInteger(stream.sourceFps.den) &&
+          stream.sourceFps.num > 0 && stream.sourceFps.den > 0 && stream.unavailableReason === null
+        : stream.sourceSha256 === null && stream.sourceFps === null && typeof stream.unavailableReason === 'string' &&
+          stream.unavailableReason.length > 0 && stream.trustedEnvelopeHashes.length === 0 && stream.untrusted.length === 0) &&
       stream.trustedEnvelopeHashes.every((hash) => SHA256.test(hash)) &&
-      stream.untrusted.every((item) => SHA256.test(item.envelopeHash) && Number.isSafeInteger(item.startFrame) && Number.isSafeInteger(item.endFrame)),
+      stream.untrusted.every((item) => SHA256.test(item.envelopeHash) && Number.isSafeInteger(item.startSourceFrame) && Number.isSafeInteger(item.endSourceFrame)),
       'INVALID_RENDER_INPUT', 'Subtitle anchor face evidence stream identity is invalid',
     )
     streamIds.add(stream.sourceArtifactId)
@@ -465,6 +485,12 @@ export function validateSubtitleAnchorPlanV3(plan: Readonly<SubtitleAnchorPlanV3
           evaluation.startFrame === cursor && evaluation.endFrame > evaluation.startFrame &&
           (evaluation.clearanceHash === null || SHA256.test(evaluation.clearanceHash)) &&
           (evaluation.kind === 'face-clearance' || evaluation.clearanceHash === null) &&
+          (evaluation.kind === 'face-clearance'
+            ? evaluation.sourceRange !== null && typeof evaluation.sourceRange === 'object' &&
+              Number.isSafeInteger(evaluation.sourceRange.startFrame) && Number.isSafeInteger(evaluation.sourceRange.endFrame) &&
+              evaluation.sourceRange.startFrame >= 0 &&
+              evaluation.sourceRange.endFrame - evaluation.sourceRange.startFrame === evaluation.endFrame - evaluation.startFrame
+            : evaluation.sourceRange === null) &&
           (evaluation.kind !== 'geometry-outside-foreground' || evaluation.state === 'free-certified') &&
           (evaluation.kind === 'geometry-outside-foreground' || evaluation.kind === 'face-clearance' || evaluation.state === 'unknown') &&
           (evaluation.sourceArtifactId === null || ID.test(evaluation.sourceArtifactId)),

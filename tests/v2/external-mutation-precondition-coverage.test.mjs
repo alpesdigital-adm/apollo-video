@@ -427,6 +427,9 @@ const coverage = Object.freeze({
   'apollo.projects.face-window-operations.create': {
     mode: 'idempotent-create', evidence: 'W62 body contains only projectVersionId, sourceArtifactId and a bounded window; server resolves source SHA, immutable edit snapshot, current rights, the cadence and the actor-bound Idempotency-Key before admission',
   },
+  'apollo.projects.face-source-windows.create': {
+    mode: 'idempotent-create', evidence: 'W65b body contains only sourceArtifactId and a bounded window of source frames; server resolves the attached source, its SHA, the integer frame rate, current rights for the project locale, the cadence and the actor-bound Idempotency-Key before admission',
+  },
   'apollo.media.segments.create': {
     mode: 'natural-idempotent-create', evidence: 'content-addressed segment identity and hash converge while the serializable transaction rechecks immutable source duration and optional parent bounds',
   },
@@ -826,7 +829,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 76,
+    'idempotent-create': 77,
     'identity-bound-action': 11,
     'natural-idempotent-create': 10,
     'state-machine-action': 20,

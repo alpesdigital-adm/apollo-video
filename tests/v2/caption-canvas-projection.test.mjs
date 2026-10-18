@@ -15,7 +15,11 @@ import { buildReframeCropFilter } from '../../src/v2/infrastructure/media/ffmpeg
 const SOURCE = Object.freeze({ artifactId: 'source-1', width: 1280, height: 720 })
 const PORTRAIT = Object.freeze({ width: 540, height: 960 })
 const LANDSCAPE = Object.freeze({ width: 960, height: 540 })
-const clip = (overrides = {}) => ({ id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: 300, ...overrides })
+// The clip plays its source from the same frame it starts on the timeline, at speed 1, unless a test says otherwise (W65b).
+const clip = (overrides = {}) => {
+  const base = { id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: 300, ...overrides }
+  return { sourceInFrame: base.timelineInFrame, sourceOutFrame: base.timelineOutFrame, rate: 1, ...base }
+}
 const projection = (canvas, clips = [clip()], extra = {}) => createCaptionProjection({ layout: { canvas, ...extra }, sources: [SOURCE], clips })
 const near = (actual, expected, tolerance, label) => assert.ok(Math.abs(actual - expected) <= tolerance, `${label}: ${actual} vs ${expected}`)
 
@@ -33,6 +37,13 @@ test('the staging frame is the largest video source, first one on a tie, and the
   assert.notEqual(projection(PORTRAIT).projectionHash,
     projection(PORTRAIT, [clip()], { composition: { foregroundScale: 0.9, verticalPosition: 0.5 } }).projectionHash)
   assert.throws(() => createCaptionProjection({ layout: { canvas: PORTRAIT }, sources: [SOURCE], clips: [clip({ sourceArtifactId: 'missing' })] }), /invalid/i)
+  // W65b: where the clip plays in its SOURCE is part of the projection's identity, and a clip that does not say is refused
+  assert.notEqual(projection(PORTRAIT).projectionHash, projection(PORTRAIT, [clip({ sourceInFrame: 40, sourceOutFrame: 340 })]).projectionHash)
+  assert.notEqual(projection(PORTRAIT).projectionHash, projection(PORTRAIT, [clip({ rate: 2 })]).projectionHash)
+  for (const broken of [{ sourceInFrame: undefined }, { sourceOutFrame: undefined }, { rate: undefined }, { sourceInFrame: -1 },
+    { sourceOutFrame: 0, sourceInFrame: 0 }, { rate: 0 }, { rate: Number.NaN }, { sourceInFrame: 1.5 }]) {
+    assert.throws(() => createCaptionProjection({ layout: { canvas: PORTRAIT }, sources: [SOURCE], clips: [clip(broken)] }), /does not say where it plays/i, JSON.stringify(broken))
+  }
   assert.throws(() => createCaptionProjection({ layout: { canvas: PORTRAIT }, sources: [SOURCE],
     clips: [clip(), clip({ id: 'clip-2', timelineInFrame: 100, timelineOutFrame: 200 })] }), /overlaps/i)
 })

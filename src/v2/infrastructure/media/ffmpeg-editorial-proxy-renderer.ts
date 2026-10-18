@@ -572,6 +572,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
           clips: input.clips.map((clip) => ({
             id: clip.id, sourceArtifactId: clip.sourceArtifactId,
             timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+            sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame, rate: clip.rate,
             ...(clip.crop ? { crop: clip.crop } : {}),
             ...(reframeRangeByClipId.has(clip.id) ? { reframe: reframeRangeByClipId.get(clip.id)! } : {}),
           })),

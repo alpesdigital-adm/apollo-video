@@ -17,7 +17,7 @@ import { createEditorialAudioTimelineHash } from '../../src/v2/domain/production
 import { subtitleAnchorDecisionFor } from '../../src/v2/domain/subtitle-anchor-plan.ts'
 import { FfmpegCaptionPixelCritic } from '../../src/v2/infrastructure/media/ffmpeg-caption-pixel-critic.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
-import { sealedWindow } from './helpers/face-envelope-v2.mjs'
+import { sealedSourceWindow } from './helpers/face-source-envelope-v3.mjs'
 
 /**
  * W65 pixel proofs, on the real renderer and real FFmpeg, in both canvases.
@@ -108,11 +108,11 @@ async function world(name, { format, master, marker, composition, evidence, veto
   const clip = Object.freeze({ id: 'clip-1', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: FRAMES, timelineInFrame: 0, timelineOutFrame: FRAMES, rate: 1 })
   const faceRow = [0.9, marker.x / master.width, marker.y / master.height, (marker.x + marker.w) / master.width, (marker.y + marker.h) / master.height]
   const envelope = evidence === 'marker' || evidence === 'clean'
-    ? sealedWindow({ start: 0, end: FRAMES, timelineDurationFrames: FRAMES, rowsAt: () => [evidence === 'marker' ? faceRow : [0.9, 0, 0, 0.02, 0.02]] })
+    ? sealedSourceWindow({ start: 0, end: FRAMES, rowsAt: () => [evidence === 'marker' ? faceRow : [0.9, 0, 0, 0.02, 0.02]] })
     : evidence === 'everywhere'
-      ? sealedWindow({ start: 0, end: FRAMES, timelineDurationFrames: FRAMES, rowsAt: () => [[0.9, 0, 0, 1, 1]] })
+      ? sealedSourceWindow({ start: 0, end: FRAMES, rowsAt: () => [[0.9, 0, 0, 1, 1]] })
       : null
-  const reader = { async listWindows() { return envelope ? [{ envelope }] : [] } }
+  const reader = { async listSourceWindows() { return envelope ? [{ envelope }] : [] } }
   let placementAssets, placementElements = []
   if (logo) {
     const logoPath = join(root, 'logo.png')
@@ -123,11 +123,11 @@ async function world(name, { format, master, marker, composition, evidence, veto
     placementAssets = [{ elementId: 'logo-1', path: logoPath, sha256 }]
   }
   const planned = await planCaptionPlacement({ faceEvidence: reader, clock: () => new Date('2026-10-18T12:00:00.000Z') }, {
-    workspaceId: 'workspace-1', projectId: 'project-1', projectVersionId: 'version-1', format, canvas,
+    workspaceId: 'workspace-1', projectId: 'project-1', format, canvas,
     editPlan: { fps: FPS, durationFrames: FRAMES, videoTracks: [{ kind: 'base-video', clips: [clip] }] }, clips: [clip], ...(composition ? { composition } : {}),
     renderSources: [{ artifactId: 'source-1', sha256: 'b'.repeat(64), mediaType: 'video', probe: { width: master.width, height: master.height } }],
     subtitleCues: [{ id: CUE.id, startFrame: CUE.startFrame, endFrame: CUE.endFrame }], subtitlePresetId: PRESET_ID,
-    placementElements, primarySourceArtifactId: 'source-1', faceEvidenceAllowed: true })
+    placementElements, primarySourceArtifactId: 'source-1' })
   const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
   const base = {
     renderKind: 'proxy', sources: [{ artifactId: 'source-1', path: sourcePath, mediaType: 'video', colorPipelineCompilation: colorCompilation('source-1') }],
