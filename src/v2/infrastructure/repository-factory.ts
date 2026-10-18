@@ -507,6 +507,7 @@ import { FfmpegOpenvinoFaceVideoAnalyzer } from './perception/ffmpeg-openvino-fa
 import { OpenvinoFace0204Detector } from './perception/openvino-face0204-detector.ts'
 import { FaceRuntimeInventory } from './perception/face-runtime-inventory.ts'
 import { PrismaFaceWindowEnvelopeRepository } from './prisma/face-window-envelope-repository.ts'
+import { FfmpegCaptionPixelCritic } from './media/ffmpeg-caption-pixel-critic.ts'
 import { faceWorkerPlatformAccepted } from '../domain/face-producer-registry.ts'
 import { YunetCpuFaceDetector } from './perception/yunet-cpu-face-detector.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
@@ -2802,6 +2803,10 @@ export function createProjectProxyRenderWorker(
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
     // W65. The sealed face windows the caption planner reads (scoped to the workspace, project, Version and source).
     faceEvidence: createFaceWindowEnvelopeRepository(),
+    // W65. The captions the plan placed are measured on the delivered pixels. No independent face veto detector is wired
+    // (the candidate's licence is pending), so every placed cue also carries FACE_PIXEL_CHECK_UNAVAILABLE: a warning that never
+    // turns an unknown into a pass.
+    captionPixelCritic: new FfmpegCaptionPixelCritic(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
     // F4.014. The colour verdict is taken on the bytes this worker just wrote
     // and lands on the review it is about to persist. Assembled here because it
     // needs the three things a worker has no business knowing: where FFmpeg is,

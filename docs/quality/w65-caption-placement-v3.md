@@ -66,7 +66,11 @@ Renderer 1.16.0, receita de proxy 1.17.0, receita de final 1.12.0: a mesma lista
 - Puras: projeção (`caption-canvas-projection.test.mjs`), claridade por banda (`caption-face-clearance.test.mjs`), plano v3 e validador
   (`subtitle-anchor-plan-v3.test.mjs`), planejador (`plan-caption-placement.test.mjs`), workers de proxy e de final.
 - PostgreSQL (harness supervisionado, não roda no CI): `tests/v2/prisma-caption-placement.integration.mjs`.
-- Pixels reais (FFmpeg, 9:16 e 16:9): ver a seção de evidência ao final do trabalho.
+- Pixels reais (FFmpeg real, renderer real, 9:16 e 16:9): `tests/v2/caption-placement-pixels.integration.mjs` - 11 cenários (rosto baixo,
+  rosto + logo desenhado, imagem rebaixada e reduzida por `composition`, faixa 16:9 sobre 9:16, rosto cobrindo o quadro, ausência de janela,
+  e a mutação em que a evidência errada leva a legenda sobre o rosto e o crítico a pega). O oráculo é código próprio: acha a imagem pela
+  moldura verde, o rosto pela cor dentro dela e a legenda pelos glifos, sem importar o crítico; a projeção é conferida contra o retângulo da
+  imagem e contra o rosto medidos.
 
 ## 7. Limites declarados
 

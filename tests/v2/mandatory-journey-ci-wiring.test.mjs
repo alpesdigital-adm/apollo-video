@@ -715,6 +715,7 @@ const W66_SUPERVISED_PG = 'W66 PostgreSQL proof that runs only under the local s
 const W62_SUPERVISED_PG = 'W62 PostgreSQL proof of the V9 face window profile; written but not yet run, it needs a supervised disposable cluster with the face_window_v9_profile migration applied; not a hosted CI step until a supervised run has passed'
 const W62_TSX_COMPOSITION = 'W62 composition proof of the V9 window worker; it loads the composition root, which only runs under tsx, so it is a local script and not part of the default node --test run'
 const W65_SUPERVISED_PG = 'W65 PostgreSQL proof of the caption placement over real sealed face windows; it needs a supervised disposable cluster with the face_window_v9_profile migration applied and the V9 window worker stand-in; not a hosted CI step until the W62 supervised proof has a hosted counterpart'
+const W65_PIXELS = 'W65 pixel proofs of the caption placement on the real renderer and real FFmpeg (both canvases, delivered-versus-control footprints); they use the pinned ffmpeg-static build and libass fonts of the supervised local runner and have no hosted counterpart yet'
 const W69_PINNED_TOOLCHAIN = 'W69 subtitle clock proof that needs an externally pinned FFmpeg/font toolchain or a real Chromium and has no download or skip fallback; local only until pinned in hosted CI'
 
 /**
@@ -744,6 +745,7 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/prisma-face-window.integration.mjs', reason: W62_SUPERVISED_PG, citedBy: ['docs/quality/w62-v9-runtime.md'] },
   { file: 'tests/v2/face-window-composition.integration.mjs', reason: W62_TSX_COMPOSITION, citedBy: ['docs/quality/w62-v9-runtime.md'] },
   { file: 'tests/v2/prisma-caption-placement.integration.mjs', reason: W65_SUPERVISED_PG, citedBy: ['docs/quality/w65-caption-placement-v3.md'] },
+  { file: 'tests/v2/caption-placement-pixels.integration.mjs', reason: W65_PIXELS, citedBy: ['docs/quality/w65-caption-placement-v3.md'] },
   {
     file: 'tests/v2/prisma-face-producer-http.integration.mjs',
     reason: 'W61 diagnostic face HTTP requires the licensed, hash-pinned development video/landing/lineage, YuNet model/license and local Python/OpenCV runtime; local result face-http-resume-v1-39bfb5da SHA256 1fa3c5960fdc2ce7bb9d7ee4cd72bc1c51fff76b10e878cfec0787f828be2fb9 is a controlled proof, not CI coverage or approved facial quality. Face producer integration is wired only for three offline audit/fixture cases; its PG and runner cases are likewise local, with faceSafety unknown and holdout closed.',

@@ -10,6 +10,8 @@ import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { validateRenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
 import { planCaptionPlacement, plannedCaptionsOverKeptFrames } from './plan-caption-placement.ts'
 import type { FaceWindowEvidenceReader } from './ports/face-window-evidence-reader.ts'
+import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
+import { evaluateCaptionPixels, type CaptionPixelIssueV1 } from '../domain/caption-pixel-verdict.ts'
 import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
 import { requireSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../domain/subtitle-system.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
@@ -68,6 +70,12 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
    * over the picture is unknown and its cue is not drawn.
    */
   faceEvidence?: FaceWindowEvidenceReader
+  /**
+   * W65. Measures, on the delivered MP4, where the captions the plan placed really are, against the same render without the burned
+   * cues. Optional: a deployment without it ships the plan's decision unverified in pixels. When it is wired and a plan draws a
+   * cue, its issues land on the review; if it cannot run, that is a warning, never a pass.
+   */
+  captionPixelCritic?: CaptionPixelCritic
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -331,7 +339,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             byteSize: rangeReuse.byteSize,
           })
         : undefined
-      const render = () => dependencies.renderer.render({
+      const renderRequest: Parameters<typeof dependencies.renderer.render>[0] = {
         operationId: operation.id,
         renderKind: 'proxy',
         sources: source.renderSources.map((asset, index) => ({
@@ -355,7 +363,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           },
         } : {}),
         signal: abortController.signal,
-      })
+      }
+      const render = () => dependencies.renderer.render(renderRequest)
       const rendered = dependencies.telemetry
         ? await runPublicOperationSpan({
             telemetry: dependencies.telemetry,
@@ -443,6 +452,30 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
               }))
             }
           }
+        }
+      }
+      // ---- W65. Where the captions really are, measured on the bytes that were rendered ----
+      // Only a plan that draws a cue is worth the control render (the same input without the burned cues). The verdict becomes
+      // issues on the review; it never edits the frames.
+      const captionPixelIssues: CaptionPixelIssueV1[] = []
+      const drawsCaptions = placementPlan.subtitleAnchorPlan?.decisions.some((decision) => decision.anchor !== null) === true
+      if (dependencies.captionPixelCritic && drawsCaptions) {
+        const controlOperationId = `${operation.id}-caption-control`
+        try {
+          const verification = await dependencies.captionPixelCritic.verify({
+            plan: placementPlan, deliveredPath: rendered.outputPath, signal: abortController.signal,
+            renderControl: async () => {
+              const control = await dependencies.renderer.render({ ...renderRequest, operationId: controlOperationId, subtitleCues: [] })
+              return { path: control.outputPath }
+            },
+          })
+          captionPixelIssues.push(...verification.issues)
+        } catch (error) {
+          // A critic that was wired and broke leaves the proxy waiting for a person; it does not fail a render that was made.
+          if (abortController.signal.aborted) throw error
+          captionPixelIssues.push(...evaluateCaptionPixels({ plan: placementPlan, samples: [], faceVeto: 'unavailable', measurementFailed: true }))
+        } finally {
+          await dependencies.renderer.cleanup(controlOperationId).catch(() => undefined)
         }
       }
       await enter('persisting')
@@ -563,6 +596,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           // The anchor decision reports into the variant verdict: a cue that had no safe band
           // blocks this output instead of shipping a subtitle over a face.
           subtitleAnchorPlan: placementPlan.subtitleAnchorPlan,
+          ...(captionPixelIssues.length ? { captionPixelIssues } : {}),
         },
       })
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')

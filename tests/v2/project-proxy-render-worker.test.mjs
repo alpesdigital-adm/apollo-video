@@ -1572,3 +1572,63 @@ test('W65 proxy worker: a reused range cannot carry a caption the plan draws, so
   assert.equal(suppressed.rendered.rangeReuse.artifactId, 'artifact-project-proxy-base')
   assert.ok(suppressed.manifest.sources.some((entry) => entry.role === 'reused-proxy-range'))
 })
+
+test('W65 proxy worker: the pixel critic is run on a plan that draws a cue, against a caption-free control render, and its verdict lands on the review', async () => {
+  const requests = []
+  const rendered = []
+  const cleaned = []
+  const operations = createOperations(portraitMasterSource())
+  const base = dependencies(operations, {
+    faceEvidence: { async listWindows() { return [{ envelope: faceWindow(() => [FAR_FACE]) }] } },
+    captionPixelCritic: {
+      async verify(request) {
+        requests.push(request)
+        const control = await request.renderControl()
+        return { samples: [], issues: [{ code: 'CAPTION_PLACEMENT_MISMATCH', severity: 'hard', cueId: 'cue-1',
+          evidenceRange: { startFrame: 10, endFrame: 11 }, elementIds: ['subtitle:cue-1'], evidenceIds: [], message: `controlled mismatch ${control.path}` }] }
+      },
+    },
+  })
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() { return portraitMasterSource() } }
+  const originalRender = base.deps.renderer.render
+  base.deps.renderer = {
+    async render(input) { rendered.push(input); return originalRender(input) },
+    async cleanup(operationId) { cleaned.push(operationId) },
+  }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-w65-pixel-critic')
+  assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].plan.subtitleAnchorPlan.decisions[0].disposition, 'placed')
+  assert.equal(requests[0].deliveredPath.endsWith('project-proxy-worker-output.mp4'), true)
+  // the control is the same input without the burned cues, in its own work directory
+  assert.equal(rendered.length, 2)
+  assert.equal(rendered[0].subtitleCues.length, 1)
+  assert.equal(rendered[1].subtitleCues.length, 0)
+  assert.equal(rendered[1].operationId, 'operation-project-proxy-test-caption-control')
+  assert.deepEqual({ ...rendered[1], operationId: rendered[0].operationId, subtitleCues: rendered[0].subtitleCues, signal: undefined },
+    { ...rendered[0], signal: undefined })
+  assert.ok(cleaned.includes('operation-project-proxy-test-caption-control'))
+  const review = base.attachedReview()
+  assert.equal(review.status, 'blocked')
+  const issue = review.criticIssues.find((entry) => entry.code === 'CAPTION_PLACEMENT_MISMATCH')
+  assert.ok(issue && issue.severity === 'hard')
+  assert.equal(issue.placementPlanHash, requests[0].plan.placementPlanHash)
+})
+
+test('W65 proxy worker: no control render is paid for when the plan draws nothing, and a critic that breaks is a warning, not a failed render', async () => {
+  const quiet = []
+  const none = dependencies(createOperations(portraitMasterSource()), { captionPixelCritic: { async verify(request) { quiet.push(request); return { issues: [], samples: [] } } } })
+  none.deps.projects = { ...none.deps.projects, async readImmutableSource() { return portraitMasterSource() } }
+  assert.equal((await runNextProjectProxyRenderOperationService(none.deps)('worker-w65-pixel-critic-idle')).status, 'succeeded')
+  assert.equal(quiet.length, 0, 'every cue is withheld here (no face windows), so there is nothing to verify')
+
+  const broken = dependencies(createOperations(portraitMasterSource()), {
+    faceEvidence: { async listWindows() { return [{ envelope: faceWindow(() => [FAR_FACE]) }] } },
+    captionPixelCritic: { async verify() { throw new Error('W65_CONTROLLED_CRITIC_FAILURE') } },
+  })
+  broken.deps.projects = { ...broken.deps.projects, async readImmutableSource() { return portraitMasterSource() } }
+  assert.equal((await runNextProjectProxyRenderOperationService(broken.deps)('worker-w65-pixel-critic-broken')).status, 'succeeded')
+  const review = broken.attachedReview()
+  assert.equal(review.status, 'warning-ack-required')
+  assert.deepEqual(review.criticIssues.filter((entry) => entry.code === 'FACE_PIXEL_CHECK_UNAVAILABLE').map((entry) => entry.severity), ['warning'])
+})
