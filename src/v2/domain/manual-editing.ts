@@ -457,10 +457,17 @@ export function materializeManualEditPlan(input: {
     const timelineIn = Number(located.clip.timelineInFrame)
     const timelineOut = Number(located.clip.timelineOutFrame)
     assertDomain(frame > timelineIn && frame < timelineOut, 'INVALID_ARGUMENT', 'Trim must remain inside the clip')
+    // A clip whose audio was bound to its own range (a replaced picture keeps the original sound) trims the same
+    // source span from both, so the sealed audio range keeps matching the picture's span and rate.
+    const audioBound = located.clip.audioSourceArtifactId !== undefined
     if (operation.edge === 'start') {
-      located.clip.sourceInFrame = Number(located.clip.sourceInFrame) + frame - timelineIn
+      const shift = frame - timelineIn
+      located.clip.sourceInFrame = Number(located.clip.sourceInFrame) + shift
+      if (audioBound) located.clip.audioSourceInFrame = Number(located.clip.audioSourceInFrame) + shift
     } else {
-      located.clip.sourceOutFrame = Number(located.clip.sourceOutFrame) - (timelineOut - frame)
+      const shift = timelineOut - frame
+      located.clip.sourceOutFrame = Number(located.clip.sourceOutFrame) - shift
+      if (audioBound) located.clip.audioSourceOutFrame = Number(located.clip.audioSourceOutFrame) - shift
     }
   } else if (operation.kind === 'split') {
     const frame = Math.round(snapTimelineMs(operation.atMs, points) / 1000 * fps)
@@ -468,11 +475,14 @@ export function materializeManualEditPlan(input: {
     const timelineOut = Number(located.clip.timelineOutFrame)
     assertDomain(frame > timelineIn && frame < timelineOut, 'INVALID_ARGUMENT', 'Split must be inside the clip')
     const sourceFrame = Number(located.clip.sourceInFrame) + frame - timelineIn
+    // The audio of a replaced clip is split at the very same offset, so each half keeps its own matching audio range.
+    const audioBound = located.clip.audioSourceArtifactId !== undefined
+    const audioFrame = audioBound ? Number(located.clip.audioSourceInFrame) + frame - timelineIn : 0
     located.clips.splice(
       located.clipIndex,
       1,
-      { ...located.clip, id: `${located.clip.id}:a`, sourceOutFrame: sourceFrame },
-      { ...located.clip, id: `${located.clip.id}:b`, sourceInFrame: sourceFrame },
+      { ...located.clip, id: `${located.clip.id}:a`, sourceOutFrame: sourceFrame, ...(audioBound ? { audioSourceOutFrame: audioFrame } : {}) },
+      { ...located.clip, id: `${located.clip.id}:b`, sourceInFrame: sourceFrame, ...(audioBound ? { audioSourceInFrame: audioFrame } : {}) },
     )
   } else if (operation.kind === 'move') {
     assertDomain(
