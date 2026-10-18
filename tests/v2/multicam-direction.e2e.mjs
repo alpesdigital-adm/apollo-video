@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -45,9 +46,11 @@ test(
     const { buildDirectableMulticamWorld, fixtureInstant, fixtureSeconds } = await import('./wave20-fixtures.mjs')
 
     const client = new PrismaClient()
-    const workspaceId = 'md-e2e-workspace'
-    const otherWorkspaceId = 'md-e2e-other-workspace'
-    const projectId = 'md-e2e-project'
+    // Every identity carries the run, so a second invocation in one database never meets the first one's workspace.
+    const run = randomUUID().replaceAll('-', '').slice(0, 12)
+    const workspaceId = `md-e2e-workspace-${run}`
+    const otherWorkspaceId = `md-e2e-other-workspace-${run}`
+    const projectId = `md-e2e-project-${run}`
     const sessionId = 'md-e2e-session'
     const at = (second) => new Date(Date.parse('2029-06-01T09:00:00.000Z') + second * 1_000)
 
@@ -391,13 +394,10 @@ test(
   'E2E-FR-150 the direction command writes a version, a plan and a Command that the database agrees with',
   { skip: RUN ? false : 'set APOLLO_MULTICAM_DIRECTION_E2E=1 with a migrated V2_DATABASE_URL' },
   async (t) => {
-    const { randomUUID } = await import('node:crypto')
-    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-    const { createMediaArtifactManifestV2, assertMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
+    const { assertMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
     const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
     const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
-    const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaCaptureSessionRepository } = await import('../../src/v2/infrastructure/prisma/capture-session-repository.ts')
     const { PrismaSyncDiagnosticRepository } = await import('../../src/v2/infrastructure/prisma/sync-diagnostic-repository.ts')
     const { PrismaCaptureProtocolRepository } = await import('../../src/v2/infrastructure/prisma/capture-protocol-repository.ts')
@@ -406,111 +406,53 @@ test(
     const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
     const { deriveMulticamEvidenceService, directMulticamSessionService } = await import('../../src/v2/application/multicam-direction.ts')
     const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
-    const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
-    const { createDesiredAction, createDesiredActionReference } = await import('../../src/v2/domain/desired-action.ts')
-    const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
+    const { calculateVersionHash } = await import('../../src/v2/application/version-hash.ts')
+    const { createProjectRow, registerRecording, seedBaseProjectVersion } = await import('./helpers/capture-journey.mjs')
+    const { RECORDING_ALLOWED_USES } = await import('./helpers/pg-output-world.mjs')
     const { buildDirectableMulticamWorld, fixtureSeconds } = await import('./wave20-fixtures.mjs')
 
     const client = new PrismaClient()
-    const workspaceId = 'md-journey-workspace'
-    const projectId = 'md-journey-project'
-    const sessionId = 'md-journey-session'
-    const versionId = 'md-journey-version-1'
-    const clientId = 'md-journey-client'
+    // Every identity carries the run. The project's Versions, Commands, snapshots and the recordings' manifests are sealed
+    // (append-only), so nothing is swept afterwards and a second invocation in one database must not meet the first one.
+    const run = randomUUID().replaceAll('-', '').slice(0, 12)
+    const workspaceId = `md-journey-workspace-${run}`
+    const projectId = `md-journey-project-${run}`
+    // Capture rows are keyed by ids that are global to the database (`<session>:v<n>`, `<session>:clock`, `<session>:d<n>`...).
+    const sessionId = `md-journey-session-${run}`
+    const versionId = `md-journey-version-1-${run}`
+    const clientId = `md-journey-client-${run}`
+    // The capture world names its tracks and source assets with this prefix, and a recording is its own artifact: the
+    // prefix keeps both unique to the run (the receipts persisted for them are named after the artifact verbatim).
+    const trackPrefix = `asset-${run}-`
+    const assetOf = (name) => `${trackPrefix}${name}`
     const at = (second) => new Date(Date.parse('2029-07-01T09:00:00.000Z') + second * 1_000)
-
-    // A project version names the Command that produced it and a Command names
-    // the version it was based on, so neither table can be emptied while the
-    // other still points at it. The two references are cleared first; this is
-    // the order a fresh reader gets wrong, which is why it is written down.
-    const clean = async () => {
-      await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-      await client.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } })
-      await client.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null } })
-      for (const table of [
-        client.v2MulticamAngleScoreComponent, client.v2MulticamAngleCandidate,
-        client.v2MulticamShotAlternative, client.v2MulticamShotDecision,
-        client.v2MulticamDirectionHead, client.v2MulticamDirection,
-        client.v2MulticamObservation, client.v2MulticamEvidenceSet,
-        client.v2SyncDiagnosticHead, client.v2SyncDiagnostic,
-        client.v2CaptureClockMap, client.v2CaptureTrackCoverage,
-        client.v2CaptureSessionClock, client.v2CaptureSyncEvidence,
-        client.v2CaptureSessionVersion, client.v2CaptureSessionHead,
-        client.v2CommandArtifactInvalidation, client.v2PublicEventOutbox,
-        client.v2EditCommand, client.v2ProjectVersion,
-        client.v2ProjectMediaAsset, client.v2ProjectSnapshot,
-        client.v2AssetRightsChange, client.v2AssetRightsSnapshot,
-        client.v2MediaArtifactManifest, client.v2MediaArtifact,
-        client.v2Project,
-      ]) {
-        await table.deleteMany({ where: { workspaceId } })
-      }
-    }
     t.after(async () => {
-      const cleanupErrors = []
-      try {
-        await clean()
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-      try {
-        await client.$disconnect()
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-      if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Multicam journey cleanup failed')
+      await client.$disconnect()
     })
-    await clean()
 
-    const world = buildDirectableMulticamWorld({ workspaceId, sessionId, projectId, endSecond: 60 })
+    const world = buildDirectableMulticamWorld({ workspaceId, sessionId, projectId, endSecond: 60, trackPrefix })
 
-    await new PrismaWorkspaceRepository(client).create(createWorkspace({
-      id: workspaceId, slug: workspaceId, name: 'Multicam journey', status: 'active', createdAt: at(0).toISOString(),
-    }))
-    await client.v2Project.create({
-      data: {
-        id: projectId, workspaceId, name: 'Multicam journey', status: 'reviewing-proxy',
-        objective: 'warming', format: '16:9', locale: 'pt-BR',
-        createdByType: 'api-client', createdById: clientId, createdAt: at(0), updatedAt: at(0),
-      },
+    // The project the way the product creates it: the creation Command, then one explicit 16:9 output variant.
+    await createProjectRow({
+      prisma: client, workspaceId, projectId, name: 'Multicam journey', objective: 'warming', format: '16:9', clientId, createdAt: at(0),
     })
-    // Controlled metadata, not physically measured recordings or an MP4 proof.
-    // Real readers require complete manifests and rights for each linked role.
+    // The recordings the way their ingest leaves them: artifact, manifest, project link and the sealed normalization receipt
+    // (a video also its editing proxy). Controlled metadata, not physically measured recordings or an MP4 proof; the
+    // readers below still require complete manifests, receipts and current rights for each linked role.
     const rightsRepository = new PrismaAssetRightsRepository(client)
+    const allowedUses = [...RECORDING_ALLOWED_USES]
     for (const track of world.session.tracks) {
       const artifactId = track.sourceAssetId
       const mediaType = ['microphone', 'master-audio', 'scratch-audio'].includes(track.role) ? 'audio' : 'video'
-      const artifactKey = `artifacts/${artifactId}.mp4`, artifactSha256 = 'b'.repeat(64)
-      const role = artifactId === 'asset-cam-a' ? 'source-master' : 'selected-insert'
-      const manifestId = `manifest-${artifactId}`
-      const manifest = createMediaArtifactManifestV2({
-        artifactKey, artifactSha256, byteSize: 4096, mediaType, container: 'mp4',
-        recipe: { id: 'capture-ingest', version: '1.0.0', parameters: { controlledFixture: 'multicam-direction', trackId: track.trackId } },
-        sources: [], probe: { duration: 60, fps: 30 },
+      const artifactKey = `artifacts/${artifactId}.mp4`
+      const artifactSha256 = calculateVersionHash({ artifactId })
+      const role = artifactId === assetOf('asset-cam-a') ? 'source-master' : 'selected-insert'
+      const registered = await registerRecording({
+        prisma: client, workspaceId, projectId, artifactId, artifactKey, mediaType, container: 'mp4',
+        sha256: artifactSha256, byteSize: 4096,
+        probe: mediaType === 'video' ? { width: 1280, height: 720, duration: 60, fps: 30 } : { duration: 60, fps: 30 },
+        role, originalFileName: `${artifactId}.mp4`, createdAt: at(0), recipeId: 'capture-ingest',
       })
-      await client.v2MediaArtifact.create({
-        data: {
-          id: artifactId, workspaceId, artifactKey,
-          sha256: artifactSha256, byteSize: BigInt(4096), mediaType, container: 'mp4',
-          status: 'available', createdAt: at(0),
-        },
-      })
-      await client.v2MediaArtifactManifest.create({
-        data: {
-          id: manifestId, workspaceId, artifactId, schemaVersion: manifest.schemaVersion,
-          manifestHash: manifest.manifestHash, recipeId: manifest.recipe.id, recipeVersion: manifest.recipe.version,
-          parametersHash: manifest.recipe.parametersHash, manifestJson: stableSerialize(manifest),
-          createdAt: at(0),
-        },
-      })
-      await client.v2ProjectMediaAsset.create({
-        data: {
-          id: randomUUID(), workspaceId, projectId, artifactId,
-          role,
-          originalFileName: `${artifactId}.mp4`, createdAt: at(0),
-        },
-      })
-      const allowedUses = [role === 'source-master' ? 'rendering' : 'editorial-reuse']
       const rightsResult = await setAssetRightsService({ repository: rightsRepository, clock: () => at(0),
         createId: () => `md-journey-rights-${artifactId}` })({
         workspaceId, artifactId, baseRevision: assetRightsRevision(artifactId, 0),
@@ -521,19 +463,16 @@ test(
       })
       const [storedArtifact, storedManifest, storedLink, storedRights] = await Promise.all([
         client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } }),
-        client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: manifestId } }),
+        client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: registered.manifestId } }),
         client.v2ProjectMediaAsset.findFirstOrThrow({ where: { workspaceId, projectId, artifactId } }),
         rightsRepository.findCurrent(workspaceId, artifactId),
       ])
       assert.deepEqual([storedArtifact.workspaceId, storedArtifact.artifactKey, storedArtifact.sha256,
         storedArtifact.byteSize, storedArtifact.mediaType, storedArtifact.container, storedArtifact.status],
       [workspaceId, artifactKey, artifactSha256, 4096n, mediaType, 'mp4', 'available'])
-      assert.deepEqual([storedManifest.workspaceId, storedManifest.artifactId, storedManifest.schemaVersion,
-        storedManifest.manifestHash, storedManifest.recipeId, storedManifest.recipeVersion, storedManifest.parametersHash],
-      [workspaceId, artifactId, manifest.schemaVersion, manifest.manifestHash, manifest.recipe.id,
-        manifest.recipe.version, manifest.recipe.parametersHash])
-      const storedBody = JSON.parse(storedManifest.manifestJson)
-      assertMediaArtifactManifest(storedBody); assert.deepEqual(storedBody, manifest)
+      assert.deepEqual([storedManifest.workspaceId, storedManifest.artifactId, storedManifest.manifestHash],
+        [workspaceId, artifactId, registered.manifestHash])
+      assertMediaArtifactManifest(JSON.parse(storedManifest.manifestJson))
       assert.equal(storedLink.role, role)
       assert.equal(storedRights.revision, rightsResult.revision)
       assert.equal(storedRights.snapshot.snapshotHash, rightsResult.snapshot.snapshotHash)
@@ -547,58 +486,13 @@ test(
       assert.deepEqual(storedRights.snapshot.allowedLocales, ['pt-BR'])
     }
 
-    const desiredActionRef = createDesiredActionReference(createDesiredAction({ objective: 'warming' }))
-    const baseClips = [{
-      id: 'clip-base-0001', sourceArtifactId: 'asset-cam-a',
-      sourceInFrame: 0, sourceOutFrame: 900, timelineInFrame: 0, timelineOutFrame: 900, rate: 1,
-    }]
-    const basePlan = {
-      schemaVersion: 2, state: 'compiled', id: `edit-plan-${versionId}`, projectVersionId: versionId,
-      storyPlanId: 'story-journey', treatmentPlanId: 'treatment-journey', directorRunId: 'director-run-journey',
-      fps: 30, durationFrames: 900,
-      sources: [{ id: 'asset-cam-a', artifactId: 'asset-cam-a', kind: 'video', durationSeconds: 60 }],
-      videoTracks: [{ id: 'track-primary-video', kind: 'base-video', clips: baseClips }],
-      overlayTracks: [], subtitleTracks: [], audioTracks: [], effectTracks: [], transitions: [],
-      markers: [], protectedElements: [], localeVariantRefs: [], formatVariantRefs: [],
-      lineageRefs: ['asset-cam-a'],
-      editorial: { commandType: 'source-ingest', exclusions: [], retainedSourceRanges: [] },
-      retimedTranscript: { sourceTranscriptId: 'transcript-journey', words: [] },
-      movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
-      subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 42 },
-      composition: {
-        layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
-        faceSafeFallback: [0.14, 0.08, 0.72, 0.56], subtitleSafeRegion: [0.08, 0.7, 0.84, 0.24],
-      },
-      director: { plannerVersion: 'journey-planner/v1', decisions: [], assumptions: [] },
-      desiredActionRef,
-      audioTimelineHash: createEditorialAudioTimelineHash({ fps: 30, clips: baseClips }),
-      createdAt: at(0).toISOString(),
-    }
-    for (const [kind, content] of [['brief', { kind: 'brief' }], ['policies', { kind: 'policies' }]]) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: `md-journey-snapshot-${kind}`, workspaceId, projectId, kind, schemaVersion: 1,
-          contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt: at(0),
-        },
-      })
-    }
-    await client.v2ProjectSnapshot.create({
-      data: {
-        id: 'md-journey-snapshot-edit-plan', workspaceId, projectId, kind: 'edit-plan', schemaVersion: 2,
-        contentJson: stableSerialize(basePlan), contentHash: calculateVersionHash(basePlan), createdAt: at(0),
-      },
+    // The Version the direction re-cuts: a real child Command of the project's head that adopts the source master's
+    // receipt and plays it whole (900 frames). Its hash is the one the fence in every request has to name.
+    const { baseHash } = await seedBaseProjectVersion({
+      prisma: client, workspaceId, projectId, versionId, clientId, objective: 'warming',
+      sourceArtifactId: assetOf('asset-cam-a'), fps: 30, durationFrames: 900, transcriptId: `transcript-journey-${run}`, createdAt: at(0),
     })
-    const baseHash = calculateVersionHash({ projectId, sequence: 1, editPlanHash: calculateVersionHash(basePlan) })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: versionId, workspaceId, projectId, sequence: 1,
-        briefSnapshotId: 'md-journey-snapshot-brief',
-        editPlanSnapshotId: 'md-journey-snapshot-edit-plan',
-        policiesSnapshotId: 'md-journey-snapshot-policies',
-        baseHash, createdBy: clientId, createdAt: at(0),
-      },
-    })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
+    const baseSequence = (await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: versionId } })).sequence
 
     // The session and its derivations, through the repositories Wave 18/19 own.
     const sessions = new PrismaCaptureSessionRepository(client)
@@ -627,16 +521,16 @@ test(
         async listLatestRunsForArtifacts({ sourceArtifactIds }) {
           return [
             {
-              runId: 'md-journey-diarization-a', sourceArtifactId: 'asset-mic-a', provider: 'fixture',
+              runId: 'md-journey-diarization-a', sourceArtifactId: assetOf('asset-mic-a'), provider: 'fixture',
               producedAt: at(3).toISOString(),
               segments: [{ segmentId: 'seg-1', ordinal: 0, speakerKey: 'cluster-a', startMs: 1000, endMs: 25000 }],
             },
             {
-              runId: 'md-journey-diarization-b', sourceArtifactId: 'asset-mic-b', provider: 'fixture',
+              runId: 'md-journey-diarization-b', sourceArtifactId: assetOf('asset-mic-b'), provider: 'fixture',
               producedAt: at(3).toISOString(),
               segments: [{ segmentId: 'seg-2', ordinal: 0, speakerKey: 'cluster-b', startMs: 25000, endMs: 50000 }],
             },
-          ].filter((run) => sourceArtifactIds.includes(run.sourceArtifactId))
+          ].filter((entry) => sourceArtifactIds.includes(entry.sourceArtifactId))
         },
       },
       visual: {
@@ -646,12 +540,12 @@ test(
             sampledFrameCount: 30,
             // 103 bps is what the production pass measures over a moving test
             // pattern; see multicam-visual-evidence.integration.mjs.
-            activityBps: window.trackId === 'track-screen' ? 103 : null,
+            activityBps: window.trackId === assetOf('track-screen') ? 103 : null,
             sharpnessBps: null,
             stabilityBps: 9000,
             exposureBps: 8500,
             method: 'fixture/signalstats',
-            evidenceRef: `media-artifact:${window.sourceArtifactId}:${window.sourceStartMs}-${window.sourceEndMs}`,
+            evidenceRef: `media-artifact:${window.sourceAssetId}:${window.sourceStartMs}-${window.sourceEndMs}`,
           }))
         },
       },
@@ -666,20 +560,99 @@ test(
       clock: () => at(4),
       evidenceWindowMs: 30000,
     })
+
+    // The fences INSIDE the commit transaction, which the service check hides. Every predicate in `commitOrReplay` could
+    // be deleted with this suite green if the only fence it exercised were the service-level one
+    // (`application/multicam-direction.ts`), which fires first and stops the request from ever reaching the
+    // transaction. The service builds the sealed bundle and hands it to `commitOrReplay`; this wrapper takes that real
+    // bundle and, BEFORE letting the real commit through, offers the repository variants of it whose world moved
+    // underneath them (the state a concurrent writer actually leaves). Each refusal happens before the transaction
+    // writes anything, and the row counts around them prove it. A sealed Version cannot be edited in place, so every
+    // contradiction is put in what the Command and its bundle claim, never in a stored row.
+    const countRows = async () => ({
+      versions: await client.v2ProjectVersion.count({ where: { workspaceId } }),
+      commands: await client.v2EditCommand.count({ where: { workspaceId } }),
+      snapshots: await client.v2ProjectSnapshot.count({ where: { workspaceId } }),
+    })
+    const withCommand = (input, patch) => ({
+      ...input,
+      bundle: { ...input.bundle, origin: { ...input.bundle.origin, command: patch(input.bundle.origin.command) } },
+    })
+    let captured = null
+    let fences = null
+    const guardedCommands = new Proxy(commands, {
+      get(target, property) {
+        if (property === 'commitOrReplay') {
+          return async (input) => {
+            captured = input
+            const before = await countRows()
+            const head = await client.v2Project.findUniqueOrThrow({ where: { id: projectId }, include: { currentVersion: true } })
+
+            // (a) the Command names a direction that is not the one stored. The direction lives in its own chain, so it
+            //     can be replaced between the service deriving it and this transaction opening.
+            const wrongDirection = await target.commitOrReplay({
+              ...input, directionEvidence: { ...input.directionEvidence, directionHash: 'e'.repeat(64) },
+            }).then(() => null, (error) => error)
+            assert.ok(wrongDirection, 'a Command compiled from a direction that is no longer stored was committed')
+            assert.equal(wrongDirection.code, 'PERSISTENCE_CONFLICT')
+            assert.match(wrongDirection.message, /not the one stored/)
+            assert.equal(wrongDirection.details.expectedDirectionHash, 'e'.repeat(64))
+
+            // (b) the project's head hash is not the one the Command was compiled against. The head's id did not change,
+            //     so the `updateMany` predicate at the end would still fire; only the version predicate at the top of the
+            //     transaction sees this.
+            const movedHash = await target.commitOrReplay(withCommand(input, (command) => ({ ...command, baseHash: 'd'.repeat(64) })))
+              .then(() => null, (error) => error)
+            assert.ok(movedHash, 'a head whose hash moved was committed over')
+            assert.equal(movedHash.code, 'VERSION_CONFLICT')
+            assert.equal(movedHash.details.currentVersionId, head.currentVersion.id)
+            assert.equal(movedHash.details.currentBaseHash, head.currentVersion.baseHash, 'the refusal says what is current')
+
+            // (c) the render outputs of the base version are no longer the ones the Command's impact was computed against,
+            //     so the invalidations it carries would name artifacts nobody has to invalidate, or miss ones somebody does.
+            const staleOutputs = await target.commitOrReplay(withCommand(input, (command) => ({
+              ...command,
+              payload: {
+                ...command.payload,
+                impact: {
+                  ...command.payload.impact,
+                  affectedArtifacts: [{
+                    artifactId: 'md-journey-vanished-proxy', kind: 'proxy',
+                    sourceVersionId: command.baseVersionId, variantId: '16:9',
+                  }],
+                },
+              },
+            })))
+              .then(() => null, (error) => error)
+            assert.ok(staleOutputs, 'a Command whose impact describes outputs the project no longer has was committed')
+            assert.equal(staleOutputs.code, 'VERSION_CONFLICT')
+            assert.match(staleOutputs.message, /render outputs changed/)
+
+            // Nothing above committed.
+            assert.deepEqual(await countRows(), before, 'a refused fence left rows behind')
+            fences = { wrongDirection, movedHash, staleOutputs }
+            return target.commitOrReplay(input)
+          }
+        }
+        const member = target[property]
+        return typeof member === 'function' ? member.bind(target) : member
+      },
+    })
+
     let issued = 0
     const execute = directMulticamSessionService({
       sessions,
       diagnostics,
       protocols: new PrismaCaptureProtocolRepository(client),
       directions,
-      commands,
+      commands: guardedCommands,
       deriveEvidence,
       clock: () => at(10),
-      createId: (prefix) => `${prefix}-md-journey-${(issued += 1)}`,
+      createId: (prefix) => `${prefix}-md-journey-${run}-${(issued += 1)}`,
       createEventId: () => randomUUID(),
     })
     const identity = {
-      clientId, credentialId: 'md-journey-credential', workspaceId, environment: 'sandbox',
+      clientId, credentialId: `md-journey-credential-${run}`, workspaceId, environment: 'sandbox',
       delegatedUserId: 'md-journey-member', delegatedIdentityId: 'md-journey-identity', workspaceRole: 'administrator',
     }
     const actor = {
@@ -695,9 +668,12 @@ test(
       actor, idempotency: { clientId, key: 'md-journey-idem-1' },
     }
 
+    const versionsBefore = await client.v2ProjectVersion.count({ where: { workspaceId } })
+    const commandsBefore = await client.v2EditCommand.count({ where: { workspaceId } })
     const result = await execute(request)
+    assert.ok(fences, 'the service never reached the repository commit, so no fence inside it was exercised')
     assert.equal(result.replayed, false)
-    assert.equal(result.version.sequence, 2)
+    assert.equal(result.version.sequence, baseSequence + 1)
     assert.ok(result.editPlan.sources.length >= 2, 'the stored plan really is multi-source')
     assert.ok(released.length > 0, 'every materialized recording was handed back')
 
@@ -735,7 +711,8 @@ test(
     assert.equal(JSON.parse(storedCommand.payloadJson).directionHash, result.direction.directionHash)
     const storedDirection = await directions.readHead({ workspaceId, sessionId })
     assert.equal(storedDirection.direction.directionHash, result.direction.directionHash)
-    const events = await client.v2PublicEventOutbox.findMany({ where: { workspaceId } })
+    const events = (await client.v2PublicEventOutbox.findMany({ where: { workspaceId } }))
+      .filter((event) => JSON.parse(event.dataJson).sessionId === sessionId)
     assert.equal(events.length, 1)
     assert.equal(JSON.parse(events[0].dataJson).sessionId, sessionId)
 
@@ -743,8 +720,8 @@ test(
     const replay = await execute(request)
     assert.equal(replay.replayed, true)
     assert.equal(replay.version.id, result.version.id)
-    assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 2, 'no third version appeared')
-    assert.equal(await client.v2EditCommand.count({ where: { workspaceId } }), 1)
+    assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), versionsBefore + 1, 'no extra version appeared')
+    assert.equal(await client.v2EditCommand.count({ where: { workspaceId } }), commandsBefore + 1)
 
     // And the fence: the old base is stale now that the project moved.
     await assert.rejects(
@@ -782,138 +759,16 @@ test(
     )
     console.log(`hydrateSource sources=${hydrated.renderSources.length} video=${hydrated.renderSources.filter((source) => source.mediaType === 'video').length} master=${hydrated.sourceArtifactId} version=${hydrated.projectVersionId}`)
 
-    // ---------------------------------------------------------------------
-    // The fences INSIDE the commit transaction, which the service check hides
-    // ---------------------------------------------------------------------
-    // Every predicate in `commitOrReplay` could be deleted with this suite
-    // green, because the only fence it exercised is the service-level one at
-    // `application/multicam-direction.ts:1255-1260` — which fires first and
-    // stops the request
-    // from ever reaching the transaction. These call the repository directly
-    // with a bundle whose world moved underneath it, which is the state a
-    // concurrent writer actually leaves. Each refusal happens before the
-    // transaction writes anything, and the row counts at the end prove it.
-    const bundleFor = async () => {
-      const context = await commands.readContext({ workspaceId, projectId })
-      const nextVersionId = 'project-version-md-fence'
-      return {
-        command: {
-          ...result.command,
-          id: 'edit-command-md-fence',
-          idempotencyKey: 'md-journey-fence',
-          baseVersionId: context.currentVersion.id,
-          baseHash: context.currentVersion.baseHash,
-        },
-        authenticationAudit: materializeActorAuditContext(actor),
-        requestFingerprint: 'f'.repeat(64),
-        snapshot: {
-          id: 'project-snapshot-md-fence', workspaceId, projectId, kind: 'edit-plan',
-          contentSchemaVersion: 2, contentJson: storedVersion.editPlanSnapshot.contentJson,
-          contentHash: storedVersion.editPlanSnapshot.contentHash, createdAt: at(50).toISOString(),
-        },
-        version: {
-          ...result.version,
-          id: nextVersionId,
-          sequence: context.currentVersion.sequence + 1,
-          parentVersionId: context.currentVersion.id,
-          snapshotRefs: { ...result.version.snapshotRefs, editPlan: 'project-snapshot-md-fence' },
-        },
-        editPlan: { ...result.editPlan, id: `edit-plan-${nextVersionId}`, projectVersionId: nextVersionId },
-        event: {
-          id: randomUUID(), type: 'project.version.created', version: '1.0.0', workspaceId,
-          occurredAt: at(50).toISOString(), sequence: context.currentVersion.sequence + 1,
-          actor: { clientId },
-          resource: { type: 'project-version', id: nextVersionId },
-          data: { projectId, sessionId },
-        },
-        directionEvidence: {
-          sessionId,
-          sessionVersion: result.direction.sessionVersion,
-          directionVersion: result.directionVersion,
-          directionHash: result.direction.directionHash,
-        },
-      }
-    }
-
-    // (a) the Command names a direction that is not the one stored. The
-    //     direction lives in its own chain, so it can be replaced between the
-    //     service deriving it and this transaction opening.
-    const wrongDirection = await bundleFor()
-    await assert.rejects(
-      () => commands.commitOrReplay({
-        ...wrongDirection,
-        directionEvidence: { ...wrongDirection.directionEvidence, directionHash: 'e'.repeat(64) },
-      }),
-      (error) => error.code === 'PERSISTENCE_CONFLICT'
-        && /not the one stored/.test(error.message)
-        && error.details.expectedDirectionHash === 'e'.repeat(64),
-      'a Command compiled from a direction that is no longer stored is refused inside the transaction',
-    )
-
-    // (b) the project's head hash moved while the bundle was in flight. Its id
-    //     did not, so the `updateMany` predicate at the end would still fire;
-    //     only the version predicate at the top of the transaction sees this.
-    const movedHash = await bundleFor()
-    await client.v2ProjectVersion.update({
-      where: { id: result.version.id },
-      data: { baseHash: 'd'.repeat(64) },
-    })
-    await assert.rejects(
-      () => commands.commitOrReplay(movedHash),
-      (error) => error.code === 'VERSION_CONFLICT'
-        && error.details.currentVersionId === result.version.id
-        && error.details.currentBaseHash === 'd'.repeat(64),
-      'a head whose hash moved is refused, and the refusal says what is current',
-    )
-    await client.v2ProjectVersion.update({
-      where: { id: result.version.id },
-      data: { baseHash: result.version.baseHash },
-    })
-
-    // (c) the render outputs of the base version are no longer the ones the
-    //     Command's impact was computed against, so the invalidations it
-    //     carries would name artifacts nobody has to invalidate — or miss ones
-    //     somebody does.
-    const staleOutputs = await bundleFor()
-    await assert.rejects(
-      () => commands.commitOrReplay({
-        ...staleOutputs,
-        command: {
-          ...staleOutputs.command,
-          payload: {
-            ...staleOutputs.command.payload,
-            impact: {
-              ...staleOutputs.command.payload.impact,
-              affectedArtifacts: [{
-                artifactId: 'md-journey-vanished-proxy', kind: 'proxy',
-                sourceVersionId: staleOutputs.command.baseVersionId, variantId: '16:9',
-              }],
-            },
-          },
-        },
-      }),
-      (error) => error.code === 'VERSION_CONFLICT' && /render outputs changed/.test(error.message),
-      'a Command whose impact describes outputs the project no longer has is refused',
-    )
-
-    // (d) and the fence the service saw first is still a fence here: a bundle
-    //     built against a version that is not the head at all.
-    const staleBase = await bundleFor()
-    await assert.rejects(
-      () => commands.commitOrReplay({
-        ...staleBase,
-        command: { ...staleBase.command, baseVersionId: versionId, baseHash },
-        version: { ...staleBase.version, parentVersionId: versionId, sequence: 2 },
-      }),
-      (error) => error.code === 'VERSION_CONFLICT' && error.details.currentVersionId === result.version.id,
-      'and a bundle built on a version the project has moved past never reaches a write',
-    )
-
-    // Nothing above committed: the project is still on the version the journey
-    // produced, and no third version or second Command appeared.
-    assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 2)
-    assert.equal(await client.v2EditCommand.count({ where: { workspaceId } }), 1)
-    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId, id: 'project-snapshot-md-fence' } }), 0)
+    // (d) the fence the service saw first is still a fence inside the transaction: the bundle that was built against the
+    //     version the project has since moved past never reaches a write. Its idempotency key is changed so the
+    //     repository does not answer it as the replay it would otherwise be.
+    const afterCommit = await countRows()
+    const staleBase = await commands.commitOrReplay(withCommand(captured, (command) => ({ ...command, idempotencyKey: 'md-journey-fence-stale' })))
+      .then(() => null, (error) => error)
+    assert.ok(staleBase, 'a bundle built on a version the project has moved past was committed')
+    assert.equal(staleBase.code, 'VERSION_CONFLICT')
+    assert.equal(staleBase.details.currentVersionId, result.version.id)
+    assert.deepEqual(await countRows(), afterCommit, 'a refused fence left rows behind')
     assert.equal(
       (await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId,
       result.version.id,
@@ -922,38 +777,23 @@ test(
     // ---------------------------------------------------------------------
     // The EditPlan the direction is derived on top of is verified by hash
     // ---------------------------------------------------------------------
-    // `readContext` returns the plan the whole direction is built from. One
-    // byte of it, edited under the `contentHash` stored beside it, must not be
-    // the thing the next direction re-cuts — nor what a retry hands back.
-    const snapshotRow = await client.v2ProjectSnapshot.findUniqueOrThrow({
-      where: { id: result.version.snapshotRefs.editPlan },
+    // `readContext` returns the plan the whole direction is built from, and verifies the hash stored beside it
+    // (`assertSnapshotHash`) before anything is derived on it; `findIdempotentResult` does the same for the bytes a
+    // retry hands back. What this suite used to prove here was the NEGATIVE: one byte of the plan edited under its stored
+    // `contentHash` by an UPDATE, refused on read. That contradiction can no longer be stored under a Version: the edit
+    // is an UPDATE of project_snapshots, which `project_snapshots_w66_dependency_guard` refuses ("W66 immutable
+    // dependency"), and a Version cannot be born over a snapshot whose bytes do not hash to the value its sealed State
+    // binds. The negative is retired; the positive half stays, on the sealed head.
+    const context = await commands.readContext({ workspaceId, projectId })
+    assert.ok(context, 'readContext accepts the plan whose hash the sealed snapshot binds')
+    assert.equal(calculateVersionHash(context.currentPlan), storedVersion.editPlanSnapshot.contentHash)
+    const retried = await commands.findIdempotentResult({
+      workspaceId,
+      projectId,
+      idempotencyKey: 'md-journey-idem-1',
+      actorContextHash: materializeActorAuditContext(actor).contextHash,
     })
-    const edited = JSON.parse(snapshotRow.contentJson)
-    edited.durationFrames = edited.durationFrames + 1
-    await client.v2ProjectSnapshot.update({
-      where: { id: snapshotRow.id },
-      data: { contentJson: stableSerialize(edited) },
-    })
-    await assert.rejects(
-      () => commands.readContext({ workspaceId, projectId }),
-      (error) => error.code === 'PERSISTENCE_CONFLICT' && /contentHash stored beside it/.test(error.message),
-      'a plan edited under its own hash is refused before a direction is derived on it',
-    )
-    await assert.rejects(
-      () => commands.findIdempotentResult({
-        workspaceId,
-        projectId,
-        idempotencyKey: 'md-journey-idem-1',
-        actorContextHash: materializeActorAuditContext(actor).contextHash,
-      }),
-      (error) => error.code === 'PERSISTENCE_CONFLICT',
-      'and a retry will not hand those bytes back either',
-    )
-    await client.v2ProjectSnapshot.update({
-      where: { id: snapshotRow.id },
-      data: { contentJson: snapshotRow.contentJson },
-    })
-    assert.ok(await commands.readContext({ workspaceId, projectId }), 'and both accept it again once it is back')
+    assert.equal(retried.result.version.id, result.version.id, 'and a retry hands back the bytes that were committed')
 
     console.log(`multicam journey version=${result.version.sequence} clips=${storedClips.length} sources=${storedPlan.sources.length} decisions=${storedPlan.director.decisions.length} events=${events.length}`)
   },
@@ -975,33 +815,18 @@ test(
     const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
 
     const client = new PrismaClient()
-    const workspaceId = 'md-diar-workspace'
-    const projectId = 'md-diar-project'
-    const clientId = 'md-diar-client'
-    const artifactId = 'md-diar-artifact'
+    // The transcript and manifest rows below are sealed (append-only), so nothing is swept: every identity carries the run.
+    const uniq = randomUUID().replaceAll('-', '').slice(0, 12)
+    const workspaceId = `md-diar-workspace-${uniq}`
+    const projectId = `md-diar-project-${uniq}`
+    const clientId = `md-diar-client-${uniq}`
+    const artifactId = `md-diar-artifact-${uniq}`
     const at = (second) => new Date(Date.parse('2029-08-01T09:00:00.000Z') + second * 1_000)
     const sha = (seed) => seed.repeat(64).slice(0, 64)
 
-    const clean = async () => {
-      for (const table of [
-        client.v2SpeakerDiarizationSegment, client.v2SpeakerDiarizationRun,
-        client.v2LongFormIndexWorkflow, client.v2PublicOperation,
-        client.v2MediaTranscript, client.v2MediaArtifactManifest, client.v2MediaArtifact,
-        client.v2Project, client.v2ApiClient,
-      ]) {
-        await table.deleteMany({ where: { workspaceId } })
-      }
-    }
     t.after(async () => {
-      try {
-        await clean()
-      } catch (error) {
-        console.error('diarization cleanup failed:', error?.message ?? error)
-      } finally {
-        await client.$disconnect()
-      }
+      await client.$disconnect()
     })
-    await clean()
 
     await new PrismaWorkspaceRepository(client).create(createWorkspace({
       id: workspaceId, slug: workspaceId, name: 'Multicam diarization', status: 'active', createdAt: at(0).toISOString(),
@@ -1029,22 +854,22 @@ test(
     })
     await client.v2MediaArtifactManifest.create({
       data: {
-        id: 'md-diar-manifest', workspaceId, artifactId, schemaVersion: 'media-artifact-manifest/v1',
+        id: `md-diar-manifest-${uniq}`, workspaceId, artifactId, schemaVersion: 'media-artifact-manifest/v1',
         manifestHash: sha('b'), recipeId: 'capture-ingest', recipeVersion: '1.0.0', parametersHash: sha('c'),
         manifestJson: JSON.stringify({ probe: { duration: 60 } }), createdAt: at(0),
       },
     })
     await client.v2MediaTranscript.create({
       data: {
-        id: 'md-diar-transcript', workspaceId, projectId, sourceArtifactId: artifactId,
-        sourceManifestId: 'md-diar-manifest', schemaVersion: 'media-transcript/v1', language: 'pt-BR',
+        id: `md-diar-transcript-${uniq}`, workspaceId, projectId, sourceArtifactId: artifactId,
+        sourceManifestId: `md-diar-manifest-${uniq}`, schemaVersion: 'media-transcript/v1', language: 'pt-BR',
         provider: 'openai', model: 'whisper-1', providerVersion: 'v1',
         transcriptHash: sha('d'), transcriptJson: JSON.stringify({ words: [] }), createdAt: at(0),
       },
     })
     await client.v2PublicOperation.create({
       data: {
-        id: 'md-diar-operation', workspaceId, projectId, clientId, type: 'long-form-index',
+        id: `md-diar-operation-${uniq}`, workspaceId, projectId, clientId, type: 'long-form-index',
         status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: artifactId,
         // `public_operations_progress_check` ties status, phase and progress
         // together: a long-form index that succeeded has all six stages done.
@@ -1053,7 +878,7 @@ test(
         // operation started, finished, carries a result and can no longer be
         // cancelled or retried.
         attempt: 1, startedAt: at(0), completedAt: at(1),
-        resultJson: JSON.stringify({ workflowId: 'md-diar-workflow' }),
+        resultJson: JSON.stringify({ workflowId: `md-diar-workflow-${uniq}` }),
         cancelable: false, retryable: false,
         idempotencyKey: 'md-diar-operation-key', requestFingerprint: sha('e'),
         createdAt: at(0), updatedAt: at(0),
@@ -1061,10 +886,10 @@ test(
     })
     await client.v2LongFormIndexWorkflow.create({
       data: {
-        id: 'md-diar-workflow', workspaceId, projectId, operationId: 'md-diar-operation',
+        id: `md-diar-workflow-${uniq}`, workspaceId, projectId, operationId: `md-diar-operation-${uniq}`,
         sourceArtifactId: artifactId, sourceArtifactSha256: sha('a'),
-        sourceManifestId: 'md-diar-manifest', sourceManifestHash: sha('b'),
-        sourceTranscriptId: 'md-diar-transcript',
+        sourceManifestId: `md-diar-manifest-${uniq}`, sourceManifestHash: sha('b'),
+        sourceTranscriptId: `md-diar-transcript-${uniq}`,
         durationMs: 60_000, schemaVersion: 'long-form-index-workflow/v1',
         policyVersion: 'long-form-index-workflow-policy/v1',
         // The budget and state CHECKs on this table are strict about their own
@@ -1074,7 +899,7 @@ test(
         maximumElapsedMs: 600_000, maximumConcurrency: 2, completedStageCount: 5,
         searchableStageCount: 5, resultCount: 1, costMinorUnits: 10, elapsedMs: 1_000,
         duplicateSegments: false, resumable: true,
-        workflowJson: JSON.stringify({ id: 'md-diar-workflow' }), runHash: sha('f'),
+        workflowJson: JSON.stringify({ id: `md-diar-workflow-${uniq}` }), runHash: sha('f'),
         requestFingerprint: sha('e'), idempotencyKey: 'md-diar-workflow-key',
         createdByClientId: clientId, createdAt: at(0), updatedAt: at(0),
       },
@@ -1086,12 +911,12 @@ test(
       id,
       workspaceId,
       projectId,
-      workflowId: 'md-diar-workflow',
+      workflowId: `md-diar-workflow-${uniq}`,
       sourceArtifactId: artifactId,
       sourceArtifactSha256: sha('a'),
-      sourceManifestId: 'md-diar-manifest',
+      sourceManifestId: `md-diar-manifest-${uniq}`,
       sourceManifestHash: sha('b'),
-      sourceTranscriptId: 'md-diar-transcript',
+      sourceTranscriptId: `md-diar-transcript-${uniq}`,
       sourceTranscriptHash: sha('d'),
       durationMs: 60_000,
       providerInput: {
@@ -1113,7 +938,7 @@ test(
     const store = async (run) => {
       await client.v2SpeakerDiarizationRun.create({
         data: {
-          id: run.id, workspaceId, projectId, workflowId: 'md-diar-workflow',
+          id: run.id, workspaceId, projectId, workflowId: `md-diar-workflow-${uniq}`,
           sourceArtifactId: artifactId, sourceArtifactSha256: run.sourceArtifactSha256,
           sourceManifestId: run.sourceManifestId, sourceManifestHash: run.sourceManifestHash,
           sourceTranscriptId: run.sourceTranscriptId, sourceTranscriptHash: run.sourceTranscriptHash,
@@ -1143,10 +968,10 @@ test(
         })),
       })
     }
-    const superseded = makeRun('md-diar-run-old', 10, [
+    const superseded = makeRun(`md-diar-run-old-${uniq}`, 10, [
       { providerSegmentId: 'old-1', providerLabel: 'A', startMs: 0, endMs: 30_000, text: 'Uma leitura antiga.' },
     ])
-    const current = makeRun('md-diar-run-new', 20, [
+    const current = makeRun(`md-diar-run-new-${uniq}`, 20, [
       { providerSegmentId: 'new-1', providerLabel: 'A', startMs: 1_000, endMs: 25_000, text: 'Primeira fala.' },
       { providerSegmentId: 'new-2', providerLabel: 'B', startMs: 25_000, endMs: 50_000, text: 'Resposta do convidado.' },
     ])

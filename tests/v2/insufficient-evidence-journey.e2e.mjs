@@ -126,17 +126,29 @@ const execFileAsync = promisify(execFile)
 const FFMPEG = ffmpegStatic ?? 'ffmpeg'
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
-const WORKSPACE = 'insufficient-evidence-workspace'
-const PROJECT = 'insufficient-evidence-project'
-const SESSION = 'insufficient-evidence-session'
-const CLIENT = 'insufficient-evidence-client'
-const VERSION = 'insufficient-evidence-version-1'
+// Every identity carries the run: the project's Versions, Commands and snapshots and the recordings' manifests are sealed
+// (append-only), so nothing is swept afterwards and a second invocation in one database must not meet the first one.
+const RUN_ID = randomUUID().replaceAll('-', '').slice(0, 12)
+const WORKSPACE = `insufficient-evidence-workspace-${RUN_ID}`
+const PROJECT = `insufficient-evidence-project-${RUN_ID}`
+// Capture rows are keyed by ids that are global to the database (`<session>:v<n>`, `<track>:coverage`, `<session>:<track>:sync`,
+// `<session>:d<n>`...), so the session and its tracks carry the run too.
+const SESSION = `insufficient-evidence-session-${RUN_ID}`
+const CLIENT = `insufficient-evidence-client-${RUN_ID}`
+const VERSION = `insufficient-evidence-version-1-${RUN_ID}`
+/** Artifact id and capture asset id are the same string on purpose (see the recordings below). */
+const ASSET = Object.freeze({
+  master: `ie-${RUN_ID}-asset-master`,
+  cameraA: `ie-${RUN_ID}-asset-cam-a`,
+  cameraB: `ie-${RUN_ID}-asset-cam-b`,
+  scratch: `ie-${RUN_ID}-asset-scratch`,
+})
 
-const MASTER_TRACK = 'track-master-audio'
-const CAMERA_A_TRACK = 'track-camera-a'
-const CAMERA_B_TRACK = 'track-camera-b'
+const MASTER_TRACK = `track-master-audio-${RUN_ID}`
+const CAMERA_A_TRACK = `track-camera-a-${RUN_ID}`
+const CAMERA_B_TRACK = `track-camera-b-${RUN_ID}`
 /** The control: a second recorder in the master's room, started early. */
-const SCRATCH_TRACK = 'track-scratch-audio'
+const SCRATCH_TRACK = `track-scratch-audio-${RUN_ID}`
 
 const SAMPLE_RATE = 16_000
 const TICKS_PER_SECOND = 90_000
@@ -316,13 +328,6 @@ test(
     )
     const { createSessionClock } = await import('../../src/v2/domain/session-clock.ts')
     const { RECOMMENDED_ACTIONS } = await import('../../src/v2/domain/sync-diagnostic.ts')
-    const { createDesiredAction, createDesiredActionReference } = await import(
-      '../../src/v2/domain/desired-action.ts'
-    )
-    const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
-    const { calculateVersionHash, stableSerialize } = await import(
-      '../../src/v2/application/version-hash.ts'
-    )
     const { PrismaApiClientRepository } = await import(
       '../../src/v2/infrastructure/prisma/api-client-repository.ts'
     )
@@ -352,40 +357,8 @@ test(
     )
 
     const client = new PrismaClient()
-    // A project version names the Command that produced it and a Command names
-    // the version it was based on, so neither table can be emptied while the
-    // other still points at it. The two references are cleared first.
-    const clean = async () => {
-      await client.v2Project.updateMany({ where: { workspaceId: WORKSPACE }, data: { currentVersionId: null } })
-      await client.v2ProjectVersion.updateMany({ where: { workspaceId: WORKSPACE }, data: { commandId: null } })
-      for (const table of [
-        client.v2MulticamAngleScoreComponent, client.v2MulticamAngleCandidate,
-        client.v2MulticamShotAlternative, client.v2MulticamShotDecision,
-        client.v2MulticamDirectionHead, client.v2MulticamDirection,
-        client.v2MulticamObservation, client.v2MulticamEvidenceSet,
-        client.v2SyncDiagnosticHead, client.v2SyncDiagnostic,
-        client.v2CaptureClockMap, client.v2CaptureTrackCoverage,
-        client.v2CaptureSessionClock, client.v2CaptureSyncEvidence,
-        client.v2CaptureSyncRun,
-        client.v2CaptureSessionVersion, client.v2CaptureSessionHead,
-        client.v2CommandArtifactInvalidation, client.v2PublicEventOutbox,
-        client.v2EditCommand, client.v2ProjectVersion,
-        client.v2ProjectMediaAsset, client.v2ProjectSnapshot,
-        client.v2MediaArtifactManifest, client.v2MediaArtifact,
-        client.v2Project, client.v2ApiCredential, client.v2ApiClient,
-      ]) {
-        await table.deleteMany({ where: { workspaceId: WORKSPACE } })
-      }
-    }
 
     t.after(async () => {
-      // Reported rather than rethrown: a cleanup failure that masks the real
-      // assertion turns one clear defect into two confusing ones.
-      try {
-        await clean()
-      } catch (error) {
-        console.error('cleanup failed:', error?.message ?? error)
-      }
       await closeJourneyObjectStore(objectStore).catch((error) => {
         console.error('object storage cleanup failed:', error?.message ?? error)
       })
@@ -395,8 +368,6 @@ test(
       await client.$disconnect().catch(() => undefined)
       await disconnectV2PostgresClient().catch(() => undefined)
     })
-    await clean()
-
     // ---- the four recordings ----------------------------------------------
     const captureDirectory = join(sourceRoot, 'capture')
     await mkdir(captureDirectory, { recursive: true })
@@ -444,12 +415,19 @@ test(
       scopes: ['projects:read', 'projects:write'],
     })
     const token = issued.token
-    await client.v2Project.create({
-      data: {
-        id: PROJECT, workspaceId: WORKSPACE, name: 'Insufficient evidence journey',
-        status: 'reviewing-proxy', objective: 'warming', format: '16:9', locale: 'pt-BR',
-        createdByType: 'api-client', createdById: CLIENT, createdAt: at(0), updatedAt: at(0),
-      },
+    // The project the way the product creates it: the creation Command, then one explicit 16:9 output variant. A
+    // Version cannot be inserted by hand, so the head the direction below re-cuts is a real child Command of that variant.
+    const { seedSealedProject, testActor, RECORDING_ALLOWED_USES } = await import('./helpers/pg-output-world.mjs')
+    const { variantBodyFor } = await import('./helpers/explicit-project-http.mjs')
+    const { registerRecording, seedBaseProjectVersion } = await import('./helpers/capture-journey.mjs')
+    const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+    const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
+    const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
+    await seedSealedProject(client, {
+      workspaceId: WORKSPACE,
+      actor: testActor({ workspaceId: WORKSPACE, clientId: CLIENT, credentialId: `${CLIENT}-seed`, environment: 'production' }),
+      prefix: 'ie', ids: { project: PROJECT }, name: 'Insufficient evidence journey', objective: 'warming',
+      variant: variantBodyFor({ aspectRatio: '16:9' }),
     })
 
     // Artifact id and capture asset id are the same string on purpose: the
@@ -457,11 +435,16 @@ test(
     // the project's media links, which are keyed by artifact id
     // (`application/multicam-direction.ts:1338-1340`, the `probedRates` map
     // keyed by `link.artifactId`).
+    //
+    // The link roles are the ones a Version may be sealed over (`assertCurrentOutputSourceUseV3`): a video is the
+    // `source-master` or a `selected-insert`, an audio recording is `source-audio` or a `selected-insert`. This journey used to
+    // link the audio master as `source-master`, a role/media pairing the sealed publication guard refuses ('Unsupported output
+    // source role/media type'), so camera A is the source master now and the recorder is the source audio.
     const recordings = [
-      { assetId: 'ie-asset-master', key: 'capture/master.m4a', file: masterFile, mediaType: 'audio', container: 'm4a', role: 'source-master' },
-      { assetId: 'ie-asset-cam-a', key: 'capture/camera-a.mp4', file: cameraAFile, mediaType: 'video', container: 'mp4', role: 'selected-insert' },
-      { assetId: 'ie-asset-cam-b', key: 'capture/camera-b.mp4', file: cameraBFile, mediaType: 'video', container: 'mp4', role: 'selected-insert' },
-      { assetId: 'ie-asset-scratch', key: 'capture/scratch.m4a', file: scratchFile, mediaType: 'audio', container: 'm4a', role: 'selected-insert' },
+      { assetId: ASSET.master, key: 'capture/master.m4a', file: masterFile, mediaType: 'audio', container: 'm4a', role: 'source-audio' },
+      { assetId: ASSET.cameraA, key: 'capture/camera-a.mp4', file: cameraAFile, mediaType: 'video', container: 'mp4', role: 'source-master' },
+      { assetId: ASSET.cameraB, key: 'capture/camera-b.mp4', file: cameraBFile, mediaType: 'video', container: 'mp4', role: 'selected-insert' },
+      { assetId: ASSET.scratch, key: 'capture/scratch.m4a', file: scratchFile, mediaType: 'audio', container: 'm4a', role: 'selected-insert' },
     ]
     // In s3 mode the four recordings go into the run's own versioned bucket
     // under exactly these keys, and the artifact root is proven to hold none of
@@ -481,96 +464,42 @@ test(
         )
       }
     }
+    // The recordings as their ingest leaves them: artifact, manifest (built by the domain factory over the MEASURED
+    // size and digest of the file that was just encoded), project link and the sealed normalization receipt (a video
+    // also its editing proxy); then the rights the production service grants. The direction at the end of the journey
+    // adopts these receipts, and refuses a source whose receipt or rights are missing.
+    const rightsRepository = new PrismaAssetRightsRepository(client)
+    const rightsUses = [...RECORDING_ALLOWED_USES]
     for (const recording of recordings) {
-      await client.v2MediaArtifact.create({
-        data: {
-          id: recording.assetId, workspaceId: WORKSPACE, artifactKey: recording.key,
-          sha256: recording.file.sha256, byteSize: BigInt(recording.file.byteSize),
-          mediaType: recording.mediaType, container: recording.container,
-          status: 'available', createdAt: at(0),
-        },
+      await registerRecording({
+        prisma: client, workspaceId: WORKSPACE, projectId: PROJECT, artifactId: recording.assetId,
+        artifactKey: recording.key, mediaType: recording.mediaType, container: recording.container,
+        sha256: recording.file.sha256, byteSize: recording.file.byteSize,
+        probe: recording.mediaType === 'video'
+          ? { width: 320, height: 180, duration: SESSION_SECONDS, fps: FPS }
+          : { duration: SESSION_SECONDS },
+        role: recording.role, originalFileName: recording.key.split('/')[1], createdAt: at(0), recipeId: 'capture-ingest',
       })
-      await client.v2MediaArtifactManifest.create({
-        data: {
-          id: `manifest-${recording.assetId}`, workspaceId: WORKSPACE, artifactId: recording.assetId,
-          schemaVersion: 'media-artifact-manifest/v1', manifestHash: digest('3'),
-          recipeId: 'capture-ingest', recipeVersion: '1.0.0', parametersHash: digest('4'),
-          manifestJson: JSON.stringify({
-            artifact: { artifactKey: recording.key },
-            probe: { duration: SESSION_SECONDS, fps: FPS, rFrameRate: `${FPS}/1` },
-          }),
-          createdAt: at(0),
-        },
-      })
-      await client.v2ProjectMediaAsset.create({
-        data: {
-          id: randomUUID(), workspaceId: WORKSPACE, projectId: PROJECT,
-          artifactId: recording.assetId, role: recording.role,
-          originalFileName: recording.key.split('/')[1], createdAt: at(0),
-        },
+      await setAssetRightsService({ repository: rightsRepository, clock: () => at(0), createId: () => `rights-${recording.assetId}` })({
+        workspaceId: WORKSPACE, artifactId: recording.assetId, baseRevision: assetRightsRevision(recording.assetId, 0),
+        actor: { type: 'api-client', id: CLIENT },
+        draft: { status: 'approved', allowedUses: rightsUses, prohibitedUses: [],
+          consent: { status: 'approved', allowedUses: rightsUses },
+          sourceNote: 'Controlled journey rights; no physical editorial acceptance proof' },
       })
     }
 
-    // The Director EditPlan this direction re-cuts. A multicam direction does
-    // not invent a timeline; without one the command answers PRECONDITION_REQUIRED.
-    const desiredActionRef = createDesiredActionReference(createDesiredAction({ objective: 'warming' }))
-    const baseClips = [{
-      id: 'clip-base-0001', sourceArtifactId: 'ie-asset-cam-a',
-      sourceInFrame: 0, sourceOutFrame: SESSION_SECONDS * FPS,
-      timelineInFrame: 0, timelineOutFrame: SESSION_SECONDS * FPS, rate: 1,
-    }]
-    const basePlan = {
-      schemaVersion: 2, state: 'compiled', id: `edit-plan-${VERSION}`, projectVersionId: VERSION,
-      storyPlanId: 'story-insufficient', treatmentPlanId: 'treatment-insufficient',
-      directorRunId: 'director-run-insufficient',
-      fps: FPS, durationFrames: SESSION_SECONDS * FPS,
-      sources: [{ id: 'ie-asset-cam-a', artifactId: 'ie-asset-cam-a', kind: 'video', durationSeconds: SESSION_SECONDS }],
-      videoTracks: [{ id: 'track-primary-video', kind: 'base-video', clips: baseClips }],
-      overlayTracks: [], subtitleTracks: [], audioTracks: [], effectTracks: [], transitions: [],
-      markers: [], protectedElements: [], localeVariantRefs: [], formatVariantRefs: [],
-      lineageRefs: ['ie-asset-cam-a'],
-      editorial: { commandType: 'source-ingest', exclusions: [], retainedSourceRanges: [] },
-      retimedTranscript: { sourceTranscriptId: 'transcript-insufficient', words: [] },
-      movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
-      subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 42 },
-      composition: {
-        layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
-        faceSafeFallback: [0.14, 0.08, 0.72, 0.56], subtitleSafeRegion: [0.08, 0.7, 0.84, 0.24],
-      },
-      director: { plannerVersion: 'journey-planner/v1', decisions: [], assumptions: [] },
-      desiredActionRef,
-      audioTimelineHash: createEditorialAudioTimelineHash({ fps: FPS, clips: baseClips }),
-      createdAt: iso(0),
-    }
-    for (const [kind, content] of [['brief', { kind: 'brief' }], ['policies', { kind: 'policies' }]]) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: `ie-snapshot-${kind}`, workspaceId: WORKSPACE, projectId: PROJECT, kind,
-          schemaVersion: 1, contentJson: stableSerialize(content),
-          contentHash: calculateVersionHash(content), createdAt: at(0),
-        },
-      })
-    }
-    await client.v2ProjectSnapshot.create({
-      data: {
-        id: 'ie-snapshot-edit-plan', workspaceId: WORKSPACE, projectId: PROJECT, kind: 'edit-plan',
-        schemaVersion: 2, contentJson: stableSerialize(basePlan),
-        contentHash: calculateVersionHash(basePlan), createdAt: at(0),
-      },
+    // The Director EditPlan this direction re-cuts: a real child Command of the head that adopts the camera A receipt and
+    // plays that recording whole. A multicam direction does not invent a timeline; without one the command answers
+    // PRECONDITION_REQUIRED.
+    const { baseHash: projectBaseHash } = await seedBaseProjectVersion({
+      prisma: client, workspaceId: WORKSPACE, projectId: PROJECT, versionId: VERSION, clientId: CLIENT, objective: 'warming',
+      sourceArtifactId: ASSET.cameraA, fps: FPS, durationFrames: SESSION_SECONDS * FPS,
+      transcriptId: `transcript-insufficient-${RUN_ID}`, createdAt: at(0),
     })
-    const projectBaseHash = calculateVersionHash({
-      projectId: PROJECT, sequence: 1, editPlanHash: calculateVersionHash(basePlan),
-    })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: VERSION, workspaceId: WORKSPACE, projectId: PROJECT, sequence: 1,
-        briefSnapshotId: 'ie-snapshot-brief',
-        editPlanSnapshotId: 'ie-snapshot-edit-plan',
-        policiesSnapshotId: 'ie-snapshot-policies',
-        baseHash: projectBaseHash, createdBy: CLIENT, createdAt: at(0),
-      },
-    })
-    await client.v2Project.update({ where: { id: PROJECT }, data: { currentVersionId: VERSION } })
+    // What the sealed seed wrote, so "a refused direction wrote nothing" is measured against it and not against a constant.
+    const seededVersions = await client.v2ProjectVersion.count({ where: { workspaceId: WORKSPACE } })
+    const seededCommands = await client.v2EditCommand.count({ where: { workspaceId: WORKSPACE } })
 
     const timebase = timebaseFromRate(TICKS_PER_SECOND)
     const track = (input) => ({
@@ -611,17 +540,17 @@ test(
       tracks: [
         track({
           trackId: MASTER_TRACK, role: 'master-audio', deviceId: 'dev-recorder',
-          assetId: 'ie-asset-master', sha256: masterFile.sha256,
+          assetId: ASSET.master, sha256: masterFile.sha256,
           syncAudioPolicy: 'final-candidate', includeInFinalMix: true,
         }),
         track({
           trackId: CAMERA_A_TRACK, role: 'camera-main', deviceId: 'dev-a',
-          assetId: 'ie-asset-cam-a', sha256: cameraAFile.sha256,
+          assetId: ASSET.cameraA, sha256: cameraAFile.sha256,
           syncAudioPolicy: 'sync-only', includeInFinalMix: false,
         }),
         track({
           trackId: CAMERA_B_TRACK, role: 'camera-alt', deviceId: 'dev-b',
-          assetId: 'ie-asset-cam-b', sha256: cameraBFile.sha256,
+          assetId: ASSET.cameraB, sha256: cameraBFile.sha256,
           syncAudioPolicy: 'none', includeInFinalMix: false,
         }),
         // The control. `scratch-audio` is never a video angle
@@ -630,7 +559,7 @@ test(
         // the refusal it is a control for.
         track({
           trackId: SCRATCH_TRACK, role: 'scratch-audio', deviceId: 'dev-scratch',
-          assetId: 'ie-asset-scratch', sha256: scratchFile.sha256,
+          assetId: ASSET.scratch, sha256: scratchFile.sha256,
           syncAudioPolicy: 'sync-only', includeInFinalMix: false,
         }),
       ],
@@ -654,9 +583,9 @@ test(
         frameRate: rational(BigInt(FPS), BigInt(1)),
         authority: {
           origin: 'master-audio',
-          sourceId: 'ie-asset-master',
+          sourceId: ASSET.master,
           provenance: 'original-capture',
-          evidenceRef: 'probe-ie-asset-master',
+          evidenceRef: `probe-${ASSET.master}`,
         },
         establishedAt: iso(1),
       }),
@@ -789,7 +718,7 @@ test(
     })).map((row) => row.sourceId).sort()
     assert.deepEqual(
       clockMapSources,
-      ['ie-asset-scratch'],
+      [ASSET.scratch],
       'a clock map was written for a track nothing could align, or withheld from the one that aligned',
     )
 
@@ -905,10 +834,10 @@ test(
     // Nothing was half-committed by any of the four.
     assert.equal(
       await client.v2ProjectVersion.count({ where: { workspaceId: WORKSPACE } }),
-      1,
+      seededVersions,
       'a refused direction created a project version',
     )
-    assert.equal(await client.v2EditCommand.count({ where: { workspaceId: WORKSPACE } }), 0)
+    assert.equal(await client.v2EditCommand.count({ where: { workspaceId: WORKSPACE } }), seededCommands)
 
     // The direction the refusal was computed from IS stored and readable: it is
     // the artifact an operator opens to find out which angle lost and why.
@@ -1080,7 +1009,7 @@ test(
     )
     assert.equal(
       await client.v2ProjectVersion.count({ where: { workspaceId: WORKSPACE } }),
-      2,
+      seededVersions + 1,
       'the accepted direction did not advance the project',
     )
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -19,12 +20,18 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   10/10. Until this existed the only approved evaluation in the lane came
  *   from a reader double, and eight of the ten readers could have been rubber
  *   stamps.
- * - **Removing one row fails exactly one criterion.** Nine deletions, one per
- *   database-backed criterion, each asserted to move only its own.
+ * - **Removing one row fails exactly one criterion.** One deletion per
+ *   database-backed criterion whose evidence row may still be deleted (seven of
+ *   nine; the two compiled-plan rows are sealed since W66, so their criteria
+ *   are proved by the world that has no compiled plan yet), each asserted to
+ *   move only its own.
  * - **Tampering is caught on the way out, and does not take the gate down.**
- *   Three rows are edited with raw SQL — a shot decision, a media artifact
- *   manifest and a renderable plan snapshot — and each has to reprove exactly
- *   one criterion while the record is still written.
+ *   Two rows are put in contradiction — a shot decision (edited with raw SQL)
+ *   and a media artifact manifest (a forged manifest row the export is
+ *   re-pointed at; a stored manifest can no longer be edited in place) — and
+ *   each has to reprove exactly one criterion while the record is still
+ *   written. The third tamper this suite used to make, a renderable plan
+ *   snapshot, is retired: see the comment where it stood.
  * - **The CHECK constraints are constraints.** Every one that encodes a domain
  *   invariant is offered a row that violates it.
  * - **The caller supplies nothing.** No evidence, no scope it does not hold,
@@ -65,10 +72,6 @@ test(
   'E2E-F4.016 the multicam long-form gate is evaluated, recorded and re-derived from PostgreSQL',
   { skip: SKIP },
   async (t) => {
-    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-    const { PrismaWorkspaceRepository } = await import(
-      '../../src/v2/infrastructure/prisma/workspace-repository.ts'
-    )
     const { PrismaMulticamDirectionRepository } = await import(
       '../../src/v2/infrastructure/prisma/multicam-direction-repository.ts'
     )
@@ -90,131 +93,61 @@ test(
       MULTICAM_LONGFORM_CRITERION_CHECKS,
     } = await import('../../src/v2/domain/multicam-longform-gate.ts')
     const { buildDirectionWorld } = await import('./wave20-fixtures.mjs')
-    const { cleanGateWorld } = await import('./helpers/multicam-longform-gate-world.mjs')
-    const { acquireGateFixtureLease } = await import('./helpers/gate-fixture-lease.mjs')
+    const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
 
     const client = new PrismaClient()
-    const A = 'f4016-workspace-a'
-    const B = 'f4016-workspace-b'
-    const PROJECT_A = 'f4016-project-a'
-    const PROJECT_B = 'f4016-project-b'
-    const SESSION = 'f4016-session'
-    const CLIENT_A = 'f4016-client-a'
+    // Every identity carries the run: the project's Versions, Commands and snapshots are sealed (append-only), so nothing
+    // can be swept afterwards and a second invocation in one database must not meet the first one's rows.
+    const RUN_ID = randomUUID().replaceAll('-', '').slice(0, 12)
+    const A = `f4016-workspace-a-${RUN_ID}`
+    const B = `f4016-workspace-b-${RUN_ID}`
+    const PROJECT_A = `f4016-project-a-${RUN_ID}`
+    const PROJECT_B = `f4016-project-b-${RUN_ID}`
+    const SESSION = `f4016-session-${RUN_ID}`
+    const CLIENT_A = `f4016-client-a-${RUN_ID}`
     /** A second credential in workspace A, for the idempotency actor check. */
-    const CLIENT_A2 = 'f4016-client-a2'
-    const CLIENT_B = 'f4016-client-b'
-    const VERSION_A = 'f4016-version-a'
+    const CLIENT_A2 = `f4016-client-a2-${RUN_ID}`
+    const CLIENT_B = `f4016-client-b-${RUN_ID}`
     const CHECK_TOTAL = MULTICAM_LONGFORM_CRITERIA.reduce(
       (total, criterion) =>
         total + MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].length,
       0,
     )
 
-    const clean = () => cleanGateWorld({ client, workspaceIds: [A, B] })
-    // `phase-gate-journey.e2e.mjs` cleans these workspaces too, because the
-    // fixture ids they share are unique across the whole database. The lease
-    // makes whichever suite starts second WAIT rather than empty a world the
-    // other is still writing.
-    const lease = await acquireGateFixtureLease()
-
     t.after(async () => {
-      // Reported, not rethrown: a cleanup failure that masks the assertion
-      // turns one clear defect into two confusing ones.
-      try {
-        await clean()
-      } catch (error) {
-        console.error('cleanup failed:', error?.message ?? error)
-      } finally {
-        // The factory-built runtime below opens the process-wide client, which
-        // is not this test's own: both have to be given back.
-        const { disconnectV2PostgresClient } = await import(
-          '../../src/v2/infrastructure/prisma-postgres/client.ts'
-        )
-        await disconnectV2PostgresClient()
-        await client.$disconnect()
-        await lease.release()
-      }
-    })
-
-    await clean()
-
-    const workspaces = new PrismaWorkspaceRepository(client)
-    for (const id of [A, B]) {
-      await workspaces.create(
-        createWorkspace({
-          id,
-          slug: id,
-          name: 'F4.016 gate',
-          status: 'active',
-          createdAt: at(0).toISOString(),
-        }),
+      // The factory-built runtime below opens the process-wide client, which
+      // is not this test's own: both have to be given back.
+      const { disconnectV2PostgresClient } = await import(
+        '../../src/v2/infrastructure/prisma-postgres/client.ts'
       )
-    }
-    for (const [id, workspaceId] of [[CLIENT_A, A], [CLIENT_A2, A], [CLIENT_B, B]]) {
-      await client.v2ApiClient.create({
-        data: {
-          id,
-          workspaceId,
-          name: 'F4.016 gate client',
-          allowedEnvironmentsJson: JSON.stringify(['sandbox']),
-          scopeGrantsJson: JSON.stringify(['projects:read', 'projects:write']),
-          createdBy: 'f4016-operator',
-          createdAt: at(0),
-          updatedAt: at(0),
-        },
-      })
-    }
-    for (const [id, workspaceId, createdById] of [
-      [PROJECT_A, A, CLIENT_A],
-      [PROJECT_B, B, CLIENT_B],
-    ]) {
-      await client.v2Project.create({
-        data: {
-          id,
-          workspaceId,
-          name: 'F4.016 gate',
-          status: 'reviewing-proxy',
-          objective: 'discovery',
-          format: '16:9',
-          locale: 'pt-BR',
-          createdByType: 'api-client',
-          createdById,
-          createdAt: at(0),
-          updatedAt: at(0),
-        },
-      })
-    }
-    for (const kind of ['brief', 'edit-plan', 'policies']) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: `f4016-snapshot-${kind}`,
-          workspaceId: A,
-          projectId: PROJECT_A,
-          kind,
-          schemaVersion: 1,
-          contentJson: JSON.stringify({ kind }),
-          contentHash: sha('1'),
-          createdAt: at(0),
-        },
-      })
-    }
-    await client.v2ProjectVersion.create({
-      data: {
-        id: VERSION_A,
-        workspaceId: A,
-        projectId: PROJECT_A,
-        sequence: 1,
-        briefSnapshotId: 'f4016-snapshot-brief',
-        editPlanSnapshotId: 'f4016-snapshot-edit-plan',
-        policiesSnapshotId: 'f4016-snapshot-policies',
-        baseHash: sha('2'),
-        createdBy: CLIENT_A,
-        createdAt: at(0),
-      },
+      await disconnectV2PostgresClient()
+      await client.$disconnect()
     })
-    await client.v2Project.update({
-      where: { id: PROJECT_A },
-      data: { currentVersionId: VERSION_A },
+
+    // Both workspaces' projects are created the way the product creates them: the creation Command, and on workspace A's
+    // project one explicit output variant (its head is the Version the gate records). The extra credential is a second
+    // API client of workspace A, for the idempotency actor check.
+    const actorA = await makeActor(CLIENT_A, A)
+    const sealedA = await seedSealedProject(client, {
+      workspaceId: A, actor: testActor({ workspaceId: A, clientId: CLIENT_A, scopes: ['projects:read', 'projects:write'] }),
+      prefix: 'f4016', ids: { project: PROJECT_A }, name: 'F4.016 gate',
+    })
+    const VERSION_A = sealedA.head.version.id
+    await seedSealedProject(client, {
+      workspaceId: B, actor: testActor({ workspaceId: B, clientId: CLIENT_B, scopes: ['projects:read', 'projects:write'] }),
+      prefix: 'f4016', ids: { project: PROJECT_B }, name: 'F4.016 gate', variant: false,
+    })
+    await client.v2ApiClient.create({
+      data: {
+        id: CLIENT_A2,
+        workspaceId: A,
+        name: 'F4.016 gate client',
+        allowedEnvironmentsJson: JSON.stringify(['sandbox']),
+        scopeGrantsJson: JSON.stringify(['projects:read', 'projects:write']),
+        createdBy: 'f4016-operator',
+        createdAt: at(0),
+        updatedAt: at(0),
+      },
     })
 
     const repository = new PrismaMulticamLongformGateRepository(client)
@@ -224,9 +157,8 @@ test(
       repository,
       legacyAudit,
       clock: () => at(100),
-      createId: () => `f4016-gate-${(issued += 1)}`,
+      createId: () => `f4016-gate-${RUN_ID}-${(issued += 1)}`,
     })
-    const actorA = await makeActor(CLIENT_A, A)
     const run = async (key, overrides = {}) =>
       evaluate({
         workspaceId: A,
@@ -765,50 +697,40 @@ test(
     const { MULTICAM_LONGFORM_CRITERIA } = await import(
       '../../src/v2/domain/multicam-longform-gate.ts'
     )
-    const { buildGateWorld, cleanGateWorld } = await import(
-      './helpers/multicam-longform-gate-world.mjs'
-    )
-    const { acquireGateFixtureLease } = await import('./helpers/gate-fixture-lease.mjs')
+    const { buildGateWorld } = await import('./helpers/multicam-longform-gate-world.mjs')
 
     const client = new PrismaClient()
-    const W = 'f4016-workspace-c'
-    const OTHER = 'f4016-workspace-d'
-    const PROJECT = 'f4016-project-c'
-    const OTHER_PROJECT = 'f4016-project-d'
-    const VERSION = 'f4016-version-c'
-    const CLIENT = 'f4016-client-c'
-    const OTHER_CLIENT = 'f4016-client-d'
+    // Every identity of the world carries the run: the world writes sealed rows (a Version, its Command, its snapshots, the
+    // artifacts' manifests) that nothing can sweep, so a second world never meets the first one's rows. The lease that
+    // used to serialise suites sharing fixed ids is not needed for that reason any more.
+    const RUN_ID = randomUUID().replaceAll('-', '').slice(0, 12)
+    const W = `f4016-workspace-c-${RUN_ID}`
+    const OTHER = `f4016-workspace-d-${RUN_ID}`
+    const PROJECT = `f4016-project-c-${RUN_ID}`
+    const OTHER_PROJECT = `f4016-project-d-${RUN_ID}`
+    const CLIENT = `f4016-client-c-${RUN_ID}`
+    const OTHER_CLIENT = `f4016-client-d-${RUN_ID}`
 
-    let world = null
-    // `buildGateWorld` writes fixture ids that are unique across the whole
-    // database, so two suites seeding it at once destroy each other. Held for
-    // the life of this test, released in the hook below.
-    const lease = await acquireGateFixtureLease()
     t.after(async () => {
-      try {
-        // Through the world when it exists, because only it knows which
-        // catalogue rows it published; through the bare cleaner otherwise.
-        await (world
-          ? world.clean()
-          : cleanGateWorld({ client, workspaceIds: [W, OTHER] }))
-      } catch (error) {
-        console.error('cleanup failed:', error?.message ?? error)
-      } finally {
-        await client.$disconnect()
-        await lease.release()
-      }
+      await client.$disconnect()
     })
 
-    world = await buildGateWorld({
+    // The world is built WITHOUT the two compiled renderable plans (criteria 4 and 6 read them), so that "no compiled plan"
+    // is a stage of this test with its own assertion: the plan rows are sealed dependencies now and a test can no longer
+    // delete one to prove its criterion fails alone. The plans are compiled right after, by the same services the
+    // 'repository' world uses.
+    const world = await buildGateWorld({
       client,
+      run: RUN_ID,
       workspaceId: W,
       projectId: PROJECT,
-      versionId: VERSION,
       clientId: CLIENT,
       otherWorkspaceId: OTHER,
       otherProjectId: OTHER_PROJECT,
       otherClientId: OTHER_CLIENT,
+      renderablePlans: 'omit',
     })
+    const VERSION = world.versionId
 
     const repository = new PrismaMulticamLongformGateRepository(client)
     const legacyAudit = new ModuleGraphLegacyRuntimeAudit({ clock: () => at(0) })
@@ -820,7 +742,7 @@ test(
       // the same report, and a clock that moves would hide a difference the
       // evidence caused behind one the timestamp caused.
       clock: () => at(200),
-      createId: () => `f4016-world-gate-${(issued += 1)}`,
+      createId: () => `f4016-world-gate-${RUN_ID}-${(issued += 1)}`,
     })
     const actor = await makeActor(CLIENT, W)
     const run = (key, overrides = {}) =>
@@ -829,6 +751,39 @@ test(
       gate.report.criteria.find((item) => item.criterion === name)
     const failing = (gate) =>
       gate.report.criteria.filter((item) => !item.passed).map((item) => item.criterion)
+
+    // -----------------------------------------------------------------------
+    // No compiled plan yet: criteria 4 and 6 fail ALONE, for want of the plan.
+    // -----------------------------------------------------------------------
+    // The same claim the nine single-row deletions below make for the other criteria, made the only way a sealed row
+    // allows: by evaluating the world before the plan row exists. Nothing but the two plan-dependent criteria is unmet,
+    // and each says its evidence is missing rather than tampered with.
+    const withoutPlans = await run('f4016-world-key-no-plans')
+    assert.deepEqual(
+      failing(withoutPlans.gate).sort(),
+      ['contextual-multi-range-synthesis', 'react-edited-with-piecewise-map'],
+      'a world without compiled plans failed something other than the criteria that read them',
+    )
+    assert.equal(withoutPlans.gate.report.satisfied, 8)
+    for (const criterion of ['react-edited-with-piecewise-map', 'contextual-multi-range-synthesis']) {
+      assert.ok(
+        criterionOf(withoutPlans.gate, criterion).checks.some((item) => item.failureReason === 'evidence-missing'),
+        `${criterion} did not name the missing plan as missing evidence`,
+      )
+    }
+    // OPEN W66 PRODUCT GAP (not a test defect): every INSERT into renderable_plan_snapshots must be bound reciprocally by its
+    // Version's sealed State (renderable_plan_snapshots_w66_commit_check / w66_renderable_dispatch_v2), and the State of an
+    // explicit-variant Version binds none. The two compiles below therefore fail at COMMIT with "W66 new renderable snapshot
+    // lacks reciprocal state binding" until the compile path is given a State-bound way to publish its plan; everything
+    // above this line (the whole world, and the no-plan stage) is proved.
+    await world.compileSynthesisPlan()
+    const onlyReactMissing = await run('f4016-world-key-react-plan-missing')
+    assert.deepEqual(
+      failing(onlyReactMissing.gate),
+      ['react-edited-with-piecewise-map'],
+      'compiling the synthesis plan moved something other than the synthesis criterion',
+    )
+    await world.compileReactPlan()
 
     // -----------------------------------------------------------------------
     // Every condition holds: the gate approves, on evidence it read itself.
@@ -875,8 +830,11 @@ test(
     )
     const evaluationOf = (rows) =>
       rows.find((row) => row.resourceType === 'capture-protocol-evaluation')?.resourceId
-    assert.match(evaluationOf(podcastCitations), /^f4016-session-podcast:podcast-v1:/)
-    assert.match(evaluationOf(teacherCitations), /^f4016-session-teacher:teacher-and-screen-v1:/)
+    assert.ok(evaluationOf(podcastCitations)?.startsWith(`${world.ids.podcastSession}:podcast-v1:`), evaluationOf(podcastCitations))
+    assert.ok(
+      evaluationOf(teacherCitations)?.startsWith(`${world.ids.teacherSession}:teacher-and-screen-v1:`),
+      evaluationOf(teacherCitations),
+    )
     assert.notEqual(
       evaluationOf(podcastCitations),
       evaluationOf(teacherCitations),
@@ -969,7 +927,7 @@ test(
     )
 
     // -----------------------------------------------------------------------
-    // Three rows edited under the product. Each reproves ONE criterion, and
+    // Two rows put in contradiction under the product. Each reproves ONE criterion, and
     // the record is still written — a reader that throws leaves no record at
     // all, which is the failure this gate exists to prevent.
     // -----------------------------------------------------------------------
@@ -1006,29 +964,52 @@ test(
       return result
     }
 
-    // A manifest edited underneath the product used to make the WHOLE
+    // A manifest that does not re-derive to its stored hash used to make the WHOLE
     // evaluation throw INVALID_ARGUMENT: `artifact-hash-matches-attempt` passed
     // while citing the manifest's hash, which the domain refuses.
+    //
+    // A stored manifest can no longer be edited (`media_artifact_manifests` refuses UPDATE and DELETE:
+    // "W66 immutable dependency"), so the contradiction goes in the way a bad writer could still put it in: a second
+    // manifest row for the output artifact whose body does not hash to the hash stored beside it (a different hash
+    // column, so the (artifact, hash) key admits it), and the promoted export pointed at that row. Pointing the
+    // export back restores the world; the forged row stays, referenced by nothing.
     const manifestId = `manifest-${world.exportIds.outputArtifact}`
     const manifestBefore = await client.v2MediaArtifactManifest.findUniqueOrThrow({
       where: { id: manifestId },
     })
+    const forgedManifestId = `${manifestId}-forged`
+    const pointExportAt = (outputManifestId) => client.$transaction([
+      client.v2ProjectFinalExportOperation.updateMany({
+        where: { workspaceId: W, operationId: world.exportIds.finalOperation },
+        data: { outputManifestId },
+      }),
+      client.v2ProjectFinalExportAttempt.updateMany({
+        where: { workspaceId: W, operationId: world.exportIds.finalOperation },
+        data: { outputManifestId },
+      }),
+    ])
     const manifestTampered = await tamper({
       label: 'manifest',
       criterion: 'final-mp4-inspectable',
       checkCode: 'output-probe-measured',
       intact: ['final-export-promoted', 'output-codec-recorded', 'artifact-hash-matches-attempt'],
-      apply: () => client.$executeRawUnsafe(
-        'UPDATE "media_artifact_manifests" SET "manifestJson" = replace("manifestJson", $1, $2) WHERE "id" = $3',
-        '"duration":120',
-        '"duration":121',
-        manifestId,
-      ),
-      restore: () => client.$executeRawUnsafe(
-        'UPDATE "media_artifact_manifests" SET "manifestJson" = $1 WHERE "id" = $2',
-        manifestBefore.manifestJson,
-        manifestId,
-      ),
+      apply: async () => {
+        await client.v2MediaArtifactManifest.create({
+          data: {
+            ...manifestBefore,
+            id: forgedManifestId,
+            manifestHash: sha('f'),
+            manifestJson: manifestBefore.manifestJson.replace('"duration":120', '"duration":121'),
+          },
+        })
+        assert.notEqual(
+          manifestBefore.manifestJson.replace('"duration":120', '"duration":121'),
+          manifestBefore.manifestJson,
+          'the forged manifest must differ from the stored one',
+        )
+        await pointExportAt(forgedManifestId)
+      },
+      restore: () => pointExportAt(manifestId),
     })
     const artifactCheck = criterionOf(manifestTampered.gate, 'final-mp4-inspectable')
       .checks.find((item) => item.code === 'artifact-hash-matches-attempt')
@@ -1038,31 +1019,15 @@ test(
       'the artifact comparison was dragged down by the manifest it does not read',
     )
 
-    // A renderable plan snapshot whose stored hash no longer recomputes. The
-    // read that finds it sits outside the criterion's own try/catch, so before
-    // the fix this threw out of readEvidence and no record was written.
-    const snapshotRow = await client.v2RenderablePlanSnapshot.findFirstOrThrow({
-      where: { workspaceId: W, origin: 'react-playback' },
-    })
-    await tamper({
-      label: 'snapshot',
-      criterion: 'react-edited-with-piecewise-map',
-      checkCode: 'map-compiled-into-plan',
-      // The three checks that never look at the plan still answer. Guarding
-      // the whole criterion instead of the read would leave all four
-      // unverified — true, but it would stop saying the map itself is fine.
-      intact: ['playback-map-persisted', 'interrupted-piece-present', 'reaction-duration-differs'],
-      apply: () => client.$executeRawUnsafe(
-        'UPDATE "renderable_plan_snapshots" SET "planHash" = $1 WHERE "id" = $2',
-        sha('b'),
-        snapshotRow.id,
-      ),
-      restore: () => client.$executeRawUnsafe(
-        'UPDATE "renderable_plan_snapshots" SET "planHash" = $1 WHERE "id" = $2',
-        snapshotRow.planHash,
-        snapshotRow.id,
-      ),
-    })
+    // RETIRED: a renderable plan snapshot whose stored hash no longer recomputes. This block used to UPDATE
+    // `renderable_plan_snapshots.planHash` and require the react criterion alone to reprove as unverified, then (below) to
+    // UPDATE `sourceHash` of both plans and require the gate to ignore a fabricated binding column. Neither contradiction
+    // can be stored any more, for two independent reasons: `renderable_plan_snapshots_w66_dependency_guard` refuses every
+    // UPDATE and DELETE of the table ("W66 immutable dependency"), and `renderable_plan_snapshots_w66_commit_check`
+    // (`w66_renderable_dispatch_v2`) refuses at COMMIT every INSERT that the Version's sealed State does not bind
+    // reciprocally ("W66 new renderable snapshot lacks reciprocal state binding"), so a forged extra row cannot be
+    // inserted either. The reader's own defence (`snapshotForSource` turns PERSISTENCE_CONFLICT into
+    // 'evidence-unverified') stays covered at the unit level; the database no longer lets a test reach it.
 
     // And the case the lane already covered, now against a world where every
     // other criterion holds: only the direction moves.
@@ -1187,33 +1152,9 @@ test(
       world.exportIds.outputArtifact,
     )
 
-    // `renderable_plan_snapshots.sourceHash` is a plain column: the snapshot's
-    // hash covers the plan document, not the binding columns beside it, so one
-    // UPDATE used to promote a stale plan to evidence while the gate still
-    // recorded the reference as verified. Criteria 4 and 6 now read the same
-    // binding out of the document they just re-derived, so a fabricated column
-    // changes nothing — and reverting to the column makes this fail.
-    for (const origin of ['react-playback', 'multi-range-synthesis']) {
-      const row = await client.v2RenderablePlanSnapshot.findFirstOrThrow({
-        where: { workspaceId: W, origin },
-      })
-      await client.$executeRawUnsafe(
-        'UPDATE "renderable_plan_snapshots" SET "sourceHash" = $1 WHERE "id" = $2',
-        sha('e'),
-        row.id,
-      )
-      const forged = await run(`f4016-world-key-source-${origin}`)
-      assert.deepEqual(
-        failing(forged.gate),
-        [],
-        `a fabricated ${origin} sourceHash changed what the gate concluded`,
-      )
-      await client.$executeRawUnsafe(
-        'UPDATE "renderable_plan_snapshots" SET "sourceHash" = $1 WHERE "id" = $2',
-        row.sourceHash,
-        row.id,
-      )
-    }
+    // RETIRED (see the retired renderable plan snapshot block above): the fabricated `sourceHash` column of each compiled
+    // plan. The column is part of a sealed row now, so the "criteria 4 and 6 read the binding out of the document, not the
+    // column" claim cannot be put to the test by editing it.
 
     // One coverage row left where two are needed. "We derived one" and "we
     // derived two and neither carries a measured coverageBps" are different
@@ -1417,8 +1358,8 @@ test(
     )
 
     // -----------------------------------------------------------------------
-    // Nine deletions, one row each. After the k-th, exactly the first k
-    // criteria are unmet and the rest still answer for themselves.
+    // Seven deletions, one row each (the two compiled-plan criteria are proved above, by the world that has no plan yet).
+    // After the k-th, exactly the first k criteria are unmet and the rest still answer for themselves.
     // -----------------------------------------------------------------------
     const deletions = [
       {
@@ -1443,23 +1384,9 @@ test(
         }),
       },
       {
-        criterion: 'react-edited-with-piecewise-map',
-        row: 'the compiled react plan',
-        remove: () => client.v2RenderablePlanSnapshot.deleteMany({
-          where: { workspaceId: W, origin: 'react-playback' },
-        }),
-      },
-      {
         criterion: 'active-speaker-and-demonstration-directed',
         row: 'the direction head',
         remove: () => client.v2MulticamDirectionHead.deleteMany({ where: { workspaceId: W } }),
-      },
-      {
-        criterion: 'contextual-multi-range-synthesis',
-        row: 'the compiled synthesis plan',
-        remove: () => client.v2RenderablePlanSnapshot.deleteMany({
-          where: { workspaceId: W, origin: 'multi-range-synthesis' },
-        }),
       },
       {
         criterion: 'colour-match-precedes-creative-lut',

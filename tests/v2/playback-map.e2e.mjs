@@ -14,9 +14,11 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *
  * - **Hydration is verified by hash.** A piece edited underneath the
  *   application makes the map unreadable rather than making the compiler cut
- *   from numbers nobody derived — and so does an edited `planJson`, which is
- *   the guard that had none: the CHECKs accept a clip shifted three hundred
- *   frames deeper into the master, and the reader does not.
+ *   from numbers nobody derived. (It used to say the same of an edited
+ *   `planJson`: the CHECKs accept a clip shifted three hundred frames deeper
+ *   into the master and the reader does not. A compiled plan is a sealed row
+ *   now, which the database neither updates nor accepts a forged sibling of,
+ *   so that half is retired where it stood below.)
  * - **The plan names files this project can render from.** Every artifact the
  *   compiled plan declares is resolved through the project's media-asset links
  *   — the lookup the render path itself performs — and unlinking one refuses
@@ -37,13 +39,17 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 const RUN = process.env.APOLLO_PLAYBACK_MAP_E2E === '1'
 
-const A = 'pm-e2e-workspace-a'
-const B = 'pm-e2e-workspace-b'
-const PROJECT_A = 'pm-e2e-project-a'
-const PROJECT_B = 'pm-e2e-project-b'
+// Every identity carries the run. The project's Versions, Commands and snapshots are sealed (append-only), so nothing is
+// swept afterwards and a second invocation in one database must not meet the first one's workspace.
+const RUN_ID = randomUUID().replaceAll('-', '').slice(0, 12)
+const A = `pm-e2e-workspace-a-${RUN_ID}`
+const B = `pm-e2e-workspace-b-${RUN_ID}`
+const PROJECT_A = `pm-e2e-project-a-${RUN_ID}`
+const PROJECT_B = `pm-e2e-project-b-${RUN_ID}`
 const SESSION = 'pm-e2e-session'
 const REACTION_TRACK = 'track-reaction'
-const VERSION_A = 'pm-e2e-version-a'
+/** The sealed Version project A's compiled plans hang from: the head of its explicit 9:16 variant (set when the project exists). */
+let VERSION_A = null
 
 const at = (second) => new Date(Date.parse('2029-07-01T09:00:00.000Z') + second * 1_000)
 const iso = (second) => at(second).toISOString()
@@ -53,10 +59,8 @@ test(
   'E2E-F4.015 a react playback map is derived, anchored, compiled and read back from PostgreSQL',
   { skip: RUN ? false : 'set APOLLO_PLAYBACK_MAP_E2E=1 with a migrated V2_DATABASE_URL' },
   async (t) => {
-    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-    const { PrismaWorkspaceRepository } = await import(
-      '../../src/v2/infrastructure/prisma/workspace-repository.ts'
-    )
+    const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
+    const { variantBodyFor } = await import('./helpers/explicit-project-http.mjs')
     const { PrismaPlaybackMapRepository } = await import(
       '../../src/v2/infrastructure/prisma/playback-map-repository.ts'
     )
@@ -82,8 +86,8 @@ test(
 
     const client = new PrismaClient()
     const clean = async () => {
+      // The compiled plans are sealed dependencies of the project (never deleted); only the mutable map rows are swept.
       for (const table of [
-        client.v2RenderablePlanSnapshot,
         client.v2PlaybackUncoveredRange, client.v2PlaybackAnchor, client.v2PlaybackPiece,
         client.v2PlaybackMapHead, client.v2PlaybackMap,
         client.v2CaptureSessionHead,
@@ -106,39 +110,16 @@ test(
     })
     await clean()
 
-    const workspaces = new PrismaWorkspaceRepository(client)
-    for (const id of [A, B]) {
-      await workspaces.create(createWorkspace({
-        id, slug: id, name: 'Playback E2E', status: 'active', createdAt: iso(0),
-      }))
-    }
-    for (const [projectId, workspaceId] of [[PROJECT_A, A], [PROJECT_B, B]]) {
-      await client.v2Project.create({
-        data: {
-          id: projectId, workspaceId, name: 'Playback E2E', status: 'reviewing-proxy',
-          objective: 'discovery', format: '9:16', locale: 'pt-BR',
-          createdByType: 'api-client', createdById: 'pm-e2e-client',
-          createdAt: at(0), updatedAt: at(0),
-        },
-      })
-    }
-    for (const kind of ['brief', 'edit-plan', 'policies']) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: `pm-e2e-snapshot-${kind}`, workspaceId: A, projectId: PROJECT_A, kind,
-          schemaVersion: 1, contentJson: JSON.stringify({ kind }), contentHash: hash('1'),
-          createdAt: at(0),
-        },
-      })
-    }
-    await client.v2ProjectVersion.create({
-      data: {
-        id: VERSION_A, workspaceId: A, projectId: PROJECT_A, sequence: 1,
-        briefSnapshotId: 'pm-e2e-snapshot-brief',
-        editPlanSnapshotId: 'pm-e2e-snapshot-edit-plan',
-        policiesSnapshotId: 'pm-e2e-snapshot-policies',
-        baseHash: hash('2'), createdBy: 'pm-e2e-client', createdAt: at(0),
-      },
+    // Each project is created the way the product creates it: the creation Command and one explicit output variant (project A's
+    // is 9:16, the Version its compiled plans hang from; project B only needs to exist).
+    const sealedA = await seedSealedProject(client, {
+      workspaceId: A, actor: testActor({ workspaceId: A, clientId: `pm-e2e-client-a-${RUN_ID}` }), prefix: 'pm', ids: { project: PROJECT_A },
+      name: 'Playback E2E', variant: variantBodyFor({ aspectRatio: '9:16' }),
+    })
+    VERSION_A = sealedA.head.version.id
+    await seedSealedProject(client, {
+      workspaceId: B, actor: testActor({ workspaceId: B, clientId: `pm-e2e-client-b-${RUN_ID}` }), prefix: 'pm', ids: { project: PROJECT_B },
+      name: 'Playback E2E', variant: false,
     })
     for (const [workspaceId, projectId] of [[A, PROJECT_A], [B, PROJECT_B]]) {
       await client.v2CaptureSessionHead.create({
@@ -152,7 +133,14 @@ test(
 
     // The slice C fixture: a reaction with a pause, a commentary, a replay, a
     // seek and a stretch where the player was hidden.
-    const world = buildPlaybackWorld({ workspaceId: A, projectId: PROJECT_A, sessionId: SESSION })
+    // The recordings' artifacts are rows with global ids (and sealed manifests), so the fixture names them after the run.
+    const world = buildPlaybackWorld({
+      workspaceId: A, projectId: PROJECT_A, sessionId: SESSION,
+      ingest: {
+        reaction: { artifactId: `artifact-pm-e2e-reaction-${RUN_ID}`, sha256: hash('a') },
+        reference: { artifactId: `artifact-pm-e2e-reference-${RUN_ID}`, sha256: hash('c') },
+      },
+    })
 
     // The two recordings as ingested artifacts, linked to the project. The ids
     // are the parts' own `evidence.ingestArtifactId` and the durations their own
@@ -388,6 +376,10 @@ test(
       'a compile refused by the fence must not leave a snapshot behind',
     )
 
+    // OPEN W66 PRODUCT GAP (not a test defect): every INSERT into renderable_plan_snapshots must be bound reciprocally by its
+    // Version's sealed State (renderable_plan_snapshots_w66_commit_check / w66_renderable_dispatch_v2), and the State of an
+    // explicit-variant Version binds none. The compile below therefore fails at COMMIT with "W66 new renderable snapshot
+    // lacks reciprocal state binding" until the compile path is given a State-bound way to publish its plan.
     const compiled = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
       ...resolvedFence,
@@ -533,104 +525,21 @@ test(
       recordings.map((recording) => [recording.artifactId, recording.durationSeconds]),
     )
 
-    // Hash-verified hydration of the PLAN, which is the guard commit fc11d484
-    // is named after and which no test exercised: removing the recompute left
-    // every suite green, this journey included.
-    //
-    // The edit is chosen to pass every CHECK on the table: same plan id, same
-    // state, same schema version, same project version, same duration, same clip
-    // count — only the first clip moved three hundred frames deeper into the
-    // master, which is exactly the kind of edit a repair script makes and the
-    // kind that changes what gets rendered.
-    const storedPlan = JSON.parse(snapshotRow.planJson)
-    const movedPlan = JSON.parse(snapshotRow.planJson)
-    movedPlan.videoTracks[0].clips[0].sourceInFrame += 300
-    movedPlan.videoTracks[0].clips[0].sourceOutFrame += 300
-    await client.v2RenderablePlanSnapshot.update({
-      where: { id: snapshotRow.id },
-      data: { planJson: JSON.stringify(movedPlan) },
-    })
-    const shifted = await snapshots.readLatestForSource({
-      workspaceId: A, origin: 'react-playback', sourceId: resolved.map.mapId,
-    }).then(() => null, (error) => error)
-    assert.equal(shifted?.code, 'PERSISTENCE_CONFLICT', 'the CHECKs accepted the edit; the reader must not')
-    assert.match(String(shifted.message), /does not match its hash/)
-    assert.equal(shifted.details.storedHash, snapshotRow.planHash)
-
-    // A tamperer who recomputes the hash — the algorithm is in the repository —
-    // still cannot store a document the domain refuses: nine clips with no
-    // transitions between them is not a plan, and every CHECK still passes.
-    const unrenderable = JSON.parse(snapshotRow.planJson)
-    unrenderable.transitions = []
-    await client.v2RenderablePlanSnapshot.update({
-      where: { id: snapshotRow.id },
-      data: {
-        planJson: JSON.stringify(unrenderable),
-        planHash: calculateRenderablePlanHash(unrenderable),
-      },
-    })
-    const invalid = await snapshots.readLatestForSource({
-      workspaceId: A, origin: 'react-playback', sourceId: resolved.map.mapId,
-    }).then(() => null, (error) => error)
-    assert.equal(invalid?.code, 'PERSISTENCE_CONFLICT')
-    assert.match(String(invalid.message), /not a renderable plan any more/)
-
-    // The other two refusals in `hydrate` need the table's own CHECKs out of the
-    // way — which is the point: they are the reader's defence for the day a
-    // repair script drops a constraint, and the constraint definition is read
-    // back from the catalogue so restoring it cannot drift from the migration.
-    const withoutConstraint = async (name, run) => {
-      const [{ def }] = await client.$queryRawUnsafe(
-        'SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint ' +
-        `WHERE conrelid = 'renderable_plan_snapshots'::regclass AND conname = $1`,
-        name,
-      )
-      await client.$executeRawUnsafe(`ALTER TABLE "renderable_plan_snapshots" DROP CONSTRAINT "${name}"`)
-      try {
-        await run()
-      } finally {
-        await client.v2RenderablePlanSnapshot.update({
-          where: { id: snapshotRow.id },
-          data: {
-            planJson: snapshotRow.planJson,
-            planHash: snapshotRow.planHash,
-            origin: snapshotRow.origin,
-          },
-        })
-        await client.$executeRawUnsafe(
-          `ALTER TABLE "renderable_plan_snapshots" ADD CONSTRAINT "${name}" ${def}`,
-        )
-      }
-    }
-
-    await withoutConstraint('renderable_plan_snapshots_plan_check', async () => {
-      await client.v2RenderablePlanSnapshot.update({
-        where: { id: snapshotRow.id },
-        data: { planJson: 'this is not a plan' },
-      })
-      const broken = await snapshots.listForProject({ workspaceId: A, projectId: PROJECT_A })
-        .then(() => null, (error) => error)
-      assert.equal(broken?.code, 'PERSISTENCE_CONFLICT')
-      assert.match(String(broken.message), /is not valid JSON/)
-    })
-    await withoutConstraint('renderable_plan_snapshots_origin_check', async () => {
-      await client.v2RenderablePlanSnapshot.update({
-        where: { id: snapshotRow.id },
-        data: { origin: 'hand-made' },
-      })
-      const foreign = await snapshots.listForProject({ workspaceId: A, projectId: PROJECT_A })
-        .then(() => null, (error) => error)
-      assert.equal(foreign?.code, 'PERSISTENCE_CONFLICT')
-      assert.match(String(foreign.message), /names an unknown origin/)
-    })
-
-    // Restored, and readable again — so the refusals above were the tampering
-    // and not a repository that cannot read its own rows.
+    // RETIRED: hash-verified hydration of the PLAN (the guard commit fc11d484 is named after). This block used to UPDATE the
+    // compiled snapshot three ways and require the reader to refuse each: a clip moved three hundred frames deeper into the
+    // master under an unchanged hash (every CHECK still passed), a document rehashed after dropping its transitions, and two
+    // rows (`planJson` not JSON, `origin` unknown) written with the table's own CHECKs dropped and restored around them.
+    // None of those contradictions can be stored any more: `renderable_plan_snapshots_w66_dependency_guard` refuses every
+    // UPDATE and DELETE of the table ("W66 immutable dependency"), and `renderable_plan_snapshots_w66_commit_check`
+    // (`w66_renderable_dispatch_v2`) refuses at COMMIT every INSERT row the Version's sealed State does not bind
+    // reciprocally, so a forged extra row cannot be put in beside the genuine one either. The reader's defence
+    // (`hydrate` in renderable-plan-snapshot-repository.ts) stays covered at the unit level; the database no longer lets
+    // this journey reach it. What stays measured here is the positive half: the plan that was compiled reads back whole.
     const restored = await snapshots.readLatestForSource({
       workspaceId: A, origin: 'react-playback', sourceId: resolved.map.mapId,
     })
     assert.equal(restored.planHash, compiled.planHash)
-    assert.deepEqual(restored.plan.videoTracks[0].clips[0], storedPlan.videoTracks[0].clips[0])
+    assert.deepEqual(JSON.parse(JSON.stringify(restored.plan)), JSON.parse(JSON.stringify(compiled.plan)))
 
     // A second delivery rate is a second plan, and PostgreSQL is what says so.
     //
@@ -751,9 +660,7 @@ test(
       `refused by ${drift.code} naming fps ${drift.details.fps}; ` +
       `second writer refused by ${lost.code} at the service and ${rejected.code} at the database; ` +
       `sources ${compiled.plan.sources.map((source) => `${source.artifactId}@${source.durationSeconds}s`).join(' + ')} ` +
-      `all linked to ${PROJECT_A}; stored plan refused after a CHECK-passing clip shift ` +
-      `(${shifted.code}), after a rehashed unrenderable document (${invalid.code}) ` +
-      `and after unlinking the reference (${unresolvable.code}); ` +
+      `all linked to ${PROJECT_A}; compile refused after unlinking the reference (${unresolvable.code}); ` +
       `composition root executed: read v${viaFactory.map.version} and ` +
       `${dependents.length} reference dependents through createReactPlaybackMapServices`,
     )

@@ -421,7 +421,6 @@ async function driveJourney(t, {
     const suffix = randomUUID().slice(0, 8)
     const workspaceId = `lfs-${suffix}`
     const projectId = `lfs-project-${suffix}`
-    const versionId = `lfs-version-${suffix}`
     const artifactId = `lfs-master-${suffix}`
     const synthesisId = `lfs-synthesis-${suffix}`
     const createdAt = new Date('2029-07-01T09:00:00.000Z')
@@ -435,22 +434,6 @@ async function driveJourney(t, {
     })
     const operationId = `lfs-render-${suffix}`
 
-    const clean = async () => {
-      for (const table of [
-        'v2RenderablePlanSnapshot',
-        'v2EditorialSynthesisJoin',
-        'v2EditorialSynthesisRange',
-        'v2EditorialSynthesis',
-        'v2StoryPlan',
-        'v2ProjectMediaAsset',
-        'v2MediaArtifactManifest',
-        'v2MediaArtifact',
-      ]) {
-        await client[table].deleteMany({ where: { workspaceId } })
-      }
-      await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    }
-
     t.after(async () => {
       // Every teardown reports instead of rethrowing: an ffmpeg work root that
       // would not go is not a failed measurement, and turning it into one
@@ -461,11 +444,6 @@ async function driveJourney(t, {
       await rm(root, { recursive: true, force: true }).catch((error) => {
         console.error('fixture cleanup reported:', error?.message ?? error)
       })
-      try {
-        await clean()
-      } catch (error) {
-        console.error('database cleanup reported:', error?.message ?? error)
-      }
       await client.$disconnect()
     })
 
@@ -506,7 +484,6 @@ async function driveJourney(t, {
     }
 
     // ---- the world the routes need ---------------------------------------
-    await clean()
     await client.v2Workspace.create({
       data: {
         id: workspaceId, slug: workspaceId, name: 'long-form synthesis journey',
@@ -525,37 +502,17 @@ async function driveJourney(t, {
       scopes: ['projects:read', 'projects:write'],
     })
     const authorization = `Bearer ${caller.token}`
-    await client.v2Project.create({
-      data: {
-        id: projectId, workspaceId, name: 'long-form synthesis journey',
-        status: 'reviewing-proxy', objective: 'discovery', format: '16:9', locale: 'pt-BR',
-        createdByType: 'api-client', createdById: caller.client.id,
-        createdAt, updatedAt: createdAt,
-      },
+    // The project the way the product creates it: the creation Command, then one explicit 16:9 output variant. A Version
+    // cannot be inserted by hand; the head of the variant is the Version the story plan and the render plan hang from.
+    const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
+    const { variantBodyFor } = await import('./helpers/explicit-project-http.mjs')
+    const sealed = await seedSealedProject(client, {
+      workspaceId,
+      actor: testActor({ workspaceId, clientId: caller.client.id, credentialId: `${caller.client.id}-seed`, environment: API_ENVIRONMENT }),
+      prefix: 'lfs', ids: { project: projectId }, name: 'long-form synthesis journey',
+      variant: variantBodyFor({ aspectRatio: '16:9' }),
     })
-    const snapshotIds = {}
-    for (const kind of ['brief', 'edit-plan', 'policies']) {
-      snapshotIds[kind] = `lfs-snapshot-${kind}-${suffix}`
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: snapshotIds[kind], workspaceId, projectId, kind, schemaVersion: 1,
-          contentJson: JSON.stringify({ kind }), contentHash: '1'.repeat(64), createdAt,
-        },
-      })
-    }
-    await client.v2ProjectVersion.create({
-      data: {
-        id: versionId, workspaceId, projectId, sequence: 1,
-        briefSnapshotId: snapshotIds.brief,
-        editPlanSnapshotId: snapshotIds['edit-plan'],
-        policiesSnapshotId: snapshotIds.policies,
-        baseHash: '2'.repeat(64), createdBy: caller.client.id, createdAt,
-      },
-    })
-    await client.v2Project.update({
-      where: { id: projectId },
-      data: { currentVersionId: versionId },
-    })
+    const versionId = sealed.head.version.id
 
     // The artifact carries the numbers ffprobe returned, never the numbers the
     // encode was asked for: the compile step reads `durationSeconds` from here
@@ -723,6 +680,10 @@ async function driveJourney(t, {
     // digest, no duration and no frame rate, because the synthesis already
     // fixed the rate.
     const snapshots = new PrismaRenderablePlanSnapshotRepository(client)
+    // OPEN W66 PRODUCT GAP (not a test defect): every INSERT into renderable_plan_snapshots must be bound reciprocally by its
+    // Version's sealed State (renderable_plan_snapshots_w66_commit_check / w66_renderable_dispatch_v2), and the State of an
+    // explicit-variant Version binds none. The compile below therefore fails at COMMIT with "W66 new renderable snapshot
+    // lacks reciprocal state binding" until the compile path is given a State-bound way to publish its plan.
     const planned = await callRoute(NextRequest, renderPlanRoute, {
       method: 'POST',
       path: `/v1/projects/${projectId}/editorial-syntheses/${synthesisId}/render-plan`,

@@ -143,8 +143,7 @@ export async function encodeSharedProxy({ artifactRoot, key, seconds = 3, fps = 
 /** Workspace, API client, and the projects with their source recording. */
 export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix, proxy, projects }) {
   const { registerRecording, seedBaseProjectVersion } = await import('./capture-journey.mjs')
-  const { calculateCanonicalHash, stableSerialize } = await import('../../../src/v2/domain/canonical-hash.ts')
-  const { createProductionBrief } = await import('../../../src/v2/domain/production-brief.ts')
+  const { calculateCanonicalHash } = await import('../../../src/v2/domain/canonical-hash.ts')
   const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../../src/v2/domain/asset-rights.ts')
   const { createAssetRightsChangeIntent } = await import('../../../src/v2/domain/asset-rights-change.ts')
   const { PrismaAssetRightsRepository } = await import('../../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
@@ -153,75 +152,14 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
   const clientId = `editor-reliability-client-${suffix}`
   const createdAt = new Date()
 
-  // Ordered by foreign key, not by taste: versions and snapshots reference the
-  // artifacts, so artifacts cannot go first. A swallowed failure here leaves
-  // rows behind that the next run then blames on the product, so each failure
-  // is collected and reported instead of caught and discarded.
-  const CLEANUP_ORDER = [
-    'v2ReviewAnnotation',
-    'v2RenderElementMap',
-    'v2ProxyReview',
-    'v2ProjectProxyRenderOperation',
-    'v2ProjectFinalExportOperation',
-    'v2PublicOperation',
-    'v2EditCommand',
-    'v2ProjectVersion',
-    'v2ProjectSnapshot',
-    'v2ProjectMediaAsset',
-    'v2MediaArtifactManifest',
-    'v2MediaArtifact',
-    'v2PublicEventOutbox',
-    'v2IdempotencyRecord',
-    'v2ProjectCreationCommand',
-    'v2UiSession',
-    'v2WorkspaceUiPrincipal',
-    'v2Project',
-    'v2ApiClient',
-  ]
-  const cleanup = async () => {
-    // Every public table with a workspaceId, swept until a pass deletes nothing.
-    // A hand-maintained order cannot keep up with the tables the real routes
-    // write (colour pipeline compilations, the LUT selection command, render
-    // element maps…), and the one that fell out of date is what left rows
-    // behind for the next run to trip over. Foreign keys decide the order: a
-    // delete that a child blocks simply retries on the next pass.
-    const tables = (
-      await prisma.$queryRawUnsafe(
-        `SELECT table_name FROM information_schema.columns
-          WHERE table_schema = 'public' AND column_name = 'workspaceId'
-          ORDER BY table_name`,
-      )
-    ).map((row) => row.table_name)
-    let remaining = new Set(tables)
-    let lastErrors = new Map()
-    for (let pass = 0; pass < tables.length + 2 && remaining.size; pass += 1) {
-      const stillBlocked = new Set()
-      lastErrors = new Map()
-      for (const table of remaining) {
-        try {
-          await prisma.$executeRawUnsafe(`DELETE FROM "${table}" WHERE "workspaceId" = $1`, workspaceId)
-        } catch (error) {
-          stillBlocked.add(table)
-          lastErrors.set(table, error instanceof Error ? error.message.split('\n').pop() : String(error))
-        }
-      }
-      if (stillBlocked.size === remaining.size) break
-      remaining = stillBlocked
-    }
-    const failures = [...lastErrors].map(([table, message]) => new Error(`${table}: ${message}`))
-    try {
-      await prisma.$executeRawUnsafe(`DELETE FROM workspaces WHERE id = $1`, workspaceId)
-    } catch (error) {
-      failures.push(new Error(`workspaces: ${error instanceof Error ? error.message.split('\n').pop() : String(error)}`))
-    }
-    if (failures.length)
-      throw new AggregateError(
-        failures,
-        `fixture rows survived cleanup in ${workspaceId}: ${failures.map((error) => error.message).join(' | ')}`,
-      )
-  }
+  // Nothing here is swept. The world writes sealed rows (a ProjectVersion, its Command, its snapshots, the manifests of
+  // its recordings) that the database refuses to update or delete, and a workspace delete cascades into them, so a
+  // fixture can neither clean up after itself nor start by cleaning up before: every identity carries `suffix`, and a
+  // second world in the same database never meets the first one's rows. `cleanup` and `residue` are kept so the suites
+  // that call them still read the same shape; they say plainly that nothing was swept.
+  const cleanup = async () => Object.freeze({ swept: false, reason: 'sealed rows are append-only; identities are unique to the run', workspaceId })
 
-  /** What is still in this workspace — the proof cleanup left nothing. */
+  /** What is in this workspace. Informational: the suffix, not a sweep, is what keeps worlds apart. */
   const residue = async () => {
     const tables = (
       await prisma.$queryRawUnsafe(
@@ -238,10 +176,9 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
       const count = Number(rows?.[0]?.n ?? 0)
       if (count > 0) left.push({ table, count })
     }
-    return { tablesChecked: tables.length, left, clean: left.length === 0 }
+    return { tablesChecked: tables.length, left, swept: false }
   }
 
-  await cleanup()
   await createWorkspaceRow({ prisma, workspaceId, name: 'Editor Reliability Workspace', createdAt })
   const issued = await issueApiClient({
     prisma,
@@ -344,50 +281,11 @@ export async function seedEditorReliabilityWorld({ prisma, artifactRoot, suffix,
       createdAt,
     })
 
-    // The shared capture helper deliberately seeds only a placeholder brief.
-    // The editor workspace is stricter: it hydrates `productionBrief`, so this
-    // fixture must carry the same canonical value the product creates.
-    const briefContent = {
-      schemaVersion: 1,
-      productionBrief: createProductionBrief({
-        ownerText: 'Público geral. Oferta de boas-vindas. Tom direto e natural.',
-      }),
-      createdAt: createdAt.toISOString(),
-    }
-    await prisma.v2ProjectSnapshot.update({
-      where: { id: `${projectId}-snapshot-brief` },
-      data: {
-        schemaVersion: Number(briefContent.schemaVersion),
-        contentJson: stableSerialize(briefContent),
-        contentHash: calculateCanonicalHash(briefContent),
-      },
-    })
-
-    // `seedBaseProjectVersion` writes the policies snapshot as `{kind:'policies'}`
-    // with row schemaVersion 1. `hydratePolicySnapshot` requires
-    // `Number(content.schemaVersion) === row.schemaVersion`, and Number(undefined)
-    // is NaN, so every read of that project refuses with PERSISTENCE_CONFLICT
-    // ("Stored project policy snapshot identity is invalid"). Rewritten here with
-    // the content shape `createProjectService` itself writes (create-project.ts
-    // 149-155), hashed with the same function the reader verifies with.
-    // capture-journey.mjs is shared with the Wave 18 journey and is not touched;
-    // the version's baseHash does not include the policies hash, so it stands.
-    const policiesContent = {
-      schemaVersion: 1,
-      workspaceId,
-      state: 'unconfigured',
-      brandKitMode: 'inherit',
-      guardrails: [],
-      createdAt: createdAt.toISOString(),
-    }
-    await prisma.v2ProjectSnapshot.update({
-      where: { id: `${projectId}-snapshot-policies` },
-      data: {
-        schemaVersion: Number(policiesContent.schemaVersion),
-        contentJson: stableSerialize(policiesContent),
-        contentHash: calculateCanonicalHash(policiesContent),
-      },
-    })
+    // The brief and the policies the editor workspace hydrates are the ones the product's own creation Command sealed
+    // (`createProjectService` writes the canonical `productionBrief` and the canonical policies document). This fixture
+    // used to rewrite both snapshots in place, because the old hand-made seed left placeholders; a sealed snapshot cannot
+    // be rewritten any more (`project_snapshots` refuses UPDATE: "W66 immutable dependency"), and nothing in the editor
+    // journeys depends on the brief's owner text, so the product's brief stands.
     // The shared seeder and the readers use the same canonical hasher. Keep all
     // untouched snapshots byte-for-byte intact and prove their stored identity
     // instead of rewriting evidence that this fixture did not create.

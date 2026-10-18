@@ -42,21 +42,20 @@ test(
   'E2E-FR-150/151/152/153 the Wave 20 constraints refuse what the domain refuses',
   { skip: RUN ? false : 'set APOLLO_WAVE20_PERSISTENCE_E2E=1 with a migrated V2_DATABASE_URL' },
   async (t) => {
-    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-    const { PrismaWorkspaceRepository } = await import(
-      '../../src/v2/infrastructure/prisma/workspace-repository.ts'
-    )
+    const { seedSealedProject, testActor, uniqueRun } = await import('./helpers/pg-output-world.mjs')
 
     const client = new PrismaClient()
-    const workspaceId = 'w20-persistence-workspace'
-    const otherWorkspaceId = 'w20-persistence-other-workspace'
-    const projectId = 'w20-persistence-project'
-    const sessionId = 'w20-persistence-session'
-    const versionId = 'w20-persistence-version'
+    // Every identity carries the run: sealed rows (the Version, its Command, its snapshots) are append-only, so a
+    // second invocation in one database must not collide with the first, and nothing here can be swept afterwards.
+    const { run } = uniqueRun('w20p')
+    const workspaceId = `w20-persistence-workspace-${run}`
+    const otherWorkspaceId = `w20-persistence-other-workspace-${run}`
+    const projectId = `w20-persistence-project-${run}`
+    const sessionId = `w20-persistence-session-${run}`
     const directionId = `${sessionId}:m1`
     const mapId = `${sessionId}:p1`
     const planId = `${sessionId}:mp1`
-    const measurementId = 'w20-measurement-camera-a'
+    const measurementId = `w20-measurement-camera-a-${run}`
     const hash = (char) => char.repeat(64)
     const at = (second) => new Date(Date.parse('2029-05-01T09:00:00.000Z') + second * 1_000)
     // The ColorMetadata a match transform declares on both sides of itself
@@ -136,57 +135,17 @@ test(
       refusals += 1
     }
 
-    const workspaces = new PrismaWorkspaceRepository(client)
-    for (const id of [workspaceId, otherWorkspaceId]) {
-      await workspaces.create(
-        createWorkspace({ id, slug: id, name: 'Wave 20 persistence', status: 'active', createdAt: at(0).toISOString() }),
-      )
-    }
-    for (const [id, workspace] of [[projectId, workspaceId], [`${projectId}-other`, otherWorkspaceId]]) {
-      await client.v2Project.create({
-        data: {
-          id,
-          workspaceId: workspace,
-          name: 'Wave 20 persistence',
-          status: 'reviewing-proxy',
-          objective: 'discovery',
-          format: '9:16',
-          locale: 'pt-BR',
-          createdByType: 'api-client',
-          createdById: 'w20-persistence-client',
-          createdAt: at(0),
-          updatedAt: at(0),
-        },
-      })
-    }
-    for (const kind of ['brief', 'edit-plan', 'policies']) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: `w20-snapshot-${kind}`,
-          workspaceId,
-          projectId,
-          kind,
-          schemaVersion: 1,
-          contentJson: JSON.stringify({ kind }),
-          contentHash: hash('1'),
-          createdAt: at(0),
-        },
-      })
-    }
-    await client.v2ProjectVersion.create({
-      data: {
-        id: versionId,
-        workspaceId,
-        projectId,
-        sequence: 1,
-        briefSnapshotId: 'w20-snapshot-brief',
-        editPlanSnapshotId: 'w20-snapshot-edit-plan',
-        policiesSnapshotId: 'w20-snapshot-policies',
-        baseHash: hash('2'),
-        createdBy: 'w20-persistence-client',
-        createdAt: at(0),
-      },
+    // The project is created the way the product creates it: the creation Command and one explicit output variant. The
+    // critic report below hangs from the variant's Version (a Version cannot be inserted by hand any more).
+    const sealed = await seedSealedProject(client, {
+      workspaceId, actor: testActor({ workspaceId, clientId: `w20-persistence-client-${run}` }),
+      prefix: 'w20p', ids: { project: projectId }, name: 'Wave 20 persistence',
     })
+    await seedSealedProject(client, {
+      workspaceId: otherWorkspaceId, actor: testActor({ workspaceId: otherWorkspaceId, clientId: `w20-persistence-other-client-${run}` }),
+      prefix: 'w20p', ids: { project: `${projectId}-other` }, name: 'Wave 20 persistence',
+    })
+    const versionId = sealed.head.version.id
     for (const [id, workspace, project] of [
       [sessionId, workspaceId, projectId],
       [`${sessionId}-other`, otherWorkspaceId, `${projectId}-other`],
@@ -591,12 +550,12 @@ test(
     // ---------------------------------------------------------------------
 
     const report = {
-      id: 'w20-critic-report',
+      id: `w20-critic-report-${run}`,
       workspaceId,
       projectId,
       projectVersionId: versionId,
       schemaVersion: 'color-critic-report/v1',
-      reportId: 'w20-critic-report',
+      reportId: `w20-critic-report-${run}`,
       subjectKind: 'camera',
       subjectCameraId: 'camera-main',
       referenceCameraId: 'camera-main',
@@ -827,10 +786,7 @@ test(
     const { stringifyWithTicks } = await import('../../src/v2/infrastructure/prisma/bigint-json.ts')
     const { calculateMulticamDirectionHash } = await import('../../src/v2/domain/multicam-direction.ts')
     const { calculateMulticamMatchPlanHash } = await import('../../src/v2/domain/multicam-match-plan.ts')
-    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-    const { PrismaWorkspaceRepository } = await import(
-      '../../src/v2/infrastructure/prisma/workspace-repository.ts'
-    )
+    const { seedSealedProject, testActor, uniqueRun } = await import('./helpers/pg-output-world.mjs')
     const { PrismaMulticamDirectionRepository } = await import(
       '../../src/v2/infrastructure/prisma/multicam-direction-repository.ts'
     )
@@ -853,16 +809,20 @@ test(
     } = await import('./wave20-fixtures.mjs')
 
     const client = new PrismaClient()
-    const A = 'w20r-workspace-a'
-    const B = 'w20r-workspace-b'
+    // Every identity carries the run: the sealed Version rows are append-only, so a second invocation in one database
+    // cannot reuse (or sweep) the first one's project and workspace.
+    const { run } = uniqueRun('w20r')
+    const A = `w20r-workspace-a-${run}`
+    const B = `w20r-workspace-b-${run}`
     // The same session id in both workspaces on purpose: an isolation check
     // whose two rows could not have collided anyway proves only that two
     // different keys are different.
     const SESSION = 'w20r-session'
     const REACT = 'w20r-react'
     const REACTION_TRACK = 'track-reaction'
-    const project = (workspace) => (workspace === A ? 'w20r-project-a' : 'w20r-project-b')
-    const version = (workspace) => (workspace === A ? 'w20r-version-a' : 'w20r-version-b')
+    const project = (workspace) => (workspace === A ? `w20r-project-a-${run}` : `w20r-project-b-${run}`)
+    const versions = {}
+    const version = (workspace) => versions[workspace]
     const at = (second) => new Date(Date.parse('2029-05-02T09:00:00.000Z') + second * 1_000)
     const digest = (character) => character.repeat(64)
 
@@ -902,54 +862,14 @@ test(
 
     await clean()
 
-    const workspaces = new PrismaWorkspaceRepository(client)
     for (const id of [A, B]) {
-      await workspaces.create(createWorkspace({
-        id, slug: id, name: 'Wave 20 round trip', status: 'active', createdAt: at(0).toISOString(),
-      }))
-      await client.v2Project.create({
-        data: {
-          id: project(id),
-          workspaceId: id,
-          name: 'Wave 20 round trip',
-          status: 'reviewing-proxy',
-          objective: 'discovery',
-          format: '16:9',
-          locale: 'pt-BR',
-          createdByType: 'api-client',
-          createdById: 'w20r-client',
-          createdAt: at(0),
-          updatedAt: at(0),
-        },
+      // Each workspace's project is created the way the product creates it, and the critic reports below hang from the
+      // variant Version of that project (a Version cannot be inserted by hand any more).
+      const sealed = await seedSealedProject(client, {
+        workspaceId: id, actor: testActor({ workspaceId: id, clientId: `w20r-client-${id}` }),
+        prefix: 'w20r', ids: { project: project(id) }, name: 'Wave 20 round trip',
       })
-      for (const kind of ['brief', 'edit-plan', 'policies']) {
-        await client.v2ProjectSnapshot.create({
-          data: {
-            id: `${version(id)}-${kind}`,
-            workspaceId: id,
-            projectId: project(id),
-            kind,
-            schemaVersion: 1,
-            contentJson: JSON.stringify({ kind }),
-            contentHash: digest('1'),
-            createdAt: at(0),
-          },
-        })
-      }
-      await client.v2ProjectVersion.create({
-        data: {
-          id: version(id),
-          workspaceId: id,
-          projectId: project(id),
-          sequence: 1,
-          briefSnapshotId: `${version(id)}-brief`,
-          editPlanSnapshotId: `${version(id)}-edit-plan`,
-          policiesSnapshotId: `${version(id)}-policies`,
-          baseHash: digest('2'),
-          createdBy: 'w20r-client',
-          createdAt: at(0),
-        },
-      })
+      versions[id] = sealed.head.version.id
       for (const sessionId of [SESSION, REACT]) {
         await client.v2CaptureSessionHead.create({
           data: {
@@ -1464,33 +1384,36 @@ test(
     //
     // What it proves:
     //
-    // - The protection is application code, not database. There is no trigger,
-    //   no rule and no row-level security on any of these tables, so nothing
-    //   below the repositories refuses anything.
+    // - For the Wave 20 aggregates (capture sessions, sync diagnostics, the
+    //   multicam direction, the match plan, the playback map and the gate
+    //   record) the protection is application code, not database. There is no
+    //   trigger, no rule and no row-level security on any of these tables, so
+    //   nothing below the repositories refuses anything.
     // - A DELETE therefore succeeds. A version row disappears, the head goes on
     //   naming its hash, and the chain that was supposed to be a history has a
     //   hole in it that no read complains about until it asks for that version.
+    // - The sealed project history is the contrast, and it is measured too:
+    //   since W66 the Version, its snapshots and the renderable plan snapshot
+    //   ARE guarded by row triggers (w66_output_immutable and
+    //   w66_output_dependency_guard), so the same DELETE offered to them is
+    //   refused by the database, not by whoever remembered to look. The
+    //   renderable plan snapshot moved from the first list to the second.
     //
-    // Why it is a test rather than a fix. Blocking DELETE in the database
-    // breaks three things this repository does on purpose and one of them is a
-    // production write path:
+    // Why the first list is a test rather than a fix. Blocking DELETE in the
+    // database breaks two things this repository does on purpose and one of
+    // them is a production write path:
     //
     // - `capture-session-repository.ts` deletes the previous clock map inside
     //   `persistClockMap` -- "a map is the current answer for one source".
-    // - `multicam-longform-gate.e2e.mjs` falsifies nine of the ten gate
+    // - `multicam-longform-gate.e2e.mjs` falsifies seven of the ten gate
     //   criteria by deleting one evidence row each, and asserts that deleting a
     //   gate record cascades to its criteria, checks and evidence.
-    // - The cleanup of every Postgres suite here, including this file's own,
-    //   deletes from the same tables.
     //
     // So the record is the honest outcome and this is the tripwire under it:
     // the day somebody does add the protection, this test fails and points at
     // the three places the record lives (PRD FR-150, spec 05 s33.2 and s34.9,
     // REQUIREMENTS-TRACEABILITY).
-    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-    const { PrismaWorkspaceRepository } = await import(
-      '../../src/v2/infrastructure/prisma/workspace-repository.ts'
-    )
+    const { seedSealedProject, testActor, uniqueRun } = await import('./helpers/pg-output-world.mjs')
     const { PrismaMulticamDirectionRepository } = await import(
       '../../src/v2/infrastructure/prisma/multicam-direction-repository.ts'
     )
@@ -1500,10 +1423,10 @@ test(
     const { buildDirectionWorld } = await import('./wave20-fixtures.mjs')
 
     const client = new PrismaClient()
-    const W = 'w20i-workspace'
-    const PROJECT = 'w20i-project'
-    const VERSION = 'w20i-version'
-    const SESSION = 'w20i-session'
+    const { run } = uniqueRun('w20i')
+    const W = `w20i-workspace-${run}`
+    const PROJECT = `w20i-project-${run}`
+    const SESSION = `w20i-session-${run}`
     const at = (second) => new Date(Date.parse('2029-05-03T09:00:00.000Z') + second * 1_000)
 
     const clean = async () => {
@@ -1539,7 +1462,6 @@ test(
       'multicam_directions', 'multicam_direction_heads',
       'multicam_match_plans', 'multicam_match_plan_heads',
       'playback_maps', 'playback_map_heads',
-      'renderable_plan_snapshots',
       'multicam_longform_gates', 'multicam_longform_gate_criteria',
       'multicam_longform_gate_checks', 'multicam_longform_gate_evidence',
     ]
@@ -1567,54 +1489,41 @@ test(
     assert.equal(Number(guards.rls), 0, 'row-level security appeared: the same record is now wrong')
     assert.equal(Number(rules.rules), 0, 'a rule appeared: the same record is now wrong')
 
+    // ---- the sealed contrast, read from the same catalogue ----------------
+    // `renderable_plan_snapshots` used to be the fifteenth table above. Since W66 it is a sealed dependency of the
+    // project's output State, and the database says so: a row trigger, before UPDATE or DELETE, that raises.
+    // tgtype bits: 1 row, 2 before, 8 delete, 16 update.
+    const sealedGuards = await client.$queryRawUnsafe(
+      `SELECT t.tgname AS name, p.proname AS fn, (t.tgtype & 27) = 27 AS refuses_update_and_delete
+       FROM pg_trigger t
+       JOIN pg_proc p ON p.oid = t.tgfoid
+       WHERE t.tgrelid = 'public.renderable_plan_snapshots'::regclass AND NOT t.tgisinternal AND NOT t.tgdeferrable`,
+    )
+    assert.deepEqual(
+      sealedGuards.map((row) => [row.name, row.fn, row.refuses_update_and_delete]),
+      [['renderable_plan_snapshots_w66_dependency_guard', 'w66_output_dependency_guard', true]],
+      'the renderable plan snapshot lost (or gained) its immutability trigger',
+    )
+
     // ---- and what that costs, on a real two-version chain -----------------
-    const workspaces = new PrismaWorkspaceRepository(client)
-    await workspaces.create(createWorkspace({
-      id: W, slug: W, name: 'W20 immutability', status: 'active', createdAt: at(0).toISOString(),
-    }))
-    await client.v2Project.create({
-      data: {
-        id: PROJECT,
-        workspaceId: W,
-        name: 'W20 immutability',
-        status: 'reviewing-proxy',
-        objective: 'discovery',
-        format: '16:9',
-        locale: 'pt-BR',
-        createdByType: 'api-client',
-        createdById: 'w20i-client',
-        createdAt: at(0),
-        updatedAt: at(0),
-      },
+    // The project is created by the product's own writers; its head is a sealed Version with sealed snapshots.
+    const sealed = await seedSealedProject(client, {
+      workspaceId: W, actor: testActor({ workspaceId: W, clientId: `w20i-client-${run}` }),
+      prefix: 'w20i', ids: { project: PROJECT }, name: 'W20 immutability',
     })
-    for (const kind of ['brief', 'edit-plan', 'policies']) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: `${VERSION}-${kind}`,
-          workspaceId: W,
-          projectId: PROJECT,
-          kind,
-          schemaVersion: 1,
-          contentJson: JSON.stringify({ kind }),
-          contentHash: '1'.repeat(64),
-          createdAt: at(0),
-        },
-      })
-    }
-    await client.v2ProjectVersion.create({
-      data: {
-        id: VERSION,
-        workspaceId: W,
-        projectId: PROJECT,
-        sequence: 1,
-        briefSnapshotId: `${VERSION}-brief`,
-        editPlanSnapshotId: `${VERSION}-edit-plan`,
-        policiesSnapshotId: `${VERSION}-policies`,
-        baseHash: '2'.repeat(64),
-        createdBy: 'w20i-client',
-        createdAt: at(0),
-      },
-    })
+
+    // The sealed history refuses the very statement the next block offers to the Wave 20 chain. The statements fail
+    // and write nothing; what is measured is who refuses, and it is the database.
+    await assert.rejects(
+      client.$executeRawUnsafe('DELETE FROM "project_versions" WHERE "id" = $1', sealed.head.version.id),
+      (error) => /W66 immutable record: project_versions DELETE/.test(String(error?.message)),
+      'a sealed Version was deleted, or refused by something other than its immutability trigger',
+    )
+    await assert.rejects(
+      client.$executeRawUnsafe('DELETE FROM "project_snapshots" WHERE "id" = $1', sealed.head.editPlanSnapshot.id),
+      (error) => /W66 immutable dependency: project_snapshots DELETE/.test(String(error?.message)),
+      'a sealed snapshot was deleted, or refused by something other than its immutability trigger',
+    )
 
     const directions = new PrismaMulticamDirectionRepository(client)
     const world = buildDirectionWorld({ workspaceId: W, projectId: PROJECT, sessionId: SESSION })

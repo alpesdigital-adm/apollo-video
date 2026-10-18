@@ -129,11 +129,15 @@ const require = createRequire(import.meta.url)
 const FFMPEG = ffmpegStatic ?? 'ffmpeg'
 const FFPROBE = require('ffprobe-static').path
 
-const WORKSPACE = 'react-journey-workspace'
-const PROJECT = 'react-journey-project'
-const SESSION = 'react-journey-session'
-const CLIENT = 'react-journey-client'
-const VERSION = 'react-journey-version'
+// Every identity carries the run: the project's Versions, Commands and snapshots are sealed (append-only), so nothing is
+// swept afterwards and a second invocation in one database must not meet the first one's rows.
+const RUN_ID = randomUUID().replaceAll('-', '').slice(0, 12)
+const WORKSPACE = `react-journey-workspace-${RUN_ID}`
+const PROJECT = `react-journey-project-${RUN_ID}`
+// Capture rows are keyed by ids that are global to the database (`<session>:v<n>`, `<session>:clock`...), so the session
+// carries the run too.
+const SESSION = `react-journey-session-${RUN_ID}`
+const CLIENT = `react-journey-client-${RUN_ID}`
 const REACTION_TRACK = 'track-reaction'
 const REFERENCE_TRACK = 'track-reference'
 
@@ -463,24 +467,8 @@ test(
     )
 
     const client = new PrismaClient()
-    const clean = async () => {
-      for (const table of [
-        client.v2PlaybackUncoveredRange, client.v2PlaybackAnchor, client.v2PlaybackPiece,
-        client.v2PlaybackMapHead, client.v2PlaybackMap,
-        client.v2CaptureSessionHead, client.v2CaptureSessionVersion,
-      ]) {
-        await table.deleteMany({ where: { workspaceId: WORKSPACE } })
-      }
-    }
 
     t.after(async () => {
-      // Reported rather than rethrown: a cleanup failure that masks the real
-      // assertion turns one clear defect into two confusing ones.
-      try {
-        await clean()
-      } catch (error) {
-        console.error('cleanup failed:', error?.message ?? error)
-      }
       await closeJourneyObjectStore(objectStore).catch((error) => {
         console.error('object storage cleanup failed:', error?.message ?? error)
       })
@@ -490,8 +478,6 @@ test(
       await client.$disconnect().catch(() => undefined)
       await disconnectV2PostgresClient().catch(() => undefined)
     })
-    await clean()
-
     // ---- the two recordings, encoded here and never committed ---------------
     // In s3 mode `sourceRoot` sits outside the artifact root and the two files
     // are uploaded below, so the build route can only have read them out of
@@ -564,31 +550,17 @@ test(
       scopes: ['projects:read', 'projects:write'],
     })
     const token = issued.token
-    await client.v2Project.create({
-      data: {
-        id: PROJECT, workspaceId: WORKSPACE, name: 'React playback journey', status: 'reviewing-proxy',
-        objective: 'discovery', format: '16:9', locale: 'pt-BR',
-        createdByType: 'api-client', createdById: CLIENT, createdAt: at(0), updatedAt: at(0),
-      },
+    // The project the way the product creates it: the creation Command, then one explicit 16:9 output variant. A Version
+    // cannot be inserted by hand; the head of the variant is the Version the playback plan below is compiled into.
+    const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
+    const { variantBodyFor } = await import('./helpers/explicit-project-http.mjs')
+    const sealed = await seedSealedProject(client, {
+      workspaceId: WORKSPACE,
+      actor: testActor({ workspaceId: WORKSPACE, clientId: CLIENT, credentialId: `${CLIENT}-seed`, environment: 'production' }),
+      prefix: 'react', ids: { project: PROJECT }, name: 'React playback journey',
+      variant: variantBodyFor({ aspectRatio: '16:9' }),
     })
-    for (const kind of ['brief', 'edit-plan', 'policies']) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: `react-journey-snapshot-${kind}`, workspaceId: WORKSPACE, projectId: PROJECT, kind,
-          schemaVersion: 1, contentJson: JSON.stringify({ kind }), contentHash: digest('1'),
-          createdAt: at(0),
-        },
-      })
-    }
-    await client.v2ProjectVersion.create({
-      data: {
-        id: VERSION, workspaceId: WORKSPACE, projectId: PROJECT, sequence: 1,
-        briefSnapshotId: 'react-journey-snapshot-brief',
-        editPlanSnapshotId: 'react-journey-snapshot-edit-plan',
-        policiesSnapshotId: 'react-journey-snapshot-policies',
-        baseHash: digest('2'), createdBy: CLIENT, createdAt: at(0),
-      },
-    })
+    const VERSION = sealed.head.version.id
 
     // The recordings as ingested artifacts. The byte size and the digest are the
     // file's own, because `LocalArtifactSourceMaterializer` re-hashes the file
@@ -599,7 +571,7 @@ test(
         role: 'reference',
         trackId: REFERENCE_TRACK,
         assetId: 'asset-reference-1',
-        artifactId: 'artifact-react-reference',
+        artifactId: `artifact-react-reference-${RUN_ID}`,
         key: 'capture/reference.mp4',
         file: referenceFile,
         measuredSeconds: referenceSeconds,
@@ -609,7 +581,7 @@ test(
         role: 'reaction',
         trackId: REACTION_TRACK,
         assetId: 'asset-reaction-1',
-        artifactId: 'artifact-react-reaction',
+        artifactId: `artifact-react-reaction-${RUN_ID}`,
         key: 'capture/reaction.mp4',
         file: reactionFile,
         measuredSeconds: reactionSeconds,
@@ -1014,6 +986,10 @@ test(
     // `createReactPlaybackMapServices()` because the compile had no capability
     // and no route, which meant the only thing that could produce a renderable
     // plan for a react edit was a test.
+    // OPEN W66 PRODUCT GAP (not a test defect): every INSERT into renderable_plan_snapshots must be bound reciprocally by its
+    // Version's sealed State (renderable_plan_snapshots_w66_commit_check / w66_renderable_dispatch_v2), and the State of an
+    // explicit-variant Version binds none. The compile below therefore fails at COMMIT with "W66 new renderable snapshot
+    // lacks reciprocal state binding" until the compile path is given a State-bound way to publish its plan.
     const planned = await callRoute(planRoute.POST, `${basePath}/playback-map/plan`, {
       method: 'POST',
       token,

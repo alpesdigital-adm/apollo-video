@@ -21,7 +21,8 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    it, and that acknowledgement is what sets `finalAllowed = true`.
  *
  * The database is a throwaway cluster; `V2_DATABASE_URL` must already be
- * migrated. Everything this test writes it deletes, before and after.
+ * migrated. The project's Version, Command and snapshots are sealed
+ * (append-only), so nothing is swept: every identity carries the run.
  */
 
 const RUN = process.env.APOLLO_COLOR_CRITIC_E2E === '1'
@@ -44,17 +45,15 @@ test(
     const { PrismaProxyReviewRepository } = await import(
       '../../src/v2/infrastructure/prisma/proxy-review-repository.ts'
     )
-    const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
-    const { PrismaApiClientRepository } = await import(
-      '../../src/v2/infrastructure/prisma/api-client-repository.ts'
-    )
-    const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+    const { seedSealedProject, testActor, uniqueRun } = await import('./helpers/pg-output-world.mjs')
+    const { variantBodyFor } = await import('./helpers/explicit-project-http.mjs')
 
     const client = new PrismaClient()
-    const suffix = 'cce2e'
+    // Every identity carries the run: a Version, its Command and its snapshots are sealed (append-only), so nothing here
+    // can be swept afterwards and a second invocation in one database must not meet the first one's rows.
+    const suffix = uniqueRun('cc').run
     const workspaceId = `color-critic-workspace-${suffix}`
     const projectId = `color-critic-project-${suffix}`
-    const projectVersionId = `color-critic-version-${suffix}`
     const clientId = `color-critic-client-${suffix}`
     const artifactId = `color-critic-artifact-${suffix}`
     const manifestId = `color-critic-manifest-${suffix}`
@@ -66,83 +65,24 @@ test(
     const reports = new PrismaColorCriticReportRepository(client)
     const reviews = new PrismaProxyReviewRepository(client)
 
-    const clean = async () => {
-      for (const table of [
-        client.v2ColorCriticProposedDelta, client.v2ColorCriticIssue,
-        client.v2ColorCriticDimensionResult, client.v2ColorCriticReportMeasurement,
-        client.v2ColorCriticReport,
-        client.v2ColorMeasurementComponent, client.v2ColorMeasurementDimension,
-        client.v2CameraColorMeasurement,
-      ]) {
-        await table.deleteMany({ where: { workspaceId } })
-      }
-      await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-    }
-
     t.after(async () => {
-      // Reported rather than rethrown: a cleanup failure that masks the real
-      // assertion turns one clear defect into two confusing ones.
-      try {
-        await clean()
-      } catch (error) {
-        console.error('cleanup failed:', error?.message ?? error)
-      } finally {
-        await client.$disconnect()
-      }
+      await client.$disconnect()
     })
-
-    await clean()
 
     // ---- seed ---------------------------------------------------------------
-    await client.v2Workspace.create({
-      data: { id: workspaceId, slug: workspaceId, name: 'Colour critic E2E', status: 'active', createdAt, updatedAt: createdAt },
-    })
-    await createApiClientService({
-      repository: new PrismaApiClientRepository(client),
-      credentialCrypto: nodeApiCredentialCrypto,
-      clock: () => createdAt,
-    })({
-      id: clientId,
-      workspaceId,
-      name: 'Colour critic E2E',
-      environment: 'production',
+    // The project is created the way the product creates it (the creation Command, then one explicit 9:16 output
+    // variant); its head is the sealed Version the proxy renders and the colour verdicts below hang from.
+    const actor0 = testActor({
+      workspaceId, clientId, credentialId: `credential-${suffix}`, environment: 'production',
       scopes: ['projects:read', 'projects:write', 'projects:approve'],
     })
-    await client.v2Project.create({
-      data: {
-        id: projectId, workspaceId, name: 'Colour critic E2E', status: 'reviewing-proxy',
-        objective: 'discovery', format: '9:16', locale: 'pt-BR',
-        createdByType: 'api-client', createdById: clientId, createdAt, updatedAt: createdAt,
-      },
+    const world = await seedSealedProject(client, {
+      workspaceId, actor: actor0, prefix: 'cc', ids: { project: projectId }, name: 'Colour critic E2E',
+      variant: variantBodyFor({ aspectRatio: '9:16' }),
     })
-    const snapshots = [
-      { id: `${projectId}-brief`, kind: 'brief', schemaVersion: 1, content: { schemaVersion: 1 } },
-      { id: `${projectId}-policies`, kind: 'policies', schemaVersion: 1, content: { schemaVersion: 1, state: 'configured' } },
-      {
-        id: `${projectId}-edit-plan`, kind: 'edit-plan', schemaVersion: 2,
-        content: { schemaVersion: 2, id: `edit-plan-${suffix}`, projectVersionId, state: 'compiled', fps: 30, durationFrames: 60 },
-      },
-    ]
-    for (const snapshot of snapshots) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: snapshot.id, workspaceId, projectId, kind: snapshot.kind,
-          schemaVersion: snapshot.schemaVersion,
-          contentJson: stableSerialize(snapshot.content),
-          contentHash: calculateVersionHash(snapshot.content),
-          createdAt,
-        },
-      })
-    }
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId, workspaceId, projectId, sequence: 1,
-        briefSnapshotId: snapshots[0].id, editPlanSnapshotId: snapshots[2].id, policiesSnapshotId: snapshots[1].id,
-        baseHash: calculateVersionHash({ projectId, projectVersionId }),
-        createdBy: clientId, createdAt,
-      },
-    })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: projectVersionId } })
+    const projectVersionId = world.head.version.id
+    const editPlanSnapshotId = world.head.editPlanSnapshot.id
+    const editPlanHash = world.head.editPlanSnapshot.contentHash
     /** An artifact plus the one manifest every FK to it needs. */
     const seedArtifact = async (id, manifest, sha256) => {
       await client.v2MediaArtifact.create({
@@ -188,7 +128,7 @@ test(
       await client.v2ProjectProxyRenderOperation.create({
         data: {
           operationId, workspaceId, projectId, projectVersionId,
-          editPlanSnapshotId: snapshots[2].id,
+          editPlanSnapshotId,
           sourceArtifactId, sourceManifestId,
           inputHash, outputArtifactId: artifactId, outputManifestId: manifestId,
           colorPipelineBindingsJson: stableSerialize([]),
@@ -320,7 +260,7 @@ test(
       inputHash,
       format: '9:16',
       sourceSha256: calculateVersionHash({ source: suffix }),
-      editPlanHash: calculateVersionHash(snapshots[2].content),
+      editPlanHash,
       expectedDurationMs: 2_000,
       uploadReceivedAt: createdAt.toISOString(),
       renderCompletedAt: completedAt.toISOString(),
