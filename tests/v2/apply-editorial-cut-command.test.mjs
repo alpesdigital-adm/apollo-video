@@ -5,8 +5,8 @@ import {
   applyEditorialCutCommandService,
   compileInitialSourceEditPlan,
 } from '../../src/v2/application/apply-editorial-cut-command.ts'
-import { createEditorialForkFixture, editorialFixturePhaseStart, traceEditorialFixtureAsync } from './helpers/operational-editorial-fixture.mjs'
-import { buildOperationalOutputVersionBundleV3 } from '../../src/v2/domain/output-version-bundle.ts'
+import { createEditorialForkFixture, editorialFixturePhaseStart, forkCopyConfigurationChild, traceEditorialFixtureAsync } from './helpers/operational-editorial-fixture.mjs'
+import { buildOperationalOutputVersionBundleV3, forkAuthorityPendingV3 } from '../../src/v2/domain/output-version-bundle.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
@@ -482,4 +482,52 @@ test('editorial impact2 uses canonical ASCII output membership for mixed IDs ind
  assert.deepEqual(first,reversed);assert.deepEqual(parseEditorialCutImpactV2(first),first)
  const tampered=structuredClone(first);tampered.affectedArtifacts.reverse()
  assert.throws(()=>parseEditorialCutImpactV2(tampered),e=>e.code==='PERSISTENCE_CONFLICT')
+})
+
+// A copy whose first children only configured it (LUT, grade) is still waiting for its editorial cut: the cut resolves the
+// authority through the Creation fork the configuration children descend from, so configuring a copy never bricks it.
+class ConfiguredCopyRepository extends InMemoryEditorialCommandRepository {
+  constructor(world, configured) {
+    super(world)
+    this.forkRoot = world.fork.bundle
+    this.parent = configured
+    this.currentVersion = configured.version
+    this.outputReferences = []
+    this.withForkRoot = true
+  }
+  async readContext(input) {
+    const context = await super.readContext(input)
+    if (!context) return context
+    const { forkRoot: _omitted, ...rest } = context
+    return this.withForkRoot ? { ...rest, forkRoot: this.forkRoot } : rest
+  }
+}
+
+test('an editorial cut over a copy that was only configured binds the Creation fork authority and materializes the copy', async () => {
+  const world = await sharedEditorialWorld(), actor = editorialActor()
+  const lut = forkCopyConfigurationChild(world.fork.bundle, { actor, suffix: 'cut-lut' })
+  const color = forkCopyConfigurationChild(lut, { actor, suffix: 'cut-color', type: 'set-project-color-plan', payload: { schemaVersion: 1 } })
+  assert.ok(forkAuthorityPendingV3(color))
+  const repository = new ConfiguredCopyRepository(world, color)
+  let event = 0, counter = 0
+  const service = applyEditorialCutCommandService({ repository, clock: () => new Date('2026-07-18T21:00:00.000Z'),
+    createId: (kind) => `${kind}-configured-copy-${++counter}`, createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}` })
+  const result = await service(request({ baseVersionId: color.version.id, baseHash: color.version.baseHash,
+    variantId: world.context.variantId, sourceTranscriptId: world.context.transcriptId }))
+  const bundle = result.outputBundle
+  assert.equal(bundle.state.document.transition, 'editorial-cut')
+  assert.equal(bundle.version.parentVersionId, color.version.id)
+  assert.equal(bundle.version.sequence, color.version.sequence + 1)
+  assert.ok(bundle.state.document.entries.length > 0 && bundle.state.document.entries.every((e) => e.consumption.status === 'materialized'),
+    'the cut materializes the copy: it is past the fork posture')
+  assert.equal(forkAuthorityPendingV3(bundle), false)
+  const authority = bundle.origin.command.payload.sourceBinding.document.authority
+  assert.equal(authority.kind, 'fork-derivation3')
+  assert.equal(authority.forkRootVersionId, world.fork.version.id, 'the authority is the Creation fork, not the configuration child')
+  assert.notEqual(authority.forkRootVersionId, color.version.id)
+  assert.equal(bundle.state.document.parentStateHash, color.state.stateHash)
+  // Rebuilding the same bundle needs the fork root; without it the cut is refused instead of guessing an authority.
+  const { forkRoot: _fork, ...withoutRoot } = repository.lastBundle.proposal
+  assert.throws(() => buildOperationalOutputVersionBundleV3(withoutRoot), (error) => error.code === 'PRECONDITION_REQUIRED' && /Creation fork/.test(error.message))
+  assert.equal(buildOperationalOutputVersionBundleV3(repository.lastBundle.proposal).state.stateHash, bundle.state.stateHash)
 })

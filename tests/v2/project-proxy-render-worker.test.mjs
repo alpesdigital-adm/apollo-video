@@ -878,6 +878,8 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           },
           async create({ data }) { operationData = data },
         },
+        // The copy-authority gate reads the sealed State of the Version; this legacy-shaped project has none.
+        async $queryRawUnsafe() { return [] },
         v2PublicEventOutbox: { async createMany() {
           if (injectedFailure === 'outbox') throw Object.assign(new Error('controlled outbox failure'), { code: 'CONTROLLED_TRANSACTION_FAILURE' })
           outboxRows += 2

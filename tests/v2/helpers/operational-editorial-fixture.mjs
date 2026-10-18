@@ -16,6 +16,8 @@ const { buildOperationalOutputVersionBundleV3, buildCreationOutputVersionBundleV
 const { createProjectCreationOutputCommandV2, normalizeProjectCreationIntentV2 } = await import('../../../src/v2/domain/project-creation-command.ts')
 const { createProductionBrief } = await import('../../../src/v2/domain/production-brief.ts')
 const { duplicateProjectService } = await import('../../../src/v2/application/duplicate-project.ts')
+const { createEditCommand } = await import('../../../src/v2/domain/edit-command.ts')
+const { transitionProjectOutputState, reidentifiedEditPlanSnapshot } = await import('../../../src/v2/domain/project-output-state-transition.ts')
 // Fixed, payload-free diagnostics for the supervised one-case investigation.
 // The synchronous fd2 sink does not retain a stream or create another process.
 // Diagnostic sink failure never substitutes for the actual constructor error.
@@ -212,5 +214,19 @@ export async function createEditorialForkFixture({actor,transcript,sourceDuratio
     forkRootVersionId:fork.version.id,forkRootStateId:fork.bundle.state.document.id,forkRootStateHash:fork.bundle.state.stateHash,derivationId:derivation.document.id,derivationHash:derivation.derivationHash},
    transcript:prepared.bundle.origin.transcript,normalizationRefs:[{id:prepared.n.document.id,projectId:prepared.n.document.projectId,receiptHash:prepared.n.receiptHash}],inventory}}
  finishContext();finishFork();return {fork,prepared,context}
+}
+/**
+ * One child of a fork copy that only configures it (a LUT selection by default): the Command re-identifies the copy's plan, so the copy keeps
+ * the fork's posture. `parent` is the Creation fork or an earlier configuration child; the result is the sealed child bundle.
+ */
+export function forkCopyConfigurationChild(parent,{actor,suffix='lut',type='set-project-lut-selection',payload,replacementSnapshots=[],createdAt='2026-07-18T20:10:00.000Z'}) {
+ const audit=materializeActorAuditContext(actor),scope={workspaceId:parent.version.workspaceId,projectId:parent.version.projectId},versionId='version-copy-'+suffix
+ const command=createEditCommand({...scope,id:'command-copy-'+suffix,baseVersionId:parent.version.id,baseHash:parent.version.baseHash,
+  author:{type:'api-client',id:audit.clientId},type,scope:{project:true},payload:payload??{schemaVersion:2,mode:'none',intensity:1},
+  idempotencyKey:'copy-child-'+suffix,createdAt})
+ return transitionProjectOutputState({parent,command,audit,requestFingerprint:calculateCanonicalHash({copyChild:suffix}),
+  allocation:{...scope,resultVersionId:versionId,stateId:'state-copy-'+suffix,parentVersionId:parent.version.id,sequence:parent.version.sequence+1,createdBy:audit.clientId,createdAt},
+  editPlanSnapshot:reidentifiedEditPlanSnapshot(parent,{snapshotId:'snapshot-copy-'+suffix,versionId,createdAt}),replacementSnapshots,
+  createMaterializationId:()=>{throw new Error('A copy without target authority materializes nothing')}})
 }
 export const controlledNormalization=normalization

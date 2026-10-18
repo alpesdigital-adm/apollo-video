@@ -679,6 +679,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
     const proposal={allocation:{workspaceId,projectId,resultVersionId:versionId,stateId,parentVersionId:context.currentVersion.id,
       sequence:context.currentVersion.sequence+1,createdBy:authenticationAudit.clientId,createdAt},parent:context.parent,
       origin:{kind:'editorial-cut-command' as const,command,audit:authenticationAudit,requestFingerprint},restoreTarget:null,
+      ...(context.forkRoot?{forkRoot:context.forkRoot}:{}),
       editPlanSnapshot:snapshot,normalizations:context.normalizations,
       materializationIds:Object.fromEntries(context.parent.state.document.entries.map(e=>[e.variantId,dependencies.createId('output-materialization')]))}
     const outputBundle=buildOperationalOutputVersionBundleV3(proposal),version=outputBundle.version

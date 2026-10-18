@@ -26,7 +26,11 @@ import { createQueuedPublicOperation,startPublicOperationAttempt,advancePublicOp
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createMediaUpload } from '../../src/v2/domain/media-transfer.ts'
 import { createMediaUploadAuditEntry } from '../../src/v2/domain/media-upload-audit-entry.ts'
-import { buildCreationOutputVersionBundleV2,buildOperationalOutputVersionBundleV3 } from '../../src/v2/domain/output-version-bundle.ts'
+import { buildCreationOutputVersionBundleV2,buildOperationalOutputVersionBundleV3,forkAuthorityPendingV3 } from '../../src/v2/domain/output-version-bundle.ts'
+import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
+import { PrismaProjectLutSelectionRepository } from '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
+import { createProjectOutputVariantService } from '../../src/v2/application/create-project.ts'
+import { variantBodyFor } from './helpers/explicit-project-http.mjs'
 import { PrismaCreationOutputBundleRepositoryV2,PrismaOperationalOutputBundleRepositoryV3 } from '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
 import { PrismaProjectMediaRepository } from '../../src/v2/infrastructure/prisma/project-media-repository.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
@@ -935,6 +939,59 @@ test(operationalCaseName,
     rightsSnapshotBirthSequence:forkSourceRights.snapshot.sequence,restoredPointerRevision:forkSourceRightsArtifact.rightsRevision,
     consumption:'blocked for render/critic/final pending legitimate target materialization'}
    emitEditorialFlush({phase:freshEditorialFocus?'fresh-ingest-fork-returned-editorial-entry':'select-restore-fork-returned-editorial-entry'})
+
+   // A copy that was only configured is still a copy. Fork2 -> LUT -> LUT keeps the fork posture (every entry blocked, nothing observed or
+   // materialized, no receipt or transcript of its own), geometry/transcript Commands are still refused with the reason the operator can act
+   // on, and the editorial cut over the second child resolves its authority through the Creation fork, not through a configuration child.
+   const configuredFork=await duplicate({...forkRequest,name:'Configured full-content fork',idempotency:{clientId:audit.clientId,key:id('forkC-request')}})
+   const configuredScope={workspaceId:scope.workspaceId,projectId:configuredFork.project.id},configuredEntry=configuredFork.bundle.state.document.entries[0]
+   let configuredAllocations=0
+   const configuredId=kind=>id('forkC-'+kind+'-'+(++configuredAllocations))
+   const selectLut=setProjectLutSelectionService({repository:new PrismaProjectLutSelectionRepository(db),clock:()=>boundedDate(),createEventId:randomUUID,createId:configuredId})
+   const lutRequest=(base,key)=>({...configuredScope,baseVersionId:base.id,baseHash:base.baseHash,selection:{mode:'none'},actor:replayActor,
+    idempotencyKey:id(key),reason:'Configuration of a copy before its editorial cut.'})
+   const configuredFirst=await selectLut(lutRequest(configuredFork.version,'forkC-lut-1'))
+   const configuredSecond=await selectLut(lutRequest(configuredFirst.version,'forkC-lut-2'))
+   assert.deepEqual([configuredFirst.version.sequence,configuredSecond.version.sequence],[2,3])
+   assert.equal(configuredFirst.version.parentVersionId,configuredFork.version.id);assert.equal(configuredSecond.version.parentVersionId,configuredFirst.version.id)
+   assert.equal((await db.v2Project.findUnique({where:{id:configuredFork.project.id}})).currentVersionId,configuredSecond.version.id)
+   for(const child of [configuredFirst,configuredSecond]) {
+    const stored=await operationalRepo.read({...configuredScope,versionId:child.version.id})
+    assert.equal(stored.origin.kind,'child-command');assert.equal(stored.state.document.transition,'inherit')
+    assert.equal(forkAuthorityPendingV3(stored),true,'The configuration child is still a copy without target authority')
+    assert.deepEqual(stored.state.document.entries.map(e=>[e.variantId,e.consumption]),
+     configuredFork.bundle.state.document.entries.map(e=>[e.variantId,{status:'blocked',reasons:['fork-target-materialization-required']}]))
+    assert.deepEqual(stored.state.document.entries.map(e=>e.spec),configuredFork.bundle.state.document.entries.map(e=>e.spec),'The literal fork revision is kept')
+    for(const purpose of ['render','critic','final']) {
+     const observed=await readPersistedOutputConsumptionV3(db,{...configuredScope,versionId:child.version.id,variantId:configuredEntry.variantId,purpose})
+     assert.equal(observed.status,'blocked');assert.deepEqual(observed.reasons,['fork-target-materialization-required'])
+    }
+   }
+   assert.equal(await db.v2OutputNormalizationReceipt.count({where:configuredScope}),0);assert.equal(await db.v2MediaTranscript.count({where:configuredScope}),0)
+   // The same Command is refused for the same reason on the Creation fork's configured descendants: a variant needs the authority first.
+   const configuredVariant=createProjectOutputVariantService({repository:operationalRepo,clock:()=>boundedDate(),createEventId:randomUUID,createId:configuredId})
+   const configuredBefore=await db.v2ProjectVersion.count({where:configuredScope})
+   await assert.rejects(()=>configuredVariant({...variantBodyFor({aspectRatio:'1:1'}),...configuredScope,baseVersionId:configuredSecond.version.id,
+    baseHash:configuredSecond.version.baseHash,actor:replayActor,idempotencyKey:id('forkC-variant')}),
+    e=>e.code==='PRECONDITION_REQUIRED'&&e.details.reason==='copy-requires-editorial-cut')
+   assert.equal(await db.v2ProjectVersion.count({where:configuredScope}),configuredBefore,'The refused Command left the copy untouched')
+   const applyConfiguredCut=applyEditorialCutCommandService({repository:new PrismaEditorialCommandRepository(db),clock:()=>boundedDate(),createEventId:randomUUID,createId:configuredId})
+   const configuredCut=await applyConfiguredCut({...configuredScope,baseVersionId:configuredSecond.version.id,baseHash:configuredSecond.version.baseHash,
+    sourceTranscriptId:sourceCueTrack.sourceTranscriptId,variantId:configuredEntry.variantId,
+    rules:[{id:id('forkc-cut-controlada').toLowerCase(),label:'Remove controlled word',alternatives:['controlada']}],reason:'Editorial cut of a configured copy.',
+    actor:replayActor,idempotency:{clientId:audit.clientId,key:id('forkC-editorial')}})
+   const configuredCutEntry=configuredCut.outputBundle.state.document.entries[0],configuredBinding=configuredCutEntry.consumption.materialization.document.sourceBinding.document
+   assert.equal(configuredCut.version.sequence,4);assert.equal(configuredCut.version.parentVersionId,configuredSecond.version.id)
+   assert.equal(configuredCutEntry.consumption.status,'materialized');assert.equal(configuredCutEntry.consumption.materialization.document.schemaVersion,'editorial-derived-materialization/v1')
+   assert.equal(configuredBinding.authority.kind,'fork-derivation3');assert.equal(configuredBinding.authority.forkRootVersionId,configuredFork.version.id,
+    'The authority is the Creation fork, not a configuration child')
+   assert.equal(configuredBinding.parentVersionId,configuredSecond.version.id)
+   assert.equal(forkAuthorityPendingV3(configuredCut.outputBundle),false)
+   assert.equal(serializeOutputCanonicalJson(await operationalRepo.read({...configuredScope,versionId:configuredCut.version.id})),serializeOutputCanonicalJson(configuredCut.outputBundle))
+   assert.equal(await db.v2OutputNormalizationReceipt.count({where:configuredScope}),0,'Original-project receipts stay in their original project')
+   facts.configuredCopy={sourceVersionId:forkSource.version.id,targetProjectId:configuredFork.project.id,children:[configuredFirst.version.id,configuredSecond.version.id],
+    childEntryConsumption:{status:'blocked',reasons:['fork-target-materialization-required']},variantRefusal:'PRECONDITION_REQUIRED/copy-requires-editorial-cut',
+    editorialVersionId:configuredCut.version.id,authorityForkRootVersionId:configuredFork.version.id,targetNormalizationExecutions:0}
 
    // Fourth duplication behavior uses this real persisted source-cue/fork.
    // Reuse remains original execution/ASR; child owns only its source binding,

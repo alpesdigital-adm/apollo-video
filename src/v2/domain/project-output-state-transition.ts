@@ -2,10 +2,10 @@ import type { ApiAccessAuditContext } from './api-access-control.ts'
 import { calculateCanonicalHash, stableSerialize } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import type { EditCommand } from './edit-command.ts'
-import { CHILD_COMMAND_TRANSITIONS, CHILD_REPLACEABLE_SNAPSHOT_KINDS, type AdoptableObservationV3, type AdoptedObservationV3,
-  type ChildReplaceableSnapshotKind } from './output-child-command.ts'
+import { CHILD_COMMAND_TRANSITIONS, CHILD_REPLACEABLE_SNAPSHOT_KINDS, COPY_REQUIRES_EDITORIAL_CUT_REASON, isForkInheritableCommandType,
+  type AdoptableObservationV3, type AdoptedObservationV3, type ChildReplaceableSnapshotKind } from './output-child-command.ts'
 import { validateOutputNormalizationV3, type SealedOutputNormalizationV3 } from './output-materialization.ts'
-import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3, type OperationalOutputParentV3,
+import { buildOperationalOutputVersionBundleV3, forkAuthorityPendingV3, operationalBundlePlanV3, type OperationalOutputParentV3,
   type OperationalOutputVersionBundleV3 } from './output-version-bundle.ts'
 import type { OutputOriginAllocation } from './output-version-origin.ts'
 import type { PersistedManualEditPayload } from './manual-editing.ts'
@@ -142,9 +142,15 @@ export function transitionProjectOutputState(input: Readonly<{
     'INVALID_COMMAND', 'Command type has no declared child output transition')
   const plan = JSON.parse(input.editPlanSnapshot.contentJson) as Record<string, unknown>
   const variantIds = input.parent.state.document.entries.map((entry) => entry.variantId)
-  const materializationIds = plan.durationFrames === 0 ? {} :
+  // A copy that no editorial cut has given target authority observes nothing and materializes nothing: a Command that only
+  // configures it keeps every entry blocked, and any other Command is refused with the reason the operator can act on.
+  const awaitsEditorialCut = forkAuthorityPendingV3(input.parent)
+  assertDomain(!awaitsEditorialCut || isForkInheritableCommandType(input.command.type), 'PRECONDITION_REQUIRED',
+    'Fork2 content requires target transcript/perception/geometry authority before child3', { reason: COPY_REQUIRES_EDITORIAL_CUT_REASON })
+  const materializationIds = plan.durationFrames === 0 || awaitsEditorialCut ? {} :
     Object.fromEntries(variantIds.map((variantId) => [variantId, input.createMaterializationId()]))
-  const observed = observedNormalizationsFor(input.parent, plan, input.adoptable)
+  const observed = awaitsEditorialCut ? Object.freeze({ normalizations: Object.freeze([]), adoptions: Object.freeze([]) }) :
+    observedNormalizationsFor(input.parent, plan, input.adoptable)
   return buildOperationalOutputVersionBundleV3({
     allocation: input.allocation,
     parent: input.parent,

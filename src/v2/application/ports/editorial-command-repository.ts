@@ -2,7 +2,7 @@ import type { EditCommand } from '../../domain/edit-command.ts'
 import type { MediaTranscript } from '../../domain/media-transcript.ts'
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { ProjectVersionV3 } from '../../domain/project-version.ts'
-import type { OperationalOutputParentV3, OperationalOutputVersionBundleV3, BuildOperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import type { CreationOutputVersionBundleV2, OperationalOutputParentV3, OperationalOutputVersionBundleV3, BuildOperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
 import type { EditorialSourceBindingBodyV1, SealedOutputNormalizationV3 } from '../../domain/output-materialization.ts'
 import type { EditorialCutPayloadV3 } from '../../domain/editorial-cut-impact.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
@@ -17,6 +17,8 @@ export interface EditorialCommandContext {
   workspaceId: string
   currentVersion: OperationalOutputParentV3['version']
   parent: OperationalOutputParentV3
+  /** The Creation fork of a copy whose children only configured it: the authority the cut binds is that fork's derivation. */
+  forkRoot?: Readonly<CreationOutputVersionBundleV2>
   sourceBindingFacts: Omit<EditorialSourceBindingBodyV1,'id'|'parentVersionId'|'parentStateId'|'parentStateHash'|'resultVersionId'|'createdAt'>
   normalizations: readonly SealedOutputNormalizationV3[]
   transcriptId: string

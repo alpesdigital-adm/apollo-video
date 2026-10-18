@@ -483,7 +483,7 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
   const reusableProxyFixture = controlledReusableProxyFixture({
     onOperationLookup: (query) => { proxyLookup = query },
   })
-  const reusableProxyRepository = new PrismaProjectProxyRenderRepository({
+  const reusableProxyRepository = new PrismaProjectProxyRenderRepository({ async $queryRawUnsafe() { return [] },
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
       versions: [{
@@ -533,7 +533,7 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
     operation: { kind: 'select', clipId: 'clip-1' },
   })
   const selectionFixture = controlledReusableProxyFixture()
-  const selectionRepository = new PrismaProjectProxyRenderRepository({
+  const selectionRepository = new PrismaProjectProxyRenderRepository({ async $queryRawUnsafe() { return [] },
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
       versions: [{
@@ -660,7 +660,7 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
     draft: { status: 'approved', allowedUses: ['rendering'], prohibitedUses: [],
       consent: { status: 'not-required', allowedUses: [] } },
     createdBy: { type: 'user', id: 'owner-proxy-2' }, createdAt })
-  const repository = new PrismaProjectProxyRenderRepository({
+  const repository = new PrismaProjectProxyRenderRepository({ async $queryRawUnsafe() { return [] },
     async $transaction(callback) {
       return callback({
         v2ProjectProxyRenderOperation: { async findFirst() { return {
@@ -755,7 +755,7 @@ test('W65 renderable snapshot attachment accepts only its own sealed null-OCR re
       execution: { tool: { id: 'ffmpeg', version: 'static', digest: 'f'.repeat(64) } } }],
   })
   let attached = 0
-  const repository = new PrismaProjectProxyRenderRepository({
+  const repository = new PrismaProjectProxyRenderRepository({ async $queryRawUnsafe() { return [] },
     async $transaction(callback) {
       return callback({
         v2ProjectProxyRenderOperation: { async findFirst() { return {
@@ -1144,7 +1144,7 @@ test('T-FR-233 a review patch result reuses proxy ranges only with the attested 
     operationId: 'operation-review-base-1', manifestId: 'manifest-review-base-1',
     artifactKey: 'editorial-proxies/review-base.mp4',
   })
-  const rangeRepository = new PrismaProjectProxyRenderRepository({
+  const rangeRepository = new PrismaProjectProxyRenderRepository({ async $queryRawUnsafe() { return [] },
     v2Project: { async findFirst() { return {
       id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
       versions: [{

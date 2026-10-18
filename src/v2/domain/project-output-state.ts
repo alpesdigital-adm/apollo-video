@@ -609,7 +609,7 @@ export interface OutputStateEntryV3 extends OutputCanonicalPolicy {
   specHash: string
   spec: Readonly<OutputSpecRevisionBody|ForkOutputSpecRevisionBodyV3>
   consumption: Readonly<
-    { status: 'blocked'; reasons: readonly ('empty-project' | 'normalization-required' | 'audio-authority-required')[] } |
+    { status: 'blocked'; reasons: readonly ('empty-project' | 'normalization-required' | 'audio-authority-required' | 'fork-target-materialization-required')[] } |
     { status: 'materialized'; materialization: Readonly<OutputMaterializationV3|EditorialDerivedMaterializationV1> }
   >
 }
@@ -677,7 +677,7 @@ export function createProjectOutputStateV3(input: ProjectOutputStateBodyV3, fact
     if(e.consumption.status==='blocked') {
       exactGeometryKeys(e.consumption,['status','reasons'],'blocked consumption')
       assertDomain(e.consumption.reasons.length>0 && new Set(e.consumption.reasons).size===e.consumption.reasons.length &&
-        e.consumption.reasons.every(r=>['empty-project','normalization-required','audio-authority-required'].includes(r)),
+        e.consumption.reasons.every(r=>['empty-project','normalization-required','audio-authority-required','fork-target-materialization-required'].includes(r)),
         'INVALID_PROJECT_VERSION','State3 blocked reasons invalid')
     } else {
       exactGeometryKeys(e.consumption,['status','materialization'],'materialized consumption')

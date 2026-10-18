@@ -8,6 +8,7 @@ import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { parseSetProjectLutSelectionBody, presentProjectLutSelectionResult } from '@/v2/public-api/project-lut-selection-contract'
 import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { isCopyRequiresEditorialCutRefusal } from '@/v2/domain/output-child-command'
 import { calculateVersionHash } from '@/v2/application/version-hash'
 
 export const dynamic = 'force-dynamic'
@@ -41,7 +42,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       actor,
       idempotencyKey: `lut-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}`,
       traceId: requestId,
+    }).catch((error: unknown) => {
+      // The selection committed on a copy no editorial cut has given authority: it renders after that cut, so the Command answers without a render.
+      if (isCopyRequiresEditorialCutRefusal(error)) return null
+      throw error
     })
+    if (proxy === null) return NextResponse.json(presentSuccess(presented), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
     return NextResponse.json(presentSuccess({
       ...presented, operation: presentPublicOperation(proxy.operation),
       replayed: result.replayed && proxy.replayed,

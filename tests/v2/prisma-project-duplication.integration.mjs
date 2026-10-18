@@ -6,7 +6,7 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { createProjectWithVariant } from './helpers/explicit-project-http.mjs'
+import { createProjectWithVariant, variantBodyFor } from './helpers/explicit-project-http.mjs'
 import { registerPlayableVideo } from './helpers/misc-pg-sources.mjs'
 
 async function getFreePort() {
@@ -431,17 +431,86 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
       body: JSON.stringify(body),
     })
-    // Retired: "Commands run on the copy" (a LUT selection, then a policy override, on the copy's head Version) and the same Command on
-    // the copy of the copy. A copy's head is a Creation2 fork whose State is blocked ('fork-target-materialization-required'), and no
-    // child Version may be built on it: buildOperationalOutputVersionBundleV3 (output-version-bundle.ts) refuses with
-    // PRECONDITION_REQUIRED "Fork2 content requires target transcript/perception/geometry authority before child3", which the public
-    // API answers 428 for POST /v1/projects/{copy}/output-variants (the single-output flows would also find no aspect ratio on the
-    // inherited output, project-output-format.ts). Nothing in 6.0.0 grants a fork that authority yet, so no Command is reachable.
+    // Commands run on the copy. A copy's head is a Creation2 fork whose State is blocked ('fork-target-materialization-required'): the
+    // Commands that only configure it (a LUT selection, then a policy override) are children that keep that posture, and they never touch the
+    // original. What needs target authority (a new output, a render) is refused with the reason the operator can act on.
+    const lutOnCopy = await post(
+      `/v1/projects/${duplicateProjectId}/lut-selection`,
+      `duplicate-copy-lut-${suffix}`,
+      {
+        baseVersionId: duplicateVersionId,
+        baseHash: duplicatePayload.data.version.baseHash,
+        selection: { mode: 'none' },
+      },
+    )
+    const lutOnCopyPayload = await lutOnCopy.json()
+    assert.equal(
+      lutOnCopy.status,
+      201,
+      `${JSON.stringify(lutOnCopyPayload)}\n${serverLogs.slice(-4_000)}`,
+    )
+    assert.equal(lutOnCopyPayload.data.version.sequence, 2)
+    const policyOnCopy = await post(
+      `/v1/projects/${duplicateProjectId}/policy-overrides`,
+      `duplicate-copy-policy-${suffix}`,
+      {
+        baseVersionId: lutOnCopyPayload.data.version.id,
+        baseHash: lutOnCopyPayload.data.version.baseHash,
+        overrides: { gradePreset: { mode: 'custom', value: 'cinema' } },
+        reason: 'Second Command on the copy.',
+      },
+    )
+    const policyOnCopyPayload = await policyOnCopy.json()
+    assert.equal(policyOnCopy.status, 201, JSON.stringify(policyOnCopyPayload))
+    assert.equal(policyOnCopyPayload.data.version.sequence, 3)
+    assert.deepEqual(
+      await readSourceRows(),
+      sourceRowsBefore,
+      'Commands on the copy never touch the original',
+    )
     assert.equal(
       await client.v2EditCommand.count({ where: { projectId: duplicateProjectId } }),
-      0,
-      'a duplicate is a Creation Command, not an edit: it starts with no edit Command of its own',
+      2,
     )
+    // Both children inherit the fork's posture: every entry blocked, nothing observed or materialized for the copy.
+    const copyStates = await client.v2ProjectOutputState.findMany({
+      where: { workspaceId, projectId: duplicateProjectId, schemaVersion: 'project-output-state/v3' },
+      include: { entries: true },
+      orderBy: { createdAt: 'asc' },
+    })
+    assert.equal(copyStates.length, 2)
+    for (const state of copyStates) {
+      assert.equal(state.transition, 'inherit')
+      assert.equal(state.consumptionStatus, 'blocked')
+      assert.ok(state.entries.length > 0)
+      for (const entry of state.entries) {
+        assert.equal(entry.geometryStatus, 'blocked-v3')
+        assert.equal(entry.materializationId, null)
+        assert.deepEqual(JSON.parse(entry.entryJson).consumption, { status: 'blocked', reasons: ['fork-target-materialization-required'] })
+      }
+    }
+    assert.equal(await client.v2OutputNormalizationReceipt.count({ where: { workspaceId, projectId: duplicateProjectId } }), 0)
+    // What needs target authority is refused, naming the reason, and leaves the copy where it was.
+    const copyVersionsBefore = await client.v2ProjectVersion.count({ where: { workspaceId, projectId: duplicateProjectId } })
+    const variantOnCopy = await post(
+      `/v1/projects/${duplicateProjectId}/output-variants`,
+      `duplicate-copy-variant-${suffix}`,
+      { ...variantBodyFor({ aspectRatio: '1:1' }), baseVersionId: policyOnCopyPayload.data.version.id, baseHash: policyOnCopyPayload.data.version.baseHash },
+    )
+    const variantOnCopyPayload = await variantOnCopy.json()
+    assert.equal(variantOnCopy.status, 428, JSON.stringify(variantOnCopyPayload))
+    assert.equal(variantOnCopyPayload.error.code, 'PRECONDITION_REQUIRED')
+    assert.deepEqual(variantOnCopyPayload.error.details, { reason: 'copy-requires-editorial-cut' })
+    const renderOnCopy = await post(`/v1/projects/${duplicateProjectId}/proxy-renders`, `duplicate-copy-render-${suffix}`, {})
+    const renderOnCopyPayload = await renderOnCopy.json()
+    assert.equal(renderOnCopy.status, 428, JSON.stringify(renderOnCopyPayload))
+    assert.deepEqual(renderOnCopyPayload.error.details, { reason: 'copy-requires-editorial-cut' })
+    assert.equal(
+      await client.v2ProjectVersion.count({ where: { workspaceId, projectId: duplicateProjectId } }),
+      copyVersionsBefore,
+      'a refused Command writes nothing',
+    )
+    assert.equal(await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId, projectId: duplicateProjectId } }), 0)
 
     const replayAfterCommands = await post(
       `/v1/projects/${sourceProject.id}/duplicates`,
@@ -488,6 +557,17 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
     assert.equal(secondResponse.status, 201, JSON.stringify(secondPayload))
     assert.equal(secondPayload.data.version.forkedFromProjectId, duplicateProjectId)
     assert.equal(secondPayload.data.version.forkedFromVersionId, copyCurrentVersion.id)
+    assert.equal(copyCurrentVersion.id, policyOnCopyPayload.data.version.id, 'the copy of the copy forks the configured head')
+    const secondLut = await post(
+      `/v1/projects/${secondPayload.data.project.id}/lut-selection`,
+      `duplicate-second-lut-${suffix}`,
+      {
+        baseVersionId: secondPayload.data.version.id,
+        baseHash: secondPayload.data.version.baseHash,
+        selection: { mode: 'none' },
+      },
+    )
+    assert.equal(secondLut.status, 201, JSON.stringify(await secondLut.json()))
     assert.deepEqual(
       await readSourceRows(),
       sourceRowsBefore,

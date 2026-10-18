@@ -57,3 +57,12 @@ test('resolveProjectOutputFormat answers like projectOutputFormat from the store
   assert.equal(await resolveProjectOutputFormat(one, { ...project, format: null }, null), null, 'no Version, no format')
   assert.equal(await resolveProjectOutputFormat(stateClient([{ output: {} }]), { ...project, format: null }, 'version-1'), null, 'a spec without an aspect ratio')
 })
+
+// A copy keeps the literal fork revision of every output it was copied with: the geometry lives in `effectiveSpec`.
+test('a copy answers with the geometry its fork revision was copied with', async () => {
+  const fork = { schemaVersion: 'output-spec-revision/v3', effectiveSpec: { output: { aspectRatio: '9:16' } } }
+  assert.equal(projectOutputFormat({ format: null }, { state: { document: { entries: [{ spec: fork }] } } }), '9:16')
+  assert.equal(projectOutputFormat({ format: null }, { state: { document: { entries: [{ spec: fork }, { spec: fork }] } } }), null, 'two outputs stay ambiguous')
+  assert.equal(projectOutputFormat({ format: null }, { state: { document: { entries: [{ spec: { schemaVersion: 'output-spec-revision/v3', effectiveSpec: {} } }] } } }), null)
+  assert.equal(await resolveProjectOutputFormat(stateClient([fork]), { ...project, format: null }, 'version-copy-1'), '9:16')
+})

@@ -1,4 +1,5 @@
 import type { ApiAccessAuditContext } from './api-access-control.ts'
+import { DomainError } from './errors.ts'
 import type { EditCommand } from './edit-command.ts'
 import type { EditCommandType } from './edit-command-registry.ts'
 import type { SealedOutputNormalizationV3 } from './output-materialization.ts'
@@ -42,6 +43,35 @@ export const CHILD_COMMAND_TRANSITIONS: Readonly<Partial<Record<EditCommandType,
   'direct-multicam-session': Object.freeze({ planEffect: 'recompiles-plan', replaces: Object.freeze([]) }),
   'set-project-policy-overrides': Object.freeze({ planEffect: 'preserves-plan', replaces: Object.freeze(['policies'] as const) }),
 })
+
+/**
+ * The Commands a copy (a Creation fork that carries content) accepts as children before it has any target authority.
+ * Each one only configures the plan it was copied with (grade, LUT, subtitle look, a segment's text, policies): none of
+ * them reads, changes or newly consumes a transcript, a perception result, a source recording or a geometry. The child
+ * keeps the fork's posture: its entries stay blocked with FORK_TARGET_MATERIALIZATION_REASON until an editorial cut
+ * binds the fork derivation's observations to the target. Anything else that moves a copy (a variant, a manual edit, a
+ * review patch, a transcript replacement, a Director run, media) still needs that authority first.
+ */
+export const FORK_INHERITABLE_COMMAND_TYPES = Object.freeze([
+  'set-project-lut-selection',
+  'set-project-color-plan',
+  'set-project-subtitle-mode',
+  'apply-subtitle-segment-override',
+  'set-project-policy-overrides',
+] as const satisfies readonly EditCommandType[])
+export const FORK_TARGET_MATERIALIZATION_REASON = 'fork-target-materialization-required' as const
+/** The operator-facing reason a copy gives for refusing to render, review or patch before its editorial cut. */
+export const COPY_REQUIRES_EDITORIAL_CUT_REASON = 'copy-requires-editorial-cut' as const
+export function isForkInheritableCommandType(type: string): boolean {
+  return (FORK_INHERITABLE_COMMAND_TYPES as readonly string[]).includes(type)
+}
+/**
+ * Whether `error` is a copy's refusal to render, review or change before its editorial cut. A Command that configured the copy has
+ * already committed when the render it would admit is refused this way: its caller answers the Command, with the render deferred.
+ */
+export function isCopyRequiresEditorialCutRefusal(error: unknown): boolean {
+  return error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details?.reason === COPY_REQUIRES_EDITORIAL_CUT_REASON
+}
 
 /**
  * The rights a recording was adopted under: its current approved snapshot at seal time. The database guard and the

@@ -210,9 +210,14 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
         ids:[...new Set(ns.map(n=>n.document.id))]})
     const materializationIds=Object.fromEntries(stored.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?
       [[e.variantId,e.consumption.materialization.document.id]]:[]))
+    // An editorial cut over a copy whose children only configured it binds the authority of the Creation fork it descends from.
+    const forkRootId=origin.kind==='editorial-cut-command'&&origin.command.payload.sourceBinding.document.authority.kind==='fork-derivation3'?
+      origin.command.payload.sourceBinding.document.authority.forkRootVersionId:null
+    const forkRoot=forkRootId!==null&&forkRootId!==parent.version.id?await readOperationalAnchorV3(client,{...input,versionId:forkRootId},cache):null
     const fresh=buildOperationalOutputVersionBundleV3({allocation:{workspaceId:input.workspaceId,projectId:input.projectId,
       resultVersionId:input.versionId,stateId:stored.state.document.id,parentVersionId:parent.version.id,sequence:stored.version.sequence,
       createdBy:stored.version.createdBy,createdAt:stored.version.createdAt},parent,origin,restoreTarget:target,
+      ...(forkRoot&&forkRoot.schemaVersion==='project-creation-output-bundle/v2'?{forkRoot}:{}),
       editPlanSnapshot:stored.editPlanSnapshot,normalizations:actual,materializationIds,
       // A child Command's replaced non-output snapshots are born with its Version; the origin declares which.
       ...(origin.kind==='child-command'?{replacementSnapshots:stored.snapshots.filter(s=>(origin.replaces as readonly string[]).includes(s.kind))}:{})})

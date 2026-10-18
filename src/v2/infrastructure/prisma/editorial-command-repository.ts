@@ -2,7 +2,7 @@ import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 import type { EditorialCommandCommit, EditorialCommandContext, EditorialCommandRepository, EditorialCommandResult } from '../../application/ports/editorial-command-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
-import { operationalBundlePlanV3, type OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
+import { forkAuthorityPendingV3, operationalBundlePlanV3, type CreationOutputVersionBundleV2, type OperationalOutputVersionBundleV3 } from '../../domain/output-version-bundle.ts'
 import { createEditorialCutInvalidations } from '../../domain/editorial-cut-impact.ts'
 import { readEditorialMaterializedPlanV3 } from '../../domain/editorial-cut-impact.ts'
 import type { EditorialSourceBindingBodyV1, SealedOutputNormalizationV3 } from '../../domain/output-materialization.ts'
@@ -47,18 +47,28 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
     const plan=JSON.parse(operationalBundlePlanV3(parent).contentJson)
     if(plan.retimedTranscript?.sourceTranscriptId!==input.transcriptId)throw new DomainError('PRECONDITION_REQUIRED','Editorial transcript is not the actual parent alignment')
     let authority:EditorialSourceBindingBodyV1['authority'];let observations:readonly SealedOutputNormalizationV3[];let manifestRefs:ReadonlyMap<string,{id:string;hash:string}>
-    if(parent.schemaVersion==='project-creation-output-bundle/v2') {
-      const fork=parent.command.payload.forkDerivation
+    // A copy whose children only configured it is still waiting for this cut: its authority is the Creation fork it descends from.
+    let forkRoot:Readonly<CreationOutputVersionBundleV2>|null=parent.schemaVersion==='project-creation-output-bundle/v2'?parent:null
+    if(forkRoot===null&&forkAuthorityPendingV3(parent)) {
+      const first=await this.client.v2ProjectVersion.findFirst({where:{workspaceId:input.workspaceId,projectId:input.projectId,sequence:1},select:{id:true}})
+      const root=first?await readPersistedOperationalOutputBundleV3(this.client,{workspaceId:input.workspaceId,projectId:input.projectId,versionId:first.id}):null
+      if(root?.schemaVersion!=='project-creation-output-bundle/v2')throw new DomainError('PRECONDITION_REQUIRED','A copy needs its Creation fork to take the editorial authority')
+      forkRoot=root
+    }
+    if(forkRoot!==null) {
+      const fork=forkRoot.command.payload.forkDerivation
       if(fork?.schemaVersion!=='project-fork-derivation/v3'||fork.document.kernel.document.source.bundle.schemaVersion!=='operational-output-version-bundle/v3')
         throw new DomainError('PRECONDITION_REQUIRED','Creation2 editorial requires a real observed source3 fork derivation')
       const source=fork.document.kernel.document.source
       authority={kind:'fork-derivation3',sourceProjectId:source.version.projectId,sourceVersionId:source.version.id,sourceBaseHash:source.version.baseHash,
-        sourceStateId:source.state.document.id,sourceStateHash:source.state.stateHash,forkRootVersionId:parent.version.id,
-        forkRootStateId:parent.state.document.id,forkRootStateHash:parent.state.stateHash,derivationId:fork.document.id,derivationHash:fork.derivationHash}
+        sourceStateId:source.state.document.id,sourceStateHash:source.state.stateHash,forkRootVersionId:forkRoot.version.id,
+        forkRootStateId:forkRoot.state.document.id,forkRootStateHash:forkRoot.state.stateHash,derivationId:fork.document.id,derivationHash:fork.derivationHash}
       observations=source.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[])
       manifestRefs=new Map(fork.document.sourceReferences.map(r=>[r.artifactId,{id:r.manifestFacts.id,hash:r.manifestFacts.manifestHash}]))
     } else {
-      const previous=parent.origin.kind==='editorial-cut-command'?parent.origin.command.payload.sourceBinding.document:null
+      // No fork root means the parent is an operational State3 (a Creation parent is its own fork root above).
+      const operational=parent as Readonly<OperationalOutputVersionBundleV3>
+      const previous=operational.origin.kind==='editorial-cut-command'?operational.origin.command.payload.sourceBinding.document:null
       authority=previous?.authority??{kind:'same-project-state3',sourceProjectId:parent.version.projectId,sourceVersionId:parent.version.id,
         sourceBaseHash:parent.version.baseHash,sourceStateId:parent.state.document.id,sourceStateHash:parent.state.stateHash,
         forkRootVersionId:null,forkRootStateId:null,forkRootStateHash:null,derivationId:null,derivationHash:null}
@@ -99,7 +109,8 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
     const outputs=await this.client.v2ProjectProxyRenderOperation.findMany({where:{projectId:input.projectId,workspaceId:input.workspaceId,
       projectVersionId:parent.version.id,operation:{status:'succeeded'}},select:{outputArtifactId:true,renderableVariantId:true}})
     if(outputs.some(o=>!o.renderableVariantId))throw new DomainError('PRECONDITION_REQUIRED','Editorial proxy lacks explicit stable variant authority')
-    return Object.freeze({projectId:input.projectId,workspaceId:input.workspaceId,currentVersion:parent.version,parent,transcriptId:t.id,transcript,
+    return Object.freeze({projectId:input.projectId,workspaceId:input.workspaceId,currentVersion:parent.version,parent,
+      ...(forkRoot!==null&&forkRoot!==parent?{forkRoot}:{}),transcriptId:t.id,transcript,
       sourceArtifactId:t.sourceArtifactId,sourceDurationSeconds,sourceFps:plan.fps,currentDurationFrames:plan.durationFrames,variantId:input.variantId,
       normalizations,sourceBindingFacts:{schemaVersion:'editorial-source-binding/v1' as const,canonicalPolicyVersion:'output-canonical-json/v1' as const,
         workspaceId:input.workspaceId,projectId:input.projectId,authority,

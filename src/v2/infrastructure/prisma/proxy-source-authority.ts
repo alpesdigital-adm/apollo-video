@@ -8,6 +8,7 @@ import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { resolveProjectOutputFormat } from './project-output-format.ts'
+import { requireCopyTargetAuthority } from './copy-target-authority.ts'
 
 /**
  * The project with the Version, media and rights its proxy render is built from. A project born under 6.0.0 has no format of
@@ -19,6 +20,9 @@ export async function queryProxySourceProject(client: PrismaClient | Prisma.Tran
   sourceArtifactId?: string; sourceManifestId?: string
 }) {
   const project = await findProxySourceProject(client, input)
+  // A copy no editorial cut has given target authority is neither rendered nor exported: refuse with the reason the operator can act on.
+  if (project) await requireCopyTargetAuthority(client, { workspaceId: input.workspaceId, projectId: input.projectId,
+    projectVersionId: input.projectVersionId ?? project.versions[0]?.id ?? project.currentVersionId })
   if (!project || project.format) return project
   const format = await resolveProjectOutputFormat(client, project, input.projectVersionId ?? project.versions[0]?.id ?? project.currentVersionId)
   return format ? { ...project, format } : project

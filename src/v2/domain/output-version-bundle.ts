@@ -264,7 +264,7 @@ import { createOutputPlanAuthority } from './project-output-state.ts'
 import { materializeManualEditPlan, materializeManualRestorePlan } from './manual-editing.ts'
 import { createManualCommandImpact } from './command-impact.ts'
 import { materializeEditorialCutPlanV3, createEditorialAudioProjectionV1, createEditorialCutImpactV2 } from './editorial-cut-impact.ts'
-import { CHILD_COMMAND_TRANSITIONS } from './output-child-command.ts'
+import { CHILD_COMMAND_TRANSITIONS, COPY_REQUIRES_EDITORIAL_CUT_REASON, FORK_TARGET_MATERIALIZATION_REASON, isForkInheritableCommandType } from './output-child-command.ts'
 
 export type OperationalOutputParentV3 = Readonly<CreationOutputVersionBundleV2|OperationalOutputVersionBundleV3>
 export interface OperationalOutputVersionBundleV3 {
@@ -285,8 +285,24 @@ export interface BuildOperationalOutputVersionBundleV3 {
   editPlanSnapshot:Readonly<ProjectSnapshot>
   /** Non-output snapshots a child Command replaces, exactly the kinds its origin declares. */
   replacementSnapshots?:readonly Readonly<ProjectSnapshot>[]
+  /**
+   * The copy's Creation fork (its first Version). Required exactly when the parent is a copy that has not yet been given
+   * target authority by an editorial cut (see forkAuthorityPendingV3) and the origin is that cut.
+   */
+  forkRoot?:Readonly<CreationOutputVersionBundleV2>
   normalizations:readonly SealedOutputNormalizationV3[]
   materializationIds:Readonly<Record<string,string>>
+}
+/**
+ * A copy has no target authority until an editorial cut binds the fork derivation's observations to it: the Creation fork
+ * itself, and every child that only configured it (they keep every entry blocked with the fork reason). A State that
+ * materialized anything is past this point.
+ */
+export function forkAuthorityPendingV3(bundle:OperationalOutputParentV3):boolean {
+  if(bundle.schemaVersion==='project-creation-output-bundle/v2')return bundle.state.document.transition==='fork-with-content'
+  const entries=bundle.state.document.entries
+  return entries.length>0&&entries.every(e=>e.consumption.status==='blocked'&&e.consumption.reasons.length===1&&
+    e.consumption.reasons[0]===FORK_TARGET_MATERIALIZATION_REASON)
 }
 export function operationalBundlePlanV3(bundle:OperationalOutputParentV3): Readonly<ProjectSnapshot> {
   if(bundle.schemaVersion==='project-creation-output-bundle/v2') {
@@ -326,7 +342,12 @@ function semanticsV3(plan:ProjectSnapshot) {
 }
 export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutputVersionBundleV3):Readonly<OperationalOutputVersionBundleV3> {
   const a=input.allocation,parent=input.parent,pp=parentFactsV3(parent)
-  assertDomain(input.origin.kind==='editorial-cut-command' || parent.version.outputContractVersion!==2 || parent.state.document.transition==='initialize-empty' &&
+  const pending=forkAuthorityPendingV3(parent)
+  // A copy before its editorial cut accepts only that cut and the Commands that merely configure what it was copied with.
+  const inheritsForkPosture=pending&&input.origin.kind==='child-command'&&isForkInheritableCommandType(input.origin.command.type)
+  if(pending)assertDomain(input.origin.kind==='editorial-cut-command'||inheritsForkPosture,
+    'PRECONDITION_REQUIRED','Fork2 content requires target transcript/perception/geometry authority before child3',{reason:COPY_REQUIRES_EDITORIAL_CUT_REASON})
+  else assertDomain(input.origin.kind==='editorial-cut-command' || parent.version.outputContractVersion!==2 || parent.state.document.transition==='initialize-empty' &&
     JSON.parse(pp.contentJson).durationFrames===0 && !JSON.parse(pp.contentJson).videoTracks.some((t:{clips:unknown[]})=>t.clips.length>0),
     'PRECONDITION_REQUIRED','Fork2 content requires target transcript/perception/geometry authority before child3')
   const origin=validateOperationalOutputOriginV3(input.origin,parent,a)
@@ -347,11 +368,16 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
   }
   if(origin.kind==='editorial-cut-command') {
     const c=origin.command,payload=c.payload,b=createEditorialSourceBindingV1(payload.sourceBinding.document),d=b.document,authority=d.authority
-    if(parent.schemaVersion==='project-creation-output-bundle/v2') {
-      const derivation=parent.command.payload.forkDerivation
+    // The fork root is the parent itself, or (a copy whose children only configured it) the fork the parent descends from.
+    const rootBundle:Readonly<CreationOutputVersionBundleV2>|null=parent.schemaVersion==='project-creation-output-bundle/v2'?parent:pending?
+      (input.forkRoot===undefined?null:validateCreationOutputVersionBundleV2(input.forkRoot)):null
+    assertDomain(!pending||rootBundle!==null&&rootBundle.version.workspaceId===a.workspaceId&&rootBundle.version.projectId===a.projectId&&
+      rootBundle.version.sequence===1,'PRECONDITION_REQUIRED','A copy whose children only configured it needs its Creation fork to take the editorial authority')
+    if(rootBundle!==null) {
+      const derivation=rootBundle.command.payload.forkDerivation
       assertDomain(derivation?.schemaVersion==='project-fork-derivation/v3'&&authority.kind==='fork-derivation3'&&
-        authority.forkRootVersionId===parent.version.id&&authority.forkRootStateId===parent.state.document.id&&
-        authority.forkRootStateHash===parent.state.stateHash&&authority.derivationId===derivation.document.id&&
+        authority.forkRootVersionId===rootBundle.version.id&&authority.forkRootStateId===rootBundle.state.document.id&&
+        authority.forkRootStateHash===rootBundle.state.stateHash&&authority.derivationId===derivation.document.id&&
         authority.derivationHash===derivation.derivationHash,'INVALID_COMMAND','Editorial root needs its exact fork3 derivation authority')
       const original=derivation.document.kernel.document.source
       assertDomain(authority.sourceProjectId===original.version.projectId&&authority.sourceVersionId===original.version.id&&
@@ -364,7 +390,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
         stableSerialize(n)===stableSerialize(observations.get(n.document.id)))&&d.inventory.length===derivation.document.sourceReferences.length&&
         d.inventory.every(i=>derivation.document.sourceReferences.some(r=>r.targetLinkId===i.linkId&&r.artifactId===i.artifactId&&r.role===i.role)),
         'INVALID_COMMAND','Fork editorial observations/inventory must retain literal derivation membership')
-    } else {
+    } else if(parent.schemaVersion!=='project-creation-output-bundle/v2') {
       const prior=parent.origin.kind==='editorial-cut-command'?parent.origin.command.payload.sourceBinding:null
       if(prior)assertDomain(stableSerialize(authority)===stableSerialize(prior.document.authority)&&
         stableSerialize(d.transcript)===stableSerialize(prior.document.transcript),'INVALID_COMMAND','Editorial continuity must retain original source authority')
@@ -422,6 +448,8 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     assertDomain(new Set(input.normalizations.map(n=>n.document.id)).size===input.normalizations.length &&
       input.normalizations.every(n=>!factual.has(n.document.id) || stableSerialize(n)===stableSerialize(factual.get(n.document.id))),
       'INVALID_COMMAND','Child Command must reuse the exact parent normalization observations')
+    assertDomain(!inheritsForkPosture||input.normalizations.length===0&&origin.adoptions.length===0,'INVALID_COMMAND',
+      'A copy without target authority observes and adopts no recording')
     const outside=input.normalizations.filter(n=>!factual.has(n.document.id)),named=new Map(origin.adoptions.map(adoption=>[adoption.receiptId,adoption]))
     assertDomain(outside.length===origin.adoptions.length && named.size===origin.adoptions.length && outside.every(n=>named.has(n.document.id)),
       'INVALID_COMMAND','Child adoptions differ from the observations outside the parent State')
@@ -449,7 +477,12 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
   assertDomain(snapshots.some(s=>s.kind==='brief') && snapshots.some(s=>s.kind==='policies'),
     'INVALID_PROJECT_VERSION','Child3 requires actual non-output snapshots')
   let entries:OutputStateEntryV3[]=[]
-  if(source.state.document.schemaVersion==='project-output-state/v3') entries=source.state.document.entries.map(e=>({
+  if(inheritsForkPosture)entries=source.state.document.entries.map(e=>{
+    assertDomain(e.spec.schemaVersion==='output-spec-revision/v3','PRECONDITION_REQUIRED','A copy keeps its literal fork revision3')
+    return {canonicalPolicyVersion:e.canonicalPolicyVersion,variantId:e.variantId,outputSpecRevisionId:e.outputSpecRevisionId,
+      specHash:e.specHash,spec:e.spec,consumption:{status:'blocked',reasons:[FORK_TARGET_MATERIALIZATION_REASON]}}
+  })
+  else if(source.state.document.schemaVersion==='project-output-state/v3') entries=source.state.document.entries.map(e=>({
     ...e,consumption:{status:'blocked',reasons:['normalization-required']}}))
   else if(origin.kind==='editorial-cut-command')entries=source.state.document.entries.map(e=>{
     assertDomain(e.spec.schemaVersion==='output-spec-revision/v3','PRECONDITION_REQUIRED','Editorial fork requires literal revision3')
@@ -504,6 +537,11 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
   const ids=new Set<string>()
   for(const e of entries) {
     const id=input.materializationIds[e.variantId]
+    if(inheritsForkPosture) {
+      // The copy inherits the fork's posture: nothing is materialized, so no consumer can mistake it for target authority.
+      assertDomain(id===undefined,'INVALID_PROJECT_VERSION','A copy without target authority cannot hide materialization')
+      continue
+    }
     if(p.durationFrames===0) {
       assertDomain(id===undefined && input.normalizations.length===0,'INVALID_PROJECT_VERSION','Empty child cannot hide materialization')
       e.consumption={status:'blocked',reasons:['empty-project']}

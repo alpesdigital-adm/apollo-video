@@ -56,7 +56,7 @@ const DIRECTOR_DESTINATION_TYPE: Readonly<Partial<Record<
   booking: 'calendar', download: 'file',
 }
 
-interface ApiEnvelope<T> { data?: T; error?: { message?: string } }
+interface ApiEnvelope<T> { data?: T; error?: { message?: string; details?: { reason?: string } } }
 interface MediaRecord {
   id: string; role: 'source-master' | 'source-audio' | 'source-image' | 'editing-proxy' | 'editorial-proxy' | 'final-output'; originalFileName: string; artifactId: string;
   manifestId: string; mediaType: string; container: string; byteSize: string; sha256: string; status: string;
@@ -1018,8 +1018,15 @@ function readableBytes(value: number | string): string {
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`
 }
 
+// Refusals the API explains with a stable reason: the operator reads what to do next, not the generic status text.
+const REFUSAL_REASON_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
+  'copy-requires-editorial-cut':
+    'Esta cópia ainda não recebeu o corte editorial. Aplique o corte editorial na cópia antes de renderizar, revisar ou ajustar a edição.',
+})
+
 function apiError<T>(payload: ApiEnvelope<T>, fallback: string): string {
-  return payload.error?.message?.trim() || fallback
+  const reason = payload.error?.details?.reason
+  return (typeof reason === 'string' ? REFUSAL_REASON_MESSAGES[reason] : undefined) || payload.error?.message?.trim() || fallback
 }
 
 function localSignedUrl(value: string): string {

@@ -4,11 +4,13 @@ import test from 'node:test'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createEditCommand } from '../../src/v2/domain/edit-command.ts'
-import { CHILD_COMMAND_TRANSITIONS } from '../../src/v2/domain/output-child-command.ts'
+import { CHILD_COMMAND_TRANSITIONS, COPY_REQUIRES_EDITORIAL_CUT_REASON, FORK_INHERITABLE_COMMAND_TYPES, FORK_TARGET_MATERIALIZATION_REASON } from '../../src/v2/domain/output-child-command.ts'
 import { EDIT_COMMAND_TYPES } from '../../src/v2/domain/edit-command-registry.ts'
 import { validateOperationalOutputOriginV3 } from '../../src/v2/domain/output-version-origin.ts'
 import { createProjectSnapshot } from '../../src/v2/domain/project-snapshot.ts'
-import { transitionProjectOutputState } from '../../src/v2/domain/project-output-state-transition.ts'
+import { parentNormalizationsV3, reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../../src/v2/domain/project-output-state-transition.ts'
+import { buildOperationalOutputVersionBundleV3, forkAuthorityPendingV3, operationalBundlePlanV3 } from '../../src/v2/domain/output-version-bundle.ts'
+import { forkCopyConfigurationChild } from './helpers/operational-editorial-fixture.mjs'
 import { ingestedWorld, outputWorld, creationRequest, variantRequest } from './helpers/output-world.mjs'
 
 const createdAt = '2026-10-15T09:00:00.000Z'
@@ -192,4 +194,109 @@ test('a child plan is materialized only from observed sources: an unobserved sou
   const bundle = transitionProjectOutputState(emptied.input)
   assert.ok(bundle.state.document.entries.length > 0)
   assert.ok(bundle.state.document.entries.every((entry) => entry.consumption.status === 'blocked' && entry.consumption.reasons[0] === 'empty-project'))
+})
+
+// ---- A copy (a Creation fork that carries content) before any editorial cut gives it target authority ----
+let copyWorldPromise
+const copyWorld = () => (copyWorldPromise ??= (async () => {
+  const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
+  const { createEditorialForkFixture } = await import('./helpers/operational-editorial-fixture.mjs')
+  const context = createExternalAuditContext({ clientId: 'client-1', credentialId: 'credential-copy-1', workspaceId: 'workspace-1', environment: 'production' })
+  const actor = Object.freeze({ ...context, auditContext: context, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' })
+  const transcript = createMediaTranscript({ language: 'pt-BR', text: 'Primeiro remover último.',
+    words: [{ word: 'Primeiro', start: 0, end: 1 }, { word: 'remover', start: 1, end: 2 }, { word: 'último.', start: 2, end: 3 }],
+    segments: [{ id: 0, start: 0, end: 3, text: 'Primeiro remover último.' }], provider: 'controlled', model: 'explicit-domain-fixture' })
+  return { actor, ...(await createEditorialForkFixture({ actor, transcript, sourceDurationSeconds: 3, fps: 30, sibling: false })) }
+})())
+const FORK_REASON = 'fork-target-materialization-required'
+const planOf = (bundle) => JSON.parse(operationalBundlePlanV3(bundle).contentJson)
+const withoutIdentity = ({ id, projectVersionId, createdAt, ...rest }) => rest
+
+test('a copy accepts every configuration Command as its first child and inherits the fork posture: blocked, nothing observed or materialized', async () => {
+  const w = await copyWorld(), root = w.fork.bundle
+  assert.equal(root.schemaVersion, 'project-creation-output-bundle/v2')
+  assert.equal(root.state.document.transition, 'fork-with-content')
+  assert.equal(forkAuthorityPendingV3(root), true)
+  assert.ok(root.state.document.entries.length > 0 && planOf(root).durationFrames > 0)
+  for (const type of FORK_INHERITABLE_COMMAND_TYPES) {
+    const policies = type === 'set-project-policy-overrides' ? [createProjectSnapshot({ workspaceId: root.version.workspaceId, projectId: root.version.projectId,
+      id: 'snapshot-copy-policies-' + type, kind: 'policies', contentSchemaVersion: 1, createdAt: '2026-07-18T20:09:00.000Z',
+      contentJson: stableSerialize({ schemaVersion: 1, state: 'configured' }), contentHash: calculateCanonicalHash({ schemaVersion: 1, state: 'configured' }) })] : []
+    const child = forkCopyConfigurationChild(root, { actor: w.actor, suffix: type, type, replacementSnapshots: policies })
+    assert.equal(child.origin.kind, 'child-command')
+    assert.equal(child.version.outputContractVersion, 3)
+    assert.equal(child.version.sequence, root.version.sequence + 1)
+    assert.equal(child.version.parentVersionId, root.version.id)
+    assert.equal(child.state.document.transition, 'inherit')
+    assert.deepEqual(child.state.document.entries.map((e) => [e.variantId, e.outputSpecRevisionId, e.specHash]),
+      root.state.document.entries.map((e) => [e.variantId, e.outputSpecRevisionId, e.specHash]))
+    for (const entry of child.state.document.entries) {
+      assert.deepEqual(entry.consumption, { status: 'blocked', reasons: [FORK_REASON] }, type)
+      assert.equal(entry.spec.schemaVersion, 'output-spec-revision/v3', 'the literal fork revision is kept, never upgraded')
+    }
+    assert.deepEqual(child.state.document.producer.document.adoptions, [])
+    assert.deepEqual(child.state.document.sourceDependencies, root.state.document.sourceDependencies)
+    assert.deepEqual(child.state.document.overlays, root.state.document.overlays)
+    assert.deepEqual(withoutIdentity(planOf(child)), withoutIdentity(planOf(root)), 'the plan is preserved byte for byte under a new identity')
+    assert.equal(forkAuthorityPendingV3(child), true, 'the child is still a copy without target authority')
+    assert.deepEqual(parentNormalizationsV3(child), [])
+    assert.equal(child.version.snapshotRefs.policies !== root.version.snapshotRefs.policies, type === 'set-project-policy-overrides')
+  }
+})
+
+test('configuration children of a copy chain, each keeping every entry blocked', async () => {
+  const w = await copyWorld()
+  const first = forkCopyConfigurationChild(w.fork.bundle, { actor: w.actor, suffix: 'chain-lut' })
+  const second = forkCopyConfigurationChild(first, { actor: w.actor, suffix: 'chain-color', type: 'set-project-color-plan', payload: { schemaVersion: 1 } })
+  const third = forkCopyConfigurationChild(second, { actor: w.actor, suffix: 'chain-subtitle', type: 'set-project-subtitle-mode', payload: { schemaVersion: 1 } })
+  assert.deepEqual([first, second, third].map((b) => b.version.sequence), [2, 3, 4])
+  assert.deepEqual([second, third].map((b) => b.version.parentVersionId), [first.version.id, second.version.id])
+  for (const bundle of [first, second, third]) {
+    assert.ok(bundle.state.document.entries.every((e) => e.consumption.status === 'blocked' && e.consumption.reasons.join() === FORK_REASON))
+    assert.deepEqual(withoutIdentity(planOf(bundle)), withoutIdentity(planOf(w.fork.bundle)))
+  }
+})
+
+test('a copy still refuses every Command that changes geometry, transcript, media or plan, naming the reason the operator can act on', async () => {
+  const w = await copyWorld(), first = forkCopyConfigurationChild(w.fork.bundle, { actor: w.actor, suffix: 'refusal-base' })
+  const refused = Object.keys(CHILD_COMMAND_TRANSITIONS).filter((type) => !FORK_INHERITABLE_COMMAND_TYPES.includes(type))
+  assert.ok(refused.length >= 6, refused.join())
+  for (const parent of [w.fork.bundle, first]) {
+    for (const type of refused) {
+      assert.throws(() => forkCopyConfigurationChild(parent, { actor: w.actor, suffix: `refused-${type}-${parent.version.sequence}`, type, payload: { schemaVersion: 1 } }),
+        (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === COPY_REQUIRES_EDITORIAL_CUT_REASON, `${type} on sequence ${parent.version.sequence}`)
+    }
+  }
+  assert.equal(COPY_REQUIRES_EDITORIAL_CUT_REASON, 'copy-requires-editorial-cut')
+})
+
+test('a copy child cannot hide an observation, an adoption or a materialization', async () => {
+  const w = await copyWorld(), root = w.fork.bundle, audit = materializeActorAuditContext(w.actor)
+  const scope = { workspaceId: root.version.workspaceId, projectId: root.version.projectId }, createdAt = '2026-07-18T20:10:00.000Z', versionId = 'version-copy-hidden'
+  const command = createEditCommand({ ...scope, id: 'command-copy-hidden', baseVersionId: root.version.id, baseHash: root.version.baseHash,
+    author: { type: 'api-client', id: audit.clientId }, type: 'set-project-lut-selection', scope: { project: true },
+    payload: { schemaVersion: 2, mode: 'none', intensity: 1 }, idempotencyKey: 'copy-child-hidden', createdAt })
+  const build = (extra) => buildOperationalOutputVersionBundleV3({
+    allocation: { ...scope, resultVersionId: versionId, stateId: 'state-copy-hidden', parentVersionId: root.version.id, sequence: 2, createdBy: audit.clientId, createdAt },
+    parent: root, restoreTarget: null, normalizations: [], materializationIds: {},
+    origin: { kind: 'child-command', command, audit, requestFingerprint: calculateCanonicalHash({ hidden: true }), replaces: [], adoptions: [] },
+    editPlanSnapshot: reidentifiedEditPlanSnapshot(root, { snapshotId: 'snapshot-copy-hidden', versionId, createdAt }), ...extra })
+  assert.equal(build({}).version.sequence, 2)
+  assert.throws(() => build({ normalizations: [w.prepared.n] }), (error) => error.code === 'INVALID_COMMAND' && /observes and adopts no recording/.test(error.message))
+  assert.throws(() => build({ materializationIds: { [root.state.document.entries[0].variantId]: 'materialization-hidden' } }),
+    (error) => error.code === 'INVALID_PROJECT_VERSION' && /cannot hide materialization/.test(error.message))
+})
+
+test('the database guard admits exactly the configuration Commands and the fork reason the domain declares', async () => {
+  const sql = await readFile(new URL('../../prisma/v2/migrations/20261017120000_fork_copy_configuration_children_v1/migration.sql', import.meta.url), 'utf8')
+  const quoted = (text) => [...text.matchAll(/'([A-Za-z-]+)'/g)].map((match) => match[1])
+  assert.deepEqual(quoted(sql.match(/pending_parent AND \(cmd\.type NOT IN \(([^)]*)\)/)[1]), [...FORK_INHERITABLE_COMMAND_TYPES])
+  assert.equal(sql.split(`["${FORK_TARGET_MATERIALIZATION_REASON}"]`).length - 1, 3, 'parent probe, helper and entry check name the same reason')
+  assert.ok(sql.includes('W66v3 a copy without target authority cannot materialize') && sql.includes('w66_fork_copy_pending_v1'))
+  // Only the two guards (and their helper) are defined: nothing weakens the immutability triggers.
+  assert.deepEqual([...sql.matchAll(/CREATE (?:OR REPLACE )?(?:FUNCTION|CONSTRAINT TRIGGER|TRIGGER) (\w+)/g)].map((match) => match[1]),
+    ['w66_fork_copy_pending_v1', 'w66_assert_editorial_binding_v1', 'w66_assert_child_command_state_v1'])
+  assert.ok(!/DROP |DISABLE|ALTER TABLE/.test(sql))
 })

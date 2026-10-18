@@ -18,6 +18,7 @@ import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
+import { requireCopyTargetAuthority } from './copy-target-authority.ts'
 
 function parseObject(value: string, field: string): Record<string, unknown> {
   try {
@@ -406,6 +407,8 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
       if (project.currentVersionId !== input.annotation.projectVersionId) {
         throw new DomainError('VERSION_CONFLICT', 'Project version changed before annotation persistence', { currentVersionId: project.currentVersionId })
       }
+      // A copy that no editorial cut has given target authority is not reviewed: the proxies it links belong to its source.
+      await requireCopyTargetAuthority(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersionId })
       const artifact = await transaction.v2MediaArtifact.findFirst({
         where: { id: input.annotation.proxyArtifactId, workspaceId: input.workspaceId, sha256: input.annotation.proxyHash, status: 'available' },
         select: { id: true },

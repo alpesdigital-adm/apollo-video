@@ -147,6 +147,18 @@ function presentMissingTool(details: Readonly<Record<string, unknown>>) {
   }
 }
 
+/**
+ * The closed set of reasons a precondition refusal publishes, each one a stable code a client can branch on and an operator can
+ * act on. Anything else a domain throw put in `details` stays internal.
+ */
+const PUBLISHED_PRECONDITION_REASONS = Object.freeze(new Set(['copy-requires-editorial-cut']))
+
+function presentPreconditionReason(details: Readonly<Record<string, unknown>>) {
+  return typeof details.reason === 'string' && PUBLISHED_PRECONDITION_REASONS.has(details.reason)
+    ? { reason: details.reason }
+    : undefined
+}
+
 export function presentPublicDomainError(error: DomainError, requestId: string) {
   const descriptor = PUBLIC_ERROR_CATALOG[error.code]
   const details =
@@ -154,9 +166,11 @@ export function presentPublicDomainError(error: DomainError, requestId: string) 
       ? { requiredScope: error.details.requiredScope }
       : error.code === 'PERSISTENCE_NOT_CONFIGURED'
         ? presentMissingTool(error.details)
-        : STALE_PAIR_CODES.has(error.code)
-          ? presentStalePair(error.details)
-          : undefined
+        : error.code === 'PRECONDITION_REQUIRED'
+          ? presentPreconditionReason(error.details)
+          : STALE_PAIR_CODES.has(error.code)
+            ? presentStalePair(error.details)
+            : undefined
   const conflict =
     error.code === 'VERSION_CONFLICT'
       ? presentVersionConflict(error.details.conflict)

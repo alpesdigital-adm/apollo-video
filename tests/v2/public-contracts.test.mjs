@@ -348,6 +348,24 @@ test('version conflicts expose only the bounded semantic diff', async () => {
   assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV4' })
 })
 
+test('a precondition refusal publishes only its closed, actionable reason', () => {
+  const copy = presentPublicDomainError(
+    new DomainError('PRECONDITION_REQUIRED', 'internal diagnostic must-not-leak', {
+      reason: 'copy-requires-editorial-cut', projectVersionId: 'version-internal', internal: 'must-not-leak',
+    }),
+    'request-copy-reason-1',
+  )
+  assert.equal(copy.error.code, 'PRECONDITION_REQUIRED')
+  assert.deepEqual(copy.error.details, { reason: 'copy-requires-editorial-cut' })
+  assert.equal(JSON.stringify(copy).includes('must-not-leak'), false)
+  assert.equal(JSON.stringify(copy).includes('version-internal'), false)
+  const unknown = presentPublicDomainError(
+    new DomainError('PRECONDITION_REQUIRED', 'x', { reason: 'some-internal-reason' }),
+    'request-copy-reason-2',
+  )
+  assert.equal(Object.hasOwn(unknown.error, 'details'), false, 'an unpublished reason stays internal')
+})
+
 test('public errors never expose a domain diagnostic through the client message', () => {
   const secret = 'provider-secret-and-private-diagnostic'
   const body = presentPublicDomainError(

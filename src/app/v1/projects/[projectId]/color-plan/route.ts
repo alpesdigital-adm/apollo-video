@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
 import { readProjectColorPlanService, setProjectColorPlanService } from '@/v2/application/project-color-plans'
+import { isCopyRequiresEditorialCutRefusal } from '@/v2/domain/output-child-command'
 import { calculateVersionHash } from '@/v2/application/version-hash'
 import {
   createColorPipelineCompilationRepository,
@@ -56,7 +57,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       workspaceId: actor.workspaceId, projectId, expectedProjectVersionId: result.version.id,
       actor, idempotencyKey: `color-plan-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}`,
       traceId: requestId,
+    }).catch((error: unknown) => {
+      // The plan committed on a copy no editorial cut has given authority: it renders after that cut, so the Command answers without a render.
+      if (isCopyRequiresEditorialCutRefusal(error)) return null
+      throw error
     })
+    if (proxy === null) return NextResponse.json(presentSuccess(presented), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
     return NextResponse.json(presentSuccess({
       ...presented, operation: presentPublicOperation(proxy.operation), replayed: result.replayed && proxy.replayed,
     }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
