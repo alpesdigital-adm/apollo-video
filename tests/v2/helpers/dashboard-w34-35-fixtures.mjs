@@ -254,28 +254,34 @@ async function storeArtifact(client, { workspaceId, artifactId, role, seed }) {
 
 // One observed source for every project of these proofs that needs a real Director run. It is a rights-granted ingest source of
 // its own (the journey's shared source keeps the rights history other proofs assert), with probe facts the ingest receipt reads.
-const DIRECTOR_SOURCE = Object.freeze({
-  artifactId: 'w34-w35-director-source-artifact', manifestId: 'w34-w35-director-source-manifest',
-  key: 'workspaces/w34-w35/raw/director-source.mov', durationSeconds: 20, fps: 30,
-})
+const DIRECTOR_SOURCE = Object.freeze({ durationSeconds: 20, fps: 30 })
+
+// Artifact, manifest and rights ids are global to the database, so the source of a workspace is named by the workspace: a second suite in the
+// same database (another workspace) gets its own source instead of finding the first one and failing the workspace foreign key.
+function directorSourceOf(workspaceId) {
+  const scope = hashOf(`w34-w35-director-source:${workspaceId}`).slice(0, 16)
+  return Object.freeze({ ...DIRECTOR_SOURCE, artifactId: `w34-w35-director-source-${scope}-artifact`, manifestId: `w34-w35-director-source-${scope}-manifest`,
+    rightsId: `w34-w35-director-source-${scope}-rights`, key: `workspaces/w34-w35/${scope}/raw/director-source.mov` })
+}
 
 async function ensureDirectorSource(client, { workspaceId, clientId, createdAt }) {
-  if (!(await client.v2MediaArtifact.findUnique({ where: { id: DIRECTOR_SOURCE.artifactId } }))) {
+  const source = directorSourceOf(workspaceId)
+  if (!(await client.v2MediaArtifact.findUnique({ where: { id: source.artifactId } }))) {
     await new PrismaMediaArtifactRepository(client).persistOrReplay({
-      workspaceId, artifactId: DIRECTOR_SOURCE.artifactId, manifestId: DIRECTOR_SOURCE.manifestId, lineageIds: [],
+      workspaceId, artifactId: source.artifactId, manifestId: source.manifestId, lineageIds: [],
       manifest: createMediaArtifactManifest({
-        artifactKey: DIRECTOR_SOURCE.key, artifactSha256: hashOf('w34-w35-director-source'), byteSize: 4_096,
+        artifactKey: source.key, artifactSha256: hashOf(`w34-w35-director-source:${workspaceId}`), byteSize: 4_096,
         mediaType: 'video', container: 'mov', recipe: { id: 'ingest-source', version: 'v1', parameters: {} },
-        probe: { width: 1_920, height: 1_080, duration: DIRECTOR_SOURCE.durationSeconds, fps: DIRECTOR_SOURCE.fps },
+        probe: { width: 1_920, height: 1_080, duration: source.durationSeconds, fps: source.fps },
       }),
       createdAt: createdAt.toISOString(),
     })
     // Rights current and sufficient before any Version adopts the source: editing, editorial reuse and rendering.
     await setAssetRightsService({
       repository: new PrismaAssetRightsRepository(client), clock: () => createdAt,
-      createId: () => 'w34-w35-director-source-rights',
+      createId: () => source.rightsId,
     })({
-      workspaceId, artifactId: DIRECTOR_SOURCE.artifactId, baseRevision: assetRightsRevision(DIRECTOR_SOURCE.artifactId, 0),
+      workspaceId, artifactId: source.artifactId, baseRevision: assetRightsRevision(source.artifactId, 0),
       draft: {
         status: 'approved', allowedUses: ['editing', 'editorial-reuse', 'rendering'], prohibitedUses: [],
         allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] },
@@ -283,8 +289,9 @@ async function ensureDirectorSource(client, { workspaceId, clientId, createdAt }
       actor: { type: 'api-client', id: clientId },
     })
   }
-  return { artifactId: DIRECTOR_SOURCE.artifactId, manifestId: DIRECTOR_SOURCE.manifestId }
+  return { artifactId: source.artifactId, manifestId: source.manifestId }
 }
+
 
 /**
  * Gives an API-created project a REAL Director run. The project is born through the public API (its creation Version and, via
