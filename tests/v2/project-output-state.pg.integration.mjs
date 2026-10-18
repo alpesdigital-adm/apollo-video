@@ -560,7 +560,9 @@ test('W66 real PostgreSQL output-state contract and immutable dependency races',
         ['missing-creation', null, { skipCreation: true }, /W66 creation Command provenance mismatch/, true],
         ['orphan-state', null, { skipVersion: true, skipCreation: true }, /query returned no rows|W66 state has no exact consuming Version/, true],
         ['missing-state', null, { skipState: true }, /Foreign key|foreign key/, false],
-        ['version-state-hash', null, { versionOverrides: { outputStateHash: 'a'.repeat(64) } }, /Foreign key|foreign key/, false],
+        // A Version naming a State hash that is not the State's: the foreign key refuses it, and so does the State's own guard (it finds no
+        // Version that consumes it exactly); which of the two events the database fires first is not part of the contract.
+        ['version-state-hash', null, { versionOverrides: { outputStateHash: 'a'.repeat(64) } }, /Foreign key|foreign key|state has no exact consuming Version/, false],
         ['version-base-hash', null, { versionOverrides: { baseHash: 'a'.repeat(64) } }, /project_versions_output_contract_check/, false],
         ['version-date', null, { versionOverrides: { createdAt: new Date(Date.parse(world.createdAt) + 1000) } }, /state has no exact consuming Version/, true],
         ['version-false-base-dependencies', (b, body) => {

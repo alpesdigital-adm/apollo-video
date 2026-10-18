@@ -19,6 +19,7 @@ import { childRowId } from "./child-row-id.ts";
 import { calculateRenderablePlanHash } from "../../application/renderable-edit-plan.ts";
 import { evaluateAssetUse } from "../../domain/asset-rights.ts";
 import { hydrateAssetRights } from "./asset-rights-repository.ts";
+import { settleDeferredOutputGuards } from "./project-version-commit.ts";
 import { hydrateStoredMediaTranscript } from "./speech-segment-catalog-repository.ts";
 import {
   batchActorAuditData,
@@ -675,6 +676,9 @@ export class PrismaMusicMontageRunRepository implements MusicMontageRunRepositor
             },
             select: { runJson: true, runHash: true },
           });
+          // A renderable snapshot is bound to its Version by a deferred database check, which Prisma 5.22 lets an interactive transaction
+          // outlive when COMMIT refuses it: settle it here so a refusal fails this call instead of returning a run that was not stored.
+          await settleDeferredOutputGuards(transaction);
           return Object.freeze({ run: hydrateRun(row), replayed: false });
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

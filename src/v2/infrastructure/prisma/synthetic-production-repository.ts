@@ -35,6 +35,7 @@ import {
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
+import { settleDeferredOutputGuards } from './project-version-commit.ts'
 import { PrismaProviderJobRepository } from './provider-job-repository.ts'
 import { PrismaSyntheticAudioMasterRepository } from './synthetic-audio-master-repository.ts'
 import { PrismaSyntheticCriticReportRepository } from './synthetic-critic-report-repository.ts'
@@ -897,6 +898,10 @@ implements SyntheticProductionRepository {
           where: { id: plan.id },
           include: { assets: { orderBy: { ordinal: 'asc' } }, audioMaster: true },
         })
+        // The run's snapshot is a project snapshot: writing one queues the deferred State check of the project's head, which Prisma 5.22
+        // lets a transaction outlive when COMMIT refuses it. Settle it here so a refusal fails this call instead of returning a run that
+        // was never stored.
+        await settleDeferredOutputGuards(transaction)
         return Object.freeze({ run: hydrateRun(row), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {

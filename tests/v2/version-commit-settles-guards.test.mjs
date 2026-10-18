@@ -45,3 +45,15 @@ test('every Version writer gives its transaction 30 s for the guard', () => {
     assert.match(text.slice(anchor), /isolationLevel: (?:Prisma\.TransactionIsolationLevel\.Serializable|'Serializable' as Prisma\.TransactionIsolationLevel), timeout: 30_000 \}\)/, name)
   }
 })
+
+// A repository that writes a project snapshot or Version row on its own (outside the shared writer) queues the same deferred checks,
+// so it settles them as well. Today that is the synthetic production run writer and the music montage publication (a renderable plan
+// snapshot is bound to its Version by a deferred check too); the list is derived, not remembered.
+test('a repository that inserts snapshots or Versions itself also settles the deferred guards', () => {
+  const loose = readdirSync(directory).filter((name) => name.endsWith('.ts'))
+    .map((name) => ({ name, text: readFileSync(new URL(name, directory), 'utf8') }))
+    .filter(({ name, text }) => !name.startsWith('output-version-bundle-') && name !== 'project-version-commit.ts' &&
+      /v2ProjectSnapshot\.create(?:Many)?\(|v2ProjectVersion\.create(?:Many)?\(|INSERT INTO project_snapshots|transaction\.v2RenderablePlanSnapshot\.create\(/.test(text))
+  assert.deepEqual(loose.map(({ name }) => name), ['music-led-montage-repository.ts', 'synthetic-production-repository.ts'])
+  for (const { name, text } of loose) assert.match(text, /await settleDeferredOutputGuards\(/, name)
+})
