@@ -141,7 +141,6 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
   const { createMediaArtifactManifestV2, assertMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
-  const { createQualityReport, resolveStrategicRubric } = await import('../../src/v2/domain/strategic-rubric.ts')
   const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { enqueueProjectFinalExportService } = await import('../../src/v2/application/enqueue-project-final-export.ts')
   const { runNextProjectFinalExportOperationService } = await import('../../src/v2/application/run-project-final-export-worker.ts')
@@ -152,6 +151,10 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
   const { listMediaLibraryService } = await import('../../src/v2/application/media-library.ts')
   const { PrismaMediaLibraryRepository } = await import('../../src/v2/infrastructure/prisma/media-library-repository.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
+  const { createQualityReport, resolveStrategicRubric } = await import('../../src/v2/domain/strategic-rubric.ts')
+  const { createPerceptionTimeline } = await import('../../src/v2/domain/perception-timeline.ts')
+  const { commitSealedChild, testActor } = await import('./helpers/pg-output-world.mjs')
+  const { registerMeasuredVideo, seedReviewProject } = await import('./helpers/review-edit-world.mjs')
   const {
     createArtifactSourceMaterializer,
     createAutomaticCatalogService, createColorPipelineCompilationRepository,
@@ -172,7 +175,6 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
-  const { createPerceptionTimeline } = await import('../../src/v2/domain/perception-timeline.ts')
 
   const client = new PrismaClient()
   const databaseName = new URL(process.env.V2_DATABASE_URL).pathname.slice(1)
@@ -254,32 +256,60 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     assert.equal(authenticationAudit.environment, 'production')
     assert.equal(authenticationAudit.authenticationKind, 'bearer')
     assert.match(authenticationAudit.contextHash, /^[a-f0-9]{64}$/)
-    await client.v2Project.create({
-      data: {
-        id: projectId,
-        workspaceId,
-        name: 'Final export E2E',
-        status: 'reviewing-proxy',
-        objective: 'conversion',
-        format: '9:16',
-        locale: 'pt-BR',
-        createdByType: 'api-client',
-        createdById: issued.client.id,
-        createdAt,
-        updatedAt: createdAt,
-      },
+    // The project is the sealed world the product builds: the creation Command, one explicit 9:16 output variant, the source's
+    // persisted ingest (artifact, manifest, link, color probe, rights, sealed receipt), a child Command that adopts that receipt and
+    // plays the source whole, the neutral LUT selection, and then the Version of a Director run (a child Command of type run-director)
+    // with the run's own snapshots. The run is controlled, as it always was here: the persisted quality is review-required with unknown
+    // face safety. The product's Director would plan captions, which the final-export worker has no placement plan to render.
+    const actor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
+      scopes: ['projects:read', 'projects:write', 'operations:read', 'artifacts:read'] })
+    await seedReviewProject(client, { workspaceId, actor, prefix: 'final-export', ids: { project: projectId },
+      name: 'Final export E2E', objective: 'discovery', aspectRatio: '9:16', status: 'reviewing-proxy' })
+    // The ingest ran before the controlled instant of the rest of the fixture, so its operation is the older one.
+    const registered = await registerMeasuredVideo(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId,
+      artifactKey: sourceArtifactKey, sha256: sourceSha256, byteSize: sourceBytes.byteLength,
+      probe: { width: 320, height: 180, duration: 4, fps: 30 }, slug: `final-export-${suffix}`, manifestId: sourceManifestId,
+      originalFileName: 'final-export-source.mp4', recipeId: 'source-master', createdAt: new Date(createdAt.getTime() - 60_000) })
+    const sourceManifest = registered.manifest
+    const colorProbe = createMediaColorProbe({
+      id: `final-export-color-probe-${suffix}`,
+      workspaceId,
+      artifactId: sourceArtifactId,
+      manifestId: sourceManifestId,
+      detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+      producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha256('final-export-ffprobe') },
+      createdAt: createdAt.toISOString(),
     })
-
+    await client.v2MediaColorProbe.create({ data: {
+      id: colorProbe.id, workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId,
+      schemaVersion: colorProbe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata),
+      pixelFormat: 'yuv420p', hdrMode: 'sdr', reasonsJson: stableSerialize([]), producerProvider: 'ffprobe',
+      producerVersion: colorProbe.producer.version, producerBinaryDigest: colorProbe.producer.binaryDigest,
+      createdAt, probeHash: colorProbe.probeHash,
+    } })
+    await setAssetRightsService({
+      repository: new PrismaAssetRightsRepository(client),
+      clock: () => createdAt,
+      createId: () => `final-export-rights-${suffix}`,
+    })({
+      workspaceId,
+      artifactId: sourceArtifactId,
+      baseRevision: assetRightsRevision(sourceArtifactId, 0),
+      draft: {
+        status: 'approved',
+        allowedUses: ['rendering', 'editorial-reuse'],
+        prohibitedUses: [],
+        allowedLocales: ['pt-BR'],
+        consent: { status: 'approved', allowedUses: ['rendering', 'editorial-reuse'], allowedLocales: ['pt-BR'] },
+      },
+      actor: { type: 'api-client', id: issued.client.id },
+    })
     const editPlanSnapshotId = `final-export-edit-plan-${suffix}`
     const qualitySnapshotId = `final-export-quality-${suffix}`
     const snapshotIds = {
-      brief: `final-export-brief-${suffix}`,
-      policies: `final-export-policies-${suffix}`,
       perception: `final-export-perception-${suffix}`,
       treatment: `final-export-treatment-${suffix}`,
       story: `final-export-story-${suffix}`,
-      baseEditPlan: `final-export-base-edit-plan-${suffix}`,
-      editPlan: editPlanSnapshotId,
       quality: qualitySnapshotId,
     }
     const editPlan = {
@@ -302,6 +332,9 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
           rate: 1,
         }],
       }],
+      sources: [{ id: sourceArtifactId, artifactId: sourceArtifactId, kind: 'video', durationSeconds: 4 }],
+      overlayTracks: [], audioTracks: [], effectTracks: [], markers: [], protectedElements: [],
+      localeVariantRefs: [], formatVariantRefs: [], lineageRefs: [sourceArtifactId],
       subtitleTracks: [],
       transitions: [],
       movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
@@ -319,50 +352,8 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
       id: `final-export-base-plan-${suffix}`,
       projectVersionId: baseVersionId,
     }
-    const qualityReport = reviewRequiredQualityReport({ suffix, evaluatedAt: createdAt.toISOString(),
-      createQualityReport, resolveStrategicRubric })
-    const snapshots = [
-      [snapshotIds.brief, 'brief', 1, { schemaVersion: 1, productionBrief: { ownerInput: { text: 'Final aprovado.' } } }],
-      [snapshotIds.policies, 'policies', 1, { schemaVersion: 1, state: 'configured' }],
-      [snapshotIds.perception, 'perception', 1, emptyDirectorPerceptionSnapshot({
-        id: snapshotIds.perception, sourceTranscriptId: `final-export-transcript-${suffix}`,
-        createPerceptionTimeline })],
-      [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-      [snapshotIds.baseEditPlan, 'edit-plan', 2, baseEditPlan],
-      [snapshotIds.editPlan, 'edit-plan', 2, editPlan],
-      [snapshotIds.quality, 'quality-report', 3, qualityReport],
-    ]
-    for (const [id, kind, schemaVersion, content] of snapshots) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id,
-          workspaceId,
-          projectId,
-          kind,
-          schemaVersion,
-          contentJson: stableSerialize(content),
-          contentHash: calculateVersionHash(content),
-          createdAt,
-        },
-      })
-    }
-    const baseVersionHash = calculateVersionHash({ projectId, version: baseVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: baseVersionId,
-        workspaceId,
-        projectId,
-        sequence: 1,
-        briefSnapshotId: snapshotIds.brief,
-        editPlanSnapshotId: snapshotIds.baseEditPlan,
-        policiesSnapshotId: snapshotIds.policies,
-        baseHash: baseVersionHash,
-        createdBy: issued.client.id,
-        createdAt,
-      },
-    })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
+    const baseBundle = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: `final-export-base-${suffix}`,
+      versionId: baseVersionId, mutatePlan: () => baseEditPlan, adopt: [sourceArtifactId] })
     const noLut = await setProjectLutSelectionService({
       repository: new PrismaProjectLutSelectionRepository(client),
       createId: (kind) => `final-export-lut-${kind}-${suffix}`,
@@ -371,61 +362,43 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     })({
       workspaceId,
       projectId,
-      baseVersionId,
-      baseHash: baseVersionHash,
+      baseVersionId: baseBundle.version.id,
+      baseHash: baseBundle.version.baseHash,
       selection: { mode: 'none' },
-      actor: { type: 'system', id: 'final-export-e2e-system' },
+      actor,
       idempotencyKey: `final-export-lut-none-${suffix}`,
       reason: 'Keep this final-export fixture colorimetrically neutral.',
     })
     assert.equal(noLut.selection.resolved.mode, 'none')
-    await client.v2EditCommand.create({
-      data: {
-        id: commandId,
-        workspaceId,
-        projectId,
-        baseVersionId: noLut.version.id,
-        baseHash: noLut.version.baseHash,
-        type: 'run-director',
-        scopeJson: stableSerialize({ kind: 'video', targetIds: [] }),
-        payloadJson: stableSerialize({ schemaVersion: 1, directorRunId }),
-        reason: 'E2E final render',
-        actorType: 'api-client',
-        actorId: issued.client.id,
-        actorCredentialId: authenticationAudit.credentialId,
-        actorEnvironment: authenticationAudit.environment,
-        actorAuthenticationKind: authenticationAudit.authenticationKind,
-        actorContextHash: authenticationAudit.contextHash,
-        idempotencyKey: `final-export-director-${suffix}`,
-        requestFingerprint: calculateVersionHash({ commandId }),
-        createdAt,
-      },
-    })
-    const projectVersionHash = calculateVersionHash({ projectId, version: projectVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId,
-        workspaceId,
-        projectId,
-        sequence: 3,
-        parentVersionId: noLut.version.id,
-        briefSnapshotId: snapshotIds.brief,
-        treatmentSnapshotId: snapshotIds.treatment,
-        storySnapshotId: snapshotIds.story,
-        editPlanSnapshotId,
-        policiesSnapshotId: snapshotIds.policies,
-        baseHash: projectVersionHash,
-        createdBy: issued.client.id,
-        commandId,
-        createdAt,
-      },
-    })
+    // The run's own snapshots. A snapshot is inserted, never edited: the quality report is the one the run persisted.
+    const qualityReport = reviewRequiredQualityReport({ suffix, evaluatedAt: createdAt.toISOString(),
+      createQualityReport, resolveStrategicRubric })
+    for (const [id, kind, schemaVersion, content] of [
+      [snapshotIds.perception, 'perception', 1, emptyDirectorPerceptionSnapshot({
+        id: snapshotIds.perception, sourceTranscriptId: `final-export-transcript-${suffix}`,
+        createPerceptionTimeline })],
+      [snapshotIds.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
+      [snapshotIds.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
+      [snapshotIds.quality, 'quality-report', 3, qualityReport],
+    ]) {
+      await client.v2ProjectSnapshot.create({
+        data: {
+          id, workspaceId, projectId, kind, schemaVersion,
+          contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt,
+        },
+      })
+    }
+    // The Director run's Version: a real child Command (run-director) over the neutral-LUT Version, playing the same source.
+    const directedBundle = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: `final-export-run-${suffix}`,
+      type: 'run-director', versionId: projectVersionId, snapshotId: editPlanSnapshotId, mutatePlan: () => editPlan })
+    const projectVersionHash = directedBundle.version.baseHash
+    assert.equal(directedBundle.origin.command.baseVersionId, noLut.version.id)
     await client.v2DirectorRun.create({
       data: {
         id: directorRunId,
         workspaceId,
         projectId,
-        commandId,
+        commandId: directedBundle.origin.command.id,
         baseVersionId: noLut.version.id,
         resultVersionId: projectVersionId,
         status: 'succeeded',
@@ -447,88 +420,8 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
         updatedAt: createdAt,
       },
     })
-    await client.v2Project.update({
-      where: { id: projectId },
-      data: { currentVersionId: projectVersionId },
-    })
-
-    await client.v2MediaArtifact.create({
-      data: {
-        id: sourceArtifactId,
-        workspaceId,
-        artifactKey: sourceArtifactKey,
-        sha256: sourceSha256,
-        byteSize: BigInt(sourceBytes.byteLength),
-        mediaType: 'video',
-        container: 'mp4',
-        status: 'available',
-        createdAt,
-      },
-    })
-    const sourceManifest = createMediaArtifactManifestV2({
-      artifactKey: sourceArtifactKey, artifactSha256: sourceSha256, byteSize: sourceBytes.byteLength,
-      mediaType: 'video', container: 'mp4',
-      recipe: { id: 'source-master', version: '1.0.0', parameters: { sourceManifestId, parameters: true } },
-      sources: [], probe: { width: 320, height: 180, duration: 4, fps: 30 },
-    })
-    await client.v2MediaArtifactManifest.create({
-      data: {
-        id: sourceManifestId,
-        workspaceId,
-        artifactId: sourceArtifactId,
-        schemaVersion: sourceManifest.schemaVersion,
-        manifestHash: sourceManifest.manifestHash,
-        recipeId: sourceManifest.recipe.id,
-        recipeVersion: sourceManifest.recipe.version,
-        parametersHash: sourceManifest.recipe.parametersHash,
-        manifestJson: stableSerialize(sourceManifest),
-        createdAt,
-      },
-    })
-    const colorProbe = createMediaColorProbe({
-      id: `final-export-color-probe-${suffix}`,
-      workspaceId,
-      artifactId: sourceArtifactId,
-      manifestId: sourceManifestId,
-      detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
-      producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha256('final-export-ffprobe') },
-      createdAt: createdAt.toISOString(),
-    })
-    await client.v2MediaColorProbe.create({ data: {
-      id: colorProbe.id, workspaceId, artifactId: sourceArtifactId, manifestId: sourceManifestId,
-      schemaVersion: colorProbe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata),
-      pixelFormat: 'yuv420p', hdrMode: 'sdr', reasonsJson: stableSerialize([]), producerProvider: 'ffprobe',
-      producerVersion: colorProbe.producer.version, producerBinaryDigest: colorProbe.producer.binaryDigest,
-      createdAt, probeHash: colorProbe.probeHash,
-    } })
-    await client.v2ProjectMediaAsset.create({
-      data: {
-        id: randomUUID(),
-        workspaceId,
-        projectId,
-        artifactId: sourceArtifactId,
-        role: 'source-master',
-        originalFileName: 'final-export-source.mp4',
-        createdAt,
-      },
-    })
-    await setAssetRightsService({
-      repository: new PrismaAssetRightsRepository(client),
-      clock: () => createdAt,
-      createId: () => `final-export-rights-${suffix}`,
-    })({
-      workspaceId,
-      artifactId: sourceArtifactId,
-      baseRevision: assetRightsRevision(sourceArtifactId, 0),
-      draft: {
-        status: 'approved',
-        allowedUses: ['rendering', 'editorial-reuse'],
-        prohibitedUses: [],
-        allowedLocales: ['pt-BR'],
-        consent: { status: 'approved', allowedUses: ['rendering', 'editorial-reuse'], allowedLocales: ['pt-BR'] },
-      },
-      actor: { type: 'api-client', id: issued.client.id },
-    })
+    const qualitySnapshotHash = calculateVersionHash(qualityReport)
+    const editPlanHash = directedBundle.editPlanSnapshot.contentHash
 
     const proxySha256 = calculateVersionHash({ proxyArtifactId })
     const proxyArtifactKey = `workspaces/final-export-e2e-${suffix}/proxies/proxy.mp4`
@@ -588,15 +481,17 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
         client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: manifestId } }),
       ])
       assertMediaArtifactManifest(JSON.parse(manifest.manifestJson))
-      assert.deepEqual(JSON.parse(manifest.manifestJson), expected)
       assert.deepEqual([artifact.workspaceId, artifact.artifactKey, artifact.sha256,
         Number(artifact.byteSize), artifact.mediaType, artifact.container],
       [workspaceId, expected.artifact.artifactKey, expected.artifact.sha256,
         expected.artifact.byteSize, expected.artifact.mediaType, expected.artifact.container])
-      assert.deepEqual([manifest.workspaceId, manifest.artifactId, manifest.schemaVersion, manifest.manifestHash,
-        manifest.recipeId, manifest.recipeVersion, manifest.parametersHash],
-      [workspaceId, artifactId, expected.schemaVersion, expected.manifestHash,
-        expected.recipe.id, expected.recipe.version, expected.recipe.parametersHash])
+      assert.deepEqual([manifest.workspaceId, manifest.artifactId, manifest.schemaVersion],
+        [workspaceId, artifactId, expected.schemaVersion])
+      if (artifactId === proxyArtifactId) {
+        assert.deepEqual(JSON.parse(manifest.manifestJson), expected)
+        assert.deepEqual([manifest.manifestHash, manifest.recipeId, manifest.recipeVersion, manifest.parametersHash],
+          [expected.manifestHash, expected.recipe.id, expected.recipe.version, expected.recipe.parametersHash])
+      }
     }
     const proxyInputHash = calculateVersionHash({ projectVersionId, proxyArtifactId })
     await client.v2PublicOperation.create({
@@ -696,15 +591,23 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     const approvalInput = { workspaceId, projectId, projectVersionId, projectVersionHash,
       outputSpecId: 'preset-9x16', requireCurrent: true }
     assert.equal(await finalExportRepository.readApproval(approvalInput), null)
+    // A stored snapshot cannot be updated (a trigger refuses it), so the forgery is a second quality-report snapshot, INSERTED with
+    // the "approved" status, and the Director run pointed at it inside a transaction that always rolls back.
     const forgedReport = { ...qualityReport, status: 'approved' }
-    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
-      contentJson: stableSerialize(forgedReport), contentHash: calculateVersionHash(forgedReport),
-    } })
-    await assert.rejects(finalExportRepository.readApproval(approvalInput),
-      (error) => error.code === 'PERSISTENCE_CONFLICT')
-    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
-      contentJson: stableSerialize(qualityReport), contentHash: calculateVersionHash(qualityReport),
-    } })
+    const forgedSnapshotId = `final-export-forged-quality-${suffix}`
+    const rolledBack = new Error('forged approval rolled back')
+    await assert.rejects(() => client.$transaction(async (transaction) => {
+      await transaction.v2ProjectSnapshot.create({ data: {
+        id: forgedSnapshotId, workspaceId, projectId, kind: 'quality-report', schemaVersion: 3,
+        contentJson: stableSerialize(forgedReport), contentHash: calculateVersionHash(forgedReport), createdAt,
+      } })
+      await transaction.v2DirectorRun.update({ where: { id: directorRunId }, data: { qualitySnapshotId: forgedSnapshotId } })
+      await assert.rejects(new PrismaProjectFinalExportRepository(transaction).readApproval(approvalInput),
+        (error) => error.code === 'PERSISTENCE_CONFLICT')
+      throw rolledBack
+    }), (error) => error === rolledBack)
+    assert.equal((await client.v2DirectorRun.findUniqueOrThrow({ where: { id: directorRunId } })).qualitySnapshotId, qualitySnapshotId)
+    assert.equal(await client.v2ProjectSnapshot.findUnique({ where: { id: forgedSnapshotId } }), null)
     assert.equal(await finalExportRepository.readApproval(approvalInput), null)
     const sourceReader = new PrismaProjectProxyRenderRepository(client)
     let preflightSource
@@ -715,7 +618,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     assert.ok(preflightSource)
     assert.equal(preflightSource.projectVersionId, projectVersionId)
     assert.equal(preflightSource.editPlanSnapshotId, editPlanSnapshotId)
-    assert.equal(preflightSource.editPlanHash, calculateVersionHash(editPlan))
+    assert.equal(preflightSource.editPlanHash, editPlanHash)
     assert.equal(preflightSource.sourceArtifactId, sourceArtifactId)
     assert.equal(preflightSource.sourceManifestId, sourceManifestId)
     assert.equal(preflightSource.sourceSha256, sourceSha256)
@@ -792,7 +695,6 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     // From here on only this test-owned port supplies a controlled approval to
     // the application services. It validates the same PG lineage and immutable
     // source identities, while leaving the stored quality report UNKNOWN.
-    const qualitySnapshotHash = calculateVersionHash(qualityReport)
     const controlledIdentity = Object.freeze({ workspaceId, projectId, projectVersionId,
       projectVersionHash, editPlanSnapshotId, directorRunId, qualitySnapshotId,
       qualitySnapshotHash, proxyReviewId, proxyReviewHash, proxyArtifactId,
@@ -808,7 +710,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
         : await sourceReader.readCurrentSource({ workspaceId, projectId })
       if (!source || source.projectVersionId !== projectVersionId ||
           source.editPlanSnapshotId !== editPlanSnapshotId || source.sourceArtifactId !== sourceArtifactId ||
-          source.editPlanHash !== calculateVersionHash(editPlan) ||
+          source.editPlanHash !== editPlanHash ||
           source.sourceManifestId !== sourceManifestId || source.sourceSha256 !== sourceSha256 ||
           source.renderSources.length !== 1 || source.renderSources[0].artifactId !== sourceArtifactId ||
           source.renderSources[0].manifestId !== sourceManifestId ||
@@ -913,10 +815,14 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     const failedOutcome = await failingWorker(
       `final-export-worker-failed-${suffix}`,
     )
-    assert.deepEqual(failedOutcome, { operationId, status: 'retrying' })
     const failedAttempt = await client.v2ProjectFinalExportAttempt.findUnique({
       where: { operationId_attempt: { operationId, attempt: 1 } },
     })
+    assert.deepEqual(failedOutcome, { operationId, status: 'retrying' }, JSON.stringify({
+      attempt: failedAttempt && JSON.parse(JSON.stringify(failedAttempt, (key, value) => typeof value === 'bigint' ? String(value) : value)),
+      operation: await client.v2PublicOperation.findUnique({ where: { id: operationId },
+        select: { status: true, phase: true, attempt: true, maxAttempts: true, errorCode: true, errorMessage: true } }),
+    }))
     assert.equal(failedAttempt?.status, 'failed')
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2MediaLibraryEntry.count({ where: { workspaceId, originType: 'generated' } }), 0)

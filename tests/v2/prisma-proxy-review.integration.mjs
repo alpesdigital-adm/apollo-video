@@ -38,13 +38,16 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
   const { PrismaProxyReviewRepository } = await import('../../src/v2/infrastructure/prisma/proxy-review-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
+  const { createMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
+  const { testActor } = await import('./helpers/pg-output-world.mjs')
+  const { materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { registerColorPipeline, registerMeasuredVideo, seedReviewProject } = await import('./helpers/review-edit-world.mjs')
 
   const client = new PrismaClient()
   const repository = new PrismaProxyReviewRepository(client)
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `proxy-review-workspace-${suffix}`
   const projectId = `proxy-review-project-${suffix}`
-  const projectVersionId = `proxy-review-version-${suffix}`
   const artifactId = `proxy-review-artifact-${suffix}`
   const manifestId = `proxy-review-manifest-${suffix}`
   const operationId = `proxy-review-operation-${suffix}`
@@ -53,12 +56,13 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
   const uiUsername = `proxy-review-user-${suffix}`
   const uiPassword = `Proxy-Review-${suffix}-secure`
   const uiSessionSecret = `proxy-review-session-secret-${suffix}-at-least-32`
-  const inputHash = calculateVersionHash({ projectId, projectVersionId, kind: 'proxy' })
   const proxySha256 = calculateVersionHash({ artifactId })
+  const renderCompletedAt = new Date(createdAt.getTime() + 65_000)
+  const lease = { owner: `proxy-review-worker-${suffix}`, attempt: 1, now: renderCompletedAt.toISOString() }
   let server
   let browser
 
-
+  // Sealed rows are append-only: every identity above carries this run's suffix and nothing is deleted.
   try {
     await client.v2Workspace.create({
       data: { id: workspaceId, slug: workspaceId, name: 'Proxy review E2E', status: 'active', createdAt, updatedAt: createdAt },
@@ -74,85 +78,25 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
       environment: 'production',
       scopes: ['projects:read', 'projects:write', 'projects:approve'],
     })
-    await client.v2Project.create({
-      data: {
-        id: projectId,
-        workspaceId,
-        name: 'Proxy review E2E',
-        status: 'reviewing-proxy',
-        objective: 'discovery',
-        format: '9:16',
-        locale: 'pt-BR',
-        createdByType: 'api-client',
-        createdById: issued.client.id,
-        createdAt,
-        updatedAt: createdAt,
-      },
-    })
-    const snapshots = [
-      {
-        id: `proxy-review-brief-${suffix}`,
-        kind: 'brief',
-        schemaVersion: 1,
-        content: { schemaVersion: 1, productionBrief: { ownerInput: { text: 'Validar o proxy antes da alta.' } } },
-      },
-      {
-        id: `proxy-review-policies-${suffix}`,
-        kind: 'policies',
-        schemaVersion: 1,
-        content: { schemaVersion: 1, state: 'configured' },
-      },
-      {
-        id: `proxy-review-edit-plan-${suffix}`,
-        kind: 'edit-plan',
-        schemaVersion: 2,
-        content: {
-          schemaVersion: 2,
-          id: `edit-plan-${suffix}`,
-          projectVersionId,
-          state: 'compiled',
-          fps: 30,
-          durationFrames: 60,
-          videoTracks: [],
-          markers: [],
-          movementPolicy: { automaticZoom: false },
-          subtitlePolicy: { faceProtection: true },
-        },
-      },
-    ]
-    for (const snapshot of snapshots) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: snapshot.id,
-          workspaceId,
-          projectId,
-          kind: snapshot.kind,
-          schemaVersion: snapshot.schemaVersion,
-          contentJson: stableSerialize(snapshot.content),
-          contentHash: calculateVersionHash(snapshot.content),
-          createdAt,
-        },
-      })
-    }
-    const projectVersionHash = calculateVersionHash({ projectId, projectVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId,
-        workspaceId,
-        projectId,
-        sequence: 1,
-        briefSnapshotId: snapshots[0].id,
-        editPlanSnapshotId: snapshots[2].id,
-        policiesSnapshotId: snapshots[1].id,
-        baseHash: projectVersionHash,
-        createdBy: issued.client.id,
-        createdAt,
-      },
-    })
-    await client.v2Project.update({
-      where: { id: projectId },
-      data: { currentVersionId: projectVersionId },
-    })
+    // The project is the sealed world the product builds (creation Command, then one explicit 9:16 output variant as its head
+    // Version); the proxy review hangs off that Version. The project is under review when the proxy is rendered.
+    const actor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
+      scopes: ['projects:read', 'projects:write', 'projects:approve'] })
+    const world = await seedReviewProject(client, { workspaceId, actor, prefix: 'proxy-review', ids: { project: projectId },
+      name: 'Proxy review E2E', aspectRatio: '9:16', status: 'reviewing-proxy',
+      briefing: 'Validar o proxy antes da alta.' })
+    const projectVersionId = world.head.version.id
+    const editPlanSnapshotId = world.head.editPlanSnapshot.id
+    const audit = materializeActorAuditContext(actor)
+    // The recording the proxy was rendered from: its persisted ingest, and the colour pipeline compilation a proxy render binds to.
+    const sourceArtifactId = `proxy-review-source-${suffix}`
+    const sourceManifestId = `proxy-review-source-manifest-${suffix}`
+    await registerMeasuredVideo(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId, artifactKey: `proxy-review/${sourceArtifactId}.mp4`,
+      sha256: calculateVersionHash({ sourceArtifactId }), byteSize: 4096, probe: { width: 540, height: 960, duration: 2, fps: 30 },
+      slug: `proxy-review-${suffix}`, manifestId: sourceManifestId, originalFileName: 'proxy-review-source.mp4', createdAt })
+    const compilation = await registerColorPipeline(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId, manifestId: sourceManifestId, createdAt })
+    const editPlan = JSON.parse(world.head.editPlanSnapshot.contentJson)
+    const inputHash = calculateVersionHash({ projectId, projectVersionId, kind: 'proxy' })
     await client.v2MediaArtifact.create({
       data: {
         id: artifactId,
@@ -166,20 +110,23 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
         createdAt,
       },
     })
+    // The workspace projection and the review preview read this manifest back and bind it to the artifact row.
+    const proxyManifest = createMediaArtifactManifest({
+      artifactKey: `proxy-review/${artifactId}.mp4`, artifactSha256: proxySha256, byteSize: 1, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'proxy-review', version: '1.0.0', parameters: { manifestId } },
+      probe: { width: 540, height: 960, duration: 2, fps: 30 },
+    })
     await client.v2MediaArtifactManifest.create({
       data: {
         id: manifestId,
         workspaceId,
         artifactId,
-        schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateVersionHash({ manifestId }),
-        recipeId: 'proxy-review',
-        recipeVersion: '1.0.0',
-        parametersHash: calculateVersionHash({ manifestId, parameters: true }),
-        manifestJson: stableSerialize({
-          artifact: { artifactKey: `proxy-review/${artifactId}.mp4` },
-          probe: { width: 540, height: 960, duration: 2, fps: 30, codec: 'h264', container: 'mp4' },
-        }),
+        schemaVersion: proxyManifest.schemaVersion,
+        manifestHash: proxyManifest.manifestHash,
+        recipeId: proxyManifest.recipe.id,
+        recipeVersion: proxyManifest.recipe.version,
+        parametersHash: proxyManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(proxyManifest),
         createdAt,
       },
     })
@@ -200,24 +147,26 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
         workspaceId,
         projectId,
         clientId: issued.client.id,
+        actorCredentialId: actor.credentialId,
+        actorEnvironment: actor.environment,
+        actorAuthenticationKind: 'bearer',
+        actorContextHash: audit.contextHash,
         type: 'project-proxy-render',
-        status: 'succeeded',
-        phase: 'completed',
+        status: 'running',
+        phase: 'persisting',
         targetType: 'media-artifact',
         targetId: artifactId,
-        cancelable: false,
+        cancelable: true,
         retryable: false,
         attempt: 1,
         maxAttempts: 3,
-        resultJson: stableSerialize({
-          resource: { type: 'media-artifact', id: artifactId, manifestId },
-        }),
+        progressCompleted: 3, progressTotal: 4, progressUnit: 'render',
+        leaseOwner: lease.owner, leaseExpiresAt: new Date(renderCompletedAt.getTime() + 60_000), heartbeatAt: renderCompletedAt,
         idempotencyKey: `proxy-review-render-${suffix}`,
         requestFingerprint: inputHash,
         createdAt,
         updatedAt: createdAt,
         startedAt: createdAt,
-        completedAt: new Date(createdAt.getTime() + 65_000),
       },
     })
     await client.v2ProjectProxyRenderOperation.create({
@@ -226,9 +175,11 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
         workspaceId,
         projectId,
         projectVersionId,
-        editPlanSnapshotId: snapshots[2].id,
-        sourceArtifactId: `source-${suffix}`,
-        sourceManifestId: `source-manifest-${suffix}`,
+        editPlanSnapshotId,
+        sourceArtifactId,
+        sourceManifestId,
+        colorPipelineBindingsJson: stableSerialize([{ sourceArtifactId, sourceManifestId, compilationId: compilation.id,
+          compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }]),
         inputHash,
         outputArtifactId: artifactId,
         outputManifestId: manifestId,
@@ -244,10 +195,10 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
       inputHash,
       format: '9:16',
       sourceSha256: calculateVersionHash({ source: suffix }),
-      editPlanHash: calculateVersionHash(snapshots[2].content),
+      editPlanHash: calculateVersionHash(editPlan),
       expectedDurationMs: 2_000,
       uploadReceivedAt: createdAt.toISOString(),
-      renderCompletedAt: new Date(createdAt.getTime() + 65_000).toISOString(),
+      renderCompletedAt: renderCompletedAt.toISOString(),
       probe: { width: 540, height: 960, duration: 2, fps: 30, codec: 'h264', container: 'mp4' },
       map: {
         schemaVersion: 'render-element-map/v1',
@@ -276,8 +227,15 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
       projectId,
       operationId,
       review,
-      createdAt: new Date(createdAt.getTime() + 65_000).toISOString(),
+      createdAt: renderCompletedAt.toISOString(),
+      lease,
     })
+    // Controlled persistence fixture: the terminal state follows the leased review commit.
+    await client.v2PublicOperation.update({ where: { id: operationId }, data: {
+      status: 'succeeded', phase: 'completed', cancelable: false, progressCompleted: 4,
+      leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, completedAt: renderCompletedAt,
+      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: artifactId, manifestId } }),
+    } })
     assert.equal(persisted.revision, 1)
     assert.equal((await repository.findCurrent({ workspaceId, projectId }))?.reviewHash, review.reviewHash)
 
@@ -291,6 +249,7 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
         NODE_ENV: 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        APOLLO_AUTH_MODE: 'bootstrap', APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true', APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
         APOLLO_UI_USERNAME: uiUsername,
         APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `proxy-review-salt-${suffix}`),
         APOLLO_UI_SESSION_SECRET: uiSessionSecret,
@@ -313,10 +272,15 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
       headers: { authorization },
     })
     const workspacePayload = await workspaceResponse.json()
+    let workspaceDiagnostic = '' // Failure diagnostics: the route hides which stored fact the projection refused.
+    if (workspaceResponse.status !== 200) {
+      const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
+      try { await new PrismaProjectWorkspaceQueryRepository(client).read({ workspaceId, projectId }) } catch (error) { workspaceDiagnostic = `${error?.code} ${error?.message} ${JSON.stringify(error?.details ?? null)}` }
+    }
     assert.equal(
       workspaceResponse.status,
       200,
-      `${JSON.stringify(workspacePayload)}\n${serverLogs.slice(-4_000)}`,
+      `${JSON.stringify(workspacePayload)}\n${workspaceDiagnostic}\n${serverLogs.slice(-4_000)}`,
     )
 
     const executablePath = [
@@ -364,17 +328,14 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
       baseRevision: review.reviewHash,
       expectedRevision: 1,
     }
-    const replayResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/proxy-reviews`, {
-      method: 'POST',
-      headers: {
-        authorization,
-        'content-type': 'application/json',
-        'idempotency-key': storedDecision.idempotencyKey,
-      },
-      body: JSON.stringify(decisionBody),
+    // The decision was taken by the UI session, and an idempotency key belongs to the authenticated context that used it: the
+    // replay is sent by the same session (the browser context's cookies), not by the bearer client.
+    const replayResponse = await page.request.post(`${baseUrl}/v1/projects/${projectId}/proxy-reviews`, {
+      headers: { 'content-type': 'application/json', 'idempotency-key': storedDecision.idempotencyKey },
+      data: JSON.stringify(decisionBody),
     })
     const replayPayload = await replayResponse.json()
-    assert.equal(replayResponse.status, 200, JSON.stringify(replayPayload))
+    assert.equal(replayResponse.status(), 200, JSON.stringify(replayPayload))
     assert.equal(replayPayload.data.replayed, true)
     assert.equal(replayPayload.data.review.finalAllowed, true)
     assert.equal(replayPayload.data.review.revision, 2)

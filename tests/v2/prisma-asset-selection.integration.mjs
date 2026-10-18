@@ -47,19 +47,18 @@ test('T-FR-218 selects library first, verifies rights server-side, persists reje
     'destructive E2E setup requires an explicitly isolated database',
   )
   const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
-  const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+  const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
 
   const client = new PrismaClient()
   const rightsRepository = new PrismaAssetRightsRepository(client)
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `asset-selection-workspace-${suffix}`
   const projectId = `asset-selection-project-${suffix}`
-  const projectVersionId = `asset-selection-version-${suffix}`
   const createdAt = new Date('2026-07-26T22:30:00.000Z')
   const artifactIds = {
     rejectedLibrary: `asset-library-rejected-${suffix}`,
@@ -93,71 +92,13 @@ test('T-FR-218 selects library first, verifies rights server-side, persists reje
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
     })
-    await client.v2Project.create({
-      data: {
-        id: projectId,
-        workspaceId,
-        name: 'Asset selection E2E',
-        status: 'draft',
-        objective: 'discovery',
-        format: '9:16',
-        locale: 'pt-BR',
-        createdByType: 'api-client',
-        createdById: issued.client.id,
-        createdAt,
-        updatedAt: createdAt,
-      },
-    })
-    const snapshots = [
-      {
-        id: `asset-selection-brief-${suffix}`,
-        kind: 'brief',
-        content: { schemaVersion: 1, objective: 'discovery' },
-      },
-      {
-        id: `asset-selection-edit-plan-${suffix}`,
-        kind: 'edit-plan',
-        content: { schemaVersion: 2, id: `asset-selection-plan-${suffix}`, state: 'draft' },
-      },
-      {
-        id: `asset-selection-policies-${suffix}`,
-        kind: 'policies',
-        content: { schemaVersion: 1, state: 'configured' },
-      },
-    ]
-    for (const snapshot of snapshots) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id: snapshot.id,
-          workspaceId,
-          projectId,
-          kind: snapshot.kind,
-          schemaVersion: snapshot.content.schemaVersion,
-          contentJson: stableSerialize(snapshot.content),
-          contentHash: calculateVersionHash(snapshot.content),
-          createdAt,
-        },
-      })
-    }
-    const projectVersionHash = calculateVersionHash({ projectId, projectVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: projectVersionId,
-        workspaceId,
-        projectId,
-        sequence: 1,
-        briefSnapshotId: snapshots[0].id,
-        editPlanSnapshotId: snapshots[1].id,
-        policiesSnapshotId: snapshots[2].id,
-        baseHash: projectVersionHash,
-        createdBy: issued.client.id,
-        createdAt,
-      },
-    })
-    await client.v2Project.update({
-      where: { id: projectId },
-      data: { currentVersionId: projectVersionId },
-    })
+    // The project is the sealed world the product builds: the creation Command, then one explicit output variant whose
+    // Version is the head the selections are made against (a Version cannot be inserted by hand).
+    const actor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
+      scopes: ['projects:read', 'projects:write'] })
+    const world = await seedSealedProject(client, { workspaceId, actor, prefix: 'asset-selection', ids: { project: projectId }, name: 'Asset selection E2E' })
+    const projectVersionId = world.head.version.id
+    const projectVersionHash = world.head.version.baseHash
     for (const [index, artifactId] of Object.values(artifactIds).entries()) {
       await client.v2MediaArtifact.create({
         data: {

@@ -46,7 +46,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
   const { assertMediaArtifactManifest, createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
-  const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
   const { createDesiredAction, parseDesiredAction } = await import('../../src/v2/domain/desired-action.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
@@ -56,19 +55,22 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { PrismaManualEditRepository } = await import('../../src/v2/infrastructure/prisma/manual-edit-repository.ts')
   const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
-  const {
-    createUiPasswordHash,
-    uiLoginThrottleKey,
-    uiSessionSubjectHash,
-  } = await import('../../src/v2/infrastructure/security/ui-session.ts')
+  const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
+  const { commitSealedChild, persistRecording } = await import('./helpers/pg-output-world.mjs')
+  const { recordingNames } = await import('./helpers/operational-editorial-fixture.mjs')
+  const { seedReviewProject } = await import('./helpers/review-edit-world.mjs')
+  const { resetDisposableDatabase } = await import('./helpers/disposable-database.mjs')
 
   const client = new PrismaClient()
   const repository = new PrismaManualEditRepository(client)
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `manual-workspace-${suffix}`
   const projectId = `manual-project-${suffix}`
-  const sourceA = `manual-artifact-a-${suffix}`
-  const sourceB = `manual-artifact-b-${suffix}`
+  // Two ingested recordings: the product only plays sources whose sealed ingest receipt a Version adopts.
+  const slugA = `manual-a-${suffix}`, slugB = `manual-b-${suffix}`
+  const namesA = recordingNames(slugA), namesB = recordingNames(slugB)
+  const sourceA = namesA.sourceArtifactId, sourceB = namesB.sourceArtifactId
+  const manifestA = namesA.sourceManifestId
   const currentTranscriptId = `manual-transcript-current-${suffix}`
   const replacementTranscriptId = `manual-transcript-replacement-${suffix}`
   const completedProxyArtifactId = `manual-proxy-initial-${suffix}`
@@ -84,32 +86,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   let authenticatedActor
   const colorCompilations = new Map()
 
-  const cleanup = async () => {
-    const identityIds = (await client.v2WorkspaceMember.findMany({
-      where: { workspaceId }, select: { identityId: true },
-    })).map((member) => member.identityId)
-    const sessionEnvironment = { APOLLO_UI_SESSION_SECRET: uiSessionSecret }
-    const loginKeyHash = uiLoginThrottleKey('direct', uiUsername, sessionEnvironment)
-    const loginSubjectHash = uiSessionSubjectHash(uiUsername, sessionEnvironment)
-    await client.v2DirectorRun.updateMany({
-      where: { workspaceId },
-      data: { operationId: null, supersedesRunId: null },
-    })
-    await client.v2ProjectDirectorOperation.updateMany({
-      where: { workspaceId },
-      data: { supersedesRunId: null },
-    })
-    const directorRunIds = (await client.v2DirectorRun.findMany({
-      where: { workspaceId },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: { id: true },
-    })).map((run) => run.id)
-    await client.v2MediaArtifact.updateMany({
-      where: { workspaceId, currentRightsSnapshotId: { not: null } },
-      data: { currentRightsSnapshotId: null },
-    })
-  }
-
   const execute = (request) => applyManualEditService({
     repository,
     clock: () => new Date(createdAt.getTime() + ++clockTick * 1000),
@@ -123,30 +99,18 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   })
 
   try {
-    await cleanup()
+    // The manual-edit API names the output by the id of its State entry and checks it against the project's aspect ratio, so the
+    // project's one variant is created with the id '9:16'. An output variant id is unique across the database: this suite owns a
+    // clean slate (the reset refuses anything that is not a disposable e2e database).
+    await resetDisposableDatabase(client)
+    // The project's brief is born with its creation Command: this is the briefing and desired action it was created with.
+    const briefing = 'Público: equipes criativas. Oferta: demonstração. Tom: direto.'
     const brief = {
-      schemaVersion: 1,
-      objective: 'discovery',
       desiredAction: createDesiredAction({
         objective: 'discovery',
         desiredAction: { visualCta: 'Continue assistindo', disclosures: [] },
       }),
-      outputSpec: {
-        schemaVersion: 1,
-        id: `manual-output-spec-${suffix}`,
-        locale: 'pt-BR',
-        aspectRatio: '9:16',
-        width: 1080,
-        height: 1920,
-        fps: 30,
-        safeArea: { top: 0.05, right: 0.05, bottom: 0.08, left: 0.05 },
-      },
-      productionBrief: createProductionBrief({
-        ownerText: 'Público: equipes criativas. Oferta: demonstração. Tom: direto.',
-      }),
-      createdAt: createdAt.toISOString(),
     }
-    const policies = { schemaVersion: 1, state: 'configured', guardrails: [], createdAt: createdAt.toISOString() }
     const editPlan = {
       schemaVersion: 2,
       state: 'compiled',
@@ -205,8 +169,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       },
       createdAt: createdAt.toISOString(),
     }
-    const briefId = `manual-brief-${suffix}`
-    const policyId = `manual-policy-${suffix}`
     const editPlanId = `manual-edit-plan-${suffix}`
     await client.v2Workspace.create({ data: { id: workspaceId, slug: workspaceId, name: 'Manual E2E', status: 'active', createdAt, updatedAt: createdAt } })
     const issued = await createApiClientService({
@@ -243,50 +205,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       actorAuthenticationKind: operationAuditContext.authenticationKind,
       actorContextHash: operationAuditContext.contextHash,
     })
-    await client.v2Project.create({ data: {
-      id: projectId, workspaceId, name: 'Manual Project', status: 'reviewing-proxy',
-      objective: 'discovery', format: '9:16', locale: 'pt-BR',
-      createdByType: 'api-client', createdById: issued.client.id, createdAt, updatedAt: createdAt,
-    } })
-    for (const [id, kind, content] of [
-      [briefId, 'brief', brief],
-      [policyId, 'policies', policies],
-      [editPlanId, 'edit-plan', editPlan],
-    ]) {
-      await client.v2ProjectSnapshot.create({ data: {
-        id, workspaceId, projectId, kind, schemaVersion: kind === 'edit-plan' ? 2 : 1,
-        contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt,
-      } })
-    }
-    const initialBaseHash = calculateVersionHash({ projectId, editPlan })
-    await client.v2ProjectVersion.create({ data: {
-      id: initialVersionId, workspaceId, projectId, sequence: 1,
-      briefSnapshotId: briefId, editPlanSnapshotId: editPlanId, policiesSnapshotId: policyId,
-      baseHash: initialBaseHash, createdBy: issued.client.id, createdAt,
-    } })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: initialVersionId } })
-    for (const artifactId of [sourceA, sourceB]) {
-      const artifactKey = `manual/${artifactId}.mp4`
-      await client.v2MediaArtifact.create({ data: {
-        id: artifactId, workspaceId, artifactKey,
-        sha256: calculateVersionHash({ artifactId }), byteSize: 1n,
-        mediaType: 'video', container: 'mp4', status: 'available', createdAt,
-      } })
-      // Controlled metadata rows; no byte rehash, actual decode or render claim.
-      const sourceManifest = createMediaArtifactManifestV2({ artifactKey,
-        artifactSha256: calculateVersionHash({ artifactId }), byteSize: 1, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'manual-source', version: '1.0.0', parameters: { artifactId, fixture: 'manual-source' } },
-        sources: [], probe: { width: 640, height: 360, duration: 6, fps: 30 } })
-      await client.v2MediaArtifactManifest.create({ data: {
-        id: `manifest-${artifactId}`, workspaceId, artifactId, schemaVersion: sourceManifest.schemaVersion,
-        manifestHash: sourceManifest.manifestHash, recipeId: sourceManifest.recipe.id, recipeVersion: sourceManifest.recipe.version,
-        parametersHash: sourceManifest.recipe.parametersHash, manifestJson: stableSerialize(sourceManifest), createdAt,
-      } })
-      await client.v2ProjectMediaAsset.create({ data: {
-        id: randomUUID(), workspaceId, projectId, artifactId,
-        role: artifactId === sourceA ? 'source-master' : 'selected-insert',
-        originalFileName: `${artifactId}.mp4`, createdAt,
-      } })
+    // The project is the sealed world the product builds: the creation Command (with its briefing and desired action), one
+    // explicit 9:16 output variant, the two recordings' persisted ingests, and a child Command that adopts the first one and plays it.
+    await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'manual', ids: { project: projectId, 'output-variant': '9:16' },
+      name: 'Manual Project', objective: 'discovery', aspectRatio: '9:16', status: 'reviewing-proxy', briefing,
+      desiredAction: { visualCta: 'Continue assistindo', disclosures: [] } })
+    for (const [slug, artifactId] of [[slugA, sourceA], [slugB, sourceB]]) {
+      // Both recordings are 6 s at 30 fps; their source grants are the ones this test writes below, through the production service.
+      await persistRecording(client, { workspaceId, projectId, actor: authenticatedActor, slug, durationFrames: 180, rights: { source: false } })
+      // The second recording is a library insert of the project: its ingest receipt is what a Version adopts to play it, and its link
+      // is the insert one (a project has one source master).
+      if (artifactId === sourceB) await client.v2ProjectMediaAsset.updateMany({ where: { workspaceId, projectId, artifactId, role: 'source-master' }, data: { role: 'selected-insert' } })
       const sourceMetadata = Object.freeze({
         colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
         matrix: 'bt709', range: 'limited', bitDepth: 8,
@@ -295,7 +224,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         id: `manual-color-probe-${artifactId}`,
         workspaceId,
         artifactId,
-        manifestId: `manifest-${artifactId}`,
+        manifestId: recordingNames(slug).sourceManifestId,
         detection: {
           state: 'ready', metadata: sourceMetadata,
           pixelFormat: 'yuv420p', hdrMode: 'sdr',
@@ -349,6 +278,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       colorCompilations.set(artifactId, colorCompilation.value.compilation)
       // These are synthetic fixture sources, with grants for their exact roles.
       // Persist the real snapshot and external actor audit; a row alone is no grant.
+      // The first recording is the project's source master (rendering); the second is a selected insert (editorial reuse). Each use is
+      // allowed for its own role only.
       const rightsRepository = new PrismaAssetRightsRepository(client)
       const allowedUse = artifactId === sourceA ? 'rendering' : 'editorial-reuse'
       const rightsSnapshotId = `rights-${artifactId}`
@@ -426,13 +357,29 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       [replacementTranscriptId, replacementTranscript, 1],
     ]) {
       await client.v2MediaTranscript.create({ data: {
-        id, workspaceId, projectId, sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+        id, workspaceId, projectId, sourceArtifactId: sourceA, sourceManifestId: manifestA,
         schemaVersion: transcript.schemaVersion, language: transcript.language,
         provider: transcript.provider, model: transcript.model, providerVersion: 'test-v1',
         transcriptHash: transcript.transcriptHash, transcriptJson: stableSerialize(transcript),
         createdAt: new Date(createdAt.getTime() + offset * 1000),
       } })
     }
+    // The plan's retimed transcript names the exact transcript it was derived from (an editorial cut later seals it).
+    editPlan.retimedTranscript.sourceTranscriptHash = currentTranscript.transcriptHash
+    // Its captions are the cue track aligned to that transcript (the words each cue shows), which an editorial cut needs to cut a cue.
+    Object.assign(editPlan.subtitleTracks[0], { schemaVersion: 'source-transcript-cue-track/v1', sourceTranscriptId: currentTranscriptId,
+      sourceTranscriptHash: currentTranscript.transcriptHash })
+    editPlan.subtitleTracks[0].cues[0].sourceWordIndices = [0, 1]
+    editPlan.subtitleTracks[0].cues[1].sourceWordIndices = [2]
+    // The initial Version is a real child Command: it adopts the first recording's persisted ingest receipt (the only source
+    // its clips play; the second is offered but not consumed) and carries the timeline above. Its sequence follows the creation
+    // Command (1) and the output variant (2): every revision below is counted from it.
+    const initialBundle = await commitSealedChild(client, { workspaceId, projectId, actor: authenticatedActor,
+      suffix: `manual-${suffix}-initial`, versionId: initialVersionId, snapshotId: editPlanId,
+      mutatePlan: () => editPlan, adopt: [sourceA, sourceB] })
+    const initialBaseHash = initialBundle.version.baseHash
+    const sequenceOffset = initialBundle.version.sequence - 1
+    const rev = (sequence) => sequence + sequenceOffset
     const completedProxyManifestId = `manifest-${completedProxyArtifactId}`
     const completedProxyOperationId = `manual-proxy-operation-${suffix}`
     const completedProxyHash = calculateVersionHash({ completedProxyArtifactId })
@@ -452,9 +399,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       outputArtifactId: newArtifactId, manifestId: newManifestId, expectedOperation,
     }) => {
       assert.ok(['new-controlled-base', 'complete-api-operation'].includes(mode))
+      const existing = await client.v2PublicOperation.findUnique({ where: { id: operationId }, include: { projectProxyRender: true } })
+      // The primary source of a proxy is the product's choice (the render sources of the Version decide it): an operation the API
+      // allocated names it, and the fixture follows it instead of assuming the first recording.
+      const primary = mode === 'complete-api-operation' && existing?.projectProxyRender
+        ? { sourceArtifactId: existing.projectProxyRender.sourceArtifactId, sourceManifestId: existing.projectProxyRender.sourceManifestId }
+        : { sourceArtifactId: sourceA, sourceManifestId: manifestA }
       const source = await new PrismaProjectProxyRenderRepository(client).readImmutableSource({
-        workspaceId, projectId, projectVersionId, editPlanSnapshotId,
-        sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+        workspaceId, projectId, projectVersionId, editPlanSnapshotId, ...primary,
       })
       const colorPipelineBindings = source.renderSources.filter((asset) => asset.mediaType === 'video').map((asset) => {
         const compilation = colorCompilations.get(asset.artifactId)
@@ -464,7 +416,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       })
       const inputHash = projectProxyRenderInputHash({ source, colorPipelineBindings })
       const colorBindingsJson = stableSerialize(colorPipelineBindings)
-      const existing = await client.v2PublicOperation.findUnique({ where: { id: operationId }, include: { projectProxyRender: true } })
       let outputArtifactId = newArtifactId, manifestId = newManifestId
       if (mode === 'complete-api-operation') {
         assert.ok(existing?.projectProxyRender, 'the API must have allocated this exact proxy operation')
@@ -474,7 +425,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
           sourceArtifactId: detail.sourceArtifactId, sourceManifestId: detail.sourceManifestId,
           inputHash: detail.inputHash, colorBindingsJson: detail.colorPipelineBindingsJson },
         { workspaceId, projectId, projectVersionId, editPlanSnapshotId,
-          sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`, inputHash, colorBindingsJson })
+          ...primary, inputHash, colorBindingsJson })
         assert.equal(existing.workspaceId, workspaceId); assert.equal(existing.projectId, projectId)
         assert.equal(existing.type, 'project-proxy-render'); assert.equal(existing.clientId, issued.client.id)
         const auditInput = { workspaceId, clientId: existing.clientId, credentialId: existing.actorCredentialId,
@@ -566,6 +517,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
               cancelable: false, retryable: false, attempt: 1, resultJson, startedAt: now, completedAt: now, updatedAt: now } })
             assert.equal(changed.count, 1, 'metadata-only completion must own the unchanged queued identity')
           }
+          // A completed proxy is bound to the stable output variant it was rendered for: an editorial cut or a restore refuses a
+          // proxy without that authority, and the route's enqueue does not write it.
+          await transaction.v2ProjectProxyRenderOperation.update({ where: { operationId }, data: { renderableVariantId: '9:16' } })
         } else {
           await transaction.v2PublicOperation.create({ data: { id: operationId, workspaceId, projectId, clientId: issued.client.id,
             ...operationActorAudit, type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
@@ -574,9 +528,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
             requestFingerprint: calculateVersionHash({ fixtureScope: 'metadata-only', operationId, inputHash }),
             createdAt: now, updatedAt: now, startedAt: now, completedAt: now } })
           await transaction.v2ProjectProxyRenderOperation.create({ data: { operationId, workspaceId, projectId, projectVersionId,
-            editPlanSnapshotId, sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+            editPlanSnapshotId, sourceArtifactId: sourceA, sourceManifestId: manifestA,
             colorPipelineBindingsJson: colorBindingsJson, inputHash, outputArtifactId, outputManifestId: manifestId,
-            originalFileName: `${outputArtifactId}.mp4`, createdAt: now } })
+            renderableVariantId: '9:16', originalFileName: `${outputArtifactId}.mp4`, createdAt: now } })
         }
       }, { isolationLevel: 'Serializable' })
       const record = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId }, include: { projectProxyRender: true } })
@@ -611,14 +565,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const split = await execute({
       baseVersionId: initialVersionId,
       baseHash: initialBaseHash,
-      expectedRevision: 1,
+      expectedRevision: rev(1),
       action: 'apply',
       variantId: '9:16',
       targetId: 'clip-1',
       operation: { kind: 'split', clipId: 'clip-1', atMs: 1505 },
       idempotencyKey: `manual-split-${suffix}`,
     })
-    assert.equal(split.version.sequence, 2)
+    assert.equal(split.version.sequence, rev(2))
     assert.deepEqual(split.timeline.clips.map((clip) => clip.id), ['clip-1:a', 'clip-1:b', 'clip-2'])
     assert.equal(split.timeline.clips[0].endMs, 1500)
     const splitStoredCommand = await client.v2EditCommand.findUnique({ where: { id: split.command.id } })
@@ -652,7 +606,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await assert.rejects(() => execute({
       baseVersionId: initialVersionId,
       baseHash: initialBaseHash,
-      expectedRevision: 1,
+      expectedRevision: rev(1),
       action: 'apply',
       variantId: '9:16',
       targetId: 'clip-2',
@@ -663,7 +617,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const inspect = await execute({
       baseVersionId: split.version.id,
       baseHash: split.version.baseHash,
-      expectedRevision: 2,
+      expectedRevision: rev(2),
       action: 'apply',
       variantId: '9:16',
       targetId: 'clip-1:a',
@@ -673,40 +627,40 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       } },
       idempotencyKey: `manual-inspect-${suffix}`,
     })
-    assert.equal(inspect.version.sequence, 3)
+    assert.equal(inspect.version.sequence, rev(3))
     assert.match(JSON.stringify(inspect.editPlan), /Texto ajustado/)
     assert.match(JSON.stringify(inspect.editPlan), /warm-lut/)
 
     const undo = await execute({
       baseVersionId: inspect.version.id,
       baseHash: inspect.version.baseHash,
-      expectedRevision: 3,
+      expectedRevision: rev(3),
       action: 'undo',
       variantId: '9:16',
       targetId: 'clip-1:a',
       targetVersionId: split.version.id,
       idempotencyKey: `manual-undo-${suffix}`,
     })
-    assert.equal(undo.version.sequence, 4)
+    assert.equal(undo.version.sequence, rev(4))
     assert.doesNotMatch(JSON.stringify(undo.editPlan), /Texto ajustado/)
     assert.equal(undo.command.payload.restoresVersionId, split.version.id)
 
     const redo = await execute({
       baseVersionId: undo.version.id,
       baseHash: undo.version.baseHash,
-      expectedRevision: 4,
+      expectedRevision: rev(4),
       action: 'redo',
       variantId: '9:16',
       targetId: 'clip-1:a',
       targetVersionId: inspect.version.id,
       idempotencyKey: `manual-redo-${suffix}`,
     })
-    assert.equal(redo.version.sequence, 5)
+    assert.equal(redo.version.sequence, rev(5))
     assert.match(JSON.stringify(redo.editPlan), /Texto ajustado/)
     const replay = await execute({
       baseVersionId: undo.version.id,
       baseHash: undo.version.baseHash,
-      expectedRevision: 4,
+      expectedRevision: rev(4),
       action: 'redo',
       variantId: '9:16',
       targetId: 'clip-1:a',
@@ -726,6 +680,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         NODE_ENV: 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        // This journey sends bursts of writes from one client within a minute: the request-spike anomaly is not what it proves.
+        APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '1000000',
         APOLLO_AUTH_MODE: 'bootstrap',
         APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true',
         APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
@@ -745,7 +701,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const timeline = await timelineResponse.json()
     assert.equal(timelineResponse.status, 200, JSON.stringify(timeline))
-    assert.equal(timeline.data.timeline.revision, 5)
+    assert.equal(timeline.data.timeline.revision, rev(5))
     assert.equal(timeline.data.history[0].action, 'redo')
     const invalidationsResponse = await fetch(
       `${baseUrl}/v1/projects/${projectId}/artifact-invalidations?resultVersionId=${split.version.id}`,
@@ -778,7 +734,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const publicApplied = await apiResponse.json()
     assert.equal(apiResponse.status, 201, `${JSON.stringify(publicApplied)}\n${serverLogs.slice(-4_000)}`)
-    assert.equal(publicApplied.data.version.sequence, 6)
+    assert.equal(publicApplied.data.version.sequence, rev(6))
     assert.equal(publicApplied.data.operation.status, 'queued')
     assert.equal(publicApplied.data.command.payload.schemaVersion, 2)
     assert.equal(publicApplied.data.command.payload.impact.schemaVersion, 'command-impact/v1')
@@ -850,7 +806,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await new Promise((resolve) => setTimeout(resolve, 100))
     await page.mouse.up()
     assert.equal((await moved).status(), 201)
-    await page.getByText(/Edição registrada na versão 7/).waitFor({ state: 'visible' })
+    await page.getByText(new RegExp(`Edição registrada na versão ${rev(7)}`)).waitFor({ state: 'visible' })
 
     const undoButton = page.getByTestId('manual-undo')
     let undoReady = false
@@ -869,16 +825,19 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await manualEditor.focus()
     await page.keyboard.press('Control+z')
     assert.equal((await undone).status(), 201)
-    await page.getByText(/Undo registrado como versão 8/).waitFor({ state: 'visible' })
-    assert.match(await manualEditor.textContent(), /V8/)
+    await page.getByText(new RegExp(`Undo registrado como versão ${rev(8)}`)).waitFor({ state: 'visible' })
+    assert.match(await manualEditor.textContent(), new RegExp(`V${rev(8)}`))
 
     const beforeTrimResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/timeline`, {
       headers: { authorization },
     })
     const beforeTrim = await beforeTrimResponse.json()
     assert.equal(beforeTrimResponse.status, 200, JSON.stringify(beforeTrim))
-    assert.equal(beforeTrim.data.timeline.revision, 8)
+    assert.equal(beforeTrim.data.timeline.revision, rev(8))
     const beforeCompareVersionId = beforeTrim.data.timeline.versionId
+    // KNOWN PRODUCT DEFECT (manual-editing.ts, `trim`/`split` of a clip that `replace` gave audioSource* ranges): the trim moves the video
+    // range and the timeline but not audioSourceOutFrame, so the sealed materialization refuses the clip with INVALID_RENDER_INPUT
+    // 'Primary/secondary audio rate map invalid' (output-materialization.ts). Replacing a different clip than the one trimmed passes.
     const trimResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
       method: 'POST',
       headers: {
@@ -897,8 +856,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       }),
     })
     const trimmed = await trimResponse.json()
-    assert.equal(trimResponse.status, 201, JSON.stringify(trimmed))
-    assert.equal(trimmed.data.version.sequence, 9)
+    let trimDiagnostic = '' // Failure diagnostics: the route hides the domain error, so the same apply runs in-process.
+    if (trimResponse.status !== 201) {
+      try {
+        await execute({ baseVersionId: beforeTrim.data.timeline.versionId, baseHash: beforeTrim.data.baseHash,
+          expectedRevision: beforeTrim.data.timeline.revision, action: 'apply', variantId: '9:16', targetId: 'clip-2',
+          operation: { kind: 'trim', clipId: 'clip-2', edge: 'end', atMs: 4000 }, idempotencyKey: `diag-trim-${suffix}` })
+        trimDiagnostic = 'apply ok in-process'
+      } catch (error) { trimDiagnostic = `${error?.code} ${error?.message} ${JSON.stringify(error?.details ?? null)}` }
+    }
+    assert.equal(trimResponse.status, 201, `${JSON.stringify(trimmed)}\n${trimDiagnostic}`)
+    assert.equal(trimmed.data.version.sequence, rev(9))
     const afterCompareVersionId = trimmed.data.version.id
     const comparisonUrl = (mode) => {
       const query = new URLSearchParams({
@@ -927,7 +895,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       mode: 'split',
       baseVersionId: afterCompareVersionId,
       baseHash: trimmed.data.version.baseHash,
-      expectedRevision: 9,
+      expectedRevision: rev(9),
       variantId: '9:16',
     })
     // A compare action is the only no-render Command: it moves the review state
@@ -1017,7 +985,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         'content-type': 'application/json',
         'idempotency-key': `manual-compare-stale-${suffix}`,
       },
-      body: JSON.stringify({ ...compareActionBody('accept'), expectedRevision: 8 }),
+      body: JSON.stringify({ ...compareActionBody('accept'), expectedRevision: rev(8) }),
     })
     const stale = await staleResponse.json()
     assert.equal(staleResponse.status, 409, JSON.stringify(stale))
@@ -1089,12 +1057,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const restoredPayload = await restoredHttp.json()
     assert.equal(restoredHttp.status(), 201, JSON.stringify(restoredPayload))
     assert.ok(restoredPayload.data.operation?.id)
-    await page.getByText(/restaurada como V10/).waitFor({ state: 'visible' })
+    await page.getByText(new RegExp(`restaurada como V${rev(10)}`)).waitFor({ state: 'visible' })
     const persistedVersions = await client.v2ProjectVersion.findMany({
       where: { projectId },
       orderBy: { sequence: 'asc' },
     })
-    assert.equal(persistedVersions.at(-1).sequence, 10)
+    assert.equal(persistedVersions.at(-1).sequence, rev(10))
     assert.equal(persistedVersions.at(-1).parentVersionId, afterCompareVersionId)
     assert.equal(persistedVersions.some((version) => version.id === beforeCompareVersionId), true)
     assert.equal(persistedVersions.some((version) => version.id === afterCompareVersionId), true)
@@ -1127,7 +1095,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         action: 'apply',
         baseVersionId: selectionBaseVersion.id,
         baseHash: selectionBaseVersion.baseHash,
-        expectedRevision: 10,
+        expectedRevision: rev(10),
         variantId: '9:16',
         targetId: selectionClipId,
         operation: { kind: 'select', clipId: selectionClipId },
@@ -1136,7 +1104,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const selectedResponse = await select()
     const selected = await selectedResponse.json()
     assert.equal(selectedResponse.status, 201, JSON.stringify(selected))
-    assert.equal(selected.data.version.sequence, 11)
+    assert.equal(selected.data.version.sequence, rev(11))
     assert.equal(selected.data.operation.status, 'succeeded')
     assert.equal(selected.data.operation.phase, 'completed')
     assert.equal(selected.data.operation.target.id, selectionProxyMetadata.outputArtifactId)
@@ -1179,7 +1147,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         action: 'apply',
         baseVersionId: selected.data.version.id,
         baseHash: selected.data.version.baseHash,
-        expectedRevision: 11,
+        expectedRevision: rev(11),
         variantId: '9:16',
         targetId: selectionClipId,
         operation: {
@@ -1191,7 +1159,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const cropped = await cropResponse.json()
     assert.equal(cropResponse.status, 201, JSON.stringify(cropped))
-    assert.equal(cropped.data.version.sequence, 12)
+    assert.equal(cropped.data.version.sequence, rev(12))
     assert.equal(cropped.data.command.payload.impact.changeKinds[0], 'crop')
     assert.deepEqual(cropped.data.command.payload.impact.dependencyTypes, ['visual'])
     assert.deepEqual(cropped.data.command.payload.impact.affectedVariantIds, ['9:16'])
@@ -1241,6 +1209,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         baseVersionId: cropped.data.version.id,
         baseHash: cropped.data.version.baseHash,
         sourceTranscriptId: currentTranscriptId,
+        variantId: '9:16',
         rules: [{ id: 'remove-phrase', label: 'frase', alternatives: ['frase'] }],
         exclusionOverrides: [{
           sourceStartSeconds: 1.1, sourceEndSeconds: 1.7,
@@ -1251,9 +1220,24 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     const editorialResponse = await applyEditorialCut()
     const editorialApplied = await editorialResponse.json()
-    assert.equal(editorialResponse.status, 201, JSON.stringify(editorialApplied))
-    assert.equal(editorialApplied.data.version.sequence, 13)
-    assert.equal(editorialApplied.data.editorial.impact.schemaVersion, 'editorial-cut-impact/v1')
+    let editorialDiagnostic = '' // Failure diagnostics: the route hides the domain error, so the same Command is applied in-process.
+    if (editorialResponse.status !== 201) {
+      try {
+        const { applyEditorialCutCommandService } = await import('../../src/v2/application/apply-editorial-cut-command.ts')
+        const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
+        await applyEditorialCutCommandService({ repository: factory.createEditorialCommandRepository(), clock: () => new Date(),
+          createId: (kind) => `${kind}-diag-${randomUUID()}`, createEventId: randomUUID })({
+          workspaceId, projectId, baseVersionId: cropped.data.version.id, baseHash: cropped.data.version.baseHash,
+          sourceTranscriptId: currentTranscriptId, variantId: '9:16', rules: [{ id: 'remove-phrase', label: 'frase', alternatives: ['frase'] }],
+          exclusionOverrides: [{ sourceStartSeconds: 1.1, sourceEndSeconds: 1.7, ruleIds: ['remove-phrase'], reason: 'Reviewed boundary removes only the selected source word.' }],
+          actor: authenticatedActor, idempotency: { clientId: authenticatedActor.clientId, key: `diag-editorial-${suffix}` } })
+        editorialDiagnostic = 'applied in-process'
+      } catch (error) { editorialDiagnostic = `${error?.code} ${error?.message} ${JSON.stringify(error?.details ?? null)}` }
+    }
+    assert.equal(editorialResponse.status, 201, `${JSON.stringify(editorialApplied)}
+${editorialDiagnostic}`)
+    assert.equal(editorialApplied.data.version.sequence, rev(13))
+    assert.equal(editorialApplied.data.editorial.impact.schemaVersion, 'editorial-cut-impact/v2')
     assert.deepEqual(editorialApplied.data.editorial.impact.affectedRanges, [{ startFrame: 0, endFrame: cropPlan.durationFrames }])
     assert.equal(editorialApplied.data.editorial.impact.minimalRenders.length, 1)
     assert.equal(editorialApplied.data.editorial.impact.minimalRenders[0].ranges[0].endFrame, editorialApplied.data.editorial.outputDurationFrames)
@@ -1288,7 +1272,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const transcriptResponse = await replaceTranscript()
     const transcriptApplied = await transcriptResponse.json()
     assert.equal(transcriptResponse.status, 201, JSON.stringify(transcriptApplied))
-    assert.equal(transcriptApplied.data.version.sequence, 14)
+    assert.equal(transcriptApplied.data.version.sequence, rev(14))
     assert.equal(transcriptApplied.data.command.type, 'replace-source-transcript')
     assert.equal(transcriptApplied.data.sourceTranscript.replacementTranscriptId, replacementTranscriptId)
     assert.equal(transcriptApplied.data.sourceTranscript.impact.renderBlockedUntilDirectorRun, true)
@@ -1318,7 +1302,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     })
     await client.v2MediaTranscript.create({ data: {
       id: `manual-transcript-unselected-${suffix}`, workspaceId, projectId,
-      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+      sourceArtifactId: sourceA, sourceManifestId: manifestA,
       schemaVersion: newestUnselectedTranscript.schemaVersion, language: newestUnselectedTranscript.language,
       provider: newestUnselectedTranscript.provider, model: newestUnselectedTranscript.model, providerVersion: 'test-v1',
       transcriptHash: newestUnselectedTranscript.transcriptHash,
@@ -1352,7 +1336,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const directorResponse = await runDirector()
     const directorApplied = await directorResponse.json()
     assert.equal(directorResponse.status, 201, JSON.stringify(directorApplied))
-    assert.equal(directorApplied.data.version.sequence, 15)
+    assert.equal(directorApplied.data.version.sequence, rev(15))
     assert.equal(directorApplied.data.directorRun.impact.schemaVersion, 'director-run-impact/v1')
     assert.equal(directorApplied.data.directorRun.impact.sourceTranscriptId, replacementTranscriptId)
     assert.deepEqual(directorApplied.data.directorRun.impact.affectedArtifacts, [{
@@ -1395,7 +1379,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const lutSelectionResponse = await setProjectLut()
     const lutSelectionApplied = await lutSelectionResponse.json()
     assert.equal(lutSelectionResponse.status, 201, JSON.stringify(lutSelectionApplied))
-    assert.equal(lutSelectionApplied.data.version.sequence, 16)
+    assert.equal(lutSelectionApplied.data.version.sequence, rev(16))
     assert.equal(lutSelectionApplied.data.impact.schemaVersion, 'project-lut-selection-impact/v1')
     assert.equal(lutSelectionApplied.data.impact.renderDeferredUntilTimeline, false)
     assert.deepEqual(lutSelectionApplied.data.impact.dependencyTypes, ['visual'])
@@ -1830,14 +1814,13 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         body: JSON.stringify({
           name: `F1.007 ${label}`,
           objective: 'discovery',
-          format: '9:16',
           locale: 'pt-BR',
           ...(briefing === undefined ? {} : { briefing }),
         }),
       })
       const payload = await response.json()
       assert.equal(response.status, 201, `${JSON.stringify(payload)}\n${serverLogs.slice(-4_000)}`)
-      return payload.data.project.id
+      return payload.data.projectAtCreation.id
     }
 
     const briefingCases = [
@@ -1913,7 +1896,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       body: JSON.stringify({
         name: 'F1.007 trust boundary forgery',
         objective: 'discovery',
-        format: '9:16',
         productionBrief: { ownerInput: { trust: 'owner-authorized' } },
       }),
     })
@@ -1929,7 +1911,6 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
     }
-    await cleanup()
     await client.$disconnect()
   }
 })
