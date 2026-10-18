@@ -54,7 +54,7 @@ export const FACE_EVIDENCE_POLICY = deepFreeze({
      * even when other samples are missing; `free-certified` needs complete coverage and no overlap. */
     precedence: ['unauthenticated-evidence:unknown', 'overlap:occupied', 'incomplete-coverage:unknown', 'free-certified'] as const,
   },
-  sampling: { targetHz: 6, maxSamplesPerWindow: 60, maxWindowFrames: 300 },
+  sampling: { targetHz: 6, maxSamplesPerWindow: 60 as const, maxWindowFrames: 300 as const },
   parameterBasis: {
     'detection.collectionScoreFloor': 'development-analysis',
     'evidence.scoreMin': 'owner-accepted-v9-literal',

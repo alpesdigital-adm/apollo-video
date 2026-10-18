@@ -55,6 +55,16 @@ export const ACCEPTED_FACE_PRODUCERS: readonly AcceptedProducer[] = Object.freez
 
 export type FaceProducerAuthentication = Readonly<{ authenticated: boolean; reasons: readonly string[] }>
 
+/** Reasons the observed runtime is not the platform and versions the owner accepted (none when it is). */
+export function acceptedFaceRuntimeReasons(runtime: Pick<FaceProducerV2['runtime'], 'platform' | 'pythonVersion' |
+  'openvinoVersion' | 'openvinoPackageVersion' | 'opencvVersion' | 'numpyVersion'>): readonly string[] {
+  const platform = ACCEPTED_FACE_PRODUCERS[0]!.platforms.find((entry) => entry.platform === runtime.platform)
+  if (!platform) return Object.freeze(['RUNTIME_PLATFORM_NOT_PARITIED'])
+  return Object.freeze(runtime.pythonVersion === platform.pythonVersion && runtime.openvinoVersion === platform.openvinoVersion &&
+    runtime.openvinoPackageVersion === platform.openvinoPackageVersion && runtime.opencvVersion === platform.opencvVersion &&
+    runtime.numpyVersion === platform.numpyVersion ? [] : ['RUNTIME_VERSION_MISMATCH'])
+}
+
 export function authenticateFaceProducer(producer: FaceProducerV2): FaceProducerAuthentication {
   const reasons: string[] = []
   const accepted = ACCEPTED_FACE_PRODUCERS.find((candidate) => candidate.name === producer.name &&
@@ -70,15 +80,9 @@ export function authenticateFaceProducer(producer: FaceProducerV2): FaceProducer
   if (assessment.ownerAcceptanceSha256 !== accepted.ownerAcceptanceSha256 ||
       assessment.v9ReceiptSha256 !== accepted.v9ReceiptSha256 ||
       assessment.v9PreregistrationSha256 !== accepted.v9PreregistrationSha256) reasons.push('ASSESSMENT_MISMATCH')
+  reasons.push(...acceptedFaceRuntimeReasons(producer.runtime))
   const platform = accepted.platforms.find((entry) => entry.platform === producer.runtime.platform)
-  if (!platform) reasons.push('RUNTIME_PLATFORM_NOT_PARITIED')
-  else {
-    const runtime = producer.runtime
-    if (runtime.pythonVersion !== platform.pythonVersion || runtime.openvinoVersion !== platform.openvinoVersion ||
-        runtime.openvinoPackageVersion !== platform.openvinoPackageVersion ||
-        runtime.opencvVersion !== platform.opencvVersion || runtime.numpyVersion !== platform.numpyVersion) {
-      reasons.push('RUNTIME_VERSION_MISMATCH')
-    }
+  if (platform) {
     const parity = assessment.runtimeParity
     if (parity.status !== 'passed' || parity.receiptSha256 !== platform.parityReceiptSha256) reasons.push('RUNTIME_PARITY_MISMATCH')
   }
