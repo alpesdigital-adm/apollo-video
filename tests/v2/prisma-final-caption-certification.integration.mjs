@@ -91,7 +91,7 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
   const { FfmpegCaptionPixelCritic, captionFootprintOf, MIN_CHANGED_PIXELS } = await import('../../src/v2/infrastructure/media/ffmpeg-caption-pixel-critic.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
-  const { PrismaFaceWindowEnvelopeRepository } = await import('../../src/v2/infrastructure/prisma/face-window-envelope-repository.ts')
+  const { PrismaFaceSourceWindowRepository } = await import('../../src/v2/infrastructure/prisma/face-source-window-repository.ts')
   const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
   const { PrismaProjectFinalExportRepository } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
   const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
@@ -272,7 +272,7 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
     sources: createArtifactSourceMaterializer(workerEnvironment), catalogOutput: createAutomaticCatalogService(),
-    faceEvidence: new PrismaFaceWindowEnvelopeRepository(client),
+    faceEvidence: new PrismaFaceSourceWindowRepository(client),
     captionPixelCritic: new FfmpegCaptionPixelCritic({ ffmpegPath: ffmpegBin }),
     leaseDurationMs: 300_000, heartbeatIntervalMs: 5_000, retryBaseDelayMs: 1, retryMaxDelayMs: 1,
   })
