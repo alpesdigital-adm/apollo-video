@@ -148,7 +148,7 @@ process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
  * module graph: ten criteria over coverage, clock maps, diagnostics, colour
  * plans, final-export operations and media MANIFESTS — the manifest, never the
  * file. `buildGateWorld` writes no bytes anywhere, in either mode
- * (`multicam-longform-gate-world.mjs:1017-1075` creates `v2MediaArtifact` and
+ * (`multicam-longform-gate-world.mjs:951-998` creates `v2MediaArtifact` and
  * `v2MediaArtifactManifest` rows and stops), and the artifacts the report cites
  * carry synthetic digests no real file could have.
  *

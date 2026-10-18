@@ -83,7 +83,11 @@ function evidenceHashOf(record: Readonly<SyncEvidenceRecord>): string {
 }
 
 export class PrismaCaptureSessionRepository implements CaptureSessionRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   // -------------------------------------------------------------------------
   // The immutable chain and its pointer

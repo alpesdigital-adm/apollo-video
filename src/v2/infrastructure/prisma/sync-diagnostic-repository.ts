@@ -205,7 +205,11 @@ function hydrateDiagnostic(row: {
 }
 
 export class PrismaSyncDiagnosticRepository implements SyncDiagnosticRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async persistMarker(input: {
     marker: Readonly<SyncMarker>

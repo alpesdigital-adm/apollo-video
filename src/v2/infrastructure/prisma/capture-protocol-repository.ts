@@ -124,7 +124,11 @@ function hydrateEvaluation(row: {
 }
 
 export class PrismaCaptureProtocolRepository implements CaptureProtocolRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async publish(input: {
     protocol: Readonly<CaptureProtocol>

@@ -110,7 +110,7 @@ test('v3/v4 protected references bind row metadata and scope without decrypting 
 test('shared preview refuses actual operation project/workspace mismatch before artifact lookup', async () => {
   for (const operation of [{ workspaceId, projectId: 'project-sister' }, { workspaceId: 'workspace-sister', projectId: 'project-projection' }]) {
     let artifactReads = 0
-    const client = { v2Project: { async findFirst() { return { id: 'project-projection', currentVersionId: 'version-projection',
+    const client = { v2Project: { async findFirst() { return { id: 'project-projection', format: '9:16', currentVersionId: 'version-projection',
       versions: [{ id: 'version-projection', sequence: 1, createdAt: at, editPlanSnapshot: { contentJson: '{}' } }] } } },
       v2ProjectFinalExportOperation: { async findMany() { return [] } },
       v2ProjectProxyRenderOperation: { async findMany() { return [{ outputArtifactId: 'artifact-projection',
