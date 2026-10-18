@@ -623,7 +623,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
     assert.deepEqual(roundedObserved.changedFrames, [1, 2])
     roundedObserved.status = 'passed'
     for (const layer of [0, 1]) {
-      const rejected = beginCase({ fps: 120, layer, interval: [1, 2], expectedRejection: 'cannot represent' })
+      const rejected = beginCase({ fps: 120, layer, interval: [1, 2], expectedRejection: 'ASS_BOUNDARY_UNREPRESENTABLE' })
       assert.throws(() => document(layer, 120, 1, 2, fontFamily), (error) => isAssBoundaryUnrepresentable(error) && error.details.frame === 1)
       rejected.status = 'passed'
     }
