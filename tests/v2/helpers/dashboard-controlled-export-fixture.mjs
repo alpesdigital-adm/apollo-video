@@ -3,6 +3,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+import { writeEditingProxyFile } from './editing-proxy-file.mjs'
+import { variantBodyFor } from './explicit-project-http.mjs'
+import { commitSealedChild, persistReceiptForExistingVideo, seedSealedProject } from './pg-output-world.mjs'
+
 // Same domain-to-row contract as project-media-repository.colorProbeData.
 export function dashboardColorProbePersistenceData(probe, stableSerialize) {
   return { id: probe.id, workspaceId: probe.workspaceId, artifactId: probe.artifactId,
@@ -18,19 +22,20 @@ export function dashboardColorProbePersistenceData(probe, stableSerialize) {
 }
 
 /** Explicit test seed, not public project/Director/proxy acceptance. The project
- * starts reviewing-proxy; this helper never UPDATEs any project's status.
- * Every copied media object has its own key/manifest and explicit copy lineage.
+ * is born through the real creation Command and one explicit 9:16 output variant (sealed Versions, never raw rows);
+ * its status is then set to reviewing-proxy, the one write this helper makes to a project row besides the sealed writers.
+ * Every copied media object has its own key/manifest and explicit copy lineage, and the base Version adopts the
+ * source's ingest receipt (persisted by persistReceiptForExistingVideo) exactly as a child Command does.
  */
 export async function seedDashboardControlledExportFixture(input) {
   const { client, workspaceId, actor, artifactRoot, suffix, transcript, sourcePath,
     sourceArtifactId: originalSourceId, sourceManifestId: originalSourceManifestId, sourceManifest,
     proxyArtifact: originalProxy, proxyManifestId: originalProxyManifestId,
-    brief: originalBrief, policies, signal, compileColorPipeline } = input
+    signal, compileColorPipeline } = input
   assert.equal(signal?.aborted ?? false, false)
   assert.equal(typeof compileColorPipeline, 'function', 'Seed must compile its actual color pipeline before inserting operation details')
   const { calculateVersionHash, stableSerialize } = await import('../../../src/v2/application/version-hash.ts')
   const { compileInitialSourceEditPlan } = await import('../../../src/v2/application/apply-editorial-cut-command.ts')
-  const { rebuildRetiredContractOneVersion } = await import('../../../src/v2/domain/project-version.ts')
   const { createMediaArtifactManifestV2 } = await import('../../../src/v2/domain/media-artifact.ts')
   const { createMediaColorProbe } = await import('../../../src/v2/domain/color-and-export.ts')
   const { assetRightsRevision } = await import('../../../src/v2/domain/asset-rights.ts')
@@ -104,9 +109,10 @@ export async function seedDashboardControlledExportFixture(input) {
       role: 'test-fixture-proxy-copy', execution: copyExecution }],
     probe: { width: proxyProbe.width, height: proxyProbe.height, duration: proxyProbe.duration, fps: proxyProbe.fps } })
 
-  await client.v2Project.create({ data: { id: projectId, workspaceId,
-    name: 'Controlled export mechanics fixture', status: 'reviewing-proxy', objective: 'discovery',
-    format: '9:16', locale: 'pt-BR', createdByType: 'api-client', createdById: actor.clientId, createdAt, updatedAt: createdAt } })
+  const world = await seedSealedProject(client, { workspaceId, actor, prefix: 'runtime-mechanical', ids: { project: projectId },
+    name: 'Controlled export mechanics fixture', objective: 'discovery', variant: variantBodyFor({ aspectRatio: '9:16' }) })
+  await client.v2Project.update({ where: { id: projectId }, data: { status: 'reviewing-proxy' } })
+  const outputSpecId = world.head.state.document.entries.find((entry) => entry.variantId === world.variantId).spec.output.id
   for (const [artifactId, manifestId, key, bytes, manifest, originalId, role] of [
     [sourceArtifactId, sourceManifestId, sourceArtifactKey, sourceBytes, sourceManifestOwn, originalSourceId, 'test-fixture-master-copy'],
     [proxyArtifactId, proxyManifestId, proxyArtifactKey, proxyBytes, proxyManifestOwn, originalProxy.id, 'test-fixture-proxy-copy'],
@@ -141,45 +147,32 @@ export async function seedDashboardControlledExportFixture(input) {
   const initialPlan = compileInitialSourceEditPlan({ id: id('initial-plan'), projectVersionId: baseVersionId,
     transcriptId, transcript, sourceArtifactId, sourceDurationSeconds: sourceProbe.duration,
     fps: sourceProbe.fps, createdAt: createdAt.toISOString() })
-  const brief = { ...originalBrief, outputSpec: { ...originalBrief.outputSpec, id: id('output') } }
-  const refs = { brief: id('brief'), policies: id('policies'), editPlan: id('base-plan-snapshot') }
-  for (const [snapshotId, kind, schemaVersion, content] of [
-    [refs.brief, 'brief', 1, brief], [refs.policies, 'policies', 1, policies], [refs.editPlan, 'edit-plan', 2, initialPlan],
-  ]) await client.v2ProjectSnapshot.create({ data: { id: snapshotId, workspaceId, projectId, kind, schemaVersion,
-    contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt } })
-  const baseVersion = rebuildRetiredContractOneVersion({ id: baseVersionId, workspaceId, projectId, sequence: 1,
-    snapshotRefs: refs, baseHash: calculateVersionHash({ schemaVersion: 'controlled-dashboard-mechanical-base/v1',
-      workspaceId, projectId, baseVersionId, snapshots: { brief: calculateVersionHash(brief), policies: calculateVersionHash(policies),
-        editPlan: calculateVersionHash(initialPlan) }, sourceManifestHash: sourceManifestOwn.manifestHash, transcriptHash: transcript.transcriptHash }),
-    createdBy: actor.clientId, createdAt: createdAt.toISOString() })
-  await client.v2ProjectVersion.create({ data: { id: baseVersion.id, workspaceId, projectId, sequence: 1,
-    briefSnapshotId: refs.brief, editPlanSnapshotId: refs.editPlan, policiesSnapshotId: refs.policies,
-    baseHash: baseVersion.baseHash, createdBy: actor.clientId, createdAt } })
-  await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersion.id } })
+  // The base Version is a real child Command: it adopts the source's persisted ingest receipt and plays it whole.
+  const { resolveFfmpegBinary } = await import('../../../src/v2/infrastructure/media/ffmpeg-binary.ts')
+  const editingProxy = await writeEditingProxyFile({ ffmpeg: resolveFfmpegBinary(), sourcePath: ownSourcePath, artifactRoot,
+    key: `workspaces/final-export-e2e-${suffix}/mechanical/editing-proxy.mp4` })
+  await persistReceiptForExistingVideo(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId,
+    createdAt: new Date(createdAt.getTime() - 60_000).toISOString(), derivative: editingProxy })
+  const baseBundle = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: id('base'), versionId: baseVersionId,
+    mutatePlan: () => initialPlan, adopt: [sourceArtifactId] })
+  const baseVersion = baseBundle.version
   const noLut = await setProjectLutSelectionService({ repository: new PrismaProjectLutSelectionRepository(client),
     createId: (kind) => id(`lut-${kind}`), createEventId: randomUUID, clock: () => createdAt })({ workspaceId, projectId,
     baseVersionId: baseVersion.id, baseHash: baseVersion.baseHash, selection: { mode: 'none' }, actor,
     idempotencyKey: id('lut-none'), reason: 'Explicit controlled mechanics fixture; no editorial approval.' })
   let bundle
-  const realReader = new PrismaDirectorRunRepository(client)
-  const controlledRepository = { findIdempotentResult: async () => null,
-    readContext: (request) => realReader.readContext(request),
-    // Explicit controlled metadata identity projection, not PG admission.
-    commitWithCanonicalSnapshots: async (scope, prepare) => {
-      const proposed = await prepare(async (candidates) => {
-        for (const candidate of candidates) {
-          assert.equal(candidate.workspaceId, scope.workspaceId)
-          assert.equal(candidate.projectId, scope.projectId)
-        }
-        return candidates
-      })
-      assert.equal(bundle, undefined)
+  const realRepository = new PrismaDirectorRunRepository(client)
+  // The real repository persists the run through the sealed writer (PG admission); this wrapper only keeps the proposed
+  // bundle so the receipt can name its Command fingerprint and decision log.
+  const observedRepository = { findIdempotentResult: (request) => realRepository.findIdempotentResult(request),
+    readContext: (request) => realRepository.readContext(request),
+    commitWithCanonicalSnapshots: (scope, prepare) => realRepository.commitWithCanonicalSnapshots(scope, async (resolve) => {
+      const proposed = await prepare(resolve)
       bundle = proposed
-      return { run: proposed.run, command: proposed.command, version: proposed.version,
-        impact: proposed.command.payload.impact, invalidations: [], replayed: false }
-    } }
+      return proposed
+    }) }
   let snapshotSequence = 0
-  const directed = await runProjectDirectorService({ repository: controlledRepository, clock: () => createdAt,
+  const directed = await runProjectDirectorService({ repository: observedRepository, clock: () => createdAt,
     createEventId: randomUUID, compileBrief: createEvidenceBoundBriefCompiler(),
     createId: (kind) => kind === 'project-snapshot' ? id(`director-snapshot-${++snapshotSequence}`) : id(kind) })({
     workspaceId, projectId, baseVersionId: noLut.version.id, baseHash: noLut.version.baseHash,
@@ -189,30 +182,6 @@ export async function seedDashboardControlledExportFixture(input) {
   assert.equal(directed.run.qualityReport.status, 'review-required')
   assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
   assert.equal(directed.run.status, 'planned')
-  await client.$transaction(async (transaction) => {
-    const command = bundle.command, version = bundle.version, run = bundle.run, audit = bundle.authenticationAudit
-    await transaction.v2EditCommand.create({ data: { id: command.id, workspaceId, projectId, baseVersionId: command.baseVersionId,
-      baseHash: command.baseHash, type: command.type, scopeJson: stableSerialize(command.scope), payloadJson: stableSerialize(command.payload),
-      reason: command.reason, actorType: command.author.type, actorId: command.author.id, actorCredentialId: audit.credentialId,
-      actorEnvironment: audit.environment, actorAuthenticationKind: audit.authenticationKind, actorContextHash: audit.contextHash,
-      idempotencyKey: command.idempotencyKey, requestFingerprint: bundle.requestFingerprint, createdAt } })
-    for (const snapshot of bundle.snapshots) await transaction.v2ProjectSnapshot.create({ data: { id: snapshot.id, workspaceId, projectId,
-      kind: snapshot.kind, schemaVersion: snapshot.contentSchemaVersion, contentJson: snapshot.contentJson, contentHash: snapshot.contentHash, createdAt } })
-    await transaction.v2ProjectVersion.create({ data: { id: version.id, workspaceId, projectId, sequence: version.sequence,
-      parentVersionId: version.parentVersionId, briefSnapshotId: version.snapshotRefs.brief, treatmentSnapshotId: version.snapshotRefs.treatment,
-      storySnapshotId: version.snapshotRefs.story, editPlanSnapshotId: version.snapshotRefs.editPlan, policiesSnapshotId: version.snapshotRefs.policies,
-      baseHash: version.baseHash, commandId: command.id, createdBy: version.createdBy, createdAt } })
-    const snapshots = command.payload.snapshotRefs
-    await transaction.v2DirectorRun.create({ data: { id: run.id, workspaceId, projectId, commandId: command.id,
-      baseVersionId: run.baseVersionId, resultVersionId: run.resultVersionId, status: run.status,
-      plannerVersion: run.plannerVersion, criticVersion: run.criticVersion, objective: run.objective,
-      objectiveVersion: run.objectiveVersion, rubricRef: run.rubricRef, perceptionSnapshotId: snapshots.perception,
-      treatmentSnapshotId: snapshots.treatment, storySnapshotId: snapshots.story, editPlanSnapshotId: snapshots.editPlan,
-      qualitySnapshotId: snapshots.quality, decisionsJson: stableSerialize(run.decisions), decisionLogJson: stableSerialize(bundle.decisionLog),
-      decisionLogHash: bundle.decisionLog.logHash, assumptionsJson: stableSerialize(run.assumptions),
-      initiatedByType: run.initiatedBy.type, initiatedById: run.initiatedBy.id, createdAt } })
-    await transaction.v2Project.update({ where: { id: projectId }, data: { currentVersionId: version.id } })
-  })
   const projectVersionId = directed.version.id, projectVersionHash = directed.version.baseHash
   // This callback uses the public compilation API and the actual copied source
   // probe. Read it through the same integrity hydrator as runtime before INSERT.
@@ -251,7 +220,7 @@ export async function seedDashboardControlledExportFixture(input) {
     colorPipelineBindingsJson: stableSerialize(colorPipelineBindings), outputArtifactId: proxyArtifactId, outputManifestId: proxyManifestId,
     originalFileName: 'mechanical-proxy.mp4', createdAt } })
   const reviewDocument = { schemaVersion: 'proxy-review/v1', projectVersionId, proxyArtifactId, proxyManifestId,
-    inputHash, outputSpecId: brief.outputSpec.id, rangeCacheKey: calculateVersionHash({ inputHash, seeded: true }),
+    inputHash, outputSpecId, rangeCacheKey: calculateVersionHash({ inputHash, seeded: true }),
     spec: { width: proxyProbe.width, height: proxyProbe.height, codec: 'h264', container: 'mp4', quality: 'review', reusableRanges: true },
     status: 'blocked', technicalIssues: [{ code: 'CONTROLLED_PROXY_FIXTURE_REQUIRES_REVIEW', severity: 'hard', category: 'integrity',
       message: 'Copied fixture bytes were not rendered for this seeded version.', correctable: false }],

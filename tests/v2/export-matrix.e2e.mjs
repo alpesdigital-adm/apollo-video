@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -12,6 +11,8 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { variantBodyFor } from './helpers/explicit-project-http.mjs'
+import { commitSealedChild, persistReceiptForExistingVideo, seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -251,13 +252,20 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
   assert.equal(isAbsolute(ffmpegBin), true)
   assert.equal(isAbsolute(ffprobeBin), true)
 
+  // This suite runs under tsx, where a static named import of a .ts module from an .mjs loses its names: it arrives dynamically.
+  const { ASS_EMISSION_POLICY } = await import('../../src/v2/domain/ass-emission-policy.ts')
   const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
-  const { createPerceptionTimeline } = await import('../../src/v2/domain/perception-timeline.ts')
+  const { createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
+  const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
   const { readOutputFormatPreset } = await import('../../src/v2/domain/output-format-registry.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
-  const { createQualityReport, resolveStrategicRubric } = await import('../../src/v2/domain/strategic-rubric.ts')
-  const { parseFinalExportQuality } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
+  const { compileInitialSourceEditPlan } = await import('../../src/v2/application/apply-editorial-cut-command.ts')
+  const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
+  const { runProjectDirectorService } = await import('../../src/v2/application/run-project-director.ts')
+  const { PrismaDirectorRunRepository } = await import('../../src/v2/infrastructure/prisma/director-run-repository.ts')
+  const { createEvidenceBoundBriefCompiler } = await import('../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts')
+  const { probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
   const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { createExportMatrixPreflightService, commitExportMatrixService } = await import('../../src/v2/application/export-matrices.ts')
   const { runNextProjectFinalExportOperationService } = await import('../../src/v2/application/run-project-final-export-worker.ts')
@@ -331,25 +339,23 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       id: sourceArtifactId, workspaceId, artifactKey: sourceArtifactKey, sha256: sourceSha,
       byteSize: BigInt(sourceBytes.byteLength), mediaType: 'video', container: 'mp4', status: 'available', createdAt,
     } })
+    const sourceProbe = await probeVideo(sourcePath)
+    const sourceManifest = createMediaArtifactManifestV2({ artifactKey: sourceArtifactKey, artifactSha256: sourceSha,
+      byteSize: sourceBytes.byteLength, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'source-master', version: '1.0.0', parameters: { controlled: true } }, sources: [],
+      probe: { width: sourceProbe.width, height: sourceProbe.height, duration: sourceProbe.duration, fps: sourceProbe.fps } })
     await client.v2MediaArtifactManifest.create({ data: {
       id: sourceManifestId, workspaceId, artifactId: sourceArtifactId,
-      schemaVersion: 'media-artifact-manifest/v2', manifestHash: calculateVersionHash({ sourceManifestId }),
-      recipeId: 'source-master', recipeVersion: '1.0.0',
-      parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }),
-      manifestJson: stableSerialize({
-        schemaVersion: 'media-artifact-manifest/v2',
-        artifact: { artifactKey: sourceArtifactKey, sha256: sourceSha, byteSize: sourceBytes.byteLength, mediaType: 'video', container: 'mp4' },
-        recipe: { id: 'source-master', version: '1.0.0', parametersHash: calculateVersionHash({ sourceManifestId, parameters: true }) },
-        sources: [],
-      }),
-      createdAt,
+      schemaVersion: 'media-artifact-manifest/v2', manifestHash: sourceManifest.manifestHash,
+      recipeId: 'source-master', recipeVersion: '1.0.0', parametersHash: sourceManifest.recipe.parametersHash,
+      manifestJson: stableSerialize(sourceManifest), createdAt,
     } })
     await setAssetRightsService({
       repository: new PrismaAssetRightsRepository(client), clock: () => createdAt,
       createId: () => `matrix-rights-${suffix}`,
     })({
       workspaceId, artifactId: sourceArtifactId, baseRevision: assetRightsRevision(sourceArtifactId, 0),
-      draft: { status: 'approved', allowedUses: ['editorial-reuse', 'rendering'], prohibitedUses: [], allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] } },
+      draft: { status: 'approved', allowedUses: ['editing', 'editorial-reuse', 'rendering'], prohibitedUses: [], allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] } },
       actor: { type: 'api-client', id: issued.client.id },
     })
 
@@ -372,122 +378,80 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
 
     const cells = []
     const controlledEvidence = new Map()
+    const seedActor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
+      scopes: ['projects:write', 'media:write'] })
     for (const [index, format] of FORMATS.entries()) {
       const key = format.replace(':', 'x')
       const preset = readOutputFormatPreset(format)
       const projectId = `matrix-project-${key}-${suffix}`
       const baseVersionId = `matrix-base-${key}-${suffix}`
-      const versionId = `matrix-version-${key}-${suffix}`
-      const commandId = `matrix-command-${key}-${suffix}`
-      const directorRunId = `matrix-director-${key}-${suffix}`
+      const transcriptId = `matrix-transcript-${key}-${suffix}`
       const proxyArtifactId = `matrix-proxy-${key}-${suffix}`
       const proxyManifestId = `matrix-proxy-manifest-${key}-${suffix}`
       const proxyOperationId = `matrix-proxy-operation-${key}-${suffix}`
       const proxyReviewId = `matrix-proxy-review-${key}-${suffix}`
-      const snapshots = {
-        brief: `matrix-brief-${key}-${suffix}`, policies: `matrix-policies-${key}-${suffix}`,
-        perception: `matrix-perception-${key}-${suffix}`, treatment: `matrix-treatment-${key}-${suffix}`,
-        story: `matrix-story-${key}-${suffix}`,
-        baseEditPlan: `matrix-base-edit-plan-${key}-${suffix}`,
-        editPlan: `matrix-edit-plan-${key}-${suffix}`,
-        quality: `matrix-quality-${key}-${suffix}`,
-      }
-      const editPlan = {
-        schemaVersion: 2, state: 'compiled', id: `matrix-plan-${key}-${suffix}`, projectVersionId: versionId,
-        fps: 30, durationFrames: 30,
-        videoTracks: [{ id: `matrix-track-${key}-${suffix}`, kind: 'base-video', clips: [{
-          id: `matrix-clip-${key}-${suffix}`, sourceArtifactId, sourceInFrame: 0, sourceOutFrame: 30,
-          timelineInFrame: 0, timelineOutFrame: 30, rate: 1,
-        }] }],
-        subtitleTracks: [], transitions: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
-        composition: {
-          layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
-          faceSafeFallback: [0.08, 0.08, 0.84, 0.84], subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22],
-        },
-      }
-      const baseEditPlan = {
-        ...editPlan,
-        id: `matrix-base-plan-${key}-${suffix}`,
-        projectVersionId: baseVersionId,
-      }
-      // Historical no-observation data is not facial evidence.
-      const perception = matrixPerceptionSnapshot(snapshots.perception,
-        `matrix-transcript-${key}-${suffix}`, createPerceptionTimeline)
-      // The real API reads this report. It must remain an honest v3 review:
-      // neither this controlled media nor a proxy review proves facial clearance.
-      const { rubric, report: quality } = matrixReviewRequiredQuality(
-        `matrix-quality-report-${key}-${suffix}`, `matrix-action-${key}-${suffix}`,
-        createdAt.toISOString(), createQualityReport, resolveStrategicRubric)
-      assert.equal(parseFinalExportQuality({ contentJson: stableSerialize(quality),
-        contentHash: calculateVersionHash(quality), contentSchemaVersion: 3,
-        objective: 'discovery', rubricRef: `${rubric.id}/v${rubric.version}` }).status, 'review-required')
+      // One transcript per source and content: the cells share the source, so the words name the cell.
+      const transcript = createMediaTranscript({ language: 'pt-BR', text: `Fonte controlada ${format}.`,
+        words: [{ word: 'Fonte', start: 0.1, end: 0.5 }, { word: `${key}.`, start: 0.5, end: 0.9 }],
+        segments: [{ id: 0, start: 0.1, end: 0.9, text: `Fonte controlada ${format}.` }], provider: 'controlled', model: 'matrix-fixture-v1' })
 
-      await client.v2Project.create({ data: {
-        id: projectId, workspaceId, name: `Matrix ${format}`, status: 'reviewing-proxy', objective: 'conversion',
-        format, locale: 'pt-BR', createdByType: 'api-client', createdById: issued.client.id, createdAt, updatedAt: createdAt,
+      // The project is born through the real creation Command with the cell's output as an explicit variant; its status is the
+      // fixture's own (the one write made to the project row besides the sealed writers).
+      await seedSealedProject(client, { workspaceId, actor: seedActor, prefix: `matrix-${key}-${suffix}`, ids: { project: projectId },
+        name: `Matrix ${format}`, objective: 'discovery', variant: variantBodyFor({ aspectRatio: format }) })
+      await client.v2Project.update({ where: { id: projectId }, data: { status: 'reviewing-proxy' } })
+      await client.v2ProjectMediaAsset.create({ data: {
+        id: randomUUID(), workspaceId, projectId, artifactId: sourceArtifactId, role: 'source-master',
+        originalFileName: 'shared-source.mp4', createdAt,
       } })
-      for (const [id, kind, schemaVersion, content] of [
-        [snapshots.brief, 'brief', 1, { schemaVersion: 1, productionBrief: { ownerInput: { text: `Matrix ${format}` } } }],
-        [snapshots.policies, 'policies', 1, { schemaVersion: 1, state: 'configured' }],
-        [snapshots.perception, 'perception', 1, perception],
-        [snapshots.treatment, 'treatment', 1, { schemaVersion: 1, state: 'complete' }],
-        [snapshots.story, 'story', 1, { schemaVersion: 1, state: 'complete' }],
-        [snapshots.baseEditPlan, 'edit-plan', 2, baseEditPlan],
-        [snapshots.editPlan, 'edit-plan', 2, editPlan],
-        [snapshots.quality, 'quality-report', 3, quality],
-      ]) {
-        await client.v2ProjectSnapshot.create({ data: {
-          id, workspaceId, projectId, kind, schemaVersion, contentJson: stableSerialize(content),
-          contentHash: calculateVersionHash(content), createdAt,
-        } })
-      }
-      const baseHash = calculateVersionHash({ projectId, version: baseVersionId })
-      await client.v2ProjectVersion.create({ data: {
-        id: baseVersionId, workspaceId, projectId, sequence: 1, briefSnapshotId: snapshots.brief,
-        editPlanSnapshotId: snapshots.baseEditPlan, policiesSnapshotId: snapshots.policies,
-        baseHash, createdBy: issued.client.id, createdAt,
-      } })
-      await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
+      await client.v2MediaTranscript.create({ data: { id: transcriptId, workspaceId, projectId, sourceArtifactId, sourceManifestId,
+        schemaVersion: transcript.schemaVersion, language: transcript.language, provider: transcript.provider, model: transcript.model,
+        providerVersion: 'controlled-v1', transcriptHash: transcript.transcriptHash, transcriptJson: stableSerialize(transcript), createdAt } })
+      // The base Version is a real child Command: it adopts this project's ingest receipt of the shared source and plays it whole.
+      await persistReceiptForExistingVideo(client, { workspaceId, projectId, actor: seedActor, artifactId: sourceArtifactId,
+        createdAt: createdAt.toISOString(), slug: `matrix-${key}-${suffix}` })
+      const basePlan = compileInitialSourceEditPlan({ id: `matrix-plan-${key}-${suffix}`, projectVersionId: baseVersionId,
+        transcriptId, transcript, sourceArtifactId, sourceDurationSeconds: sourceProbe.duration, fps: sourceProbe.fps,
+        createdAt: createdAt.toISOString() })
+      const base = await commitSealedChild(client, { workspaceId, projectId, actor: seedActor, suffix: `matrix-${key}-${suffix}-base`,
+        versionId: baseVersionId, mutatePlan: () => basePlan, adopt: [sourceArtifactId] })
       const noLut = await setProjectLutSelectionService({
         repository: new PrismaProjectLutSelectionRepository(client),
         createId: (kind) => `matrix-lut-${kind}-${key}-${suffix}`,
         createEventId: randomUUID,
         clock: () => createdAt,
       })({
-        workspaceId, projectId, baseVersionId, baseHash,
+        workspaceId, projectId, baseVersionId: base.version.id, baseHash: base.version.baseHash,
         selection: { mode: 'none' }, actor: { type: 'system', id: 'matrix-e2e-system' },
         idempotencyKey: `matrix-lut-none-${key}-${suffix}`,
         reason: 'Keep the export matrix colorimetrically neutral.',
       })
       assert.equal(noLut.selection.resolved.mode, 'none')
-      await client.v2EditCommand.create({ data: {
-        id: commandId, workspaceId, projectId, baseVersionId: noLut.version.id, baseHash: noLut.version.baseHash, type: 'run-director',
-        scopeJson: stableSerialize({ kind: 'video', targetIds: [] }),
-        payloadJson: stableSerialize({ schemaVersion: 1, directorRunId }), reason: 'Matrix E2E',
-        actorType: 'api-client', actorId: issued.client.id, idempotencyKey: `matrix-director-${key}-${suffix}`,
-        requestFingerprint: calculateVersionHash({ commandId }), createdAt,
-      } })
-      const versionHash = calculateVersionHash({ projectId, version: versionId })
-      await client.v2ProjectVersion.create({ data: {
-        id: versionId, workspaceId, projectId, sequence: 3, parentVersionId: noLut.version.id,
-        briefSnapshotId: snapshots.brief, treatmentSnapshotId: snapshots.treatment, storySnapshotId: snapshots.story,
-        editPlanSnapshotId: snapshots.editPlan, policiesSnapshotId: snapshots.policies,
-        baseHash: versionHash, createdBy: issued.client.id, commandId, createdAt,
-      } })
-      await client.v2DirectorRun.create({ data: {
-        id: directorRunId, workspaceId, projectId, commandId, baseVersionId: noLut.version.id, resultVersionId: versionId,
-        status: 'succeeded', objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1',
-        plannerVersion: 'matrix-e2e-1.0.0', criticVersion: 'matrix-e2e-1.0.0',
-        perceptionSnapshotId: snapshots.perception, treatmentSnapshotId: snapshots.treatment,
-        storySnapshotId: snapshots.story, editPlanSnapshotId: snapshots.editPlan, qualitySnapshotId: snapshots.quality,
-        decisionsJson: '[]', assumptionsJson: '[]', initiatedByType: 'api-client', initiatedById: issued.client.id,
-        createdAt, updatedAt: createdAt,
-      } })
-      await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
-      await client.v2ProjectMediaAsset.create({ data: {
-        id: randomUUID(), workspaceId, projectId, artifactId: sourceArtifactId, role: 'source-master',
-        originalFileName: 'shared-source.mp4', createdAt,
-      } })
+      // The real Director reads the sealed parent: with no detector evidence its report is an honest v3 review-required one,
+      // neither this controlled media nor a proxy review proves facial clearance.
+      const directed = await runProjectDirectorService({
+        repository: new PrismaDirectorRunRepository(client), clock: () => createdAt, createEventId: randomUUID,
+        compileBrief: createEvidenceBoundBriefCompiler(),
+        createId: (kind) => `matrix-${kind}-${key}-${suffix}-${randomUUID().slice(0, 8)}`,
+      })({
+        workspaceId, projectId, baseVersionId: noLut.version.id, baseHash: noLut.version.baseHash, actor: seedActor,
+        idempotency: { key: `matrix-director-${key}-${suffix}` }, reason: 'Matrix E2E',
+      })
+      assert.equal(directed.run.qualityReport.status, 'review-required')
+      assert.equal(directed.run.qualityReport.faceSafety.status, 'unknown')
+      // The real Director leaves its run `planned`. This suite proves export MECHANICS through a controlled port, and the admission
+      // of a final export wants a `succeeded` run: that status is set here, explicitly, on the run's own mutable row. The stored
+      // QualityReport stays the real review-required / unknown one (nothing here approves it).
+      await client.v2DirectorRun.update({ where: { id: directed.run.id }, data: { status: 'succeeded' } })
+      const quality = directed.run.qualityReport
+      const versionId = directed.version.id
+      const versionHash = directed.version.baseHash
+      const directorRunId = directed.run.id
+      const editPlanSnapshotId = directed.version.snapshotRefs.editPlan
+      const qualitySnapshotId = directed.command.payload.snapshotRefs.quality
+      const editPlanRow = await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: editPlanSnapshotId } })
+      const qualityRow = await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: qualitySnapshotId } })
+      assert.equal(qualityRow.contentJson, stableSerialize(quality))
 
       const proxyKey = `workspaces/${workspaceId}/proxies/${key}.mp4`
       await client.v2MediaArtifact.create({ data: {
@@ -516,7 +480,7 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       } })
       await client.v2ProjectProxyRenderOperation.create({ data: {
         operationId: proxyOperationId, workspaceId, projectId, projectVersionId: versionId,
-        editPlanSnapshotId: snapshots.editPlan, sourceArtifactId, sourceManifestId, inputHash: proxyInputHash,
+        editPlanSnapshotId, sourceArtifactId, sourceManifestId, inputHash: proxyInputHash,
         colorPipelineBindingsJson: stableSerialize([]),
         outputArtifactId: proxyArtifactId, outputManifestId: proxyManifestId,
         originalFileName: `${key}-proxy.mp4`, createdAt,
@@ -533,9 +497,9 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       } })
       cells.push({ recipeId: 'review-required-master-v3', projectId, projectVersionId: versionId,
         projectVersionHash: versionHash, format, locale: 'pt-BR' })
-      controlledEvidence.set(projectId, Object.freeze({ directorRunId, qualitySnapshotId: snapshots.quality,
-        qualitySnapshotHash: calculateVersionHash(quality), quality,
-        editPlanSnapshotId: snapshots.editPlan, editPlanHash: calculateVersionHash(editPlan),
+      controlledEvidence.set(projectId, Object.freeze({ directorRunId, qualitySnapshotId,
+        qualitySnapshotHash: qualityRow.contentHash, quality,
+        editPlanSnapshotId, editPlanHash: editPlanRow.contentHash,
         proxyReviewId, proxyReviewHash: calculateVersionHash({ proxyReviewId, versionId, proxyArtifactId, status: 'ready-for-final' }),
         proxyArtifactId, proxyManifestId, sourceArtifactId, sourceManifestId, sourceSha256: sourceSha }))
     }
@@ -672,7 +636,10 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       if (sourceDeclaration.artifactKey !== sourceArtifactKey ||
           sourceDeclaration.sha256 !== evidence.sourceSha256 ||
           sourceDeclaration.byteSize !== sourceBytes.byteLength) return null
-      return Object.freeze({ ...source, projectVersionHash: cell.projectVersionHash,
+      // The Director's plan carries caption cues, and the final export worker does not hand the renderer the placement plan a rendered cue
+      // requires (INVALID_RENDER_INPUT: "Rendered subtitle cues require a complete unknown-face review plan"). This proof is about export
+      // MECHANICS through a controlled port, so the port renders the cut without its captions; the stored plan and its hash are untouched.
+      return Object.freeze({ ...source, editPlan: Object.freeze({ ...source.editPlan, subtitleTracks: Object.freeze([]) }), projectVersionHash: cell.projectVersionHash,
         locale: project.locale ?? 'pt-BR', directorRunId: evidence.directorRunId,
         qualitySnapshotId: evidence.qualitySnapshotId,
         qualitySnapshotHash: evidence.qualitySnapshotHash,
@@ -735,7 +702,7 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       approval: { approved: true, note: 'Controlled export mechanics only.' },
       actor: controlledActor })
     const matrixId = committed.matrix.id
-    assert.equal(committed.matrix.status, 'queued')
+    assert.equal(committed.matrix.status, 'queued', JSON.stringify(committed.matrix).slice(0, 3000))
     assert.equal(new Set(committed.matrix.cells.map((cell) => cell.operationId)).size, 5)
 
     function controlledWorker(ffmpegPath) {
@@ -813,6 +780,8 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
       errorRetryable: retryOperation?.errorRetryable,
       attempt: retryOperation?.attempt,
       maxAttempts: retryOperation?.maxAttempts,
+      attempts: retryOutcome ? (await client.v2ProjectFinalExportAttempt.findMany({ where: { operationId: retryOutcome.operationId } }))
+        .map((entry) => ({ attempt: entry.attempt, status: entry.status, code: entry.errorCode, stage: entry.errorStage, validators: entry.validatorsJson })) : [],
       workerChecks: {
         sourceFound: Boolean(retrySource),
         inputHashMatches: recomputedInputHash === retryDetail?.inputHash,
@@ -823,6 +792,12 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
         bindingCount: retryBindings.length,
         renderSourceIds: retrySource?.renderSources.map((source) => source.artifactId),
         bindingSourceIds: retryBindings.map((binding) => binding.sourceArtifactId),
+        planFps: retrySource?.editPlan.fps,
+        outputFps: retryOutputSpec?.fps,
+        proxyReviewMatches: retrySource?.proxyReviewId === retryDetail?.proxyReviewId && retrySource?.proxyReviewHash === retryDetail?.proxyReviewHash,
+        audioTimelineMatches: retrySource ? retrySource.editPlan.audioTimelineHash === undefined
+          || retrySource.editPlan.audioTimelineHash === createEditorialAudioTimelineHash({ fps: retrySource.editPlan.fps,
+            clips: retrySource.editPlan.videoTracks.find((track) => track.kind === 'base-video').clips }) : null,
       },
     }))
     const retryResponse = await fetch(`${baseUrl}/v1/export-matrices/${matrixId}`, { headers: { authorization } })

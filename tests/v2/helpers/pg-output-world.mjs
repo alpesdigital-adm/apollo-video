@@ -19,7 +19,8 @@ import { randomUUID } from 'node:crypto'
 const { compileInitialSourceEditPlan } = await import('../../../src/v2/application/apply-editorial-cut-command.ts')
 const { createExternalAuditContext, materializeActorAuditContext } = await import('../../../src/v2/application/authenticate-api-client.ts')
 const { createProjectService, createProjectOutputVariantService } = await import('../../../src/v2/application/create-project.ts')
-const { createAssetRightsSnapshot } = await import('../../../src/v2/domain/asset-rights.ts')
+const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../../src/v2/domain/asset-rights.ts')
+const { createAssetRightsChangeIntent } = await import('../../../src/v2/domain/asset-rights-change.ts')
 const { calculateCanonicalHash, stableSerialize } = await import('../../../src/v2/domain/canonical-hash.ts')
 const { createMediaTranscript } = await import('../../../src/v2/domain/media-transcript.ts')
 const { serializeOutputCanonicalJson } = await import('../../../src/v2/domain/output-canonical-policy.ts')
@@ -115,10 +116,21 @@ export function assetRightsRow(snapshot) {
   }
 }
 
-/** Stores a rights snapshot and makes it the artifact's current one at its sequence (the audited pointer and revision). */
+/**
+ * Stores a rights snapshot and makes it the artifact's current one at its sequence (the pointer and the revision), with the audit change
+ * that revision names: anything that reads the artifact's rights back with its history (a fork, a duplicate) refuses a revision that has
+ * no audit change.
+ */
 export async function persistCurrentRights(client, snapshot) {
   await client.v2AssetRightsSnapshot.create({ data: assetRightsRow(snapshot) })
   await client.v2MediaArtifact.update({ where: { id: snapshot.artifactId }, data: { currentRightsSnapshotId: snapshot.id, rightsRevision: snapshot.sequence } })
+  const change = createAssetRightsChangeIntent({ workspaceId: snapshot.workspaceId, artifactId: snapshot.artifactId, snapshotHash: snapshot.snapshotHash,
+    baseRevision: assetRightsRevision(snapshot.artifactId, snapshot.sequence - 1),
+    actor: { kind: 'internal', actorType: snapshot.createdBy.type, actorId: snapshot.createdBy.id }, changedAt: snapshot.createdAt })
+  await client.v2AssetRightsChange.create({ data: { id: change.id, workspaceId: change.workspaceId, artifactId: change.artifactId, sequence: snapshot.sequence,
+    snapshotId: snapshot.id, snapshotHash: change.snapshotHash, baseRevision: change.baseRevision,
+    resultRevision: assetRightsRevision(snapshot.artifactId, snapshot.sequence), actorKind: 'internal', actorType: snapshot.createdBy.type,
+    actorId: snapshot.createdBy.id, requestFingerprint: change.requestFingerprint, changedAt: new Date(change.changedAt) } })
   return snapshot
 }
 
@@ -195,21 +207,23 @@ export async function persistRecording(client, {
  * caller (a journey grants rights through the production service).
  */
 export async function persistReceiptForExistingVideo(client, {
-  workspaceId, projectId, actor, artifactId, createdAt = new Date().toISOString(), nativeFps, durationFrames, width, height,
+  workspaceId, projectId, actor, artifactId, createdAt = new Date().toISOString(), nativeFps, durationFrames, width, height, slug: given, derivative,
 }) {
   const scope = { workspaceId, projectId }
   const manifestRow = await client.v2MediaArtifactManifest.findFirstOrThrow({ where: { artifactId, workspaceId }, orderBy: { createdAt: 'asc' } })
   const manifest = JSON.parse(manifestRow.manifestJson)
   const fps = nativeFps ?? manifest.probe?.fps ?? 30
-  const slug = `existing-${artifactId}`
+  // One source can be ingested into several projects: each ingest has its own operation, proxy and receipt, named by `slug`.
+  const slug = given ?? `existing-${artifactId}`
   const receipt = controlledNormalization(projectId, scope, { slug, createdAt, nativeFps: fps,
     durationFrames: durationFrames ?? Math.max(2, Math.round((manifest.probe?.duration ?? 2) * fps)),
     width: width ?? manifest.probe?.width, height: height ?? manifest.probe?.height,
+    ...(derivative ? { derivativeKey: derivative.key, derivativeSha256: derivative.sha256, derivativeByteSize: derivative.byteSize } : {}),
     source: { artifactId, manifestId: manifestRow.id, manifest } })
   const document = receipt.document
   const audit = materializeActorAuditContext(actor)
   await new PrismaMediaArtifactRepository(client).persistOrReplay({ workspaceId, artifactId: document.derivative.artifactId,
-    manifestId: document.derivative.manifestId, lineageIds: [artifactId], manifest: document.derivative.manifest, createdAt })
+    manifestId: document.derivative.manifestId, lineageIds: [`lineage-${document.derivative.artifactId}-0`], manifest: document.derivative.manifest, createdAt })
   await client.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId, projectId, artifactId: document.derivative.artifactId,
     role: 'editing-proxy', originalFileName: `${slug}-proxy.mp4`, createdAt: new Date(createdAt) } })
   const queued = createQueuedPublicOperation({ ...scope, id: document.operationId, clientId: actor.clientId, type: 'media-ingest',
@@ -231,7 +245,7 @@ export async function persistReceiptForExistingVideo(client, {
     id: `rights-${document.derivative.artifactId}-1`, workspaceId, artifactId: document.derivative.artifactId, sequence: 1,
     draft: { status: 'approved', allowedUses: [...RECORDING_ALLOWED_USES], prohibitedUses: [], sourceNote: `${slug}-proxy`, consent: { status: 'not-required', allowedUses: [] } },
     createdBy: { type: 'api-client', id: actor.clientId }, createdAt }))
-  return Object.freeze({ slug, receipt, proxyRights, sourceArtifactId: artifactId, sourceManifestId: manifestRow.id })
+  return Object.freeze({ slug, receipt, proxyRights, operationId: document.operationId, sourceArtifactId: artifactId, sourceManifestId: manifestRow.id })
 }
 
 /**

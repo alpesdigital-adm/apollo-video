@@ -16,6 +16,7 @@ const CANVAS = Object.freeze({
   '9:16': { width: 360, height: 640, proxyWidth: 180, proxyHeight: 320 },
   '1:1': { width: 480, height: 480, proxyWidth: 240, proxyHeight: 240 },
   '4:5': { width: 384, height: 480, proxyWidth: 192, proxyHeight: 240 },
+  '21:9': { width: 840, height: 360, proxyWidth: 420, proxyHeight: 180 },
 })
 
 /**

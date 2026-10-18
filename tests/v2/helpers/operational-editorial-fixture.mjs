@@ -82,7 +82,9 @@ function normalization(sourceProjectId,scope,options={}) {
  const existing=options.source // {artifactId,manifestId,manifest}: the recording's own persisted facts
  const sourceManifest=existing?.manifest??createMediaArtifactManifest({artifactKey:sourceKey,artifactSha256:sourceSha,byteSize:sourceBytes,mediaType:'video',container:'mp4',recipe:{id:'direct-upload',version:'1.0.0',parameters:{mimeType:'video/mp4'}},
   probe:{width:sourceProbe.width,height:sourceProbe.height,duration:(options.durationFrames??60)/(options.nativeFps??30),fps:options.nativeFps??30}})
- const derivativeManifest=createMediaArtifactManifestV2({artifactKey:names.derivativeKey,artifactSha256:names.derivativeSha,byteSize:2000,mediaType:'video',container:'mp4',
+ // A suite whose page plays the editing proxy writes a real file and names its key, digest and size too.
+ const derivativeKey=options.derivativeKey??names.derivativeKey,derivativeSha=options.derivativeSha256??names.derivativeSha
+ const derivativeManifest=createMediaArtifactManifestV2({artifactKey:derivativeKey,artifactSha256:derivativeSha,byteSize:options.derivativeByteSize??2000,mediaType:'video',container:'mp4',
   recipe:{id:'editing-proxy',version:'1.2.0',parameters:{normalizationPolicy:'output-normalization-receipt/v3',maxWidth:1280,maxHeight:1280,videoCodec:'h264',audioCodec:'aac'}},
   sources:[{artifactKey:sourceManifest.artifact.artifactKey,sha256:sourceManifest.artifact.sha256,role:'source-master',execution:{tool:{id:'ffmpeg',version:'static',digest:'f'.repeat(64)}}}],
   probe:{width:derivativeProbe.width,height:derivativeProbe.height,duration:(options.durationFrames??60)/(options.nativeFps??30),fps:options.nativeFps??30}})
@@ -91,7 +93,7 @@ function normalization(sourceProjectId,scope,options={}) {
   sourceProbe,derivativeProbe,audioProbes:{source:observedAudioFromVideoProbeV3(sourceProbe),derivative:observedAudioFromVideoProbeV3(derivativeProbe)},
   execution:{provider:'ffmpeg',recipeVersion:'media-normalization-execution/2026-10-14-v3',binarySha256:'f'.repeat(64),argv:['-hide_banner','-loglevel','error','-y','-i','/controlled/'+names.slug+'/source.mp4','-map','0:v:0','-map','0:a:0?',
    '-vf','scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos','-c:v','libx264','-preset','veryfast','-crf','24','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-ar','48000','-movflags','+faststart','/controlled/'+names.slug+'/derivative.mp4'],
-   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:sourceManifest.artifact.sha256,sourceSha256After:sourceManifest.artifact.sha256,derivativeSha256:names.derivativeSha,autorotate:true},createdAt:options.createdAt??'2026-10-14T12:00:02.000Z'}))
+   spawnObserved:true,closeObserved:true,exitCode:0,sourceSha256Before:sourceManifest.artifact.sha256,sourceSha256After:sourceManifest.artifact.sha256,derivativeSha256:derivativeSha,autorotate:true},createdAt:options.createdAt??'2026-10-14T12:00:02.000Z'}))
 }
 // The observed probe of an audio recording: one packet per 1600 samples at 48 kHz, demux origin read from the format.
 function observedAudio({durationSeconds=2,channels=1}={}) {
