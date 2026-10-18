@@ -16,12 +16,13 @@ import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
  * not run in CI).
  *
  * The source is a 6 s portrait master: a flat picture with a GREEN frame and a MAGENTA rectangle - the stand-in for a face - in the
- * lower centre, drawn only in source frames 120-179. The Director cut plays it in a different order and with a jump:
+ * lower centre, drawn only in source frames 120-179. The Director cut trims it and jumps over the middle:
  *
- *     timeline  0- 59   <- source 120-179   (the stand-in face is on screen)
- *     timeline 60-119   <- source   0- 59   (it is not)
+ *     timeline  0- 59   <- source   0- 59   (no stand-in face)
+ *     timeline 60-119   <- source 120-179   (the stand-in face is on screen)
  *
- * so what the pixels show at a timeline frame is NOT what the source shows at the same frame number. The face windows are produced
+ * so what the pixels show at a timeline frame of the second half is NOT what the source shows at the same frame number (source 60-119
+ * has no face at all). The face windows are produced
  * by the real enqueue + worker + repository over PostgreSQL, in SOURCE frames, while the project's head is the BASE Version (one clip
  * playing the whole source); the final is exported from the Director's Version, which did not exist then. The detector is a stand-in
  * (it returns real V9 tensors for the source frames where the stand-in face is, because no real detector sees a magenta box as a face);
@@ -29,8 +30,8 @@ import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
  * The pixel critic is wired with a colour-key face veto of its own, which finds the stand-in on the caption-free frame.
  *
  *   F0  the cut, no cues                                       -> the control
- *   F1  the cut, two cues, windows over the whole source       -> BOTH burned: the cue over the face is moved off it, the other
- *                                                                stays in the preferred bottom band (evidence reused across Versions)
+ *   F1  the cut, two cues, windows over the whole source       -> BOTH burned: the first cue keeps the preferred bottom band, the
+ *                                                                cue over the face is moved off it (evidence reused across Versions)
  *   F2  the cut, two cues, windows over source 0-149 only      -> the cue over source 130-169 is OMITTED and LISTED, the other burned
  *   F3  the cut, two cues, evidence placed on the TIMELINE     -> the pixel critic catches the caption on the face: no final is delivered
  */
@@ -48,13 +49,15 @@ const MARKER = Object.freeze({ x: 72, y: 224, w: 36, h: 83 })
 const FACE_ROW = Object.freeze([0.9, MARKER.x / MASTER.width, MARKER.y / MASTER.height, (MARKER.x + MARKER.w) / MASTER.width, (MARKER.y + MARKER.h) / MASTER.height])
 const FACE_FIRST_SOURCE_FRAME = 120
 const CUT = Object.freeze([
-  { sourceInFrame: 120, sourceOutFrame: 180, timelineInFrame: 0, timelineOutFrame: 60 },
-  { sourceInFrame: 0, sourceOutFrame: 60, timelineInFrame: 60, timelineOutFrame: 120 },
+  { sourceInFrame: 0, sourceOutFrame: 60, timelineInFrame: 0, timelineOutFrame: 60 },
+  { sourceInFrame: 120, sourceOutFrame: 180, timelineInFrame: 60, timelineOutFrame: 120 },
 ])
-const CUE_FACE = Object.freeze({ id: 'cue-face', startFrame: 10, endFrame: 50, text: 'Legenda sobre o rosto', anchor: 'bottom' })
-const CUE_CLEAR = Object.freeze({ id: 'cue-clear', startFrame: 70, endFrame: 110, text: 'Legenda no trecho livre', anchor: 'bottom' })
-const FACE_CUE_FRAMES = Object.freeze([15, 30, 45])
-const CLEAR_CUE_FRAMES = Object.freeze([75, 90, 105])
+// The free cue comes first: the anchor solver keeps the previous band whenever it is still eligible (hysteresis), so a free cue AFTER a
+// moved one would legitimately stay where that one went. First, it takes the preferred bottom band; the cue over the face must leave it.
+const CUE_CLEAR = Object.freeze({ id: 'cue-clear', startFrame: 10, endFrame: 50, text: 'Legenda no trecho livre', anchor: 'bottom' })
+const CUE_FACE = Object.freeze({ id: 'cue-face', startFrame: 70, endFrame: 110, text: 'Legenda sobre o rosto', anchor: 'bottom' })
+const CLEAR_CUE_FRAMES = Object.freeze([15, 30, 45])
+const FACE_CUE_FRAMES = Object.freeze([75, 90, 105])
 const QUIET_FRAMES = Object.freeze([2, 55, 65, 115])
 
 // ---- the oracle: code of its own, no import from the critic's decision logic -----------------------------------------------------
@@ -374,14 +377,14 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
     const FIRST_PART = { startSourceFrame: 0, endSourceFrame: 150 }
     // the detector stand-in sees the stand-in face where the source has it: source frames 120-179
     const faceWhereTheSourceHasIt = (frame) => (frame >= FACE_FIRST_SOURCE_FRAME ? [FACE_ROW] : [])
-    // a producer that measured on the TIMELINE would have put the face at timeline 0-59 and none after
-    const faceWhereTheTimelineHasIt = (frame) => (frame < 60 ? [FACE_ROW] : [])
+    // a producer that measured on the TIMELINE would have put the face at timeline 60-119 (where it is on screen) and none elsewhere
+    const faceWhereTheTimelineHasIt = (frame) => (frame >= 60 && frame < 120 ? [FACE_ROW] : [])
 
     const worlds = {
       F0: await seedWorld({ key: 'f0', source: masterFile, cues: [] }),
-      F1: await seedWorld({ key: 'f1', source: masterFile, cues: [CUE_FACE, CUE_CLEAR], windows: [EVERYWHERE], rowsAt: faceWhereTheSourceHasIt }),
-      F2: await seedWorld({ key: 'f2', source: masterFile, cues: [CUE_FACE, CUE_CLEAR], windows: [FIRST_PART], rowsAt: faceWhereTheSourceHasIt }),
-      F3: await seedWorld({ key: 'f3', source: masterFile, cues: [CUE_FACE, CUE_CLEAR], windows: [EVERYWHERE], rowsAt: faceWhereTheTimelineHasIt }),
+      F1: await seedWorld({ key: 'f1', source: masterFile, cues: [CUE_CLEAR, CUE_FACE], windows: [EVERYWHERE], rowsAt: faceWhereTheSourceHasIt }),
+      F2: await seedWorld({ key: 'f2', source: masterFile, cues: [CUE_CLEAR, CUE_FACE], windows: [FIRST_PART], rowsAt: faceWhereTheSourceHasIt }),
+      F3: await seedWorld({ key: 'f3', source: masterFile, cues: [CUE_CLEAR, CUE_FACE], windows: [EVERYWHERE], rowsAt: faceWhereTheTimelineHasIt }),
     }
 
     // ---- the evidence was produced in SOURCE frames, under a Version that is not the one exported ----
@@ -428,7 +431,7 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
     assert.ok(otherBands.length > 0, 'the preset offers a band other than the bottom one')
     const facts = { premise: [], faceCueMovedOffTheFace: [], clearCueInBottomBand: [], quiet: [], omitted: [], keyedByTimelineCaught: null }
 
-    // the premise, from the delivered control: the stand-in face is on screen on timeline 0-59 and not on 60-119
+    // the premise, from the delivered control: the stand-in face is on screen on timeline 60-119 and not on 0-59
     const markerAt = new Map()
     for (const number of [...FACE_CUE_FRAMES, ...CLEAR_CUE_FRAMES]) {
       const raw = await frame(F0.delivered, number, width, height)
@@ -438,13 +441,13 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
       markerAt.set(number, box)
       facts.premise.push({ frame: number, marker: box })
     }
-    for (const number of FACE_CUE_FRAMES) assert.ok(markerAt.get(number), `the stand-in face is on screen at timeline frame ${number} (source ${number + 120})`)
-    for (const number of CLEAR_CUE_FRAMES) assert.equal(markerAt.get(number), null, `no stand-in face at timeline frame ${number} (source ${number - 60})`)
+    for (const number of FACE_CUE_FRAMES) assert.ok(markerAt.get(number), `the stand-in face is on screen at timeline frame ${number} (source ${number + 60})`)
+    for (const number of CLEAR_CUE_FRAMES) assert.equal(markerAt.get(number), null, `no stand-in face at timeline frame ${number} (source ${number})`)
     const markerBox = markerAt.get(FACE_CUE_FRAMES[0])
     const bottomPx = px(bands.bottom, width, height)
     assert.equal(intersects({ left: bottomPx.left, top: bottomPx.top, right: bottomPx.right, bottom: bottomPx.bottom }, markerBox), true, 'the stand-in face is under the bottom band')
 
-    // F1: the cue over the face is burned OFF it, in another band; the cue over the free stretch keeps the bottom band
+    // F1: the cue over the free stretch takes the preferred bottom band; the cue over the face is burned OFF it, in another band
     for (const number of FACE_CUE_FRAMES) {
       const [delivered, control] = await Promise.all([frame(F1.delivered, number, width, height), frame(F0.delivered, number, width, height)])
       const measured = captionFootprintOf(delivered, control, width, height)
@@ -470,7 +473,7 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
       facts.quiet.push({ frame: number, changedPixels: measured.changedPixels })
     }
 
-    // F2: evidence only over source 0-149: the cue over source 130-169 cannot be certified, so NOTHING is drawn for it; the other is
+    // F2: evidence only over source 0-149: the cue over source 130-169 (timeline 70-109) cannot be certified, so NOTHING is drawn for it
     for (const number of FACE_CUE_FRAMES) {
       const [delivered, control] = await Promise.all([frame(F2.delivered, number, width, height), frame(F0.delivered, number, width, height)])
       const measured = captionFootprintOf(delivered, control, width, height)
@@ -486,12 +489,12 @@ test('T-W65B final export on a Director cut with face evidence keyed by source t
 
     if (evidenceDir) {
       await mkdir(evidenceDir, { recursive: true })
-      await png(F0.delivered, 30, join(evidenceDir, 'F0-control-timeline-30-face-on-screen.png'))
-      await png(F0.delivered, 90, join(evidenceDir, 'F0-control-timeline-90-no-face.png'))
-      await png(F1.delivered, 30, join(evidenceDir, 'F1-face-cue-moved-off-the-face-30.png'))
-      await png(F1.delivered, 90, join(evidenceDir, 'F1-clear-cue-in-bottom-band-90.png'))
-      await png(F2.delivered, 30, join(evidenceDir, 'F2-uncertifiable-cue-omitted-30.png'))
-      await png(F2.delivered, 90, join(evidenceDir, 'F2-covered-cue-burned-90.png'))
+      await png(F0.delivered, 30, join(evidenceDir, 'F0-control-timeline-30-no-face.png'))
+      await png(F0.delivered, 90, join(evidenceDir, 'F0-control-timeline-90-face-on-screen.png'))
+      await png(F1.delivered, 30, join(evidenceDir, 'F1-clear-cue-in-bottom-band-30.png'))
+      await png(F1.delivered, 90, join(evidenceDir, 'F1-face-cue-moved-off-the-face-90.png'))
+      await png(F2.delivered, 30, join(evidenceDir, 'F2-covered-cue-burned-30.png'))
+      await png(F2.delivered, 90, join(evidenceDir, 'F2-uncertifiable-cue-omitted-90.png'))
     }
 
     // F3 (mutation): evidence placed at the TIMELINE's frames instead of the source's says "no face" under the cue that is over the

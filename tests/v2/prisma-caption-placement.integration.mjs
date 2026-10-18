@@ -143,10 +143,11 @@ test('W65b PostgreSQL caption placement: sealed source windows place, move or wi
       assert.equal(decisionOf(overClean, 'cut-clean').disposition, 'placed')
       assert.equal(decisionOf(overClean, 'cut-clean').anchor, 'bottom')
       assert.deepEqual(overClean.placementPlan.subtitleAnchorPlan.faceClearance.streams[0].trustedEnvelopeHashes, [clean.envelopeHash])
-      // the jump to source [600,650) has no window: withheld, and the SOURCE window to request is the source's, not the timeline's
+      // the jump to source [600,650) has no window: withheld, and the SOURCE window to request is the source's, not the timeline's (it
+      // starts one sample gap before the cue and cannot extend past the last source frame any clip plays)
       const jump = await planCut([{ id: 'cut-jump', startFrame: 160, endFrame: 190 }])
       assert.equal(decisionOf(jump, 'cut-jump').disposition, 'review-required')
-      assert.deepEqual(jump.requiredFaceWindows, [{ sourceArtifactId: world.sourceId, windows: [{ startSourceFrame: 610 - 15, endSourceFrame: 640 + 15 }] }])
+      assert.deepEqual(jump.requiredFaceWindows, [{ sourceArtifactId: world.sourceId, windows: [{ startSourceFrame: 610 - 15, endSourceFrame: 650 }] }])
       // a cue across a cut is measured in both clips and never as one run through the skipped source frames
       const acrossCut = await planCut([{ id: 'cut-across', startFrame: 40, endFrame: 60 }])
       assert.equal(decisionOf(acrossCut, 'cut-across').bandAssessments.bottom.face.state, 'occupied', 'the part over source 320-330 sees the face of frame 320')
