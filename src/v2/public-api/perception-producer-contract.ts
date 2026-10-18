@@ -71,3 +71,31 @@ export function parseFaceWindowRunRequest(raw: unknown): Readonly<{
     window: Object.freeze({ startTimelineFrame: window.startTimelineFrame as number, endTimelineFrame: window.endTimelineFrame as number }),
   })
 }
+
+/**
+ * A V9 SOURCE window (W65b): identity of the source and the frames of ITS OWN timeline to observe. No version, no timeline range;
+ * cadence and scores are server-owned.
+ */
+export function parseFaceSourceWindowRunRequest(raw: unknown): Readonly<{
+  sourceArtifactId: string
+  window: Readonly<{ startSourceFrame: number; endSourceFrame: number }>
+}> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new DomainError('INVALID_ARGUMENT', 'Face source window request must be an object')
+  }
+  const value = raw as Record<string, unknown>
+  const window = value.window as Record<string, unknown> | undefined
+  if (Object.keys(value).sort().join('|') !== 'sourceArtifactId|window' ||
+      typeof value.sourceArtifactId !== 'string' || !ID.test(value.sourceArtifactId) ||
+      !window || typeof window !== 'object' || Array.isArray(window) ||
+      Object.keys(window).sort().join('|') !== 'endSourceFrame|startSourceFrame' ||
+      !Number.isSafeInteger(window.startSourceFrame) || Number(window.startSourceFrame) < 0 ||
+      !Number.isSafeInteger(window.endSourceFrame) || Number(window.endSourceFrame) <= Number(window.startSourceFrame) ||
+      Number(window.endSourceFrame) - Number(window.startSourceFrame) > 300) {
+    throw new DomainError('INVALID_ARGUMENT', 'Face source window request fields are invalid')
+  }
+  return Object.freeze({
+    sourceArtifactId: value.sourceArtifactId,
+    window: Object.freeze({ startSourceFrame: window.startSourceFrame as number, endSourceFrame: window.endSourceFrame as number }),
+  })
+}

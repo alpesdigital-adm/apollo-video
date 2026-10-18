@@ -43,6 +43,8 @@ model V2Workspace {
   temporalProducerOperations             V2TemporalProducerOperation[]
   faceProducerEnvelopes                  V2FaceProducerEnvelope[]
   faceProducerOperations                 V2FaceProducerOperation[]
+  faceSourceWindowEnvelopes              V2FaceSourceWindowEnvelope[]
+  faceSourceWindowRawOutputs             V2FaceSourceWindowRawOutput[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
   mediaUploads                           V2MediaUpload[]
   mediaUploadAuditEntries                V2MediaUploadAuditEntry[]
@@ -1981,6 +1983,7 @@ model V2MediaArtifact {
   temporalProducerOperations  V2TemporalProducerOperation[]
   faceProducerEnvelopes       V2FaceProducerEnvelope[]
   faceProducerOperations      V2FaceProducerOperation[]
+  faceSourceWindowEnvelopes   V2FaceSourceWindowEnvelope[]
   imageAnalysisThumbnails      V2ImageAnalysis[]                         @relation("ImageAnalysisThumbnailArtifact")
   imageAnalysisPreviews        V2ImageAnalysis[]                         @relation("ImageAnalysisPreviewArtifact")
   imageReuseSources            V2ImageReuseReference[]                   @relation("ImageReuseSourceArtifact")
@@ -2455,6 +2458,54 @@ model V2FaceProducerRawOutput {
   @@map("face_producer_raw_outputs")
 }
 
+/// A sealed face window of one SOURCE artifact (W65b, `face-producer-envelope/v3`): keyed by the source's bytes and its own
+/// frames, not by a project, a version or an EditPlan. The operation that produced it is lineage, not identity.
+model V2FaceSourceWindowEnvelope {
+  id                     String   @id @db.VarChar(128)
+  workspaceId            String   @db.VarChar(128)
+  sourceArtifactId       String   @db.VarChar(128)
+  sourceSha256           String   @db.Char(64)
+  operationId            String   @unique @db.VarChar(128)
+  operationAttempt       Int
+  operationFenceHash     String   @db.Char(64)
+  detectorConfigHash     String   @db.Char(64)
+  contentJson            String   @db.Text
+  envelopeHash           String   @db.Char(64)
+  schemaVersion          String   @default("face-producer-envelope/v3") @db.VarChar(64)
+  windowStartSourceFrame Int
+  windowEndSourceFrame   Int
+  createdAt              DateTime @db.Timestamptz(3)
+  rawOutputs             V2FaceSourceWindowRawOutput[]
+
+  workspace      V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  operation      V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, sourceArtifactId, sourceSha256, windowStartSourceFrame], map: "face_source_window_envelopes_window_idx")
+  @@map("face_source_window_envelopes")
+}
+
+/// The raw 5600-byte detector output of one sampled frame of a source window envelope.
+model V2FaceSourceWindowRawOutput {
+  id          String   @id @db.VarChar(128)
+  workspaceId String   @db.VarChar(128)
+  envelopeId  String   @db.VarChar(128)
+  sampleIndex Int
+  sourceFrame Int
+  sha256      String   @db.Char(64)
+  rawBytes    Bytes
+  createdAt   DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  envelope  V2FaceSourceWindowEnvelope @relation(fields: [envelopeId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([envelopeId, sampleIndex])
+  @@index([workspaceId, envelopeId])
+  @@map("face_source_window_raw_outputs")
+}
+
 model V2FaceProducerOperation {
   operationId          String   @id @db.VarChar(128)
   workspaceId          String   @db.VarChar(128)
@@ -2472,6 +2523,10 @@ model V2FaceProducerOperation {
   detectorProfile          String @default("yunet-v5-diagnostic") @db.VarChar(64)
   windowStartTimelineFrame Int?
   windowEndTimelineFrame   Int?
+  // The source profile (`openvino-face0204-v9-source`, W65b) windows the SOURCE's own frames; the project/version/EditPlan columns are
+  // then only the context the window was requested from (authorization and audit), never part of what the evidence is about.
+  windowStartSourceFrame   Int?
+  windowEndSourceFrame     Int?
 
   workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -3562,6 +3617,7 @@ model V2PublicOperation {
   temporalProducerOperation        V2TemporalProducerOperation?
   faceProducerEnvelope             V2FaceProducerEnvelope?
   faceProducerOperation            V2FaceProducerOperation?
+  faceSourceWindowEnvelope         V2FaceSourceWindowEnvelope?
   longFormIndexRunsAsOrigin        V2LongFormIndexRun[]                      @relation("LongFormIndexRunOriginOperation")
   hierarchicalRunsAsOrigin         V2HierarchicalProcessingRun[]             @relation("HierarchicalRunOriginOperation")
   speakerDiarizationRunsAsOrigin   V2SpeakerDiarizationRun[]                 @relation("SpeakerDiarizationRunOriginOperation")

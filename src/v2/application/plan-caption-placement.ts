@@ -1,9 +1,10 @@
-import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { createCaptionProjection, type CaptionProjection, type ProjectionClip } from '../domain/caption-canvas-projection.ts'
 import type { FaceEvidenceForSource } from '../domain/caption-face-clearance.ts'
 import { DomainError } from '../domain/errors.ts'
-import { collectFaceEvidenceStream, type FaceEvidenceExpectation } from '../domain/face-evidence-stream.ts'
-import { faceWindowTimeMap, planRequiredFaceWindows, type RequiredFaceWindow } from '../domain/face-evidence-time-map.ts'
+import { collectFaceSourceEvidenceStream } from '../domain/face-source-evidence-stream.ts'
+import {
+  planRequiredSourceWindows, projectTimelineSpansToSource, type RequiredSourceWindow,
+} from '../domain/face-evidence-time-map.ts'
 import { maxSampleGapFrames } from '../domain/face-evidence-policy.ts'
 import type { NormalizedBounds, OutputAspectRatio } from '../domain/output-spec.ts'
 import type { PerceptionTimeline } from '../domain/perception-timeline.ts'
@@ -12,21 +13,25 @@ import type { RenderReframePlanV1 } from '../domain/render-reframe-plan.ts'
 import { FINAL_CAPTION_ANCHOR_POLICY } from '../domain/final-caption-certification.ts'
 import { DEFAULT_SUBTITLE_ANCHOR_POLICY } from '../domain/subtitle-anchor-plan.ts'
 import type { SubtitlePresetId } from '../domain/subtitle-system.ts'
-import type { FaceWindowEvidenceReader } from './ports/face-window-evidence-reader.ts'
+import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 
 /**
- * Builds the placement plan of one render, proxy or final (W65).
+ * Builds the placement plan of one render, proxy or final (W65; evidence keyed by the SOURCE since W65b).
  *
  * The plan is decided on the VARIANT'S canvas: the render's sources, clips, crops/reframe and composition give the single
- * source-to-canvas projection; the trusted face windows of each source (read here, scoped to the workspace, project and
- * ProjectVersion, and accepted only by `collectFaceEvidenceStream`) give the face evidence; the caption bands of the
- * output preset are judged against both. What cannot be established is unknown, never free:
+ * source-to-canvas projection; the trusted face windows of each source (read here, by the source's own frames, and accepted only
+ * by `collectFaceSourceEvidenceStream`) give the face evidence; the caption bands of the output preset are judged against both.
+ *
+ * Evidence is a function of the source's bytes, so it does not belong to any EditPlan: it is read per source, whatever the cut
+ * (several clips, trims, reorders), and projected onto each cue through the clips of THIS render's EditPlan. What cannot be
+ * established is unknown, never free:
  *
  * - a video source whose dimensions are not known makes the whole projection unavailable (every band unknown);
- * - a timeline that is not exactly one real-time clip of a source, a fractional frame rate, a renderable snapshot, or the
- *   absence of a reader leave that source without a stream (its bands over the picture are unknown).
+ * - a fractional timeline frame rate, a clip whose speed is not 1 (or whose source and timeline ranges differ in length) and the
+ *   absence of a reader leave the bands over that picture unknown (the plan says which);
+ * - a source with no stored window, or with windows that do not cover a cue's frames, leaves it unknown.
  *
- * It also lists the face windows that would let the cues be certified. Listing is all it does: requesting them is the
+ * It also lists the SOURCE windows that would let the cues be certified. Listing is all it does: requesting them is the
  * Director's job (W64), not the renderer's.
  */
 export type CaptionPlacementRenderSource = Readonly<{
@@ -37,15 +42,27 @@ export type CaptionPlacementRenderSource = Readonly<{
   probe?: Readonly<{ width: number; height: number }>
 }>
 
+export type CaptionPlacementClip = Readonly<{
+  id: string
+  sourceArtifactId: string
+  /** Where the clip plays in its source: the evidence is keyed by these frames. */
+  sourceInFrame: number
+  sourceOutFrame: number
+  timelineInFrame: number
+  timelineOutFrame: number
+  rate: number
+  crop?: Readonly<NormalizedBounds>
+}>
+
 export type CaptionPlacementInput = Readonly<{
   workspaceId: string
+  /** The project being rendered: it reads the evidence (the source must be attached to it; its locale governs the rights). */
   projectId: string
-  projectVersionId: string
   format: OutputAspectRatio
   canvas: Readonly<{ width: number; height: number }>
-  /** The EditPlan being rendered (read for its frame rate, duration and clip map). */
+  /** The EditPlan being rendered (read for its frame rate and duration). */
   editPlan: Readonly<{ fps: number; durationFrames: number }>
-  clips: readonly Readonly<{ id: string; sourceArtifactId: string; timelineInFrame: number; timelineOutFrame: number; crop?: Readonly<NormalizedBounds> }>[]
+  clips: readonly CaptionPlacementClip[]
   composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
   renderSources: readonly CaptionPlacementRenderSource[]
   reframePlan?: Readonly<RenderReframePlanV1>
@@ -55,8 +72,6 @@ export type CaptionPlacementInput = Readonly<{
   trustedOcr?: Readonly<{ envelopeId: string; envelopeHash: string; inputVersionId: string; timeMapHash: string; timeline: Readonly<PerceptionTimeline> }>
   /** The source the OCR timeline was measured on. */
   primarySourceArtifactId: string
-  /** False for renderable snapshots: their plan is not the Version's EditPlan, so the Version's windows do not describe it. */
-  faceEvidenceAllowed: boolean
   /**
    * What a cue that cannot be certified costs (W65b). `block` (the default): the cue is not drawn and the reason is a HARD issue,
    * so the render cannot be approved. `omit-and-list`: the cue is not drawn and the reason is a WARNING that lists it as a review
@@ -68,8 +83,8 @@ export type CaptionPlacementInput = Readonly<{
 export type CaptionPlacementResult = Readonly<{
   placementPlan: Readonly<RenderPlacementPlan>
   projection: Readonly<CaptionProjection> | null
-  /** Face windows that would let the cues be certified, per source whose timeline admits windows at all. */
-  requiredFaceWindows: readonly Readonly<{ sourceArtifactId: string; windows: readonly RequiredFaceWindow[] }>[]
+  /** Windows of each SOURCE (its own frames) that would let the cues be certified, for each source the cues can be mapped onto. */
+  requiredFaceWindows: readonly Readonly<{ sourceArtifactId: string; windows: readonly RequiredSourceWindow[] }>[]
 }>
 
 const FACE_WINDOW_LIST_LIMIT = 200
@@ -81,6 +96,7 @@ function buildProjection(input: CaptionPlacementInput): Readonly<{ projection: R
   try {
     const clips: ProjectionClip[] = input.clips.map((clip) => ({
       id: clip.id, sourceArtifactId: clip.sourceArtifactId, timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+      sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame, rate: clip.rate,
       ...(clip.crop ? { crop: clip.crop } : {}),
       ...(ranges.has(clip.id) ? { reframe: ranges.get(clip.id)! } : {}),
     }))
@@ -99,40 +115,49 @@ function buildProjection(input: CaptionPlacementInput): Readonly<{ projection: R
 }
 
 export async function planCaptionPlacement(
-  dependencies: Readonly<{ faceEvidence?: FaceWindowEvidenceReader; clock: () => Date }>,
+  dependencies: Readonly<{ faceEvidence?: FaceSourceWindowEvidenceReader; clock: () => Date }>,
   input: CaptionPlacementInput,
 ): Promise<CaptionPlacementResult> {
   const { projection, reason } = input.subtitleCues.length ? buildProjection(input) : { projection: null as Readonly<CaptionProjection> | null }
   const evidence: FaceEvidenceForSource[] = []
-  const requiredFaceWindows: { sourceArtifactId: string; windows: readonly RequiredFaceWindow[] }[] = []
-  const integerFps = Number.isInteger(input.editPlan.fps) && input.editPlan.fps > 0
-  if (input.subtitleCues.length && integerFps) {
-    const fps = { num: input.editPlan.fps, den: 1 }
-    const gap = maxSampleGapFrames(fps)
+  const requiredFaceWindows: { sourceArtifactId: string; windows: readonly RequiredSourceWindow[] }[] = []
+  if (input.subtitleCues.length) {
+    const integerFps = Number.isInteger(input.editPlan.fps) && input.editPlan.fps > 0
     const policy = DEFAULT_SUBTITLE_ANCHOR_POLICY
+    // The span of timeline frames each cue's decision is measured over (the cue, extended by the stability window).
     const spans = input.subtitleCues.map((cue) => ({
       startFrame: cue.startFrame,
       endFrame: Math.min(input.editPlan.durationFrames, Math.max(cue.endFrame, cue.startFrame + policy.minFramesBetweenChanges)),
     }))
-    const from = Math.max(0, Math.min(...spans.map((span) => span.startFrame)) - gap)
-    const to = Math.min(input.editPlan.durationFrames, Math.max(...spans.map((span) => span.endFrame)) + gap)
     for (const sourceArtifactId of [...new Set(input.clips.map((clip) => clip.sourceArtifactId))].toSorted()) {
-      const timeMap = faceWindowTimeMap(input.editPlan, sourceArtifactId)
-      if (!timeMap) continue
-      requiredFaceWindows.push({ sourceArtifactId, windows: planRequiredFaceWindows({ durationFrames: input.editPlan.durationFrames, fps, spans }) })
+      if (!integerFps) {
+        // The source's frames are mapped onto the timeline by an integer frame offset, which needs the same integer frame rate.
+        evidence.push({ sourceArtifactId, stream: null, unavailableReason: 'TIMELINE_FPS_NOT_INTEGER' })
+        continue
+      }
+      const sourceClips = input.clips.filter((clip) => clip.sourceArtifactId === sourceArtifactId)
+      const sourceSpans = projectTimelineSpansToSource(sourceClips, sourceArtifactId, spans)
+      if (sourceSpans.length === 0) continue
+      const fps = { num: input.editPlan.fps, den: 1 }
+      const gap = maxSampleGapFrames(fps)
+      // No cue asks about a source frame the clips do not play, so the last frame any clip plays bounds the evidence.
+      const sourceDurationFrames = Math.max(...sourceClips.map((clip) => clip.sourceOutFrame))
+      requiredFaceWindows.push({ sourceArtifactId, windows: planRequiredSourceWindows({ sourceDurationFrames, fps, spans: sourceSpans }) })
       const renderSource = input.renderSources.find((source) => source.artifactId === sourceArtifactId)
-      if (!renderSource || !projection || !input.faceEvidenceAllowed || !dependencies.faceEvidence || to <= from) continue
-      const stored = await dependencies.faceEvidence.listWindows({
-        workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId, sourceArtifactId,
-        fromTimelineFrame: from, toTimelineFrame: to, now: dependencies.clock(), limit: FACE_WINDOW_LIST_LIMIT,
+      const from = Math.max(0, Math.min(...sourceSpans.map((span) => span.startFrame)) - gap)
+      const to = Math.min(sourceDurationFrames, Math.max(...sourceSpans.map((span) => span.endFrame)) + gap)
+      if (!renderSource || !projection || !dependencies.faceEvidence || to <= from) continue
+      const stored = await dependencies.faceEvidence.listSourceWindows({
+        workspaceId: input.workspaceId, projectId: input.projectId, sourceArtifactId,
+        fromSourceFrame: from, toSourceFrame: to, now: dependencies.clock(), limit: FACE_WINDOW_LIST_LIMIT,
       })
       if (stored.length === 0) continue
-      const expected: FaceEvidenceExpectation = Object.freeze({
-        workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId, sourceArtifactId,
-        sourceSha256: renderSource.sha256, timeMapHash: calculateCanonicalHash(timeMap),
-        timelineDurationFrames: input.editPlan.durationFrames, timelineFps: fps,
+      evidence.push({
+        sourceArtifactId,
+        stream: collectFaceSourceEvidenceStream(stored.map((item) => item.envelope), {
+          workspaceId: input.workspaceId, sourceArtifactId, sourceSha256: renderSource.sha256, sourceFps: fps, sourceDurationFrames,
+        }),
       })
-      evidence.push({ sourceArtifactId, stream: collectFaceEvidenceStream(stored.map((item) => item.envelope), expected) })
     }
   }
   const placementPlan = createRenderPlacementPlan({

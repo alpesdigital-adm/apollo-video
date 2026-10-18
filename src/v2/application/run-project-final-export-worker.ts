@@ -33,7 +33,7 @@ import {
 } from '../domain/final-caption-certification.ts'
 import { planCaptionPlacement } from './plan-caption-placement.ts'
 import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
-import type { FaceWindowEvidenceReader } from './ports/face-window-evidence-reader.ts'
+import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import {
@@ -75,8 +75,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
   sources: ArtifactSourceMaterializer
-  /** W65. The sealed face windows of the approved Version; without them no cue over the picture can be certified. */
-  faceEvidence?: FaceWindowEvidenceReader
+  /** W65/W65b. The sealed face windows of the SOURCES the approved Version plays; without them no cue over the picture can be certified. */
+  faceEvidence?: FaceSourceWindowEvidenceReader
   /**
    * W65b. Confirms, on the delivered MP4, that every burned caption is where the plan put it. A final that burns at least one
    * caption is refused (before the encode) without it: a caption is never delivered on the strength of the plan alone.
@@ -293,7 +293,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       // before the encode is anything else - a hard issue, a band that is not free-certified under a placed cue, or a burned
       // caption that nothing would confirm in the delivered pixels.
       const { placementPlan } = await planCaptionPlacement({ clock, ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}) }, {
-        workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
+        workspaceId: operation.workspaceId, projectId: context.projectId,
         format: source.format as OutputAspectRatio,
         canvas: { width: context.outputSpec.width, height: context.outputSpec.height },
         editPlan: source.editPlan, clips, ...(composition ? { composition } : {}),
@@ -304,7 +304,6 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         subtitlePresetId, placementElements: [],
         ...(source.trustedOcr ? { trustedOcr: source.trustedOcr } : {}),
         primarySourceArtifactId: source.sourceArtifactId,
-        faceEvidenceAllowed: true,
         uncertifiedCues: 'omit-and-list',
       })
       validateRenderPlacementPlan(placementPlan)

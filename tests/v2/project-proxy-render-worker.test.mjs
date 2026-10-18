@@ -35,7 +35,7 @@ import { DomainError } from '../../src/v2/domain/errors.ts'
 import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
 import { contentAddressedArtifactKey } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { buildMeasurement } from './wave20-fixtures.mjs'
-import { sealedWindow } from './helpers/face-envelope-v2.mjs'
+import { sealedSourceWindow } from './helpers/face-source-envelope-v3.mjs'
 
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
@@ -1468,7 +1468,7 @@ test('T-F4.014 an approved colour adds nothing to the review and still releases 
 })
 
 // ---------------------------------------------------------------------------------------------------------------------
-// W65: captions are decided on the variant's canvas from the sealed face windows of the Version being rendered.
+// W65/W65b: captions are decided on the variant's canvas from the sealed face windows of the SOURCES the render plays.
 // ---------------------------------------------------------------------------------------------------------------------
 const portraitMasterSource = (extra = {}) => Object.freeze({
   ...source(),
@@ -1482,17 +1482,19 @@ const portraitMasterSource = (extra = {}) => Object.freeze({
   ...extra,
 })
 const SEALED_SCOPE = Object.freeze({
-  workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', projectVersionId: 'project-version-proxy-test',
+  workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test',
   sourceArtifactId: 'artifact-project-proxy-source', sourceSha256: 'c'.repeat(64),
 })
-const faceWindow = (rowsAt, overrides = {}) => sealedWindow({ start: 0, end: 300, rowsAt, overrides: { ...SEALED_SCOPE, ...overrides } })
+// A source window carries no project and no version: only the source (artifact and bytes) and the workspace it belongs to.
+const faceWindow = (rowsAt, overrides = {}) => sealedSourceWindow({ start: 0, end: 300, rowsAt,
+  overrides: { workspaceId: SEALED_SCOPE.workspaceId, sourceArtifactId: SEALED_SCOPE.sourceArtifactId, sourceSha256: SEALED_SCOPE.sourceSha256, ...overrides } })
 const FAR_FACE = [0.9, 0.0, 0.0, 0.03, 0.05]
 
 async function runCaptionWorker(immutableSource, envelopes) {
   const operations = createOperations(immutableSource)
   const requests = []
   const base = dependencies(operations, envelopes ? {
-    faceEvidence: { async listWindows(input) { requests.push(input); return envelopes.map((envelope) => ({ envelope })) } },
+    faceEvidence: { async listSourceWindows(input) { requests.push(input); return envelopes.map((envelope) => ({ envelope })) } },
   } : {})
   base.deps.projects = { ...base.deps.projects, async readImmutableSource() { return immutableSource } }
   let rendered = null
@@ -1517,12 +1519,12 @@ test('W65 proxy worker: a cue is drawn only where the sealed face windows of thi
   assert.equal(unknown.review.status, 'warning-ack-required')
   assert.ok(unknown.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
 
-  // a clean, complete, authenticated stream for this exact Version and source certifies the preferred band
+  // a clean, complete, authenticated stream of this exact source (by its bytes) certifies the preferred band
   const clean = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE])])
   assert.equal(clean.requests.length, 1)
   assert.deepEqual({ ...clean.requests[0], now: undefined },
-    { workspaceId: SEALED_SCOPE.workspaceId, projectId: SEALED_SCOPE.projectId, projectVersionId: SEALED_SCOPE.projectVersionId,
-      sourceArtifactId: SEALED_SCOPE.sourceArtifactId, fromTimelineFrame: 0, toTimelineFrame: 75, now: undefined, limit: 200 })
+    { workspaceId: SEALED_SCOPE.workspaceId, projectId: SEALED_SCOPE.projectId,
+      sourceArtifactId: SEALED_SCOPE.sourceArtifactId, fromSourceFrame: 0, toSourceFrame: 75, now: undefined, limit: 200 })
   const cleanDecision = subtitleAnchorDecisionFor(clean.rendered.placementPlan.subtitleAnchorPlan, 'cue-1')
   assert.equal(cleanDecision.disposition, 'placed'); assert.equal(cleanDecision.anchor, 'bottom')
   assert.ok(!clean.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' || issue.code === 'NO_SAFE_SUBTITLE_REGION'))
@@ -1535,8 +1537,8 @@ test('W65 proxy worker: a cue is drawn only where the sealed face windows of thi
   assert.equal(movedDecision.bandAssessments.bottom.face.state, 'occupied')
   assert.equal(movedDecision.disposition, 'placed'); assert.notEqual(movedDecision.anchor, 'bottom')
 
-  // evidence of another Version is not evidence of this one
-  const foreign = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE], { projectVersionId: 'project-version-elsewhere' })])
+  // evidence of other bytes (another source file) is not evidence of this one; evidence is NOT tied to a Version any more
+  const foreign = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE], { sourceSha256: 'd'.repeat(64) })])
   assert.equal(subtitleAnchorDecisionFor(foreign.rendered.placementPlan.subtitleAnchorPlan, 'cue-1').disposition, 'review-required')
   assert.equal(foreign.review.status, 'warning-ack-required')
 })
@@ -1582,7 +1584,7 @@ test('W65 proxy worker: the pixel critic is run on a plan that draws a cue, agai
   const cleaned = []
   const operations = createOperations(portraitMasterSource())
   const base = dependencies(operations, {
-    faceEvidence: { async listWindows() { return [{ envelope: faceWindow(() => [FAR_FACE]) }] } },
+    faceEvidence: { async listSourceWindows() { return [{ envelope: faceWindow(() => [FAR_FACE]) }] } },
     captionPixelCritic: {
       async verify(request) {
         requests.push(request)
@@ -1626,7 +1628,7 @@ test('W65 proxy worker: no control render is paid for when the plan draws nothin
   assert.equal(quiet.length, 0, 'every cue is withheld here (no face windows), so there is nothing to verify')
 
   const broken = dependencies(createOperations(portraitMasterSource()), {
-    faceEvidence: { async listWindows() { return [{ envelope: faceWindow(() => [FAR_FACE]) }] } },
+    faceEvidence: { async listSourceWindows() { return [{ envelope: faceWindow(() => [FAR_FACE]) }] } },
     captionPixelCritic: { async verify() { throw new Error('W65_CONTROLLED_CRITIC_FAILURE') } },
   })
   broken.deps.projects = { ...broken.deps.projects, async readImmutableSource() { return portraitMasterSource() } }

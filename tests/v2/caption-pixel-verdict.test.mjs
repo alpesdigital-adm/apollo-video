@@ -3,12 +3,12 @@ import test from 'node:test'
 
 import { createCaptionProjection } from '../../src/v2/domain/caption-canvas-projection.ts'
 import { captionSampleFrames, CAPTION_BAND_TOLERANCE_PX, evaluateCaptionPixels } from '../../src/v2/domain/caption-pixel-verdict.ts'
-import { collectFaceEvidenceStream } from '../../src/v2/domain/face-evidence-stream.ts'
+import { collectFaceSourceEvidenceStream } from '../../src/v2/domain/face-source-evidence-stream.ts'
 import { critiqueOutputFormat } from '../../src/v2/domain/format-quality-critic.ts'
 import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { buildRenderElementMap } from '../../src/v2/domain/review-system.ts'
 import { captionFootprintOf, MIN_CHANGED_PIXELS } from '../../src/v2/infrastructure/media/ffmpeg-caption-pixel-critic.ts'
-import { expectation, sealedWindow } from './helpers/face-envelope-v2.mjs'
+import { sealedSourceWindow, sourceExpectation } from './helpers/face-source-envelope-v3.mjs'
 
 /**
  * W65: the pixel verdict compares MEASURED footprints with the plan, and never trusts the renderer's own element map or the
@@ -16,9 +16,9 @@ import { expectation, sealedWindow } from './helpers/face-envelope-v2.mjs'
  */
 const CANVAS = Object.freeze({ width: 960, height: 540 })
 const SOURCE = Object.freeze({ artifactId: 'source-1', width: 1280, height: 720 })
-const clip = { id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: 300 }
+const clip = { id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: 300, sourceInFrame: 0, sourceOutFrame: 300, rate: 1 }
 const projection = createCaptionProjection({ layout: { canvas: CANVAS }, sources: [SOURCE], clips: [clip] })
-const cleanStream = collectFaceEvidenceStream([sealedWindow({ start: 0, end: 300, rowsAt: () => [[0.9, 0, 0, 0.03, 0.05]] })], expectation())
+const cleanStream = collectFaceSourceEvidenceStream([sealedSourceWindow({ start: 0, end: 300, rowsAt: () => [[0.9, 0, 0, 0.03, 0.05]] })], sourceExpectation())
 const CUE = { id: 'cue-1', startFrame: 100, endFrame: 130 }
 const planFor = ({ evidence = [{ sourceArtifactId: 'source-1', stream: cleanStream }], elements = [], cues = [CUE] } = {}) => createRenderPlacementPlan({
   format: '16:9', canvas: CANVAS, durationFrames: 300, subtitlePresetId: 'kinetic', elements,
@@ -122,7 +122,7 @@ test('the footprint is the box around the pixels that differ, and codec noise is
 
 test('the format critic lifts the pixel issues into the variant report: a mismatch or an overlap blocks the output, an unavailable check warns', () => {
   const map = buildRenderElementMap({ proxyHash: 'a'.repeat(64), fps: 30, durationFrames: 300, canvas: CANVAS, source: { width: 1280, height: 720 },
-    clips: [{ id: 'clip-1', sourceArtifactId: 'source-1', timelineInFrame: 0, timelineOutFrame: 300 }] })
+    clips: [clip] })
   const critique = (captionPixelIssues) => critiqueOutputFormat({ outputSpecId: plan.outputSpecId, format: '16:9', proxyHash: 'a'.repeat(64), map,
     placementPlanHash: plan.placementPlanHash, subtitleAnchorPlan: plan.subtitleAnchorPlan, captionPixelIssues })
   const mismatch = critique(evaluateCaptionPixels({ plan, samples: [sample(115, null)], faceVeto: 'ran' }))

@@ -116,24 +116,25 @@ export const FACE_ENVELOPE_V2_MAX_TIMELINE_FRAMES = 10_000_000
 export const FACE_ENVELOPE_V2_MAX_WINDOW_FRAMES = FACE_EVIDENCE_POLICY.sampling.maxWindowFrames
 export const FACE_ENVELOPE_V2_MAX_SAMPLES = FACE_EVIDENCE_POLICY.sampling.maxSamplesPerWindow
 
-function invalid(message: string): never { throw new DomainError('INVALID_ARGUMENT', message) }
-function frame(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 }
-function keys(value: object, expected: readonly string[], label: string) {
+export function invalid(message: string): never { throw new DomainError('INVALID_ARGUMENT', message) }
+export function frame(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 }
+export function keys(value: object, expected: readonly string[], label: string) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).sort().join('|') !== [...expected].sort().join('|')) {
     invalid(`${label} has unsupported or missing fields`)
   }
 }
-function freeze<T>(value: T): T {
+export function freeze<T>(value: T): T {
   if (value && typeof value === 'object') {
     for (const child of Object.values(value)) freeze(child)
     Object.freeze(value)
   }
   return value
 }
-const sha = (value: unknown) => typeof value === 'string' && SHA.test(value)
+export const sha = (value: unknown) => typeof value === 'string' && SHA.test(value)
 
-function validateDetectorConfig(d: FaceDetectorConfigV2) {
+/** Shared with `face-producer-envelope-v3`: the detector and the producer pins are the same whatever keys the evidence. */
+export function validateDetectorConfig(d: FaceDetectorConfigV2) {
   keys(d, ['family', 'model', 'inputWidth', 'inputHeight', 'colorOrder', 'tensorLayout', 'tensorType', 'pixelRange',
     'resize', 'orientationPolicy', 'frameEncoding', 'backend', 'precision', 'threads', 'streams', 'outputSlots',
     'outputBytes', 'collectionScoreFloor'], 'Face detector config')
@@ -148,7 +149,7 @@ function validateDetectorConfig(d: FaceDetectorConfigV2) {
   }
 }
 
-function validateProducer(p: FaceProducerV2) {
+export function validateProducer(p: FaceProducerV2) {
   keys(p, ['name', 'model', 'outputPolicy', 'runtime', 'adapterSha256', 'bridgeSha256', 'pythonExecutableSha256',
     'ffmpegSha256', 'ffprobeSha256', 'assessment'], 'Face producer')
   keys(p.model, ['precision', 'xmlSha256', 'binSha256', 'xmlBytes', 'binBytes', 'licenseSha256', 'sourceCommit'], 'Face model')
@@ -318,7 +319,7 @@ export function createFaceProducerEnvelopeV2(input: FaceProducerEnvelopeV2Input)
 }
 
 /** Re-derives a sample's boxes from its retained raw detector output; false means the evidence was not produced from it. */
-export function faceSampleMatchesRawOutput(sample: FaceSampleV2, raw: Uint8Array): boolean {
+export function faceSampleMatchesRawOutput(sample: Pick<FaceSampleV2, 'status' | 'boxes' | 'rawOutput'>, raw: Uint8Array): boolean {
   if (sample.rawOutput === null || raw.byteLength !== FACE0204_OUTPUT_BYTES) return false
   const decoded = decodeFace0204Output(raw, FACE_EVIDENCE_POLICY.detection.collectionScoreFloor)
   if (sample.status === 'unknown') return decoded.status === 'failed'

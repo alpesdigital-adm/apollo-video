@@ -75,3 +75,48 @@ export function planRequiredFaceWindows(input: Readonly<{
 
 /** The longest window one operation may cover at this rate (same arithmetic the producers use). */
 export const FACE_WINDOW_MAX_FRAMES = FACE_EVIDENCE_POLICY.sampling.maxWindowFrames
+
+// ---------------------------------------------------------------------------------------------------------------------
+// W65b. Evidence is keyed by the frames of the SOURCE; a cue lives on the timeline. These two functions are the whole bridge.
+// ---------------------------------------------------------------------------------------------------------------------
+
+export type SourceMappedClip = Readonly<{
+  sourceArtifactId: string
+  sourceInFrame: number; sourceOutFrame: number
+  timelineInFrame: number; timelineOutFrame: number
+  rate: number
+}>
+export type FrameSpan = Readonly<{ startFrame: number; endFrame: number }>
+export type RequiredSourceWindow = Readonly<{ startSourceFrame: number; endSourceFrame: number }>
+
+/**
+ * The SOURCE frames that `spans` (half-open, timeline frames) show, through the clips of `sourceArtifactId`. Only a unit-rate clip
+ * whose source and timeline ranges have the same length is a pure frame offset; any other clip contributes nothing (its band is
+ * `unknown`, never guessed). A span across a cut yields one source span per clip, and they are NOT adjacent in general.
+ */
+export function projectTimelineSpansToSource(clips: readonly SourceMappedClip[], sourceArtifactId: string, spans: readonly FrameSpan[]): readonly FrameSpan[] {
+  const mapped: FrameSpan[] = []
+  for (const clip of clips) {
+    if (clip.sourceArtifactId !== sourceArtifactId || clip.rate !== 1 ||
+        clip.sourceOutFrame - clip.sourceInFrame !== clip.timelineOutFrame - clip.timelineInFrame) continue
+    const offset = clip.sourceInFrame - clip.timelineInFrame
+    for (const span of spans) {
+      const start = Math.max(span.startFrame, clip.timelineInFrame), end = Math.min(span.endFrame, clip.timelineOutFrame)
+      if (end > start) mapped.push(Object.freeze({ startFrame: start + offset, endFrame: end + offset }))
+    }
+  }
+  return Object.freeze(mapped)
+}
+
+/**
+ * The windows of the SOURCE (half-open, source frames, each at most `maxWindowFrames`) that would let the clearance of `spans` (source
+ * frames) answer: the same widening, merging and cutting as `planRequiredFaceWindows`, in the source's own frames. It only LISTS.
+ */
+export function planRequiredSourceWindows(input: Readonly<{
+  sourceDurationFrames: number
+  fps: Readonly<{ num: number; den: number }>
+  spans: readonly FrameSpan[]
+}>): readonly RequiredSourceWindow[] {
+  return Object.freeze(planRequiredFaceWindows({ durationFrames: input.sourceDurationFrames, fps: input.fps, spans: input.spans })
+    .map((window) => Object.freeze({ startSourceFrame: window.startTimelineFrame, endSourceFrame: window.endTimelineFrame })))
+}
