@@ -203,12 +203,16 @@ export async function writeFenceRightsSnapshot(db, world, sequence, expiresAt, l
   return rights.id
 }
 
+/**
+ * `kinds` defaults to all three fences. A profile whose evidence belongs to the SOURCE rather than to the head Version (W65b) leaves
+ * `head` out: for it a moved head is not a reason to refuse a publish, and its own suite proves that positively.
+ */
 export async function verifyProducerPublishFences({ db, world, repository, Repository,
-  enqueue, cloneEnvelope, cancel, envelopeModel, label, phases }) {
+  enqueue, cloneEnvelope, cancel, envelopeModel, label, phases, kinds = ['lease', 'rights', 'head'] }) {
   assert.deepEqual(phases, label === 'ocr'
     ? ['transcribing', 'verifying', 'persisting']
     : ['analyzing', 'verifying', 'persisting'])
-  for (const kind of ['lease', 'rights', 'head']) {
+  for (const kind of kinds) {
     const operationId = await enqueue(`publish-${kind}`)
     const owner = `${label}-${kind}-${world.suffix}`
     let releaseRights

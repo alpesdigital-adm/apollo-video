@@ -6,12 +6,15 @@ import test from 'node:test'
 
 // Run through tsx (see test:integration:face-window-composition): the factory pulls in the whole composition root.
 const pick = (module, name) => module[name] ?? module.default?.[name]
-const { createFaceWindowWorker } = await import('../../src/v2/infrastructure/repository-factory.ts').then((module) => ({ createFaceWindowWorker: pick(module, 'createFaceWindowWorker') }))
+const factory = await import('../../src/v2/infrastructure/repository-factory.ts')
+// W62 timeline window worker and W65b source window worker share one analyzer composition, and so one set of refusals.
+const workers = { timeline: pick(factory, 'createFaceWindowWorker'), source: pick(factory, 'createFaceSourceWindowWorker') }
 const inventory = await import('../../src/v2/infrastructure/perception/face-runtime-inventory.ts')
 const buildFaceRuntimeManifest = pick(inventory, 'buildFaceRuntimeManifest')
 const faceRuntimeManifestSha256 = pick(inventory, 'faceRuntimeManifestSha256')
 
-test('the V9 worker composition fails closed: unaccepted platform, missing pins, drifted runtime', async () => {
+for (const [profile, createFaceWindowWorker] of Object.entries(workers)) test(`the V9 ${profile} worker composition fails closed: unaccepted platform, missing pins, drifted runtime`, async () => {
+  assert.equal(typeof createFaceWindowWorker, 'function')
   // Linux has no passed parity receipt, so nothing else is even looked at.
   for (const platform of ['linux', 'darwin', 'freebsd']) {
     await assert.rejects(createFaceWindowWorker({}, undefined, platform), (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED' && /parity receipt/.test(error.message))

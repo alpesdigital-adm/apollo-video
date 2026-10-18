@@ -864,6 +864,10 @@ const queuedFaceWindowOperationVisibleExample = {
   ...queuedFaceProducerOperationVisibleExample,
   id: 'operation-face-window-example-1',
 }
+const queuedFaceSourceWindowOperationVisibleExample = {
+  ...queuedFaceProducerOperationVisibleExample,
+  id: 'operation-face-source-window-example-1',
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -7941,6 +7945,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     }],
     'apollo://schemas/face-window-operation-read/v1': [{
       data: { operation: queuedFaceWindowOperationVisibleExample },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/face-source-window-run-request/v1': [{
+      sourceArtifactId: 'artifact-source-example-1',
+      window: { startSourceFrame: 100, endSourceFrame: 250 },
+    }],
+    'apollo://schemas/face-source-window-operation-created/v1': [{
+      data: { operation: queuedFaceSourceWindowOperationVisibleExample, replayed: false },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/face-source-window-operation-read/v1': [{
+      data: { operation: queuedFaceSourceWindowOperationVisibleExample },
       meta: { apiVersion: 'v1' },
     }],
     'apollo://schemas/enqueue-provider-job-request/v1': [{
