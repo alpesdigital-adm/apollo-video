@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
+import { commitSealedChild, persistRecording, planPlayingRecordings, seedSealedProject, testActor } from './helpers/pg-output-world.mjs'
 
 test('PublicOperation persistence is idempotent, workspace-scoped and integrity checked', async () => {
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
@@ -1062,39 +1062,45 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     const { stableSerialize, calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
     // The project and its head come from the real creation (creation Command, then one explicit output variant): a Version cannot be
     // inserted by hand. The source artifact is linked to it the way an ingest links it.
-    const sealed = await seedSealedProject(client, { workspaceId, actor: testActor({ workspaceId, clientId, credentialId, environment: 'sandbox' }),
+    const casActor = testActor({ workspaceId, clientId, credentialId, environment: 'sandbox' })
+    const sealed = await seedSealedProject(client, { workspaceId, actor: casActor,
       prefix: 'operation-cas', ids: { project: projectId }, name: 'CAS project', objective: 'discovery', at: () => now })
-    const versionId = sealed.head.version.id
-    const editPlanId = sealed.head.editPlanSnapshot.id
-    await client.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId,
-      projectId, artifactId, role: 'source-master', originalFileName: 'source.mp4', createdAt: now } })
+    // A proxy render is admitted only over a head whose output is consumable: one observed recording, adopted and played by a child
+    // Version. The recording is the source of the controlled renders below (persistRecording links it to the project).
+    const recording = await persistRecording(client, { workspaceId, projectId, actor: casActor, slug: `operation-cas-${run}-source` })
+    const head = await commitSealedChild(client, { workspaceId, projectId, actor: casActor, suffix: `operation-cas-${run}-ingested`,
+      mutatePlan: planPlayingRecordings([recording]), adopt: [recording.names.sourceArtifactId] })
+    const versionId = head.version.id
+    const editPlanId = head.editPlanSnapshot.id
+    const casArtifactId = recording.names.sourceArtifactId
+    const casManifestId = recording.names.sourceManifestId
     const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
     const { createColorPipelineCompilation } = await import('../../src/v2/domain/color-pipeline-compilation.ts')
     const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
     const colorMetadata = { colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8 }
-    const probe = createMediaColorProbe({ id: `operation-cas-color-probe-${run}`, workspaceId, artifactId, manifestId,
+    const probe = createMediaColorProbe({ id: `operation-cas-color-probe-${run}`, workspaceId, artifactId: casArtifactId, manifestId: casManifestId,
       detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
       producer: { provider: 'ffprobe', version: '7.1.1', binaryDigest: sha('b') }, createdAt: now.toISOString() })
-    await client.v2MediaColorProbe.create({ data: { id: probe.id, workspaceId, artifactId, manifestId,
+    await client.v2MediaColorProbe.create({ data: { id: probe.id, workspaceId, artifactId: casArtifactId, manifestId: casManifestId,
       schemaVersion: probe.schemaVersion, state: 'ready', metadataJson: stableSerialize(colorMetadata), pixelFormat: 'yuv420p',
       hdrMode: 'sdr', reasonsJson: '[]', producerProvider: 'ffprobe', producerVersion: probe.producer.version,
       producerBinaryDigest: probe.producer.binaryDigest, createdAt: now, probeHash: probe.probeHash } })
     const compilation = createColorPipelineCompilation({ id: `operation-cas-color-compilation-${run}`, workspaceId, projectId,
-      sourceArtifactId: artifactId, sourceManifestId: manifestId, probe, outputMetadata: colorMetadata,
+      sourceArtifactId: casArtifactId, sourceManifestId: casManifestId, probe, outputMetadata: colorMetadata,
       stages: ['technical', 'match', 'creative-lut', 'output'].map((kind) => ({ id: `cas-${kind}`, kind, version: 'v1',
         enabled: ['technical', 'output'].includes(kind), input: colorMetadata, output: colorMetadata,
         implementation: { provider: 'ffmpeg-zscale', version: 'v1', parameters: { mode: 'identity' }, parametersHash: calculateCanonicalHash({ mode: 'identity' }) } })),
       createdByClientId: clientId, createdAt: now.toISOString() })
     await new PrismaColorPipelineCompilationRepository(client).persist({ compilation,
       idempotencyKey: 'cas-color', requestFingerprint: calculateCanonicalHash(compilation) }, authenticationAudit)
-    const colorPipelineBindings = [{ sourceArtifactId: artifactId, sourceManifestId: manifestId, compilationId: compilation.id,
+    const colorPipelineBindings = [{ sourceArtifactId: casArtifactId, sourceManifestId: casManifestId, compilationId: compilation.id,
       compilationHash: compilation.compilationHash, pipelineHash: compilation.pipeline.pipelineHash }]
     const admitProxy = async (label, hash, createdAt) => repository.createOrReplay({
       operation: createQueuedPublicOperation({ id: `operation-cas-${label}-${run}`, workspaceId, clientId, projectId,
         type: 'project-proxy-render', target: { type: 'media-artifact', id: `operation-cas-output-${label}-${run}`, manifestId: `operation-cas-manifest-${label}-${run}` },
         maxAttempts: 3, createdAt }), authenticationAudit,
       context: { kind: 'project-proxy-render', projectId, projectVersionId: versionId, editPlanSnapshotId: editPlanId,
-        sourceArtifactId: artifactId, sourceManifestId: manifestId, colorPipelineBindings, inputHash: sha(hash),
+        sourceArtifactId: casArtifactId, sourceManifestId: casManifestId, colorPipelineBindings, inputHash: sha(hash),
         outputArtifactId: `operation-cas-output-${label}-${run}`, outputManifestId: `operation-cas-manifest-${label}-${run}`, originalFileName: `${label}.mp4` },
       idempotencyKey: `operation-cas-${label}-${run}`, requestFingerprint: sha(hash),
     })

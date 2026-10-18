@@ -129,7 +129,13 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     // the root is followed by an output variant, and that Version (not the empty root) is the head the journey works on.
     const variant = await createProjectOutputVariantService({ repository: new PrismaOperationalOutputBundleRepositoryV3(client), clock: () => at(0), createId: (kind) => `${kind}-transformation-e2e-${++entity}`, createEventId: randomUUID })({ ...variantBody(), workspaceId, projectId, baseVersionId: created.creationVersion.id, baseHash: created.creationVersion.baseHash, actor, idempotencyKey: 'transformation-production-variant' })
     assert.equal(variant.bundle.state.document.entries.some((entry) => entry.spec.output.aspectRatio === '16:9'), true)
-    const headVersion = variant.bundle.version
+    // A review annotation and the cleanup mask over it consume the head's output ('critic'): an empty variant head has nothing to review, so
+    // the head is a child Version that adopts one observed recording and plays it (the transformed source below is a separate artifact).
+    const { commitSealedChild, persistRecording, planPlayingRecordings } = await import('./helpers/pg-output-world.mjs')
+    const headRecording = await persistRecording(client, { workspaceId, projectId, actor, slug: 'transformation-e2e-head' })
+    const headBundle = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: 'transformation-e2e-head',
+      mutatePlan: planPlayingRecordings([headRecording]), adopt: [headRecording.names.sourceArtifactId] })
+    const headVersion = headBundle.version
     const projectVersionId = headVersion.id
 
     const storage = new LocalMediaUploadStorage(artifactRoot)
