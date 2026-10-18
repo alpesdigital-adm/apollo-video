@@ -38,9 +38,12 @@ import { PrismaAutomaticCatalogRepository } from '../../src/v2/infrastructure/pr
 import { externalActorAuditData } from '../../src/v2/infrastructure/prisma/external-actor-audit.ts'
 import { expectedOcrTimeline } from '../../src/v2/domain/projected-ocr-timeline.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
-import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
+import { commitSealedChild, persistRecording, planPlayingRecordings } from './helpers/pg-output-world.mjs'
+import { seedDirectorOcrWorld } from './helpers/s3c-director-ocr-world.mjs'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { createDirectedAudioTimelineHash } from '../../src/v2/domain/director-run.ts'
+import { materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import { renderableCompileVersionId } from '../../src/v2/application/compile-renderable-plan-version.ts'
 import { renderablePlanSnapshotOf } from '../../src/v2/application/renderable-edit-plan.ts'
 import { PrismaRenderablePlanSnapshotRepository } from '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
 
@@ -344,7 +347,10 @@ async function canonicalDirectorSnapshotOwnerPG({ db, workspaceId, projectId, ac
   const released = new Promise((resolve) => { release = resolve })
   try {
     latch = holder.$transaction(async (tx) => {
-      await tx.v2ProjectSnapshot.update({ where: { id: original.id }, data: { schemaVersion: original.schemaVersion + 1 } })
+      // project_snapshots is append-only (BEFORE UPDATE trigger project_snapshots_w66_dependency_guard): a stored row can no longer be
+      // rewritten under the reader, so the schema tamper this latch used to commit is unreachable. What stays observable is the wait:
+      // the canonical reader locks the row FOR SHARE, so it queues behind a writer that holds it FOR UPDATE, and then resolves it.
+      await tx.$queryRaw`SELECT id FROM project_snapshots WHERE id = ${original.id} FOR UPDATE`
       readyResolve()
       const deadline = Date.now() + 5000
       let waited = false
@@ -356,7 +362,7 @@ async function canonicalDirectorSnapshotOwnerPG({ db, workspaceId, projectId, ac
         if (waited) break
         await new Promise((resolve) => setTimeout(resolve, 25))
       }
-      assert.ok(waited, 'canonical snapshot reader must wait on the real updated row')
+      assert.ok(waited, 'canonical snapshot reader must wait on the real locked row')
       release()
     }, { timeout: 8000 }).catch((error) => { readyReject(error); release(); throw error })
     latch.catch(() => {})
@@ -367,14 +373,12 @@ async function canonicalDirectorSnapshotOwnerPG({ db, workspaceId, projectId, ac
     await released
     await latch
     const result = await reading
-    assert.equal(result.error?.code, 'PERSISTENCE_CONFLICT', 'tampered schema must be reread after the real row-lock wait')
+    assert.equal(result.error, sentinel, 'after the real row-lock wait the reader resolves the intact canonical row')
     assert.deepEqual(await baseline(), before)
   } catch (error) { primary = error; throw error } finally {
     release()
     await Promise.allSettled([latch, reading].filter(Boolean))
     const errors = []
-    try { await db.v2ProjectSnapshot.update({ where: { id: original.id }, data: { schemaVersion: original.schemaVersion } }) }
-    catch (error) { errors.push(error) }
     const closed = await Promise.allSettled([holder.$disconnect(), reader.$disconnect()])
     errors.push(...closed.filter((result) => result.status === 'rejected').map((result) => result.reason))
     if (errors.length) throw new AggregateError(primary ? [primary, ...errors] : errors, 'Canonical snapshot latch cleanup failed')
@@ -602,7 +606,10 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', artifactPath],
       { windowsHide: true, timeout: 30_000 })
       const bytes = await readFile(artifactPath)
-      const world = await seedPerceptionProducerContext(db, { suffix, artifactKey,
+      // The world is sealed by the product's writers: the project's one output is the explicit 9:16 variant (the format every
+      // consumer below reads from the sealed entry), the recording is ingested and granted, and the Version that plays the plan and
+      // the transcript below is committed as a child Command - a sealed Version's rows are never rewritten.
+      const world = await seedDirectorOcrWorld(db, { suffix, artifactKey,
         sourceSha256: sha(bytes), byteSize: BigInt(bytes.length) })
       cleanupScope = { workspaceId, clientId: world.clientId, suffix }
       const manifestId = `w64-manifest-${suffix}`
@@ -627,39 +634,32 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         schemaVersion: transcript.schemaVersion, language: transcript.language,
         provider: transcript.provider, model: transcript.model, providerVersion: 'controlled-v1',
         transcriptHash: transcript.transcriptHash, transcriptJson: stableSerialize(transcript) } })
-      const brief = { schemaVersion: 1, objective: 'discovery',
-        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        outputSpec: { schemaVersion: 1, id: `w64-output-${suffix}`, locale: 'pt-BR',
-          aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
-          safeArea: { top: 0.05, right: 0.05, bottom: 0.08, left: 0.05 } },
-        productionBrief: createProductionBrief({ ownerText: 'Público: equipes criativas. Tom: direto e natural.' }),
-        createdAt: new Date().toISOString() }
-      const policies = { schemaVersion: 1, state: 'configured', guardrails: [],
-        createdAt: new Date().toISOString() }
-      const plan = { ...world.plan, sources: [{ id: world.sourceId, artifactId: world.sourceId,
+      const inputPlanOf = (playing) => ({ ...playing, sources: [{ id: world.sourceId, artifactId: world.sourceId,
         kind: 'video', durationSeconds: 4 }], overlayTracks: [], subtitleTracks: [],
-        audioTracks: [], effectTracks: [], markers: [], transitions: [], protectedElements: [],
-        localeVariantRefs: [], formatVariantRefs: [], lineageRefs: [world.sourceId],
-        editorial: { commandType: 'remove-spoken-content', exclusions: [],
-          retainedSourceRanges: [{ sourceStartSeconds: 0, sourceEndSeconds: 4 }] },
-        subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 32 },
-        retimedTranscript: { sourceTranscriptId: transcriptId, sourceTranscriptHash: transcript.transcriptHash,
-          words: [
-            { text: 'Bem', sourceStartSeconds: 0.2, sourceEndSeconds: 0.5,
-              timelineStartFrame: 6, timelineEndFrame: 15 },
-            { text: 'vindo', sourceStartSeconds: 0.5, sourceEndSeconds: 0.9,
-              timelineStartFrame: 15, timelineEndFrame: 27 },
-            { text: 'ao', sourceStartSeconds: 0.9, sourceEndSeconds: 1.1,
-              timelineStartFrame: 27, timelineEndFrame: 33 },
-            { text: 'Apollo', sourceStartSeconds: 1.1, sourceEndSeconds: 1.7,
-              timelineStartFrame: 33, timelineEndFrame: 51 },
-          ] }, createdAt: new Date().toISOString() }
-      for (const [id, content, schemaVersion] of [
-        [`w61-brief-${suffix}`, brief, 1], [`w61-policy-${suffix}`, policies, 1],
-        [world.editId, plan, 2],
-      ]) await db.v2ProjectSnapshot.update({ where: { id },
-        data: { contentJson: stableSerialize(content), contentHash: calculateCanonicalHash(content),
-          schemaVersion } })
+      audioTracks: [], effectTracks: [], markers: [], transitions: [], protectedElements: [],
+      localeVariantRefs: [], formatVariantRefs: [], lineageRefs: [world.sourceId],
+      editorial: { commandType: 'remove-spoken-content', exclusions: [],
+        retainedSourceRanges: [{ sourceStartSeconds: 0, sourceEndSeconds: 4 }] },
+      subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 32 },
+      retimedTranscript: { sourceTranscriptId: transcriptId, sourceTranscriptHash: transcript.transcriptHash,
+        words: [
+          { text: 'Bem', sourceStartSeconds: 0.2, sourceEndSeconds: 0.5,
+            timelineStartFrame: 6, timelineEndFrame: 15 },
+          { text: 'vindo', sourceStartSeconds: 0.5, sourceEndSeconds: 0.9,
+            timelineStartFrame: 15, timelineEndFrame: 27 },
+          { text: 'ao', sourceStartSeconds: 0.9, sourceEndSeconds: 1.1,
+            timelineStartFrame: 27, timelineEndFrame: 33 },
+          { text: 'Apollo', sourceStartSeconds: 1.1, sourceEndSeconds: 1.7,
+            timelineStartFrame: 33, timelineEndFrame: 51 },
+        ] }, createdAt: new Date().toISOString() })
+      // The Version that plays the recording with this transcript is a real child Command that adopts the recording's ingest
+      // receipt (the stored brief and policies stay what project creation sealed: they are not part of what this suite proves).
+      const inputHead = await commitSealedChild(db, { workspaceId, projectId: world.projectId, actor: world.actor,
+        suffix: `w64-${suffix}-input`, adopt: [world.sourceId],
+        mutatePlan: (parentPlan) => inputPlanOf(planPlayingRecordings([world.recording])(parentPlan)) })
+      world.head = inputHead
+      world.versionId = inputHead.version.id
+      world.editId = inputHead.editPlanSnapshot.id
       const actorContext = createExternalAuditContext({ clientId: world.clientId,
         credentialId: `w64-credential-${suffix}`, workspaceId, environment: 'production' })
       const actor = { ...actorContext, scopes: new Set(['projects:write']),
@@ -743,7 +743,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         createId: (kind) => `${kind}-${suffix}-${counters.set(kind, (counters.get(kind) ?? 0) + 1).get(kind)}`,
         compileBrief: createEvidenceBoundBriefCompiler() })
       const request = { workspaceId, projectId: world.projectId,
-        baseVersionId: world.versionId, baseHash: 'b'.repeat(64), actor,
+        baseVersionId: world.versionId, baseHash: world.head.version.baseHash, actor,
         idempotency: { key: `w64-director-${suffix}` },
         reason: 'Plan source OCR as untrusted content with explicit review.' }
       const directed = await run(request)
@@ -804,90 +804,43 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
           data: { currentRightsSnapshotId: snapshot.id, rightsRevision: { increment: 1 } } })
         return snapshot
       }
-      const secondId = `proxy-rights-second-${suffix}`, secondManifestId = `proxy-rights-manifest-${suffix}`
-      const secondKey = `${workspaceId}/rights-controlled-second.mp4`
-      await db.v2MediaArtifact.create({ data: { id: secondId, workspaceId, artifactKey: secondKey,
-        sha256: '9'.repeat(64), byteSize: 1024n, mediaType: 'video', container: 'mp4', status: 'available' } })
-      await db.v2MediaArtifactManifest.create({ data: { id: secondManifestId, workspaceId,
-        artifactId: secondId, schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: sha(Buffer.from(secondManifestId)), recipeId: 'controlled-rights-source',
-        recipeVersion: '1.0.0', parametersHash: sha(Buffer.from(secondKey)),
-        manifestJson: stableSerialize({ artifact: { artifactKey: secondKey } }) } })
-      const secondLinkId = randomUUID(), ambiguousLinkId = randomUUID()
-      await db.v2ProjectMediaAsset.create({ data: { id: secondLinkId, workspaceId,
-        projectId: world.projectId, artifactId: secondId, role: 'selected-insert', originalFileName: 'controlled-second.mp4' } })
-      const rightsPlan = JSON.parse(directedEdit.contentJson)
-      rightsPlan.id = `proxy-rights-plan-${suffix}`
-      rightsPlan.formatVariantRefs = ['9:16']
-      const rightsClips = rightsPlan.videoTracks.find((t) => t.kind === 'base-video').clips
-      rightsClips[0].audioSourceArtifactId = secondId
-      rightsPlan.audioTimelineHash = createDirectedAudioTimelineHash({ fps: rightsPlan.fps,
-        clips: rightsClips, musicTracks: rightsPlan.audioTracks })
-      const rightsSnapshot = renderablePlanSnapshotOf({ workspaceId, projectId: world.projectId,
-        origin: 'react-playback', sourceId: `controlled-rights-playback-${suffix}`,
-        sourceHash: sha(Buffer.from(secondId)), sourceVersion: null, plan: rightsPlan })
-      await new PrismaRenderablePlanSnapshotRepository(db).persist({ snapshot: rightsSnapshot,
-        createdAt: new Date().toISOString() })
-      const snapshotRequest = { workspaceId, projectId: world.projectId, planId: rightsPlan.id,
-        planHash: rightsSnapshot.planHash, format: '9:16' }
-      const readRightsSnapshot = () => proxy.readRenderableSnapshotSource(snapshotRequest)
-      const readRightsProject = () => proxy.readImmutableSource({ workspaceId, projectId: world.projectId,
-        projectVersionId: directed.version.id, editPlanSnapshotId: directedEdit.id,
-        sourceArtifactId: world.sourceId, sourceManifestId: manifestId })
-      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
-        data: { contentJson: stableSerialize(rightsPlan), contentHash: calculateVersionHash(rightsPlan) } })
-      try {
-        assert.ok(!JSON.parse(rightsTemplate.allowedUsesJson).includes('editorial-reuse'),
-          'master fixture must match ingest rather than silently add library reuse')
-        for (const [role, mediaType, use, outputRole] of [
-          ['source-master', 'video', 'rendering', 'source-master'],
-          ['source-audio', 'audio', 'rendering', 'source-master'],
-          ['selected-insert', 'video', 'editorial-reuse', 'selected-insert'],
-        ]) {
-          await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role } })
-          await db.v2MediaArtifact.update({ where: { id: secondId }, data: { mediaType } })
-          await installRights(secondId, { allowedUses: [use] })
-          for (const read of [readRightsProject, readRightsSnapshot]) {
-            assert.equal((await read()).renderSources.find((s) => s.artifactId === secondId).role, outputRole)
-          }
-          await installRights(secondId, { allowedUses: [use === 'rendering' ? 'editorial-reuse' : 'rendering'] })
-          for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
-        }
-        await installRights(secondId, { allowedUses: ['editorial-reuse'] })
-        for (const draft of [{ status: 'revoked' }, { status: 'expired' },
-          { expiresAt: '2020-01-01T00:00:00Z' }, { allowedUses: ['editing'], prohibitedUses: ['rendering'] },
-          { allowedLocales: ['en-US'] },
-          { consent: { status: 'revoked', allowedUses: [] } }]) {
-          await installRights(world.sourceId, draft)
-          for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
-        }
-        await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: world.rightsId } })
-        assert.equal(await proxy.readCurrentSource({ workspaceId: world.otherWorkspaceId, projectId: world.projectId }), null)
-        assert.equal(await proxy.readRenderableSnapshotSource({ ...snapshotRequest, workspaceId: world.otherWorkspaceId }), null)
-        await db.v2ProjectMediaAsset.create({ data: { id: ambiguousLinkId,
-          workspaceId, projectId: world.projectId, artifactId: secondId,
-          role: 'source-master', originalFileName: 'ambiguous-second.mp4' } })
-        for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
-          error.code === 'PERSISTENCE_CONFLICT' && /unambiguous/i.test(error.message))
-        await db.v2ProjectMediaAsset.delete({ where: { id: ambiguousLinkId } })
-        // editing-proxy is permitted by the DB role CHECK but cannot authorize
-        // a referenced render source; exercise the reader rather than SQL 23514.
-        await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role: 'editing-proxy' } })
-        for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
-          error.code === 'PERSISTENCE_CONFLICT' && /unsupported/i.test(error.message))
-      } finally {
-        await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: world.rightsId } })
-        await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
-          data: { contentJson: directedEdit.contentJson, contentHash: directedEdit.contentHash } })
+      // A renderable plan is born with a Version of its own (compile-renderable-plan): the child of the head it is compiled on, whose
+      // id the plan must carry. The compile moves the head to that Version.
+      const compileRenderable = async (baseVersionId, planTemplate, sourceId, sourceHash) => {
+        const origin = 'react-playback'
+        // The row's historical authority: the plan names its derivation (`<origin>:<source id>:<source hash>`) in its lineage.
+        const plan = { ...planTemplate, projectVersionId: renderableCompileVersionId({
+          workspaceId, projectId: world.projectId, origin, sourceId, sourceHash, baseVersionId }),
+        lineageRefs: [...(planTemplate.lineageRefs ?? []), `${origin}:${sourceId}:${sourceHash}`] }
+        const snapshot = renderablePlanSnapshotOf({ workspaceId, projectId: world.projectId,
+          origin, sourceId, sourceHash, sourceVersion: null, plan })
+        const { snapshot: stored } = await new PrismaRenderablePlanSnapshotRepository(db).persist({ snapshot,
+          createdAt: new Date().toISOString(), baseVersionId,
+          author: { type: 'api-client', id: world.clientId }, audit: materializeActorAuditContext(actor) })
+        const version = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: plan.projectVersionId } })
+        return { plan, snapshot, stored, version }
       }
-      const alteredEdit = JSON.parse(directedEdit.contentJson)
-      alteredEdit.videoTracks.find((track) => track.kind === 'base-video').clips[0].sourceInFrame += 1
-      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
-        data: { contentJson: stableSerialize(alteredEdit), contentHash: calculateVersionHash(alteredEdit) } })
-      assert.equal((await proxy.readCurrentSource({ workspaceId, projectId: world.projectId })).trustedOcr,
-        undefined, 'A changed result time map cannot carry source-frame OCR coordinates')
-      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
-        data: { contentJson: directedEdit.contentJson, contentHash: directedEdit.contentHash } })
+      // A result whose time map is not the one its OCR evidence was bound to must carry no source-frame coordinates. The Version's
+      // plan snapshot cannot be rewritten (project_snapshots is append-only: trigger project_snapshots_w66_dependency_guard), so the
+      // contradiction is stored instead: a perception snapshot sealed over the same evidence but another time map is inserted beside
+      // the original and the Director run - a mutable pointer row - is pointed at it. Plan and evidence then disagree exactly as when
+      // the plan was the side that changed; the reader's predicate (hash of the plan's time map != the evidence's) is the same.
+      const directedRunRow = await db.v2DirectorRun.findUniqueOrThrow({ where: { id: directed.run.id } })
+      const originalPerception = await db.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: directedRunRow.perceptionSnapshotId } })
+      const anotherTimeMap = JSON.parse(originalPerception.contentJson)
+      assert.ok(anotherTimeMap.ocrEvidence, 'the Director perception snapshot carries the OCR evidence the time map is bound to')
+      anotherTimeMap.ocrEvidence = { ...anotherTimeMap.ocrEvidence, timeMapHash: calculateCanonicalHash(`another-time-map-${suffix}`) }
+      const anotherTimeMapSnapshot = await db.v2ProjectSnapshot.create({ data: { id: `w64-other-time-map-${suffix}`,
+        workspaceId, projectId: world.projectId, kind: originalPerception.kind, schemaVersion: originalPerception.schemaVersion,
+        contentJson: stableSerialize(anotherTimeMap), contentHash: calculateCanonicalHash(anotherTimeMap),
+        createdAt: originalPerception.createdAt } })
+      const pointRunAt = (perceptionSnapshotId) => db.v2DirectorRun.update({ where: { id: directed.run.id },
+        data: { perceptionSnapshotId } })
+      await pointRunAt(anotherTimeMapSnapshot.id)
+      try {
+        assert.equal((await proxy.readCurrentSource({ workspaceId, projectId: world.projectId })).trustedOcr,
+          undefined, 'A changed result time map cannot carry source-frame OCR coordinates')
+      } finally { await pointRunAt(originalPerception.id) }
       // Controlled repository attachment: the receipt is bound to a sealed recipe, not a
       // fabricated facial approval or a claim that this output was actually rendered.
       const ocrReceipt = { envelopeId, envelopeHash, inputVersionId: world.versionId,
@@ -1032,11 +985,8 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       await assert.rejects(attach(), /rights|blocked/i)
       await db.v2MediaArtifact.update({ where: { id: world.sourceId },
         data: { currentRightsSnapshotId: world.rightsId, rightsRevision: 7 } })
-      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
-        data: { contentJson: stableSerialize(alteredEdit), contentHash: calculateVersionHash(alteredEdit) } })
-      await assert.rejects(attach(), /changed|evidence|time.map/i)
-      await db.v2ProjectSnapshot.update({ where: { id: directedEdit.id },
-        data: { contentJson: directedEdit.contentJson, contentHash: directedEdit.contentHash } })
+      await pointRunAt(anotherTimeMapSnapshot.id)
+      try { await assert.rejects(attach(), /changed|evidence|time.map/i) } finally { await pointRunAt(originalPerception.id) }
       await db.v2PublicOperation.update({ where: { id: proxyOperationId },
         data: { leaseOwner: 'w65-takeover-worker' } })
       await assert.rejects(attach(), /lease/i)
@@ -1090,11 +1040,13 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       assert.equal(stored.schemaVersion, 2)
       assert.equal(calculateCanonicalHash(JSON.parse(stored.contentJson)), stored.contentHash)
       assert.equal((await run(request)).replayed, true)
-      await db.v2ProjectSnapshot.update({ where: { id: stored.id },
-        data: { contentHash: 'f'.repeat(64) } })
-      await assert.rejects(run(request), /hash|snapshot|invalid/i)
-      await db.v2ProjectSnapshot.update({ where: { id: stored.id },
-        data: { contentHash: stored.contentHash } })
+      // A stored perception snapshot whose hash is not its content's: stored beside the original (the original's hash is immutable)
+      // and pointed at by the run, which the replay must refuse.
+      const forgedHash = await db.v2ProjectSnapshot.create({ data: { id: `w64-forged-hash-${suffix}`,
+        workspaceId, projectId: world.projectId, kind: stored.kind, schemaVersion: stored.schemaVersion,
+        contentJson: stored.contentJson, contentHash: 'f'.repeat(64), createdAt: stored.createdAt } })
+      await pointRunAt(forgedHash.id)
+      try { await assert.rejects(run(request), /hash|snapshot|invalid/i) } finally { await pointRunAt(stored.id) }
       assert.equal(row.projectVersionId, directed.version.parentVersionId)
       assert.equal((await director.readContext({ workspaceId, projectId: world.projectId })).ocrEnvelope,
         undefined, 'OCR from parent version must not flow to a later version')
@@ -1241,13 +1193,15 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       // Two further controlled rows exercise an observed cancel-first lock queue
       // and an actual expired-lease reclaim. They use the same sealed source and
       // review shape; each output has a distinct artifact/manifest/operation.
-      const expiryPlan = { ...JSON.parse(directedEdit.contentJson),
-        id: `proxy-expiry-plan-${suffix}`, formatVariantRefs: ['9:16'] }
-      const expirySnapshot = renderablePlanSnapshotOf({ workspaceId, projectId: world.projectId,
-        origin: 'react-playback', sourceId: `controlled-expiry-playback-${suffix}`,
-        sourceHash: sha(Buffer.from(`expiry-${suffix}`)), sourceVersion: null, plan: expiryPlan })
-      await new PrismaRenderablePlanSnapshotRepository(db).persist({ snapshot: expirySnapshot,
-        createdAt: new Date().toISOString() })
+      const expiryCompiled = await compileRenderable(directed.version.id, { ...JSON.parse(directedEdit.contentJson),
+        id: `proxy-expiry-plan-${suffix}`, formatVariantRefs: ['9:16'] },
+      `controlled-expiry-playback-${suffix}`, sha(Buffer.from(`expiry-${suffix}`)))
+      const expiryPlan = expiryCompiled.plan, expirySnapshot = expiryCompiled.snapshot, expiryVersion = expiryCompiled.version
+      assert.equal(expiryVersion.parentVersionId, directed.version.id)
+      // The compile moved the head to the Version that holds the plan. The project-mode rows below are authorized against the
+      // Director result, so the head goes back to it (a pointer only: no Version is created before the manual Commands, which
+      // continue from the expiry Version - a Version's sequence is unique in a project, so the head only moves forward from there).
+      await db.v2Project.update({ where: { id: world.projectId }, data: { currentVersionId: directed.version.id } })
 
       async function seedOrderedRace(label, expiredLease = false, snapshotMode = false) {
         const id = `w65-${label}-operation-${suffix}`
@@ -1256,7 +1210,8 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         const key = `${workspaceId}/controlled-${label}-proxy.mp4`
         const hash = sha(Buffer.from(id))
         const parameters = { ...recipeParameters, inputHash: hash,
-          ...(snapshotMode ? { ocrReceipt: null } : {}) }
+          ...(snapshotMode ? { ocrReceipt: null, projectVersionId: expiryVersion.id,
+            editPlanSnapshotId: expiryVersion.editPlanSnapshotId } : {}) }
         const manifest = createMediaArtifactManifestV2({
           artifactKey: key, artifactSha256: 'd'.repeat(64), byteSize: 1024,
           mediaType: 'video', container: 'mp4',
@@ -1285,7 +1240,8 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         const detailRow = { ...raceDetailData, operationId: id, inputHash: hash,
           outputArtifactId: artifactId, outputManifestId: manifestId,
           originalFileName: `controlled-${label}-proxy.mp4`,
-          ...(snapshotMode ? { renderablePlanId: expiryPlan.id, renderablePlanHash: expirySnapshot.planHash,
+          ...(snapshotMode ? { projectVersionId: expiryVersion.id, editPlanSnapshotId: expiryVersion.editPlanSnapshotId,
+            renderablePlanId: expiryPlan.id, renderablePlanHash: expirySnapshot.planHash,
             renderableOrigin: expirySnapshot.origin, renderableSourceId: expirySnapshot.sourceId,
             renderableSourceHash: expirySnapshot.sourceHash, renderableVariantId: '9:16', renderableFormat: '9:16' } : {}) }
         assertControlledProxyRowHydrates(publicRow, detailRow, proxyAudit.contextHash)
@@ -1298,7 +1254,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         delete base.reviewHash
         const reviewBody = { ...base, proxyArtifactId: artifactId,
           proxyManifestId: manifestId, inputHash: hash,
-          ...(snapshotMode ? { editPlanHash: expirySnapshot.planHash } : {}),
+          ...(snapshotMode ? { projectVersionId: expiryVersion.id, editPlanHash: expirySnapshot.planHash } : {}),
           renderCompletedAt: finishedAt,
           timeToFirstProxyMs: Date.parse(finishedAt) - Date.parse(base.uploadReceivedAt) }
         const review = Object.freeze({ ...reviewBody,
@@ -1307,7 +1263,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
           attach: (client) => new PrismaProjectProxyRenderRepository(client)[snapshotMode
             ? 'attachCompletedSnapshotOutput' : 'attachCompletedOutput']({
             workspaceId, operationId: id, projectId: world.projectId,
-            projectVersionId: directed.version.id, variantId: '9:16',
+            projectVersionId: snapshotMode ? expiryVersion.id : directed.version.id, variantId: '9:16',
             outputArtifactId: artifactId, outputManifestId: manifestId,
             originalFileName: `controlled-${label}-proxy.mp4`,
             createdAt: finishedAt, recipeParameters: parameters,
@@ -1469,6 +1425,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
 
       // Inline reuse completes without a worker. Its rights fence is a separate
       // transaction from the already committed manual Command/Version below.
+      await db.v2Project.update({ where: { id: world.projectId }, data: { currentVersionId: expiryVersion.id } })
       const manualRepository = new PrismaManualEditRepository(db)
       for (const rightsChange of ['allow', 'revoke', 'expiry']) {
         await installRights(world.sourceId)
@@ -1664,6 +1621,81 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       }
 
       await canonicalDirectorSnapshotOwnerPG({ db, workspaceId, projectId: world.projectId, actor })
+
+      // ---- Rights of every referenced source, through both resolvers ----------------------------------------------------
+      // The Director's plan cannot be rewritten to reference a second source (a Version's plan snapshot is append-only), so the plan
+      // that does is carried by Versions born with it, on top of the final head: a child Command that adopts the second recording's
+      // ingest receipt (the project resolver reads it), and the compile-renderable-plan child that is born with the renderable plan
+      // (the snapshot resolver reads it). The rights are then changed under both, exactly as before: rights pointers are mutable.
+      const second = await persistRecording(db, { workspaceId, projectId: world.projectId, actor: world.actor,
+        slug: `w61-rights-second-${suffix}`, durationFrames: 120 })
+      const secondId = second.names.sourceArtifactId
+      const secondLinkId = (await db.v2ProjectMediaAsset.findFirstOrThrow({
+        where: { projectId: world.projectId, artifactId: secondId, role: 'source-master' } })).id
+      await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role: 'selected-insert' } })
+      const ambiguousLinkId = randomUUID()
+      const withSecondAudio = (plan) => {
+        const next = structuredClone(plan)
+        next.formatVariantRefs = ['9:16']
+        const clips = next.videoTracks.find((t) => t.kind === 'base-video').clips
+        clips[0].audioSourceArtifactId = secondId
+        next.audioTimelineHash = createDirectedAudioTimelineHash({ fps: next.fps, clips, musicTracks: next.audioTracks })
+        return next
+      }
+      const rightsHead = await commitSealedChild(db, { workspaceId, projectId: world.projectId, actor: world.actor,
+        suffix: `w64-${suffix}-rights-plan`, adopt: [secondId], mutatePlan: withSecondAudio })
+      const rightsCompiled = await compileRenderable(rightsHead.version.id, {
+        ...JSON.parse(rightsHead.editPlanSnapshot.contentJson), id: `proxy-rights-plan-${suffix}` },
+      `controlled-rights-playback-${suffix}`, sha(Buffer.from(secondId)))
+      const rightsPlan = rightsCompiled.plan, rightsSnapshot = rightsCompiled.snapshot
+      const snapshotRequest = { workspaceId, projectId: world.projectId, planId: rightsPlan.id,
+        planHash: rightsSnapshot.planHash, format: '9:16' }
+      const readRightsSnapshot = () => proxy.readRenderableSnapshotSource(snapshotRequest)
+      const readRightsProject = () => proxy.readImmutableSource({ workspaceId, projectId: world.projectId,
+        projectVersionId: rightsHead.version.id, editPlanSnapshotId: rightsHead.editPlanSnapshot.id,
+        sourceArtifactId: world.sourceId, sourceManifestId: manifestId })
+      try {
+        assert.ok(!JSON.parse(rightsTemplate.allowedUsesJson).includes('editorial-reuse'),
+          'master fixture must match ingest rather than silently add library reuse')
+        for (const [role, mediaType, use, outputRole] of [
+          ['source-master', 'video', 'rendering', 'source-master'],
+          ['source-audio', 'audio', 'rendering', 'source-master'],
+          ['selected-insert', 'video', 'editorial-reuse', 'selected-insert'],
+        ]) {
+          await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role } })
+          await db.v2MediaArtifact.update({ where: { id: secondId }, data: { mediaType } })
+          await installRights(secondId, { allowedUses: [use] })
+          for (const read of [readRightsProject, readRightsSnapshot]) {
+            assert.equal((await read()).renderSources.find((s) => s.artifactId === secondId).role, outputRole)
+          }
+          await installRights(secondId, { allowedUses: [use === 'rendering' ? 'editorial-reuse' : 'rendering'] })
+          for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+        }
+        await installRights(secondId, { allowedUses: ['editorial-reuse'] })
+        for (const draft of [{ status: 'revoked' }, { status: 'expired' },
+          { expiresAt: '2020-01-01T00:00:00Z' }, { allowedUses: ['editing'], prohibitedUses: ['rendering'] },
+          { allowedLocales: ['en-US'] },
+          { consent: { status: 'revoked', allowedUses: [] } }]) {
+          await installRights(world.sourceId, draft)
+          for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+        }
+        await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: world.rightsId } })
+        assert.equal(await proxy.readCurrentSource({ workspaceId: world.otherWorkspaceId, projectId: world.projectId }), null)
+        assert.equal(await proxy.readRenderableSnapshotSource({ ...snapshotRequest, workspaceId: world.otherWorkspaceId }), null)
+        await db.v2ProjectMediaAsset.create({ data: { id: ambiguousLinkId,
+          workspaceId, projectId: world.projectId, artifactId: secondId,
+          role: 'source-master', originalFileName: 'ambiguous-second.mp4' } })
+        for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
+          error.code === 'PERSISTENCE_CONFLICT' && /unambiguous/i.test(error.message))
+        await db.v2ProjectMediaAsset.delete({ where: { id: ambiguousLinkId } })
+        // editing-proxy is permitted by the DB role CHECK but cannot authorize
+        // a referenced render source; exercise the reader rather than SQL 23514.
+        await db.v2ProjectMediaAsset.update({ where: { id: secondLinkId }, data: { role: 'editing-proxy' } })
+        for (const read of [readRightsProject, readRightsSnapshot]) await assert.rejects(read(), (error) =>
+          error.code === 'PERSISTENCE_CONFLICT' && /unsupported/i.test(error.message))
+      } finally {
+        await db.v2MediaArtifact.update({ where: { id: world.sourceId }, data: { currentRightsSnapshotId: world.rightsId } })
+      }
 
     } catch (error) { primaryError = error } finally {
       const cleanupErrors = []
