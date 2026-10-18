@@ -5,7 +5,10 @@ import { createFaceProducerEnvelopeV2 } from '../../../src/v2/domain/face-produc
 
 import { decodeFace0204Output, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256 } from '../../../src/v2/domain/face-detector-output.ts'
 import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256, FACE_V9_OWNER_ACCEPTANCE_SHA256 } from '../../../src/v2/domain/face-evidence-policy.ts'
-import { ACCEPTED_FACE_PRODUCERS } from '../../../src/v2/domain/face-producer-registry.ts'
+// A namespace import with a `default` fallback: under tsx (which runs a TypeScript module as CommonJS) a static named import of this
+// export is not detectable by Node, and the supervised PostgreSQL suites that load this helper run under tsx.
+import * as faceProducerRegistry from '../../../src/v2/domain/face-producer-registry.ts'
+const ACCEPTED_FACE_PRODUCERS = faceProducerRegistry.ACCEPTED_FACE_PRODUCERS ?? faceProducerRegistry.default?.ACCEPTED_FACE_PRODUCERS
 
 export const sha = (digit) => digit.repeat(64)
 const hash = (value) => createHash('sha256').update(value).digest('hex')

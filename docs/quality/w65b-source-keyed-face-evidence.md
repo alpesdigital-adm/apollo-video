@@ -178,3 +178,37 @@ Os números e os caminhos de evidência estão no relatório da entrega; esta se
 - Pixels, mesma maquinaria sem banco: `tests/v2/caption-placement-pixels.integration.mjs` (migrado para o leitor por fonte).
 - Composição: `tests/v2/face-window-composition.integration.mjs` (os dois workers V9 recusam plataforma sem recibo, pin ausente e
   runtime alterado antes de tocar o banco).
+
+## 11. Estado em 2026-10-18 (pausa) e próximos passos
+
+**Feito e verde** (unitário, `tsc`, lint de arquitetura): domínio v3, stream, projeção por clipes, persistência, worker, composição, rotas,
+contrato público (linha de base só por adição), 14 mutações de comportamento todas mortas, `face-window-composition` com os dois
+workers V9 (a refatoração da fábrica manteve um único ponto de construção auditado). Suíte unitária completa em `claude/w65b-part2-wip`:
+3376 testes, 3 falhas, uma preexistente (`stored-projection-manifest`, ver relatório) e duas da refatoração da fábrica, já corrigidas.
+
+**Prova PostgreSQL de `w65b-p2a` (`w65b-pg-runs/w65b-p2a-e7f3165a`)**: só `prisma-final-caption-certification` (regressão da Parte 1,
+já lendo janelas por fonte) passou, 1/1. Os demais passos falharam **antes de executar qualquer asserção**:
+
+- `migration-drift` (`prisma migrate diff --exit-code`) sai 2 por drift preexistente em 59 tabelas sem relação (FKs, defaults); nenhuma
+  linha cita `face_producer_operations`, `face_source_window_envelopes` nem `face_source_window_raw_outputs`. O passo deve virar uma
+  asserção sobre essas três tabelas (e não um `--exit-code` global).
+- as suítes que carregam `tests/v2/helpers/face-envelope-v2.mjs` sob `tsx` falham na importação: `tsx` roda módulo `.ts` como CommonJS e
+  o Node não detecta `import { ACCEPTED_FACE_PRODUCERS, FACE0204_OUTPUT_POLICY_ID, ... }` estático. Isto vale também para
+  `prisma-face-window.integration.mjs` (W62, nunca executada). Correção em andamento: importar por namespace com fallback em `.default`
+  (feito para `face-producer-registry.ts`; falta o mesmo para `face-detector-output.ts` e `face-evidence-policy.ts` no mesmo helper e
+  conferir `face-source-envelope-v3.mjs`).
+
+**Próximos passos exatos**
+
+1. Terminar o helper tsx-safe e confirmar que cada suíte carrega: `node node_modules/tsx/dist/cli.mjs --test <suíte>` sem
+   `V2_DATABASE_URL` deve mostrar `skipped 1`, nunca `SyntaxError`.
+2. Trocar o passo de drift por uma asserção das três tabelas; rodar `w65b-pg-plan-p2a.json` (BASE) pelo harness
+   `run-local-pg-w65b.mjs` (de `C:/dev/apollo-video-worktrees/w65b-final-gate-source-evidence`, com `--keep-going`), na ordem:
+   `prisma-face-source-window`, `prisma-caption-placement`, `prisma-face-window` (regressão W62), `prisma-final-caption-source-evidence`
+   (`APOLLO_FINAL_SOURCE_EVIDENCE_E2E=1`), `prisma-final-caption-certification`, `caption-placement-pixels`. As suítes novas ainda
+   **nunca executaram**: espere correções de fixture (por exemplo `fps`/duração do probe do mundo, nomes de bandas, o texto exato da
+   falha do crítico de pixels no mundo F3).
+3. Preencher a seção 10 com os números dessa rodada; registrar a evidência em `docs/quality/project-status.json` (W65) e regenerar
+   `docs/PROJECT-STATUS.md` (`npm run project:status`, depois `:check`).
+4. No cabeçote final: suíte unitária completa e as 13 suítes físicas (`run-w69-physical-suites.mjs`), ambas sob o lock global.
+5. Decisão da Astra na integração: remover o recurso `face-window-operations` da W62 (sem consumidor).
