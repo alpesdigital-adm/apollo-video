@@ -77,10 +77,10 @@ export function buildAssSubtitles(input: {
   const events = input.cues.flatMap((cue) => {
     assertAssCueText(cue.text)
     const decision = input.anchorPlan ? subtitleAnchorDecisionFor(input.anchorPlan, cue.id) : null
-    if (!decision || input.anchorPlan?.schemaVersion !== 'subtitle-anchor-plan/v2') {
+    if (!decision || !(input.anchorPlan?.schemaVersion === 'subtitle-anchor-plan/v2' || input.anchorPlan?.schemaVersion === 'subtitle-anchor-plan/v3')) {
       throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cue has no runtime facial review decision')
     }
-    // A cue with unknown facial coverage is not drawn.
+    // A cue whose band could not be certified (unknown facial coverage) or whose bands are all taken is not drawn.
     if (decision?.suppressed) return []
     if (decision?.bounds) {
       // `\an5` centres the box on the point, so the point is the centre of the decided band.
@@ -385,7 +385,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     if (input.subtitleCues?.length) {
       const placement = input.placementPlan
       const anchorPlan = placement?.subtitleAnchorPlan
-      if (!placement || anchorPlan?.schemaVersion !== 'subtitle-anchor-plan/v2' ||
+      if (!placement || !(anchorPlan?.schemaVersion === 'subtitle-anchor-plan/v2' || anchorPlan?.schemaVersion === 'subtitle-anchor-plan/v3') ||
           placement.format !== input.format ||
           placement.durationFrames !== fullExpectedFrames ||
           Math.abs(anchorPlan.fps - input.fps) > 0.01) {
