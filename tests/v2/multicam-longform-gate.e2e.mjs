@@ -771,11 +771,8 @@ test(
         `${criterion} did not name the missing plan as missing evidence`,
       )
     }
-    // OPEN W66 PRODUCT GAP (not a test defect): every INSERT into renderable_plan_snapshots must be bound reciprocally by its
-    // Version's sealed State (renderable_plan_snapshots_w66_commit_check / w66_renderable_dispatch_v2), and the State of an
-    // explicit-variant Version binds none. The two compiles below therefore fail at COMMIT with "W66 new renderable snapshot
-    // lacks reciprocal state binding" until the compile path is given a State-bound way to publish its plan; everything
-    // above this line (the whole world, and the no-plan stage) is proved.
+    // Each compile is a Command on the head that creates the Version its plan is born with (the gate judges the CURRENT Version,
+    // so the world re-issues the colour critic's verdict for the head each compile leaves, exactly as the product's critic would).
     await world.compileSynthesisPlan()
     const onlyReactMissing = await run('f4016-world-key-react-plan-missing')
     assert.deepEqual(
@@ -784,6 +781,8 @@ test(
       'compiling the synthesis plan moved something other than the synthesis criterion',
     )
     await world.compileReactPlan()
+    const HEAD = await world.headVersionId()
+    assert.notEqual(HEAD, VERSION, 'the two compiles moved the head to the Version the second plan was born with')
 
     // -----------------------------------------------------------------------
     // Every condition holds: the gate approves, on evidence it read itself.
@@ -798,7 +797,7 @@ test(
     assert.equal(approved.gate.report.satisfied, 10)
     assert.equal(approved.gate.report.evaluated, 10)
     assert.equal(approved.gate.report.blocking.length, 0)
-    assert.equal(approved.gate.projectVersionId, VERSION)
+    assert.equal(approved.gate.projectVersionId, HEAD, 'the gate judges the current Version')
     assert.ok(
       approved.gate.sessionId &&
         (await client.v2CaptureSessionHead.count({
@@ -1081,7 +1080,7 @@ test(
       reportId: 'f4016-critic-report-open',
       workspaceId: W,
       projectId: PROJECT,
-      projectVersionId: VERSION,
+      projectVersionId: HEAD,
       subject: { kind: 'output', artifactId: 'artifact-output' },
       before: criticStage('before', 'artifact-intermediate', sha('d')),
       after: criticStage('after', 'artifact-output', sha('e'), { exposure: lumaAtEv(0.5, -2.5) }),

@@ -38,6 +38,7 @@ export const EDIT_COMMAND_IMPACT_SCHEMAS = [
   'compare-action-impact/v1',
   'multicam-direction-impact/v1',
   'project-output-state-impact/v1',
+  'renderable-compile-impact/v1',
 ] as const
 export type EditCommandImpactSchema = (typeof EDIT_COMMAND_IMPACT_SCHEMAS)[number]
 
@@ -216,6 +217,17 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
     evidence: 'project-policy-overrides-impact.ts:21 declares renderBlockedUntilDirectorRun true; '
       + 'resolved policy changes invalidate existing outputs but no render is enqueued before a '
       + 'new DirectorRun recompiles treatment, story and edit plan',
+  }),
+  'compile-renderable-plan': Object.freeze({
+    // The Version a renderable plan is born with. The EditPlan is the parent's under a new identity, so no existing render is
+    // invalidated and none is enqueued from the Command: the plan it binds is rendered by its own operation, by plan id.
+    renderPolicy: 'no-render',
+    impactSchema: 'renderable-compile-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: true,
+    deferralReason: null,
+    evidence: 'renderable-compile-command.ts:120 createRenderableCompileImpact declares renderSemanticsChanged false and '
+      + 'freezes every affected list empty; the preserved EditPlan snapshot id is the only plan it names',
   }),
   'compare-action': Object.freeze({
     renderPolicy: 'no-render',

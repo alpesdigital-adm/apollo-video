@@ -6,6 +6,8 @@ import {
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import type { DesiredActionInput } from '../domain/desired-action.ts'
 import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
+import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
+import { renderableCompileAuthor, renderableCompileVersionId } from './compile-renderable-plan-version.ts'
 import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
 import type { EditorialSynthesisRepository } from './ports/editorial-synthesis-repository.ts'
 import type { RenderSourceRepository } from './ports/render-source-repository.ts'
@@ -306,9 +308,17 @@ export function compileSynthesisRenderPlanService(dependencies: {
     workspaceId: string
     projectId: string
     synthesisId: string
+    /**
+     * The project head the plan is compiled on. The plan is born with that head's child (a `compile-renderable-plan` Version), so
+     * the plan it answers names the child, and a retry on the same head replays the stored plan even after the head moved.
+     */
     projectVersionId: string
     objective: StrategicObjectiveId
     desiredAction?: Readonly<DesiredActionInput>
+    /** Who compiled. The Command that creates the Version is theirs. */
+    actor: Readonly<{ kind: 'human' | 'api-client' | 'director' | 'system'; id: string; delegatedUserId?: string }>
+    /** The credential audit of an external (api-client) actor. */
+    audit?: Readonly<ApiAccessAuditContext>
   }): Promise<Readonly<{
     plan: Readonly<DirectedEditPlan>
     planHash: string
@@ -320,6 +330,7 @@ export function compileSynthesisRenderPlanService(dependencies: {
      */
     snapshot: Readonly<StoredRenderablePlanSnapshot>
   }>> => {
+    const compiler = renderableCompileAuthor({ workspaceId: input.workspaceId, actor: input.actor, audit: input.audit ?? null })
     const stored = await dependencies.syntheses.read({
       workspaceId: input.workspaceId,
       synthesisId: input.synthesisId,
@@ -369,7 +380,8 @@ export function compileSynthesisRenderPlanService(dependencies: {
     const createdAt = dependencies.clock().toISOString()
     const plan = compileSynthesisToDirectedPlan(stored.synthesis, {
       sources,
-      projectVersionId: input.projectVersionId,
+      projectVersionId: renderableCompileVersionId({ workspaceId: input.workspaceId, projectId: input.projectId, origin: 'multi-range-synthesis',
+        sourceId: stored.synthesis.id, sourceHash: stored.synthesis.synthesisHash, baseVersionId: input.projectVersionId }),
       objective: input.objective,
       ...(input.desiredAction ? { desiredAction: input.desiredAction } : {}),
       createdAt,
@@ -386,6 +398,9 @@ export function compileSynthesisRenderPlanService(dependencies: {
         plan,
       }),
       createdAt,
+      baseVersionId: input.projectVersionId,
+      author: compiler.author,
+      audit: compiler.audit,
     })
     return Object.freeze({
       plan: persisted.snapshot.plan,

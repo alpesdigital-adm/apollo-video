@@ -27,12 +27,23 @@ const WRITES_VERSION_ROW = [
   /INSERT\s+INTO\s+"?project_versions"?/i,
   /insert\s*\(\s*\w+\s*,\s*['"]project_versions['"]/,
 ]
+/**
+ * A renderable plan snapshot is born with the Version whose sealed State binds it (the database dispatch guard refuses a bare
+ * INSERT), so the row is written by the same shared persistence file as the Version, in the same transaction. No other file
+ * may insert, upsert or raw-insert one: a second writer would be a path that only the database refusal stands behind.
+ */
+const WRITES_RENDERABLE_SNAPSHOT_ROW = [
+  /\.v2RenderablePlanSnapshot\s*\.\s*(?:create|createMany|upsert|createManyAndReturn)\s*\(/,
+  /INSERT\s+INTO\s+"?renderable_plan_snapshots"?/i,
+  /insert\s*\(\s*\w+\s*,\s*['"]renderable_plan_snapshots['"]/,
+]
 const BUILDS_RETIRED_VERSION = /\bcreateProjectVersion\b/
 const REBUILDS_RETIRED_VERSION = /\brebuildRetiredContractOneVersion\b/
 
 function violationKinds(rel, source) {
   const kinds = []
   if (rel !== VERSION_WRITER && WRITES_VERSION_ROW.some((pattern) => pattern.test(source))) kinds.push('writes a ProjectVersion row outside the shared writer')
+  if (rel !== VERSION_WRITER && WRITES_RENDERABLE_SNAPSHOT_ROW.some((pattern) => pattern.test(source))) kinds.push('writes a renderable plan snapshot row outside the shared writer')
   if (rel !== VERSION_BUILDER && BUILDS_RETIRED_VERSION.test(source)) {
     kinds.push('uses the retired createProjectVersion builder instead of a sealed Version read or the output state transition')
   }

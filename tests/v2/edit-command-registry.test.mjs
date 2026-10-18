@@ -1,4 +1,5 @@
 import { createMediaLibraryAttachmentImpact, parseMediaLibraryAttachmentImpact } from '../../src/v2/domain/media-library-attachment-impact.ts'
+import { createRenderableCompileImpact, parseRenderableCompileImpact } from '../../src/v2/domain/renderable-compile-command.ts'
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -341,6 +342,7 @@ const IMPACT_FIXTURES = {
   ...OUTPUT_STATE_IMPACTS,
   'attach-media-library-reference': { build: () => createMediaLibraryAttachmentImpact({ commandId: 'command-library', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', selectionKind: 'asset', selectionId: 'asset-source', parentArtifactId: 'asset-source', sourceSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-source' }), parse: parseMediaLibraryAttachmentImpact },
   'apply-subtitle-segment-override': { build: () => subtitleSegmentOverrideImpact(), parse: parseCommandImpact },
+  'compile-renderable-plan': { build: () => createRenderableCompileImpact({ commandId: 'command-renderable', baseVersionId: 'version-base', resultVersionId: 'version-result', preservedEditPlanSnapshotId: 'snapshot-edit', renderablePlanSnapshotId: 'renderable-snapshot-1', renderablePlanHash: 'a'.repeat(64) }), parse: parseRenderableCompileImpact },
   'compare-action': { build: () => compareActionImpact(), parse: parseCompareActionImpact },
   'direct-multicam-session': { build: () => multicamDirectionImpact(), parse: parseMulticamDirectionImpact },
   'manual-edit': { build: () => manualImpact(), parse: parseCommandImpact },
@@ -374,7 +376,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 16)
+  assert.equal(EDIT_COMMAND_TYPES.length, 17)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -475,7 +477,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(literals[0])
     }
   }
-  assert.equal(callSites, 14, 'expected one createEditCommand call site per classic Command type')
+  assert.equal(callSites, 15, 'expected one createEditCommand call site per classic Command type')
   assert.equal(outputFactorySites, 1, 'expected one application call site of the output Command constructor')
   assert.deepEqual(
     [...NOT_YET_PRODUCED_BY_AN_APPLICATION_SERVICE.keys()].filter((type) => discovered.has(type)), [],
@@ -613,7 +615,7 @@ test('T-F0-027 deferred types enqueue no render before their unblocking event', 
 })
 
 test('T-F0-027 no-render types carry an explicit zero impact and preserve their version', () => {
-  assert.deepEqual([...editCommandTypesByRenderPolicy('no-render')], ['attach-media-library-reference', 'compare-action'])
+  assert.deepEqual([...editCommandTypesByRenderPolicy('no-render')], ['attach-media-library-reference', 'compare-action', 'compile-renderable-plan'])
   const policy = editCommandPolicy('compare-action')
   assert.equal(policy.impactSchema, 'compare-action-impact/v1')
   assert.equal(policy.requiresImpact, true)

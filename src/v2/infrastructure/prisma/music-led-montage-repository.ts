@@ -20,6 +20,7 @@ import { calculateRenderablePlanHash } from "../../application/renderable-edit-p
 import { evaluateAssetUse } from "../../domain/asset-rights.ts";
 import { hydrateAssetRights } from "./asset-rights-repository.ts";
 import { settleDeferredOutputGuards } from "./project-version-commit.ts";
+import { commitRenderablePlanVersionInTransaction } from "./renderable-plan-version-commit.ts";
 import { hydrateStoredMediaTranscript } from "./speech-segment-catalog-repository.ts";
 import {
   batchActorAuditData,
@@ -483,17 +484,6 @@ export class PrismaMusicMontageRunRepository implements MusicMontageRunRepositor
         "PERSISTENCE_CONFLICT",
         "Music run and renderable plan are not the same eligible derivation",
       );
-    const snapshotId = childRowId(
-      [
-        snapshot.workspaceId,
-        snapshot.origin,
-        snapshot.sourceId,
-        snapshot.sourceHash.slice(0, 16),
-        snapshot.plan.projectVersionId,
-        String(snapshot.fps),
-      ],
-      200,
-    );
     try {
       return await this.client.$transaction(
         async (transaction) => {
@@ -628,24 +618,14 @@ export class PrismaMusicMontageRunRepository implements MusicMontageRunRepositor
               "ASSET_NOT_USABLE",
               "Visual source authority changed before montage publication",
             );
-          await transaction.v2RenderablePlanSnapshot.create({
-            data: {
-              id: snapshotId,
-              workspaceId: snapshot.workspaceId,
-              projectId: snapshot.projectId,
-              projectVersionId: snapshot.plan.projectVersionId,
-              planId: snapshot.planId,
-              origin: snapshot.origin,
-              sourceId: snapshot.sourceId,
-              sourceHash: snapshot.sourceHash,
-              sourceVersion: snapshot.sourceVersion,
-              fps: snapshot.fps,
-              durationFrames: snapshot.durationFrames,
-              clipCount: snapshot.clipCount,
-              planJson: JSON.stringify(snapshot.plan),
-              planHash: snapshot.planHash,
-              createdAt: new Date(run.createdAt),
-            },
+          // The renderable plan is born with the Version that holds it: a child of the head this run names, made by the shared Version
+          // writer in this transaction (the database refuses the row on its own). The run, created next, records the base it was authorized on.
+          await commitRenderablePlanVersionInTransaction(transaction, {
+            snapshot,
+            baseVersionId: run.projectVersionId,
+            author: { type: "api-client", id: input.actorClientId, ...(input.authenticationAudit.delegatedUserId ? { delegatedUserId: input.authenticationAudit.delegatedUserId } : {}) },
+            audit: input.authenticationAudit,
+            createdAt: run.createdAt,
           });
           const row = await transaction.v2MusicMontageRun.create({
             data: {
@@ -676,8 +656,8 @@ export class PrismaMusicMontageRunRepository implements MusicMontageRunRepositor
             },
             select: { runJson: true, runHash: true },
           });
-          // A renderable snapshot is bound to its Version by a deferred database check, which Prisma 5.22 lets an interactive transaction
-          // outlive when COMMIT refuses it: settle it here so a refusal fails this call instead of returning a run that was not stored.
+          // The Version that holds the renderable plan is bound to it by deferred database checks, which Prisma 5.22 lets an interactive
+          // transaction outlive when COMMIT refuses them: settle them here so a refusal fails this call instead of returning a run that was not stored.
           await settleDeferredOutputGuards(transaction);
           return Object.freeze({ run: hydrateRun(row), replayed: false });
         },

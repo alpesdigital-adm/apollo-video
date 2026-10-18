@@ -172,15 +172,12 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
       source: { kind: 'original-audio', artifactId: fixture.artifactId, artifactSha256: encoded.sha256, rightsSnapshotId: fixture.rights.snapshot.id },
       requestedByClientId: fixture.clientId, at: fixture.now.toISOString() })
     await new PrismaLocalizationMediaRunRepository(prisma).create({ run, requestFingerprint: 'b'.repeat(64), idempotencyKey: `media-${fixture.suffix}`, authenticationAudit: fixture.audit })
-    const explicitVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({
-      where: { id: fixture.versionId } })
-    assert.ok(explicitVersion.parentVersionId,
-      'the no-LUT Command fixture must provide a distinct historical parent')
-    await prisma.v2Project.update({ where: { id: fixture.projectId },
-      data: { currentVersionId: explicitVersion.parentVersionId } })
-    const historicalHead = await prisma.v2Project.findUniqueOrThrow({
+    // The plan is born with the child of the head the canonical script was approved on, so that Version must still be the head
+    // (a head that moved since is a VERSION_CONFLICT for the worker, never a plan compiled on a stale base).
+    const headBefore = await prisma.v2Project.findUniqueOrThrow({
       where: { id: fixture.projectId }, select: { currentVersionId: true, status: true } })
-    assert.notEqual(historicalHead.currentVersionId, fixture.versionId)
+    assert.equal(headBefore.currentVersionId, fixture.versionId,
+      'the fixture publishes against the head the canonical script was approved on')
     runtime = createLocalizationMediaRuntime({
       ...process.env,
       APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
@@ -253,7 +250,14 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
       workspaceId: fixture.workspaceId, projectId: fixture.projectId,
       planId: proof.snapshotId, planHash: proof.planHash,
     } })
-    assert.equal(snapshotRow.projectVersionId, fixture.versionId)
+    // The snapshot is born with a Version of its own: the child of the base, made by the run's requester, whose sealed State binds it.
+    const bornWith = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: snapshotRow.projectVersionId } })
+    assert.notEqual(bornWith.id, fixture.versionId)
+    assert.equal(bornWith.parentVersionId, fixture.versionId)
+    assert.equal(bornWith.createdBy, fixture.clientId)
+    assert.equal(JSON.parse(snapshotRow.planJson).projectVersionId, bornWith.id)
+    const bornState = await prisma.v2ProjectOutputState.findUniqueOrThrow({ where: { id: bornWith.outputStateId } })
+    assert.deepEqual([bornState.renderablePlanSnapshotId, bornState.renderablePlanId, bornState.renderablePlanHash], [snapshotRow.id, snapshotRow.planId, snapshotRow.planHash])
     const snapshotReader = new PrismaProjectProxyRenderRepository(prisma)
     const snapshotLookup = { workspaceId: fixture.workspaceId, projectId: fixture.projectId,
       planId: proof.snapshotId, planHash: proof.planHash, format: proof.format }
@@ -262,8 +266,8 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
     assert.equal(await snapshotReader.readRenderableSnapshotSource({ ...snapshotLookup,
       workspaceId: `other-${fixture.workspaceId}` }), null)
     assert.deepEqual(await prisma.v2Project.findUniqueOrThrow({ where: { id: fixture.projectId },
-      select: { currentVersionId: true, status: true } }), historicalHead,
-    'historical snapshot publication must not change the current ProjectVersion or project status')
+      select: { currentVersionId: true, status: true } }), { currentVersionId: bornWith.id, status: headBefore.status },
+    'snapshot publication moves the head to the Version that holds the plan and leaves the project status alone')
     const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: fixture.versionId }, include: { editPlanSnapshot: true } })
     const snapshotPlan = JSON.parse(snapshotRow.planJson), basePlan = JSON.parse(baseVersion.editPlanSnapshot.contentJson)
     assert.deepEqual(snapshotPlan.videoTracks, basePlan.videoTracks, 'localization snapshot must leave the base video clips unchanged')

@@ -12,11 +12,18 @@ import {
 } from '../../application/renderable-edit-plan.ts'
 import { validateDirectedEditPlan, type DirectedEditPlan } from '../../domain/director-run.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { childRowId } from './child-row-id.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { commitRenderablePlanVersionInTransaction, persistRenderablePlanVersion } from './renderable-plan-version-commit.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
+}
+
+/** A unique violation, whether Prisma modelled the insert (P2002) or a raw INSERT surfaced PostgreSQL's 23505 (P2010). */
+function isUniqueViolation(error: unknown): boolean {
+  if (isPrismaCode(error, 'P2002')) return true
+  const meta = typeof error === 'object' && error !== null && 'meta' in error ? (error as { meta?: { code?: unknown } }).meta : undefined
+  return isPrismaCode(error, 'P2010') && meta?.code === '23505'
 }
 
 interface SnapshotRow {
@@ -143,82 +150,40 @@ export class PrismaRenderablePlanSnapshotRepository implements RenderablePlanSna
     return row ? hydrate(row) : null
   }
 
-  async persist(input: {
-    snapshot: Readonly<RenderablePlanSnapshot>
-    createdAt: string
-  }): Promise<Readonly<{ snapshot: Readonly<StoredRenderablePlanSnapshot>; replayed: boolean }>> {
+  async persist(input: Parameters<RenderablePlanSnapshotRepository['persist']>[0]): Promise<Readonly<{ snapshot: Readonly<StoredRenderablePlanSnapshot>; replayed: boolean }>> {
     const { snapshot } = input
-    // The natural key of the bridge, hashed into the row id: one derivation, at
-    // one hash, for one project version, delivered at one frame rate. A retry
-    // lands on the same row.
+    // The natural key of the bridge: one derivation, at one hash, compiled into one project version (the child of the head the
+    // caller compiled on, whose id the plan document carries), delivered at one frame rate. A retry lands on the same row, and
+    // it is found before anything is written: the first compile moved the head, so the base the retry names is no longer it.
     //
-    // The rate is the caller's, not the source's. `planFps` is a published knob
-    // of the compile capability and it is the timebase every clip is expressed
-    // in, so the same map at 25/1 and at 30/1 are two documents with two plan
-    // hashes. While it was out of this key the second rate collided with the
-    // first and was answered PERSISTENCE_CONFLICT — a refusal nothing in the
-    // schema, the description or the details explained. The objective is not
-    // here on purpose: see `renderable_plan_delivery_rate_key`.
+    // The rate is the caller's, not the source's. `planFps` is a published knob of the compile capability and it is the
+    // timebase every clip is expressed in, so the same map at 25/1 and at 30/1 are two documents with two plan hashes. The
+    // objective is not here on purpose: see `renderable_plan_delivery_rate_key`.
     //
-    // The DB's `renderable_plan_snapshots_source_key` holds the same columns and
-    // is what actually enforces this; the id is that key hashed, so a divergence
-    // between the two would show up as a P2002 the replay below cannot resolve.
-    const id = childRowId([
-      snapshot.workspaceId,
-      snapshot.origin,
-      snapshot.sourceId,
-      snapshot.sourceHash.slice(0, 16),
-      snapshot.plan.projectVersionId,
-      String(snapshot.fps),
-    ], 200)
+    // The DB's `renderable_plan_snapshots_source_key` holds the same columns and is what actually enforces this.
+    const replay = await this.replayOf(snapshot)
+    if (replay) return replay
     try {
-      await this.client.v2RenderablePlanSnapshot.create({
-        data: {
-          id,
-          workspaceId: snapshot.workspaceId,
-          projectId: snapshot.projectId,
-          projectVersionId: snapshot.plan.projectVersionId,
-          planId: snapshot.planId,
-          origin: snapshot.origin,
-          sourceId: snapshot.sourceId,
-          sourceHash: snapshot.sourceHash,
-          sourceVersion: snapshot.sourceVersion,
-          fps: snapshot.fps,
-          durationFrames: snapshot.durationFrames,
-          clipCount: snapshot.clipCount,
-          planJson: JSON.stringify(snapshot.plan),
-          planHash: snapshot.planHash,
-          createdAt: new Date(input.createdAt),
-        },
-      })
+      // The row is never inserted on its own: the database admits it only with the Version whose State binds it, and that Version
+      // is written by the one shared Version writer. Inside a caller's transaction the caller settles the deferred guards.
+      const request = { snapshot, baseVersionId: input.baseVersionId, author: input.author, audit: input.audit, createdAt: input.createdAt }
+      if ('$transaction' in this.client) await persistRenderablePlanVersion(this.client, request)
+      else await commitRenderablePlanVersionInTransaction(this.client, request)
     } catch (error) {
-      if (!isPrismaCode(error, 'P2002')) throw error
-      const stored = await this.readByKey(snapshot)
-      // Same key, same cut: the caller compiled twice and gets the first
-      // answer. Same key, different cut: the request was identical down to the
-      // delivery rate, so what changed the compiler's output was not the
-      // request — a compiler that moved, or a row edited underneath — and
-      // overwriting the plan somebody already rendered would erase the evidence
-      // of what was rendered. The details name the whole key: "a different plan
-      // is stored for that source hash" left a reader guessing which part of
-      // their request had collided.
-      if (stored && stored.planHash === snapshot.planHash) {
-        return Object.freeze({ snapshot: stored, replayed: true })
-      }
-      throw new DomainError(
-        'PERSISTENCE_CONFLICT',
-        `A different plan is already stored for ${snapshot.origin} ${snapshot.sourceId} at that hash, in project version ${snapshot.plan.projectVersionId} at ${snapshot.fps} fps`,
-        {
-          sourceId: snapshot.sourceId,
-          projectVersionId: snapshot.plan.projectVersionId,
-          fps: snapshot.fps,
-          storedPlanHash: stored?.planHash ?? null,
-          incomingPlanHash: snapshot.planHash,
-        },
-      )
+      // A concurrent identical compile won the head or the key: what it stored is the answer, whatever this one saw. Inside a
+      // caller's transaction a failure aborts that transaction, so there is nothing left to read: the caller's rollback answers.
+      const lost = isUniqueViolation(error) || (error instanceof DomainError && error.code === 'VERSION_CONFLICT')
+      if (!lost || !('$transaction' in this.client)) throw error
+      const racing = await this.replayOf(snapshot)
+      if (racing) return racing
+      if (error instanceof DomainError) throw error
+      // Another Command took the Version number (or the key) after this one read the head: the project moved, which the caller
+      // answers like every other Command based on a Version that is no longer the head.
+      throw new DomainError('VERSION_CONFLICT', 'The project moved while the renderable plan was being compiled; read its head and compile on it',
+        { baseVersionId: input.baseVersionId })
     }
-    // Read back rather than handing the caller its own object: the round trip
-    // is where a plan that cannot be rehydrated is still cheap to fix.
+    // Read back rather than handing the caller its own object: the round trip is where a plan that cannot be rehydrated is still
+    // cheap to fix.
     const written = await this.readByKey(snapshot)
     if (!written) {
       throw new DomainError(
@@ -227,6 +192,30 @@ export class PrismaRenderablePlanSnapshotRepository implements RenderablePlanSna
       )
     }
     return Object.freeze({ snapshot: written, replayed: false })
+  }
+
+  /**
+   * The stored answer for this key. Same key, same cut: the caller compiled twice and gets the first answer. Same key, different
+   * cut: the request was identical down to the delivery rate, so what changed the compiler's output was not the request — a
+   * compiler that moved, or a row edited underneath — and overwriting the plan somebody already rendered would erase the evidence
+   * of what was rendered. The details name the whole key: "a different plan is stored for that source hash" left a reader guessing
+   * which part of their request had collided.
+   */
+  private async replayOf(snapshot: Readonly<RenderablePlanSnapshot>): Promise<Readonly<{ snapshot: Readonly<StoredRenderablePlanSnapshot>; replayed: true }> | null> {
+    const stored = await this.readByKey(snapshot)
+    if (!stored) return null
+    if (stored.planHash === snapshot.planHash) return Object.freeze({ snapshot: stored, replayed: true as const })
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `A different plan is already stored for ${snapshot.origin} ${snapshot.sourceId} at that hash, in project version ${snapshot.plan.projectVersionId} at ${snapshot.fps} fps`,
+      {
+        sourceId: snapshot.sourceId,
+        projectVersionId: snapshot.plan.projectVersionId,
+        fps: snapshot.fps,
+        storedPlanHash: stored.planHash,
+        incomingPlanHash: snapshot.planHash,
+      },
+    )
   }
 
   private async readByKey(

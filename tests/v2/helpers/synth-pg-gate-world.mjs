@@ -273,6 +273,11 @@ export async function buildGateWorld({
   const head = sealed.head
   const versionId = head.version.id
   const versionHash = head.version.baseHash
+  // A renderable plan is born with the child of the head it is compiled on, and that child becomes the head: the gate judges the
+  // CURRENT Version (its colour critic above all), so the world compiles on the head it finds and re-homes the critic's verdict on
+  // the head each compile leaves. `versionId` stays the Version the world's other rows hang from.
+  const headOf = async () => (await client.v2Project.findUniqueOrThrow({ where: { id: projectId }, select: { currentVersionId: true } })).currentVersionId
+  let rehomeCriticReport = async () => {}
   // The director run and the export chain name a snapshot of each kind. A sealed project carries brief, policies and
   // edit-plan (a fourth or fifth would break the bundle's snapshot membership), so those kinds share the head's rows.
   const refs = head.version.snapshotRefs
@@ -505,7 +510,7 @@ export async function buildGateWorld({
     // like every other playback command.
     baseVersionId: `${ids.reactSession}:playback:track-reaction:v${resolvedReact.map.version}`,
     baseHash: resolvedReact.map.mapHash,
-    projectVersionId: versionId,
+    projectVersionId: await headOf(),
     objective: 'discovery',
     planFps: rational(30n, 1n),
   })
@@ -593,8 +598,9 @@ export async function buildGateWorld({
     workspaceId,
     projectId,
     synthesisId: synthesis.synthesis.id,
-    projectVersionId: versionId,
+    projectVersionId: await headOf(),
     objective: 'discovery',
+    actor: { kind: 'human', id: u('f4016-operator') },
   })
 
   // ---- criterion 7: the camera match, and the colour plan it resolves in --
@@ -668,13 +674,22 @@ export async function buildGateWorld({
   })
 
   // ---- criterion 8: the colour critic's verdict on the current version ----
-  const criticReport = buildCriticReport({
+  const criticFor = (projectVersionId, reportId) => buildCriticReport({
     workspaceId,
     projectId,
-    projectVersionId: versionId,
-    reportId: u('f4016-critic-report'),
+    projectVersionId,
+    reportId,
     matchPlan: match.plan,
   })
+  // The verdict is on the current Version: when a compile moves the head, the same verdict is re-issued for the Version it left.
+  let rehomed = 0
+  rehomeCriticReport = async () => {
+    const current = await headOf()
+    if (current === criticReport.projectVersionId) return
+    criticReport = criticFor(current, u(`f4016-critic-report-head-${(rehomed += 1)}`))
+    await criticReports.persist({ report: criticReport, createdAt: at(70) })
+  }
+  let criticReport = criticFor(await headOf(), u('f4016-critic-report'))
   await criticReports.persist({ report: criticReport, createdAt: at(70) })
 
   // ---- criterion 9: the delivered MP4, its artifact and its manifest -----
@@ -902,7 +917,7 @@ export async function buildGateWorld({
     synthesis: synthesis.synthesis,
     match,
     colourPlan,
-    criticReport,
+    get criticReport() { return criticReport },
     insufficientSession,
     snapshotIds,
     protocolRowIds,
@@ -912,6 +927,10 @@ export async function buildGateWorld({
     versionId,
     versionHash,
     head,
+    /** The project head now: the Version the last compile left, or `versionId` while nothing compiled. */
+    headVersionId: headOf,
+    /** Re-issue the colour critic's verdict for the current head (a compile outside the world moved it). */
+    rehomeCriticReport: () => rehomeCriticReport(),
   }
 }
 

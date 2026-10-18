@@ -5,6 +5,9 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { compileInitialSourceEditPlan } from '../../src/v2/application/apply-editorial-cut-command.ts'
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import { renderableCompileVersionId } from '../../src/v2/application/compile-renderable-plan-version.ts'
+import { assembleDirectedEditPlan, renderablePlanSnapshotOf } from '../../src/v2/application/renderable-edit-plan.ts'
+import { PrismaRenderablePlanSnapshotRepository } from '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createEditCommand } from '../../src/v2/domain/edit-command.ts'
@@ -276,6 +279,168 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
     await commit(ordered.parent, ordered.bundle)
     const orderedStored = await readPersistedOperationalOutputBundleV3(db, { ...scope, versionId: ordered.bundle.version.id })
     assert.equal(orderedStored.version.baseHash, ordered.bundle.version.baseHash)
+  } finally {
+    await db.$disconnect()
+  }
+})
+
+/**
+ * A renderable plan reaches a project only as the State of a Version born with it, against a real PostgreSQL (supervised, same gate).
+ *
+ *   1. compiling creates the child Version of the head through the shared Version writer: Command, EditPlan, State, bundle and the
+ *      snapshot row in one transaction, the head moves, and a factual read-back rebuilds the bundle from the stored row;
+ *   2. the State and the row name each other (id, plan id, hash, Version), and the plan document hashes to the stored hash;
+ *   3. a retry on the same head replays the stored row and writes nothing, even after the head moved on; a compile on a base that
+ *      is no longer the head is VERSION_CONFLICT; another derivation compiles on the new head;
+ *   4. a bare INSERT of a snapshot is still refused at COMMIT, and so is every row the State was not sealed over.
+ */
+test('W66 PostgreSQL a renderable plan is born with its Version, bound reciprocally, and a bare INSERT of a snapshot is refused', { skip: !enabled, timeout: 300_000 }, async () => {
+  const runId = randomUUID().replaceAll('-', '').slice(0, 12)
+  const workspaceId = `w66rc-${runId}-workspace`, projectId = `w66rc-${runId}-project`, clientId = `w66rc-${runId}-client`
+  const scope = { workspaceId, projectId }
+  const db = new PrismaClient()
+  try {
+    const startedAt = new Date()
+    await db.v2Workspace.create({ data: { id: workspaceId, slug: `w66rc-${runId}`, name: 'W66 renderable compile PG', createdAt: startedAt, updatedAt: startedAt } })
+    await db.v2ApiClient.create({ data: { id: clientId, workspaceId, name: 'Renderable compile actor', allowedEnvironmentsJson: '["sandbox"]',
+      scopeGrantsJson: '["projects:write"]', createdBy: clientId, createdAt: startedAt } })
+    const auditContext = createExternalAuditContext({ workspaceId, clientId, credentialId: `w66rc-${runId}-credential`, environment: 'sandbox' })
+    const actor = Object.freeze({ ...auditContext, auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' })
+    const audit = materializeActorAuditContext(actor)
+    const author = { type: 'api-client', id: clientId }
+    const world = await seedSealedProject(db, { workspaceId, actor, prefix: `w66rc-${runId}`, ids: { project: projectId } })
+    const snapshots = new PrismaRenderablePlanSnapshotRepository(db)
+    const headOf = async () => (await db.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId
+    const at = () => new Date(Date.now() + 1000).toISOString()
+    const hash = (character) => character.repeat(64)
+
+    // The plan a compiler assembles: it names the child of the head it compiles on, which it asks for before it assembles anything.
+    const compiled = (baseVersionId, label, { fps = 30, frames = 60 } = {}) => {
+      const sourceId = `w66rc-${runId}-map-${label}`, sourceHash = hash(label === 'a' ? 'a' : 'b'), origin = 'react-playback'
+      const plan = assembleDirectedEditPlan({
+        planId: `w66rc-${runId}-plan-${label}`, projectVersionId: renderableCompileVersionId({ ...scope, origin, sourceId, sourceHash, baseVersionId }),
+        derivedFrom: { origin, id: sourceId, hash: sourceHash }, objective: 'discovery', fps,
+        sources: [{ id: `w66rc-${runId}-source`, artifactId: `w66rc-${runId}-artifact`, kind: 'video', durationSeconds: 10 }],
+        clips: [{ id: `clip-${label}-1`, sourceArtifactId: `w66rc-${runId}-artifact`, sourceInFrame: 0, sourceOutFrame: frames, timelineInFrame: 0, timelineOutFrame: frames, rate: 1 }],
+        seams: [], lineageRefs: [`playback-map:${sourceId}:v1`], assumptions: ['PostgreSQL renderable compile proof'], createdAt: at() })
+      return renderablePlanSnapshotOf({ ...scope, origin, sourceId, sourceHash, sourceVersion: 1, plan })
+    }
+    const persist = (baseVersionId, snapshot) => snapshots.persist({ snapshot, createdAt: at(), baseVersionId, author, audit })
+    const residue = async () => ({
+      versions: await db.v2ProjectVersion.count({ where: scope }), snapshots: await db.v2RenderablePlanSnapshot.count({ where: scope }),
+      commands: await db.v2EditCommand.count({ where: { ...scope, type: 'compile-renderable-plan' } }), head: await headOf(),
+    })
+
+    // ---- 1. the first compile: a child of the head, born with its plan
+    const base = world.head.version
+    assert.equal(await headOf(), base.id)
+    const first = compiled(base.id, 'a')
+    const created = await persist(base.id, first)
+    assert.equal(created.replayed, false)
+    const child = await db.v2ProjectVersion.findUniqueOrThrow({ where: { id: first.plan.projectVersionId } })
+    assert.equal(created.snapshot.plan.projectVersionId, child.id, 'the stored plan names the Version it was born with')
+    assert.equal(child.parentVersionId, base.id)
+    assert.equal(child.sequence, base.sequence + 1)
+    assert.equal(child.outputContractVersion, 3)
+    assert.equal(await headOf(), child.id, 'the head moved to the new Version')
+    const row = await db.v2RenderablePlanSnapshot.findFirstOrThrow({ where: { ...scope, planHash: first.planHash } })
+    assert.equal(row.projectVersionId, child.id)
+
+    // ---- 2. the reciprocal binding, as the database stores it
+    const state = await db.v2ProjectOutputState.findUniqueOrThrow({ where: { id: child.outputStateId } })
+    assert.deepEqual([state.renderablePlanSnapshotId, state.renderablePlanId, state.renderablePlanHash], [row.id, row.planId, row.planHash])
+    assert.equal(state.transition, 'inherit')
+    const command = await db.v2EditCommand.findUniqueOrThrow({ where: { id: child.commandId } })
+    assert.equal(command.type, 'compile-renderable-plan')
+    assert.equal(command.baseVersionId, base.id)
+    assert.equal(command.baseHash, base.baseHash)
+    const origin = JSON.parse((await db.v2OutputOperationalBundle.findUniqueOrThrow({ where: { versionId: child.id } })).originJson)
+    assert.equal(origin.kind, 'renderable-compile-command')
+    const stored = await readPersistedOperationalOutputBundleV3(db, { ...scope, versionId: child.id })
+    assert.equal(stored.version.baseHash, child.baseHash)
+    assert.equal(stored.state.document.renderablePlan.snapshotId, row.id)
+    assert.equal(stored.state.document.renderablePlan.hash, first.planHash)
+    assert.equal(JSON.parse(operationalBundlePlanV3(stored).contentJson).projectVersionId, child.id, 'the EditPlan is the head\'s under the new Version\'s identity')
+    assert.equal(await db.v2PublicEventOutbox.count({ where: { workspaceId, resourceType: 'project-version', resourceId: child.id } }), 1, 'the Version is announced like every other')
+
+    // ---- 3. a retry replays, writes nothing and survives the head moving; another derivation compiles on the new head
+    const afterFirst = await residue()
+    const replay = await persist(base.id, compiled(base.id, 'a'))
+    assert.equal(replay.replayed, true)
+    assert.equal(replay.snapshot.planHash, first.planHash)
+    assert.deepEqual(await residue(), afterFirst)
+    const second = compiled(child.id, 'b')
+    const secondCreated = await persist(child.id, second)
+    assert.equal(secondCreated.replayed, false)
+    assert.equal(await headOf(), second.plan.projectVersionId)
+    const afterSecond = await residue()
+    assert.equal((await persist(base.id, compiled(base.id, 'a'))).replayed, true, 'the first compile still replays after the head moved twice')
+    assert.deepEqual(await residue(), afterSecond)
+    // The base of a compile that was never made is no longer the head: the project moved.
+    await assert.rejects(() => persist(base.id, compiled(base.id, 'b')), (error) => error.code === 'VERSION_CONFLICT' && error.details.currentVersionId === second.plan.projectVersionId)
+    assert.deepEqual(await residue(), afterSecond)
+    // The same derivation at the same base, delivered at another rate, is not a replay either: the base is not the head.
+    await assert.rejects(() => persist(base.id, compiled(base.id, 'a', { fps: 25 })), (error) => error.code === 'VERSION_CONFLICT')
+    assert.deepEqual(await residue(), afterSecond)
+
+    // ---- 4. a bare INSERT of a snapshot is refused at COMMIT, for the head's Version and for any other
+    const headId = await headOf()
+    const bare = compiled(headId, 'c')
+    const insertSql = 'INSERT INTO "renderable_plan_snapshots" ("id","workspaceId","projectId","projectVersionId","planId","origin","sourceId","sourceHash","sourceVersion","fps","durationFrames","clipCount","planJson","planHash","createdAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)'
+    const insertValues = (version, plan) => [`w66rc-${runId}-bare-${version}`, workspaceId, projectId, version, plan.planId, plan.origin, plan.sourceId, plan.sourceHash,
+      plan.sourceVersion, plan.fps, plan.durationFrames, plan.clipCount, JSON.stringify(plan.plan), plan.planHash, new Date()]
+    const beforeBare = await residue()
+    for (const version of [headId, base.id]) {
+      const forged = renderablePlanSnapshotOf({ ...scope, origin: 'react-playback', sourceId: bare.sourceId, sourceHash: bare.sourceHash, sourceVersion: 1,
+        plan: assembleDirectedEditPlan({ planId: `w66rc-${runId}-bare-plan-${version}`, projectVersionId: version, derivedFrom: { origin: 'react-playback', id: bare.sourceId, hash: bare.sourceHash },
+          objective: 'discovery', fps: 30, sources: [{ id: 'bare-source', artifactId: 'bare-artifact', kind: 'video', durationSeconds: 10 }],
+          clips: [{ id: 'bare-clip', sourceArtifactId: 'bare-artifact', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 }],
+          seams: [], lineageRefs: [], assumptions: ['bare insert'], createdAt: at() }) })
+      await assert.rejects(() => db.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(insertSql, ...insertValues(version, forged))
+        await settleDeferredOutputGuards(tx)
+      }, transactionOptions), (error) => String(error.meta?.message ?? error.message).includes('W66 new renderable snapshot lacks reciprocal state binding'),
+      `a bare row for ${version === headId ? 'the head' : 'a past Version'}`)
+    }
+    assert.deepEqual(await residue(), beforeBare, 'the refused rows left nothing')
+
+    // ---- 4b. a row the State was not sealed over is refused by the operational guard, whatever the application wrote
+    const lying = compiled(headId, 'd')
+    const beforeLie = await residue()
+    const intercept = (rewrite) => new Proxy(db, { get(target, key) {
+      if (key !== '$transaction') { const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value }
+      return (action, options) => target.$transaction(async (tx) => action(new Proxy(tx, { get(transaction, property) {
+        if (property === '$executeRawUnsafe') return (query, ...values) => {
+          if (query.startsWith('INSERT INTO "renderable_plan_snapshots" (')) {
+            const columns = query.slice(query.indexOf('(') + 1, query.indexOf(')')).split(',').map((name) => name.replaceAll('"', ''))
+            return rewrite({ columns, values, run: () => transaction.$executeRawUnsafe(query, ...values) })
+          }
+          return transaction.$executeRawUnsafe(query, ...values)
+        }
+        const value = Reflect.get(transaction, property)
+        return typeof value === 'function' ? value.bind(transaction) : value
+      } })), options)
+    } })
+    const lies = [
+      ['the plan document is not the one the State sealed (a clip moved, the hash and every column kept)', ({ columns, values, run }) => {
+        const planAt = columns.indexOf('planJson'), plan = JSON.parse(values[planAt])
+        plan.videoTracks[0].clips[0].sourceInFrame += 1; plan.videoTracks[0].clips[0].sourceOutFrame += 1
+        values[planAt] = JSON.stringify(plan)
+        return run()
+      }, 'W66 historical plan authority digest/body mismatch'],
+      ['the row is never written (the State names a snapshot nobody stored)', () => Promise.resolve(0), 'W66v3'],
+    ]
+    for (const [label, rewrite, expected] of lies) {
+      const forgedSnapshots = new PrismaRenderablePlanSnapshotRepository(intercept(rewrite))
+      await assert.rejects(() => forgedSnapshots.persist({ snapshot: lying, createdAt: at(), baseVersionId: headId, author, audit }),
+        (error) => String(error.meta?.message ?? error.message).includes(expected), label)
+      assert.deepEqual(await residue(), beforeLie, `${label} left nothing`)
+    }
+    // And the honest compile of the same plan still goes through afterwards: no refusal was remembered.
+    const honest = await persist(headId, lying)
+    assert.equal(honest.replayed, false)
+    assert.equal(await headOf(), lying.plan.projectVersionId)
   } finally {
     await db.$disconnect()
   }

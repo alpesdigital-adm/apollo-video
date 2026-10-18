@@ -169,9 +169,13 @@ test("T-FR-192 compiles approved translated subtitles on the unchanged source ti
     ],
     format: "9:16",
     planId: "localized-plan-001",
+    runId: "media-run-001",
     createdAt: at,
   });
   assert.equal(result.plan.durationFrames, 120);
+  // The plan is born with the child of the head the canonical script was approved on, and says which derivation decided it.
+  assert.notEqual(result.plan.projectVersionId, basePlan.projectVersionId);
+  assert.ok(result.plan.lineageRefs.includes(`localization:media-run-001:${result.lineageHash}`));
   assert.equal(result.durationDeviation.thresholdExceeded, false);
   assert.equal(
     result.plan.videoTracks[0].clips[0].timelineOutFrame,
@@ -204,6 +208,7 @@ test("T-FR-193 refuses original audio as uploaded/local voice and permits it onl
     ],
     format: "9:16",
     planId: "localized-plan-001",
+    runId: "media-run-001",
     createdAt: at,
   };
   assert.throws(

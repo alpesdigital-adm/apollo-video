@@ -873,6 +873,11 @@ export function createLocalizationMediaRuntime(
   })
   const processor = createLocalizationMediaProcessor({
     contexts: new PrismaLocalizationMediaContextLoader(client), snapshots: createRenderablePlanSnapshotRepository(), proxy, clock,
+    // The Version that holds a renderable plan is made by the client that requested the run, under the audit persisted for it.
+    authorOf: async (run) => {
+      const audit = await runs.readAuthenticationAudit({ workspaceId: run.workspaceId, runId: run.id })
+      return { author: { type: 'api-client', id: audit.clientId, ...(audit.delegatedUserId ? { delegatedUserId: audit.delegatedUserId } : {}) }, audit }
+    },
   })
   return Object.freeze({
     runs,

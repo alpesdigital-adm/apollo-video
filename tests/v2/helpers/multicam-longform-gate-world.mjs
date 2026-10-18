@@ -276,6 +276,11 @@ export async function buildGateWorld({
   }
   const versionId = sealed.head.version.id
   const versionBaseHash = sealed.head.version.baseHash
+  // A renderable plan is born with the child of the head it is compiled on, and that child becomes the head: the gate judges the
+  // CURRENT Version (its colour critic above all), so the world compiles on the head it finds and re-homes the critic's verdict on
+  // the head each compile leaves. `versionId` stays the Version the world's other rows hang from.
+  const headOf = async () => (await client.v2Project.findUniqueOrThrow({ where: { id: projectId }, select: { currentVersionId: true } })).currentVersionId
+  let rehomeCriticReport = async () => {}
   // The snapshots the Director run and the export chain name besides the head's own EditPlan.
   const snapshotIds = { 'edit-plan': sealed.head.editPlanSnapshot.id }
   for (const kind of ['perception', 'treatment', 'story', 'quality-report']) {
@@ -503,7 +508,7 @@ export async function buildGateWorld({
     snapshots,
     clock: reactClock,
   })
-  const compileReactPlan = () => compileReact({
+  const compileReactPlan = async () => compileReact({
     actor: reactActor,
     sessionId: ids.reactSession,
     reactionTrackId: 'track-reaction',
@@ -511,10 +516,10 @@ export async function buildGateWorld({
     // like every other playback command.
     baseVersionId: `${ids.reactSession}:playback:track-reaction:v${resolvedReact.map.version}`,
     baseHash: resolvedReact.map.mapHash,
-    projectVersionId: versionId,
+    projectVersionId: await headOf(),
     objective: 'discovery',
     planFps: rational(30n, 1n),
-  })
+  }).then(async (compiled) => { await rehomeCriticReport(); return compiled })
   if (renderablePlans === 'repository') await compileReactPlan()
 
   // ---- criterion 6: two hours of master as a two-minute multi-range cut ---
@@ -595,13 +600,14 @@ export async function buildGateWorld({
   const compileSynthesis = compileSynthesisRenderPlanService({
     syntheses, sources: renderSources, snapshots, clock: () => new Date(at(51)),
   })
-  const compileSynthesisPlan = () => compileSynthesis({
+  const compileSynthesisPlan = async () => compileSynthesis({
     workspaceId,
     projectId,
     synthesisId: synthesis.synthesis.id,
-    projectVersionId: versionId,
+    projectVersionId: await headOf(),
     objective: 'discovery',
-  })
+    actor: { kind: 'human', id: `f4016-operator-${run}` },
+  }).then(async (compiled) => { await rehomeCriticReport(); return compiled })
   if (renderablePlans === 'repository') await compileSynthesisPlan()
 
   // ---- criterion 7: the camera match, and the colour plan it resolves in --
@@ -675,13 +681,22 @@ export async function buildGateWorld({
   })
 
   // ---- criterion 8: the colour critic's verdict on the current version ----
-  const criticReport = buildCriticReport({
+  const criticFor = (projectVersionId, reportId) => buildCriticReport({
     workspaceId,
     projectId,
-    projectVersionId: versionId,
-    reportId: `f4016-critic-report-${run}`,
+    projectVersionId,
+    reportId,
     matchPlan: match.plan,
   })
+  // The verdict is on the current Version: when a compile moves the head, the same verdict is re-issued for the Version it left.
+  let rehomed = 0
+  rehomeCriticReport = async () => {
+    const head = await headOf()
+    if (head === criticReport.projectVersionId) return
+    criticReport = criticFor(head, `f4016-critic-report-${run}-head-${(rehomed += 1)}`)
+    await criticReports.persist({ report: criticReport, createdAt: at(70) })
+  }
+  let criticReport = criticFor(await headOf(), `f4016-critic-report-${run}`)
   await criticReports.persist({ report: criticReport, createdAt: at(70) })
 
   // ---- criterion 9: the delivered MP4, its artifact and its manifest -----
@@ -899,7 +914,11 @@ export async function buildGateWorld({
     run,
     projectId: sealed.projectId,
     versionId,
-    /** Compile the two renderable plans criteria 4 and 6 need, for a world built with `renderablePlans: 'omit'`. */
+    /** The project head now: the Version the last compile left, or `versionId` while nothing compiled. */
+    headVersionId: headOf,
+    /** Re-issue the colour critic's verdict for the current head (a compile outside the world's own closures moved it). */
+    rehomeCriticReport: () => rehomeCriticReport(),
+    /** Compile the two renderable plans criteria 4 and 6 need, for a world built with `renderablePlans: 'omit'`. Each compiles on the head it finds. */
     compileReactPlan,
     compileSynthesisPlan,
     ids,
@@ -915,7 +934,7 @@ export async function buildGateWorld({
     synthesis: synthesis.synthesis,
     match,
     colourPlan,
-    criticReport,
+    get criticReport() { return criticReport },
     insufficientSession,
     snapshotIds,
     protocolRowIds,

@@ -986,10 +986,8 @@ test(
     // `createReactPlaybackMapServices()` because the compile had no capability
     // and no route, which meant the only thing that could produce a renderable
     // plan for a react edit was a test.
-    // OPEN W66 PRODUCT GAP (not a test defect): every INSERT into renderable_plan_snapshots must be bound reciprocally by its
-    // Version's sealed State (renderable_plan_snapshots_w66_commit_check / w66_renderable_dispatch_v2), and the State of an
-    // explicit-variant Version binds none. The compile below therefore fails at COMMIT with "W66 new renderable snapshot
-    // lacks reciprocal state binding" until the compile path is given a State-bound way to publish its plan.
+    // The plan is born with its Version: the compile is a Command on the head (`projectVersionId` of the request) that creates the
+    // Version whose sealed State binds the plan, so the answer names the CHILD of that head.
     const planned = await callRoute(planRoute.POST, `${basePath}/playback-map/plan`, {
       method: 'POST',
       token,
@@ -1006,6 +1004,8 @@ test(
     assert.equal(planned.status, 201, JSON.stringify(planned.payload))
     assert.equal(planned.payload.data.plan.sourceVersion, 2)
     assert.equal(planned.payload.data.plan.sourceHash, anchored.payload.data.map.mapHash)
+    const plannedVersion = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: planned.payload.data.plan.projectVersionId } })
+    assert.equal(plannedVersion.parentVersionId, VERSION, 'the plan is born with the child of the head it was compiled on')
 
     // The document the renderer receives, read back out of PostgreSQL rather
     // than out of the response: the published answer is a summary, and what

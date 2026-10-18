@@ -61,6 +61,27 @@ test('a second ProjectVersion writer is refused in every spelling', () => {
   assert.deepEqual(outputStateArchitectureViolations([{ rel: 'infrastructure/prisma/reader.ts', source: 'await tx.v2ProjectVersion.findMany({})\n// project_versions\n' }], none), [])
 })
 
+test('a renderable plan snapshot is written by the shared persistence file alone, in every spelling', () => {
+  for (const source of [
+    'await transaction.v2RenderablePlanSnapshot.create({ data })',
+    'await this.client.v2RenderablePlanSnapshot . createMany ({ data })',
+    'await tx.v2RenderablePlanSnapshot.upsert({})',
+    'await tx.$executeRawUnsafe(`INSERT INTO "renderable_plan_snapshots" (id) VALUES ($1)`)',
+    'await tx.$executeRawUnsafe("insert into renderable_plan_snapshots (id) values ($1)")',
+    "await insert(tx, 'renderable_plan_snapshots', { id })",
+  ]) {
+    for (const rel of ['infrastructure/prisma/renderable-plan-snapshot-repository.ts', 'infrastructure/prisma/music-led-montage-repository.ts', 'application/example.ts', 'infrastructure/prisma/project-version-commit.ts']) {
+      const found = outputStateArchitectureViolations([{ rel, source }], none)
+      assert.equal(found.length, 1, `${rel}: ${source}`)
+      assert.match(found[0], /writes a renderable plan snapshot row outside the shared writer/)
+    }
+    assert.deepEqual(outputStateArchitectureViolations([{ rel: VERSION_WRITER, source }], none), [], source)
+  }
+  // Reading, counting and deleting-by-cascade are not writing.
+  assert.deepEqual(outputStateArchitectureViolations([{ rel: 'infrastructure/prisma/reader.ts',
+    source: 'await tx.v2RenderablePlanSnapshot.findFirst({})\nawait tx.v2RenderablePlanSnapshot.count({})\n// renderable_plan_snapshots\nconst sql = "SELECT id FROM renderable_plan_snapshots WHERE id=$1"\n' }], none), [])
+})
+
 test('the retired builder is refused outside its definition', () => {
   const found = outputStateArchitectureViolations([{ rel: 'application/lut.ts', source: "import { createProjectVersion } from '../domain/project-version.ts'\n" }], none)
   assert.equal(found.length, 1)

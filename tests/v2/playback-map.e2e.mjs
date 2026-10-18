@@ -376,10 +376,8 @@ test(
       'a compile refused by the fence must not leave a snapshot behind',
     )
 
-    // OPEN W66 PRODUCT GAP (not a test defect): every INSERT into renderable_plan_snapshots must be bound reciprocally by its
-    // Version's sealed State (renderable_plan_snapshots_w66_commit_check / w66_renderable_dispatch_v2), and the State of an
-    // explicit-variant Version binds none. The compile below therefore fails at COMMIT with "W66 new renderable snapshot
-    // lacks reciprocal state binding" until the compile path is given a State-bound way to publish its plan.
+    // A renderable plan is born with its Version: the compile is a `compile-renderable-plan` Command on the head, so the plan it
+    // answers names the CHILD of the head it was compiled on (`projectVersionId` of the request), whose sealed State binds the row.
     const compiled = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
       ...resolvedFence,
@@ -387,6 +385,13 @@ test(
       planFps: rational(BigInt(30), BigInt(1)),
     })
     validateDirectedEditPlan(compiled.plan)
+    const VERSION_B = compiled.plan.projectVersionId
+    assert.notEqual(VERSION_B, VERSION_A)
+    const bornWith = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: VERSION_B } })
+    assert.equal(bornWith.parentVersionId, VERSION_A, 'the plan is born with the child of the head it was compiled on')
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: PROJECT_A } })).currentVersionId, VERSION_B, 'and that child is the head')
+    const bornState = await client.v2ProjectOutputState.findUniqueOrThrow({ where: { id: bornWith.outputStateId } })
+    assert.equal(bornState.renderablePlanHash, compiled.planHash, 'its sealed State binds the plan reciprocally')
     assert.equal(compiled.plan.durationFrames, 40 * 30)
     assert.equal(compiled.mapVersion, 2)
     const snapshotRow = await client.v2RenderablePlanSnapshot.findFirstOrThrow({
@@ -419,7 +424,8 @@ test(
       Object.fromEntries(recordings.map((recording) => [recording.artifactId, recording.durationSeconds])),
     )
 
-    // Recompiling is a replay: the same derivation at the same hash is one row.
+    // Recompiling is a replay: the same derivation at the same hash on the same head is one row and one Version, even though the
+    // first compile already moved the head past the base the retry names.
     const again = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
       ...resolvedFence,
@@ -547,18 +553,30 @@ test(
     // wave's review it was not in `renderable_plan_snapshots_source_key`: the
     // same map version, into the same project version, at 25/1 after 30/1 hit
     // the unique index and came back PERSISTENCE_CONFLICT — a 409 that named
-    // neither the rate nor a way forward. The in-memory suite pins the decision;
-    // only this one proves the index agrees, because the index is what enforces
-    // it when two operators compile at once.
-    const twentyFive = await compile({
+    // neither the rate nor a way forward. A plan is now born with its own
+    // Version, so the second rate is a second compile on the head the first one
+    // left (the first rate's Version): a plan of its own, never a collision. On
+    // the old base the project has moved, which is a VERSION_CONFLICT and not a
+    // PERSISTENCE_CONFLICT.
+    const staleBase = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
       ...resolvedFence,
       projectVersionId: VERSION_A, objective: 'discovery',
+      planFps: rational(BigInt(25), BigInt(1)),
+    }).then(() => null, (error) => error)
+    assert.equal(staleBase?.code, 'VERSION_CONFLICT')
+    assert.equal(staleBase.details.currentVersionId, VERSION_B)
+    const twentyFive = await compile({
+      actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
+      projectVersionId: VERSION_B, objective: 'discovery',
       planFps: rational(BigInt(25), BigInt(1)),
     })
     assert.equal(twentyFive.replayed, false)
     assert.equal(twentyFive.plan.durationFrames, 40 * 25)
     assert.notEqual(twentyFive.planHash, compiled.planHash)
+    const VERSION_C = twentyFive.plan.projectVersionId
+    assert.equal((await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: VERSION_C } })).parentVersionId, VERSION_B)
     const bothRates = await client.v2RenderablePlanSnapshot.findMany({
       where: { workspaceId: A, sourceId: resolved.map.mapId },
       orderBy: { fps: 'asc' },
@@ -567,10 +585,10 @@ test(
     assert.equal(bothRates.length, 2, 'each delivery rate keeps its own row')
     assert.deepEqual(bothRates.map((row) => row.fps), [25, 30])
     assert.deepEqual(bothRates.map((row) => row.durationFrames), [40 * 25, 40 * 30])
-    // Same derivation, same hash, same project version: the two rows differ in
-    // the delivery rate alone, which is exactly what the old key forbade.
+    // Same derivation, same hash, the same map: the two rows differ in the delivery rate and in the Version each was born with
+    // (the second is the child of the first), which is exactly what the old key forbade.
     assert.equal(new Set(bothRates.map((row) => row.sourceHash)).size, 1)
-    assert.equal(new Set(bothRates.map((row) => row.projectVersionId)).size, 1)
+    assert.deepEqual(bothRates.map((row) => row.projectVersionId), [VERSION_C, VERSION_B])
     assert.equal(new Set(bothRates.map((row) => row.planHash)).size, 2)
 
     // Neither rate supersedes the other: asking again for the first one replays
@@ -592,7 +610,8 @@ test(
     // to mean: the same source, at the same hash, into the same project version,
     // at the same rate, compiling to a DIFFERENT document. Nothing a request can
     // ask for produces this — it takes a compiler that moved or a row edited
-    // underneath — so it is provoked here by persisting a drifted plan directly.
+    // underneath — so it is provoked here by persisting a drifted plan directly
+    // (found by its key before any Version is created).
     const drifted = renderablePlanSnapshotOf({
       workspaceId: A,
       projectId: PROJECT_A,
@@ -608,11 +627,12 @@ test(
         },
       },
     })
-    const drift = await snapshots.persist({ snapshot: drifted, createdAt: iso(210) })
+    const drift = await snapshots.persist({ snapshot: drifted, createdAt: iso(210), baseVersionId: VERSION_A,
+      author: { type: 'user', id: 'operator-ana' }, audit: null })
       .then(() => null, (error) => error)
     assert.equal(drift?.code, 'PERSISTENCE_CONFLICT')
     assert.equal(drift.details.fps, 30, 'the refusal must name the delivery rate that collided')
-    assert.equal(drift.details.projectVersionId, VERSION_A)
+    assert.equal(drift.details.projectVersionId, VERSION_B)
     assert.equal(drift.details.storedPlanHash, compiled.planHash)
     assert.equal(drift.details.incomingPlanHash, drifted.planHash)
     assert.equal(
@@ -656,7 +676,7 @@ test(
       `plan ${compiled.plan.durationFrames} frames over ` +
       `${compiled.plan.videoTracks[0].clips.length} clips at 30 fps and ` +
       `${twentyFive.plan.durationFrames} frames at 25 fps = 2 snapshot rows, ` +
-      `same map hash and same project version; a drifted plan at a stored rate ` +
+      `same map hash, each born with its own Version (the second the child of the first); a drifted plan at a stored rate ` +
       `refused by ${drift.code} naming fps ${drift.details.fps}; ` +
       `second writer refused by ${lost.code} at the service and ${rejected.code} at the database; ` +
       `sources ${compiled.plan.sources.map((source) => `${source.artifactId}@${source.durationSeconds}s`).join(' + ')} ` +

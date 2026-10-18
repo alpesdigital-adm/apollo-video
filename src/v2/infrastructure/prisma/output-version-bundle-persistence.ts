@@ -107,7 +107,26 @@ export async function persistOutputVersionBundleInTransactionV3(tx:OutputBundleT
     producerPayloadHash:b.origin.kind==='ingest-operation'?null:sha(encode(b.origin.kind==='create-output-variant'||b.origin.kind==='revise-output-spec'?b.origin.result.command.payload:(b.origin as Extract<typeof b.origin,{command:unknown}>).command.payload))})
 }
 
+/**
+ * The renderable plan snapshot a renderable-compile Version publishes, written beside that Version in the same transaction (the
+ * only place a renderable plan snapshot row is inserted). The database admits the row only when the sealed State of the Version it
+ * names binds it back and its operational guard accepts the whole bundle, so this checks nothing the guard does not: it refuses to
+ * hand the guard a row that is not the one the State was sealed over, instead of letting the COMMIT say so.
+ */
+export async function persistRenderablePlanSnapshotInTransactionV3(tx:OutputBundleTransactionV3,b:OperationalOutputVersionBundleV3,
+  row:Readonly<V2RenderablePlanSnapshotFacts>):Promise<void> {
+  const facts=createV2RenderablePlanSnapshotFacts(row),bound=b.state.document.renderablePlan
+  if(b.origin.kind!=='renderable-compile-command' || bound===null || bound.snapshotId!==facts.id || bound.planId!==facts.planId ||
+    bound.hash!==facts.planHash || facts.projectVersionId!==b.version.id || facts.workspaceId!==b.version.workspaceId ||
+    facts.projectId!==b.version.projectId || facts.createdAt!==b.version.createdAt)
+    throw new DomainError('PERSISTENCE_CONFLICT','The renderable plan snapshot is not the one the Version\'s State is sealed over')
+  await insert(tx,'renderable_plan_snapshots',{id:facts.id,workspaceId:facts.workspaceId,projectId:facts.projectId,projectVersionId:facts.projectVersionId,
+    planId:facts.planId,origin:facts.origin,sourceId:facts.sourceId,sourceHash:facts.sourceHash,sourceVersion:facts.sourceVersion,fps:facts.fps,
+    durationFrames:facts.durationFrames,clipCount:facts.clipCount,planJson:facts.planJson,planHash:facts.planHash,createdAt:new Date(facts.createdAt)})
+}
+
 import type { PreparedOperationalIngestV3 } from '../../application/ports/output-version-bundle-repository.ts'
+import { createV2RenderablePlanSnapshotFacts, type V2RenderablePlanSnapshotFacts } from '../../domain/project-fork-derivation.ts'
 import { validateOutputNormalizationV3 } from '../../domain/output-materialization.ts'
 import { createMediaColorProbe } from '../../domain/color-and-export.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'

@@ -320,6 +320,7 @@ import type { ProjectVersionV2, ProjectVersionV3 } from './project-version.ts'
 import type { ProjectOutputStateV2, ProjectOutputStateV3 } from './project-output-state.ts'
 import { createEditorialSourceBindingV1 } from './output-materialization.ts'
 import { CHILD_COMMAND_TRANSITIONS, type ChildCommandOriginV3 } from './output-child-command.ts'
+import { validateRenderableCompileOriginV3, type RenderableCompileOriginV3 } from './renderable-compile-command.ts'
 import type { EditorialCutPayloadV3 } from './editorial-cut-impact.ts'
 export type OperationalOutputOriginV3 = Readonly<
   { kind:'create-output-variant'|'revise-output-spec'; result:ReturnType<typeof createOutputVariantCommand> } |
@@ -331,7 +332,8 @@ export type OperationalOutputOriginV3 = Readonly<
   { kind:'inherit-command'; command:EditCommand<PersistedManualEditPayload>; audit:ApiAccessAuditContext; requestFingerprint:string } |
   { kind:'restore-command'; command:EditCommand<PersistedManualEditPayload>; audit:ApiAccessAuditContext; requestFingerprint:string;
     target:Readonly<{versionId:string;baseHash:string;stateId:string;stateHash:string}> } |
-  ChildCommandOriginV3
+  ChildCommandOriginV3 |
+  RenderableCompileOriginV3
 >
 export function validateOperationalOutputOriginV3(input: OperationalOutputOriginV3,
   base: Readonly<{version:ProjectVersionV2|ProjectVersionV3;state:ProjectOutputStateV2|ProjectOutputStateV3}>,
@@ -357,6 +359,8 @@ export function validateOperationalOutputOriginV3(input: OperationalOutputOrigin
     const {schemaVersion:_schema,transcriptHash:_seal,...facts}=t.document,fresh=createMediaTranscript(facts)
     assertDomain(fresh.transcriptHash===t.document.transcriptHash && stableSerialize(fresh)===stableSerialize(t.document),
       'INVALID_COMMAND','Ingest transcript authority differs')
+  } else if(input.kind==='renderable-compile-command') {
+    validateRenderableCompileOriginV3(input,base,allocation)
   } else if(input.kind==='child-command') {
     exact(input,['kind','command','audit','requestFingerprint','replaces','adoptions'])
     const c=input.command,transition=CHILD_COMMAND_TRANSITIONS[c.type as keyof typeof CHILD_COMMAND_TRANSITIONS]

@@ -680,10 +680,8 @@ async function driveJourney(t, {
     // digest, no duration and no frame rate, because the synthesis already
     // fixed the rate.
     const snapshots = new PrismaRenderablePlanSnapshotRepository(client)
-    // OPEN W66 PRODUCT GAP (not a test defect): every INSERT into renderable_plan_snapshots must be bound reciprocally by its
-    // Version's sealed State (renderable_plan_snapshots_w66_commit_check / w66_renderable_dispatch_v2), and the State of an
-    // explicit-variant Version binds none. The compile below therefore fails at COMMIT with "W66 new renderable snapshot
-    // lacks reciprocal state binding" until the compile path is given a State-bound way to publish its plan.
+    // The plan is born with its Version: the compile is a Command on the head (`projectVersionId` of the request) that creates the
+    // Version whose sealed State binds the plan, so the answer names the CHILD of that head.
     const planned = await callRoute(NextRequest, renderPlanRoute, {
       method: 'POST',
       path: `/v1/projects/${projectId}/editorial-syntheses/${synthesisId}/render-plan`,
@@ -698,6 +696,8 @@ async function driveJourney(t, {
     assert.equal(compiled.sourceId, synthesisId)
     assert.equal(compiled.sourceHash, summary.synthesisHash)
     assert.equal(compiled.clipCount, WINDOWS.length)
+    const plannedVersion = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: compiled.projectVersionId } })
+    assert.equal(plannedVersion.parentVersionId, versionId, 'the plan is born with the child of the head it was compiled on')
 
     // The plan that gets rendered is the one PostgreSQL returned, so a
     // serialization that lost a frame index would render the wrong span.

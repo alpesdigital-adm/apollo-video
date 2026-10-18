@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireScope } from '@/v2/application/authenticate-api-client'
+import { materializeActorAuditContext, requireScope } from '@/v2/application/authenticate-api-client'
 import { DomainError } from '@/v2/domain/errors'
 import { createSynthesisRenderPlanService } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
@@ -22,8 +22,9 @@ export const dynamic = 'force-dynamic'
  * go, because the bridge to a renderable plan had no address. The gate reads
  * the row this writes.
  *
- * The caller brings the project version the plan belongs to and what the cut is
- * for. It brings no source, no digest and no duration: the masters are resolved
+ * The caller brings the project head the plan is compiled on (the plan is born
+ * with its child: a `compile-renderable-plan` Version, which the answer names)
+ * and what the cut is for. It brings no source, no digest and no duration: the masters are resolved
  * through the media links the project carries, which is the lookup the render
  * path performs, and a master whose bytes are no longer the ones the ranges
  * were selected from is refused rather than quoted.
@@ -50,6 +51,8 @@ export async function POST(
       synthesisId,
       projectVersionId: body.projectVersionId,
       objective: body.objective,
+      actor: { kind: 'api-client', id: actor.clientId, ...(actor.delegatedUserId ? { delegatedUserId: actor.delegatedUserId } : {}) },
+      audit: materializeActorAuditContext(actor),
     })
     return NextResponse.json(
       presentSuccess(presentCompiledRenderablePlan(result)),

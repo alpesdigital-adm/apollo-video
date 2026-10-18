@@ -265,6 +265,8 @@ import { materializeManualEditPlan, materializeManualRestorePlan } from './manua
 import { createManualCommandImpact } from './command-impact.ts'
 import { materializeEditorialCutPlanV3, createEditorialAudioProjectionV1, createEditorialCutImpactV2 } from './editorial-cut-impact.ts'
 import { CHILD_COMMAND_TRANSITIONS, COPY_REQUIRES_EDITORIAL_CUT_REASON, FORK_TARGET_MATERIALIZATION_REASON, isForkInheritableCommandType } from './output-child-command.ts'
+import { bindRenderableSnapshotV3, RENDERABLE_COMPILE_PRODUCER_SCHEMA } from './renderable-compile-command.ts'
+import type { V2RenderablePlanSnapshotFacts } from './project-fork-derivation.ts'
 
 export type OperationalOutputParentV3 = Readonly<CreationOutputVersionBundleV2|OperationalOutputVersionBundleV3>
 export interface OperationalOutputVersionBundleV3 {
@@ -290,6 +292,11 @@ export interface BuildOperationalOutputVersionBundleV3 {
    * target authority by an editorial cut (see forkAuthorityPendingV3) and the origin is that cut.
    */
   forkRoot?:Readonly<CreationOutputVersionBundleV2>
+  /**
+   * The stored row a renderable compile publishes with its Version. Required exactly for that origin, which sealed the row's
+   * identity in its Command; the State binds the row as its alternate plan, and no other origin may carry one.
+   */
+  renderableSnapshot?:Readonly<V2RenderablePlanSnapshotFacts>
   normalizations:readonly SealedOutputNormalizationV3[]
   materializationIds:Readonly<Record<string,string>>
 }
@@ -377,6 +384,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     JSON.parse(pp.contentJson).durationFrames===0 && !JSON.parse(pp.contentJson).videoTracks.some((t:{clips:unknown[]})=>t.clips.length>0),
     'PRECONDITION_REQUIRED','Fork2 content requires target transcript/perception/geometry authority before child3')
   const origin=validateOperationalOutputOriginV3(input.origin,parent,a)
+  const renderable=bindRenderableSnapshotV3(origin,input.renderableSnapshot,a)
   const edit=snapshotV3(input.editPlanSnapshot,a.workspaceId,a.projectId),p=JSON.parse(edit.contentJson) as MaterializationPlanV3
   assertDomain(edit.kind==='edit-plan' && edit.createdAt===a.createdAt && p.projectVersionId===a.resultVersionId &&
     edit.id!==pp.id && edit.id.length>0,'INVALID_PROJECT_VERSION','Child3 needs freshly materialized EditPlan identity')
@@ -489,6 +497,20 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
         'INVALID_COMMAND','Child adoption differs from the receipt it names or belongs to another workspace or project')
       assertDomain(!parentSources.has(adoption.sourceArtifactId),'INVALID_COMMAND','Child adoption repeats a source the parent State already observes')
     }
+  } else if(origin.kind==='renderable-compile-command') {
+    // Declared effect: the EditPlan is the parent's under a new identity and every entry re-materializes from the parent's exact
+    // observations. The alternate plan the State binds adds none: the compile observes and adopts no recording of its own.
+    // A cut copy materializes under the editorial authority its cut bound to it; the compile does not carry that binding.
+    assertDomain(!parent.state.document.entries.some(e=>e.consumption.status==='materialized'&&
+      e.consumption.materialization.document.schemaVersion==='editorial-derived-materialization/v1'),'PRECONDITION_REQUIRED',
+      'A cut copy keeps its editorial authority in every Version; a renderable plan cannot be compiled onto it yet',{reason:'renderable-compile-on-cut-copy'})
+    assertDomain(calculateOutputCanonicalHash(semanticsV3(operationalBundlePlanV3(source)))===calculateOutputCanonicalHash(semanticsV3(edit)),
+      'INVALID_COMMAND','Renderable compile declared an unchanged EditPlan but changed its semantics')
+    const factual=new Map((parent.state.document.schemaVersion==='project-output-state/v3'?
+      parent.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[]):[]).map(n=>[n.document.id,n]))
+    assertDomain(new Set(input.normalizations.map(n=>n.document.id)).size===input.normalizations.length &&
+      input.normalizations.every(n=>factual.has(n.document.id) && stableSerialize(n)===stableSerialize(factual.get(n.document.id))),
+      'INVALID_COMMAND','Renderable compile must reuse the exact parent normalization observations')
   } else if(origin.kind!=='ingest-operation'&&origin.kind!=='editorial-cut-command')assertDomain(
     calculateOutputCanonicalHash(semanticsV3(operationalBundlePlanV3(source)))===calculateOutputCanonicalHash(semanticsV3(edit)),
     'INVALID_COMMAND','Origin changed plan semantics outside its declared effect')
@@ -517,7 +539,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
   })
   else assertDomain(source.state.document.entries.length===0,'PRECONDITION_REQUIRED',
     'Fork2 source revisions require explicit target revision materialization before child3')
-  if(origin.kind==='child-command')assertDomain(entries.length>0,'PRECONDITION_REQUIRED','A child Command requires an explicit output variant')
+  if(origin.kind==='child-command'||origin.kind==='renderable-compile-command')assertDomain(entries.length>0,'PRECONDITION_REQUIRED','A child Command requires an explicit output variant')
   let provenance:ProjectOutputStateBodyV3['provenance'],transition:ProjectOutputStateBodyV3['transition'],commandId:string|null
   let producerBody:Record<string,OutputJson>
   if(origin.kind==='create-output-variant'||origin.kind==='revise-output-spec') {
@@ -550,6 +572,12 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
       leaseOwner:origin.leaseOwner,uploadId:origin.detail.uploadId,sourceArtifactId:origin.detail.sourceArtifactId,
       sourceManifestId:origin.detail.sourceManifestId,transcriptId:origin.transcript.id,
       transcriptHash:origin.transcript.document.transcriptHash}
+  } else if(origin.kind==='renderable-compile-command') {
+    const c=origin.command,row=renderable!
+    provenance={kind:'edit-command',id:c.id,hash:c.commandHash};commandId=c.id;transition='inherit'
+    producerBody={schemaVersion:RENDERABLE_COMPILE_PRODUCER_SCHEMA,canonicalPolicyVersion:OUTPUT_CANONICAL_POLICY_VERSION,
+      kind:origin.kind,commandId:c.id,commandHash:c.commandHash,payloadHash:calculateOutputCanonicalHash(c.payload),
+      renderablePlanSnapshotId:row.id,renderablePlanId:row.planId,renderablePlanHash:row.planHash}
   } else {
     const c=(origin as Extract<typeof origin,{command:unknown}>).command
     provenance={kind:'edit-command',id:c.id,hash:c.commandHash};commandId=c.id
@@ -594,10 +622,14 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     resultVersionId:a.resultVersionId,parentVersionId:parent.version.id,parentStateId:parent.state.document.id,
     parentStateHash:parent.state.stateHash,transition,provenance,producer:{document:producerBody,hash:calculateOutputCanonicalHash(producerBody)},
     editPlan:{snapshotId:edit.id,hash:edit.contentHash,authority:createOutputPlanAuthority({canonicalPolicyVersion:OUTPUT_CANONICAL_POLICY_VERSION,
-      kind:'project-edit-plan',planDocument:JSON.parse(edit.contentJson)})},renderablePlan:null,entries,
+      kind:'project-edit-plan',planDocument:JSON.parse(edit.contentJson)})},
+    // Only a renderable compile binds an alternate plan: the row it published with this Version, by id, plan id and hash.
+    renderablePlan:renderable===null?null:{snapshotId:renderable.id,planId:renderable.planId,hash:renderable.planHash,
+      authority:createOutputPlanAuthority({canonicalPolicyVersion:OUTPUT_CANONICAL_POLICY_VERSION,kind:'renderable-edit-plan',
+        planDocument:JSON.parse(renderable.planJson)})},entries,
     overlays:source.state.document.overlays,invalidations:source.state.document.invalidations,
     sourceDependencies:source.state.document.sourceDependencies,createdAt:a.createdAt},
-  {editPlanDocument:JSON.parse(edit.contentJson),renderablePlanDocument:null})
+  {editPlanDocument:JSON.parse(edit.contentJson),renderablePlanDocument:renderable===null?null:JSON.parse(renderable.planJson)})
   const refs={brief:snapshots.find(s=>s.kind==='brief')!.id,policies:snapshots.find(s=>s.kind==='policies')!.id,editPlan:edit.id,
     ...(snapshots.find(s=>s.kind==='treatment')?{treatment:snapshots.find(s=>s.kind==='treatment')!.id}:{}),
     ...(snapshots.find(s=>s.kind==='story')?{story:snapshots.find(s=>s.kind==='story')!.id}:{})}

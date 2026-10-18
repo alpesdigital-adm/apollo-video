@@ -460,6 +460,11 @@ test(
     assert.equal(compileMap.payload.data.plan.sourceHash, world.resolvedReact.map.mapHash)
     assert.equal(compileMap.payload.data.plan.sourceVersion, world.resolvedReact.map.version)
     assert.ok(compileMap.payload.data.plan.clipCount >= 1)
+    // A plan is born with its Version: the compile is a Command on the head, so the answer names the child of VERSION_A, which is
+    // now the head the next compile has to name.
+    const VERSION_B = compileMap.payload.data.plan.projectVersionId
+    assert.notEqual(VERSION_B, VERSION_A)
+    assert.equal((await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: VERSION_B } })).parentVersionId, VERSION_A)
 
     // The fence is a fence over the wire and not only inside the service: the
     // pair the build produced is one version behind the anchor that resolved
@@ -490,7 +495,7 @@ test(
       method: 'POST',
       path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
       params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
-      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      body: { projectVersionId: VERSION_B, objective: 'discovery' },
       authorization: bearerA,
     })
     assert.equal(compileCut.status, 201, compileCut.text)
@@ -514,7 +519,7 @@ test(
       method: 'POST',
       path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
       params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
-      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      body: { projectVersionId: VERSION_B, objective: 'discovery' },
       authorization: bearerA,
     })
     assert.equal(compileAgain.status, 200, compileAgain.text)
@@ -526,11 +531,33 @@ test(
       method: 'POST',
       path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
       params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
-      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      body: { projectVersionId: VERSION_B, objective: 'discovery' },
       authorization: bearerB,
     })
     assert.equal(foreignCompile.status, 404, foreignCompile.text)
     assert.equal(foreignCompile.payload.error.code, 'EDITORIAL_SYNTHESIS_NOT_FOUND')
+
+    // The base of the first compile is no longer the head: a compile that was never made is a conflict, not a plan on a stale base.
+    const staleBase = await callRoute(NextRequest, playbackPlanRoute, {
+      method: 'POST',
+      path: `/v1/projects/${PROJECT_A}/capture-sessions/${world.ids.reactSession}/playback-map/plan`,
+      params: { projectId: PROJECT_A, sessionId: world.ids.reactSession },
+      body: {
+        baseVersionId: `${world.ids.reactSession}:playback:track-reaction:v${world.resolvedReact.map.version}`,
+        baseHash: world.resolvedReact.map.mapHash,
+        reactionTrackId: 'track-reaction',
+        projectVersionId: VERSION_A,
+        objective: 'discovery',
+        planFps: '25/1',
+      },
+      authorization: bearerA,
+    })
+    assert.equal(staleBase.status, 409, staleBase.text)
+    assert.equal(staleBase.payload.error.code, 'VERSION_CONFLICT')
+
+    // The gate judges the CURRENT Version, and each compile moved it: the colour critic's verdict is re-issued for the head the
+    // second compile left, as the product's critic would.
+    await world.rehomeCriticReport()
 
     // Exactly two rows, both written by a route handler.
     assert.equal(

@@ -15,7 +15,7 @@ test('the shared Version writer is called by a known set of repositories', () =>
   assert.deepEqual(writers.map(({ name }) => name), [
     'director-run-repository.ts', 'manual-edit-repository.ts', 'media-library-repository.ts', 'multicam-direction-command-repository.ts',
     'project-color-plan-repository.ts', 'project-lut-selection-repository.ts', 'project-policy-overrides-repository.ts',
-    'project-subtitle-configuration-repository.ts', 'review-patch-batch-repository.ts', 'review-patch-repository.ts',
+    'project-subtitle-configuration-repository.ts', 'renderable-plan-version-commit.ts', 'review-patch-batch-repository.ts', 'review-patch-repository.ts',
     'source-transcript-replacement-repository.ts', 'subtitle-segment-override-repository.ts',
   ], 'a new caller of commitProjectVersionWithOutputState must settle the deferred guards too, and be listed here')
 })
@@ -47,13 +47,14 @@ test('every Version writer gives its transaction 30 s for the guard', () => {
 })
 
 // A repository that writes a project snapshot or Version row on its own (outside the shared writer) queues the same deferred checks,
-// so it settles them as well. Today that is the synthetic production run writer and the music montage publication (a renderable plan
-// snapshot is bound to its Version by a deferred check too); the list is derived, not remembered.
+// so it settles them as well. Today that is the synthetic production run writer; the list is derived, not remembered. (A renderable
+// plan snapshot is written by the shared writer with its Version, so the music montage publication that used to insert one itself is
+// now a caller of the shared module, which is covered by the first tests above and by output-state-architecture-gates.)
 test('a repository that inserts snapshots or Versions itself also settles the deferred guards', () => {
   const loose = readdirSync(directory).filter((name) => name.endsWith('.ts'))
     .map((name) => ({ name, text: readFileSync(new URL(name, directory), 'utf8') }))
     .filter(({ name, text }) => !name.startsWith('output-version-bundle-') && name !== 'project-version-commit.ts' &&
-      /v2ProjectSnapshot\.create(?:Many)?\(|v2ProjectVersion\.create(?:Many)?\(|INSERT INTO project_snapshots|transaction\.v2RenderablePlanSnapshot\.create\(/.test(text))
-  assert.deepEqual(loose.map(({ name }) => name), ['music-led-montage-repository.ts', 'synthetic-production-repository.ts'])
+      /v2ProjectSnapshot\.create(?:Many)?\(|v2ProjectVersion\.create(?:Many)?\(|INSERT INTO project_snapshots/.test(text))
+  assert.deepEqual(loose.map(({ name }) => name), ['synthetic-production-repository.ts'])
   for (const { name, text } of loose) assert.match(text, /await settleDeferredOutputGuards\(/, name)
 })

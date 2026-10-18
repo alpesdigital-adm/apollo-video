@@ -9,6 +9,8 @@ import type { RenderablePlanSnapshotRepository } from "./ports/renderable-plan-s
 import { renderablePlanSnapshotOf } from "./renderable-edit-plan.ts";
 import type { PublicOperationRepository } from "./ports/public-operation-repository.ts";
 import { requireScope, type AuthenticatedExternalActor } from "./authenticate-api-client.ts";
+import type { ApiAccessAuditContext } from "../domain/api-access-control.ts";
+import type { CommandActor } from "../domain/edit-command.ts";
 
 export interface LocalizationMediaProcessingContext {
   variant: Readonly<LocalizationVariant>;
@@ -92,6 +94,11 @@ export function createLocalizationMediaProcessor(deps: {
   proxy: LocalizationProxyRuntime;
   clock?: () => Date;
   createId?: (kind: "plan") => string;
+  /**
+   * Who the Version that holds each renderable plan is made by: the client that requested the run, with the credential audit
+   * persisted for it. A processor without one acts as the media worker itself, with no external audit.
+   */
+  authorOf?: (run: Readonly<LocalizationMediaRun>) => Promise<Readonly<{ author: Readonly<CommandActor>; audit: Readonly<ApiAccessAuditContext> | null }>>;
 }): LocalizationMediaProcessor {
   const clock = deps.clock ?? (() => new Date());
   return Object.freeze({
@@ -106,6 +113,9 @@ export function createLocalizationMediaProcessor(deps: {
         "VERSION_CONFLICT",
         "Localization media authority changed before processing",
       );
+      const compiler = deps.authorOf
+        ? await deps.authorOf(run)
+        : Object.freeze({ author: Object.freeze({ type: "system" as const, id: "localization-media-worker" }), audit: null });
       const renderedPlans: LocalizationMediaEvidence["renderablePlans"][number][] = [];
       const lineageHashes: string[] = [];
       let blockDurations: LocalizationMediaEvidence["blockDurations"] = [];
@@ -116,6 +126,7 @@ export function createLocalizationMediaProcessor(deps: {
           ...context,
           format,
           planId: deps.createId?.("plan") ?? `plan-localization-${calculateCanonicalHash({ runId: run.id, format, variantHash: run.variantHash }).slice(0, 32)}`,
+          runId: run.id,
           createdAt: clock().toISOString(),
         });
         const persisted = await deps.snapshots.persist({
@@ -129,6 +140,10 @@ export function createLocalizationMediaProcessor(deps: {
             plan: compiled.plan,
           }),
           createdAt: clock().toISOString(),
+          // The plan is born with the child of the head the canonical script was approved on.
+          baseVersionId: context.basePlan.projectVersionId,
+          author: compiler.author,
+          audit: compiler.audit,
         });
         const proxy = await deps.proxy.render({
           run,

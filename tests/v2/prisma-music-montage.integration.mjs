@@ -123,15 +123,8 @@ test(
         transcriptId: `transcript-${suffix}`,
         createdAt: now,
       });
-      // A sealed project always has a head, so "the head moved" is a real move: to a sibling Version committed on the same
-      // parent (stored, head left where it was), and back.
-      const sibling = await commitSealedChild(prisma, {
-        workspaceId,
-        projectId,
-        actor: testActor({ workspaceId, clientId, credentialId: `${clientId}-seed`, environment: "production" }),
-        suffix: `${suffix}-moved-head`,
-        moveHead: false,
-      });
+      // A sealed project always has a head, so "the head moved" is a real move: to a sibling Version committed on the head the first
+      // publication left (stored, head left where it was), and back to the base the run was authorized on.
       const moveHead = (currentVersionId) =>
         prisma.v2Project.update({ where: { id: projectId }, data: { currentVersionId } });
       const rightsRepository = new PrismaAssetRightsRepository(prisma);
@@ -240,6 +233,23 @@ test(
       assert.equal(first.run.editPlan.durationFrames, 100);
       assert.equal(await prisma.v2MusicMontageRun.count({ where }), 1);
       assert.equal(await prisma.v2RenderablePlanSnapshot.count({ where }), 1);
+      // The renderable plan is born with its Version: the child of the head the run was authorized on, which became the head, and
+      // whose sealed State binds the very row the publication stored.
+      const published = await prisma.v2RenderablePlanSnapshot.findFirstOrThrow({ where });
+      const publishedVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({ where: { id: published.projectVersionId } });
+      assert.equal(publishedVersion.parentVersionId, versionId);
+      assert.equal(first.run.projectVersionId, versionId, "the run records the base it was authorized on");
+      assert.equal(first.run.editPlan.projectVersionId, publishedVersion.id, "the plan names the Version it was born with");
+      assert.equal((await prisma.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId, publishedVersion.id);
+      const publishedState = await prisma.v2ProjectOutputState.findUniqueOrThrow({ where: { id: publishedVersion.outputStateId } });
+      assert.deepEqual([publishedState.renderablePlanSnapshotId, publishedState.renderablePlanHash], [published.id, published.planHash]);
+      const sibling = await commitSealedChild(prisma, {
+        workspaceId,
+        projectId,
+        actor: testActor({ workspaceId, clientId, credentialId: `${clientId}-seed`, environment: "production" }),
+        suffix: `${suffix}-moved-head`,
+        moveHead: false,
+      });
       assert.equal(
         (await runs.findById(workspaceId, projectId, first.run.id)).runHash,
         first.run.runHash,

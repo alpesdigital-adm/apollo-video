@@ -28508,9 +28508,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         baseVersionId: w20VersionRefSchema,
         baseHash: sha256Schema,
         reactionTrackId: idSchema,
-        // The project version the plan belongs to. The same cut under two
-        // project versions is two plans, which is why it is part of the
-        // snapshot's natural key.
+        // The project head the plan is compiled on. A plan is born with its own
+        // Version (a `compile-renderable-plan` Command on that head): the answer
+        // names that child, not this id, and a head that has moved since is a
+        // 409 VERSION_CONFLICT unless the same compile was already made on it
+        // (then it replays). The same cut on two heads is two plans, which is why
+        // it is part of the snapshot's natural key.
         projectVersionId: idSchema,
         // What the cut is for. It reaches the plan as a desired action, and
         // this compile sends no destination with it, so only the objectives
@@ -28524,11 +28527,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         // rounded number here would put a drift nobody chose into the timeline.
         //
         // It is part of the snapshot's natural key, because it is the timebase
-        // every clip is expressed in: compiling one map version into one
-        // project version at 25/1 and again at 30/1 produces two plans, each
-        // with its own `planId` and `planHash`, and neither supersedes the
-        // other. Repeating a compile at a rate already stored replays that
-        // plan and answers 200.
+        // every clip is expressed in: compiling one map version at 25/1 and
+        // again at 30/1 produces two plans, each with its own `planId`,
+        // `planHash` and Version (the second compile is made on the head the
+        // first one left), and neither supersedes the other. Repeating a compile
+        // at a rate already stored on the same head replays that plan and
+        // answers 200.
         planFps: rationalSchema,
       },
     },
@@ -28544,10 +28548,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       // content-addressed cut, so there is no later version of it to be stale
       // against, and it already fixed its frame rate exactly — a second answer
       // here would contradict the aggregate. With no rate to choose, the
-      // request contributes only the project version to the plan's identity,
-      // and a repeat compile always replays.
+      // request contributes only the head it is compiled on to the plan's
+      // identity, and a repeat compile on that head always replays.
       required: ['projectVersionId', 'objective'],
       properties: {
+        // The project head the plan is compiled on; the plan is born with the
+        // Version that is its child (see the react compile above).
         projectVersionId: idSchema,
         // Same restriction as the react compile: no destination travels with
         // the objective, so `discovery`, `awareness` and `warming` are the

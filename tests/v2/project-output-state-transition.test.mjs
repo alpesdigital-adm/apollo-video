@@ -41,7 +41,8 @@ function childInput(parentWorld, overrides = {}) {
 }
 
 test('every registered Command type is either a dedicated output origin or declares a child transition', () => {
-  const dedicated = new Set(['create-output-variant', 'revise-output-spec', 'remove-spoken-content', 'compare-action'])
+  // 'compile-renderable-plan' is the origin of a renderable plan's Version (renderable-compile-command), proven in renderable-compile-output-state.test.mjs.
+  const dedicated = new Set(['create-output-variant', 'revise-output-spec', 'remove-spoken-content', 'compare-action', 'compile-renderable-plan'])
   const declared = new Set(Object.keys(CHILD_COMMAND_TRANSITIONS))
   assert.deepEqual([...EDIT_COMMAND_TYPES].filter((type) => !dedicated.has(type) && !declared.has(type)), [])
   assert.deepEqual([...declared].filter((type) => dedicated.has(type)), [])
