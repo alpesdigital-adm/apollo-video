@@ -83,7 +83,33 @@ não **quem** está debaixo. Sem detector de veto independente, cada legenda que
 
 ## 6. Provas
 
-(Preenchido quando as provas rodam.)
+**Mutação (unidade).** `project-final-export.test.mjs` com quatro mutantes do worker: planejar sob a política que bloqueia (10 testes falham), remover a
+recusa sem crítico (1), o recibo nunca reprova (2), o crítico nunca é consultado (8). Todos mortos; o worker foi restaurado byte a byte.
+
+**PostgreSQL 16 + FFmpeg real + crítico C1 real** (`prisma-final-caption-certification.integration.mjs`, harness supervisionado `run-local-pg-w65b.mjs`,
+trava global, cluster descartável, zero backends/porta livre no pós-voo; `w65b-f1d-ac6d6574`, 1/1, 39 s). O repositório do gate é o real; o relatório do
+Diretor persistido é `review-required` com `faceSafety` `unknown` e **permanece assim** no banco. Quatro finais 1080x1920 H.264/AAC das mesmas duas fontes
+(landscape 320x180 e retrato 180x320, os mesmos bytes copiados em cada mundo):
+
+| | fonte | cue | resultado |
+| --- | --- | --- | --- |
+| A | landscape | 1 | **queimada** (banda inferior sobre a cópia desfocada: geometria); crítico `ran`; 1 queimada, 0 omitidas |
+| B | landscape | nenhuma | controle de A |
+| C | retrato | 1 | **omitida e listada** (`FACE_PERCEPTION_UNAVAILABLE`: a imagem preenche o canvas e não há janela); crítico `not-needed` |
+| D | retrato | nenhuma | controle de C |
+
+Pixels (quadros do MP4 entregue, medidos com `captionFootprintOf`: luma > 60 e dois vizinhos, >= 40 pixels): em A, nos quadros 35, 60 e 85 a legenda tem
+32 261, 27 267 e 27 318 pixels alterados e o retângulo `x 0,25 y 0,831 w 0,497 h 0,068` está **dentro da banda inferior** do plano
+(`x 0,08 y 0,83 w 0,84 h 0,07`, tolerância 6 px); nos quadros 5, 15, 100 e 115, 0 pixel alterado. Em C contra D: 0 pixel alterado nos nove quadros medidos e
+os MP4 de C e D têm **o mesmo SHA-256** (`6ebb98ca...`): a legenda omitida não deixou nada. A e B são codificações separadas com lossy (nenhum dos quadros é
+byte-idêntico), por isso "sem legenda" é a medida do próprio crítico e não igualdade de bytes. Um relatório com um hard check falho é recusado pelo mesmo gate
+(`EDITORIAL_ACCEPTANCE_FAILED`, nenhuma operação criada) e um `approved` forjado (snapshot inserido numa transação revertida) é `PERSISTENCE_CONFLICT`.
+Evidência: `w65b-pg-runs/w65b-f1d-ac6d6574` e `w65b-f1-evidence-04` (quatro PNGs do quadro 60 e `w65b-final-caption-certification-proof.json`).
+
+**Limite do que rodou.** `prisma-final-export.integration.mjs` (E2E com servidor Next) segue no contrato de semeadura antigo (`project_versions_output_contract_check`
+recusa a linha de versão sem State selado): ele já não semeia neste ponto de partida do ramo, e a integração reescreveu a semeadura (`review-edit-world.mjs`). As cinco
+asserções que o W65b muda nele estão no ramo (`readApproval` admite o relatório; a API recusa um relatório desonesto; completar o export não altera o relatório) e precisam ser
+reaplicadas sobre a versão reescrita ao integrar; a prova acima não depende dele.
 
 Suítes: `tests/v2/final-caption-certification.test.mjs` (domínio: política, admissão, recibo, mutações), `tests/v2/project-final-export.test.mjs`
 (worker e gate com repositório simulado), `tests/v2/project-proxy-render-worker.test.mjs` (laudo do proxy sob `omit-and-list`),
