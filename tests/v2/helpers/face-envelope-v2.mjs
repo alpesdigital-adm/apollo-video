@@ -1,14 +1,12 @@
 import { createHash } from 'node:crypto'
 
-import { calculateCanonicalHash } from '../../../src/v2/domain/canonical-hash.ts'
-import { createFaceProducerEnvelopeV2 } from '../../../src/v2/domain/face-producer-envelope-v2.ts'
+// Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
+const { calculateCanonicalHash } = await import('../../../src/v2/domain/canonical-hash.ts')
+const { createFaceProducerEnvelopeV2 } = await import('../../../src/v2/domain/face-producer-envelope-v2.ts')
 
-import { decodeFace0204Output, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256 } from '../../../src/v2/domain/face-detector-output.ts'
-import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256, FACE_V9_OWNER_ACCEPTANCE_SHA256 } from '../../../src/v2/domain/face-evidence-policy.ts'
-// A namespace import with a `default` fallback: under tsx (which runs a TypeScript module as CommonJS) a static named import of this
-// export is not detectable by Node, and the supervised PostgreSQL suites that load this helper run under tsx.
-import * as faceProducerRegistry from '../../../src/v2/domain/face-producer-registry.ts'
-const ACCEPTED_FACE_PRODUCERS = faceProducerRegistry.ACCEPTED_FACE_PRODUCERS ?? faceProducerRegistry.default?.ACCEPTED_FACE_PRODUCERS
+const { decodeFace0204Output, FACE0204_OUTPUT_POLICY_ID, FACE0204_OUTPUT_POLICY_SHA256 } = await import('../../../src/v2/domain/face-detector-output.ts')
+const { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256, FACE_V9_OWNER_ACCEPTANCE_SHA256 } = await import('../../../src/v2/domain/face-evidence-policy.ts')
+const { ACCEPTED_FACE_PRODUCERS } = await import('../../../src/v2/domain/face-producer-registry.ts')
 
 export const sha = (digit) => digit.repeat(64)
 const hash = (value) => createHash('sha256').update(value).digest('hex')

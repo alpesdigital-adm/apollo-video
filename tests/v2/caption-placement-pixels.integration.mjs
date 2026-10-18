@@ -7,16 +7,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { planCaptionPlacement } from '../../src/v2/application/plan-caption-placement.ts'
-import { clipForegroundOnCanvas, sourceRectCanvasSegments } from '../../src/v2/domain/caption-canvas-projection.ts'
-import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
-import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
-import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
-import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
-import { createEditorialAudioTimelineHash } from '../../src/v2/domain/production-modes.ts'
-import { subtitleAnchorDecisionFor } from '../../src/v2/domain/subtitle-anchor-plan.ts'
-import { FfmpegCaptionPixelCritic } from '../../src/v2/infrastructure/media/ffmpeg-caption-pixel-critic.ts'
-import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+// Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
+const { planCaptionPlacement } = await import('../../src/v2/application/plan-caption-placement.ts')
+const { clipForegroundOnCanvas, sourceRectCanvasSegments } = await import('../../src/v2/domain/caption-canvas-projection.ts')
+const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+const { createColorPipelineCompilation } = await import('../../src/v2/domain/color-pipeline-compilation.ts')
+const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
+const { readOutputFormatPreset } = await import('../../src/v2/domain/output-format-registry.ts')
+const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
+const { subtitleAnchorDecisionFor } = await import('../../src/v2/domain/subtitle-anchor-plan.ts')
+const { FfmpegCaptionPixelCritic } = await import('../../src/v2/infrastructure/media/ffmpeg-caption-pixel-critic.ts')
+const { FfmpegEditorialProxyRenderer } = await import('../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts')
 import { sealedSourceWindow } from './helpers/face-source-envelope-v3.mjs'
 
 /**

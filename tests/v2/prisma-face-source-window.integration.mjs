@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
-import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
-import { createFaceProducerEnvelopeV3 } from '../../src/v2/domain/face-producer-envelope-v3.ts'
-import { PrismaFaceProducerEnvelopeRepository } from '../../src/v2/infrastructure/prisma/face-producer-envelope-repository.ts'
-import { PrismaFaceSourceWindowRepository } from '../../src/v2/infrastructure/prisma/face-source-window-repository.ts'
-import { PrismaFaceSourceWindowRequestContextRepository } from '../../src/v2/infrastructure/prisma/face-source-window-request-context-repository.ts'
-import { PrismaFaceWindowEnvelopeRepository } from '../../src/v2/infrastructure/prisma/face-window-envelope-repository.ts'
+// Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
+const { createAssetRightsSnapshot } = await import('../../src/v2/domain/asset-rights.ts')
+const { stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
+const { createFaceProducerEnvelopeV3 } = await import('../../src/v2/domain/face-producer-envelope-v3.ts')
+const { PrismaFaceProducerEnvelopeRepository } = await import('../../src/v2/infrastructure/prisma/face-producer-envelope-repository.ts')
+const { PrismaFaceSourceWindowRepository } = await import('../../src/v2/infrastructure/prisma/face-source-window-repository.ts')
+const { PrismaFaceSourceWindowRequestContextRepository } = await import('../../src/v2/infrastructure/prisma/face-source-window-request-context-repository.ts')
+const { PrismaFaceWindowEnvelopeRepository } = await import('../../src/v2/infrastructure/prisma/face-window-envelope-repository.ts')
 import { acceptedProducer } from './helpers/face-envelope-v2.mjs'
 import { actorFor, directorCut, finish, peerProject, sourceAnalyzerFor, sourceWindowHarness } from './helpers/face-source-pg.mjs'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'

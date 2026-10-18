@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { Prisma, PrismaClient } from '../../../generated/prisma-v2/index.js'
-import { cancelPublicOperationService } from '../../../src/v2/application/cancel-public-operation.ts'
-import { createAssetRightsSnapshot } from '../../../src/v2/domain/asset-rights.ts'
+// Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
+const { cancelPublicOperationService } = await import('../../../src/v2/application/cancel-public-operation.ts')
+const { createAssetRightsSnapshot } = await import('../../../src/v2/domain/asset-rights.ts')
 import { commitSealedChild, RECORDING_ALLOWED_USES } from './pg-output-world.mjs'
-import { calculateVersionHash } from '../../../src/v2/application/version-hash.ts'
-import { DomainError } from '../../../src/v2/domain/errors.ts'
-import { stableSerialize } from '../../../src/v2/domain/canonical-hash.ts'
+const { calculateVersionHash } = await import('../../../src/v2/application/version-hash.ts')
+const { DomainError } = await import('../../../src/v2/domain/errors.ts')
+const { stableSerialize } = await import('../../../src/v2/domain/canonical-hash.ts')
 
 function deferred() {
   let resolve

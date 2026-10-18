@@ -1,5 +1,6 @@
-import { createFaceProducerEnvelopeV3 } from '../../../src/v2/domain/face-producer-envelope-v3.ts'
-import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256 } from '../../../src/v2/domain/face-evidence-policy.ts'
+// Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
+const { createFaceProducerEnvelopeV3 } = await import('../../../src/v2/domain/face-producer-envelope-v3.ts')
+const { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256 } = await import('../../../src/v2/domain/face-evidence-policy.ts')
 import { acceptedProducer, detectorConfig, observedSample, sha, unknownSample } from './face-envelope-v2.mjs'
 
 /**

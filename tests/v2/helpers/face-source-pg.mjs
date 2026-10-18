@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 
-import { createExternalAuditContext } from '../../../src/v2/application/authenticate-api-client.ts'
-import { enqueueFaceSourceWindowRunService } from '../../../src/v2/application/enqueue-face-source-window-run.ts'
-import { runNextFaceSourceWindowOperationService } from '../../../src/v2/application/run-face-source-window-worker.ts'
-import { PrismaFaceSourceWindowRepository } from '../../../src/v2/infrastructure/prisma/face-source-window-repository.ts'
-import { PrismaFaceSourceWindowRequestContextRepository } from '../../../src/v2/infrastructure/prisma/face-source-window-request-context-repository.ts'
-import { PrismaPublicOperationRepository } from '../../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+// Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
+const { createExternalAuditContext } = await import('../../../src/v2/application/authenticate-api-client.ts')
+const { enqueueFaceSourceWindowRunService } = await import('../../../src/v2/application/enqueue-face-source-window-run.ts')
+const { runNextFaceSourceWindowOperationService } = await import('../../../src/v2/application/run-face-source-window-worker.ts')
+const { PrismaFaceSourceWindowRepository } = await import('../../../src/v2/infrastructure/prisma/face-source-window-repository.ts')
+const { PrismaFaceSourceWindowRequestContextRepository } = await import('../../../src/v2/infrastructure/prisma/face-source-window-request-context-repository.ts')
+const { PrismaPublicOperationRepository } = await import('../../../src/v2/infrastructure/prisma/public-operation-repository.ts')
 import { acceptedProducer, detectorConfig, observedSample, unknownSample } from './face-envelope-v2.mjs'
 import { commitSealedChild, seedSealedProject } from './pg-output-world.mjs'
 import { cancelProducerFenceCase } from './producer-publish-lock-race.mjs'

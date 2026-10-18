@@ -3,14 +3,15 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
-import { enqueueFaceWindowRunService } from '../../src/v2/application/enqueue-face-window-run.ts'
-import { runNextFaceWindowOperationService } from '../../src/v2/application/run-face-window-worker.ts'
-import { createFaceProducerEnvelopeV2 } from '../../src/v2/domain/face-producer-envelope-v2.ts'
-import { PrismaFaceProducerEnvelopeRepository } from '../../src/v2/infrastructure/prisma/face-producer-envelope-repository.ts'
-import { PrismaFaceWindowEnvelopeRepository } from '../../src/v2/infrastructure/prisma/face-window-envelope-repository.ts'
-import { PrismaFaceWindowRequestContextRepository } from '../../src/v2/infrastructure/prisma/perception-producer-request-context-repository.ts'
-import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+// Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
+const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+const { enqueueFaceWindowRunService } = await import('../../src/v2/application/enqueue-face-window-run.ts')
+const { runNextFaceWindowOperationService } = await import('../../src/v2/application/run-face-window-worker.ts')
+const { createFaceProducerEnvelopeV2 } = await import('../../src/v2/domain/face-producer-envelope-v2.ts')
+const { PrismaFaceProducerEnvelopeRepository } = await import('../../src/v2/infrastructure/prisma/face-producer-envelope-repository.ts')
+const { PrismaFaceWindowEnvelopeRepository } = await import('../../src/v2/infrastructure/prisma/face-window-envelope-repository.ts')
+const { PrismaFaceWindowRequestContextRepository } = await import('../../src/v2/infrastructure/prisma/perception-producer-request-context-repository.ts')
+const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
 import { acceptedProducer, detectorConfig, observedSample, unknownSample } from './helpers/face-envelope-v2.mjs'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
 import { cancelProducerFenceCase, verifyProducerPublishFences } from './helpers/producer-publish-lock-race.mjs'

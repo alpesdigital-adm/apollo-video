@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { planCaptionPlacement } from '../../src/v2/application/plan-caption-placement.ts'
-import { subtitleAnchorDecisionFor } from '../../src/v2/domain/subtitle-anchor-plan.ts'
-import { PrismaFaceSourceWindowRepository } from '../../src/v2/infrastructure/prisma/face-source-window-repository.ts'
-import { hydrateProxyRenderSources, queryProxySourceProject } from '../../src/v2/infrastructure/prisma/proxy-source-authority.ts'
+// Under tsx a static named import of a TypeScript module is not visible to Node (the module runs as CommonJS), so these are dynamic.
+const { planCaptionPlacement } = await import('../../src/v2/application/plan-caption-placement.ts')
+const { subtitleAnchorDecisionFor } = await import('../../src/v2/domain/subtitle-anchor-plan.ts')
+const { PrismaFaceSourceWindowRepository } = await import('../../src/v2/infrastructure/prisma/face-source-window-repository.ts')
+const { hydrateProxyRenderSources, queryProxySourceProject } = await import('../../src/v2/infrastructure/prisma/proxy-source-authority.ts')
 import { directorCut, finish, peerProject, sourceWindowHarness } from './helpers/face-source-pg.mjs'
 import { seedPerceptionProducerContext } from './helpers/perception-producer-pg-world.mjs'
 
