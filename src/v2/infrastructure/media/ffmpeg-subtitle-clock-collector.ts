@@ -12,7 +12,7 @@ import { validateRenderPlacementPlan } from '../../domain/render-placement-plan.
 import { calculateOutputCanonicalHash, serializeOutputCanonicalJson, OUTPUT_CANONICAL_POLICY_VERSION } from '../../domain/output-canonical-policy.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { ObservedClockFrame, ClockTimeBase } from '../../domain/materialized-subtitle-clock.ts'
-import { buildEditorialCompositionPrefix } from './ffmpeg-editorial-composition-graph.ts'
+import { buildEditorialCompositionPrefix, buildPreLibassClockStage } from './ffmpeg-editorial-composition-graph.ts'
 import { OwnedDeadlineIo, OwnedIoInconclusive, assertOwnedIoAdmission, pendingOwnedIo, type OwnedIoPhase } from './ffmpeg-owned-io.ts'
 import { NodeOwnedFfmpegExecutor, OwnedFfmpegProcessFailure, OwnedFfmpegAdmissionFailure, OwnedFfmpegTerminalInconclusive, assertOwnedFfmpegAdmission, pendingOwnedFfmpegTerminations, type OwnedFfmpegExecutor,
   type OwnedFfmpegProcessObservation } from './ffmpeg-owned-process.ts'
@@ -433,7 +433,9 @@ export class FfmpegSubtitleClockCollector implements SubtitleClockCollector {
         for (const file of parent.files) await authenticate({ path: resolve(registered.directory, file.filename), ...file })
         globalOrigin = parent.frames[input.fragment.globalStartFrame]!
       }
-      const prefix = validated.prefix, graph = [...prefix.filters, '[' + prefix.videoLabel + ']showinfo@apollo_preass[clock_preass]']
+      // Observe exactly what libass receives: the renderer places `fps=<rate>` (ass-frame-clock/v2) last before the filter.
+      const prefix = validated.prefix, clockStage = buildPreLibassClockStage({ inputLabel: prefix.videoLabel, outputFps: input.prepared.outputFps })
+      const graph = [...prefix.filters, ...clockStage.filters, '[' + clockStage.outputLabel + ']showinfo@apollo_preass[clock_preass]']
       const escape = (path: string) => path.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
       if (input.diagnosticAss) {
         await save('diagnostic.ass', input.diagnosticAss.text)

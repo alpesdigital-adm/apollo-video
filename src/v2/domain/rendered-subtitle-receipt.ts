@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain, DomainError } from './errors.ts'
-import { ASS_EMISSION_POLICY, assertAssCueText, assertAssFrameInterval, assFrameTimestamp } from './ass-emission-policy.ts'
+import { ASS_EMISSION_POLICY, assertAssCueText, assFrameClockBinder } from './ass-emission-policy.ts'
 import { validateOutputSpec, type OutputSpec } from './output-spec.ts'
 import { renderElementMapHash, validateRenderElementMap, type RenderElementMap } from './review-system.ts'
 
@@ -143,6 +143,9 @@ export function createRenderedSubtitleReceipt(input: {
     scriptEvents.length === input.drawnCues.length,
   'INVALID_RENDER_INPUT', 'Subtitle receipt does not cover exactly the emitted ASS events')
   const seen = new Set<string>()
+  // The receipt binds the timestamps to the clock the subtitles filter saw (ass-frame-clock/v2): the
+  // centisecond of each boundary is derived again here, never accepted from the event line.
+  const binder = scriptEvents.length ? assFrameClockBinder(input.outputSpec.fps, input.map.durationFrames) : null
   // Per-document ASS line uniqueness; this is not cross-request replay state.
   const uniqueAssLines = new Set<string>()
   const drawn = input.drawnCues.map((cue) => {
@@ -152,10 +155,9 @@ export function createRenderedSubtitleReceipt(input: {
       cue.endFrame <= input.map.durationFrames,
     'INVALID_RENDER_INPUT', 'Subtitle receipt cue identity or frame interval is invalid')
     assertHash(cue.anchorDecisionHash, 'anchorDecisionHash')
-    assertAssFrameInterval(cue.startFrame, cue.endFrame, input.outputSpec.fps)
+    const time = binder!.timestamps(cue.startFrame, cue.endFrame)
     const fields = cue.assEventLine.split(',', 4)
-    assertDomain(fields[1] === assFrameTimestamp(cue.startFrame, input.outputSpec.fps) &&
-      fields[2] === assFrameTimestamp(cue.endFrame, input.outputSpec.fps),
+    assertDomain(fields[1] === time.start && fields[2] === time.end,
     'INVALID_RENDER_INPUT', 'Subtitle receipt ASS timestamps differ from cue frames')
     assertDomain(scriptEvents.includes(cue.assEventLine) && !uniqueAssLines.has(cue.assEventLine) &&
       cue.displayText === displayTextFromAssEvent(cue.assEventLine),

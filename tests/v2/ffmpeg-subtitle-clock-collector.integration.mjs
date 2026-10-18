@@ -228,6 +228,10 @@ test('owned product-prefix collector records full observed clocks; emission and 
         const replay = await collector.capture({ ...request, runId: replayAttempt.runId, diagnosticAss: { text: emptyAss, sha256: digest(emptyAss) } }); replayAttempt.traceHash = replay.traceHash; replayAttempt.outcome = 'captured'
         collector.assertReplay(prepared, replay)
         assert.equal(prepared.frames.length, vector.frames); assert.equal(prepared.frames[vector.target].frame, vector.target)
+        // The last stage before libass is fps=<rate> (ass-frame-clock/v2): whatever the composition publishes, libass
+        // receives frame k with PTS k in the inverse of the rate, so the observed clock is the closed form the binder uses.
+        for (const frame of prepared.frames) assert.deepEqual({ pts: frame.pts, timeBase: frame.timeBase },
+          { pts: String(frame.frame), timeBase: { numerator: '1', denominator: String(request.prepared.outputFps) } })
         assert.equal(prepared.mp4Clock.frames.length, vector.frames)
         assert.equal(prepared.integration, 'blocked')
         if (vector.name === 'concat-audio-60-frame-6') {

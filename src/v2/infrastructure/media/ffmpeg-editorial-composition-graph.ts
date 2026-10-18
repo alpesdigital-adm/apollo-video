@@ -237,3 +237,20 @@ export function buildEditorialCompositionPrefix(input: Readonly<PreparedEditoria
       ...videoInputs.flatMap((clipInput) => ['-ss', clipInput.ss, '-t', clipInput.t, '-i', clipInput.path]),
       ...placementInputs.flatMap((asset) => ['-i', asset.path])]), videoLabel: composedLabel, audioLabel: 'outa' })
 }
+
+/**
+ * Last stage before libass (`ass-frame-clock/v2`, clock `fps-stage-consecutive-pts/v1`).
+ * The `fps` filter publishes the inverse of the rate as its time base and numbers
+ * the frames consecutively from the first PTS, so the clock `vf_subtitles` converts
+ * into milliseconds is a closed form of the frame index and the rate. Whatever
+ * time base the composition ends in (concat publishes 1/1000000, lavfi 1/rate,
+ * the overlay inherits) does not reach libass, and the binary64 skew of that time
+ * base cannot move a boundary. Used by the renderer and by the clock collector so
+ * both observe the same stream.
+ */
+export function buildPreLibassClockStage(input: { inputLabel: string; outputFps: number }) {
+  if (!Number.isSafeInteger(input.outputFps) || input.outputFps <= 0 || !/^[A-Za-z0-9_]+$/.test(input.inputLabel)) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'The pre-libass clock stage requires an integer rate and a plain label')
+  }
+  return Object.freeze({ filters: Object.freeze([`[${input.inputLabel}]fps=${input.outputFps}[clocked]`]), outputLabel: 'clocked' as const })
+}

@@ -7,7 +7,7 @@ import type { EditorialProxyRenderer } from '../../application/ports/editorial-p
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { assertAssCueText, assertAssFrameInterval, assFrameTimestamp } from '../../domain/ass-emission-policy.ts'
+import { assertAssCueText, assertAssFrameInterval, assFrameClockBinder, type AssBoundaryBinder } from '../../domain/ass-emission-policy.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../../domain/output-format-registry.ts'
 import { validateRenderPlacementPlan } from '../../domain/render-placement-plan.ts'
 import { validateRenderReframePlan, type RenderReframeRangeV1 } from '../../domain/render-reframe-plan.ts'
@@ -19,7 +19,7 @@ import { subtitleAnchorDecisionFor, type SubtitleAnchorPlan } from '../../domain
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
-import { buildEditorialCompositionPrefix } from './ffmpeg-editorial-composition-graph.ts'
+import { buildEditorialCompositionPrefix, buildPreLibassClockStage } from './ffmpeg-editorial-composition-graph.ts'
 export { buildReframeCropFilter, buildPlacementOverlayFilters, atempoFactors } from './ffmpeg-editorial-composition-graph.ts'
 import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
@@ -56,6 +56,8 @@ export function buildAssSubtitles(input: {
   width: number
   height: number
   fps: number
+  /** Frames of the fragment these cues are local to; the clock restarts at 0 for each fragment. */
+  durationFrames: number
   cues: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['subtitleCues']>
   ctaOverlays?: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['ctaOverlays']>
   /** Runtime cues require a v2 review decision. The old `cue.anchor` is never a fallback. */
@@ -70,6 +72,8 @@ export function buildAssSubtitles(input: {
   )
   const marginHorizontal = Math.round(input.width * 0.07)
   const marginVertical = Math.round(input.height * 0.075)
+  let binder: AssBoundaryBinder | undefined
+  const stamps = (start: number, end: number) => (binder ??= assFrameClockBinder(input.fps, input.durationFrames)).timestamps(start, end)
   const events = input.cues.flatMap((cue) => {
     assertAssCueText(cue.text)
     const decision = input.anchorPlan ? subtitleAnchorDecisionFor(input.anchorPlan, cue.id) : null
@@ -78,18 +82,18 @@ export function buildAssSubtitles(input: {
     }
     // A cue with unknown facial coverage is not drawn.
     if (decision?.suppressed) return []
-    assertAssFrameInterval(cue.startFrame, cue.endFrame, input.fps)
     if (decision?.bounds) {
       // `\an5` centres the box on the point, so the point is the centre of the decided band.
       const centreX = Math.round((decision.bounds.x + decision.bounds.width / 2) * input.width)
       const centreY = Math.round((decision.bounds.y + decision.bounds.height / 2) * input.height)
-      return [`Dialogue: 0,${assFrameTimestamp(cue.startFrame, input.fps)},${assFrameTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${wrapAssText(cue.text)}`]
+      const time = stamps(cue.startFrame, cue.endFrame)
+      return [`Dialogue: 0,${time.start},${time.end},Default,,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${wrapAssText(cue.text)}`]
     }
     throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cue review decision has no drawable bounds')
   })
   const ctaEvents = (input.ctaOverlays ?? []).map((overlay) => {
-    assertAssFrameInterval(overlay.startFrame, overlay.endFrame, input.fps)
-    return `Dialogue: 1,${assFrameTimestamp(overlay.startFrame, input.fps)},${assFrameTimestamp(overlay.endFrame, input.fps)},CTA,,0,0,0,,{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.1)})}${wrapAssText(overlay.text, 28)}`
+    const time = stamps(overlay.startFrame, overlay.endFrame)
+    return `Dialogue: 1,${time.start},${time.end},CTA,,0,0,0,,{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.1)})}${wrapAssText(overlay.text, 28)}`
   })
   return [
     '[Script Info]',
@@ -120,19 +124,19 @@ type EditorialRenderInput = Parameters<EditorialProxyRenderer['render']>[0]
 
 /** Validate both global and actually emitted local clocks before any I/O. */
 export function assertEditorialAssEmission(input: Pick<EditorialRenderInput,
-  'fps' | 'subtitleCues' | 'ctaOverlays' | 'placementPlan'>): void {
+  'fps' | 'subtitleCues' | 'ctaOverlays' | 'placementPlan'> & { durationFrames: number }): void {
   for (const cue of input.subtitleCues ?? []) {
     assertAssCueText(cue.text)
     const plan = input.placementPlan?.subtitleAnchorPlan
     const decision = plan ? subtitleAnchorDecisionFor(plan, cue.id) : null
     if (decision?.suppressed) continue
     if (!wrapAssText(cue.text)) throw new DomainError('INVALID_RENDER_INPUT', 'Drawable ASS text is empty')
-    assertAssFrameInterval(cue.startFrame, cue.endFrame, input.fps)
+    assertAssFrameInterval(cue.startFrame, cue.endFrame, input.fps, input.durationFrames)
   }
   for (const overlay of input.ctaOverlays ?? []) {
     assertAssCueText(overlay.text)
     if (!wrapAssText(overlay.text, 28)) throw new DomainError('INVALID_RENDER_INPUT', 'Drawable ASS text is empty')
-    assertAssFrameInterval(overlay.startFrame, overlay.endFrame, input.fps)
+    assertAssFrameInterval(overlay.startFrame, overlay.endFrame, input.fps, input.durationFrames)
   }
 }
 
@@ -364,9 +368,10 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       ? assertPartialRanges(rangeReuse.ranges, fullExpectedFrames)
       : []
     const slices = ranges.map((range) => sliceRenderRange(input, range))
-    assertEditorialAssEmission(input)
+    assertEditorialAssEmission({ ...input, durationFrames: fullExpectedFrames })
     for (const slice of slices) assertEditorialAssEmission({
       ...slice, fps: input.fps, placementPlan: input.placementPlan,
+      durationFrames: slice.clips.reduce((total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame, 0),
     })
     for (const slice of slices) for (const clip of slice.clips) assertClipTimeline(clip)
     const renderClips = rangeReuse ? slices.flatMap((slice) => slice.clips) : input.clips
@@ -652,13 +657,17 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
             width,
             height,
             fps: outputFps,
+            durationFrames: composition.clips.reduce((total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame, 0),
             cues: composition.subtitleCues ?? [],
             ctaOverlays: composition.ctaOverlays,
             anchorPlan: input.placementPlan?.subtitleAnchorPlan ?? null,
           }),
           'utf8',
         )
-        filters.push(`[${composedLabel}]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
+        // The last stage before libass numbers the frames in the inverse of the rate, so the clock the
+        // ASS boundaries were bound to is the clock the subtitles filter sees (ass-frame-clock/v2).
+        const clock = buildPreLibassClockStage({ inputLabel: composedLabel, outputFps })
+        filters.push(...clock.filters, `[${clock.outputLabel}]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
       } else filters.push(`[${composedLabel}]null[outv]`)
       return { filters, videoInputs, inputArgs: prefix.inputArgs }
     }

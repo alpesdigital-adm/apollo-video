@@ -97,3 +97,53 @@ controlados e no prefixo completo do produto; 3/6/111/803, 100/120 FPS, adjacên
 CTA, fragmentos rebaseados, .25–4 e multilayers; verificação de PTS do MP4 final;
 cache frio/stale e publicação PG atômica. A policy v1 reprovada não é reabilitada
 por este desenho. Nenhum status TODO, deploy ou aceite é promovido.
+
+## Causa exata e binder de intervalos representáveis (2026-10-17)
+
+**Causa.** O vf_subtitles do FFmpeg 8.1.1 não entrega a libass o instante racional
+do frame. Ele calcula `double time_ms = pts * av_q2d(time_base) * 1000` e a conversão
+implícita para `long long now` trunca. O binary64 arredonda depois de `av_q2d`, depois
+do produto com o PTS e depois do `* 1000`; um frame que cai exatamente num milissegundo
+chega um milissegundo abaixo: 100000@1/1000000 = 99 (o mesmo frame 6/60 em 1/60 = 100),
+111@1/30 = 3699, 803@1/100 = 8029. A libass mostra um evento sse `start <= now < start +
+duração` (meio-aberto, em ms) e o ASS guarda centissegundos; a fronteira escrita no
+centissegundo ideal (v1) cai um frame depois exatamente nesses frames. Inclusividade,
+direção do arredondamento do centissegundo e fps não são a causa: o frame com now = 100
+acende o evento que começa em 100. No modelo, com `now` pela conversão fixada, a fronteira
+v1 fica atrasada em 450 de 6667 frames sobre centissegundo exato a 30 fps com time_base
+1/fps e em 1920 de 6667 com o time_base 1/1000000 que o concat publica (25/50/100 fps:
+97 e 5937 de 20000).
+
+**Binder.** Para iniciar (ou terminar, exclusivo) no frame `k` o centissegundo `cs` tem de
+satisfazer `now(k-1) < 10*cs <= now(k)`; o binder escolhe o máximo desse intervalo, como o
+contrato do relógio materializado, sem epsilon e sem deslocar o frame esperado. Janela
+vazia é recusa tipada (`AssBoundaryUnrepresentableError`, `details.reason =
+ASS_BOUNDARY_UNREPRESENTABLE`, com o frame e os `now` vizinhos) antes de qualquer I/O. A
+mesma implementação (`libass-clock-model.ts`) atende o relógio observado (contrato acima) e
+o relógio fechado abaixo; a prova de solidez e completude contra um oráculo independente
+da visibilidade libass cobre todos os intervalos [a,b) de 120 frames em 24–240 fps e três
+time_bases (`tests/v2/libass-clock-binder-model.test.mjs`).
+
+**Normalização explícita (`ass-frame-clock/v2`).** O último estágio antes da libass passa a
+ser `fps=<taxa>`: o filtro publica o inverso da taxa reduzida como time_base e numera os
+frames consecutivamente a partir do primeiro PTS, então o `now` da libass é função fechada
+de (índice, taxa) e o time_base de saída da composição (concat 1/1000000, lavfi 1/taxa,
+overlay herdado) não chega mais à libass. É a "normalização explícita do clock" que este
+desenho previa para o futuro, com contrato e recipe próprios (política v2, renderer 1.14.0,
+receitas 1.15.0/1.10.0) e prova física própria; não é correção numérica. O coletor observa
+o mesmo estágio e o teste de integração do coletor exige PTS = índice em 1/taxa. O caminho
+observado/replay deste documento continua sendo o contrato de evidência (isolado, não
+ativado) e verifica o relógio fechado, não é substituído por ele.
+
+**Representabilidade.** Com o relógio fechado, 24–90 fps têm 100% das fronteiras e dos
+cues de um frame representáveis (janela de pelo menos 10 ms); 100 fps: 99,7% e 99,4%
+(frame 803 recusado: `now` 8020 e 8029 não contêm centissegundo); 120 fps: 83,3% e 66,7%;
+144 fps: 69,4% e 38,9%; 240 fps: 41,7% e 0% (cue de um frame nunca é representável).
+Com o time_base 1/1000000 do concat, 100 fps cairia para 77,0% e 53,9%: o estágio `fps`
+é parte da correção. Não há teto de taxa na política; o teto 1..120 do OutputSpec é regra
+de produto separada. Taxa genuinamente irrepresentável é recusa por intervalo, provada nos
+pixels (esgotando os pares de centissegundos vizinhos) e não uma proibição.
+
+**Fragmentos.** Cada fragmento clipado/rebaseado reinicia o relógio em 0 e é ligado de novo:
+no modelo, o cue global [5,6) a 120 fps é representável (4..5 cs) e o mesmo cue local [1,2)
+após rebase de 4 frames não é.
