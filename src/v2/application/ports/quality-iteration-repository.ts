@@ -7,6 +7,7 @@ import type { PersistedAssetSelection } from './asset-selection-repository.ts'
 import type { PersistedProxyReview } from './proxy-review-repository.ts'
 import type { AssetRightsSnapshot } from '../../domain/asset-rights.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 
 export interface QualityRubricEvidence {
   criterionId: string
@@ -116,7 +117,10 @@ export interface QualityIterationContext {
   projectVersionId: string
   projectVersionHash: string
   objective: string
+  /** The aspect ratio the sealed output of the reviewed Version carries (the one persisted consumption reader's answer). */
   format: string
+  /** The exact Version, State, variant revision and materialization the context was admitted from (purpose `critic`). */
+  outputConsumption?: Readonly<{ sealHash: string; seal: Readonly<OutputConsumptionSealV3> }>
   locale: string
   proxyReview: Readonly<PersistedProxyReview>
   assetSelections: readonly Readonly<PersistedAssetSelection>[]
@@ -137,6 +141,8 @@ export interface QualityIterationRepository {
     projectVersionId: string
     proxyReviewId: string
     assetSelectionIds: readonly string[]
+    /** The stable variant of the State being scored; absent means the State's only output. */
+    variantId?: string
   }): Promise<Readonly<QualityIterationContext> | null>
   persist(
     iteration: Readonly<PersistedQualityIteration>,

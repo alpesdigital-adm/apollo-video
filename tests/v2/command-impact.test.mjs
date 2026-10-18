@@ -41,6 +41,7 @@ import {
   editCommandExternalActorAuditData,
   hydrateEditCommandExternalActorAudit,
 } from '../../src/v2/infrastructure/prisma/edit-command-actor-audit.ts'
+import { fakeOutputWorld } from './helpers/output-consumption-fakes.mjs'
 
 const workspaceId = 'workspace-impact-1'
 const projectId = 'project-impact-1'
@@ -48,6 +49,8 @@ const baseVersionId = 'project-version-impact-1'
 const resultVersionId = 'project-version-impact-2'
 const commandId = 'edit-command-impact-1'
 const createdAt = '2026-07-31T19:00:00.000Z'
+// The sealed State of the result Version a proxy render consumes (the persisted `render` verdict; the project row carries no format).
+const resultWorld = fakeOutputWorld({ workspaceId, projectId, versionId: resultVersionId, entries: [{ variantId: 'variant-9x16', aspectRatio: '9:16' }] })
 
 function controlledSourceRightsRow(artifactId) {
   const rights = createAssetRightsSnapshot({ id: `rights-${artifactId}`, workspaceId,
@@ -483,11 +486,11 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
   const reusableProxyFixture = controlledReusableProxyFixture({
     onOperationLookup: (query) => { proxyLookup = query },
   })
-  const reusableProxyRepository = new PrismaProjectProxyRenderRepository({ async $queryRawUnsafe() { return [] },
+  const reusableProxyRepository = new PrismaProjectProxyRenderRepository({ $queryRawUnsafe: resultWorld.queryRawUnsafe,
     v2Project: { async findFirst() { return {
-      id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
+      id: projectId, workspaceId, format: null, currentVersionId: resultVersionId,
       versions: [{
-        id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
+        id: resultVersionId, baseHash: resultWorld.version.baseHash, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
         editPlanSnapshot: {
           workspaceId, projectId,
           contentJson: committed.snapshot.contentJson,
@@ -533,11 +536,11 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
     operation: { kind: 'select', clipId: 'clip-1' },
   })
   const selectionFixture = controlledReusableProxyFixture()
-  const selectionRepository = new PrismaProjectProxyRenderRepository({ async $queryRawUnsafe() { return [] },
+  const selectionRepository = new PrismaProjectProxyRenderRepository({ $queryRawUnsafe: resultWorld.queryRawUnsafe,
     v2Project: { async findFirst() { return {
-      id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
+      id: projectId, workspaceId, format: null, currentVersionId: resultVersionId,
       versions: [{
-        id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
+        id: resultVersionId, baseHash: resultWorld.version.baseHash, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
         editPlanSnapshot: {
           workspaceId, projectId,
           contentJson: committed.snapshot.contentJson,
@@ -689,8 +692,8 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
   repository.lockCompletionSources = async () => new Date(createdAt)
   repository.completeProxyTransaction = async () => {}
   repository.queryProject = async () => ({ id: projectId, workspaceId, locale: 'pt-BR',
-    format: '9:16', currentVersionId: resultVersionId,
-    versions: [{ id: resultVersionId, editPlanSnapshotId: recipeParameters.editPlanSnapshotId,
+    format: '9:16', outputConsumption: resultWorld.consumption('render'), currentVersionId: resultVersionId,
+    versions: [{ id: resultVersionId, baseHash: resultWorld.version.baseHash, editPlanSnapshotId: recipeParameters.editPlanSnapshotId,
       editPlanSnapshot: { workspaceId, projectId, contentJson: JSON.stringify(sourcePlan),
         contentHash: calculateVersionHash(sourcePlan) }, directorRunAsResult: null }],
     mediaAssets: [{ artifactId: sourceArtifactId, role: 'source-master',
@@ -1144,11 +1147,11 @@ test('T-FR-233 a review patch result reuses proxy ranges only with the attested 
     operationId: 'operation-review-base-1', manifestId: 'manifest-review-base-1',
     artifactKey: 'editorial-proxies/review-base.mp4',
   })
-  const rangeRepository = new PrismaProjectProxyRenderRepository({ async $queryRawUnsafe() { return [] },
+  const rangeRepository = new PrismaProjectProxyRenderRepository({ $queryRawUnsafe: resultWorld.queryRawUnsafe,
     v2Project: { async findFirst() { return {
-      id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
+      id: projectId, workspaceId, format: null, currentVersionId: resultVersionId,
       versions: [{
-        id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
+        id: resultVersionId, baseHash: resultWorld.version.baseHash, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
         editPlanSnapshot: { workspaceId, projectId, contentJson: committed.snapshot.contentJson, contentHash: committed.snapshot.contentHash },
         directorRunAsResult: null,
         command: {

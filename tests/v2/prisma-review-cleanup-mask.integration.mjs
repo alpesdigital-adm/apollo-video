@@ -47,12 +47,18 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
     const issued = await createApiClientService({ repository: new PrismaApiClientRepository(client), credentialCrypto: nodeApiCredentialCrypto, clock: () => at(0) })({ id: clientId, credentialId, workspaceId, name: 'Review mask client', environment: 'production', scopes: ['projects:read', 'projects:write'] })
     const auditContext = createExternalAuditContext({ clientId, credentialId: issued.credential.id, workspaceId, environment: 'production' })
     const actor = Object.freeze({ ...auditContext, scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext })
-    // The project is the sealed world the product builds: the creation Command and one explicit 9:16 output variant, whose
-    // Version is the head the proxy, the annotation and the mask hang off (media cannot be linked to a project that has
-    // only its empty creation Version).
+    // The project is the sealed world the product builds: the creation Command and one explicit 9:16 output variant (media
+    // cannot be linked to a project that has only its empty creation Version).
     const world = await seedReviewProject(client, { workspaceId, actor, prefix: `review-mask-${run}`,
       name: 'Review mask project', objective: 'awareness', aspectRatio: '9:16', at: () => at(0) })
-    const projectId = world.projectId, versionId = world.head.version.id, editPlanSnapshotId = world.head.editPlanSnapshot.id
+    // The review is a critique of the output of its Version, and the one persisted consumption reader admits only an output the State
+    // materialized: the empty variant is blocked (`empty-project`). The project plays one observed recording (150 frames, the
+    // length of the proxy below), and the Version that adopts it is the head everything hangs off.
+    const { persistRecording, commitSealedChild, planPlayingRecordings } = await import('./helpers/pg-output-world.mjs')
+    const recording = await persistRecording(client, { workspaceId, projectId: world.projectId, actor, slug: `review-mask-${run}-recording`, durationFrames: 150 })
+    const head = await commitSealedChild(client, { workspaceId, projectId: world.projectId, actor, suffix: `review-mask-${run}-ingested`,
+      mutatePlan: planPlayingRecordings([recording]), adopt: [recording.names.sourceArtifactId] })
+    const projectId = world.projectId, versionId = head.version.id, editPlanSnapshotId = head.editPlanSnapshot.id
 
     const sourceArtifactId = `artifact-review-mask-source-${run}`
     const proxyArtifactId = `artifact-review-mask-proxy-${run}`

@@ -6,6 +6,7 @@ import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
 import { assertMediaArtifactManifest, createMediaArtifactManifest, createMediaArtifactManifestV2,
   createReplayableMediaArtifactManifest, createReconstructableMediaArtifactManifest } from '../../src/v2/domain/media-artifact.ts'
 import { readStoredProjectionManifest, readReviewPreviewContext } from '../../src/v2/infrastructure/prisma/review-annotation-repository.ts'
+import { materializedEntry, stateClient, storedState } from './helpers/output-consumption-readers-fakes.mjs'
 
 // Controlled DTO metadata only. No MP4/crypto plaintext read, persistence,
 // worker execution, rights grant or editorial acceptance is claimed.
@@ -110,7 +111,10 @@ test('v3/v4 protected references bind row metadata and scope without decrypting 
 test('shared preview refuses actual operation project/workspace mismatch before artifact lookup', async () => {
   for (const operation of [{ workspaceId, projectId: 'project-sister' }, { workspaceId: 'workspace-sister', projectId: 'project-projection' }]) {
     let artifactReads = 0
-    const client = { v2Project: { async findFirst() { return { id: 'project-projection', format: '9:16', currentVersionId: 'version-projection',
+    // The review is admitted from the sealed State of the Version it previews (purpose critic) before any operation is read.
+    const sealed = storedState({ workspaceId, projectId: 'project-projection', versionId: 'version-projection', entries: [materializedEntry('variant-projection')] })
+    const client = { ...stateClient([sealed]),
+      v2Project: { async findFirst() { return { id: 'project-projection', currentVersionId: 'version-projection',
       versions: [{ id: 'version-projection', sequence: 1, createdAt: at, editPlanSnapshot: { contentJson: '{}' } }] } } },
       v2ProjectFinalExportOperation: { async findMany() { return [] } },
       v2ProjectProxyRenderOperation: { async findMany() { return [{ outputArtifactId: 'artifact-projection',

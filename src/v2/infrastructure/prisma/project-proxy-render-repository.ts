@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index
 
 import type { EditorialCutEditPlan } from '../../application/apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
-import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
+import type { ProjectProxyRenderRepository, ProjectProxyRenderSource, ProjectRenderConsumptionPurpose } from '../../application/ports/project-proxy-render-repository.ts'
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../application/ports/editorial-proxy-renderer.ts'
 import { catalogApprovedOutputService } from '../../application/catalog-approved-output.ts'
@@ -95,14 +95,20 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     return queryProxySourceProject(client, input)
   }
 
-  async readCurrentSource(input: { workspaceId: string; projectId: string }) {
+  /** The head Version, consumed for `purpose` (default: the proxy render). The persisted verdict refuses what may not be consumed. */
+  async readCurrentSource(input: { workspaceId: string; projectId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string }) {
     const project = await this.queryProject(input)
     const source = hydrateProxySource(project)
     return source ? this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)) : null
   }
 
-  async readImmutableSource(input: { workspaceId: string; projectId: string; projectVersionId: string; editPlanSnapshotId: string; sourceArtifactId: string; sourceManifestId: string }) {
+  /** The exact Version a worker was sealed to, consumed for `purpose` (default: the proxy render). */
+  async readImmutableSource(input: { workspaceId: string; projectId: string; projectVersionId: string; editPlanSnapshotId: string; sourceArtifactId: string;
+    sourceManifestId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string; requireCurrent?: boolean }) {
     const project = await this.queryProject(input)
+    if (input.requireCurrent === true && project && project.currentVersionId !== input.projectVersionId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'The sealed Version is no longer the current Version of the project')
+    }
     const source = hydrateProxySource(project, input)
     return source ? this.attachTrustedOcr(project!, await this.attachRangeReuse(input.workspaceId, project!, source)) : null
   }
@@ -157,7 +163,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     }) })
   }
 
-  async readRenderableSnapshotSource(input: { workspaceId: string; projectId: string; planId: string; planHash: string; format: string },
+  async readRenderableSnapshotSource(input: { workspaceId: string; projectId: string; planId: string; planHash: string; format: string; variantId?: string },
     client: PrismaClient | Prisma.TransactionClient = this.client, evaluatedAt: Date = new Date()) {
     // Renderable snapshots use their own edit maps. OCR from a Director result is never inherited;
     // the worker renders cues only with explicit unknown-face review and no OCR coordinates.
@@ -166,13 +172,23 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     if (!snapshot.plan.formatVariantRefs.includes(input.format as never)) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot is not bound to the requested format')
     }
+    // The plan's own Version is consumed (never the head) for the proxy render, and its sealed entry names the format: the
+    // requested one must be it. A State with several outputs is a named gap (the sole-output rule refuses it, never guesses).
     const project = await this.queryProject({
       workspaceId: input.workspaceId,
       projectId: input.projectId,
       projectVersionId: snapshot.plan.projectVersionId,
+      purpose: 'render',
+      ...(input.variantId !== undefined ? { variantId: input.variantId } : {}),
     }, client)
+    if (project && project.format !== input.format) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot is not bound to the requested format')
+    }
     const version = project?.versions[0]
     if (!project || !version) return null
+    if (project.outputConsumption.seal.projectVersionId !== version.id || project.outputConsumption.seal.projectVersionHash !== version.baseHash) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot Version is not the Version its output consumption seals')
+    }
     const renderSources = hydrateProxyRenderSources(project, snapshot.plan, evaluatedAt)
     const primary = renderSources.find((asset) => asset.mediaType === 'video') ?? renderSources[0]
     const primaryLink = primary ? uniqueSourceLink(project.mediaAssets, primary.artifactId) : undefined
@@ -185,7 +201,8 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       editPlanSnapshotId: version.editPlanSnapshotId,
       editPlanHash: snapshot.planHash,
       editPlan: snapshot.plan,
-      format: input.format,
+      format: project.format,
+      outputConsumption: project.outputConsumption,
       sourceArtifactId: primary.artifactId,
       sourceManifestId: primary.manifestId,
       sourceArtifactKey: primary.artifactKey,

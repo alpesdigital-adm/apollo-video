@@ -55,7 +55,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProxyReviewRepository } = await import('../../src/v2/infrastructure/prisma/proxy-review-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
-  const { testActor } = await import('./helpers/pg-output-world.mjs')
+  const { commitSealedChild, persistRecording, planPlayingRecordings, testActor } = await import('./helpers/pg-output-world.mjs')
   const { seedReviewProject } = await import('./helpers/review-edit-world.mjs')
 
   const client = new PrismaClient()
@@ -95,11 +95,17 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
     // Version); everything below hangs off that Version. The project is under review when its proxies are rendered.
     const actor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
       scopes: ['projects:read', 'projects:write'] })
-    const world = await seedReviewProject(client, { workspaceId, actor, prefix: 'quality', ids: { project: projectId },
+    await seedReviewProject(client, { workspaceId, actor, prefix: 'quality', ids: { project: projectId },
       name: 'Quality iteration E2E', aspectRatio: '9:16', status: 'reviewing-proxy' })
-    const projectVersionId = world.head.version.id
-    const projectVersionHash = world.head.version.baseHash
-    const editPlanSnapshotId = world.head.editPlanSnapshot.id
+    // The iteration scores the output of its Version, and the one persisted consumption reader admits only an output the State
+    // materialized (the empty variant is blocked with `empty-project`): the project plays one observed 10 s recording, and the
+    // Version that adopts it is the head the proxies, the review and the iterations hang off.
+    const recording = await persistRecording(client, { workspaceId, projectId, actor, slug: `quality-${suffix}-recording`, durationFrames: 300 })
+    const head = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: `quality-${suffix}-ingested`,
+      mutatePlan: planPlayingRecordings([recording]), adopt: [recording.names.sourceArtifactId] })
+    const projectVersionId = head.version.id
+    const projectVersionHash = head.version.baseHash
+    const editPlanSnapshotId = head.editPlanSnapshot.id
     await client.v2MediaArtifact.create({
       data: {
         id: selectedArtifactId,
@@ -241,7 +247,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         inputHash,
         format: '9:16',
         sourceSha256: '1'.repeat(64),
-        editPlanHash: world.head.editPlanSnapshot.contentHash,
+        editPlanHash: head.editPlanSnapshot.contentHash,
         expectedDurationMs: 10_000,
         uploadReceivedAt: createdAt.toISOString(),
         renderCompletedAt: new Date(createdAt.getTime() + 1_000).toISOString(),

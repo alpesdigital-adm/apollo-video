@@ -783,7 +783,7 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
     } : null
     const recomputedInputHash = retryDetail && retrySource && retryOutputSpec
       ? calculateVersionHash({
-        kind: 'project-final-export/v1', projectId: retryDetail.projectId,
+        kind: 'project-final-export/v2', projectId: retryDetail.projectId,
         assEmissionPolicy: ASS_EMISSION_POLICY,
         projectVersionId: retryDetail.projectVersionId, projectVersionHash: retryDetail.projectVersionHash,
         editPlanSnapshotId: retrySource.editPlanSnapshotId, editPlanHash: retrySource.editPlanHash,
@@ -794,6 +794,7 @@ test('T-F2-GATE/F2.028 blocks the real API without facial authority and preserve
         sourceSha256: retrySource.sourceSha256,
         renderSourcesFingerprint: projectRenderSourcesFingerprint(retrySource.renderSources),
         colorPipelineBindings: retryBindings, outputSpec: retryOutputSpec,
+        outputConsumptionSealHash: retrySource.outputConsumption.sealHash,
       })
       : null
     assert.equal(retryOutcome?.status, 'retrying', stableSerialize({

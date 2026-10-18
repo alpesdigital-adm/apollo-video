@@ -34,7 +34,6 @@ async function waitForServer(baseUrl, child) {
 }
 
 test('review annotations persist idempotently without mutating the project version', async () => {
-  const { createProjectService } = await import('../../src/v2/application/create-project.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createColorPipelineCompilationService } = await import('../../src/v2/application/color-pipeline-compilations.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
@@ -47,9 +46,8 @@ test('review annotations persist idempotently without mutating the project versi
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
   )
-  const { PrismaCreationOutputBundleRepositoryV2 } = await import(
-    '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
-  )
+  const { commitSealedChild, persistRecording, planPlayingRecordings } = await import('./helpers/pg-output-world.mjs')
+  const { seedReviewProject } = await import('./helpers/review-edit-world.mjs')
   const { PrismaReviewAnnotationRepository } = await import(
     '../../src/v2/infrastructure/prisma/review-annotation-repository.ts'
   )
@@ -110,20 +108,16 @@ test('review annotations persist idempotently without mutating the project versi
     })
     const projectAuthenticationAudit = materializeActorAuditContext(projectActor)
 
-    let entityCounter = 0
-    let eventCounter = 0
-    const projectResult = await createProjectService({
-      repository: new PrismaCreationOutputBundleRepositoryV2(client),
-      clock: () => new Date(createdAt),
-      createId: (kind) => `${kind}-review-integration-${++entityCounter}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(++eventCounter).padStart(12, '0')}`,
-    })({
-      workspaceId,
-      name: 'Projeto de revisão',
-      objective: 'discovery',
-      actor: projectActor,
-      idempotency: { clientId: 'review-integration-client', key: 'review-integration-project' },
-    })
+    // The project is the sealed world the product builds: the creation Command, one explicit 9:16 output variant, and a Version that
+    // adopts one observed recording. A review is a critique of the output of its Version, and the one persisted consumption reader
+    // admits only an output the State materialized (the empty variant is blocked with `empty-project`).
+    const world = await seedReviewProject(client, { workspaceId, actor: projectActor, prefix: 'review-integration', name: 'Projeto de revisão',
+      objective: 'discovery', aspectRatio: '9:16', status: 'reviewing-proxy', at: () => new Date(createdAt) })
+    const recording = await persistRecording(client, { workspaceId, projectId: world.projectId, actor: projectActor, slug: 'review-integration-recording', createdAt })
+    const head = await commitSealedChild(client, { workspaceId, projectId: world.projectId, actor: projectActor, suffix: 'review-integration-ingested',
+      mutatePlan: planPlayingRecordings([recording]), adopt: [recording.names.sourceArtifactId] })
+    const projectResult = { projectAtCreation: { id: world.projectId }, creationVersion: { id: head.version.id, snapshotRefs: { editPlan: head.editPlanSnapshot.id } } }
+    const versionCount = await client.v2ProjectVersion.count({ where: { workspaceId, projectId: world.projectId } })
 
     await client.v2MediaArtifact.create({
       data: {
@@ -286,7 +280,7 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(initialPayload.data.session.proxyArtifactId, artifactId)
     assert.equal(initialPayload.data.session.proxyHash, proxyHash)
     assert.equal(initialPayload.data.session.stale, false)
-    assert.equal(initialPayload.data.versions.length, 1)
+    assert.equal(initialPayload.data.versions.length, versionCount)
     assert.equal(initialPayload.data.versions[0].current, true)
     assert.equal(initialPayload.data.scopeContext.options.length, 9)
     assert.equal(initialPayload.data.annotations.length, 0)
@@ -322,6 +316,7 @@ test('review annotations persist idempotently without mutating the project versi
       timeRangeMs: [1000, 1000],
       screenshotRef: 'data:image/jpeg;base64,/9j/2Q==',
       scope: 'region',
+      applicationScope: { kind: 'region' },
       region: { x: 0.1, y: 0.2, width: 0.3, height: 0.2 },
       targetIds: [],
       text: 'Manter a legenda abaixo do rosto.',
@@ -426,7 +421,7 @@ test('review annotations persist idempotently without mutating the project versi
       where: { workspaceId, type: 'annotation.created' },
     })), 2)
     assert.equal(projectAfterReview.currentVersionId, projectResult.creationVersion.id)
-    assert.equal(projectAfterReview.versions.length, 1)
+    assert.equal(projectAfterReview.versions.length, versionCount)
   } finally {
     if (server && server.exitCode === null) {
       server.kill()

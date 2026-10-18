@@ -94,7 +94,7 @@ export function requireOutputVariant(state: OutputConsumptionState, variantId: s
  * The aspect ratio an entry's sealed spec carries: its own, or (a copy's literal fork revision, which keeps the geometry it was
  * copied with as `effectiveSpec`) the effective one. `null` when the spec carries none: the output then has no format of its own.
  */
-export function outputEntryAspectRatio(entry: OutputConsumptionEntry): string | null {
+export function outputEntryAspectRatio(entry: Readonly<{ spec: unknown }>): string | null {
   const spec = entry.spec as { output?: { aspectRatio?: unknown }; effectiveSpec?: { output?: { aspectRatio?: unknown } } }
   const ratio = spec.output?.aspectRatio ?? spec.effectiveSpec?.output?.aspectRatio
   return typeof ratio === 'string' && ratio.length > 0 ? ratio : null

@@ -63,6 +63,8 @@ export interface ProjectFinalExportRepository {
     projectId: string
     projectVersionId: string
     projectVersionHash: string
+    /** The State variant to export; absent means the State's only output. */
+    variantId?: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null>
   readImmutableApprovedSource(input: {
     workspaceId: string
@@ -78,6 +80,10 @@ export interface ProjectFinalExportRepository {
     proxyArtifactId: string
     sourceArtifactId: string
     sourceManifestId: string
+    /** The State variant to export; absent means the State's only output. */
+    variantId?: string
+    /** The worker refuses (PERSISTENCE_CONFLICT), before it renders anything, when the sealed Version is no longer the project's head. */
+    requireCurrent?: boolean
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null>
   convergeOutputIdentity(input: {
     workspaceId: string

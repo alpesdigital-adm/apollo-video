@@ -1,5 +1,9 @@
+import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 import type { RenderElementMap } from '../../domain/review-system.ts'
 import type { SubtitleSidecarFormat } from '../../domain/subtitle-sidecar.ts'
+
+/** One admission of the Version's output by the persisted consumption reader: the seal and its hash. */
+export type SidecarOutputConsumptionSeal = Readonly<{ seal: Readonly<OutputConsumptionSealV3>; sealHash: string }>
 
 /**
  * Everything the sidecar pipeline is allowed to read, assembled from the
@@ -29,6 +33,11 @@ export interface RenderedSubtitleAlignmentSource {
   renderElementMapHash: string
   map: Readonly<RenderElementMap>
   cueTexts: Readonly<Record<string, string>>
+  /**
+   * The exact Version, State, variant revision and materialization the alignment was admitted from: always the `render`
+   * admission, and the `final` one too when the evidence is a final export. `variantId` above is the aspect ratio that entry carries.
+   */
+  outputConsumption?: Readonly<{ render: SidecarOutputConsumptionSeal; final?: SidecarOutputConsumptionSeal }>
 }
 
 export interface PersistedSubtitleSidecar {
@@ -66,8 +75,11 @@ export interface SubtitleSidecarRepository {
   readRenderedAlignment(input: {
     workspaceId: string
     projectId: string
+    /** Today the aspect ratio of the output the render evidence is keyed by. */
     variantId: string
     projectVersionId?: string
+    /** The stable variant of the State whose output is aligned; absent means the one carrying `variantId`'s ratio. */
+    stateVariantId?: string
   }): Promise<Readonly<RenderedSubtitleAlignmentSource> | null>
   findIdempotent(input: {
     workspaceId: string

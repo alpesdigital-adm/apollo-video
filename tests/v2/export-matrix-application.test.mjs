@@ -9,6 +9,7 @@ import {
 } from '../../src/v2/application/export-matrices.ts'
 import { deriveExportMatrixRuntimeStatus } from '../../src/v2/domain/export-matrix.ts'
 import { HmacPreflightCommitTokenIssuer } from '../../src/v2/infrastructure/security/preflight-commit-token.ts'
+import { alteredConsumption, fakeOutputWorld } from './helpers/output-consumption-fakes.mjs'
 
 const workspaceId = 'workspace-export-matrix-app'
 const formats = ['9:16', '16:9', '4:5', '1:1', '21:9']
@@ -44,9 +45,13 @@ function requests() {
   }))
 }
 
-function source(projectId) {
+function source(projectId, consumptionPatch = {}) {
   const format = formatByProject.get(projectId)
   const sourceArtifactId = `source-${projectId}`
+  // The sealed State of the Version the final export consumes (the persisted `final` verdict).
+  const outputConsumption = alteredConsumption(fakeOutputWorld({ workspaceId, projectId, versionId: `version-${format.replace(':', 'x')}`,
+    baseHash: String(formats.indexOf(format) + 1).repeat(64), entries: [{ variantId: `variant-${projectId}`, aspectRatio: format }] }).consumption('final'),
+  consumptionPatch)
   return Object.freeze({
     projectId,
     projectVersionId: `version-${format.replace(':', 'x')}`,
@@ -73,6 +78,7 @@ function source(projectId) {
       })]) }]),
     }),
     format,
+    outputConsumption,
     locale: 'pt-BR',
     directorRunId: `director-${projectId}`,
     qualitySnapshotId: `quality-${projectId}`,
@@ -332,4 +338,32 @@ test('T-FR-235 treats a missing trusted color compilation as not ready', async (
   assert.equal(result.record.preflight.allowed, false)
   assert.equal(result.commitToken, undefined)
   assert.deepEqual(result.record.preflight.blockers, [{ code: 'CELL_NOT_READY', cellId: result.record.preflight.definition.cells[0].id }])
+})
+
+test('S3 the export matrix preflight is bound to the sealed final verdict of every cell: another State, revision or materialization is another snapshot', async () => {
+  const snapshotFor = async (patch, label) => {
+    const matrices = matrixRepository()
+    const result = await createExportMatrixPreflightService({
+      matrices: matrices.repository,
+      projects: { async readApprovedCurrentSource(input) { return source(input.projectId, input.projectId === 'project-4x5' ? patch : {}) } },
+      rights: { async findCurrent(_workspaceId, artifactId) { return { snapshot: rights(artifactId), revision: 'revision-1' } } },
+      colorPipelines: { async listForSource(input) {
+        return [{ compilation: { id: `color-${input.sourceArtifactId}`, sourceArtifactId: input.sourceArtifactId,
+          sourceManifestId: input.sourceManifestId, compilationHash: 'e'.repeat(64), pipeline: { pipelineHash: 'f'.repeat(64) } } }]
+      } },
+      capacity: { async read() { return { operatorMaximumCostMinorUnits: 1_000_000, operatorAvailableStorageBytes: 1_000_000_000 } } },
+      tokenIssuer: new HmacPreflightCommitTokenIssuer('export-matrix-test-secret-that-is-long-enough'),
+      clock: () => new Date('2026-08-24T18:00:00.000Z'),
+      createPreflightId: () => `preflight-seal-${label}`,
+    })({ workspaceId, cells: requests(), requestedMaximumCostMinorUnits: 1_000_000, requestedMaximumStorageBytes: 1_000_000_000,
+      actor: actor(), idempotencyKey: `export-matrix-seal-${label}` })
+    return result.record.preflight.snapshotHash
+  }
+  const sealed = await snapshotFor({}, 'sealed')
+  assert.equal(await snapshotFor({}, 'sealed-again'), sealed, 'the same sealed verdict is the same snapshot')
+  for (const [label, patch] of [
+    ['newer-state', { outputStateId: 'state-newer', outputStateHash: '6'.repeat(64) }],
+    ['revised-variant', { outputSpecRevisionId: 'revision-revised', specHash: '7'.repeat(64) }],
+    ['other-materialization', { materializationId: 'materialization-other', materializationHash: '8'.repeat(64) }],
+  ]) assert.notEqual(await snapshotFor(patch, label), sealed, `${label}: a changed seal cannot commit under the old preflight`)
 })

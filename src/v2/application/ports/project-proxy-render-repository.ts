@@ -1,6 +1,7 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
+import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 import type { PerceptionTimeline } from '../../domain/perception-timeline.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
 import type { SubtitlePresetId, SubtitlePresetSnapshot } from '../../domain/subtitle-system.ts'
@@ -51,13 +52,26 @@ export interface ProjectRenderSourceAsset {
   role: 'source-master' | 'selected-insert' | 'approved-music'
 }
 
+/**
+ * What a render consumer may do with a Version: the proxy renders it (`render`), the final export publishes it (`final`). The
+ * persisted consumption reader decides both; a consumer never completes the answer with the project's format or the head.
+ */
+export type ProjectRenderConsumptionPurpose = 'render' | 'final'
+
 export interface ProjectProxyRenderSource {
   projectId: string
   projectVersionId: string
   editPlanSnapshotId: string
   editPlanHash: string
   editPlan: Readonly<EditorialCutEditPlan | DirectedEditPlan>
+  /** The aspect ratio the sealed entry of the consumed State carries: the only authority for the format of this render. */
   format: string
+  /**
+   * The exact Version, State, variant revision and materialization this source was read from (the persisted consumption
+   * verdict, sealed). Its hash is part of every input hash derived from this source, so an operation sealed to one State is
+   * refused when the State, the variant revision or the materialization it consumes is another.
+   */
+  outputConsumption: Readonly<{ seal: Readonly<OutputConsumptionSealV3>; sealHash: string }>
   /** Present only after repository verification of sealed OCR, base/result lineage and identical time map. */
   trustedOcr?: Readonly<{
     envelopeId: string
@@ -128,7 +142,8 @@ export interface ProjectProxyCompletionLease {
 }
 
 export interface ProjectProxyRenderRepository {
-  readCurrentSource(input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectProxyRenderSource> | null>
+  /** `variantId`: the State variant to consume; absent means the State's only output. */
+  readCurrentSource(input: { workspaceId: string; projectId: string; purpose?: ProjectRenderConsumptionPurpose; variantId?: string }): Promise<Readonly<ProjectProxyRenderSource> | null>
   readImmutableSource(input: {
     workspaceId: string
     projectId: string
@@ -136,6 +151,15 @@ export interface ProjectProxyRenderRepository {
     editPlanSnapshotId: string
     sourceArtifactId: string
     sourceManifestId: string
+    purpose?: ProjectRenderConsumptionPurpose
+    /** The State variant to consume; absent means the State's only output. */
+    variantId?: string
+    /**
+     * A worker sealed to a Version that is no longer the project's head can never publish (admission and completion both fence on
+     * the head), so it refuses before it renders anything: PERSISTENCE_CONFLICT when the head moved. Off by default: the read is
+     * otherwise of the exact Version, whichever the head is.
+     */
+    requireCurrent?: boolean
   }): Promise<Readonly<ProjectProxyRenderSource> | null>
   readRenderableSnapshotSource(input: {
     workspaceId: string
@@ -143,6 +167,8 @@ export interface ProjectProxyRenderRepository {
     planId: string
     planHash: string
     format: string
+    /** The State variant of the plan's Version to consume; absent means that State's only output. */
+    variantId?: string
   }): Promise<Readonly<ProjectProxyRenderSource> | null>
   attachCompletedOutput(input: {
     lease: Readonly<ProjectProxyCompletionLease>

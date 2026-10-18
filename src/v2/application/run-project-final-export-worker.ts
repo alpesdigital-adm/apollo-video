@@ -23,7 +23,7 @@ import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-ma
 import type { ProjectColorPlanRepository } from './ports/project-color-plan-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
-import { projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { contextVariantSelection, projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { deriveEditorialRenderGeometry } from './derive-editorial-render-geometry.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
@@ -185,6 +185,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
     }
     try {
       scheduleHeartbeat()
+      // `final` purpose: the repository reads the exact Version through the persisted `final` verdict (state/entry/spec sealed).
       const source = await dependencies.projects.readImmutableApprovedSource({
         workspaceId: operation.workspaceId,
         projectId: context.projectId,
@@ -199,6 +200,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         proxyArtifactId: context.proxyArtifactId,
         sourceArtifactId: context.sourceArtifactId,
         sourceManifestId: context.sourceManifestId,
+        ...contextVariantSelection(context),
+        // Sealed to a Version that is no longer the head: it can never publish, so it refuses before it renders anything.
+        requireCurrent: true,
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
@@ -242,6 +246,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
         colorPipelineBindings: context.colorPipelineBindings,
         outputSpec: context.outputSpec,
+        // Re-read through the same `final` verdict: another State, variant revision or materialization is another input hash.
+        outputConsumptionSealHash: source.outputConsumption.sealHash,
       })
       if (
         immutableInputHash !== context.inputHash ||

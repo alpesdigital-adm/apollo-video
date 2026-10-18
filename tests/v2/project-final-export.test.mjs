@@ -19,6 +19,7 @@ import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan
 import { createQualityReport, resolveStrategicRubric } from '../../src/v2/domain/strategic-rubric.ts'
 import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { parseFinalExportQuality, PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
+import { alteredConsumption, fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
 import { assertRenderedSubtitleCuesAreReviewed } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import {
   advancePublicOperationPhase,
@@ -96,6 +97,8 @@ const projectId = 'project-final-export-test'
 const projectVersionId = 'project-version-final-export-test'
 const sourceArtifactId = 'artifact-final-export-source'
 const sourceManifestId = 'manifest-final-export-source'
+// The sealed State of the Version the final export consumes: the persisted `final` verdict of this world is what every source carries.
+const finalWorld = fakeOutputWorld({ workspaceId, projectId, versionId: projectVersionId, baseHash: '1'.repeat(64) })
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-final-export', sourceArtifactId, sourceManifestId,
   compilationHash: '8'.repeat(64), pipeline: Object.freeze({ pipelineHash: '9'.repeat(64) }),
@@ -165,6 +168,7 @@ function approvedSource() {
       ]) }]),
     }),
     format: '9:16',
+    outputConsumption: finalWorld.consumption('final'),
     locale: 'pt-BR',
     directorRunId: 'director-run-final-export-test',
     qualitySnapshotId: 'quality-snapshot-final-export-test',
@@ -192,10 +196,9 @@ function approvedSource() {
   })
 }
 
-function finalInputHash(includePolicy = true) {
-  const source = approvedSource()
+function finalInputHash(includePolicy = true, source = approvedSource()) {
   return calculateVersionHash({
-    kind: 'project-final-export/v1',
+    kind: 'project-final-export/v2',
     ...(includePolicy ? { assEmissionPolicy: ASS_EMISSION_POLICY } : {}),
     projectId,
     projectVersionId,
@@ -223,6 +226,7 @@ function finalInputHash(includePolicy = true) {
       container: 'mp4',
       quality: 'final',
     },
+    outputConsumptionSealHash: source.outputConsumption.sealHash,
   })
 }
 
@@ -875,4 +879,203 @@ test('the renderer admission gate still refuses captions that arrive without the
   )
   assert.doesNotThrow(() => assertRenderedSubtitleCuesAreReviewed({ subtitleCues, format: '9:16', fps: 30, placementPlan: expectedPlacementPlan() }, 300))
   assert.doesNotThrow(() => assertRenderedSubtitleCuesAreReviewed({ format: '9:16', fps: 30 }, 300))
+})
+
+// ---------------------------------------------------------------------------
+// Slice S3 - the final export consumes ONE persisted verdict (`final`) and seals it into its input hash.
+// ---------------------------------------------------------------------------
+
+const sealedOtherwise = [
+  ['a newer State (the head moved to a newer Version)', { projectVersionId: 'project-version-newer', projectVersionHash: '5'.repeat(64),
+    outputStateId: 'state-of-newer-version', outputStateHash: '6'.repeat(64) }],
+  ['another variant revision (the output was revised)', { outputSpecRevisionId: 'revision-variant-main-revised', specHash: '7'.repeat(64) }],
+  ['another materialization of the same revision', { materializationId: 'materialization-variant-main-other', materializationHash: '8'.repeat(64) }],
+]
+
+test('S3 final export enqueue seals the persisted final verdict into the input hash: another State, revision or materialization is another input', async () => {
+  const hashes = new Set()
+  for (const [label, patch] of [['the sealed State itself', {}], ...sealedOtherwise]) {
+    const source = withConsumption(approvedSource(), alteredConsumption(approvedSource().outputConsumption, patch))
+    let created
+    const enqueue = enqueueProjectFinalExportService({
+      projects: { async readApprovedCurrentSource() { return source } },
+      rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
+      operations: { async findReplay() { return null }, async createOrReplay(input) { created = input; return { ...input, replayed: false } } },
+      colorPipelines,
+      clock: () => new Date('2026-07-19T01:05:00.000Z'),
+      createId: (kind) => `${kind}-final-export-seal`,
+    })
+    await enqueue({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), format: '9:16',
+      approval: { approved: true }, actor: exportActor(), idempotencyKey: `final-export-seal-${hashes.size}` })
+    assert.equal(created.context.inputHash, finalInputHash(true, source), `${label}: the input hash is the independently computed one`)
+    assert.equal(source.outputConsumption.seal.purpose, 'final')
+    hashes.add(created.context.inputHash)
+  }
+  assert.equal(hashes.size, 4, 'each sealed State/revision/materialization addresses a distinct final input')
+})
+
+test('S3 final export enqueue publishes the refusal of the final verdict and allocates nothing', async () => {
+  for (const reason of ['derived-source-perception-authority-required', 'copy-requires-editorial-cut']) {
+    const enqueue = enqueueProjectFinalExportService({
+      projects: { async readApprovedCurrentSource() {
+        throw new DomainError('PRECONDITION_REQUIRED', 'Output is not consumable for this purpose', { reason, purpose: 'final' })
+      } },
+      rights: { async findCurrent() { throw new Error('rights must not be read for a refused verdict') } },
+      operations: { async findReplay() { throw new Error('must not look for a replay') } },
+      colorPipelines,
+      clock: () => new Date('2026-07-19T01:05:00.000Z'),
+      createId() { throw new Error('must not allocate') },
+    })
+    await assert.rejects(() => enqueue({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), format: '9:16',
+      approval: { approved: true }, actor: exportActor(), idempotencyKey: `final-export-refused-${reason}` }),
+    (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.reason === reason)
+  }
+})
+
+test('S3 final export worker refuses an operation sealed to another State, variant revision or materialization before it renders anything', async () => {
+  for (const [label, patch] of sealedOtherwise) {
+    const operations = createOperations()
+    const { calls, renderInputs, dependencies } = workerDependencies(operations)
+    serveSource(dependencies, (source) => ({ outputConsumption: alteredConsumption(source.outputConsumption, patch) }))
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-sealed-otherwise')
+    assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' }, label)
+    assert.equal(operations.operation.error.code, 'invalid_render_input', label)
+    assert.deepEqual([calls.rendered, renderInputs.length, calls.persisted, calls.attached, calls.cataloged], [0, 0, 0, 0, 0], `${label}: nothing rendered, nothing published`)
+    assert.equal(calls.failed, 1, label)
+  }
+})
+
+test('S3 final export worker refuses tampered source bytes (another sha256 than the one the operation sealed) before it renders anything', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  serveSource(dependencies, (source) => ({
+    sourceSha256: 'e'.repeat(64),
+    renderSources: Object.freeze([Object.freeze({ ...source.renderSources[0], sha256: 'e'.repeat(64) })]),
+  }))
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-tampered-bytes')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
+  assert.equal(operations.operation.error.code, 'invalid_render_input')
+  assert.deepEqual([calls.rendered, calls.persisted, calls.attached], [0, 0, 0])
+})
+
+test('S3 final export worker refuses rights revoked after enqueue before it renders anything', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations, () => null)
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-rights-revoked-at-start')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
+  assert.equal(operations.operation.error.code, 'asset_rights_blocked')
+  assert.deepEqual([calls.rendered, calls.persisted, calls.attached], [0, 0, 0])
+})
+
+test('S3 the final repository reads the source through the final verdict BEFORE any approval: a cut copy and a copy never cut are refused with their published reasons', async () => {
+  const version = { id: projectVersionId, baseHash: '1'.repeat(64) }
+  for (const [label, entries, sourceDependencies, reason] of [
+    ['a cut copy (editorial-derived, fork lineage)', [{ variantId: 'variant-copy', aspectRatio: '9:16', derived: true }],
+      { forkDerivationId: 'derivation-1' }, 'derived-source-perception-authority-required'],
+    ['a copy never cut (the fork target materialization is still required)', [{ variantId: 'variant-copy', aspectRatio: '9:16',
+      blockedReasons: ['fork-target-materialization-required'] }], { forkDerivationId: 'derivation-1' }, 'copy-requires-editorial-cut'],
+  ]) {
+    const world = fakeOutputWorld({ workspaceId, projectId, versionId: projectVersionId, baseHash: version.baseHash, entries, sourceDependencies })
+    const reads = []
+    const repository = new PrismaProjectFinalExportRepository({
+      $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+      v2Project: { async findFirst(query) {
+        reads.push(Object.keys(query.select ?? query.include ?? {}))
+        return { id: projectId, workspaceId, locale: 'pt-BR', currentVersionId: projectVersionId, versions: [version], mediaAssets: [] }
+      } },
+    })
+    const refusal = (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' &&
+      error.details.reason === reason && error.details.purpose === 'final'
+    await assert.rejects(repository.readApprovedCurrentSource({ workspaceId, projectId, projectVersionId, projectVersionHash: version.baseHash }), refusal, label)
+    await assert.rejects(repository.readImmutableApprovedSource({ workspaceId, projectId, projectVersionId, projectVersionHash: version.baseHash,
+      editPlanSnapshotId: 'snapshot-edit-plan-final-test', directorRunId: 'director-run-final-export-test',
+      qualitySnapshotId: 'quality-snapshot-final-export-test', qualitySnapshotHash: '3'.repeat(64),
+      proxyReviewId: 'proxy-review-final-export-test', proxyReviewHash: '7'.repeat(64), proxyArtifactId: 'artifact-proxy-final-export-test',
+      sourceArtifactId, sourceManifestId }), refusal, label)
+    assert.equal(reads.length, 2, `${label}: only the source project was read (once per call), never the approval (DirectorRun, QualityReport, proxy review)`)
+    assert.ok(reads.every((keys) => !keys.includes('directorRuns') && !keys.includes('proxyReviews')), label)
+    assert.ok(world.sql.every((text) => text.includes('FROM project_versions v LEFT JOIN project_output_states s')), `${label}: the light reader only, never the audit rebuild`)
+  }
+})
+
+test('S3 final export worker reads the exact Version with the head fence on, so a head that moved is refused before anything renders', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  const asked = []
+  dependencies.projects.readImmutableApprovedSource = async (input) => {
+    asked.push(input)
+    throw new DomainError('PERSISTENCE_CONFLICT', 'The sealed Version is no longer the current Version of the project')
+  }
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-head-moved')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
+  assert.equal(asked.length, 1)
+  assert.equal(asked[0].requireCurrent, true)
+  assert.equal(operations.operation.error.code, 'persistence_conflict')
+  assert.deepEqual([calls.rendered, calls.persisted, calls.attached], [0, 0, 0])
+})
+
+test('S3 the final repository forwards the head fence: a Version that is no longer the head is a persistence conflict, never a source', async () => {
+  const version = { id: projectVersionId, baseHash: '1'.repeat(64) }
+  const world = fakeOutputWorld({ workspaceId, projectId, versionId: projectVersionId, baseHash: version.baseHash })
+  const repository = new PrismaProjectFinalExportRepository({
+    $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+    v2Project: { async findFirst() {
+      return { id: projectId, workspaceId, locale: 'pt-BR', currentVersionId: 'project-version-newer-head', versions: [version], mediaAssets: [] }
+    } },
+  })
+  await assert.rejects(repository.readImmutableApprovedSource({ workspaceId, projectId, projectVersionId, projectVersionHash: version.baseHash,
+    editPlanSnapshotId: 'snapshot-edit-plan-final-test', directorRunId: 'director-run-final-export-test',
+    qualitySnapshotId: 'quality-snapshot-final-export-test', qualitySnapshotHash: '3'.repeat(64),
+    proxyReviewId: 'proxy-review-final-export-test', proxyReviewHash: '7'.repeat(64), proxyArtifactId: 'artifact-proxy-final-export-test',
+    sourceArtifactId, sourceManifestId, requireCurrent: true }),
+  (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT' && /no longer the current Version/.test(error.message))
+})
+
+test('S3 final export threads an optional State variant to the final verdict (enqueue, repository, worker) and says nothing when it is absent', async () => {
+  const asked = []
+  const enqueue = (variantId, key) => enqueueProjectFinalExportService({
+    projects: { async readApprovedCurrentSource(input) { asked.push(input); return approvedSource() } },
+    rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
+    operations: { async findReplay() { return null }, async createOrReplay(input) { return { ...input, replayed: false } } },
+    colorPipelines,
+    clock: () => new Date('2026-07-19T01:05:00.000Z'),
+    createId: (kind) => `${kind}-final-export-variant`,
+  })({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), format: '9:16', approval: { approved: true },
+    actor: exportActor(), idempotencyKey: key, ...(variantId === undefined ? {} : { variantId }) })
+  await enqueue(undefined, 'final-variant-absent')
+  await enqueue('variant-tall', 'final-variant-present')
+  assert.deepEqual(asked, [
+    { workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64) },
+    { workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), variantId: 'variant-tall' },
+  ])
+  await assert.rejects(enqueue('x', 'final-variant-invalid'), (error) => error.code === 'INVALID_ARGUMENT')
+
+  // The repository: a State with two outputs is refused without a variant, and consumed with one (before any approval is read).
+  const version = { id: projectVersionId, baseHash: '1'.repeat(64) }
+  const world = fakeOutputWorld({ workspaceId, projectId, versionId: projectVersionId, baseHash: version.baseHash, entries: [
+    { variantId: 'variant-wide', aspectRatio: '16:9' }, { variantId: 'variant-tall', aspectRatio: '9:16', derived: true }],
+  sourceDependencies: { forkDerivationId: 'derivation-1' } })
+  const repository = new PrismaProjectFinalExportRepository({
+    $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+    v2Project: { async findFirst() { return { id: projectId, workspaceId, locale: 'pt-BR', currentVersionId: projectVersionId, versions: [version], mediaAssets: [] } } },
+  })
+  const at = { workspaceId, projectId, projectVersionId, projectVersionHash: version.baseHash }
+  await assert.rejects(repository.readApprovedCurrentSource(at), (error) => error.details?.reason === 'output-variant-required' && error.details?.purpose === 'final')
+  // variant-tall is a cut copy (editorial-derived with fork lineage): its final is blocked by the same verdict; variant-wide passes the verdict
+  // and goes on to the approval lookup (no media in this fake, so it is not a source).
+  await assert.rejects(repository.readApprovedCurrentSource({ ...at, variantId: 'variant-tall' }),
+    (error) => error.details?.reason === 'derived-source-perception-authority-required')
+
+  // The worker reads through the variant a later step persists in the context (none today).
+  for (const [contextOverride, expected] of [[{}, undefined], [{ variantId: 'variant-tall' }, 'variant-tall']]) {
+    const operations = createOperations()
+    const { dependencies } = workerDependencies(operations)
+    const workerAsked = []
+    const original = operations.repository.claimNext
+    operations.repository.claimNext = async (input) => { const claimed = await original(input); return { ...claimed, context: { ...claimed.context, ...contextOverride } } }
+    dependencies.projects.readImmutableApprovedSource = async (input) => { workerAsked.push(input); return approvedSource() }
+    await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-variant')
+    assert.equal(workerAsked[0].variantId, expected)
+    assert.equal('variantId' in workerAsked[0], expected !== undefined)
+  }
 })

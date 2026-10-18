@@ -12,13 +12,12 @@ import { DomainError } from '../../domain/errors.ts'
 import { assertMediaArtifactManifest, type MediaArtifactManifest } from '../../domain/media-artifact.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { REVIEW_SCOPE_KINDS, type ReviewScope } from '../../domain/review-system.ts'
-import { resolveProjectOutputFormat } from './project-output-format.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
 import {
   externalActorAuditData,
   hydrateExternalActorAudit,
 } from './external-actor-audit.ts'
-import { requireCopyTargetAuthority } from './copy-target-authority.ts'
+import { requireCriticOutputConsumption } from './critic-output-consumption.ts'
 
 function parseObject(value: string, field: string): Record<string, unknown> {
   try {
@@ -204,18 +203,74 @@ interface ProxyCandidate {
 
 export type ReviewPreviewReader = Pick<Prisma.TransactionClient,
   'v2Project' | 'v2ProjectFinalExportOperation' | 'v2ProjectProxyRenderOperation' |
-  'v2ProjectMediaAsset' | 'v2MediaArtifact' | 'v2ProjectOutputState'>
+  'v2ProjectMediaAsset' | 'v2MediaArtifact' | '$queryRawUnsafe'>
 
+/**
+ * `variantId` is the stable variant of the State the review is about; absent means the State's only output (several outputs
+ * without it are refused with `output-variant-required`).
+ */
+export type ReviewPreviewInput = Readonly<{ workspaceId: string; projectId: string; projectVersionId?: string; variantId?: string }>
+
+/**
+ * The review preview of one Version. The output the review is about is the one the persisted consumption reader admits for the
+ * `critic` purpose: the State of exactly the selected Version (the head, or the historical one asked for), its output (the
+ * explicit `variantId`, or the only one), and the format that output carries. A Version whose output cannot be critiqued (a copy no
+ * editorial cut has materialized, a project without outputs, several outputs without a variant, a State that fails its seal) is
+ * refused with the published reason, before any proxy is looked for.
+ */
 export async function readReviewPreviewContext(
   client: ReviewPreviewReader,
-  input: { workspaceId: string; projectId: string; projectVersionId?: string },
+  input: ReviewPreviewInput,
 ): Promise<Readonly<ReviewPreviewContext> | null> {
+  const found = await locateReviewPreview(client, input, (versionId) => requireCriticOutputConsumption(client, {
+    workspaceId: input.workspaceId, projectId: input.projectId, versionId, ...(input.variantId ? { variantId: input.variantId } : {}) }))
+  if (!found) return null
+  const { located: { scopeCounts, ...facts }, admission } = found
+  return Object.freeze({
+    ...facts,
+    formatId: admission.formatId,
+    outputConsumption: Object.freeze({ sealHash: admission.sealHash, seal: admission.seal }),
+    availableScopeCounts: Object.freeze({ ...scopeCounts, formats: 1 }) as ReviewPreviewContext['availableScopeCounts'],
+  })
+}
+
+/** What the workspace reports of the review preview: which proxy a review of the Version would be about, and whether it is stale. */
+export type ReviewPreviewAvailability = Readonly<Pick<ReviewPreviewContext,
+  'currentProjectVersionId' | 'projectVersionId' | 'sourceVersionId' | 'proxyArtifactId' | 'proxyHash' | 'stale'>>
+
+/**
+ * The proxy a review of the Version would be about, as a read model: it describes which proxy exists and whether it is stale, and
+ * admits nothing. Whether the output behind it may be critiqued is the consumers' verdict (the preview and the annotation refuse a
+ * copy no editorial cut has materialized with the published reason), not a fact this description invents a reason for.
+ */
+export async function readReviewPreviewAvailability(
+  client: ReviewPreviewReader,
+  input: Omit<ReviewPreviewInput, 'variantId'>,
+): Promise<ReviewPreviewAvailability | null> {
+  const found = await locateReviewPreview(client, input, async () => null)
+  if (!found) return null
+  const { currentProjectVersionId, projectVersionId, sourceVersionId, proxyArtifactId, proxyHash, stale } = found.located
+  return Object.freeze({ currentProjectVersionId, projectVersionId, sourceVersionId, proxyArtifactId, proxyHash, stale })
+}
+
+/** The preview without the facts only the output's admission knows (its format and the format scope count). */
+type LocatedReviewPreview = Omit<ReviewPreviewContext, 'formatId' | 'outputConsumption' | 'availableScopeCounts'> &
+  { scopeCounts: Omit<ReviewPreviewContext['availableScopeCounts'], 'formats'> }
+
+/**
+ * Selects the Version and the proxy a review of it is about. `admit` runs as soon as the Version is selected (before any operation
+ * or proxy is read): the consumers pass the critic admission, the availability read model passes nothing.
+ */
+async function locateReviewPreview<Admission>(
+  client: ReviewPreviewReader,
+  input: Omit<ReviewPreviewInput, 'variantId'>,
+  admit: (versionId: string) => Promise<Admission>,
+): Promise<{ located: LocatedReviewPreview; admission: Admission } | null> {
   const project = await client.v2Project.findFirst({
     where: { id: input.projectId, workspaceId: input.workspaceId },
     select: {
       id: true,
       currentVersionId: true,
-      format: true,
       locale: true,
       versions: {
         orderBy: { sequence: 'desc' },
@@ -233,7 +288,7 @@ export async function readReviewPreviewContext(
     ? project.versions.find((version) => version.id === input.projectVersionId)
     : project.versions.find((version) => version.id === project.currentVersionId)
   if (!selectedVersion) return null
-  const format = await resolveProjectOutputFormat(client, { ...project, workspaceId: input.workspaceId }, selectedVersion.id)
+  const admission = await admit(selectedVersion.id)
   const [finalOperations, proxyOperations] = await Promise.all([
     client.v2ProjectFinalExportOperation.findMany({
       where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
@@ -298,7 +353,7 @@ export async function readReviewPreviewContext(
     ...proxyOperations.map((operation) => operation.projectVersionId),
   ])
   previewVersionIds.add(project.currentVersionId)
-  return Object.freeze({
+  const located: LocatedReviewPreview = Object.freeze({
     currentProjectVersionId: project.currentVersionId,
     projectVersionId: selectedVersion.id,
     sourceVersionId: candidate.projectVersionId ?? null,
@@ -309,17 +364,15 @@ export async function readReviewPreviewContext(
     height: probe.height,
     durationFrames,
     stale: selectedVersion.id !== project.currentVersionId || candidate.projectVersionId !== selectedVersion.id,
-    formatId: format ?? '9:16',
     localeId: project.locale ?? 'pt-BR',
     recipeIds,
-    availableScopeCounts: Object.freeze({
+    scopeCounts: Object.freeze({
       frame: durationFrames,
       region: 1,
       clip: scenes.length,
       scene: scenes.length,
       range: 1,
       project: 1,
-      formats: format ? 1 : 0,
       locales: project.locale ? 1 : 0,
       recipes: recipeIds.length,
     }),
@@ -332,6 +385,7 @@ export async function readReviewPreviewContext(
     }))),
     scenes,
   })
+  return { located, admission }
 }
 
 export class PrismaReviewAnnotationRepository implements ReviewAnnotationRepository {
@@ -343,7 +397,7 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
     this.createEventId = createEventId
   }
 
-  async readPreviewContext(input: { workspaceId: string; projectId: string; projectVersionId?: string }): Promise<Readonly<ReviewPreviewContext> | null> {
+  async readPreviewContext(input: ReviewPreviewInput): Promise<Readonly<ReviewPreviewContext> | null> {
     return readReviewPreviewContext(this.client, input)
   }
 
@@ -381,6 +435,8 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
     annotation: PersistedReviewAnnotation
     idempotencyKey: string
     requestFingerprint: string
+    /** The stable variant of the State being critiqued; absent means the State's only output. */
+    variantId?: string
   }) {
     try {
       return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
@@ -407,8 +463,10 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
       if (project.currentVersionId !== input.annotation.projectVersionId) {
         throw new DomainError('VERSION_CONFLICT', 'Project version changed before annotation persistence', { currentVersionId: project.currentVersionId })
       }
-      // A copy that no editorial cut has given target authority is not reviewed: the proxies it links belong to its source.
-      await requireCopyTargetAuthority(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersionId })
+      // The annotation is a critique of the output of exactly this Version. A copy that no editorial cut has given target authority
+      // is not reviewed (the proxies it links belong to its source), nor is a Version whose output the reader cannot admit.
+      await requireCriticOutputConsumption(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId!,
+        ...(input.variantId ? { variantId: input.variantId } : {}) })
       const artifact = await transaction.v2MediaArtifact.findFirst({
         where: { id: input.annotation.proxyArtifactId, workspaceId: input.workspaceId, sha256: input.annotation.proxyHash, status: 'available' },
         select: { id: true },

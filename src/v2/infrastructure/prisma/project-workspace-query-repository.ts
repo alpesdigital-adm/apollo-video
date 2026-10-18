@@ -1,7 +1,9 @@
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { ProjectWorkspaceQueryRepository, ProjectWorkspaceMediaRecord, ProjectReviewAvailability } from '../../application/ports/project-workspace-query-repository.ts'
-import { readReviewPreviewContext, readStoredProjectionManifest } from './review-annotation-repository.ts'
+import { readReviewPreviewAvailability, readStoredProjectionManifest } from './review-annotation-repository.ts'
+import { readStoredOutputStateV3 } from './output-state-consumption.ts'
+import { outputEntryAspectRatio, type OutputConsumptionEntry } from '../../domain/output-consumption.ts'
 import { readCurrentProxyReview } from './proxy-review-repository.ts'
 import { readPublicOperation } from './public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -81,6 +83,29 @@ function probeFromManifest(manifest: Readonly<MediaArtifactManifest>): ProjectWo
   return manifest.probe ? { ...manifest.probe } : undefined
 }
 
+/**
+ * The format of a project is the aspect ratio of the only output of the State its head Version seals; a project with several
+ * outputs, none, or a head whose State is not a consumable document has no format of its own, and nothing completes the gap (the
+ * stored `projects.format` column is not an authority: a project created under contract 6 never had one).
+ *
+ * This is a description, not a consumption: a copy no editorial cut has materialized, or an entry the State blocks, still carries
+ * the format it was copied or configured with, so it is shown with it. A State that fails its own seal is an integrity failure and
+ * propagates.
+ */
+async function readSoleOutputFormat(client: Pick<Prisma.TransactionClient, '$queryRawUnsafe'>,
+  scope: Readonly<{ workspaceId: string; projectId: string; versionId: string }>): Promise<string | null> {
+  let stored
+  try {
+    stored = await readStoredOutputStateV3(client, scope)
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED') return null
+    throw error
+  }
+  const entries = stored?.state.document.entries
+  if (!entries || entries.length !== 1) return null
+  return outputEntryAspectRatio(entries[0] as OutputConsumptionEntry)
+}
+
 export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQueryRepository {
   private readonly client: PrismaClient
 
@@ -128,9 +153,10 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
         project.currentVersion.projectId !== input.projectId || project.currentVersion.workspaceId !== input.workspaceId
       ))) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace current version is inconsistent')
       const requestedVersionId = project.currentVersionId
+      const outputFormat = requestedVersionId ? await readSoleOutputFormat(transaction, { ...input, versionId: requestedVersionId }) : null
       const [preview, report] = requestedVersionId
         ? await Promise.all([
-            readReviewPreviewContext(transaction, { ...input, projectVersionId: requestedVersionId }),
+            readReviewPreviewAvailability(transaction, { ...input, projectVersionId: requestedVersionId }),
             readCurrentProxyReview(transaction, { ...input, projectVersionId: requestedVersionId }),
           ])
         : [null, null]
@@ -276,7 +302,7 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
         project: Object.freeze({
           id: project.id, workspaceId: project.workspaceId, name: project.name,
           status: hydrateProjectStatus(project.status),
-          ...(project.objective ? { objective: project.objective } : {}), ...(project.format ? { format: project.format } : {}),
+          ...(project.objective ? { objective: project.objective } : {}), ...(outputFormat ? { format: outputFormat } : {}),
           ...(project.locale ? { locale: project.locale } : {}), ...(project.currentVersionId ? { currentVersionId: project.currentVersionId } : {}),
           createdAt: project.createdAt.toISOString(),
         }),

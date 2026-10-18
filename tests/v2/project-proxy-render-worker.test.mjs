@@ -12,7 +12,8 @@ import {
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
-import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
+import { projectProxyRenderInputHash, projectRenderSourcesFingerprint } from '../../src/v2/application/project-render-sources.ts'
+import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { enqueueProjectProxyRenderService, enqueueRenderableSnapshotProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
@@ -35,7 +36,10 @@ import { DomainError } from '../../src/v2/domain/errors.ts'
 import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
 import { contentAddressedArtifactKey } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { buildMeasurement } from './wave20-fixtures.mjs'
+import { alteredConsumption, fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
 
+// The sealed State of the Version this worker's operations consume: the persisted `render` verdict every source below carries.
+const proxyWorld = fakeOutputWorld({ workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', versionId: 'project-version-proxy-test' })
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
   sourceManifestId: 'manifest-project-proxy-source', compilationHash: '8'.repeat(64),
@@ -234,6 +238,7 @@ function source() {
       ]) }]),
     }),
     format: '9:16',
+    outputConsumption: proxyWorld.consumption('render'),
     sourceArtifactId: 'artifact-project-proxy-source',
     sourceManifestId: 'manifest-project-proxy-source',
     sourceArtifactKey: 'workspaces/project-proxy-test/masters/source.mp4',
@@ -762,6 +767,7 @@ test('renderable snapshot lookup never spreads transport-only format into Prisma
 test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache hit', async () => {
   const baseVersionId = 'project-version-proxy-base'
   const resultVersionId = 'project-version-proxy-selection'
+  const reuseWorld = fakeOutputWorld({ workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', versionId: resultVersionId })
   const commandId = 'command-selection-proxy-test'
   const editPlan = { ...source().editPlan, id: `edit-plan-${baseVersionId}`, projectVersionId: baseVersionId, createdAt: '2026-07-31T22:44:00.000Z' }
   const impact = createManualCommandImpact({
@@ -878,8 +884,10 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           },
           async create({ data }) { operationData = data },
         },
-        // The copy-authority gate reads the sealed State of the Version; this legacy-shaped project has none.
-        async $queryRawUnsafe() { return [] },
+        // The inline authority reads the sealed State of the Version it reuses (the light reader); every other raw read is empty.
+        async $queryRawUnsafe(text, ...params) {
+          return String(text).includes('FROM project_versions v LEFT JOIN project_output_states s') ? reuseWorld.queryRawUnsafe(text, ...params) : []
+        },
         v2PublicEventOutbox: { async createMany() {
           if (injectedFailure === 'outbox') throw Object.assign(new Error('controlled outbox failure'), { code: 'CONTROLLED_TRANSACTION_FAILURE' })
           outboxRows += 2
@@ -892,8 +900,8 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           sourceReads += 1
           const rights = controlledProxyRightsRow(context.sourceArtifactId, {
             ...(blockedSource || (finalRightsBlocked && sourceReads > 1) ? { status: 'revoked' } : {}) })
-          return { id: operation.projectId, workspaceId: operation.workspaceId, locale: 'pt-BR', format: '9:16',
-            currentVersionId: resultVersionId, versions: [{ id: resultVersionId,
+          return { id: operation.projectId, workspaceId: operation.workspaceId, locale: 'pt-BR', format: null,
+            currentVersionId: resultVersionId, versions: [{ id: resultVersionId, baseHash: reuseWorld.version.baseHash,
               editPlanSnapshotId: context.editPlanSnapshotId, editPlanSnapshot: snapshotRow(context.editPlanSnapshotId, childPlan),
               directorRunAsResult: null }], mediaAssets: [{ role: 'source-master', artifactId: context.sourceArtifactId,
                 originalFileName: 'source-editorial.mp4', createdAt: new Date(now), upload: null, artifact: {
@@ -1464,4 +1472,239 @@ test('T-F4.014 an approved colour adds nothing to the review and still releases 
   assert.equal(run.review.finalAllowed, false)
   assert.equal(run.runtime.calls.cleaned, 1)
   assert.equal(run.runtime.rows.size, 1, 'the approving verdict is recorded too')
+})
+
+// ---------------------------------------------------------------------------
+// Slice S3 - the proxy render consumes ONE persisted verdict (`render`) and seals it into its input hash.
+// ---------------------------------------------------------------------------
+
+const sealedOtherwise = [
+  ['a newer State (the head moved to a newer Version)', { projectVersionId: 'project-version-newer', projectVersionHash: '5'.repeat(64),
+    outputStateId: 'state-of-newer-version', outputStateHash: '6'.repeat(64) }],
+  ['another variant revision (the output was revised)', { outputSpecRevisionId: 'revision-variant-main-revised', specHash: '7'.repeat(64) }],
+  ['another materialization of the same revision', { materializationId: 'materialization-variant-main-other', materializationHash: '8'.repeat(64) }],
+]
+const sealedSource = (patch, base = source()) => withConsumption(base, alteredConsumption(base.outputConsumption, patch))
+
+test('S3 the proxy input hash is built over the sealed consumption: kinds v4/v5/v6, independently recomputed, one distinct hash per State, revision or materialization', () => {
+  const base = source()
+  const plain = {
+    assEmissionPolicy: ASS_EMISSION_POLICY, projectId: base.projectId, projectVersionId: base.projectVersionId,
+    editPlanSnapshotId: base.editPlanSnapshotId, editPlanHash: base.editPlanHash, sourceArtifactId: base.sourceArtifactId,
+    sourceManifestId: base.sourceManifestId, sourceSha256: base.sourceSha256,
+    renderSourcesFingerprint: projectRenderSourcesFingerprint(base.renderSources), colorPipelineBindings, format: base.format,
+    outputConsumptionSealHash: base.outputConsumption.sealHash,
+  }
+  const rangeReuse = Object.freeze({ schemaVersion: 'project-proxy-range-reuse/v1', commandId: 'command-hash', impactHash: '1'.repeat(64),
+    baseVersionId: 'project-version-proxy-base', ranges: Object.freeze([Object.freeze({ startFrame: 0, endFrame: 30 })]),
+    artifactId: 'artifact-base', manifestId: 'manifest-base', artifactKey: 'k', sha256: '2'.repeat(64), byteSize: 10 })
+  const unchangedReuse = Object.freeze({ schemaVersion: 'project-proxy-unchanged-reuse/v1', commandId: 'command-hash', impactHash: '3'.repeat(64),
+    baseVersionId: 'project-version-proxy-base', operationId: 'operation-base', artifactId: 'artifact-base', manifestId: 'manifest-base',
+    artifactKey: 'k', sha256: '4'.repeat(64), byteSize: 10 })
+  assert.equal(projectProxyRenderInputHash({ source: base, colorPipelineBindings }), calculateVersionHash({ kind: 'project-proxy-render/v4', ...plain }))
+  assert.equal(projectProxyRenderInputHash({ source: Object.freeze({ ...base, rangeReuse }), colorPipelineBindings }),
+    calculateVersionHash({ kind: 'project-proxy-render/v5', ...plain, rangeReuse }))
+  assert.equal(projectProxyRenderInputHash({ source: Object.freeze({ ...base, unchangedReuse }), colorPipelineBindings }),
+    calculateVersionHash({ kind: 'project-proxy-render/v6', ...plain, unchangedReuse }))
+  const hashes = new Set([projectProxyRenderInputHash({ source: base, colorPipelineBindings })])
+  for (const [, patch] of sealedOtherwise) hashes.add(projectProxyRenderInputHash({ source: sealedSource(patch), colorPipelineBindings }))
+  hashes.add(projectProxyRenderInputHash({ source: withConsumption(base, proxyWorld.consumption('critic')), colorPipelineBindings }))
+  assert.equal(hashes.size, 5, 'the State, the variant revision, the materialization and the purpose each address a distinct input')
+  assert.throws(() => projectProxyRenderInputHash({ source: Object.freeze({ ...base, outputConsumption: undefined }), colorPipelineBindings }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT', 'a source not read through the consumption verdict has no input hash')
+})
+
+test('S3 proxy enqueue reads the head through the render verdict and seals what it read into the operation input hash', async () => {
+  const hashes = new Set()
+  for (const [label, patch] of [['the sealed State itself', {}], ...sealedOtherwise]) {
+    const sealed = sealedSource(patch)
+    let asked, persisted
+    const result = await enqueueProjectProxyRenderService({
+      projects: { async readCurrentSource(input) { asked = input; return sealed } },
+      colorPipelines: { async listForSource() { return [{ compilation: colorCompilation }] } },
+      operations: { async findReplay() { return null }, async createOrReplay(input) { persisted = input; return { ...input, replayed: false } } },
+      clock: () => new Date('2026-09-08T20:15:00.000Z'),
+      createId: (kind) => `${kind}-sealed-proxy-test`,
+    })({ workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', actor: proxyActor(), idempotencyKey: `sealed-proxy-${hashes.size}` })
+    assert.equal(result.operation.status, 'queued', label)
+    assert.deepEqual(asked, { workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', purpose: 'render' }, label)
+    assert.equal(persisted.context.inputHash, projectProxyRenderInputHash({ source: sealed, colorPipelineBindings }), label)
+    hashes.add(persisted.context.inputHash)
+  }
+  assert.equal(hashes.size, 4, 'another State, variant revision or materialization is another operation input')
+})
+
+test('S3 renderable snapshot proxy enqueue seals the consumption of the plan Version into the operation input hash', async () => {
+  const hashes = new Set()
+  for (const [, patch] of [['sealed', {}], ...sealedOtherwise]) {
+    const sealed = sealedSource(patch)
+    let persisted
+    const request = { workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', planId: 'plan-localization-test',
+      planHash: '1'.repeat(64), origin: 'localization', sourceId: 'localization-run-test', sourceHash: '2'.repeat(64),
+      variantId: 'localization-variant-test', format: '9:16', actor: proxyActor(), idempotencyKey: `snapshot-sealed-${hashes.size}` }
+    await enqueueRenderableSnapshotProxyRenderService({
+      snapshots: { async readByPlan() { return { planId: request.planId, planHash: request.planHash, origin: request.origin,
+        sourceId: request.sourceId, sourceHash: request.sourceHash, plan: { localeVariantRefs: [request.variantId] } } } },
+      projects: { async readRenderableSnapshotSource() { return sealed } },
+      colorPipelines: { async listForSource() { return [{ compilation: colorCompilation }] } },
+      operations: { async findReplay() { return null }, async createOrReplay(input) { persisted = input; return { ...input, replayed: false } } },
+      clock: () => new Date('2026-09-08T20:15:00.000Z'),
+      createId: (kind) => `${kind}-snapshot-sealed-test`,
+    })(request)
+    hashes.add(persisted.context.inputHash)
+  }
+  assert.equal(hashes.size, 4, 'the snapshot proxy input is sealed to the State, revision and materialization of the plan Version')
+})
+
+test('S3 the snapshot proxy enqueue publishes the refusal of the render verdict and allocates nothing', async () => {
+  const request = { workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', planId: 'plan-localization-test',
+    planHash: '1'.repeat(64), origin: 'localization', sourceId: 'localization-run-test', sourceHash: '2'.repeat(64),
+    variantId: 'localization-variant-test', format: '9:16', actor: proxyActor(), idempotencyKey: 'snapshot-refused' }
+  await assert.rejects(enqueueRenderableSnapshotProxyRenderService({
+    snapshots: { async readByPlan() { return { planId: request.planId, planHash: request.planHash, origin: request.origin,
+      sourceId: request.sourceId, sourceHash: request.sourceHash, plan: { localeVariantRefs: [request.variantId] } } } },
+    projects: { async readRenderableSnapshotSource() {
+      throw new DomainError('PRECONDITION_REQUIRED', 'Output is not consumable for this purpose', { reason: 'output-variant-required', purpose: 'render' })
+    } },
+    colorPipelines: { async listForSource() { throw new Error('must not resolve colour') } },
+    operations: { async findReplay() { return null }, async createOrReplay() { throw new Error('must not admit') } },
+    clock: () => new Date('2026-09-08T20:15:00.000Z'),
+    createId() { throw new Error('must not allocate') },
+  })(request), (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'output-variant-required')
+})
+
+test('S3 proxy worker refuses an operation sealed to another State, variant revision or materialization before it renders or attaches anything', async () => {
+  for (const [label, patch] of sealedOtherwise) {
+    const operations = createOperations()
+    const base = dependencies(operations)
+    const asked = []
+    let rendered = 0
+    const render = base.deps.renderer.render
+    base.deps.renderer = { ...base.deps.renderer, async render(input) { rendered += 1; return render(input) } }
+    base.deps.projects = { ...base.deps.projects, async readImmutableSource(input) { asked.push(input); return sealedSource(patch) } }
+    const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-project-proxy-sealed-otherwise')
+    assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'failed' }, label)
+    assert.equal(operations.operation.error.code, 'invalid_render_input', label)
+    assert.equal(asked.length, 1)
+    assert.equal(asked[0].purpose, 'render', 'the worker reads the exact Version through the render verdict')
+    assert.equal(asked[0].requireCurrent, true, 'a worker sealed to a Version that is no longer the head refuses before it renders')
+    assert.deepEqual([rendered, base.calls.persisted, base.calls.attached], [0, 0, 0], `${label}: nothing rendered, nothing attached`)
+  }
+})
+
+test('S3 snapshot proxy worker refuses a plan Version whose sealed consumption is not the one the operation was sealed to', async () => {
+  const immutableSource = source()
+  const renderableSnapshot = Object.freeze({
+    planId: 'plan-localization-worker-test', planHash: '1'.repeat(64), origin: 'localization',
+    sourceId: 'localization-run-worker-test', sourceHash: '2'.repeat(64),
+    variantId: 'localization-variant-worker-test', format: '9:16',
+  })
+  const inputHash = calculateVersionHash({
+    type: 'renderable-snapshot-proxy/v1', renderInputHash: projectProxyRenderInputHash({ source: immutableSource, colorPipelineBindings }),
+    snapshot: renderableSnapshot,
+  })
+  for (const [label, patch] of sealedOtherwise) {
+    const operations = createOperations(immutableSource, { renderableSnapshot, inputHash })
+    const base = dependencies(operations)
+    let rendered = 0
+    const render = base.deps.renderer.render
+    base.deps.renderer = { ...base.deps.renderer, async render(input) { rendered += 1; return render(input) } }
+    base.deps.projects = { async readImmutableSource() { throw new Error('project EditPlan must not be the snapshot proxy source') },
+      async readRenderableSnapshotSource() { return sealedSource(patch, immutableSource) },
+      async attachCompletedOutput() { throw new Error('must not attach') }, async attachCompletedSnapshotOutput() { throw new Error('must not attach') } }
+    const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-snapshot-proxy-sealed-otherwise')
+    assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'failed' }, label)
+    assert.equal(operations.operation.error.code, 'invalid_render_input', label)
+    assert.equal(rendered, 0, label)
+  }
+})
+
+test('S3 proxy worker refuses tampered source bytes (another sha256 than the one the operation sealed) before it renders anything', async () => {
+  const operations = createOperations()
+  const base = dependencies(operations)
+  let rendered = 0
+  const render = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer, async render(input) { rendered += 1; return render(input) } }
+  const original = source()
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() {
+    return Object.freeze({ ...original, sourceSha256: 'e'.repeat(64),
+      renderSources: Object.freeze([Object.freeze({ ...original.renderSources[0], sha256: 'e'.repeat(64) })]) })
+  } }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-project-proxy-tampered-bytes')
+  assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'failed' })
+  assert.equal(operations.operation.error.code, 'invalid_render_input')
+  assert.deepEqual([rendered, base.calls.persisted, base.calls.attached], [0, 0, 0])
+})
+
+test('S3 proxy worker does not render when the rights of a source were revoked after enqueue (the verdict read refuses)', async () => {
+  const operations = createOperations()
+  const base = dependencies(operations)
+  let rendered = 0
+  const render = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer, async render(input) { rendered += 1; return render(input) } }
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() {
+    throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Render source artifact-project-proxy-source no longer has approved current rights')
+  } }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-project-proxy-rights-revoked')
+  assert.notEqual(outcome.status, 'succeeded')
+  assert.notEqual(operations.operation.status, 'succeeded')
+  assert.deepEqual([rendered, base.calls.persisted, base.calls.attached], [0, 0, 0])
+})
+
+// ---------------------------------------------------------------------------
+// Slice S3 - an optional explicit State variant is threaded to the consumption reader; absent means the State's only output.
+// ---------------------------------------------------------------------------
+
+test('S3 proxy enqueue, snapshot enqueue and worker thread an optional State variant to the source reads, and say nothing when it is absent', async () => {
+  const sealed = source()
+  const asked = []
+  const request = { workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', actor: proxyActor() }
+  const enqueue = (variantId, key) => enqueueProjectProxyRenderService({
+    projects: { async readCurrentSource(input) { asked.push(input); return sealed } },
+    colorPipelines: { async listForSource() { return [{ compilation: colorCompilation }] } },
+    operations: { async findReplay() { return null }, async createOrReplay(input) { return { ...input, replayed: false } } },
+    clock: () => new Date('2026-09-08T20:15:00.000Z'),
+    createId: (kind) => `${kind}-variant-proxy-test`,
+  })({ ...request, ...(variantId === undefined ? {} : { variantId }), idempotencyKey: key })
+  await enqueue(undefined, 'variant-absent')
+  await enqueue('variant-tall', 'variant-present')
+  assert.deepEqual(asked, [
+    { workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', purpose: 'render' },
+    { workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', purpose: 'render', variantId: 'variant-tall' },
+  ])
+  await assert.rejects(enqueue('x', 'variant-invalid'), (error) => error.code === 'INVALID_ARGUMENT')
+
+  const snapshotAsked = []
+  const snapshotRequest = { ...request, planId: 'plan-localization-test', planHash: '1'.repeat(64), origin: 'localization',
+    sourceId: 'localization-run-test', sourceHash: '2'.repeat(64), variantId: 'localization-variant-test', format: '9:16' }
+  const fingerprints = []
+  const snapshotEnqueue = (outputVariantId, key) => enqueueRenderableSnapshotProxyRenderService({
+    snapshots: { async readByPlan() { return { planId: snapshotRequest.planId, planHash: snapshotRequest.planHash, origin: snapshotRequest.origin,
+      sourceId: snapshotRequest.sourceId, sourceHash: snapshotRequest.sourceHash, plan: { localeVariantRefs: [snapshotRequest.variantId] } } } },
+    projects: { async readRenderableSnapshotSource(input) { snapshotAsked.push(input); return sealed } },
+    colorPipelines: { async listForSource() { return [{ compilation: colorCompilation }] } },
+    operations: { async findReplay(input) { fingerprints.push(input.requestFingerprint); return null },
+      async createOrReplay(input) { return { ...input, replayed: false } } },
+    clock: () => new Date('2026-09-08T20:15:00.000Z'),
+    createId: (kind) => `${kind}-variant-snapshot-test`,
+  })({ ...snapshotRequest, ...(outputVariantId === undefined ? {} : { outputVariantId }), idempotencyKey: key })
+  await snapshotEnqueue(undefined, 'snapshot-variant-absent')
+  await snapshotEnqueue('variant-tall', 'snapshot-variant-present')
+  assert.deepEqual(snapshotAsked.map((input) => input.variantId), [undefined, 'variant-tall'])
+  assert.equal('variantId' in snapshotAsked[0], false)
+  assert.notEqual(fingerprints[0], fingerprints[1], 'another State variant is another request')
+
+  // The worker reads through the variant a later step persists in the context (none today).
+  const operations = createOperations(sealed, { variantId: 'variant-tall' })
+  const base = dependencies(operations)
+  const workerAsked = []
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource(input) { workerAsked.push(input); return sealed } }
+  await runNextProjectProxyRenderOperationService(base.deps)('worker-project-proxy-variant')
+  assert.equal(workerAsked[0].variantId, 'variant-tall')
+  const plain = createOperations()
+  const plainBase = dependencies(plain)
+  const plainAsked = []
+  plainBase.deps.projects = { ...plainBase.deps.projects, async readImmutableSource(input) { plainAsked.push(input); return source() } }
+  await runNextProjectProxyRenderOperationService(plainBase.deps)('worker-project-proxy-no-variant')
+  assert.equal('variantId' in plainAsked[0], false, 'absent means the State\'s only output')
 })

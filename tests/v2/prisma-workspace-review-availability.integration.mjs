@@ -14,7 +14,7 @@ test('workspace availability reads one repeatable PG snapshot and rejects stored
 }, async () => {
   const { PrismaClient } = await import('../../generated/prisma-v2/index.js')
   const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
-  const { readReviewPreviewContext } = await import('../../src/v2/infrastructure/prisma/review-annotation-repository.ts')
+  const { readReviewPreviewAvailability } = await import('../../src/v2/infrastructure/prisma/review-annotation-repository.ts')
   const { calculateVersionHash: hash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { calculateProxyReviewHash } = await import('../../src/v2/application/render-workflow.ts')
   const { assertMediaArtifactManifest, createMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
@@ -112,7 +112,7 @@ test('workspace availability reads one repeatable PG snapshot and rejects stored
     assert.equal(noProxy.media.length, 1)
     assert.deepEqual(noProxy.reviewAvailability.annotations, { state: 'unavailable', reason: 'no-proxy' })
     assert.deepEqual(noProxy.reviewAvailability.proxyReview, { state: 'unavailable', reason: 'no-report' })
-    assert.equal(await readReviewPreviewContext(client, { ...scope(projectId), projectVersionId: `missing-${runId}` }), null)
+    assert.equal(await readReviewPreviewAvailability(client, { ...scope(projectId), projectVersionId: `missing-${runId}` }), null)
     const fallback = await artifact('editing')
     await client.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId, projectId, artifactId: fallback.id,
       role: 'editing-proxy', originalFileName: 'editing.mp4', createdAt: at } })
@@ -252,7 +252,7 @@ test('workspace availability reads one repeatable PG snapshot and rejects stored
         const manifestConflict = (error) => error.code === 'PERSISTENCE_CONFLICT' &&
           error.message === 'Stored projection manifest failed integrity or row binding validation' &&
           error.details?.manifestId === forgedId
-        await assert.rejects(() => readReviewPreviewContext(tx, { ...scope(projectId), projectVersionId: v3.id }), manifestConflict, label)
+        await assert.rejects(() => readReviewPreviewAvailability(tx, { ...scope(projectId), projectVersionId: v3.id }), manifestConflict, label)
         const sameSnapshot = new PrismaProjectWorkspaceQueryRepository({ $transaction: (action) => action(tx) })
         await assert.rejects(() => sameSnapshot.read(scope(projectId)), manifestConflict, label)
         throw rollback
@@ -269,7 +269,7 @@ test('workspace availability reads one repeatable PG snapshot and rejects stored
       const forgedId = await insertForged(tx, source.id, sourceResealed)
       // Preview/report artifacts remain intact. Only workspace media hydration
       // confronts this valid resealed source document with its original row.
-      assert.equal((await readReviewPreviewContext(tx, { ...scope(projectId), projectVersionId: v3.id })).proxyArtifactId, thirdOutput.id)
+      assert.equal((await readReviewPreviewAvailability(tx, { ...scope(projectId), projectVersionId: v3.id })).proxyArtifactId, thirdOutput.id)
       const sameSnapshot = new PrismaProjectWorkspaceQueryRepository({ $transaction: (action) => action(tx) })
       await assert.rejects(() => sameSnapshot.read(scope(projectId)), (error) => error.code === 'PERSISTENCE_CONFLICT' &&
         error.message === 'Stored projection manifest failed integrity or row binding validation' && error.details?.manifestId === forgedId)
@@ -284,7 +284,7 @@ test('workspace availability reads one repeatable PG snapshot and rejects stored
     await assert.rejects(() => client.$transaction(async (tx) => {
       await tx.v2PublicOperation.update({ where: { id: third.operationId }, data: { projectId: emptyId } })
       const operationConflict = (error) => error.code === 'PERSISTENCE_CONFLICT' && error.message === 'Review preview operation belongs to another project'
-      await assert.rejects(() => readReviewPreviewContext(tx, { ...scope(projectId), projectVersionId: v3.id }), operationConflict)
+      await assert.rejects(() => readReviewPreviewAvailability(tx, { ...scope(projectId), projectVersionId: v3.id }), operationConflict)
       const sameSnapshot = new PrismaProjectWorkspaceQueryRepository({ $transaction: (action) => action(tx) })
       await assert.rejects(() => sameSnapshot.read(scope(projectId)), operationConflict)
       throw rollback

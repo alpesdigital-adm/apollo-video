@@ -7,38 +7,57 @@ import { calculateVersionHash } from '../../application/version-hash.ts'
 import { evaluateAssetUse } from '../../domain/asset-rights.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { resolveProjectOutputFormat } from './project-output-format.ts'
-import { requireCopyTargetAuthority } from './copy-target-authority.ts'
+import type { OutputConsumptionPurpose } from '../../domain/output-consumption.ts'
+import { requirePersistedOutputConsumptionV3 } from './output-state-consumption.ts'
 
-/**
- * The project with the Version, media and rights its proxy render is built from. A project born under 6.0.0 has no format of
- * its own: `format` is then the aspect ratio of the only output the Version's sealed State carries (null when there are several
- * or none; the render then refuses instead of guessing which output it meant).
- */
-export async function queryProxySourceProject(client: PrismaClient | Prisma.TransactionClient, input: {
+type ProxySourceQuery = {
   workspaceId: string; projectId: string; projectVersionId?: string; editPlanSnapshotId?: string;
   sourceArtifactId?: string; sourceManifestId?: string
-}) {
-  const project = await findProxySourceProject(client, input)
-  // A copy no editorial cut has given target authority is neither rendered nor exported: refuse with the reason the operator can act on.
-  if (project) await requireCopyTargetAuthority(client, { workspaceId: input.workspaceId, projectId: input.projectId,
-    projectVersionId: input.projectVersionId ?? project.versions[0]?.id ?? project.currentVersionId })
-  if (!project || project.format) return project
-  const format = await resolveProjectOutputFormat(client, project, input.projectVersionId ?? project.versions[0]?.id ?? project.currentVersionId)
-  return format ? { ...project, format } : project
+  /** What the caller will do with the source: the proxy render (default) or the final export. The verdict is the purpose's. */
+  purpose?: Extract<OutputConsumptionPurpose, 'render' | 'final'>
+  /** The State variant to consume. Absent means "the State's only output": a State with several outputs is then refused, never guessed. */
+  variantId?: string
 }
 
-function findProxySourceProject(client: PrismaClient | Prisma.TransactionClient, input: {
-  workspaceId: string; projectId: string; projectVersionId?: string; editPlanSnapshotId?: string;
-  sourceArtifactId?: string; sourceManifestId?: string
-}) {
+/**
+ * The project with the Version, media and rights its render is built from, read through the one persisted consumption verdict.
+ *
+ * The Version consumed is the one asked for, else the head. Its sealed State and the sole output's entry decide whether it may be
+ * rendered (or exported) at all, and name the format: `format` is the aspect ratio of the sealed entry, never the project's
+ * stored format and never a default. A refusal is a PRECONDITION_REQUIRED whose `details.reason` names why (a copy no editorial
+ * cut has given authority, a final export of a cut copy, an output without a format, a State with several outputs, ...).
+ * `outputConsumption` is the seal of what was read, for the consumer to put in its context and input hash.
+ */
+export async function queryProxySourceProject(client: PrismaClient | Prisma.TransactionClient, input: ProxySourceQuery) {
+  const project = await findProxySourceProject(client, input)
+  if (!project) return null
+  const purpose = input.purpose ?? 'render'
+  const versionId = input.projectVersionId ?? project.versions[0]?.id ?? project.currentVersionId
+  if (!versionId) {
+    throw new DomainError('PRECONDITION_REQUIRED', 'Project has no Version whose output can be consumed', { reason: 'output-version-missing', purpose })
+  }
+  // The light reader (sealed Version + State rows): safe inside an owner transaction. The audit rebuild is never asked for here.
+  const consumption = await requirePersistedOutputConsumptionV3(client, {
+    workspaceId: input.workspaceId, projectId: input.projectId, versionId, purpose,
+    ...(input.variantId !== undefined ? { variantId: input.variantId } : {}) })
+  if (consumption.aspectRatio === null) {
+    throw new DomainError('PRECONDITION_REQUIRED', 'The consumed output carries no aspect ratio of its own',
+      { reason: 'output-not-consumable', purpose, outputStateId: consumption.state.document.id })
+  }
+  return {
+    ...project,
+    format: consumption.aspectRatio,
+    outputConsumption: Object.freeze({ seal: consumption.seal, sealHash: consumption.sealHash }),
+  }
+}
+
+function findProxySourceProject(client: PrismaClient | Prisma.TransactionClient, input: ProxySourceQuery) {
   return client.v2Project.findFirst({
     where: { id: input.projectId, workspaceId: input.workspaceId },
     select: {
       id: true,
       workspaceId: true,
       locale: true,
-      format: true,
       currentVersionId: true,
       versions: {
         where: input.projectVersionId
@@ -187,8 +206,11 @@ export function hydrateProxySource(
   const manifest = expected?.sourceManifestId
     ? media?.artifact.manifests.find((item) => item.id === expected.sourceManifestId)
     : media?.artifact.manifests[0]
-  // No single output format (several outputs, or none): there is no one proxy to build, so there is no source either.
-  if (!project || !version || !media || !manifest || !project.format) return null
+  if (!project || !version || !media || !manifest) return null
+  // The Version row and the sealed State must be one and the same Version: a consumption sealed to another is no authority here.
+  if (project.outputConsumption.seal.projectVersionId !== version.id || project.outputConsumption.seal.projectVersionHash !== version.baseHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy source is not the Version its output consumption seals')
+  }
   const editPlan = parseProxySourceRecord(version.editPlanSnapshot.contentJson, 'project proxy EditPlan') as unknown as EditorialCutEditPlan | DirectedEditPlan
   const manifestBody = parseProxySourceRecord(manifest.manifestJson, 'project proxy source manifest')
   const artifactBody = manifestBody.artifact
@@ -214,6 +236,7 @@ export function hydrateProxySource(
     editPlanHash: version.editPlanSnapshot.contentHash,
     editPlan: Object.freeze(editPlan),
     format: project.format,
+    outputConsumption: project.outputConsumption,
     sourceArtifactId: media.artifactId,
     sourceManifestId: manifest.id,
     sourceArtifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,

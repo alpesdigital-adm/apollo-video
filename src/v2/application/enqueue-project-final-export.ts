@@ -50,6 +50,8 @@ export function enqueueProjectFinalExportService(dependencies: {
     projectVersionId: string
     projectVersionHash: string
     format: string
+    /** The State variant to export; absent means the State's only output (a State with several outputs is refused, never guessed). */
+    variantId?: string
     approval: { approved: true; note?: string }
     actor: AuthenticatedExternalActor
     idempotencyKey: string
@@ -60,6 +62,7 @@ export function enqueueProjectFinalExportService(dependencies: {
     const projectId = validateId(request.projectId, 'projectId')
     const projectVersionId = validateId(request.projectVersionId, 'projectVersionId')
     const projectVersionHash = validateHash(request.projectVersionHash, 'projectVersionHash')
+    const variantId = request.variantId === undefined ? undefined : validateId(request.variantId, 'variantId')
     requireScope(request.actor, 'projects:write')
     const audit = materializeActorAuditContext(request.actor)
     assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match export request')
@@ -85,6 +88,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       projectId,
       projectVersionId,
       projectVersionHash,
+      ...(variantId === undefined ? {} : { variantId }),
     })
     if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Current project version does not have an approved DirectorRun, QualityReport and post-render proxy review')
     assertDomain(source.format === request.format, 'INVALID_OUTPUT_SPEC', 'Final export format must match the approved project format')
@@ -148,6 +152,8 @@ export function enqueueProjectFinalExportService(dependencies: {
       renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
       colorPipelineBindings,
       outputSpec: finalOutputSpec,
+      // The `final` verdict this source was read through: the exact Version, State, variant revision and materialization.
+      outputConsumptionSealHash: source.outputConsumption.sealHash,
     })
     const requestFingerprint = calculateVersionHash({
       type: 'project-final-export',

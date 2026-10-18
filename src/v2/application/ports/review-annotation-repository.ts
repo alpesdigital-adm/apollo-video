@@ -5,6 +5,7 @@ import type {
   ReviewScopeKind,
 } from '../../domain/review-system.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { OutputConsumptionSealV3 } from '../../domain/output-consumption.ts'
 
 export interface ReviewSceneRecord {
   id: string
@@ -24,7 +25,10 @@ export interface ReviewPreviewContext {
   height: number
   durationFrames: number
   stale: boolean
+  /** The aspect ratio the sealed entry of the previewed Version carries (the one persisted consumption reader's answer). */
   formatId: string
+  /** The exact Version, State, variant revision and materialization the preview was admitted from (purpose `critic`). */
+  outputConsumption?: Readonly<{ sealHash: string; seal: Readonly<OutputConsumptionSealV3> }>
   localeId: string
   recipeIds: readonly string[]
   availableScopeCounts: Readonly<Record<ReviewScopeKind, number>>
@@ -53,6 +57,8 @@ export interface ReviewAnnotationRepository {
     workspaceId: string
     projectId: string
     projectVersionId?: string
+    /** The stable variant of the State being previewed; absent means the State's only output. */
+    variantId?: string
   }): Promise<Readonly<ReviewPreviewContext> | null>
   list(input: {
     workspaceId: string
@@ -72,5 +78,7 @@ export interface ReviewAnnotationRepository {
     annotation: PersistedReviewAnnotation
     idempotencyKey: string
     requestFingerprint: string
+    /** The stable variant of the State being critiqued; absent means the State's only output. */
+    variantId?: string
   }): Promise<Readonly<PersistedReviewAnnotation>>
 }

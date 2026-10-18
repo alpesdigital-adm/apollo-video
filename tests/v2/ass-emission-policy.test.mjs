@@ -54,12 +54,15 @@ test('ASS text gate rejects C0 and DEL before suppression or whitespace rewritin
 })
 
 test('pre-render identity pins emission policy and cannot replay old arithmetic', () => {
-  const inputs = { projectId: 'p', projectVersionId: 'v', outputSpec: { fps: 30 } }
-  const oldHash = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs })
-  const expected = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs, assEmissionPolicy: ASS_EMISSION_POLICY })
+  const inputs = { projectId: 'p', projectVersionId: 'v', outputSpec: { fps: 30 }, outputConsumptionSealHash: 'a'.repeat(64) }
+  const oldHash = calculateVersionHash({ kind: 'project-final-export/v2', ...inputs })
+  const expected = calculateVersionHash({ kind: 'project-final-export/v2', ...inputs, assEmissionPolicy: ASS_EMISSION_POLICY })
   assert.equal(projectFinalRenderInputHash(inputs), expected)
   assert.notEqual(expected, oldHash)
   assert.equal(projectFinalRenderInputHash({ ...inputs, assEmissionPolicy: { version: 'old' } }), expected)
+  // The consumption seal is part of the identity: an input that does not name it is not a final input at all.
+  assert.throws(() => projectFinalRenderInputHash({ projectId: 'p', projectVersionId: 'v', outputSpec: { fps: 30 } }),
+    (error) => error.code === 'INVALID_RENDER_INPUT')
 })
 
 test('renderer rejects a valid global CTA rebased into an invalid 120 fps clock before source I/O', async () => {

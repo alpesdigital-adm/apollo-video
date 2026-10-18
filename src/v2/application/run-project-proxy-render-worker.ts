@@ -30,7 +30,7 @@ import {
   type EvaluateColorCriticResult,
 } from './color-critic.ts'
 import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
-import { projectProxyRenderInputHash } from './project-render-sources.ts'
+import { contextVariantSelection, projectProxyRenderInputHash } from './project-render-sources.ts'
 import { deriveEditorialRenderGeometry } from './derive-editorial-render-geometry.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
@@ -174,10 +174,15 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             planId: context.renderableSnapshot.planId,
             planHash: context.renderableSnapshot.planHash,
             format: context.renderableSnapshot.format,
+            ...contextVariantSelection(context),
           })
         : await dependencies.projects.readImmutableSource({
             workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
             editPlanSnapshotId: context.editPlanSnapshotId, sourceArtifactId: context.sourceArtifactId, sourceManifestId: context.sourceManifestId,
+            purpose: 'render',
+            ...contextVariantSelection(context),
+            // Sealed to a Version that is no longer the head: it can never publish, so it refuses before it renders anything.
+            requireCurrent: true,
           })
       if (!source) throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable project render source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []

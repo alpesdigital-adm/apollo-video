@@ -60,6 +60,7 @@ import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { materializeManualEditPlan } from '../../domain/manual-editing.ts'
 import { readSafeReusableProxyReceipt } from './proxy-reuse-safety.ts'
 import { assertInlineProxySourceAuthority, lockProxySourceArtifacts } from './proxy-source-authority.ts'
+import { requirePersistedOutputConsumptionV3 } from './output-state-consumption.ts'
 import { editPlanReferencesSource } from './perception-producer-request-context-repository.ts'
 import { lockProducerPublishProject, lockProducerPublishSource, producerPublishClock } from './producer-publish-fence.ts'
 import {
@@ -1819,6 +1820,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           ingestUploadKind = upload.kind as 'video' | 'audio' | 'image'
         }
         if (projectRenderContext) {
+          // The same persisted `render` verdict the enqueue and the worker applied, on the exact Version the context names.
+          await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: projectRenderContext.projectId, versionId: projectRenderContext.projectVersionId, purpose: 'render' })
           const [source, renderableSnapshot, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: { id: projectRenderContext.projectId, workspaceId: input.operation.workspaceId },
             include: {
@@ -2022,6 +2026,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           reusedRenderMap = safeReuse.map
         }
         if (finalExportContext) {
+          // The owner transaction applies the same persisted `final` verdict the enqueue and the worker applied, on the exact
+          // Version the context names (the light reader: sealed Version + State rows only, never the audit rebuild). A Version
+          // the verdict does not admit for a final export is refused with its published reason before any approval is read.
+          await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: finalExportContext.projectId, versionId: finalExportContext.projectVersionId, purpose: 'final' })
           const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: {
               id: finalExportContext.projectId,

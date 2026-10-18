@@ -39,9 +39,9 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { createMediaArtifactManifest } = await import('../../src/v2/domain/media-artifact.ts')
-  const { testActor } = await import('./helpers/pg-output-world.mjs')
+  const { RECORDING_ALLOWED_USES, commitSealedChild, planPlayingRecordings, testActor } = await import('./helpers/pg-output-world.mjs')
   const { materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
-  const { registerColorPipeline, registerMeasuredVideo, seedReviewProject } = await import('./helpers/review-edit-world.mjs')
+  const { grantRendering, registerColorPipeline, registerMeasuredVideo, seedReviewProject } = await import('./helpers/review-edit-world.mjs')
 
   const client = new PrismaClient()
   const repository = new PrismaProxyReviewRepository(client)
@@ -82,20 +82,27 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
     // Version); the proxy review hangs off that Version. The project is under review when the proxy is rendered.
     const actor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production',
       scopes: ['projects:read', 'projects:write', 'projects:approve'] })
-    const world = await seedReviewProject(client, { workspaceId, actor, prefix: 'proxy-review', ids: { project: projectId },
+    await seedReviewProject(client, { workspaceId, actor, prefix: 'proxy-review', ids: { project: projectId },
       name: 'Proxy review E2E', aspectRatio: '9:16', status: 'reviewing-proxy',
       briefing: 'Validar o proxy antes da alta.' })
-    const projectVersionId = world.head.version.id
-    const editPlanSnapshotId = world.head.editPlanSnapshot.id
     const audit = materializeActorAuditContext(actor)
     // The recording the proxy was rendered from: its persisted ingest, and the colour pipeline compilation a proxy render binds to.
     const sourceArtifactId = `proxy-review-source-${suffix}`
     const sourceManifestId = `proxy-review-source-manifest-${suffix}`
-    await registerMeasuredVideo(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId, artifactKey: `proxy-review/${sourceArtifactId}.mp4`,
+    const registered = await registerMeasuredVideo(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId, artifactKey: `proxy-review/${sourceArtifactId}.mp4`,
       sha256: calculateVersionHash({ sourceArtifactId }), byteSize: 4096, probe: { width: 540, height: 960, duration: 2, fps: 30 },
       slug: `proxy-review-${suffix}`, manifestId: sourceManifestId, originalFileName: 'proxy-review-source.mp4', createdAt })
     const compilation = await registerColorPipeline(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId, manifestId: sourceManifestId, createdAt })
-    const editPlan = JSON.parse(world.head.editPlanSnapshot.contentJson)
+    // The review is a critique of the output of its Version, and the one persisted consumption reader admits only an output the State
+    // materialized (the empty variant is blocked with `empty-project`): the head plays the recording above, whose ingest is adopted.
+    const rightsActor = testActor({ workspaceId, clientId: issued.client.id, credentialId: issued.credential.id, environment: 'production', scopes: ['artifacts:rights'] })
+    await grantRendering(client, { workspaceId, artifactId: sourceArtifactId, actor: rightsActor, snapshotId: `proxy-review-source-rights-${suffix}`,
+      allowedUses: [...RECORDING_ALLOWED_USES], clock: () => createdAt })
+    const head = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: `proxy-review-${suffix}-ingested`,
+      mutatePlan: planPlayingRecordings([{ slug: `proxy-review-${suffix}`, names: { sourceArtifactId }, receipt: registered.receipt.receipt }]), adopt: [sourceArtifactId] })
+    const projectVersionId = head.version.id
+    const editPlanSnapshotId = head.editPlanSnapshot.id
+    const editPlan = JSON.parse(head.editPlanSnapshot.contentJson)
     const inputHash = calculateVersionHash({ projectId, projectVersionId, kind: 'proxy' })
     await client.v2MediaArtifact.create({
       data: {

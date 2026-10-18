@@ -19,6 +19,9 @@ const { createColorPipelineCompilationService } = await import('../../src/v2/app
 const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
 const { PrismaLocalizationMediaRunRepository } = await import('../../src/v2/infrastructure/prisma/localization-media-run-repository.ts')
 const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
+const { projectProxyRenderInputHash } = await import('../../src/v2/application/project-render-sources.ts')
+const { calculateVersionHash } = await import('../../src/v2/application/version-hash.ts')
+const { requirePersistedOutputConsumptionV3 } = await import('../../src/v2/infrastructure/prisma/output-state-consumption.ts')
 const { LocalArtifactSourceMaterializer } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
 const { hydratePublicOperationRecord, PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
 const { createQueuedPublicOperation } = await import('../../src/v2/domain/public-operation.ts')
@@ -265,6 +268,34 @@ test('localization subtitles-only persists a snapshot-bound proxy through Postgr
       planId: `missing-${proof.snapshotId}` }), null)
     assert.equal(await snapshotReader.readRenderableSnapshotSource({ ...snapshotLookup,
       workspaceId: `other-${fixture.workspaceId}` }), null)
+    // The snapshot proxy consumes the persisted `render` verdict of the plan's OWN Version (never the head), seals it, and the operation's
+    // input hash is built over that seal; the requested format must be the sealed entry's.
+    const snapshotSource = await snapshotReader.readRenderableSnapshotSource(snapshotLookup)
+    assert.ok(snapshotSource)
+    const sealed = await requirePersistedOutputConsumptionV3(prisma, { workspaceId: fixture.workspaceId, projectId: fixture.projectId,
+      versionId: bornWith.id, purpose: 'render', reconstruct: true })
+    assert.equal(snapshotSource.outputConsumption.seal.projectVersionId, bornWith.id)
+    assert.equal(snapshotSource.outputConsumption.seal.outputStateId, bornWith.outputStateId)
+    assert.equal(snapshotSource.outputConsumption.seal.purpose, 'render')
+    assert.equal(snapshotSource.outputConsumption.sealHash, sealed.sealHash, 'the cheap read is the very seal the full factual rebuild yields')
+    assert.equal(snapshotSource.format, proof.format)
+    assert.equal(snapshotSource.format, sealed.aspectRatio, 'the sealed entry names the format')
+    const wrongFormat = proof.format === '1:1' ? '4:5' : '1:1'
+    await assert.rejects(snapshotReader.readRenderableSnapshotSource({ ...snapshotLookup, format: wrongFormat }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT' && /not bound to the requested format/.test(error.message))
+    assert.equal(operation.inputHash, calculateVersionHash({ type: 'renderable-snapshot-proxy/v1',
+      snapshot: { planId: operation.renderablePlanId, planHash: operation.renderablePlanHash, origin: operation.renderableOrigin,
+        sourceId: operation.renderableSourceId, sourceHash: operation.renderableSourceHash, variantId: operation.renderableVariantId,
+        format: operation.renderableFormat },
+      renderInputHash: projectProxyRenderInputHash({ source: snapshotSource, colorPipelineBindings: JSON.parse(operation.colorPipelineBindingsJson) }) }),
+    'the operation input hash the worker verified is built over the sealed consumption')
+    assert.notEqual(operation.inputHash, calculateVersionHash({ type: 'renderable-snapshot-proxy/v1',
+      snapshot: { planId: operation.renderablePlanId, planHash: operation.renderablePlanHash, origin: operation.renderableOrigin,
+        sourceId: operation.renderableSourceId, sourceHash: operation.renderableSourceHash, variantId: operation.renderableVariantId,
+        format: operation.renderableFormat },
+      renderInputHash: projectProxyRenderInputHash({ source: { ...snapshotSource, outputConsumption: { ...snapshotSource.outputConsumption,
+        sealHash: calculateVersionHash({ otherState: true }) } }, colorPipelineBindings: JSON.parse(operation.colorPipelineBindingsJson) }) }),
+    'another State is another operation input')
     assert.deepEqual(await prisma.v2Project.findUniqueOrThrow({ where: { id: fixture.projectId },
       select: { currentVersionId: true, status: true } }), { currentVersionId: bornWith.id, status: headBefore.status },
     'snapshot publication moves the head to the Version that holds the plan and leaves the project status alone')

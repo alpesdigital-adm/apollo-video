@@ -6,6 +6,7 @@ import { assembleDirectedEditPlan, calculateRenderablePlanHash } from '../../src
 import { assertInlineProxySourceAuthority } from '../../src/v2/infrastructure/prisma/proxy-source-authority.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+import { fakeOutputWorld } from './helpers/output-consumption-fakes.mjs'
 
 const workspaceId = 'workspace-proxy-rights', projectId = 'project-proxy-rights'
 const createdAt = '2026-10-01T00:00:00.000Z'
@@ -30,7 +31,7 @@ function rightsRow(artifactId, overrides = {}) {
 }
 
 function fixture({ role = 'selected-insert', mediaType = 'video', rights = { allowedUses: ['editorial-reuse'] },
-  ambiguous = false, reverse = false, music = false } = {}) {
+  ambiguous = false, reverse = false, music = false, world: worldOptions = {} } = {}) {
   const masterId = 'artifact-rights-master', secondId = 'artifact-rights-second'
   const plan = { ...assembleDirectedEditPlan({ planId: 'plan-proxy-rights',
     projectVersionId: 'version-proxy-rights', derivedFrom: { origin: 'react-playback',
@@ -56,13 +57,16 @@ function fixture({ role = 'selected-insert', mediaType = 'video', rights = { all
   const links = [link(masterId, 'source-master', 'video', {}), second]
   if (ambiguous) links.push({ ...second, role: 'source-master' })
   if (reverse) links.reverse()
-  const project = { id: projectId, workspaceId, locale: 'pt-BR', format: '9:16',
+  // The sealed State of the Version the render consumes. The project row carries NO format (the 6.0.0 world): the sealed entry is the
+  // only authority for it.
+  const world = fakeOutputWorld({ workspaceId, projectId, versionId: plan.projectVersionId, ...worldOptions })
+  const project = { id: projectId, workspaceId, locale: 'pt-BR', format: null,
     currentVersionId: plan.projectVersionId, mediaAssets: links,
-    versions: [{ id: plan.projectVersionId, editPlanSnapshotId: 'snapshot-proxy-rights',
+    versions: [{ id: plan.projectVersionId, baseHash: world.version.baseHash, editPlanSnapshotId: 'snapshot-proxy-rights',
       editPlanSnapshot: { workspaceId, projectId, contentJson: JSON.stringify(plan),
         contentHash: calculateVersionHash(plan) }, command: null, directorRunAsResult: null }] }
   const hash = calculateRenderablePlanHash(plan)
-  const client = { async $queryRaw() { return [{ now: new Date() }] }, async $queryRawUnsafe() { return [] },
+  const client = { async $queryRaw() { return [{ now: new Date() }] }, $queryRawUnsafe: world.queryRawUnsafe,
     v2MediaArtifactManifest: { async findFirst() { return { manifestJson: JSON.stringify({ sources: links.map((link) => ({
       artifactKey: link.artifactId + '.mp4', sha256: link.artifact.sha256,
       role: music && link.artifactId === secondId ? 'approved-music' : link.role === 'selected-insert' ? 'selected-insert' : 'source-master' })) }) } } },
@@ -73,7 +77,7 @@ function fixture({ role = 'selected-insert', mediaType = 'video', rights = { all
       fps: 30, durationFrames: 60, clipCount: 2, planJson: JSON.stringify(plan),
       planHash: hash, createdAt: new Date(createdAt) } } } }
   const repository = new PrismaProjectProxyRenderRepository(client)
-  return { secondId, project, repository, client,
+  return { secondId, project, repository, client, world,
     inlineRead: () => assertInlineProxySourceAuthority(client, { workspaceId, projectId, projectVersionId: plan.projectVersionId,
       editPlanSnapshotId: 'snapshot-proxy-rights', sourceArtifactId: masterId, sourceManifestId: 'manifest-' + masterId,
       outputArtifactId: 'output-inline-rights', outputManifestId: 'manifest-inline-rights' }),
@@ -129,7 +133,7 @@ test('project path: music retains its pinned current snapshot branch but never a
 })
 
 test('publication fences lock project then all video/audio/music/output identities in deterministic order before clock refresh', async () => {
-  const { project, repository, secondId } = fixture({ role: 'source-audio', mediaType: 'audio' })
+  const { project, repository, secondId, world } = fixture({ role: 'source-audio', mediaType: 'audio' })
   const snapshot = project.versions[0].editPlanSnapshot
   const plan = JSON.parse(snapshot.contentJson)
   plan.audioTracks = [{ artifactId: 'artifact-rights-music' }]
@@ -142,7 +146,7 @@ test('publication fences lock project then all video/audio/music/output identiti
   const expected = ['artifact-rights-master', 'artifact-rights-music', 'artifact-rights-output', secondId,
     'artifact-\uE000', 'artifact-\u{10000}'].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
   const order = []
-  const tx = { async $queryRawUnsafe() { return [] }, v2Project: { async findFirst() { return project } }, async $queryRaw(strings, ...values) {
+  const tx = { $queryRawUnsafe: world.queryRawUnsafe, v2Project: { async findFirst() { return project } }, async $queryRaw(strings, ...values) {
     const sql = strings.join('?')
     if (sql.includes('FROM projects')) {
       order.push('project')
@@ -239,4 +243,150 @@ test('inline music keeps its exact current rights snapshot and source lineage br
   assert.equal((await good.inlineRead()).renderSources.find((source) => source.artifactId === good.secondId).role, 'approved-music')
   good.project.mediaAssets[1].artifact.currentRightsSnapshot.id = 'wrong-current-music-rights'
   await assert.rejects(good.inlineRead(), (error) => error.code === 'ASSET_RIGHTS_BLOCKED')
+})
+
+// ---------------------------------------------------------------------------
+// Slice S3 - the proxy render reads ONE persisted consumption verdict, never the project's format or the head.
+// ---------------------------------------------------------------------------
+
+const reasonOf = (reason, purpose) => (error) => error?.code === 'PRECONDITION_REQUIRED' && error.details?.reason === reason &&
+  (purpose === undefined || error.details?.purpose === purpose)
+const cutCopyWorld = { entries: [{ variantId: 'variant-copy', aspectRatio: '9:16', derived: true }], sourceDependencies: { forkDerivationId: 'derivation-1' } }
+const neverCutWorld = { entries: [{ variantId: 'variant-copy', aspectRatio: '9:16', blockedReasons: ['fork-target-materialization-required'] }],
+  sourceDependencies: { forkDerivationId: 'derivation-1' } }
+
+for (const path of ['projectRead', 'inlineRead', 'snapshotRead']) {
+  test(`${path}: the source carries the seal of the exact Version, State, variant revision and materialization it was read through, and the format of its sealed entry`, async () => {
+    const subject = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] },
+      world: { entries: [{ variantId: 'variant-main', aspectRatio: '9:16', outputSpecRevisionId: 'revision-main-3', specHash: 'd'.repeat(64),
+        materializationId: 'materialization-main-3', materializationHash: 'e'.repeat(64) }] } })
+    const source = await subject[path]()
+    assert.deepEqual(source.outputConsumption.seal, { schemaVersion: 'output-consumption-seal/v1', purpose: 'render',
+      projectVersionId: 'version-proxy-rights', projectVersionHash: subject.world.version.baseHash,
+      outputStateId: subject.world.document.id, outputStateHash: subject.world.stateHash, variantId: 'variant-main',
+      outputSpecRevisionId: 'revision-main-3', specHash: 'd'.repeat(64), materializationId: 'materialization-main-3', materializationHash: 'e'.repeat(64) })
+    assert.deepEqual(source.outputConsumption, subject.world.consumption('render'))
+    assert.equal(source.format, '9:16', 'the sealed entry names the format; the project row carries none')
+    assert.ok(subject.world.sql.length >= 1 && subject.world.sql.every((text) => text.includes('FROM project_versions v LEFT JOIN project_output_states s')),
+      'the light reader only: sealed Version + State rows, never the audit rebuild')
+  })
+
+  test(`${path}: the sealed entry is the only authority for the format; a contradicting project row is ignored`, async () => {
+    const subject = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] }, world: { entries: [{ variantId: 'variant-wide', aspectRatio: '16:9' }] } })
+    subject.project.format = '1:1'
+    if (path === 'snapshotRead') {
+      // The plan binds 9:16 only; the sealed entry of its Version is 16:9: the requested format cannot be served.
+      await assert.rejects(subject.snapshotRead(), (error) => error.code === 'PERSISTENCE_CONFLICT' && /not bound to the requested format/.test(error.message))
+      return
+    }
+    assert.equal((await subject[path]()).format, '16:9')
+  })
+
+  test(`${path}: a cut copy renders (render verdict), a copy never cut is refused with the published reason`, async () => {
+    const cut = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] }, world: cutCopyWorld })
+    const source = await cut[path]()
+    assert.equal(source.outputConsumption.seal.purpose, 'render')
+    assert.equal(source.outputConsumption.seal.variantId, 'variant-copy')
+    await assert.rejects(fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] }, world: neverCutWorld })[path](),
+      reasonOf('copy-requires-editorial-cut', 'render'))
+  })
+
+  test(`${path}: a State with several outputs, an output without a format and a Version without a State are refused with their published reasons`, async () => {
+    await assert.rejects(fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] },
+      world: { entries: [{ variantId: 'variant-a', aspectRatio: '9:16' }, { variantId: 'variant-b', aspectRatio: '16:9' }] } })[path](), reasonOf('output-variant-required', 'render'))
+    await assert.rejects(fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] },
+      world: { entries: [{ variantId: 'variant-a', aspectRatio: null }] } })[path](), reasonOf('output-not-consumable', 'render'))
+    const missing = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] } })
+    missing.client.$queryRawUnsafe = async () => []
+    await assert.rejects(missing[path](), reasonOf('output-version-missing'))
+  })
+
+  test(`${path}: a Version row that is not the Version its State seals is a persistence conflict, not a source`, async () => {
+    const subject = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] } })
+    subject.project.versions[0].baseHash = 'f'.repeat(64)
+    await assert.rejects(subject[path](), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  })
+}
+
+test('projectRead: the final purpose refuses a cut copy before anything is hydrated, and renders the same State for an ordinary project', async () => {
+  const cut = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] }, world: cutCopyWorld })
+  await assert.rejects(cut.repository.readCurrentSource({ workspaceId, projectId, purpose: 'final' }), reasonOf('derived-source-perception-authority-required', 'final'))
+  await assert.rejects(cut.repository.readImmutableSource({ workspaceId, projectId, projectVersionId: 'version-proxy-rights',
+    editPlanSnapshotId: 'snapshot-proxy-rights', sourceArtifactId: 'artifact-rights-master', sourceManifestId: 'manifest-artifact-rights-master', purpose: 'final' }),
+  reasonOf('derived-source-perception-authority-required', 'final'))
+  await assert.rejects(fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] }, world: neverCutWorld }).repository
+    .readCurrentSource({ workspaceId, projectId, purpose: 'final' }), reasonOf('copy-requires-editorial-cut', 'final'))
+  const ordinary = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] } })
+  const final = await ordinary.repository.readCurrentSource({ workspaceId, projectId, purpose: 'final' })
+  assert.equal(final.outputConsumption.seal.purpose, 'final')
+  assert.notEqual(final.outputConsumption.sealHash, (await ordinary.projectRead()).outputConsumption.sealHash, 'the purpose is part of the seal')
+})
+
+test('the immutable read consumes the exact Version it is asked for, not the head', async () => {
+  const subject = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] } })
+  const versionsAsked = []
+  const findFirst = subject.client.v2Project.findFirst
+  subject.client.v2Project.findFirst = async (query) => { versionsAsked.push(query.select.versions.where); return findFirst(query) }
+  const source = await subject.repository.readImmutableSource({ workspaceId, projectId, projectVersionId: 'version-proxy-rights',
+    editPlanSnapshotId: 'snapshot-proxy-rights', sourceArtifactId: 'artifact-rights-master', sourceManifestId: 'manifest-artifact-rights-master' })
+  assert.equal(source.outputConsumption.seal.projectVersionId, 'version-proxy-rights')
+  assert.deepEqual(versionsAsked, [{ id: 'version-proxy-rights', editPlanSnapshotId: 'snapshot-proxy-rights' }])
+  // Another Version id asks for another State: the fake only knows this one, so the verdict is "output Version missing".
+  await assert.rejects(subject.repository.readImmutableSource({ workspaceId, projectId, projectVersionId: 'version-newer-head',
+    editPlanSnapshotId: 'snapshot-proxy-rights', sourceArtifactId: 'artifact-rights-master', sourceManifestId: 'manifest-artifact-rights-master' }),
+  reasonOf('output-version-missing'))
+})
+
+test('the immutable read with the head fence on refuses a Version that is no longer the head, and leaves the exact-Version read alone without it', async () => {
+  const subject = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] } })
+  const input = { workspaceId, projectId, projectVersionId: 'version-proxy-rights', editPlanSnapshotId: 'snapshot-proxy-rights',
+    sourceArtifactId: 'artifact-rights-master', sourceManifestId: 'manifest-artifact-rights-master' }
+  assert.equal((await subject.repository.readImmutableSource({ ...input, requireCurrent: true })).projectVersionId, 'version-proxy-rights')
+  subject.project.currentVersionId = 'version-newer-head'
+  assert.equal((await subject.repository.readImmutableSource(input)).projectVersionId, 'version-proxy-rights', 'the exact-Version read does not care about the head')
+  await assert.rejects(subject.repository.readImmutableSource({ ...input, requireCurrent: true }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT' && /no longer the current Version/.test(error.message))
+})
+
+// ---------------------------------------------------------------------------
+// Slice S3 - an optional explicit State variant is threaded to the one consumption reader; absent means the State's only output.
+// ---------------------------------------------------------------------------
+
+const twoOutputs = { entries: [{ variantId: 'variant-wide', aspectRatio: '16:9', outputSpecRevisionId: 'revision-wide-1', materializationId: 'materialization-wide' },
+  { variantId: 'variant-tall', aspectRatio: '9:16', outputSpecRevisionId: 'revision-tall-4', materializationId: 'materialization-tall' }] }
+
+test('an explicit State variant selects one output of a State with several: its entry names the format and the seal; absent or unknown is refused', async () => {
+  const subject = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] }, world: twoOutputs })
+  const immutable = { workspaceId, projectId, projectVersionId: 'version-proxy-rights', editPlanSnapshotId: 'snapshot-proxy-rights',
+    sourceArtifactId: 'artifact-rights-master', sourceManifestId: 'manifest-artifact-rights-master' }
+  await assert.rejects(subject.repository.readCurrentSource({ workspaceId, projectId }), reasonOf('output-variant-required', 'render'))
+  await assert.rejects(subject.repository.readImmutableSource(immutable), reasonOf('output-variant-required', 'render'))
+  for (const [variantId, format, revision] of [['variant-wide', '16:9', 'revision-wide-1'], ['variant-tall', '9:16', 'revision-tall-4']]) {
+    const current = await subject.repository.readCurrentSource({ workspaceId, projectId, variantId })
+    assert.equal(current.format, format)
+    assert.equal(current.outputConsumption.seal.variantId, variantId)
+    assert.equal(current.outputConsumption.seal.outputSpecRevisionId, revision)
+    assert.deepEqual(current.outputConsumption, subject.world.consumption('render', variantId))
+    const exact = await subject.repository.readImmutableSource({ ...immutable, variantId })
+    assert.equal(exact.outputConsumption.sealHash, current.outputConsumption.sealHash)
+    const final = await subject.repository.readCurrentSource({ workspaceId, projectId, variantId, purpose: 'final' })
+    assert.equal(final.outputConsumption.seal.variantId, variantId)
+  }
+  assert.notEqual((await subject.repository.readCurrentSource({ workspaceId, projectId, variantId: 'variant-wide' })).outputConsumption.sealHash,
+    (await subject.repository.readCurrentSource({ workspaceId, projectId, variantId: 'variant-tall' })).outputConsumption.sealHash, 'each output seals differently')
+  await assert.rejects(subject.repository.readCurrentSource({ workspaceId, projectId, variantId: 'variant-unknown' }), reasonOf('output-variant-unknown'))
+  // The snapshot read: the plan binds 9:16, so only the 9:16 output serves it, and the format must still be the entry's.
+  const storedPlan = JSON.parse(subject.project.versions[0].editPlanSnapshot.contentJson)
+  const planRead = (variantId) => subject.repository.readRenderableSnapshotSource({ workspaceId, projectId, planId: storedPlan.id,
+    planHash: calculateRenderablePlanHash(storedPlan), format: '9:16', variantId })
+  assert.equal((await planRead('variant-tall')).outputConsumption.seal.variantId, 'variant-tall')
+  await assert.rejects(planRead('variant-wide'), (error) => error.code === 'PERSISTENCE_CONFLICT' && /not bound to the requested format/.test(error.message))
+  await assert.rejects(planRead(undefined), reasonOf('output-variant-required', 'render'))
+})
+
+test('an explicit State variant of a copy never cut is still refused with the published reason', async () => {
+  const subject = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] }, world: { entries: [
+    { variantId: 'variant-a', aspectRatio: '9:16', blockedReasons: ['fork-target-materialization-required'] },
+    { variantId: 'variant-b', aspectRatio: '9:16', blockedReasons: ['fork-target-materialization-required'] }] } })
+  await assert.rejects(subject.repository.readCurrentSource({ workspaceId, projectId, variantId: 'variant-b' }), reasonOf('copy-requires-editorial-cut', 'render'))
 })

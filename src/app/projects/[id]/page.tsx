@@ -1022,7 +1022,30 @@ function readableBytes(value: number | string): string {
 const REFUSAL_REASON_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   'copy-requires-editorial-cut':
     'Esta cópia ainda não recebeu o corte editorial. Aplique o corte editorial na cópia antes de renderizar, revisar ou ajustar a edição.',
+  'derived-source-perception-authority-required':
+    'A exportação final de uma cópia com corte editorial ainda não está disponível: a cópia precisa ter a própria autoridade de percepção (rostos) antes de exportar. Renderização e revisão seguem liberadas.',
+  'empty-project':
+    'A saída deste projeto ainda não tem conteúdo. Ingira a mídia e monte a linha do tempo (ou crie a variante de saída) antes de renderizar, revisar ou exportar.',
+  'output-variant-required':
+    'Este projeto tem mais de uma saída. Indique a variante exata antes de renderizar, revisar ou exportar.',
+  'output-variant-unknown':
+    'A variante pedida não existe nesta versão do projeto. Atualize a página e escolha uma das saídas da versão.',
+  'output-variant-ambiguous':
+    'Duas saídas deste projeto têm o mesmo formato, então não dá para distinguir qual delas renderizar, revisar ou exportar. Mantenha um único formato por saída.',
+  'normalization-required':
+    'A mídia deste projeto ainda não foi normalizada. Conclua a ingestão da mídia antes de renderizar, revisar ou exportar.',
+  'audio-authority-required':
+    'O áudio deste projeto ainda não tem autoridade confirmada. Conclua a normalização do áudio antes de renderizar, revisar ou exportar.',
+  'output-not-consumable':
+    'A saída desta versão não pode ser renderizada, revisada nem exportada. Confira o formato de saída do projeto e a versão escolhida.',
+  'output-version-missing':
+    'A versão pedida não existe neste projeto. Atualize a página e escolha uma versão existente.',
 })
+
+// The edit endpoints name the output they act on. A project whose current version has exactly one output has that format; with
+// none or several there is no single format to name, and nothing guesses one.
+const OUTPUT_FORMAT_REQUIRED_MESSAGE =
+  'Este projeto não tem um único formato de saída. A edição manual e a restauração de versões só ficam disponíveis quando a versão atual tem exatamente uma saída.'
 
 function apiError<T>(payload: ApiEnvelope<T>, fallback: string): string {
   const reason = payload.error?.details?.reason
@@ -2200,12 +2223,18 @@ export default function ProjectWorkspacePage() {
     }
   }
 
+  const outputFormat = workspace?.project.format ?? null
+
   async function submitManualEdit(input: {
     action: 'apply' | 'undo' | 'redo'
     operation?: ManualOperation
     targetVersionId?: string
   }): Promise<void> {
     if (!manualTimeline || !workspace?.version || manualBusy) return
+    if (!outputFormat) {
+      setNotice(OUTPUT_FORMAT_REQUIRED_MESSAGE)
+      return
+    }
     const selectedId = input.operation?.clipId ?? manualSelectedClipId ?? 'project-edit-plan'
     const video = previewVideo.current
     if (video) {
@@ -2228,7 +2257,7 @@ export default function ProjectWorkspacePage() {
             baseVersionId: manualTimeline.timeline.versionId,
             baseHash: manualTimeline.baseHash,
             expectedRevision: manualTimeline.timeline.revision,
-            variantId: workspace.project.format ?? '9:16',
+            variantId: outputFormat,
             targetId: selectedId,
             ...(input.operation ? { operation: input.operation } : {}),
             ...(input.targetVersionId ? { targetVersionId: input.targetVersionId } : {}),
@@ -2429,6 +2458,10 @@ export default function ProjectWorkspacePage() {
     action: 'accept' | 'reopen' | 'restore',
   ): Promise<void> {
     if (!versionComparison || compareBusy) return
+    if (!outputFormat) {
+      setNotice(OUTPUT_FORMAT_REQUIRED_MESSAGE)
+      return
+    }
     setCompareBusy(true)
     setNotice(null)
     try {
@@ -2452,7 +2485,7 @@ export default function ProjectWorkspacePage() {
             baseVersionId: versionComparison.current.versionId,
             baseHash: versionComparison.current.baseHash,
             expectedRevision: versionComparison.current.revision,
-            variantId: workspace?.project.format ?? '9:16',
+            variantId: outputFormat,
           }),
         },
       )
@@ -3701,12 +3734,13 @@ export default function ProjectWorkspacePage() {
                   <p className="mt-1 text-[10px] text-[#706c64]">
                     V{manualTimeline.timeline.revision} · snap 120 ms · S divide · Delete apara · Ctrl+Z desfaz
                   </p>
+                  {!outputFormat ? <p className="mt-1 text-[10px] text-[#b58d31]" data-testid="manual-format-required">{OUTPUT_FORMAT_REQUIRED_MESSAGE}</p> : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     className="border border-white/[0.08] px-3 py-2 text-[9px] text-[#918b82] hover:border-white/[0.18] hover:text-white disabled:opacity-30"
                     data-testid="manual-undo"
-                    disabled={manualBusy || !undoTargetVersionId}
+                    disabled={manualBusy || !outputFormat || !undoTargetVersionId}
                     onClick={() => undoTargetVersionId && void submitManualEdit({ action: 'undo', targetVersionId: undoTargetVersionId })}
                     type="button"
                   >
@@ -3715,7 +3749,7 @@ export default function ProjectWorkspacePage() {
                   <button
                     className="border border-white/[0.08] px-3 py-2 text-[9px] text-[#918b82] hover:border-white/[0.18] hover:text-white disabled:opacity-30"
                     data-testid="manual-redo"
-                    disabled={manualBusy || !redoTargetVersionId}
+                    disabled={manualBusy || !outputFormat || !redoTargetVersionId}
                     onClick={() => redoTargetVersionId && void submitManualEdit({ action: 'redo', targetVersionId: redoTargetVersionId })}
                     type="button"
                   >
@@ -3771,7 +3805,7 @@ export default function ProjectWorkspacePage() {
                       <span className="mr-auto font-mono text-[9px] text-[#8a847b]" data-testid="manual-selected-clip">{manualSelectedClip.id}</span>
                       <button
                         className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
-                        disabled={manualBusy}
+                        disabled={manualBusy || !outputFormat}
                         onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'trim', clipId: manualSelectedClip.id, edge: 'start', atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.startMs / 1000) * 1000) } })}
                         type="button"
                       >
@@ -3779,7 +3813,7 @@ export default function ProjectWorkspacePage() {
                       </button>
                       <button
                         className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
-                        disabled={manualBusy}
+                        disabled={manualBusy || !outputFormat}
                         onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'split', clipId: manualSelectedClip.id, atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.startMs / 1000) * 1000) } })}
                         type="button"
                       >
@@ -3787,7 +3821,7 @@ export default function ProjectWorkspacePage() {
                       </button>
                       <button
                         className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
-                        disabled={manualBusy}
+                        disabled={manualBusy || !outputFormat}
                         onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'trim', clipId: manualSelectedClip.id, edge: 'end', atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.endMs / 1000) * 1000) } })}
                         type="button"
                       >
@@ -3798,7 +3832,7 @@ export default function ProjectWorkspacePage() {
                         <select
                           className="max-w-36 bg-transparent text-[9px] normal-case text-[#b3ada4] outline-hidden"
                           data-testid="manual-replace"
-                          disabled={manualBusy}
+                          disabled={manualBusy || !outputFormat}
                           onChange={(event) => {
                             if (event.target.value && event.target.value !== manualSelectedClip.sourceId) {
                               void submitManualEdit({ action: 'apply', operation: { kind: 'replace', clipId: manualSelectedClip.id, sourceId: event.target.value } })
@@ -3846,7 +3880,7 @@ export default function ProjectWorkspacePage() {
                       <button
                         className="mt-3 w-full border border-[#dbae3f]/45 bg-[#dbae3f]/10 px-3 py-2 text-[9px] font-bold text-[#ddb858] disabled:opacity-35"
                         data-testid="manual-crop-apply"
-                        disabled={manualBusy || !manualCropValid}
+                        disabled={manualBusy || !outputFormat || !manualCropValid}
                         onClick={submitManualCrop}
                         type="button"
                       >
@@ -3889,7 +3923,7 @@ export default function ProjectWorkspacePage() {
                     <button
                       className="mt-3 w-full bg-[#dbae3f] px-3 py-2 text-[9px] font-bold text-[#171207] disabled:opacity-35"
                       data-testid="manual-inspector-apply"
-                      disabled={manualBusy}
+                      disabled={manualBusy || !outputFormat}
                       onClick={submitManualInspector}
                       type="button"
                     >
@@ -4110,10 +4144,11 @@ export default function ProjectWorkspacePage() {
                     <div className="border border-white/[0.07] bg-[#050505] p-3">
                       <p className="text-[8px] font-semibold uppercase tracking-[0.17em] text-[#827b70]">Decisão</p>
                       <p className="mt-2 text-[9px] leading-4 text-[#625e57]">Aceitar e reabrir registram Command. Restaurar cria uma nova child version; A e B permanecem intactas.</p>
+                      {!outputFormat ? <p className="mt-2 text-[9px] leading-4 text-[#b58d31]" data-testid="compare-format-required">{OUTPUT_FORMAT_REQUIRED_MESSAGE}</p> : null}
                       <div className="mt-3 grid gap-2">
-                        <button className="bg-[#7167ff] px-3 py-2 text-[9px] font-bold text-white disabled:opacity-35" data-testid="compare-accept" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('accept')} type="button">Aceitar depois</button>
-                        <button className="border border-white/[0.1] px-3 py-2 text-[9px] text-[#aaa49a] disabled:opacity-35" data-testid="compare-reopen" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('reopen')} type="button">Reabrir edição</button>
-                        <button className="border border-[#d9aa3d]/30 px-3 py-2 text-[9px] text-[#d7b35f] disabled:opacity-35" data-testid="compare-restore" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('restore')} type="button">Restaurar antes como nova versão</button>
+                        <button className="bg-[#7167ff] px-3 py-2 text-[9px] font-bold text-white disabled:opacity-35" data-testid="compare-accept" disabled={compareBusy || !outputFormat || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('accept')} type="button">Aceitar depois</button>
+                        <button className="border border-white/[0.1] px-3 py-2 text-[9px] text-[#aaa49a] disabled:opacity-35" data-testid="compare-reopen" disabled={compareBusy || !outputFormat || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('reopen')} type="button">Reabrir edição</button>
+                        <button className="border border-[#d9aa3d]/30 px-3 py-2 text-[9px] text-[#d7b35f] disabled:opacity-35" data-testid="compare-restore" disabled={compareBusy || !outputFormat || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('restore')} type="button">Restaurar antes como nova versão</button>
                       </div>
                     </div>
                   </div>
@@ -5001,12 +5036,12 @@ export default function ProjectWorkspacePage() {
                   <div className="border-b border-white/[0.07] bg-[#0b0b0b] px-5 py-5 lg:border-b-0 lg:border-r">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#777168]">Mapa de risco</p>
-                      <span className="font-mono text-[9px] text-[#625d56]">{workspace.project.format ?? '9:16'}</span>
+                      <span className="font-mono text-[9px] text-[#625d56]">{workspace.project.format ?? '—'}</span>
                     </div>
                     <div
                       className="relative mx-auto mt-4 max-h-72 w-full max-w-40 overflow-hidden border border-white/[0.12] bg-[radial-gradient(circle_at_50%_35%,#292824_0,#171715_34%,#0e0e0d_72%)] shadow-[0_20px_55px_rgba(0,0,0,.35)]"
                       data-testid="contamination-region-map"
-                      style={{ aspectRatio: (workspace.project.format ?? '9:16').replace(':', ' / ') }}
+                      style={{ aspectRatio: workspace.project.format ? workspace.project.format.replace(':', ' / ') : '1 / 1' }}
                     >
                       <span className="absolute inset-x-0 top-1/2 h-px bg-white/[0.035]" />
                       <span className="absolute inset-y-0 left-1/2 w-px bg-white/[0.035]" />

@@ -158,6 +158,8 @@ export function createExportMatrixPreflightService(dependencies: {
           editPlanHash: source.editPlanHash,
           renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
           colorPipelineBindings,
+          // The preflight is bound to the exact State/variant revision/materialization the commit will consume for the final.
+          outputConsumptionSealHash: source.outputConsumption.sealHash,
         }) : calculateCanonicalHash({ unavailableCellId: cell.id }),
       }))
     }

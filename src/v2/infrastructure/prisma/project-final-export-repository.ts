@@ -132,8 +132,12 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     projectId: string
     projectVersionId: string
     projectVersionHash: string
+    variantId?: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null> {
-    const source = await this.sourceReader.readCurrentSource({ workspaceId: input.workspaceId, projectId: input.projectId })
+    // The final verdict first: a Version the persisted consumption does not admit for a final export (a cut copy still without
+    // perception authority, a copy never cut, ...) refuses with its published reason before any approval is looked up.
+    const source = await this.sourceReader.readCurrentSource({ workspaceId: input.workspaceId, projectId: input.projectId, purpose: 'final',
+      ...(input.variantId === undefined ? {} : { variantId: input.variantId }) })
     if (!source) return null
     const approval = await this.readApproval({ ...input, outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
     if (!source || !approval || source.projectVersionId !== input.projectVersionId) return null
@@ -154,8 +158,15 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     proxyArtifactId: string
     sourceArtifactId: string
     sourceManifestId: string
+    variantId?: string
+    requireCurrent?: boolean
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null> {
-    const source = await this.sourceReader.readImmutableSource(input)
+    const source = await this.sourceReader.readImmutableSource({
+      workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId,
+      editPlanSnapshotId: input.editPlanSnapshotId, sourceArtifactId: input.sourceArtifactId, sourceManifestId: input.sourceManifestId,
+      purpose: 'final', ...(input.variantId === undefined ? {} : { variantId: input.variantId }),
+      ...(input.requireCurrent === true ? { requireCurrent: true } : {}),
+    })
     if (!source) return null
     const approval = await this.readApproval({ ...input, outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
     if (!source || !approval) return null

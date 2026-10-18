@@ -38,12 +38,15 @@ export function enqueueRenderableSnapshotProxyRenderService(dependencies: {
     sourceHash: string
     variantId: string
     format: string
+    /** The State variant of the plan's Version to consume (`variantId` above is the localization variant); absent means that State's only output. */
+    outputVariantId?: string
     actor: AuthenticatedExternalActor
     idempotencyKey: string
     traceId?: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const projectId = validateId(request.projectId, 'projectId')
+    const outputVariantId = request.outputVariantId === undefined ? undefined : validateId(request.outputVariantId, 'outputVariantId')
     const planId = validateId(request.planId, 'planId')
     const sourceId = validateId(request.sourceId, 'sourceId')
     const variantId = validateId(request.variantId, 'variantId')
@@ -64,11 +67,13 @@ export function enqueueRenderableSnapshotProxyRenderService(dependencies: {
     const requestFingerprint = calculateVersionHash({
       type: 'renderable-snapshot-proxy-request/v1', projectId,
       snapshot: { planId, planHash: request.planHash, origin: request.origin, sourceId, sourceHash: request.sourceHash, variantId, format: request.format },
+      ...(outputVariantId === undefined ? {} : { outputVariantId }),
       actorContextHash: audit.contextHash,
     })
     const replay = await dependencies.operations.findReplay({ workspaceId, clientId, actorContextHash: audit.contextHash, idempotencyKey, requestFingerprint })
     if (replay) return replay
-    const source = await dependencies.projects.readRenderableSnapshotSource({ workspaceId, projectId, planId, planHash: request.planHash, format: request.format })
+    const source = await dependencies.projects.readRenderableSnapshotSource({ workspaceId, projectId, planId, planHash: request.planHash, format: request.format,
+      ...(outputVariantId === undefined ? {} : { variantId: outputVariantId }) })
     if (!source) throw new DomainError('PROJECT_NOT_FOUND', 'Renderable snapshot source media was not found')
     const colorPipelineBindings = await resolveRenderColorPipelineBindings({ repository: dependencies.colorPipelines, workspaceId, projectId, sources: source.renderSources })
     const inputHash = calculateVersionHash({
@@ -108,12 +113,15 @@ export function enqueueProjectProxyRenderService(dependencies: {
     workspaceId: string
     projectId: string
     expectedProjectVersionId?: string
+    /** The State variant to render; absent means the State's only output (a State with several outputs is refused, never guessed). */
+    variantId?: string
     actor: AuthenticatedExternalActor
     idempotencyKey: string
     traceId?: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const projectId = validateId(request.projectId, 'projectId')
+    const variantId = request.variantId === undefined ? undefined : validateId(request.variantId, 'variantId')
     const expectedProjectVersionId = request.expectedProjectVersionId
       ? validateId(request.expectedProjectVersionId, 'expectedProjectVersionId')
       : undefined
@@ -123,7 +131,10 @@ export function enqueueProjectProxyRenderService(dependencies: {
     const clientId = validateId(audit.clientId, 'actor.id')
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(idempotencyKey.length > 0 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key must contain 1 to 128 characters')
-    const source = await dependencies.projects.readCurrentSource({ workspaceId, projectId })
+    // The head Version, consumed for the proxy render: the persisted verdict refuses (with its published reason) what may not be
+    // rendered, and the seal of what was read goes into the input hash below.
+    const source = await dependencies.projects.readCurrentSource({ workspaceId, projectId, purpose: 'render',
+      ...(variantId === undefined ? {} : { variantId }) })
     if (!source) throw new DomainError('PROJECT_NOT_FOUND', 'Project with a compiled EditPlan and source master was not found')
     if (expectedProjectVersionId && source.projectVersionId !== expectedProjectVersionId) {
       throw new DomainError('VERSION_CONFLICT', 'Project changed before proxy enqueue', {

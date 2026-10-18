@@ -17,6 +17,7 @@ import { produceContiguousEvidenceService } from '../../src/v2/application/conti
 import { produceContiguousEvaluationsService } from '../../src/v2/application/contiguous-evaluation.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
+import { fakeOutputWorld } from './helpers/output-consumption-fakes.mjs'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
@@ -550,6 +551,8 @@ function renderHarness(input) {
     editPlanHash: input.editPlanHash,
     editPlan: input.compiledPlan,
     format: '16:9',
+    outputConsumption: fakeOutputWorld({ workspaceId: 'workspace-controlled-render', projectId: PROJECT_ID, versionId: PROJECT_VERSION_ID,
+      entries: [{ variantId: 'variant-16x9', aspectRatio: '16:9' }] }).consumption('render'),
     sourceArtifactId: MASTER_ARTIFACT_ID,
     sourceManifestId: MASTER_MANIFEST_ID,
     sourceArtifactKey: MASTER_ARTIFACT_KEY,
