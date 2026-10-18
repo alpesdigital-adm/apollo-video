@@ -239,7 +239,10 @@ composto é CFR (o `-r` da saída continua aplicado).
 e de final 1.11.0: um proxy ou final do estágio `fps` fica um quadro curto nessa build e não pode ser reaproveitado. O
 coletor observa o mesmo estágio (`buildPreLibassClockStage`).
 
-**Verificação física no commit que adota o estágio** (sob o lock global, evidência add-only em `BASE`):
-prova de pixels com receita nova, editorial-renderer 9/9 (T-FR-227 completo, 30/60/120 s, proxy e final), coletor,
-subtitle-anchor, subtitle-styles, style-tokens, proof-mode goldens e subtitle-vtt-native; caminhos em
-`docs/quality/w69-materialized-subtitle-clock-v2.md` na seção seguinte quando a rodada termina.
+**Verificação física no commit que adota o estágio** (0729feac, sob o lock global, evidência add-only em `BASE`):
+prova de pixels com receita nova `w69-ass-binder-pixels-v7-settb-setpts-a22a1ada` (1/1); e, em
+`w69-physical-suites-v1-1feda10a`: editorial-renderer 9/9 (T-FR-227 completo, 30/60/120 s, proxy e final), coletor 1/1,
+subtitle-anchor 6/6, subtitle-styles 1/1, style-tokens 1/1, proof-mode goldens 12/12 e subtitle-vtt-native 1/1. Antes da
+mudança, em 47467ff7: editorial-renderer 8/9 (`w69-physical-suites-v1-2e497d0d`), igual em f7ee0b05 menos o estágio
+(`...-58726aee`: 9/9), e o candidato `settb+setpts` já fechava 9/9 + coletor + anchor + prova de pixels
+(`...-4e5274df`, `w69-ass-binder-pixels-candidate-settb-9b8afe43`).
