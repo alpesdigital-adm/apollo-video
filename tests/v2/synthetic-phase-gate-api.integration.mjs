@@ -148,96 +148,6 @@ async function seedClient(prisma, issueApiCredential, {
   return `Bearer ${issued.token}`
 }
 
-async function seedProjectVersion(prisma, {
-  workspaceId,
-  clientId,
-  projectId,
-  versionId,
-  versionHash,
-  now,
-}) {
-  await prisma.v2Project.create({
-    data: {
-      id: projectId,
-      workspaceId,
-      name: projectId,
-      status: 'reviewing-proxy',
-      objective: 'awareness',
-      format: '16:9',
-      locale: 'pt-BR',
-      createdByType: 'api-client',
-      createdById: clientId,
-      createdAt: now,
-      updatedAt: now,
-    },
-  })
-  const snapshots = [
-    { kind: 'brief', suffix: 'brief', hash: '1'.repeat(64), schemaVersion: 1 },
-    { kind: 'edit-plan', suffix: 'edit-plan', hash: '2'.repeat(64), schemaVersion: 2 },
-    { kind: 'policies', suffix: 'policies', hash: '3'.repeat(64), schemaVersion: 1 },
-  ]
-  await prisma.v2ProjectSnapshot.createMany({
-    data: snapshots.map((snapshot) => ({
-      id: `${projectId}-${snapshot.suffix}`,
-      workspaceId,
-      projectId,
-      kind: snapshot.kind,
-      schemaVersion: snapshot.schemaVersion,
-      contentJson: JSON.stringify({ kind: snapshot.kind }),
-      contentHash: snapshot.hash,
-      createdAt: now,
-    })),
-  })
-  await prisma.v2ProjectVersion.create({
-    data: {
-      id: versionId,
-      workspaceId,
-      projectId,
-      sequence: 1,
-      briefSnapshotId: `${projectId}-brief`,
-      editPlanSnapshotId: `${projectId}-edit-plan`,
-      policiesSnapshotId: `${projectId}-policies`,
-      baseHash: versionHash,
-      createdBy: clientId,
-      createdAt: now,
-    },
-  })
-  await prisma.v2Project.update({
-    where: { id: projectId },
-    data: { currentVersionId: versionId },
-  })
-}
-
-async function removeFixtures(prisma, workspaceIds) {
-  await prisma.$transaction(async (transaction) => {
-    await transaction.v2SyntheticPhaseGate.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2Project.updateMany({
-      where: { workspaceId: { in: workspaceIds } },
-      data: { currentVersionId: null },
-    })
-    await transaction.v2ProjectVersion.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2ProjectSnapshot.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2Project.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2ApiCredential.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2ApiClient.deleteMany({
-      where: { workspaceId: { in: workspaceIds } },
-    })
-    await transaction.v2Workspace.deleteMany({
-      where: { id: { in: workspaceIds } },
-    })
-  })
-}
-
 test('T-F3-GATE public HTTP run/list enforces auth, scope, tenant, closed input and idempotency', {
   skip: SKIP,
   timeout: 90_000,
@@ -250,20 +160,15 @@ test('T-F3-GATE public HTTP run/list enforces auth, scope, tenant, closed input 
   const suffix = randomUUID().replaceAll('-', '').slice(0, 12)
   const workspaceId = `synthetic-gate-api-${suffix}`
   const otherWorkspaceId = `synthetic-gate-api-other-${suffix}`
-  const workspaceIds = [workspaceId, otherWorkspaceId]
+  const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
   const projectId = `synthetic-gate-api-project-${suffix}`
   const otherProjectId = `synthetic-gate-api-other-project-${suffix}`
-  const versionId = `synthetic-gate-api-version-${suffix}`
-  const otherVersionId = `synthetic-gate-api-other-version-${suffix}`
-  const versionHash = 'a'.repeat(64)
-  const otherVersionHash = 'b'.repeat(64)
   const now = new Date('2026-09-23T12:00:00.000Z')
   let server
   let diagnostics = ''
   let primaryError
 
   try {
-    await removeFixtures(prisma, workspaceIds)
     await prisma.v2Workspace.createMany({ data: [
       { id: workspaceId, slug: workspaceId, name: workspaceId, createdAt: now, updatedAt: now },
       { id: otherWorkspaceId, slug: otherWorkspaceId, name: otherWorkspaceId, createdAt: now, updatedAt: now },
@@ -296,22 +201,39 @@ test('T-F3-GATE public HTTP run/list enforces auth, scope, tenant, closed input 
       scopes: ['projects:read', 'projects:write'],
       now,
     })
-    await seedProjectVersion(prisma, {
+    // Each project is born the way the product makes one (creation Version, then an explicit output variant); its head
+    // Version is the one the gate is run against. The clients and credentials above already exist, so the sealed
+    // writers only reuse them.
+    const sealed = await seedSealedProject(prisma, {
       workspaceId,
-      clientId: `synthetic-gate-api-client-${suffix}`,
-      projectId,
-      versionId,
-      versionHash,
-      now,
+      actor: testActor({
+        workspaceId,
+        clientId: `synthetic-gate-api-client-${suffix}`,
+        credentialId: `synthetic-gate-api-credential-${suffix}`,
+        environment: 'production',
+        scopes: ['projects:read', 'projects:write'],
+      }),
+      prefix: 'synthetic-gate-api',
+      ids: { project: projectId },
+      name: projectId,
     })
-    await seedProjectVersion(prisma, {
+    const otherSealed = await seedSealedProject(prisma, {
       workspaceId: otherWorkspaceId,
-      clientId: `synthetic-gate-api-other-client-${suffix}`,
-      projectId: otherProjectId,
-      versionId: otherVersionId,
-      versionHash: otherVersionHash,
-      now,
+      actor: testActor({
+        workspaceId: otherWorkspaceId,
+        clientId: `synthetic-gate-api-other-client-${suffix}`,
+        credentialId: `synthetic-gate-api-other-cred-${suffix}`,
+        environment: 'production',
+        scopes: ['projects:read', 'projects:write'],
+      }),
+      prefix: 'synthetic-gate-api-other',
+      ids: { project: otherProjectId },
+      name: otherProjectId,
     })
+    const versionId = sealed.head.version.id
+    const versionHash = sealed.head.version.baseHash
+    const otherVersionId = otherSealed.head.version.id
+    const otherVersionHash = otherSealed.head.version.baseHash
 
     const port = await freePort()
     const baseUrl = `http://127.0.0.1:${port}`
@@ -458,11 +380,7 @@ test('T-F3-GATE public HTTP run/list enforces auth, scope, tenant, closed input 
     } catch (error) {
       teardownErrors.push(error)
     }
-    try {
-      await removeFixtures(prisma, workspaceIds)
-    } catch (error) {
-      teardownErrors.push(error)
-    }
+    // No fixture removal: the sealed rows of both projects are append-only and every identity carries this run's suffix.
     try {
       await prisma.$disconnect()
     } catch (error) {

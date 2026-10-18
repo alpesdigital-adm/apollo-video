@@ -52,9 +52,10 @@ test('W24.2 PostgreSQL fences provider transport evidence by job attempt, hash a
     const issued = await createApiClientService({ repository: new PrismaApiClientRepository(client), credentialCrypto: nodeApiCredentialCrypto, clock: () => at(0) })({ id: clientId, credentialId, workspaceId, name: 'Provider provenance client', environment: 'production', scopes: ['projects:read', 'projects:write'] })
     const audit = createExternalAuditContext({ clientId, credentialId: issued.credential.id, workspaceId, environment: 'production' })
     const actor = Object.freeze({ ...audit, scopes: new Set(['projects:read', 'projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext: audit })
+    // Sealed rows are append-only and nothing here deletes them, so every identity carries this invocation's suffix: the
+    // suite can run again (or beside another suite) in the same database.
     let entity = 0
-    let event = 0
-    const created = await createProjectService({ repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => at(0), createId: (kind) => `${kind}-provenance-${++entity}`, createEventId: () => `00000000-0000-4000-8000-${String(900_000 + ++event).padStart(12, '0')}` })({ workspaceId, name: 'Provider provenance', objective: 'awareness', actor, idempotencyKey: 'provider-provenance-project' })
+    const created = await createProjectService({ repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => at(0), createId: (kind) => `${kind}-provenance-${suffix}-${++entity}`, createEventId: randomUUID })({ workspaceId, name: 'Provider provenance', objective: 'awareness', actor, idempotencyKey: 'provider-provenance-project' })
     const consentArtifactId = `provider-consent-${suffix}`
     await client.v2MediaArtifact.create({ data: { id: consentArtifactId, workspaceId, artifactKey: `provider/${suffix}-consent.json`, sha256: '7'.repeat(64), byteSize: 64n, mediaType: 'data', container: 'json', status: 'available', createdAt: at(0) } })
     const profile = await registerSyntheticPresenterProfileService({
@@ -184,6 +185,6 @@ test('W24.2 PostgreSQL fences provider transport evidence by job attempt, hash a
     await assert.rejects(repository.recordEvidence({ evidence: staleEvidence }), (error) => error.code === 'VERSION_CONFLICT')
     assert.equal(await client.v2ProviderTransportEvidence.count({ where: { workspaceId, jobId } }), 1)
   } finally {
-    try { } finally { await client.$disconnect() }
+    await client.$disconnect()
   }
 })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -13,9 +13,12 @@ const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
 
-const workspaceId = 'cache-invalidation-int-workspace'
-const clientId = 'cache-invalidation-int-client'
-const credentialId = 'cache-invalidation-int-credential'
+// Sealed rows are append-only and nothing here deletes them: every identity carries this invocation's RUN, so the suite
+// can run again, or beside other suites, in one database.
+const RUN = randomUUID().replaceAll('-', '').slice(0, 10)
+const workspaceId = `cache-invalidation-int-workspace-${RUN}`
+const clientId = `cache-invalidation-int-client-${RUN}`
+const credentialId = `cache-invalidation-int-credential-${RUN}`
 const hash = (character) => character.repeat(64)
 const at = (second) => new Date(Date.parse('2029-05-01T00:00:00.000Z') + second * 1_000).toISOString()
 
@@ -102,11 +105,10 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
     })
     let entity = 0
-    let event = 0
     const createProject = createProjectService({
       repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
-      createId: (kind) => `${kind}-cacheinv-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(700_000 + ++event).padStart(12, '0')}`,
+      createId: (kind) => `${kind}-cacheinv-${RUN}-${++entity}`,
+      createEventId: randomUUID,
     })
     const main = await createProject({
       workspaceId, name: 'Invalidação precisa', objective: 'awareness', actor,
@@ -119,9 +121,10 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       idempotencyKey: 'cacheinv-project-twin',
     })
 
+    const consentEvidenceId = `cacheinv-consent-evidence-${RUN}`
     await client.v2MediaArtifact.create({
       data: {
-        id: 'cacheinv-consent-evidence', workspaceId, artifactKey: 'cacheinv/consent.json',
+        id: consentEvidenceId, workspaceId, artifactKey: 'cacheinv/consent.json',
         sha256: hash('b'), byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
       },
     })
@@ -131,12 +134,12 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       repository: syntheticRepository, artifacts: artifactRepository, clock: () => new Date(at(0)),
     })
     const profileInput = (version, key, extra = {}) => ({
-      workspaceId, profileId: 'cacheinv-presenter', version, actorIdentityId: 'cacheinv-identity',
+      workspaceId, profileId: `cacheinv-presenter-${RUN}`, version, actorIdentityId: 'cacheinv-identity',
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_cacheinv' },
       voice: { id: 'voice_cacheinv', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: `cacheinv-consent-v${version}`, evidenceArtifactId: 'cacheinv-consent-evidence', granted: true,
+        id: `cacheinv-consent-v${version}-${RUN}`, evidenceArtifactId: consentEvidenceId, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
         ...extra,
@@ -147,9 +150,9 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const profileBInput = profileInput(1, 'cacheinv-profile-b-v1')
     const profileB = await registerProfile({
       ...profileBInput,
-      profileId: 'cacheinv-presenter-b',
+      profileId: `cacheinv-presenter-b-${RUN}`,
       actorIdentityId: 'cacheinv-identity-b',
-      consent: { ...profileBInput.consent, id: 'cacheinv-consent-b-v1' },
+      consent: { ...profileBInput.consent, id: `cacheinv-consent-b-v1-${RUN}` },
     })
 
     // Controlled provider boundary: every paid call is counted here, so the
@@ -198,8 +201,8 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       jobs: providerRepository, adapters: registry, profiles: syntheticRepository,
       audioMasters, projects, artifacts: artifactRepository,
       rights: rightsRepository, clock: () => new Date(at(2)),
-      createJobId: () => `cacheinv-job-${++entity}`,
-      createTransitionId: () => `cacheinv-transition-${++providerTransition}`,
+      createJobId: () => `cacheinv-job-${RUN}-${++entity}`,
+      createTransitionId: () => `cacheinv-transition-${RUN}-${++providerTransition}`,
     })
     const sourceMaterializer = new LocalArtifactSourceMaterializer(artifactRoot)
     const materializer = new AuthorizedProviderSubmissionInputMaterializer({
@@ -226,7 +229,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
         assert.ok(alignment && binding, 'controlled cache invalidation critic needs persisted alignment and block binding')
         const measured = new Set(['pronunciation', 'temporal-integrity', 'audiovisual-integrity'])
         const report = createSyntheticCriticReport({
-          id: `cacheinv-critic-${++criticOrdinal}`,
+          id: `cacheinv-critic-${RUN}-${++criticOrdinal}`,
           workspaceId: input.job.workspaceId, projectId: input.job.projectId, blockId: binding.blockId,
           capability: 'tts', adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion,
           artifactId: input.artifact.artifactId, artifactSha256: input.artifact.artifactSha256,
@@ -256,7 +259,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
           ingestor: ttsIngestor, critic: ttsCritic,
           clock: tick,
           createLeaseToken: () => `cacheinv-lease-${second}`,
-          createTransitionId: () => `cacheinv-transition-${++providerTransition}`,
+          createTransitionId: () => `cacheinv-transition-${RUN}-${++providerTransition}`,
         })(`cacheinv-worker-${second}`)
         if (worked === null) quiet += 1
         else quiet = 0
@@ -270,7 +273,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const ensureClock = () => new Date(at(ensureFrozen ? ensureSecond : (ensureSecond += 1)))
     const planDependencies = {
       plans, projects, profiles: syntheticRepository, clock: () => new Date(at(1)),
-      createId: (kind) => `${kind}-ci-${++entity}`,
+      createId: (kind) => `${kind}-ci-${RUN}-${++entity}`,
     }
     const createPlan = createSyntheticScriptPlanService(planDependencies)
     const mutatePlan = mutateSyntheticScriptPlanService(planDependencies)
@@ -291,7 +294,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       repository: audioMasters, projects, profiles: syntheticRepository,
       providerJobs: providerRepository, artifacts: artifactRepository, rights: rightsRepository,
       criticReports,
-      clock: () => new Date(at(70)), createId: () => `cacheinv-master-${++entity}`,
+      clock: () => new Date(at(70)), createId: () => `cacheinv-master-${RUN}-${++entity}`,
     })
     const compile = compileSyntheticBlockAudioService({
       plans, generations, providerJobs: providerRepository, criticReports, profiles: syntheticRepository,
@@ -311,7 +314,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
           const row = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId }, select: { rightsRevision: true } })
           if (row.rightsRevision > 0) continue
           const snapshot = createAssetRightsSnapshot({
-            id: `cacheinv-rights-${artifactId}`, workspaceId, artifactId, sequence: 1,
+            id: `cacheinv-rights-${RUN}-${artifactId}`, workspaceId, artifactId, sequence: 1,
             draft: {
               status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: markets, allowedLocales: ['pt-BR'],
               allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
@@ -507,7 +510,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const rightsTarget = approvedByBlock.get(blocks[0])
     const rightsArtifactId = rightsTarget.audioArtifactId
     const narrowed = createAssetRightsSnapshot({
-      id: `cacheinv-rights-narrowed-${rightsArtifactId}`, workspaceId, artifactId: rightsArtifactId, sequence: 2,
+      id: `cacheinv-rights-narrowed-${RUN}-${rightsArtifactId}`, workspaceId, artifactId: rightsArtifactId, sequence: 2,
       draft: {
         status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['USA'], allowedLocales: ['pt-BR'],
         allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
@@ -743,6 +746,13 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     )
     assert.equal(await client.v2SyntheticBlockConcatenation.count({ where: { workspaceId } }), concatenationsBeforeRevokedCompile)
     assert.equal(await client.v2SyntheticAudioMaster.count({ where: { workspaceId } }), mastersBeforeRevokedCompile)
+
+    // The passes above leave jobs planned (the last ensure enqueues without draining). Provider workers claim the oldest
+    // non-terminal job of ANY workspace and sealed rows are never deleted, so the next suite to run a worker in this
+    // database would claim them; they end canceled through the real repository instead.
+    const { cancelOutstandingProviderJobs } = await import('./helpers/synth-pg-job-quiesce.mjs')
+    await cancelOutstandingProviderJobs(client, { workspaceId, repository: providerRepository })
+    assert.equal(await client.v2ProviderJob.count({ where: { workspaceId, status: { notIn: ['approved', 'rejected', 'failed', 'canceled', 'expired', 'superseded'] } } }), 0)
   } finally {
     await client.$disconnect()
     await rm(root, { recursive: true, force: true })

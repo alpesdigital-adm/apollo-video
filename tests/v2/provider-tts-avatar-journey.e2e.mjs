@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -13,9 +13,12 @@ const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
 
-const workspaceId = 'provider-journey-e2e-workspace'
-const clientId = 'provider-journey-e2e-client'
-const credentialId = 'provider-journey-e2e-credential'
+// Sealed rows are append-only and this journey runs more than once in one database (the integration and the e2e step),
+// so every identity it creates carries this invocation's RUN and nothing is deleted.
+const RUN = randomUUID().replaceAll('-', '').slice(0, 10)
+const workspaceId = `provider-journey-e2e-workspace-${RUN}`
+const clientId = `provider-journey-e2e-client-${RUN}`
+const credentialId = `provider-journey-e2e-credential-${RUN}`
 const hash = (character) => character.repeat(64)
 const at = (second) => new Date(Date.parse('2029-01-01T00:00:00.000Z') + second * 1_000).toISOString()
 
@@ -120,16 +123,15 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
     })
     let entity = 0
-    let event = 0
     const project = await createProjectService({
       repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
-      createId: (kind) => `${kind}-provider-journey-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(900_000 + ++event).padStart(12, '0')}`,
+      createId: (kind) => `${kind}-provider-journey-${RUN}-${++entity}`,
+      createEventId: randomUUID,
     })({ workspaceId, name: 'Jornada TTS para avatar', objective: 'awareness', actor, idempotencyKey: 'provider-journey-project' })
 
     await client.v2MediaArtifact.create({
       data: {
-        id: 'journey-consent-evidence', workspaceId, artifactKey: 'provider-journey/consent.json',
+        id: `journey-consent-evidence-${RUN}`, workspaceId, artifactKey: 'provider-journey/consent.json',
         sha256: hash('a'), byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
       },
     })
@@ -139,12 +141,12 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       repository: syntheticRepository, artifacts: artifactRepository, clock: () => new Date(at(0)),
     })
     const registered = await registerProfile({
-      workspaceId, profileId: 'journey-presenter', version: 1, actorIdentityId: 'journey-identity',
+      workspaceId, profileId: `journey-presenter-${RUN}`, version: 1, actorIdentityId: 'journey-identity',
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_journey_123' },
       voice: { id: 'voice_journey_123', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: 'journey-consent', evidenceArtifactId: 'journey-consent-evidence', granted: true,
+        id: `journey-consent-${RUN}`, evidenceArtifactId: `journey-consent-evidence-${RUN}`, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
       },
@@ -235,8 +237,8 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       jobs: providerRepository, adapters: registry, profiles: syntheticRepository,
       audioMasters: audioMasterRepository, projects: projectsQuery, artifacts: artifactRepository,
       rights: rightsRepository, clock: () => new Date(at(1)),
-      createJobId: () => `journey-job-${entity += 1}`,
-      createTransitionId: () => `journey-transition-${++providerTransition}`,
+      createJobId: () => `journey-job-${RUN}-${entity += 1}`,
+      createTransitionId: () => `journey-transition-${RUN}-${++providerTransition}`,
       resolveAvatarCriticBinding: async ({ audioMaster, audioRange, profileSnapshotId, use, market, locale }) => {
         assert.equal(audioMaster.source.kind, 'tts')
         const generation = await generations.findByProviderJob({
@@ -254,7 +256,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
 
     const createdPlan = await createSyntheticScriptPlanService({
       plans, projects: projectsQuery, profiles: syntheticRepository,
-      clock: () => new Date(at(1)), createId: (kind) => `${kind}-provider-journey-${++entity}`,
+      clock: () => new Date(at(1)), createId: (kind) => `${kind}-provider-journey-${RUN}-${++entity}`,
     })({
       workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
       profileSnapshotId: registered.profile.snapshot.id, locale: 'pt-BR', scriptText: SCRIPT,
@@ -344,7 +346,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       pronunciation: new AlignmentSyntheticCriticPronunciationEvaluator({ alignment }),
       controlled: new DeterministicSyntheticCriticControlledEvaluator(),
       clock: () => new Date(at(7)),
-      createId: ({ evaluationContextHash }) => `journey-critic-${evaluationContextHash.slice(0, 48)}`,
+      createId: ({ evaluationContextHash }) => `journey-critic-${RUN}-${evaluationContextHash.slice(0, 48)}`,
     })
     const criticContext = new PrismaSyntheticCriticRuntimeContextResolver({
       client, artifacts: artifactRepository, resultArtifacts: resultArtifactRepository,
@@ -374,7 +376,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
         ingestor: ttsIngestor, critic: ttsCritic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-tts-lease-${tick}`,
-        createTransitionId: () => `journey-transition-${++providerTransition}`,
+        createTransitionId: () => `journey-transition-${RUN}-${++providerTransition}`,
       })(`journey-tts-worker-${tick}`)
     }
     for (let stage = 0; stage < 6; stage += 1) await runFreshTtsWorkerOnce()
@@ -431,7 +433,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     // Rights for the produced artifacts before they may feed the audio master.
     for (const [index, artifactId] of [audioEntry.artifactId, alignmentEntry.artifactId].entries()) {
       const snapshot = createAssetRightsSnapshot({
-        id: `journey-rights-${index + 1}`, workspaceId, artifactId, sequence: 1,
+        id: `journey-rights-${RUN}-${index + 1}`, workspaceId, artifactId, sequence: 1,
         draft: {
           status: 'approved', allowedUses: ['ads'], prohibitedUses: [], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
           allowedSyntheticOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
@@ -451,7 +453,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       criticReports,
       alignment,
       audioDurations: new FfmpegDecodedSyntheticAudioDurationReader(sourceMaterializer, process.env),
-      clock: () => new Date(at(10)), createId: () => 'journey-audio-master',
+      clock: () => new Date(at(10)), createId: () => `journey-audio-master-${RUN}`,
     })
     const audioMasterRequest = {
       workspaceId, projectId: project.projectAtCreation.id, projectVersionId: project.creationVersion.id,
@@ -527,7 +529,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
         ingestor: avatarIngestor, critic: avatarCritic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-avatar-lease-${tick}`,
-        createTransitionId: () => `journey-transition-${++providerTransition}`,
+        createTransitionId: () => `journey-transition-${RUN}-${++providerTransition}`,
       })(`journey-avatar-worker-${tick}`)
     }
     for (let stage = 0; stage < 8; stage += 1) await runFreshAvatarWorkerOnce()
@@ -629,7 +631,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
         adapters: registry, materializer, ingestor: diagnosticIngestor, critic,
         clock: () => new Date(at(tick + 2)),
         createLeaseToken: () => `journey-race-lease-${tick}`,
-        createTransitionId: () => `journey-transition-${++providerTransition}`,
+        createTransitionId: () => `journey-transition-${RUN}-${++providerTransition}`,
       })(`journey-race-worker-${tick}`)
     }
     let reachedEvaluating = false
@@ -733,7 +735,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       defaultLocale: registered.profile.snapshot.defaultLocale, status: 'active',
       disclosure: registered.profile.snapshot.disclosure,
       consent: {
-        id: 'journey-consent-v2-revoked', evidenceArtifactId: 'journey-consent-evidence', granted: true,
+        id: `journey-consent-v2-revoked-${RUN}`, evidenceArtifactId: `journey-consent-evidence-${RUN}`, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
         revokedAt: at(40),
@@ -742,7 +744,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     })
     const racedRights = await rightsRepository.findCurrent(workspaceId, audioEntry.artifactId)
     const restricted = createAssetRightsSnapshot({
-      id: 'journey-rights-audio-restricted', workspaceId, artifactId: audioEntry.artifactId, sequence: 2,
+      id: `journey-rights-audio-restricted-${RUN}`, workspaceId, artifactId: audioEntry.artifactId, sequence: 2,
       draft: {
         status: 'restricted', allowedUses: [], prohibitedUses: ['ads'],
         allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'], allowedSyntheticOperations: [],
@@ -786,12 +788,12 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
 
     // Revoked consent blocks any new provider effect for that profile.
     const revoked = await registerProfile({
-      workspaceId, profileId: 'journey-presenter-revoked', version: 1, actorIdentityId: 'journey-identity-revoked',
+      workspaceId, profileId: `journey-presenter-revoked-${RUN}`, version: 1, actorIdentityId: 'journey-identity-revoked',
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_revoked_123' },
       voice: { id: 'voice_revoked_123', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: 'journey-consent-revoked', evidenceArtifactId: 'journey-consent-evidence', granted: true,
+        id: `journey-consent-revoked-${RUN}`, evidenceArtifactId: `journey-consent-evidence-${RUN}`, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
         revokedAt: '2029-06-01T00:00:00.000Z',
@@ -813,6 +815,12 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       }),
       (error) => error.code === 'ASSET_RIGHTS_BLOCKED',
     )
+
+    // The consent-race job is left evaluating (its approval was refused on purpose). Provider workers claim the oldest
+    // non-terminal job of ANY workspace, and sealed rows are never deleted, so a suite that runs a worker later in this
+    // database would claim it; it ends canceled through the real repository instead.
+    const { cancelOutstandingProviderJobs } = await import('./helpers/synth-pg-job-quiesce.mjs')
+    assert.ok((await cancelOutstandingProviderJobs(client, { workspaceId, repository: providerRepository })).includes(racedJobId))
   } finally {
     await client.$disconnect()
     if (objectStore) {

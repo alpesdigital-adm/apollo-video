@@ -263,10 +263,7 @@ test(
     const { MULTICAM_LONGFORM_CRITERIA, MULTICAM_LONGFORM_GATE_ID } = await import(
       '../../src/v2/domain/multicam-longform-gate.ts'
     )
-    const { buildGateWorld, cleanGateWorld } = await import(
-      './helpers/multicam-longform-gate-world.mjs'
-    )
-    const { acquireGateFixtureLease } = await import('./helpers/gate-fixture-lease.mjs')
+    const { buildGateWorld } = await import('./helpers/synth-pg-gate-world.mjs')
     // The four breakages below write real aggregates: no hash is invented, so
     // every hash the gate re-derives afterwards is the hash the product
     // computes over the doctored body. Three go through their domain factory.
@@ -317,58 +314,39 @@ test(
     )
 
     const client = new PrismaClient()
-    const A = 'f4016-journey-workspace-a'
-    const B = 'f4016-journey-workspace-b'
-    const PROJECT_A = 'f4016-journey-project-a'
-    const PROJECT_B = 'f4016-journey-project-b'
-    const VERSION_A = 'f4016-journey-version-a'
-    const OWNER_A = 'f4016-journey-owner-a'
-    const OWNER_B = 'f4016-journey-owner-b'
-    // `buildGateWorld` writes fixed fixture ids — media artifacts among them,
-    // and `media_artifacts.id` is unique across the whole database rather than
-    // per workspace. A crashed run of THIS suite or of
-    // `multicam-longform-gate.e2e.mjs` therefore blocks the next seed, so the
-    // cleanup takes back both worlds. Today the two are separate, sequential
-    // CI steps — but nothing in the workflow enforces that, and a suite that
-    // empties another suite's live fixture mid-flight fails as a domain bug.
-    // The lease below makes the second runner WAIT instead, so the sentence
-    // "they never run at once" is now true because something makes it true.
-    const WORKSPACES = [A, B, 'f4016-workspace-a', 'f4016-workspace-b']
-
-    const clean = () => cleanGateWorld({ client, workspaceIds: WORKSPACES })
-    const lease = await acquireGateFixtureLease()
+    // Sealed rows are append-only, so nothing here is deleted and nothing is shared: every identity this journey and its
+    // world write carries RUN. CI runs the journey twice in one database (the integration step and the s3 step), and a
+    // second run has to find the first one's rows untouched and none of its own ids taken.
+    const RUN = randomUUID().replaceAll('-', '').slice(0, 10)
+    const A = `f4016-journey-workspace-a-${RUN}`
+    const B = `f4016-journey-workspace-b-${RUN}`
+    const OWNER_A = `f4016-journey-owner-a-${RUN}`
+    const OWNER_B = `f4016-journey-owner-b-${RUN}`
     const objectStore = await openJourneyObjectStore()
 
     t.after(async () => {
-      // Reported, not rethrown: a cleanup failure that masks the assertion
-      // turns one clear defect into two confusing ones.
-      try {
-        await clean()
-      } catch (error) {
-        console.error('cleanup failed:', error?.message ?? error)
-      }
       await closeJourneyObjectStore(objectStore).catch((error) => {
         console.error('object storage cleanup failed:', error?.message ?? error)
       })
       await client.$disconnect()
-      await lease.release()
     })
 
-    await clean()
     const world = await buildGateWorld({
       client,
+      run: RUN,
       workspaceId: A,
-      projectId: PROJECT_A,
-      versionId: VERSION_A,
       clientId: OWNER_A,
       otherWorkspaceId: B,
-      otherProjectId: PROJECT_B,
       otherClientId: OWNER_B,
       // The two renderable plans are NOT seeded. Section 0 below writes them
       // through the published routes, which is the only way this journey can
       // claim the gate is reachable from outside a test.
       renderablePlans: 'omit',
     })
+    // The projects are born through the creation Command and one explicit output variant; their ids and the head
+    // Version come back from the world.
+    const PROJECT_A = world.projectId
+    const VERSION_A = world.versionId
 
     // The credentials the journey actually authenticates with. They are issued
     // after the world is built because building it starts by emptying the
@@ -620,7 +598,7 @@ test(
       'the replay wrote a third row; only section 0 and the approval may have written',
     )
 
-    const mismatch = await evaluate(bearerA, approvedKey, { sessionId: 'f4016-session-podcast' })
+    const mismatch = await evaluate(bearerA, approvedKey, { sessionId: world.ids.podcastSession })
     assert.equal(mismatch.status, 409, mismatch.text)
     assert.equal(mismatch.payload.error.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
 

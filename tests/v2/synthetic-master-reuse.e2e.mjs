@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile, execFileSync, spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import http from 'node:http'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -12,17 +12,25 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { createProjectWithVariant } from './helpers/explicit-project-http.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
 const execFileAsync = promisify(execFile)
 
-const workspaceId = 'master-reuse-e2e-workspace'
-const foreignWorkspaceId = 'master-reuse-e2e-foreign'
-const clientId = 'master-reuse-e2e-client'
-const foreignClientId = 'master-reuse-e2e-foreign-client'
-const providerJobId = 'master-reuse-provider-job'
+// Sealed rows are append-only and nothing here deletes them: every identity carries this invocation's RUN, so the journey
+// can run again (and beside other suites) in one database.
+const RUN = randomUUID().replaceAll('-', '').slice(0, 10)
+const workspaceId = `master-reuse-e2e-workspace-${RUN}`
+const foreignWorkspaceId = `master-reuse-e2e-foreign-${RUN}`
+const clientId = `master-reuse-e2e-client-${RUN}`
+const foreignClientId = `master-reuse-e2e-foreign-client-${RUN}`
+const providerJobId = `master-reuse-provider-job-${RUN}`
+const reuseBlockId = `master-reuse-block-${RUN}`
+const reusePlanId = `master-reuse-plan-${RUN}`
+const reusePlanVersionId = `master-reuse-plan-v1-${RUN}`
+const segmentBlockIds = [`block-1-${RUN}`, `block-2-${RUN}`]
 const hash = (character) => character.repeat(64)
 const at = (second) => new Date(Date.parse('2029-06-01T00:00:00.000Z') + second * 1_000).toISOString()
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -183,20 +191,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
   let serverLogs = ''
   let primaryError
 
-  const cleanupWorkspace = async (id) => {
-    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId: id }, data: { currentVersionId: null } })
-    await client.v2MediaArtifact.updateMany({
-      where: { workspaceId: id },
-      data: { currentRightsSnapshotId: null, rightsRevision: 0 },
-    })
-  }
-  const cleanup = async () => {
-    await cleanupWorkspace(workspaceId)
-    await cleanupWorkspace(foreignWorkspaceId)
-  }
-
   try {
-    await cleanup()
     await mkdir(artifactRoot, { recursive: true })
     await mkdir(workRoot, { recursive: true })
 
@@ -243,10 +238,10 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       'output-speech-evidence': { key: `workspaces/${workspaceId}/masters/output-speech-evidence.json`, mediaType: 'data', container: 'json' },
     }
     const artifactIds = {
-      'provider-original': 'master-reuse-original',
-      'final-audio': 'master-reuse-audio',
-      alignment: 'master-reuse-alignment',
-      'output-speech-evidence': 'master-reuse-output-speech-evidence',
+      'provider-original': `master-reuse-original-${RUN}`,
+      'final-audio': `master-reuse-audio-${RUN}`,
+      alignment: `master-reuse-alignment-${RUN}`,
+      'output-speech-evidence': `master-reuse-output-speech-evidence-${RUN}`,
     }
     const scriptText = 'Primeira ideia do roteiro. Segunda ideia bem forte.'
     const alignmentWords = [
@@ -344,11 +339,10 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const auditContext = materializeActorAuditContext(actor)
 
     let entity = 0
-    let event = 0
     const projectA = await createProjectService({
       repository: new PrismaCreationOutputBundleRepositoryV2(client), clock: () => new Date(at(0)),
-      createId: (kind) => `${kind}-master-reuse-${++entity}`,
-      createEventId: () => `00000000-0000-4000-8000-${String(710_000 + ++event).padStart(12, '0')}`,
+      createId: (kind) => `${kind}-master-reuse-${RUN}-${++entity}`,
+      createEventId: randomUUID,
     })({
       workspaceId, name: 'Projeto A', objective: 'awareness', actor,
       idempotencyKey: 'master-reuse-project-a',
@@ -357,6 +351,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const projectVersionId = projectA.creationVersion.id
 
     // 2. Catalogued artifacts, cleared rights and the presenter consent.
+    const consentEvidenceId = `master-reuse-consent-evidence-${RUN}`
     for (const [role, file] of Object.entries(roleFiles)) {
       await client.v2MediaArtifact.create({
         data: {
@@ -368,14 +363,14 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     }
     await client.v2MediaArtifact.create({
       data: {
-        id: 'master-reuse-consent-evidence', workspaceId, artifactKey: `workspaces/${workspaceId}/masters/consent.json`,
+        id: consentEvidenceId, workspaceId, artifactKey: `workspaces/${workspaceId}/masters/consent.json`,
         sha256: hash('e'), byteSize: 512n, mediaType: 'data', container: 'json', status: 'available', createdAt: new Date(at(0)),
       },
     })
     const setRights = setAssetRightsService({
       repository: new PrismaAssetRightsRepository(client),
       clock: () => new Date(at(0)),
-      createId: () => `master-reuse-rights-${++entity}`,
+      createId: () => `master-reuse-rights-${RUN}-${++entity}`,
     })
     const rightsDecisions = []
     for (const role of Object.keys(roleFiles)) {
@@ -400,12 +395,12 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       artifacts: new PrismaMediaArtifactRepository(client),
       clock: () => new Date(at(0)),
     })({
-      workspaceId, profileId: 'master-reuse-presenter', version: 1, actorIdentityId: 'master-reuse-identity',
+      workspaceId, profileId: `master-reuse-presenter-${RUN}`, version: 1, actorIdentityId: 'master-reuse-identity',
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_reuse' },
       voice: { id: 'voice_reuse', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
-        id: 'master-reuse-consent-v1', evidenceArtifactId: 'master-reuse-consent-evidence', granted: true,
+        id: `master-reuse-consent-v1-${RUN}`, evidenceArtifactId: consentEvidenceId, granted: true,
         allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
         allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
       },
@@ -413,7 +408,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     })
     const profileSnapshotId = profile.profile.profileSnapshotId
     const audioMaster = createSyntheticAudioMaster({
-      id: 'master-reuse-audio-master', workspaceId, projectId, projectVersionId, profileSnapshotId,
+      id: `master-reuse-audio-master-${RUN}`, workspaceId, projectId, projectVersionId, profileSnapshotId,
       source: { kind: 'uploaded' },
       audio: { artifactId: artifactIds['final-audio'], artifactSha256: bytes['final-audio'].sha256, durationMs: 4_000, locale: 'pt-BR' },
       alignmentEvidence: { artifactId: artifactIds.alignment, artifactSha256: bytes.alignment.sha256 },
@@ -462,7 +457,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     for (const [resultRole, masterRole] of Object.entries(resultRoles)) {
       await client.v2ProviderResultArtifact.create({
         data: {
-          id: `master-reuse-result-${masterRole}`, workspaceId, projectId, jobId: providerJobId,
+          id: `master-reuse-result-${RUN}-${masterRole}`, workspaceId, projectId, jobId: providerJobId,
           schemaVersion: 'provider-result-artifact/v1', role: resultRole, providerJobRef: 'heygen_job_reuse',
           artifactId: artifactIds[masterRole], artifactSha256: bytes[masterRole].sha256,
           byteSize: BigInt(bytes[masterRole].byteSize),
@@ -481,17 +476,17 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     //     approval or the promotion below fails closed.
     await client.v2SyntheticScriptPlan.create({
       data: {
-        id: 'master-reuse-plan', workspaceId, projectId, schemaVersion: 'synthetic-script-plan/v1',
+        id: reusePlanId, workspaceId, projectId, schemaVersion: 'synthetic-script-plan/v1',
         requestFingerprint: hash('1'), idempotencyKey: 'master-reuse-plan-key', createdByClientId: clientId,
         actorContextHash: auditContext.contextHash, createdAt: new Date(at(0)), updatedAt: new Date(at(0)),
       },
     })
     await client.v2SyntheticScriptPlanVersion.create({
       data: {
-        id: 'master-reuse-plan-v1', planId: 'master-reuse-plan', workspaceId, projectId, sequence: 1,
+        id: reusePlanVersionId, planId: reusePlanId, workspaceId, projectId, sequence: 1,
         projectVersionId, profileSnapshotId, schemaVersion: 'synthetic-script-plan-version/v1',
         locale: 'pt-BR', segmentationVersion: 'synthetic-script-segmentation/v1',
-        scriptHash: hash('2'), commandType: 'create-plan', blockSequenceJson: '["master-reuse-block"]',
+        scriptHash: hash('2'), commandType: 'create-plan', blockSequenceJson: JSON.stringify([reuseBlockId]),
         impactJson: '{}', commandImpactHash: hash('3'), planVersionHash: hash('4'),
         requestFingerprint: hash('1'), idempotencyKey: 'master-reuse-plan-version-key',
         createdByClientId: clientId, actorContextHash: auditContext.contextHash, createdAt: new Date(at(0)),
@@ -499,10 +494,10 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     })
     await client.v2SyntheticScriptBlock.create({
       data: {
-        id: 'master-reuse-block', workspaceId, projectId, planId: 'master-reuse-plan',
+        id: reuseBlockId, workspaceId, projectId, planId: reusePlanId,
         schemaVersion: 'synthetic-script-block/v1', exactText: 'Primeira ideia do roteiro.',
         normalizedTextHash: hash('5'), locale: 'pt-BR', occurrence: 1,
-        createdInVersionId: 'master-reuse-plan-v1', originKind: 'initial-segmentation',
+        createdInVersionId: reusePlanVersionId, originKind: 'initial-segmentation',
         blockHash: hash('6'), createdAt: new Date(at(0)),
       },
     })
@@ -533,7 +528,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     })
     const criticVerdict = await new PrismaSyntheticCriticReportRepository(client).record({
       report: createSyntheticCriticReport({
-        id: 'master-reuse-critic-report', workspaceId, projectId, blockId: 'master-reuse-block',
+        id: `master-reuse-critic-report-${RUN}`, workspaceId, projectId, blockId: reuseBlockId,
         providerJobId,
         capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         artifactId: artifactIds['provider-original'], artifactSha256: bytes['provider-original'].sha256,
@@ -549,7 +544,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
         evaluationContextHash: calculateCanonicalHash({
           fixture: 'master-reuse-evaluation-context/v1',
           workspaceId, projectId, providerJobId,
-          blockId: 'master-reuse-block', artifactId: artifactIds['provider-original'],
+          blockId: reuseBlockId, artifactId: artifactIds['provider-original'],
           artifactSha256: bytes['provider-original'].sha256,
         }),
         evaluators: [
@@ -592,7 +587,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
         audioMasterHash: audioMaster.masterHash,
         audioRange,
         criticBinding: {
-          blockId: 'master-reuse-block', scriptText, scriptHash, profileSnapshotId,
+          blockId: reuseBlockId, scriptText, scriptHash, profileSnapshotId,
           expectedDurationMs: 4_000, alignmentArtifactId: artifactIds.alignment,
           use: 'ads', market: 'BRA', locale: 'pt-BR',
         },
@@ -678,8 +673,8 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
         duration: Number(originalProbe.format.duration), fps: rateNumerator / rateDenominator },
     })
     await new PrismaMediaArtifactRepository(client).persistOrReplay({
-      workspaceId, artifactId: artifactIds['provider-original'], manifestId: 'master-reuse-original-manifest',
-      lineageIds: ['master-reuse-original-audio-lineage'], manifest: originalManifest, createdAt: at(7),
+      workspaceId, artifactId: artifactIds['provider-original'], manifestId: `master-reuse-original-manifest-${RUN}`,
+      lineageIds: [`master-reuse-original-audio-lineage-${RUN}`], manifest: originalManifest, createdAt: at(7),
     })
 
     // 4. A loopback provider boundary nothing in this journey may touch. Every
@@ -831,8 +826,8 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const catalogued = await catalogSegments({
       workspaceId, masterId, actor,
       blocks: [
-        { blockId: 'block-1', exactText: 'Primeira ideia do roteiro.', occurrence: 1 },
-        { blockId: 'block-2', exactText: 'Segunda ideia bem forte.', occurrence: 1 },
+        { blockId: segmentBlockIds[0], exactText: 'Primeira ideia do roteiro.', occurrence: 1 },
+        { blockId: segmentBlockIds[1], exactText: 'Segunda ideia bem forte.', occurrence: 1 },
       ],
     })
     assert.equal(catalogued.replayed, false)
@@ -860,7 +855,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       assert.equal(segment.audioArtifactId, artifactIds['final-audio'])
       assert.equal(segment.videoArtifactId, artifactIds['provider-original'])
       assert.equal(segment.alignmentArtifactId, artifactIds.alignment)
-      assert.equal(segment.identity.profileId, 'master-reuse-presenter')
+      assert.equal(segment.identity.profileId, `master-reuse-presenter-${RUN}`)
       assert.equal(segment.identity.profileVersion, 1)
       assert.equal(segment.identity.voiceId, 'voice_reuse')
       assert.equal(segment.identity.avatarIdentityRef, 'avatar_reuse')
@@ -878,7 +873,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const runGate = runSyntheticPhaseGateService({
       repository: gateRepository,
       clock: () => new Date(at(8)),
-      createId: () => 'master-reuse-phase-gate',
+      createId: () => `master-reuse-phase-gate-${RUN}`,
     })
     const gateRequest = {
       workspaceId,
@@ -933,7 +928,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       const tamperedGate = await runSyntheticPhaseGateService({
         repository: gateRepository,
         clock: () => new Date(at(9)),
-        createId: () => 'master-reuse-phase-gate-tampered',
+        createId: () => `master-reuse-phase-gate-tampered-${RUN}`,
       })({ ...gateRequest, idempotencyKey: 'master-reuse-phase-gate-tampered-key' })
       assert.equal(tamperedGate.gate.report.approved, false)
       assert.ok(tamperedGate.gate.report.missing.includes('F3-GATE-002'))
@@ -967,12 +962,18 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     assert.equal(mastersBefore, 1)
     assert.equal(segmentsBefore, 2)
 
-    const createdB = await api('POST', '/v1/projects', {
+    // 6.0.0 creation: the body has no `format`; the 9:16 output is an explicit variant created on the creation Version.
+    const postData = async (path, body, key) => {
+      const response = await api('POST', path, { key, payload: body })
+      assert.ok(response.status >= 200 && response.status < 300, `${path} answered ${response.status}: ${JSON.stringify(response.payload)}`)
+      return response.payload.data
+    }
+    const projectB = await createProjectWithVariant(postData, {
+      project: { name: 'Projeto B', objective: 'awareness' },
+      aspectRatio: '9:16',
       key: 'master-reuse-project-b',
-      payload: { name: 'Projeto B', objective: 'awareness', format: '9:16' },
     })
-    assert.equal(createdB.status, 201, JSON.stringify(createdB.payload))
-    const projectBId = createdB.payload.data.project.id
+    const projectBId = projectB.projectId
     assert.notEqual(projectBId, projectId)
 
     // The workspace catalog answers project B with project A's segment.
@@ -1065,7 +1066,6 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     for (const teardown of [
       () => stopChild(server),
       () => closeHttpServer(stub),
-      () => cleanup(),
       () => client.$disconnect(),
       () => rm(root, { recursive: true, force: true }),
     ]) {
