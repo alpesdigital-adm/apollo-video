@@ -253,7 +253,7 @@ export async function runDashboardRuntimeJourney(input) {
   const { client, baseUrl, authorization, workspaceId, projectId, projectVersionId,
     projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId, sourceSha256,
     sourceByteSize, sourceManifest, sourcePath, sourceColorProbe, artifactRoot, uiUsername, uiPassword, suffix, signal, mechanicalSeed,
-    observeOwnedServer, observeHttpConnections, selectHttpWorkspacePath } = input
+    ingestOperationId, observeOwnedServer, observeHttpConnections, selectHttpWorkspacePath } = input
   assert.equal(typeof observeOwnedServer, 'function', 'Owned test server lifecycle observer is required')
   const directory = process.env.APOLLO_DASHBOARD_RUNTIME_EVIDENCE_ROOT
   assert.ok(directory && isAbsolute(directory), 'Runtime evidence requires an absolute external directory')
@@ -265,10 +265,13 @@ export async function runDashboardRuntimeJourney(input) {
     proofScope: 'runtime-proxy-and-negative-final-admission', editorialAcceptance: false, faceSafety: 'unknown',
     storedQualityStatus: 'review-required',
     controlledInputs: ['FFmpeg synthetic source bytes', 'aligned transcript', 'initial compiled timeline',
-      'source rights', 'source color probe', 'separate seeded blocked review project', 'test-only rejected final approval claim'],
+      'source rights', 'source color probe', 'separate seeded blocked review project', 'test-only rejected final approval claim',
+      'separate seeded editorial source project (ingest-compiled plan, no Director)', 'separate seeded isolated Director project for failure/recovery'],
     runtimeProduced: ['public project and proxy admission', 'Director service snapshots/Command/impact/decision log',
       'real main-project proxy worker review', 'public final rejection and PostgreSQL rejection of a controlled approval claim',
-      'PostgreSQL states/events/artifacts', 'public retry and version fences'],
+      'PostgreSQL states/events/artifacts', 'public retry and version fences',
+      'public copy refusal (428 copy-requires-editorial-cut) and configuration Commands on copies',
+      'public editorial cut of a copy, its queued proxy render, worker review and annotation'],
     pendingProofs: ['W35 positive final admission with authoritative approved DirectorRun and ready proxy review',
       'W35 real final worker, rendering-final/completed GUI, final MP4 and final replay'],
     governancePolicy: { anomalyRequestMinimum: 400, scope: 'owned E2E server only', productionDefaultChanged: false },
@@ -720,7 +723,8 @@ export async function runDashboardRuntimeJourney(input) {
       return workspace?.workspaceVersionPresent ? [...requiredPaths, prefix + '/synthetic-phase-gates', '/v1/capabilities'] : requiredPaths
     } })
   }
-  const post = async (path, body, key, expected) => {
+  // The whole envelope: `data` on success, `error` on a refusal the caller expects (post keeps returning only `data`).
+  const postEnvelope = async (path, body, key, expected) => {
     const response = await fetch(`${baseUrl}${path}`, { method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30000) })
@@ -743,8 +747,9 @@ export async function runDashboardRuntimeJourney(input) {
     diagnostic.bodyKind = 'json'
     assert.equal(response.status, expected, JSON.stringify({ ...diagnostic, expected,
       apiErrorCode: /^[A-Z][A-Z0-9_]+$/.test(payload?.error?.code ?? '') ? payload.error.code : null }))
-    return payload.data
+    return payload
   }
+  const post = async (...args) => (await postEnvelope(...args)).data
   const annotationScreenshot = async (artifact, name) => {
     const path = join(artifactRoot, ...artifact.artifactKey.split('/'))
     const framePath = join(directory, `${name}.png`)
@@ -1065,7 +1070,7 @@ export async function runDashboardRuntimeJourney(input) {
     } else await attachCdp(pipelinePage)
     markBrowserPage(pipelinePage, 'pipeline-bootstrap', 'pipeline')
     pipeline = await createDashboardPipelineObserver({ page: pipelinePage, client, baseUrl, workspaceId, evidenceDir: directory })
-    const observe = async ({ stage, id = projectId, operationId, operationStatus, status, phase, completed, eventTypes = [],
+    const observe = async ({ stage, id = projectId, operationId, ingestOperationId: observedIngestId, operationStatus, status, phase, completed, eventTypes = [],
       origin = 'public-api+postgres+factory-worker', seededStatus = false }) => {
       const row = await client.v2Project.findUniqueOrThrow({ where: { id } })
       assert.equal(row.status, status, `${stage}: authoritative project status`)
@@ -1086,6 +1091,13 @@ export async function runDashboardRuntimeJourney(input) {
         assert.equal(projected.dashboard.latestOperation.status, operation.status)
         assert.equal(projected.dashboard.latestOperation.phase, phase)
         assert.deepEqual(projected.dashboard.latestOperation.progress, { completed, total: 4, unit: 'render' })
+      } else if (observedIngestId) {
+        // A source-only project is one whose ingest finished: the media-ingest operation that left its receipt is its latest.
+        const ingest = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: observedIngestId } })
+        assert.equal(ingest.type, 'media-ingest'); assert.equal(ingest.status, 'succeeded')
+        assert.equal(projected.dashboard.latestOperation.id, observedIngestId)
+        assert.equal(projected.dashboard.latestOperation.type, 'media-ingest')
+        assert.equal(projected.dashboard.latestOperation.status, 'succeeded')
       }
       if (eventTypes.length) {
         markBrowserPage(pipelinePage, stage, 'pipeline')
@@ -1117,7 +1129,10 @@ export async function runDashboardRuntimeJourney(input) {
         assert.equal(await action.isEnabled(), true)
         const bar = card.getByRole('progressbar')
         if (operation) assert.equal(await bar.getAttribute('aria-valuenow'), String(completed * 25))
-        else assert.equal(await bar.count(), 0)
+        else if (observedIngestId) {
+          const ingestProgress = projected.dashboard.latestOperation.progress
+          assert.equal(await bar.getAttribute('aria-valuenow'), String(Math.round(100 * ingestProgress.completed / ingestProgress.total)))
+        } else assert.equal(await bar.count(), 0)
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
         const name = `w35-${stage}-${layout}.png`; await page.screenshot({ path: join(directory, name), fullPage: true })
         evidence.screenshots.push({ name, sha256: sha256(await readFile(join(directory, name))) })
@@ -1235,14 +1250,20 @@ export async function runDashboardRuntimeJourney(input) {
         throw error
       }
     }
-    await observe({ stage: 'draft', status: 'draft' })
+    await observe({ stage: 'draft', status: 'draft', ingestOperationId })
     const draftReviewRequests = evidence.browserRequests.filter((record) => record.method === 'GET' &&
       [`/v1/projects/${projectId}/annotations`, `/v1/projects/${projectId}/proxy-reviews`].includes(record.path))
-    assert.deepEqual(draftReviewRequests, [], 'Source-only draft must not request unavailable annotations or proxy reports')
-    evidence.reviewAvailabilityProof = { projectId, draftRequests: 0, origin: 'browser-request-ledger', afterWorker: 'pending' }
+    // An ingested source always carries its editing proxy, which is what the annotation session previews; no proxy report exists
+    // until a proxy render is reviewed. The page asks for exactly what the published availability says is there, and for nothing else.
+    const draftWorkspace = await readPublicWorkspace(projectId, 'draft-review-availability')
+    assert.equal(draftWorkspace.reviewAvailability.proxyReview.state, 'unavailable')
+    assert.equal(draftWorkspace.reviewAvailability.annotations.state, 'available')
+    assert.deepEqual(draftReviewRequests.map((record) => record.path).sort(), [`/v1/projects/${projectId}/annotations`],
+      'The ingested draft requests the annotation session its editing proxy makes available, and no unavailable proxy report')
+    evidence.reviewAvailabilityProof = { projectId, draftRequests: draftReviewRequests.length, origin: 'browser-request-ledger', afterWorker: 'pending' }
     await proveShellNavigation()
-    const created = await post('/v1/projects', { name: 'Runtime event creation', objective: 'discovery', format: '9:16' }, `runtime-event-create-${suffix}`, 201)
-    await pipeline.observe({ stage: 'created', projectId: created.project.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
+    const created = await post('/v1/projects', { name: 'Runtime event creation', objective: 'discovery' }, `runtime-event-create-${suffix}`, 201)
+    await pipeline.observe({ stage: 'created', projectId: created.projectAtCreation.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
     prototype.claimNext = async function (...args) {
       const result = await originals.claimNext.apply(this, args)
       if (result && activeObserver) {
@@ -1320,6 +1341,17 @@ export async function runDashboardRuntimeJourney(input) {
       proxyHash: proxyArtifact.sha256, frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
       screenshotRef: await annotationScreenshot(proxyArtifact, 'annotation-main-frame-0'), text: 'Controlled runtime inspection; preserve framing.' }, `runtime-annotation-${suffix}`, 201)
     await pipeline.observe({ stage: 'annotation', projectId, annotationId: annotation.annotation.id, expectedEventTypes: ['annotation.created'], expectedState: 'revising' })
+    // A copy (fork) of the project references every artifact it links, the rendered proxy included, and each needs current rights that
+    // allow the editing use: the proxy render stores its output without a grant, so the owner grants it, exactly as for the master.
+    {
+      const { setAssetRightsService } = await import('../../../src/v2/application/set-asset-rights.ts')
+      const { assetRightsRevision } = await import('../../../src/v2/domain/asset-rights.ts')
+      await setAssetRightsService({ repository: new PrismaAssetRightsRepository(client), clock: () => new Date(), createId: () => `runtime-proxy-rights-${suffix}` })({
+        workspaceId, artifactId: proxyArtifact.id, baseRevision: assetRightsRevision(proxyArtifact.id, 0),
+        draft: { status: 'approved', allowedUses: ['editing', 'rendering', 'editorial-reuse'], prohibitedUses: [], allowedLocales: ['pt-BR'],
+          consent: { status: 'not-required', allowedUses: [] }, sourceNote: 'Controlled rendered proxy of the runtime journey' },
+        actor: { type: 'api-client', id: actor.clientId } })
+    }
     const copy = await post(`/v1/projects/${projectId}/duplicates`, { expectedVersionId: projectVersionId,
       expectedVersionHash: projectVersionHash, name: 'Runtime isolated failure' }, `runtime-copy-${suffix}`, 201)
     await pipeline.observe({ stage: 'copy', projectId: copy.project.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
@@ -1566,22 +1598,140 @@ export async function runDashboardRuntimeJourney(input) {
         sha256: artifact.sha256, byteSize: bytes.length, name, probe, fullDecode: true })
     }
     activeObserver = null
-    const compilation = JSON.parse((await client.v2ColorPipelineCompilation.findFirstOrThrow({ where: { workspaceId, projectId } })).compilationJson)
-    const copyCompilationBody = {
-      sourceArtifactId: compilation.sourceArtifactId, sourceManifestId: compilation.sourceManifestId,
-      outputMetadata: compilation.pipeline.outputMetadata,
-      stages: compilation.pipeline.stages.map(({ id, kind, version, enabled, output, implementation, lut }) =>
+    // A copy of a project with content is a Creation fork. It takes the configuration Commands (they commit and render nothing) but
+    // has no authority to render until an editorial cut binds the fork's observations to it; every render is refused with the reason.
+    const colorBodyFor = (artifactId, manifestId) => ({
+      sourceArtifactId: artifactId, sourceManifestId: manifestId,
+      outputMetadata: principalCompilation.pipeline.outputMetadata,
+      stages: principalCompilation.pipeline.stages.map(({ id, kind, version, enabled, output, implementation, lut }) =>
         ({ id, kind, version, enabled, output, implementation, ...(lut ? { lut } : {}) })),
+    })
+    const proxyRenderOperations = async (id) => ({
+      public: await client.v2PublicOperation.count({ where: { workspaceId, projectId: id, type: 'project-proxy-render' } }),
+      details: await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId, projectId: id } }),
+    })
+    const refuseCopyRender = async (stageName, copyProjectId, key) => {
+      const refused = await postEnvelope(`/v1/projects/${copyProjectId}/proxy-renders`, undefined, key, 428)
+      assert.equal(refused.error.code, 'PRECONDITION_REQUIRED')
+      assert.deepEqual(refused.error.details, { reason: 'copy-requires-editorial-cut' })
+      assert.deepEqual(await proxyRenderOperations(copyProjectId), { public: 0, details: 0 }, `${stageName}: the refusal left no render operation behind`)
+      assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copyProjectId } })).status, 'draft')
+      evidence.states.push({ stage: stageName, projectId: copyProjectId, status: 'draft', httpStatus: 428, errorCode: refused.error.code,
+        reason: refused.error.details.reason, proxyRenderOperations: 0, origin: 'public-api+postgres' })
     }
-    assert.deepEqual(parseCreateColorPipelineCompilationBody(copyCompilationBody), copyCompilationBody)
-    await post(`/v1/projects/${copy.project.id}/color-pipeline-compilations`, copyCompilationBody, `runtime-copy-color-${suffix}`, 201)
-    const selected = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
-      baseVersionId: copy.version.id, baseHash: copy.version.baseHash, selection: { mode: 'none' },
+    const configureCopy = async (label, copyProjectId, copyVersion, colorBody, keys) => {
+      assert.deepEqual(parseCreateColorPipelineCompilationBody(colorBody), colorBody)
+      await refuseCopyRender(`${label}-render-refused`, copyProjectId, keys.refusal)
+      await post(`/v1/projects/${copyProjectId}/color-pipeline-compilations`, colorBody, keys.color, 201)
+      const configured = await post(`/v1/projects/${copyProjectId}/lut-selection`, {
+        baseVersionId: copyVersion.id, baseHash: copyVersion.baseHash, selection: { mode: 'none' },
+        reason: 'Configuration of a copy before its editorial cut.',
+      }, keys.lut, 201)
+      assert.equal(configured.version.sequence, 2)
+      assert.equal(configured.version.parentVersionId, copyVersion.id)
+      assert.equal(Object.hasOwn(configured, 'operation'), false, 'A copy without an editorial cut answers the LUT selection without a render operation')
+      assert.deepEqual(await proxyRenderOperations(copyProjectId), { public: 0, details: 0 }, `${label}: configuring the copy enqueued no render`)
+      const configuredRow = await client.v2Project.findUniqueOrThrow({ where: { id: copyProjectId } })
+      assert.equal(configuredRow.status, 'draft'); assert.equal(configuredRow.currentVersionId, configured.version.id)
+      evidence.states.push({ stage: `${label}-configured`, projectId: copyProjectId, status: configuredRow.status, versionId: configured.version.id,
+        versionSequence: configured.version.sequence, operation: null, proxyRenderOperations: 0, origin: 'public-api+postgres' })
+      // Configured is still a copy: the render stays refused for the same reason.
+      await refuseCopyRender(`${label}-render-refused-after-configuration`, copyProjectId, keys.refusalAfter)
+      return configured
+    }
+
+    // 1. The copy of the MAIN project: its plan came from the Director, so it can be configured but never cut or rendered.
+    const copyConfigured = await configureCopy('copy', copy.project.id, copy.version, colorBodyFor(sourceArtifactId, sourceManifestId), {
+      refusal: `runtime-copy-render-refused-${suffix}`, color: `runtime-copy-color-${suffix}`, lut: `runtime-copy-lut-${suffix}`,
+      refusalAfter: `runtime-copy-render-refused-after-${suffix}` })
+    assert.equal(copyConfigured.version.parentVersionId, copy.version.id)
+
+    // 2. The honest path: an ingest-compiled project (no Director) is copied, configured, and then cut. The cut gives the copy its authority.
+    const editorial = await seedDashboardControlledExportFixture({ client, workspaceId, actor, artifactRoot, suffix: `${suffix}-edit`,
+      sourceArtifactId, sourceManifestId, sourcePath, sourceManifest, signal, ...mechanicalSeed,
+      editorialSource: true, projectName: 'Runtime editorial source' })
+    evidence.editorialSourceFixture = editorial.receipt
+    const editorialCopy = await post(`/v1/projects/${editorial.projectId}/duplicates`, { expectedVersionId: editorial.projectVersionId,
+      expectedVersionHash: editorial.projectVersionHash, name: 'Runtime editorial copy' }, `runtime-edit-copy-${suffix}`, 201)
+    assert.equal(editorialCopy.project.duplicatedFromProjectId, editorial.projectId)
+    assert.equal(editorialCopy.version.sequence, 1)
+    await pipeline.observe({ stage: 'edit-copy', projectId: editorialCopy.project.id, expectedEventTypes: ['project.created'], expectedState: 'draft' })
+    const editorialConfigured = await configureCopy('edit-copy', editorialCopy.project.id, editorialCopy.version,
+      colorBodyFor(editorial.sourceArtifactId, editorial.sourceManifestId), {
+        refusal: `runtime-edit-render-refused-${suffix}`, color: `runtime-edit-color-${suffix}`, lut: `runtime-edit-lut-${suffix}`,
+        refusalAfter: `runtime-edit-render-refused-after-${suffix}` })
+    const editorialStates = await client.v2ProjectOutputState.findMany({
+      where: { workspaceId, projectId: editorialCopy.project.id, resultVersionId: editorialCopy.version.id }, include: { entries: true } })
+    assert.equal(editorialStates.length, 1); assert.equal(editorialStates[0].entries.length, 1)
+    const cutVariantId = editorialStates[0].entries[0].variantId
+    assert.notEqual(cutVariantId, editorial.variantId, 'The copy has its own stable variant identity')
+    const cut = await post(`/v1/projects/${editorialCopy.project.id}/commands`, { type: 'remove-spoken-content',
+      baseVersionId: editorialConfigured.version.id, baseHash: editorialConfigured.version.baseHash,
+      sourceTranscriptId: editorial.transcriptId, variantId: cutVariantId,
+      rules: [{ id: 'ao', label: 'ao', alternatives: ['ao'] }], reason: 'Editorial cut of a configured copy.' }, `runtime-edit-cut-${suffix}`, 201)
+    assert.equal(cut.command.type, 'remove-spoken-content')
+    assert.equal(cut.command.baseVersionId, editorialConfigured.version.id)
+    assert.equal(cut.version.sequence, 3); assert.equal(cut.version.parentVersionId, editorialConfigured.version.id)
+    assert.equal(cut.editorial.sourceTranscriptId, editorial.transcriptId)
+    assert.deepEqual(cut.editorial.exclusions.map((range) => range.ruleIds), [['ao']])
+    assert.equal(cut.editorial.retainedSourceRanges.length, 2)
+    assert.equal(cut.operation.status, 'queued', 'The cut admits the render the copy could not have before it')
+    const cutOperation = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: cut.operation.id } })
+    assert.equal(cutOperation.type, 'project-proxy-render'); assert.equal(cutOperation.projectId, editorialCopy.project.id)
+    assert.equal(cutOperation.status, 'queued')
+    assert.equal((await client.v2ProjectProxyRenderOperation.findUniqueOrThrow({ where: { operationId: cut.operation.id } })).projectVersionId, cut.version.id)
+    const cutProject = await client.v2Project.findUniqueOrThrow({ where: { id: editorialCopy.project.id } })
+    assert.equal(cutProject.currentVersionId, cut.version.id); assert.equal(cutProject.status, 'rendering-proxy')
+    // The source project is not touched by what happens to its copy.
+    const editorialSourceRow = await client.v2Project.findUniqueOrThrow({ where: { id: editorial.projectId } })
+    assert.equal(editorialSourceRow.currentVersionId, editorial.projectVersionId)
+    evidence.states.push({ stage: 'edit-cut-queued', projectId: editorialCopy.project.id, status: cutProject.status, operationId: cut.operation.id,
+      versionId: cut.version.id, versionSequence: cut.version.sequence, retainedSourceRanges: cut.editorial.retainedSourceRanges,
+      exclusionRuleIds: cut.editorial.exclusions.map((range) => range.ruleIds), origin: 'public-api+postgres' })
+    const cutWorker = await proxyWorker(`runtime-edit-cut-worker-${suffix}`, { workspaceId, operationId: cut.operation.id, signal })
+    const cutRow = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: cut.operation.id },
+      select: { status: true, phase: true, attempt: true, errorCode: true, errorMessage: true } })
+    assert.deepEqual(cutWorker, { operationId: cut.operation.id, status: 'succeeded' },
+      JSON.stringify({ ...cutRow, errorMessage: cutRow.errorMessage?.slice(0, 800) ?? null }))
+    const cutReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: cut.operation.id } })
+    assert.equal(cutReview.projectId, editorialCopy.project.id); assert.equal(cutReview.projectVersionId, cut.version.id)
+    // The product rule (proxy-review-repository): a blocked review sends the project to revising; any other review waits for the
+    // operator in reviewing-proxy. The cut copy has no Director quality report, so which one it gets is read, not assumed.
+    const cutStatus = cutReview.status === 'blocked' ? 'revising' : 'reviewing-proxy'
+    await observe({ stage: 'edit-cut-review', id: editorialCopy.project.id, status: cutStatus, operationId: cut.operation.id,
+      phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    evidence.editorialCut = { sourceProjectId: editorial.projectId, copyProjectId: editorialCopy.project.id, cutVersionId: cut.version.id,
+      operationId: cut.operation.id, reviewId: cutReview.id, reviewStatus: cutReview.status, finalAllowed: cutReview.finalAllowed,
+      warningsAcknowledged: cutReview.warningsAcknowledged,
+      technicalIssueCodes: JSON.parse(cutReview.technicalIssuesJson).map((issue) => issue.code),
+      criticIssueCodes: JSON.parse(cutReview.criticIssuesJson).map((issue) => issue.code),
+      projectStatus: cutStatus, origin: 'public-api+postgres+factory-worker' }
+    const cutArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: cutReview.proxyArtifactId } })
+    const cutAnnotation = await post(`/v1/projects/${editorialCopy.project.id}/annotations`, {
+      projectVersionId: cut.version.id, proxyArtifactId: cutArtifact.id, proxyHash: cutArtifact.sha256,
+      frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
+      screenshotRef: await annotationScreenshot(cutArtifact, 'annotation-edit-cut-frame-0'), text: 'Conferir o corte editorial da cópia.',
+    }, `runtime-edit-annotation-${suffix}`, 201)
+    await pipeline.observe({ stage: 'edit-cut-annotation', projectId: editorialCopy.project.id, annotationId: cutAnnotation.annotation.id,
+      expectedEventTypes: ['annotation.created'], expectedState: cutStatus })
+
+    // 3. The failure/recovery/patch/stale-version proof needs a project that takes patches and renders: an isolated Director project.
+    const iso = await seedDashboardControlledExportFixture({ client, workspaceId, actor, artifactRoot, suffix: `${suffix}-iso`,
+      sourceArtifactId, sourceManifestId, sourcePath, sourceManifest, proxyArtifact, proxyManifestId: review.proxyManifestId,
+      signal, ...mechanicalSeed, projectName: 'Runtime isolated failure',
+      compileColorPipeline: ({ projectId: seedProjectId, sourceArtifactId: seedArtifactId, sourceManifestId: seedManifestId }) =>
+        post(`/v1/projects/${seedProjectId}/color-pipeline-compilations`, colorBodyFor(seedArtifactId, seedManifestId), `runtime-iso-color-${suffix}`, 201),
+    })
+    const isoId = iso.projectId
+    assert.notEqual(isoId, projectId); assert.notEqual(isoId, mechanical.projectId)
+    evidence.isolatedFixture = iso.receipt
+    const selected = await post(`/v1/projects/${isoId}/lut-selection`, {
+      baseVersionId: iso.projectVersionId, baseHash: iso.projectVersionHash, selection: { mode: 'none' },
       reason: 'Controlled neutral rendering for independent runtime fence proof.',
-    }, `runtime-copy-lut-${suffix}`, 201)
+    }, `runtime-iso-lut-${suffix}`, 201)
     const failedProxy = selected
     assert.equal(failedProxy.operation.status, 'queued', 'LUT selection admits a physical render for the new version')
-    const duplicateProxy = await fetch(`${baseUrl}/v1/projects/${copy.project.id}/proxy-renders`, { method: 'POST',
+    const duplicateProxy = await fetch(`${baseUrl}/v1/projects/${isoId}/proxy-renders`, { method: 'POST',
       headers: { authorization, 'idempotency-key': `runtime-duplicate-input-${suffix}` }, signal: AbortSignal.timeout(30000) })
     const duplicateBody = await duplicateProxy.json()
     assert.equal(duplicateProxy.status, 409); assert.equal(duplicateBody.error.code, 'PERSISTENCE_CONFLICT')
@@ -1589,13 +1739,13 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal((await client.v2PublicOperation.findUniqueOrThrow({ where: { id: selected.operation.id } })).status, 'queued')
     evidence.duplicateAdmission = { status: duplicateProxy.status, errorCode: duplicateBody.error.code,
       projectVersionId: selected.version.id, unchangedOperationId: selected.operation.id }
-    const hidden = `${sourcePath}.owned-unavailable`
-    await rename(sourcePath, hidden)
+    const hidden = `${iso.sourcePath}.owned-unavailable`
+    await rename(iso.sourcePath, hidden)
     try {
       const outcome = await proxyWorker(`runtime-failure-worker-${suffix}`, { workspaceId, operationId: failedProxy.operation.id, signal })
       assert.equal(outcome.operationId, failedProxy.operation.id)
       assert.equal(outcome.status, 'failed')
-    } finally { await rename(hidden, sourcePath) }
+    } finally { await rename(hidden, iso.sourcePath) }
     const failedRow = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: failedProxy.operation.id } })
     assert.equal(failedRow.status, 'failed')
     assert.equal(failedRow.attempt, 1)
@@ -1603,36 +1753,36 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal(failedRow.errorRetryable, false)
     evidence.workerFailure = { operationId: failedRow.id, attempt: failedRow.attempt, code: failedRow.errorCode,
       retryable: failedRow.errorRetryable, origin: 'production-source-materializer' }
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'failed')
-    await observe({ stage: 'worker-failed', id: copy.project.id, status: 'failed', operationId: failedRow.id, phase: 'failed', completed: failedRow.progressCompleted, eventTypes: ['operation.status.changed'] })
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: isoId } })).status, 'failed')
+    await observe({ stage: 'worker-failed', id: isoId, status: 'failed', operationId: failedRow.id, phase: 'failed', completed: failedRow.progressCompleted, eventTypes: ['operation.status.changed'] })
     await post(`/v1/operations/${failedRow.id}/retry`, undefined, `runtime-worker-retry-${suffix}`, 200)
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'rendering-proxy')
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: isoId } })).status, 'rendering-proxy')
     await delay(1100)
     assert.deepEqual(await proxyWorker(`runtime-recovered-worker-${suffix}`, { workspaceId, operationId: failedRow.id, signal }), { operationId: failedRow.id, status: 'succeeded' })
-    await observe({ stage: 'copy-review', id: copy.project.id, status: 'revising', operationId: failedRow.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
-    const copyReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: failedRow.id } })
-    assert.equal(copyReview.status, 'blocked'); assert.equal(copyReview.finalAllowed, false)
-    const copyArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: copyReview.proxyArtifactId } })
-    const copyAnnotation = await post(`/v1/projects/${copy.project.id}/annotations`, {
-      projectVersionId: selected.version.id, proxyArtifactId: copyArtifact.id, proxyHash: copyArtifact.sha256,
+    await observe({ stage: 'isolated-review', id: isoId, status: 'revising', operationId: failedRow.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    const isolatedReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: failedRow.id } })
+    assert.equal(isolatedReview.status, 'blocked'); assert.equal(isolatedReview.finalAllowed, false)
+    const isolatedArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: isolatedReview.proxyArtifactId } })
+    const isolatedAnnotation = await post(`/v1/projects/${isoId}/annotations`, {
+      projectVersionId: selected.version.id, proxyArtifactId: isolatedArtifact.id, proxyHash: isolatedArtifact.sha256,
       frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
-      screenshotRef: await annotationScreenshot(copyArtifact, 'annotation-copy-frame-0'), text: 'Ajustar enquadramento central.',
-    }, `runtime-copy-annotation-${suffix}`, 201)
-    await pipeline.observe({ stage: 'copy-annotation', projectId: copy.project.id, annotationId: copyAnnotation.annotation.id,
+      screenshotRef: await annotationScreenshot(isolatedArtifact, 'annotation-isolated-frame-0'), text: 'Ajustar enquadramento central.',
+    }, `runtime-iso-annotation-${suffix}`, 201)
+    await pipeline.observe({ stage: 'isolated-annotation', projectId: isoId, annotationId: isolatedAnnotation.annotation.id,
       expectedEventTypes: ['annotation.created'], expectedState: 'revising' })
-    const proposal = await post(`/v1/projects/${copy.project.id}/patch-proposals`, { annotationId: copyAnnotation.annotation.id }, `runtime-proposal-${suffix}`, 201)
+    const proposal = await post(`/v1/projects/${isoId}/patch-proposals`, { annotationId: isolatedAnnotation.annotation.id }, `runtime-proposal-${suffix}`, 201)
     assert.equal(proposal.proposal.status, 'ready')
-    const applied = await post(`/v1/projects/${copy.project.id}/patch-proposals/${proposal.proposal.id}/apply`, { confirmed: true }, `runtime-patch-${suffix}`, 201)
-    assert.equal((await client.v2ReviewAnnotation.findUniqueOrThrow({ where: { id: copyAnnotation.annotation.id } })).status, 'applied')
-    await pipeline.observe({ stage: 'annotation-resolved', projectId: copy.project.id, annotationId: copyAnnotation.annotation.id,
+    const applied = await post(`/v1/projects/${isoId}/patch-proposals/${proposal.proposal.id}/apply`, { confirmed: true }, `runtime-patch-${suffix}`, 201)
+    assert.equal((await client.v2ReviewAnnotation.findUniqueOrThrow({ where: { id: isolatedAnnotation.annotation.id } })).status, 'applied')
+    await pipeline.observe({ stage: 'annotation-resolved', projectId: isoId, annotationId: isolatedAnnotation.annotation.id,
       expectedEventTypes: ['annotation.resolved'], expectedState: 'rendering-proxy' })
     assert.deepEqual(await proxyWorker(`runtime-patch-worker-${suffix}`, { workspaceId, operationId: applied.operation.id, signal }), { operationId: applied.operation.id, status: 'succeeded' })
     const patchedReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: applied.operation.id } })
     assert.equal(patchedReview.status, 'blocked'); assert.equal(patchedReview.finalAllowed, false)
-    await observe({ stage: 'patched-review', id: copy.project.id, status: 'revising', operationId: applied.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    await observe({ stage: 'patched-review', id: isoId, status: 'revising', operationId: applied.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     // Exhaust actual durable claims without any status seed or mutation. Each
     // abandoned claim owns a short lease; the next runtime claim settles it.
-    const abandoned = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
+    const abandoned = await post(`/v1/projects/${isoId}/lut-selection`, {
       baseVersionId: applied.version.id, baseHash: applied.version.baseHash, selection: { mode: 'none' },
       reason: 'Admit a new immutable version for expired lease recovery proof.',
     }, `runtime-abandoned-${suffix}`, 201)
@@ -1650,17 +1800,17 @@ export async function runDashboardRuntimeJourney(input) {
       leaseOwner: `exhaustion-observer-${suffix}`, now: afterLease.toISOString(), leaseUntil: new Date(afterLease.getTime() + 120000).toISOString() }), null)
     const exhausted = await client.v2PublicOperation.findUniqueOrThrow({ where: { id: abandoned.operation.id } })
     assert.equal(exhausted.errorCode, 'worker_lease_expired')
-    await observe({ stage: 'failed', id: copy.project.id, status: 'failed', operationId: exhausted.id, phase: 'failed', completed: exhausted.progressCompleted, eventTypes: ['operation.status.changed'] })
+    await observe({ stage: 'failed', id: isoId, status: 'failed', operationId: exhausted.id, phase: 'failed', completed: exhausted.progressCompleted, eventTypes: ['operation.status.changed'] })
     await post(`/v1/operations/${exhausted.id}/retry`, undefined, `runtime-retry-${suffix}`, 200)
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })).status, 'rendering-proxy')
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: isoId } })).status, 'rendering-proxy')
     await delay(1100)
     assert.deepEqual(await proxyWorker(`runtime-retry-worker-${suffix}`, { workspaceId, operationId: exhausted.id, signal }), { operationId: exhausted.id, status: 'succeeded' })
     const retriedReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: exhausted.id } })
     assert.equal(retriedReview.status, 'blocked'); assert.equal(retriedReview.finalAllowed, false)
-    await observe({ stage: 'retried-review', id: copy.project.id, status: 'revising', operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    await observe({ stage: 'retried-review', id: isoId, status: 'revising', operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     // Advance the version through the real Command service while an older
     // admitted task still owns a lease. No newer admission masks this CAS test.
-    const staleVersionJob = await post(`/v1/projects/${copy.project.id}/lut-selection`, {
+    const staleVersionJob = await post(`/v1/projects/${isoId}/lut-selection`, {
       baseVersionId: abandoned.version.id, baseHash: abandoned.version.baseHash, selection: { mode: 'none' },
       reason: 'Admit a physical render before an independently committed newer Command.',
     }, `runtime-stale-version-${suffix}`, 201)
@@ -1672,18 +1822,18 @@ export async function runDashboardRuntimeJourney(input) {
     const versionBeforeEdit = await client.v2ProjectVersion.findUniqueOrThrow({ where: { id: staleVersionJob.version.id } })
     const changed = await setProjectLutSelectionService({ repository: new PrismaProjectLutSelectionRepository(client),
       createId: (kind) => `runtime-version-${kind}-${randomUUID()}`, createEventId: randomUUID })({
-      workspaceId, projectId: copy.project.id, baseVersionId: versionBeforeEdit.id, baseHash: versionBeforeEdit.baseHash,
+      workspaceId, projectId: isoId, baseVersionId: versionBeforeEdit.id, baseHash: versionBeforeEdit.baseHash,
       selection: { mode: 'none' }, actor: { type: 'system', id: 'controlled-version-fence-command' },
       idempotencyKey: `runtime-version-edit-${suffix}`, reason: 'Verify an older task cannot change the current version status.' })
     assert.notEqual(changed.version.id, staleClaim.context.projectVersionId)
     await repository.failOrRetry({ operationId: staleClaim.operation.id, leaseOwner: staleClaim.lease.owner, attempt: staleClaim.lease.attempt,
       now: new Date().toISOString(), error: { code: 'controlled_version_changed', message: 'Original version superseded by a real Command', retryable: false } })
-    const afterVersionFailure = await client.v2Project.findUniqueOrThrow({ where: { id: copy.project.id } })
+    const afterVersionFailure = await client.v2Project.findUniqueOrThrow({ where: { id: isoId } })
     assert.equal(afterVersionFailure.currentVersionId, changed.version.id)
     assert.equal(afterVersionFailure.status, 'rendering-proxy', 'older version failure does not change current project status')
     const versionRetryResponse = await fetch(`${baseUrl}/v1/operations/${staleClaim.operation.id}/retry`, { method: 'POST', headers: { authorization }, signal: AbortSignal.timeout(30000) })
     assert.equal(versionRetryResponse.status, 409)
-    evidence.states.push({ stage: 'current-version-cas-rejected', projectId: copy.project.id, operationId: staleClaim.operation.id,
+    evidence.states.push({ stage: 'current-version-cas-rejected', projectId: isoId, operationId: staleClaim.operation.id,
       currentVersionId: changed.version.id, operationVersionId: staleClaim.context.projectVersionId,
       status: afterVersionFailure.status, origin: 'real-command-service+fenced-repository' })
     await drainBrowserResponses()

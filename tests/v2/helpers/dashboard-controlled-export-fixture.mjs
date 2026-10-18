@@ -26,14 +26,19 @@ export function dashboardColorProbePersistenceData(probe, stableSerialize) {
  * its status is then set to reviewing-proxy, the one write this helper makes to a project row besides the sealed writers.
  * Every copied media object has its own key/manifest and explicit copy lineage, and the base Version adopts the
  * source's ingest receipt (persisted by persistReceiptForExistingVideo) exactly as a child Command does.
+ *
+ * `editorialSource: true` seeds the other kind of project the journey needs: an ingest-compiled plan that an editorial cut can
+ * descend from (a Director plan carries no source transcript hash, so a copy of a Director project can never take the cut). It stops
+ * after the base child and the neutral LUT: no copied proxy, no Director run, no seeded review, no color compilation, and the project
+ * keeps the status its sealed Versions gave it. It returns the head the project can be duplicated at and the transcript a cut names.
  */
 export async function seedDashboardControlledExportFixture(input) {
   const { client, workspaceId, actor, artifactRoot, suffix, transcript, sourcePath,
     sourceArtifactId: originalSourceId, sourceManifestId: originalSourceManifestId, sourceManifest,
     proxyArtifact: originalProxy, proxyManifestId: originalProxyManifestId,
-    signal, compileColorPipeline } = input
+    signal, compileColorPipeline, editorialSource = false, projectName = 'Controlled export mechanics fixture' } = input
   assert.equal(signal?.aborted ?? false, false)
-  assert.equal(typeof compileColorPipeline, 'function', 'Seed must compile its actual color pipeline before inserting operation details')
+  if (!editorialSource) assert.equal(typeof compileColorPipeline, 'function', 'Seed must compile its actual color pipeline before inserting operation details')
   const { calculateVersionHash, stableSerialize } = await import('../../../src/v2/application/version-hash.ts')
   const { compileInitialSourceEditPlan } = await import('../../../src/v2/application/apply-editorial-cut-command.ts')
   const { createMediaArtifactManifestV2 } = await import('../../../src/v2/domain/media-artifact.ts')
@@ -79,18 +84,21 @@ export async function seedDashboardControlledExportFixture(input) {
   assert.equal(previousSourceManifest.manifestJson, stableSerialize(sourceManifest))
   await copyFile(sourcePath, ownSourcePath)
   assert.equal(hashBytes(await readFile(ownSourcePath)), originalSource.sha256)
-  const originalProxyPath = join(artifactRoot, ...originalProxy.artifactKey.split('/'))
-  const proxyBytes = await readFile(originalProxyPath)
-  assert.equal(hashBytes(proxyBytes), originalProxy.sha256)
-  assert.equal(BigInt(proxyBytes.length), originalProxy.byteSize)
-  const previousProxyManifest = await client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: originalProxyManifestId } })
-  assert.equal(previousProxyManifest.workspaceId, workspaceId)
-  assert.equal(previousProxyManifest.artifactId, originalProxy.id)
-  await copyFile(originalProxyPath, ownProxyPath)
-  assert.equal(hashBytes(await readFile(ownProxyPath)), originalProxy.sha256)
+  let proxyBytes = null, previousProxyManifest = null
+  if (!editorialSource) {
+    const originalProxyPath = join(artifactRoot, ...originalProxy.artifactKey.split('/'))
+    proxyBytes = await readFile(originalProxyPath)
+    assert.equal(hashBytes(proxyBytes), originalProxy.sha256)
+    assert.equal(BigInt(proxyBytes.length), originalProxy.byteSize)
+    previousProxyManifest = await client.v2MediaArtifactManifest.findUniqueOrThrow({ where: { id: originalProxyManifestId } })
+    assert.equal(previousProxyManifest.workspaceId, workspaceId)
+    assert.equal(previousProxyManifest.artifactId, originalProxy.id)
+    await copyFile(originalProxyPath, ownProxyPath)
+    assert.equal(hashBytes(await readFile(ownProxyPath)), originalProxy.sha256)
+  }
   const sourceProbe = await probeVideo(ownSourcePath, { signal })
   assert.equal(Number.isInteger(sourceProbe.fps), true, 'Fixture uses the observed source fps without coercion')
-  const proxyProbe = await probeVideo(ownProxyPath, { signal })
+  const proxyProbe = editorialSource ? null : await probeVideo(ownProxyPath, { signal })
   const copyExecution = { tool: { id: 'controlled-fixture-copy', version: '1.0.0', digest: toolDigest } }
   const sourceManifestOwn = createMediaArtifactManifestV2({ artifactKey: sourceArtifactKey,
     artifactSha256: originalSource.sha256, byteSize: sourceBytes.length, mediaType: 'video', container: 'mp4',
@@ -100,7 +108,7 @@ export async function seedDashboardControlledExportFixture(input) {
     sources: [{ artifactKey: originalSource.artifactKey, sha256: originalSource.sha256,
       role: 'test-fixture-master-copy', execution: copyExecution }],
     probe: { width: sourceProbe.width, height: sourceProbe.height, duration: sourceProbe.duration, fps: sourceProbe.fps } })
-  const proxyManifestOwn = createMediaArtifactManifestV2({ artifactKey: proxyArtifactKey,
+  const proxyManifestOwn = editorialSource ? null : createMediaArtifactManifestV2({ artifactKey: proxyArtifactKey,
     artifactSha256: originalProxy.sha256, byteSize: proxyBytes.length, mediaType: 'video', container: 'mp4',
     recipe: { id: 'controlled-dashboard-proxy-copy', version: '1.0.0', parameters: {
       projectId, originalArtifactId: originalProxy.id, originalManifestId: originalProxyManifestId,
@@ -110,12 +118,12 @@ export async function seedDashboardControlledExportFixture(input) {
     probe: { width: proxyProbe.width, height: proxyProbe.height, duration: proxyProbe.duration, fps: proxyProbe.fps } })
 
   const world = await seedSealedProject(client, { workspaceId, actor, prefix: 'runtime-mechanical', ids: { project: projectId },
-    name: 'Controlled export mechanics fixture', objective: 'discovery', variant: variantBodyFor({ aspectRatio: '9:16' }) })
-  await client.v2Project.update({ where: { id: projectId }, data: { status: 'reviewing-proxy' } })
+    name: projectName, objective: 'discovery', variant: variantBodyFor({ aspectRatio: '9:16' }) })
+  if (!editorialSource) await client.v2Project.update({ where: { id: projectId }, data: { status: 'reviewing-proxy' } })
   const outputSpecId = world.head.state.document.entries.find((entry) => entry.variantId === world.variantId).spec.output.id
   for (const [artifactId, manifestId, key, bytes, manifest, originalId, role] of [
     [sourceArtifactId, sourceManifestId, sourceArtifactKey, sourceBytes, sourceManifestOwn, originalSourceId, 'test-fixture-master-copy'],
-    [proxyArtifactId, proxyManifestId, proxyArtifactKey, proxyBytes, proxyManifestOwn, originalProxy.id, 'test-fixture-proxy-copy'],
+    ...(editorialSource ? [] : [[proxyArtifactId, proxyManifestId, proxyArtifactKey, proxyBytes, proxyManifestOwn, originalProxy.id, 'test-fixture-proxy-copy']]),
   ]) {
     await client.v2MediaArtifact.create({ data: { id: artifactId, workspaceId, artifactKey: key,
       sha256: hashBytes(bytes), byteSize: BigInt(bytes.length), mediaType: 'video', container: 'mp4', status: 'available', createdAt } })
@@ -160,6 +168,19 @@ export async function seedDashboardControlledExportFixture(input) {
     createId: (kind) => id(`lut-${kind}`), createEventId: randomUUID, clock: () => createdAt })({ workspaceId, projectId,
     baseVersionId: baseVersion.id, baseHash: baseVersion.baseHash, selection: { mode: 'none' }, actor,
     idempotencyKey: id('lut-none'), reason: 'Explicit controlled mechanics fixture; no editorial approval.' })
+  if (editorialSource) {
+    // The head a copy is taken at. The plan is the ingest-compiled one, so its retimed transcript names the source transcript hash.
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId, noLut.version.id)
+    return { projectId, projectVersionId: noLut.version.id, projectVersionHash: noLut.version.baseHash, baseVersionId,
+      variantId: world.variantId, transcriptId, transcriptHash: transcript.transcriptHash, sourceArtifactId, sourceManifestId,
+      sourceSha256: originalSource.sha256, sourceByteSize: sourceBytes.length, sourceManifest: sourceManifestOwn, sourcePath: ownSourcePath,
+      receipt: { proofScope: 'controlled-editorial-source', seeded: true, projectId, baseVersionId, projectVersionId: noLut.version.id,
+        projectVersionHash: noLut.version.baseHash, transcriptId, transcriptHash: transcript.transcriptHash,
+        copies: [{ sourceArtifactId: originalSourceId, sourceManifestId: originalSourceManifestId,
+          artifactId: sourceArtifactId, manifestId: sourceManifestId, manifestHash: sourceManifestOwn.manifestHash, sha256: originalSource.sha256 }],
+        controlled: ['owned copied master bytes', 'aligned transcript', 'rights', 'ingest-compiled initial plan'],
+        notProven: ['Director run', 'face safety', 'proxy render for this project'] } }
+  }
   let bundle
   const realRepository = new PrismaDirectorRunRepository(client)
   // The real repository persists the run through the sealed writer (PG admission); this wrapper only keeps the proposed

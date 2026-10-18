@@ -13,6 +13,9 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { assertDashboardCftBuildBindings, createDashboardRuntimePreparationForTest, prepareDashboardRuntimeJourney, runDashboardRuntimeJourney } from './helpers/dashboard-runtime-journey.mjs'
 import { dashboardColorProbePersistenceData } from './helpers/dashboard-controlled-export-fixture.mjs'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { createProjectWithVariant } from './helpers/explicit-project-http.mjs'
+import { writeEditingProxyFile } from './helpers/editing-proxy-file.mjs'
+import { commitSealedChild, persistReceiptForExistingVideo } from './helpers/pg-output-world.mjs'
 
 // Source bytes, aligned transcript, initial timeline, rights and color probe are
 // controlled inputs. The real Director service materializes canonical snapshots.
@@ -263,16 +266,16 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
     try { await waitForServer(baseUrl, server) } catch (error) { throw new Error(`${error.message}\n${serverLogs}`, { cause: error }) }
     if (httpDiagnosticsEnabled) httpClient.assertHealthy()
     const authorization = `Bearer ${issued.token}`
-    const created = await fetch(`${baseUrl}/v1/projects`, { method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': `runtime-create-${suffix}` }, body: JSON.stringify({ name: 'Dashboard runtime W35', objective: 'discovery', format: '9:16', locale: 'pt-BR' }) })
-    const createdBody = await created.json()
-    assert.equal(created.status, 201, JSON.stringify(createdBody))
-    projectId = createdBody.data.project.id
-    assert.equal(createdBody.data.project.status, 'draft')
-    const snapshotIds = {
-      brief: `final-export-brief-${suffix}`,
-      policies: `final-export-policies-${suffix}`,
-      baseEditPlan: `final-export-base-edit-plan-${suffix}`,
+    // 6.0.0: the project is born without an output; the 9:16 output the journey edits is an explicit variant.
+    const call = async (path, body, key) => {
+      const response = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key }, body: JSON.stringify(body) })
+      const envelope = await response.json()
+      assert.ok(response.ok, `${path} -> ${response.status} ${JSON.stringify(envelope)}`)
+      return envelope.data
     }
+    const world = await createProjectWithVariant(call, { project: { name: 'Dashboard runtime W35', objective: 'discovery', locale: 'pt-BR' }, aspectRatio: '9:16', key: `runtime-create-${suffix}` })
+    projectId = world.projectId
+    assert.equal(world.created.projectAtCreation.status, 'draft')
     const transcriptId = `runtime-transcript-${suffix}`
     const transcript = createMediaTranscript({ language: 'pt-BR',
       text: 'Bem vindo ao Apollo', provider: 'controlled', model: 'aligned-fixture-v1',
@@ -323,70 +326,6 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
         subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22],
       },
     }
-    const baseEditPlan = {
-      ...editPlan,
-      id: `final-export-base-plan-${suffix}`,
-      projectVersionId: baseVersionId,
-    }
-    const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
-    const snapshots = [
-      [snapshotIds.brief, 'brief', 1, { schemaVersion: 1, objective: 'discovery',
-        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        outputSpec: { schemaVersion: 1, id: `runtime-output-${suffix}`, locale: 'pt-BR',
-          aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
-          safeArea: { top: 0.05, right: 0.05, bottom: 0.08, left: 0.05 } },
-        productionBrief: createProductionBrief({ ownerText: 'Público: equipes criativas. Tom: direto e natural.' }),
-        createdAt: createdAt.toISOString() }],
-      [snapshotIds.policies, 'policies', 1, { schemaVersion: 1, state: 'configured', guardrails: [], createdAt: createdAt.toISOString() }],
-      [snapshotIds.baseEditPlan, 'edit-plan', 2, baseEditPlan],
-    ]
-    for (const [id, kind, schemaVersion, content] of snapshots) {
-      await client.v2ProjectSnapshot.create({
-        data: {
-          id,
-          workspaceId,
-          projectId,
-          kind,
-          schemaVersion,
-          contentJson: stableSerialize(content),
-          contentHash: calculateVersionHash(content),
-          createdAt,
-        },
-      })
-    }
-    const baseVersionHash = calculateVersionHash({ projectId, version: baseVersionId })
-    await client.v2ProjectVersion.create({
-      data: {
-        id: baseVersionId,
-        workspaceId,
-        projectId,
-        sequence: 2,
-        parentVersionId: createdBody.data.version.id,
-        briefSnapshotId: snapshotIds.brief,
-        editPlanSnapshotId: snapshotIds.baseEditPlan,
-        policiesSnapshotId: snapshotIds.policies,
-        baseHash: baseVersionHash,
-        createdBy: issued.client.id,
-        createdAt,
-      },
-    })
-    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
-    const noLut = await setProjectLutSelectionService({
-      repository: new PrismaProjectLutSelectionRepository(client),
-      createId: (kind) => `final-export-lut-${kind}-${suffix}`,
-      createEventId: randomUUID,
-      clock: () => createdAt,
-    })({
-      workspaceId,
-      projectId,
-      baseVersionId,
-      baseHash: baseVersionHash,
-      selection: { mode: 'none' },
-      actor: { type: 'system', id: 'final-export-e2e-system' },
-      idempotencyKey: `final-export-lut-none-${suffix}`,
-      reason: 'Keep this final-export fixture colorimetrically neutral.',
-    })
-    assert.equal(noLut.selection.resolved.mode, 'none')
     await client.v2MediaArtifact.create({
       data: {
         id: sourceArtifactId,
@@ -453,10 +392,11 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
       baseRevision: assetRightsRevision(sourceArtifactId, 0),
       draft: {
         status: 'approved',
-        allowedUses: ['rendering', 'editorial-reuse'],
+        // 'editing' is what a copy (fork) of the project needs from the master it references.
+        allowedUses: ['editing', 'rendering', 'editorial-reuse'],
         prohibitedUses: [],
         allowedLocales: ['pt-BR'],
-        consent: { status: 'approved', allowedUses: ['rendering', 'editorial-reuse'], allowedLocales: ['pt-BR'] },
+        consent: { status: 'approved', allowedUses: ['editing', 'rendering', 'editorial-reuse'], allowedLocales: ['pt-BR'] },
       },
       actor: { type: 'api-client', id: issued.client.id },
     })
@@ -471,6 +411,33 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
     const actor = { ...auditContext, auditContext, scopes: new Set(['projects:write']),
       authenticationKind: 'bearer', clientKillSwitchEngaged: false,
       workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active' }
+    // The base Version is a real child Command: it adopts the source's persisted ingest receipt (observed by its manifest, granted
+    // by the rights above) and plays it whole. The LUT selection then builds on it, as the Director does on the LUT's Version.
+    // The ingest ran before the journey's controlled instant, so a later render operation is the project's latest one.
+    // The workspace page plays the project's editing proxy, so the receipt names a real file, not a controlled fact.
+    const editingProxy = await writeEditingProxyFile({ ffmpeg: ffmpegBin, sourcePath, artifactRoot,
+      key: `workspaces/final-export-e2e-${suffix}/proxies/editing-proxy.mp4` })
+    const ingested = await persistReceiptForExistingVideo(client, { workspaceId, projectId, actor, artifactId: sourceArtifactId,
+      createdAt: new Date(createdAt.getTime() - 60_000).toISOString(), derivative: editingProxy })
+    const baseBundle = await commitSealedChild(client, { workspaceId, projectId, actor, suffix: `runtime-${suffix}`, versionId: baseVersionId,
+      mutatePlan: () => editPlan, adopt: [sourceArtifactId] })
+    const baseVersionHash = baseBundle.version.baseHash
+    const noLut = await setProjectLutSelectionService({
+      repository: new PrismaProjectLutSelectionRepository(client),
+      createId: (kind) => `final-export-lut-${kind}-${suffix}`,
+      createEventId: randomUUID,
+      clock: () => createdAt,
+    })({
+      workspaceId,
+      projectId,
+      baseVersionId,
+      baseHash: baseVersionHash,
+      selection: { mode: 'none' },
+      actor: { type: 'system', id: 'final-export-e2e-system' },
+      idempotencyKey: `final-export-lut-none-${suffix}`,
+      reason: 'Keep this final-export fixture colorimetrically neutral.',
+    })
+    assert.equal(noLut.selection.resolved.mode, 'none')
     const directed = await runProjectDirectorService({
       repository: new PrismaDirectorRunRepository(client), clock: () => createdAt,
       createEventId: randomUUID, compileBrief: createEvidenceBoundBriefCompiler(),
@@ -513,10 +480,10 @@ test('W35 real dashboard proxy/retry transitions and negative final admission; s
     })
     assert.equal(compilationResponse.status, 201, `${await compilationResponse.text()}\n${serverLogs.slice(-4_000)}`)
     await runDashboardRuntimeJourney({ client, baseUrl, authorization, workspaceId, projectId, runtimePreparation,
-      projectVersionId, projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId,
+      projectVersionId, projectVersionHash, directed, actor, sourceArtifactId, sourceManifestId, ingestOperationId: ingested.operationId,
       sourceSha256, sourceByteSize: sourceBytes.length, sourceManifest, sourcePath, artifactRoot,
       sourceColorProbe: colorProbe,
-      mechanicalSeed: { transcript, brief: snapshots[0][3], policies: snapshots[1][3], createdAt: createdAt.toISOString() },
+      mechanicalSeed: { transcript, createdAt: createdAt.toISOString() },
       uiUsername, uiPassword, suffix, signal: t.signal, observeOwnedServer,
       ...(httpDiagnosticsEnabled ? { observeHttpConnections,
         selectHttpWorkspacePath: (path) => httpWorkspacePaths.add(path) } : {}) })
