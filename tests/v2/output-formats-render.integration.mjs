@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,10 +12,13 @@ import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../../src/v2/domain/output-format-registry.ts'
 import { OUTPUT_ASPECT_RATIOS } from '../../src/v2/domain/output-spec.ts'
+import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 
-const ffmpegPath = 'ffmpeg'
-const ffprobePath = 'ffprobe'
+// The renderer hashes the FFmpeg binary it runs, so it needs a real path, not a command name resolved from PATH.
+const require = createRequire(import.meta.url)
+const ffmpegPath = process.env.FFMPEG_BIN ?? require('ffmpeg-static')
+const ffprobePath = process.env.FFPROBE_BIN ?? require('ffprobe-static').path
 const sourceArtifactId = 'artifact-format-smoke-source'
 
 function colorCompilation() {
@@ -52,12 +56,21 @@ test('T-FR-160 real FFmpeg smoke renders and manifests all five required formats
     const manifests = []
     for (const ratio of OUTPUT_ASPECT_RATIOS) {
       const preset = OUTPUT_FORMAT_REGISTRY.presets[ratio]
+      // A rendered cue needs a complete unknown-face review plan (renderer rule, not relaxed). While face coverage is
+      // unknown the cue is suppressed: the smoke proves frames, audio, size and manifests for every format, and that the
+      // caption layer draws nothing (the anchor goldens carry the positive caption geometry).
+      const cue = { id: `subtitle-${ratio.replace(':', 'x')}`, startFrame: 0, endFrame: 30, text: 'Formato seguro', anchor: 'bottom' }
+      const placementPlan = createRenderPlacementPlan({
+        format: ratio, canvas: { width: preset.exportDefaults.proxy.width, height: preset.exportDefaults.proxy.height },
+        durationFrames: 30, subtitlePresetId: 'kinetic', elements: [],
+        subtitleAnchor: { fps: 30, cues: [{ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame }],
+          faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' } },
+      })
       const result = await renderer.render({
         operationId: `format-smoke-${ratio.replace(':', 'x')}`, renderKind: 'proxy',
         sources: [{ artifactId: sourceArtifactId, path: sourcePath, mediaType: 'video', colorPipelineCompilation: compilation }],
         lutPaths: {}, clips: [{ id: `clip-${ratio.replace(':', 'x')}`, sourceArtifactId, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 }],
-        fps: 30, format: ratio,
-        subtitleCues: [{ id: `subtitle-${ratio.replace(':', 'x')}`, startFrame: 0, endFrame: 30, text: 'Formato seguro', anchor: 'bottom' }],
+        fps: 30, format: ratio, subtitleCues: [cue], placementPlan,
       })
       const streams = JSON.parse(execFileSync(ffprobePath, [
         '-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,codec_name,width,height,nb_read_frames,duration', '-of', 'json', result.outputPath,
@@ -71,7 +84,7 @@ test('T-FR-160 real FFmpeg smoke renders and manifests all five required formats
       assert.ok(Math.abs(Number(video.duration) - Number(audio.duration)) <= 1 / 30)
 
       const raw = execFileSync(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-ss', '0.5', '-i', result.outputPath, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { windowsHide: true, maxBuffer: 8 * 1024 * 1024 })
-      let minX = video.width; let minY = video.height; let maxX = -1; let maxY = -1
+      let minX = video.width; let minY = video.height; let maxX = -1; let maxY = -1 // bright pixels: none expected
       for (let pixel = 0; pixel < video.width * video.height; pixel += 1) {
         const offset = pixel * 3
         if (raw[offset] > 190 && raw[offset + 1] > 190 && raw[offset + 2] > 190) {
@@ -79,10 +92,8 @@ test('T-FR-160 real FFmpeg smoke renders and manifests all five required formats
           minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y)
         }
       }
-      assert.ok(maxX >= minX && maxY >= minY, `${ratio} subtitle must be visible`)
-      const bounds = preset.subtitleBounds
-      assert.ok(minX >= Math.floor(bounds.x * video.width) && maxX <= Math.ceil((bounds.x + bounds.width) * video.width), `${ratio} subtitle horizontal bounds`)
-      assert.ok(minY >= Math.floor(bounds.y * video.height) && maxY <= Math.ceil((bounds.y + bounds.height) * video.height), `${ratio} subtitle vertical bounds`)
+      assert.ok(maxX < minX && maxY < minY, `${ratio} must draw no caption pixel while face coverage is unknown`)
+      assert.equal(result.renderElementMap.elements.some((element) => element.type === 'subtitle'), false, `${ratio} suppressed cue must not appear in the map`)
 
       const metadata = await stat(result.outputPath)
       const manifest = createMediaArtifactManifestV2({

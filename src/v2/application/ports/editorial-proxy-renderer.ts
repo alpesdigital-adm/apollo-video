@@ -23,12 +23,20 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
  * and final recipe 1.8.0 distinguish these suppressed pixels from older bottom-anchor output;
  * an older proxy cannot be reused across the safety-policy change.
  */
-// 1.13.0 pins ass-frame-clock/v1: exact frame-representable floor boundaries,
-// local fragment validation and fail-closed C0/DEL text. These affect pixels;
-// renderer digest and both recipe versions invalidate previous reuse.
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.13.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.14.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.9.0'
+// 1.13.0 pinned ass-frame-clock/v1 (exact-rational floor boundaries), reprobated by the W69 v5 pixel proof:
+// vf_subtitles hands libass trunc(pts * q2d * 1000) in binary64, which is one millisecond low on some frames.
+// 1.14.0 pins ass-frame-clock/v2: the stream ends in `fps=<rate>` before libass, every cue boundary is an
+// integer centisecond inside the window of the frame it starts or ends at, an empty window is a typed refusal
+// before any I/O, each clipped/rebased fragment is bound in its own clock, and C0/DEL text still fails closed.
+// 1.15.0 pins ass-frame-clock/v3: the stream ends in `settb=1/<rate>,setpts=N` before libass instead of `fps=<rate>`.
+// The v2 stage dropped the final frame after `overlay=shortest=1` on FFmpeg 6.1.1 (T-FR-227: 899 of 900 frames, every
+// rate from 24 to 120 fps); the v3 stage gives libass the same (pts = frame index, time base 1/rate) and never changes the
+// frame count. Proxy recipe 1.16.0 and final recipe 1.11.0: a proxy or final of the v2 stage is one frame short on that
+// FFmpeg and must not be reused.
+// These affect pixels; renderer digest and both recipe versions invalidate previous reuse.
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.15.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.16.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.11.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {

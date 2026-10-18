@@ -8,6 +8,7 @@ import { createMaterializedSubtitleClock, requireMaterializedSubtitleClock, deri
   legalAssCentisecondPreimage, materializedAssInterval, materializedAssBoundary, assCentisecondTimestamp, createMaterializedAssClockLookup,
   assertSubtitleClockReplay, MATERIALIZED_SUBTITLE_CLOCK_VERSION, SUBTITLE_CLOCK_CONVERSION_POLICY } from '../../src/v2/domain/materialized-subtitle-clock.ts'
 import { serializeMaterializedAssEvents, materializedAssParametersHash } from '../../src/v2/domain/materialized-ass-events.ts'
+import { isBurnInSubtitleFpsUnsupported } from '../../src/v2/domain/output-spec.ts'
 
 // Metadata/numeric fixtures only. These tests never read private evidence, pixels or FFmpeg.
 const h = 'a'.repeat(64), sha = (text) => createHash('sha256').update(text, 'utf8').digest('hex')
@@ -30,7 +31,7 @@ const clockSource = (rate = 1, trackId = 'track-alpha', clipId = 'clip-alpha', f
     rangeFrameDomainId: 'normalized-timeline-alpha', sourceProbeHash: h, traceSha256: h,
     graphHash: calculateOutputCanonicalHash({ ...policy, graph: `[0:v]fps=${fps},setpts=PTS-STARTPTS[preass]`, argv: ['-threads', '1'] }) },
 })
-function body({ fps = 30, frames = [0, 1, 2, 3, 4, 5], timeBase = tb(fps), rate = 1 } = {}) {
+function body({ fps = 30, frames = [0, 1, 2, 3, 4, 5], timeBase = tb(fps), rate = 1, mode = 'burn-in' } = {}) {
   const configuration = { schemaVersion: 'controlled-subtitle-configuration/v1', ...policy, purpose: 'contract fixture, no face approval' }
   const encoding = (kind) => ({ codec: 'h264', encoder: 'libx264', pixelFormat: 'yuv420p', container: 'mp4', faststart: true,
     width: 320, height: 320, fps, quality: { mode: 'crf', value: kind === 'final' ? 18 : 23, preset: kind === 'final' ? 'medium' : 'veryfast' },
@@ -42,7 +43,7 @@ function body({ fps = 30, frames = [0, 1, 2, 3, 4, 5], timeBase = tb(fps), rate 
     profile: { schemaVersion: 'materialized-delivery-profile/v1', id: 'profile-alpha', version: 1,
       rendererContractVersion: 'ffmpeg-editorial-output/v1', final: encoding('final'), proxy: encoding('proxy'),
       proxyToFinal: { schemaVersion: 'output-canvas-transform/v1', scaleX: 1, scaleY: 1 },
-      subtitles: { mode: 'burn-in', configuration: { schemaVersion: configuration.schemaVersion, document: configuration,
+      subtitles: { mode, configuration: { schemaVersion: configuration.schemaVersion, document: configuration,
         hash: calculateOutputCanonicalHash(configuration) }, fontAssets: [{ artifactId: 'font-alpha', sha256: h }] } },
     preset: null, createdAt: '2026-10-12T00:00:00.000Z',
   })
@@ -138,10 +139,21 @@ test('30fps [1,2), first/last explicit domain boundaries, 120fps capacity per in
   assert.deepEqual(materializedAssInterval(observed, 1, 2), { startCs: 3n, endCs: 6n })
   assert.equal(materializedAssBoundary(observed, 0), 0n)
   assert.equal(materializedAssBoundary(observed, 6), 100n)
-  const fast = clock({ fps: 120 })
+  // 120 fps: a burn-in spec at this rate is refused when it is sealed (see the next test), so the clock layer's own
+  // per-interval refusal is exercised with the delivery mode a 120 fps output may legally have. Same oracle, same values.
+  const fast = clock({ fps: 120, mode: 'sidecar' })
   assert.throws(() => materializedAssInterval(fast, 1, 2), /not representable/)
   assert.deepEqual(materializedAssInterval(fast, 2, 3), { startCs: 1n, endCs: 2n })
   assert.equal(fast.renderInput.output.fps, 120)
+})
+
+test('burned-in subtitles above 90 fps have no sealed OutputSpec; sidecar and no-subtitle outputs keep 120 fps', () => {
+  for (const fps of [24, 30, 60, 90]) assert.equal(clock({ fps }).renderInput.output.fps, fps, `burn-in ${fps} fps`)
+  for (const fps of [91, 100, 120]) {
+    assert.throws(() => clock({ fps }), (error) => isBurnInSubtitleFpsUnsupported(error) && error.code === 'INVALID_OUTPUT_SPEC' &&
+      error.details.reason === 'SUBTITLE_BURN_IN_FPS_UNSUPPORTED' && error.details.fps === fps && error.details.maxFps === 90, `burn-in ${fps} fps`)
+  }
+  assert.equal(clock({ fps: 120, mode: 'sidecar' }).renderInput.output.fps, 120)
 })
 
 test('rates .25–4, mixed source timebases, rotation and distinct multilayer tracks remain admitted', () => {
@@ -193,7 +205,7 @@ test('native FPS differs only with explicit measured normalization and exact sea
 })
 
 test('distinct PTS collapsed to one libass millisecond block only an unrepresentable requested boundary', () => {
-  const observed = clock({ fps: 120, timeBase: tb(1000000) })
+  const observed = clock({ fps: 120, timeBase: tb(1000000), mode: 'sidecar' })
   assert.equal(observed.frames.length, 6)
   assert.throws(() => materializedAssInterval(observed, 1, 2), /ordered/)
   assert.deepEqual(materializedAssInterval(observed, 0, 6), { startCs: 0n, endCs: 100n })
@@ -342,6 +354,9 @@ test('clipped/rebased fragments revalidate local intervals and retain global cue
   assert.equal(document.emitted[0].globalStartFrame, 5)
   assert.equal(document.emitted[0].globalEndFrame, 8)
   assert.equal(document.emitted[0].assEventLine.split(',')[1], '0:00:00.00')
-  const fast = clock({ fps: 120 })
-  assert.throws(() => emit([cue({ localStartFrame: 1, localEndFrame: 2 })], fast), /not representable/)
+  // Emission needs the burn-in profile, and that profile no longer exists at 120 fps: the clock still refuses the
+  // interval itself (previous test), and asking for the burn-in spec is the typed refusal.
+  assert.throws(() => clock({ fps: 120 }), isBurnInSubtitleFpsUnsupported)
+  const fast = clock({ fps: 120, mode: 'sidecar' })
+  assert.throws(() => emit([cue({ localStartFrame: 1, localEndFrame: 2 })], fast), /exact burn-in profile/)
 })

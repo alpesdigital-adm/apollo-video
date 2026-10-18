@@ -5,6 +5,7 @@ import { createProductionBrief } from '../domain/production-brief.ts'
 import { createProjectCreationOutputCommandV2, normalizeProjectCreationIntentV2 } from '../domain/project-creation-command.ts'
 import { createOutputVariantCommand } from '../domain/output-variant-command.ts'
 import { createOutputSpecRevisionBody, type OutputSpecRevisionBody } from '../domain/output-spec-revision.ts'
+import { assertSubtitleDeliverySupportedAtFps } from '../domain/output-spec.ts'
 import { OUTPUT_CANONICAL_POLICY_VERSION, serializeOutputCanonicalJson } from '../domain/output-canonical-policy.ts'
 import { buildOperationalOutputVersionBundleV3, operationalBundlePlanV3,
   type BuildOperationalOutputVersionBundleV3 } from '../domain/output-version-bundle.ts'
@@ -54,6 +55,9 @@ export function parseCreateProjectOutputVariantBody(raw: unknown): CreateProject
     throw new DomainError('INVALID_ARGUMENT', 'Font assets must be an explicit bounded array')
   for (const font of subtitles.fontAssets) exact(font, ['artifactId', 'sha256'], 'font')
   sealed(subtitles.configuration, 'subtitle configuration'); sealed(body.preset, 'preset')
+  // Typed refusal before any repository read: burned-in subtitles are not offered above BURN_IN_SUBTITLE_MAX_FPS.
+  // The sealed OutputSpec revision enforces the same rule, so no other path can reach a render with this pair.
+  if (subtitles.mode === 'burn-in') assertSubtitleDeliverySupportedAtFps('burn-in', output.fps as number)
   return { ...body, ...(body.reason === undefined ? {} : { reason: (body.reason as string).trim() }) } as unknown as CreateProjectOutputVariantInput
 }
 

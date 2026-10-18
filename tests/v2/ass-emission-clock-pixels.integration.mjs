@@ -7,10 +7,13 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import test from 'node:test'
 import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
+import { assCentisecondTimestamp, derivePinnedLibassNowMs, isAssBoundaryUnrepresentable } from '../../src/v2/domain/libass-clock-model.ts'
+import { buildPreLibassClockStage } from '../../src/v2/infrastructure/media/ffmpeg-editorial-composition-graph.ts'
 import { buildAssSubtitles, sliceRenderRange } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 
 const require = createRequire(import.meta.url)
 const WIDTH = 320, HEIGHT = 240, FRAMES = 6
+const ABSOLUTE_BUDGET_MS = 420000, PROCESS_BUDGET_MS = 30000
 const frameSize = WIDTH * HEIGHT * 3
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
@@ -45,7 +48,8 @@ function observedPreLibassClock(log, indices) {
  * https://github.com/FFmpeg/FFmpeg/blob/master/libavfilter/vf_subtitles.c */
 function document(layer, fps, startFrame, endFrame, fontFamily) {
   const cue = { id: 'clock-cue', startFrame, endFrame, text: 'CLOCK' }
-  return buildAssSubtitles({ width: WIDTH, height: HEIGHT, fps,
+  // The streams under test hold at least four frames after the cue; the end of the fragment is not under test here.
+  return buildAssSubtitles({ width: WIDTH, height: HEIGHT, fps, durationFrames: Math.max(FRAMES, endFrame + 4),
     cues: layer === 0 ? [cue] : [],
     ctaOverlays: layer === 1 ? [cue] : [],
     anchorPlan: layer === 0 ? { schemaVersion: 'subtitle-anchor-plan/v2', decisions: [{
@@ -70,7 +74,8 @@ const DIFFERENTIAL_TARGETS = [
   { fps: 100, target: 803, before: ['0:00:08.02', '0:00:08.03'], after: ['0:00:08.03', '0:00:08.04'] },
 ]
 function differentialAss(layer, fps, target, fontFamily, interval) {
-  const lines = document(layer, fps, target, target + 1, fontFamily).split('\n')
+  const base = fps === 120 ? 2 : 1 // the target itself may be refused; the base only carries the event text
+  const lines = document(layer, fps, base, base + 1, fontFamily).split('\n')
   let events = 0
   const result = lines.map((line) => {
     if (!line.startsWith('Dialogue:')) return line
@@ -82,6 +87,11 @@ function differentialAss(layer, fps, target, fontFamily, interval) {
   assert.equal(events, 1, 'differential fixture must change exactly one event interval')
   return result
 }
+// 100 fps frame 803 reaches libass at 8029 ms after frame 802 at 8020 ms: no centisecond lies in (8020, 8029],
+// so no ASS event starts exactly there. The expectation is a typed refusal, proven below by exhausting the
+// neighbouring centisecond pairs against real pixels. Every other target is bound and lights exactly its frame.
+const BOUNDARY_TARGETS = [[30, 3], [60, 6], [30, 111], [60, 111], [100, 803]]
+const REFUSED_TARGETS = new Set(['100:803'])
 function originalCaseSchedule() {
   const cases = []
   const add = (metadata) => cases.push({ ...metadata, status: 'not-executed' })
@@ -90,16 +100,20 @@ function originalCaseSchedule() {
     add({ fps, layer: 'empty', expectedChangedFrames: [] })
     add({ fps, layer: 'suppressed', interval: [1, 2], expectedChangedFrames: [] })
   }
-  for (const [fps, start] of [[30, 3], [60, 6], [30, 111], [60, 111], [100, 803]])
+  for (const [fps, start] of BOUNDARY_TARGETS)
     for (const clock of ['lavfi', 'trim-setpts-fps-concat'])
-      for (const layer of [0, 1]) add({ fps, layer, clock, interval: [start, start + 1], expectedChangedFrames: [start] })
+      for (const layer of [0, 1]) {
+        const expectedBinding = REFUSED_TARGETS.has(`${fps}:${start}`) ? 'refused' : 'bound'
+        add({ fps, layer, clock, interval: [start, start + 1], expectedBinding,
+          expectedChangedFrames: expectedBinding === 'bound' ? [start] : null })
+      }
   for (const layer of [0, 1]) add({ fps: 30, layer, clock: 'adjacent-cues', intervals: [[1, 2], [2, 3]],
     expectedFrames: { first: [1], next: [2], baseline: [0, 3, 4, 5] } })
   add({ fps: 30, layer: 1, clock: 'clipped-rebased-fragment', globalInterval: [3, 8],
     renderRange: [5, 9], expectedLocalIntervals: [[0, 3]], expectedChangedFrames: [0, 1, 2] })
   add({ fps: 30, layer: 1, clock: 'rounded-end-regression-control', interval: [1, 2],
     alteredAssEnd: '0:00:00.07', expectedChangedFrames: [1, 2] })
-  for (const layer of [0, 1]) add({ fps: 120, layer, interval: [1, 2], expectedRejection: 'cannot represent' })
+  for (const layer of [0, 1]) add({ fps: 120, layer, interval: [1, 2], expectedRejection: 'ASS_BOUNDARY_UNREPRESENTABLE' })
   return cases
 }
 
@@ -124,13 +138,36 @@ function pixelCaptureBudget(indices) {
   return { ...PIXEL_CAPTURE_POLICY, maxProcessedFrames, rawBudgetBytes, logBudgetBytes, combinedBudgetBytes }
 }
 
-function renderPixels(binary, root, fps, file, { indices = [0, 1, 2, 3, 4, 5], prefix = '', capture, timeoutMs = 30000, absoluteDeadline, budgetError } = {}) {
+/** The exact filter the renderer places immediately before libass (buildPreLibassClockStage). */
+function preLibassClockFilter(fps) {
+  const [stage] = buildPreLibassClockStage({ inputLabel: 'in', outputFps: fps }).filters
+  return stage.replace(/^\[in\]/, '').replace(/\[clocked\]$/, '')
+}
+function assertClosedStageClock(clock, fps) {
+  assert.ok(clock.timeBases.length > 0 && clock.timeBases.every((tb) => tb.numerator === '1' && tb.denominator === String(fps)),
+    'The observed pre-libass time base must be the inverse of the rate')
+  assert.ok(clock.frames.length > 0 && clock.frames.every((frame) => frame.pts === String(frame.frame)),
+    'The observed pre-libass PTS must number the frames consecutively from 0')
+}
+/** libass now of each observed frame, by the pinned conversion applied to the observed PTS and time base. */
+function observedNowMs(clock) {
+  const [timeBase] = clock.timeBases
+  return new Map(clock.frames.map((frame) => [frame.frame, Number(derivePinnedLibassNowMs(frame.pts, timeBase))]))
+}
+const litFrames = (nowByFrame, indices, startCs, endCs) =>
+  indices.filter((frame) => startCs * 10 <= nowByFrame.get(frame) && nowByFrame.get(frame) < endCs * 10)
+const centiseconds = (timestamp) => {
+  const match = /^(\d+):(\d{2}):(\d{2})\.(\d{2})$/.exec(timestamp)
+  return Number(match[1]) * 360000 + Number(match[2]) * 6000 + Number(match[3]) * 100 + Number(match[4])
+}
+
+function renderPixels(binary, root, fps, file, { indices = [0, 1, 2, 3, 4, 5], prefix = '', capture, timeoutMs = PROCESS_BUDGET_MS, absoluteDeadline, budgetError } = {}) {
   // Select AFTER libass, retaining the real incoming PTS even for late-frame
   // boundaries. A narrow raw window bounds memory without rebasing that clock.
   // showinfo passes input frames through unchanged and reports their real PTS:
   // https://ffmpeg.org/ffmpeg-filters.html#showinfo
   const bufferBudget = pixelCaptureBudget(indices)
-  const filters = [prefix, 'showinfo', file ? `subtitles=filename='${file}':fontsdir='fonts'` : '',
+  const filters = [prefix, preLibassClockFilter(fps), 'showinfo', file ? `subtitles=filename='${file}':fontsdir='fonts'` : '',
     `select=between(n\\,${indices[0]}\\,${indices.at(-1)})`].filter(Boolean).join(',')
   const args = [
     '-hide_banner', '-loglevel', 'verbose', '-threads', '1', '-filter_threads', '1',
@@ -142,7 +179,7 @@ function renderPixels(binary, root, fps, file, { indices = [0, 1, 2, 3, 4, 5], p
     // Final monotonic gate immediately before spawning, after args construction.
     const remaining = Math.floor(absoluteDeadline - performance.now())
     if (remaining <= 0) throw budgetError()
-    timeoutMs = Math.min(timeoutMs, 30000, remaining)
+    timeoutMs = Math.min(timeoutMs, PROCESS_BUDGET_MS, remaining)
   }
   const execution = spawnSync(binary, args,
     { cwd: root, windowsHide: true, timeout: timeoutMs, maxBuffer: bufferBudget.combinedBudgetBytes })
@@ -155,7 +192,9 @@ function renderPixels(binary, root, fps, file, { indices = [0, 1, 2, 3, 4, 5], p
   assert.ok(execution.stdout.length + execution.stderr.length <= bufferBudget.combinedBudgetBytes,
     'FFmpeg output exceeds the combined raw/log budget')
   const log = execution.stderr.toString('utf8')
-  const clockFrames = observedPreLibassClock(log, indices).frames
+  const observedClock = observedPreLibassClock(log, indices)
+  assertClosedStageClock(observedClock, fps)
+  const clockFrames = observedClock.frames
   assert.ok(clockFrames.length <= bufferBudget.maxProcessedFrames &&
     clockFrames.every((frame) => frame.frame < bufferBudget.maxProcessedFrames),
   'Observed showinfo frames exceed the declared processing bound')
@@ -170,8 +209,8 @@ function changedFrames(actual, baseline, indices = [0, 1, 2, 3, 4, 5]) {
       .equals(baseline.subarray(frame * frameSize, (frame + 1) * frameSize))).map((frame) => indices[frame])
 }
 
-test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30/60/100/120 fps', { timeout: 180000 }, async (t) => {
-  const deadline = performance.now() + 180000
+test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30/60/100/120 fps', { timeout: ABSOLUTE_BUDGET_MS + 30000 }, async (t) => {
+  const deadline = performance.now() + ABSOLUTE_BUDGET_MS
   const evidenceRoot = process.env.APOLLO_ASS_EVIDENCE_ROOT
   let binary = process.env.FFMPEG_BIN
   const pinned = process.env.APOLLO_ASS_FFMPEG_SHA256
@@ -179,18 +218,19 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
   const fontSha256 = process.env.APOLLO_ASS_FONT_SHA256
   const fontFamily = process.env.APOLLO_ASS_FONT_FAMILY
   const fontFace = process.env.APOLLO_ASS_FONT_POSTSCRIPT_NAME
-  const proof = { schemaVersion: 'ass-clock-pixels-proof/v3', platform: process.platform,
+  const proof = { schemaVersion: 'ass-clock-pixels-proof/v4', platform: process.platform,
     scope: 'controlled ASS timing pixels; no activation or facial/editorial acceptance claim',
     ffmpeg: { path: binary, approvedSha256: pinned },
     font: { path: fontPath, approvedSha256: fontSha256, family: fontFamily, face: fontFace },
     source: { generator: `lavfi color=c=0x202020:s=${WIDTH}x${HEIGHT}`, frameCount: FRAMES, pixelFormat: 'rgb24' },
     configuration: { threads: 1, filterThreads: 1, vsync: 0, filter: 'subtitles=filename=<fixture>:fontsdir=fonts',
+      preLibassClockStage: 'settb=1/<rate>,setpts=N immediately before showinfo and subtitles, as buildPreLibassClockStage places it in the renderer',
       diagnosticFilter: 'showinfo immediately before subtitles; same clock graph and coverage expectations',
-      executionBudget: { absoluteMs: 180000, perProcessMs: 30000, scope: 'version query plus all original and additional pixel executions' } },
+      executionBudget: { absoluteMs: ABSOLUTE_BUDGET_MS, perProcessMs: PROCESS_BUDGET_MS, scope: 'version query plus all original and additional pixel executions' } },
     emissionPolicy: ASS_EMISSION_POLICY, pixelCapturePolicy: PIXEL_CAPTURE_POLICY,
     originalFailureBehavior: 'stop on first original failure; remaining original cases are not-executed',
     differentialProtocol: { schemaVersion: 'ass-clock-boundary-differential/v1', targets: DIFFERENTIAL_TARGETS,
-      graphs: ['lavfi', 'trim-setpts-fps-concat'], layers: [0, 1], budgetMs: 180000,
+      graphs: ['lavfi', 'trim-setpts-fps-concat'], layers: [0, 1], budgetMs: ABSOLUTE_BUDGET_MS,
       scope: 'pixel bracketing only; no direct observation of libass integer now' },
     cases: originalCaseSchedule(), diagnostics: [], discriminations: [], secondaryErrors: [],
     executions: [], outcome: { status: 'running' },
@@ -254,7 +294,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
   const remainingTimeout = () => {
     const remaining = Math.floor(deadline - performance.now())
     if (remaining <= 0) throw clockBudgetError()
-    return Math.min(30000, remaining)
+    return Math.min(PROCESS_BUDGET_MS, remaining)
   }
   const captureFfmpegVersion = () => {
     const record = { schemaVersion: 'ass-clock-version-execution/v1', args: ['-version'],
@@ -313,6 +353,28 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
       return { observed, value: null }
     }
   }
+  /** Physical completeness proof for a refused boundary. Every centisecond pair around the boundary is
+   * rendered; none may light exactly the requested frame, and each result must equal the model prediction
+   * made from the PTS observed before libass. */
+  const exhaustRefusedBoundary = async ({ fps, start, clock, indices, prefix, baseline }) => {
+    const nowByFrame = observedNowMs(observedPreLibassClock(baseline.log, indices))
+    const centre = Math.floor(nowByFrame.get(start) / 10)
+    const results = []
+    for (let startCs = centre - 2; startCs <= centre + 2; startCs += 1) {
+      for (let endCs = startCs + 1; endCs <= startCs + 4; endCs += 1) {
+        const interval = [assCentisecondTimestamp(BigInt(startCs)), assCentisecondTimestamp(BigInt(endCs))]
+        const ass = differentialAss(1, fps, start, fontFamily, interval)
+        await writeAss('exhaustion.ass', ass)
+        const rendered = pixels(binary, root, fps, 'exhaustion.ass', { indices, prefix, timeoutMs: remainingTimeout() })
+        const actual = changedFrames(rendered.raw, baseline.raw, indices)
+        const predicted = litFrames(nowByFrame, indices, startCs, endCs)
+        results.push({ startCs, endCs, actual, predicted, renderedRawSha256: sha256(rendered.raw) })
+        assert.deepEqual(actual, predicted, `${fps} fps ${clock} [${startCs},${endCs}) cs: pixels differ from the model prediction`)
+        assert.notDeepEqual(actual, [start], `${fps} fps ${clock} [${startCs},${endCs}) cs lights exactly frame ${start}: the refusal was wrong`)
+      }
+    }
+    return { centreCs: centre, observedNowMs: Object.fromEntries(indices.map((frame) => [frame, nowByFrame.get(frame)])), pairs: results.length, results }
+  }
   const additionalDiagnostics = async () => {
     activeCase = null
     for (const target of DIFFERENTIAL_TARGETS) {
@@ -338,8 +400,16 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
               continue
             }
             const result = await runDiagnostic(metadata, async (observed) => {
-              const ass = interval === null ? document(layer, fps, start, start + 1, fontFamily) :
-                differentialAss(layer, fps, start, fontFamily, interval)
+              let ass
+              try {
+                ass = interval === null ? document(layer, fps, start, start + 1, fontFamily) :
+                  differentialAss(layer, fps, start, fontFamily, interval)
+              } catch (error) {
+                if (!(interval === null && isAssBoundaryUnrepresentable(error))) throw error
+                observed.binding = 'refused' // the original boundary is not representable: no original ASS exists
+                observed.refusal = { reason: error.details.reason, refusal: error.refusal, frame: error.details.frame }
+                return null
+              }
               observed.assSha256 = sha256(ass)
               await writeAss('differential.ass', ass)
               // Check the monotonic balance again after asynchronous file I/O.
@@ -350,6 +420,14 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
               observed.effectiveLibassAndFontConfiguration = rendered.log.split('\n').filter((line) => /libass|fontselect:|font provider|Loading font/.test(line))
               const actual = changedFrames(rendered.raw, baseline.value.raw, indices)
               observed.changedFrames = actual // Retain coverage before any assertion.
+              // The model, applied to the PTS observed before libass, must predict the pixels of every control.
+              const clockNow = observedNowMs(observedPreLibassClock(rendered.log, indices))
+              const [modelStart, modelEnd] = interval === null ? [null, null] : interval.map(centiseconds)
+              if (interval !== null) {
+                observed.predictedChangedFrames = litFrames(clockNow, indices, modelStart, modelEnd)
+                assert.deepEqual(actual, observed.predictedChangedFrames,
+                  `differential ${fps} fps ${clock} layer ${layer} ${side}: pixels differ from the model prediction`)
+              }
               const pinnedFaceReported = rendered.log.split('\n').some((line) => line.includes('fontselect:') && line.includes(fontFace))
               observed.fontSelection = pinnedFaceReported ? 'pinned-face-reported' : actual.length === 0 ? 'no-rendered-text-frame' : 'unverified'
               // A control with no event on any decoded frame need not select a
@@ -372,7 +450,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
       }
     }
     activeDiagnostic = null
-    proof.diagnosticOutcome = { status: 'collection-finished', elapsedMs: Math.ceil(performance.now() - (deadline - 180000)),
+    proof.diagnosticOutcome = { status: 'collection-finished', elapsedMs: Math.ceil(performance.now() - (deadline - ABSOLUTE_BUDGET_MS)),
       observed: proof.diagnostics.filter((item) => item.status === 'observed').length,
       passed: proof.diagnostics.filter((item) => item.status === 'passed').length,
       failed: proof.diagnostics.filter((item) => item.status === 'failed').length,
@@ -385,6 +463,8 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
     proof.testSourceSha256 = sha256(await readFile(new URL(import.meta.url)))
     proof.rendererSourceSha256 = sha256(await readFile(new URL('../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts', import.meta.url)))
     proof.emissionPolicySourceSha256 = sha256(await readFile(new URL('../../src/v2/domain/ass-emission-policy.ts', import.meta.url)))
+    proof.clockModelSourceSha256 = sha256(await readFile(new URL('../../src/v2/domain/libass-clock-model.ts', import.meta.url)))
+    proof.compositionGraphSourceSha256 = sha256(await readFile(new URL('../../src/v2/infrastructure/media/ffmpeg-editorial-composition-graph.ts', import.meta.url)))
     assert.match(pinned ?? '', /^[a-f0-9]{64}$/, 'owner must supply independently approved APOLLO_ASS_FFMPEG_SHA256')
     proof.ffmpeg.sha256 = sha256(await readFile(binary))
     assert.equal(proof.ffmpeg.sha256, pinned)
@@ -420,7 +500,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
         observed.status = 'passed'
       }
       const emptyObserved = beginCase({ fps, layer: 'empty', expectedChangedFrames: [] })
-      const empty = buildAssSubtitles({ width: WIDTH, height: HEIGHT, fps, cues: [], ctaOverlays: [] })
+      const empty = buildAssSubtitles({ width: WIDTH, height: HEIGHT, fps, durationFrames: FRAMES, cues: [], ctaOverlays: [] })
       emptyObserved.assSha256 = sha256(empty)
       await writeAss('empty.ass', empty)
       const emptyChanges = changedFrames(pixels(binary, root, fps, 'empty.ass').raw, baseline.raw)
@@ -428,7 +508,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
       assert.deepEqual(emptyChanges, [])
       emptyObserved.status = 'passed'
       const suppressedObserved = beginCase({ fps, layer: 'suppressed', interval: [1, 2], expectedChangedFrames: [] })
-      const suppressed = buildAssSubtitles({ width: WIDTH, height: HEIGHT, fps,
+      const suppressed = buildAssSubtitles({ width: WIDTH, height: HEIGHT, fps, durationFrames: FRAMES,
         cues: [{ id: 'suppressed', startFrame: 1, endFrame: 2, text: 'CLOCK' }],
         anchorPlan: { schemaVersion: 'subtitle-anchor-plan/v2', decisions: [{ cueId: 'suppressed', suppressed: true }] },
       })
@@ -442,7 +522,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
     // These exact-centisecond and later-frame boundaries are deliberate gates:
     // IEEE double conversion in vf_subtitles may disagree with rational ceil.
     // A failure here blocks policy activation; it must never be rounded away.
-    for (const [fps, start] of [[30, 3], [60, 6], [30, 111], [60, 111], [100, 803]]) {
+    for (const [fps, start] of BOUNDARY_TARGETS) {
       const indices = [start - 2, start - 1, start, start + 1, start + 2]
       for (const clock of ['lavfi', 'trim-setpts-fps-concat']) {
         const prefix = boundaryClockPrefix(fps, start, clock)
@@ -450,9 +530,27 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
         activeCase = null
         const baseline = pixels(binary, root, fps, undefined, options)
         for (const layer of [0, 1]) {
+          const expectedBinding = REFUSED_TARGETS.has(`${fps}:${start}`) ? 'refused' : 'bound'
           const observed = beginCase({ fps, layer, clock, interval: [start, start + 1], observedFrameIndices: indices,
-            expectedChangedFrames: [start], effectiveFilterGraph: prefix })
-          const ass = document(layer, fps, start, start + 1, fontFamily)
+            expectedBinding, expectedChangedFrames: expectedBinding === 'bound' ? [start] : null, effectiveFilterGraph: prefix })
+          let ass
+          try {
+            ass = document(layer, fps, start, start + 1, fontFamily)
+            observed.binding = 'bound'
+          } catch (error) {
+            assert.ok(isAssBoundaryUnrepresentable(error), `unexpected binder failure: ${error?.message}`)
+            observed.binding = 'refused'
+            observed.refusal = { reason: error.details.reason, refusal: error.refusal, frame: error.details.frame,
+              previousMs: error.details.previousMs, currentMs: error.details.currentMs }
+          }
+          t.diagnostic(JSON.stringify({ fps, start, clock, layer, binding: observed.binding, refusal: observed.refusal ?? null }))
+          assert.equal(observed.binding, expectedBinding, `${fps} fps boundary ${start}: the pure binder and the declared pixel schedule disagree`)
+          if (observed.binding === 'refused') {
+            // Prove the refusal physically: no centisecond pair near the boundary may light exactly [start].
+            if (layer === 1) observed.exhaustion = await exhaustRefusedBoundary({ fps, start, clock, indices, prefix, baseline })
+            observed.status = 'passed'
+            continue
+          }
           observed.assSha256 = sha256(ass)
           await writeAss('boundary.ass', ass)
           const rendered = pixels(binary, root, fps, 'boundary.ass', options)
@@ -502,7 +600,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
     fragmentObserved.materializedRange = fragment
     fragmentObserved.localIntervals = fragment.ctaOverlays.map((cue) => [cue.startFrame, cue.endFrame])
     assert.deepEqual(fragment.ctaOverlays.map((cue) => [cue.startFrame, cue.endFrame]), [[0, 3]])
-    const fragmentAss = buildAssSubtitles({ width: WIDTH, height: HEIGHT, fps: 30,
+    const fragmentAss = buildAssSubtitles({ width: WIDTH, height: HEIGHT, fps: 30, durationFrames: 4,
       cues: [], ctaOverlays: fragment.ctaOverlays }).replaceAll(',Arial,', `,${fontFamily},`)
     fragmentObserved.assSha256 = sha256(fragmentAss)
     await writeAss('fragment.ass', fragmentAss)
@@ -525,8 +623,8 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
     assert.deepEqual(roundedObserved.changedFrames, [1, 2])
     roundedObserved.status = 'passed'
     for (const layer of [0, 1]) {
-      const rejected = beginCase({ fps: 120, layer, interval: [1, 2], expectedRejection: 'cannot represent' })
-      assert.throws(() => document(layer, 120, 1, 2, fontFamily), /cannot represent/)
+      const rejected = beginCase({ fps: 120, layer, interval: [1, 2], expectedRejection: 'ASS_BOUNDARY_UNREPRESENTABLE' })
+      assert.throws(() => document(layer, 120, 1, 2, fontFamily), (error) => isAssBoundaryUnrepresentable(error) && error.details.frame === 1)
       rejected.status = 'passed'
     }
     proof.outcome = { status: 'passed' }

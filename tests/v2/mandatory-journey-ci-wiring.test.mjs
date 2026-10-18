@@ -817,7 +817,7 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/responsive-placement-visual.integration.mjs', reason: PHASE_1_3, citedBy: ['docs/PROJECT-STATUS.md', 'docs/quality/project-status-classification-audit.md'] },
   { file: 'tests/v2/source-deconstruction-golden-reel.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/subtitle-anchor-render.integration.mjs', reason: PHASE_1_3, citedBy: ['docs/PROJECT-STATUS.md', 'docs/quality/project-status-classification-audit.md'] },
-  { file: 'tests/v2/subtitle-sidecar-pipeline.integration.mjs', reason: PHASE_1_3, citedBy: ['docs/PROJECT-STATUS.md', 'docs/quality/project-status-classification-audit.md'] },
+  { file: 'tests/v2/subtitle-sidecar-pipeline.integration.mjs', reason: PHASE_1_3, citedBy: ['docs/PROJECT-STATUS.md', 'docs/quality/project-status-classification-audit.md', 'docs/quality/w69-materialized-subtitle-clock-v2.md'] },
   { file: 'tests/v2/subtitle-style-token-goldens.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/subtitle-style-visual-goldens.integration.mjs', reason: PHASE_1_3, citedBy: ['docs/PROJECT-STATUS.md', 'docs/quality/project-status-classification-audit.md'] },
   { file: 'tests/v2/transformation-critic-media.integration.mjs', reason: PHASE_1_3 },

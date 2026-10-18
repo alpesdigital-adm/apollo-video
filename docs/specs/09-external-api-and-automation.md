@@ -1035,6 +1035,17 @@ Estágios legados podem estar ausentes; nenhuma stack, caminho local ou segredo
 integra a resposta. A observabilidade da tentativa termina no registro
 imutável de promoção; falhas posteriores continuam na PublicOperation.
 
+`POST /v1/projects/{projectId}/subtitle-sidecars` com `projectVersionId` de uma versão
+histórica deriva o sidecar somente do render dessa versão (variante, RenderInput, snapshot de
+EditPlan e cue map próprios) e responde `projectVersion.current=false`; resolução que não seja
+o render nomeado, artefato, manifesto, RenderInput ou cue map divergentes, e render bloqueado
+ou sem revisão são recusados com `SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH` antes de qualquer
+escrita. `POST /v1/projects/{projectId}/output-variants` recusa, com `INVALID_OUTPUT_SPEC`
+e razão tipada `SUBTITLE_BURN_IN_FPS_UNSUPPORTED`, perfil de entrega com legenda queimada
+(`subtitles.mode=burn-in`) acima de 90 fps, antes de qualquer leitura ou renderização;
+saídas sem legenda queimada mantêm 1–120 fps. Detalhes e evidência em
+`docs/quality/w69-materialized-subtitle-clock-v2.md`.
+
 1. Os dez FRs 240–249 possuem endpoints/contracts e testes correspondentes.
 2. Capability registry cobre todas as ações operáveis da UI.
 3. OpenAPI e JSON Schemas são publicados e validados no CI.

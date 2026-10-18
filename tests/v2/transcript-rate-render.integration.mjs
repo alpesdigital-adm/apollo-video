@@ -1,4 +1,3 @@
-import { assertDirectorSnapshotContent } from '../../src/v2/application/director-snapshot-identity.ts'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -14,30 +13,25 @@ import {
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
-import { replaceSourceTranscriptService } from '../../src/v2/application/replace-source-transcript.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
-import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
+import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
-import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
-import { rebuildRetiredContractOneVersion } from '../../src/v2/domain/project-version.ts'
-import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
-import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import {
   advancePublicOperationPhase,
   retryOrFailPublicOperation,
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
-import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain/source-transcript-replacement.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
+import { replaceThenDirect, sealedMasterHead } from './helpers/retimed-journey-world.mjs'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = resolveFfmpegBinary(process.env.FFMPEG_BIN)
@@ -282,15 +276,6 @@ const currentTranscript = transcriptFromSourceFrames([['rascunho', 6, 15]])
 const replacementTranscript = transcriptFromSourceFrames(WORD_SOURCE_FRAMES)
 const repeatReplacementTranscript = transcriptFromSourceFrames(REPEAT_WORD_SOURCE_FRAMES)
 
-function baseVersion() {
-  return rebuildRetiredContractOneVersion({
-    id: 'version-base', workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    sequence: 4, parentVersionId: 'version-parent',
-    snapshotRefs: { brief: 'snapshot-brief', editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
-    baseHash: 'a'.repeat(64), createdBy: 'client-transcript-rate', createdAt: CREATED_AT,
-  })
-}
-
 function compiledEditPlan(clips = CLIPS, durationFrames = DURATION_FRAMES) {
   return {
     schemaVersion: 2, state: 'compiled', id: 'edit-plan-base', projectVersionId: 'version-base',
@@ -311,186 +296,45 @@ function compiledEditPlan(clips = CLIPS, durationFrames = DURATION_FRAMES) {
   }
 }
 
-class ReplacementRepository {
-  constructor(options = {}) {
-    this.editPlan = options.editPlan ?? compiledEditPlan()
-    this.replacement = options.replacement ?? replacementTranscript
-  }
-
-  committed
-  async findIdempotentResult() { return this.committed ?? null }
-  async readContext() {
-    return {
-      currentVersion: baseVersion(), editPlan: this.editPlan, editPlanHash: 'b'.repeat(64),
-      currentTranscript: {
-        id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash,
-        sourceArtifactId: MASTER_ARTIFACT_ID,
-      },
-      replacementTranscript: {
-        id: 'transcript-replacement', transcriptHash: this.replacement.transcriptHash,
-        sourceArtifactId: MASTER_ARTIFACT_ID, transcript: this.replacement,
-      },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: 'version-base', variantId: '9:16' },
-      ],
-    }
-  }
-
-  async commitOrReplay(bundle) {
-    const invalidations = createSourceTranscriptArtifactInvalidations({
-      impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt,
-    })
-    // The persisted snapshot — not the in-memory object — is what the rest of
-    // the journey reads, exactly like the Postgres repository would do.
-    const result = {
-      command: bundle.command, version: bundle.version,
-      editPlan: JSON.parse(bundle.snapshot.contentJson), impact: bundle.command.payload.impact,
-      invalidations, replayed: false, snapshot: bundle.snapshot,
-    }
-    this.committed = { requestFingerprint: bundle.requestFingerprint, result }
-    return result
-  }
-}
-
-class DirectorRepository {
-  constructor(editPlan, currentVersion) {
-    this.snapshotRows = new Map()
-    this.editPlan = editPlan
-    this.currentVersion = currentVersion
-    this.records = new Map()
-  }
-
-  async findIdempotentResult({ workspaceId, projectId, idempotencyKey }) {
-    return this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
-  }
-
-  async readContext({ workspaceId, projectId }) {
-    if (workspaceId !== WORKSPACE_ID || projectId !== PROJECT_ID) return null
-    return {
-      workspaceId,
-      project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
-      currentVersion: this.currentVersion,
-      brief: {
-        objective: 'discovery',
-        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
-      },
-      policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
-      editPlan: this.editPlan,
-      currentDurationFrames: this.editPlan.durationFrames,
-      proxyVariantId: '9:16',
-      sourceRights: {
-        state: 'present', snapshotId: 'rights-rate-master',
-        snapshotHash: 'e'.repeat(64), status: 'approved', consentStatus: 'not-required',
-      },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: this.currentVersion.id, variantId: '9:16' },
-      ],
-      transcript: {
-        id: 'transcript-replacement', sourceArtifactId: MASTER_ARTIFACT_ID, language: 'pt-BR',
-        provider: 'groq', model: 'whisper-large-v3',
-        transcriptHash: this.editPlan.retimedTranscript.sourceTranscriptHash,
-      },
-    }
-  }
-
-  async commitWithCanonicalSnapshots(scope, prepare) {
-    // Controlled in-memory transaction: explicit canonical store, no PG claim.
-    const rows = new Map(this.snapshotRows)
-    const resolve = async (candidates) => candidates.map((candidate) => {
-      assert.equal(candidate.workspaceId, scope.workspaceId)
-      assert.equal(candidate.projectId, scope.projectId)
-      const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
-      const stored = rows.get(key)
-      if (stored) {
-        assertDirectorSnapshotContent(candidate, stored)
-        return stored
-      }
-      rows.set(key, candidate)
-      return candidate
-    })
-    const bundle = await prepare(resolve)
-    assert.equal(bundle.command.baseVersionId, scope.baseVersionId)
-    assert.equal(bundle.command.baseHash, scope.baseHash)
-    assert.equal(bundle.requestFingerprint, scope.requestFingerprint)
-    const result = await this.commitPreparedBundle(bundle)
-    this.snapshotRows = rows
-    return result
-  }
-
-  async commitPreparedBundle(bundle) {
-    this.lastBundle = bundle
-    const impact = parseDirectorRunImpact(bundle.command.payload.impact)
-    const result = Object.freeze({
-      run: bundle.run, command: bundle.command, version: bundle.version,
-      impact, invalidations: createDirectorRunInvalidations({ impact, createdAt: bundle.command.createdAt }),
-      snapshots: bundle.snapshots, replayed: false,
-    })
-    this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
-      requestFingerprint: bundle.requestFingerprint, result,
-    })
-    return result
-  }
-}
-
 const retimed = (plan) =>
   plan.retimedTranscript.words.map((word) => [word.text, word.timelineStartFrame, word.timelineEndFrame])
 
 const sourceEvidence = (plan) =>
   plan.retimedTranscript.words.map((word) => [word.text, word.sourceStartSeconds, word.sourceEndSeconds])
 
+const OUTPUT_REFERENCES = (versionId) => [
+  { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: versionId, variantId: '9:16' },
+]
+
 /**
  * Runs the replacement -> Director half of a journey and returns the PERSISTED
  * directed snapshot, which is the only thing the render half is allowed to read.
+ *
+ * The parent is a real sealed ProjectVersion3/State3 (the pure W66 world): the recording is this suite's master, with
+ * its real storage key, digest and size, and the head carries the suite's compiled EditPlan. Only persistence is replaced.
  */
 async function directRetimedPlan(options) {
-  const replacementRepository = new ReplacementRepository({
-    editPlan: options.editPlan, replacement: options.replacement,
+  const masterBytes = await readFile(options.masterPath)
+  const { actor, head } = await sealedMasterHead({
+    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, clientId: 'client-transcript-rate', credentialId: 'credential-transcript-rate',
+    master: { artifactId: MASTER_ARTIFACT_ID, durationSeconds: 12, sourceKey: MASTER_ARTIFACT_KEY,
+      sourceSha256: createHash('sha256').update(masterBytes).digest('hex'), sourceByteSize: masterBytes.byteLength },
+    plan: options.editPlan, suffix: `rate-base-${options.suffix}`,
   })
-  let replacementIds = 0
-  const replace = replaceSourceTranscriptService({
-    repository: replacementRepository,
-    clock: () => new Date('2026-07-31T09:10:00.000Z'),
-    createId: () => [
-      `edit-command-replace-${options.suffix}`,
-      `version-retimed-${options.suffix}`,
-      `snapshot-retimed-${options.suffix}`,
-    ][replacementIds++],
-    createEventId: () => '123e4567-e89b-42d3-a456-426614174020',
-  })
-  const replacement = await replace({
-    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
-    replacementTranscriptId: 'transcript-replacement',
-    expectedTranscriptHash: options.replacement.transcriptHash,
-    actor: proxyActor(),
-    idempotencyKey: `transcript-rate-render-journey-${options.suffix}`,
-  })
-  const persisted = JSON.parse(replacement.snapshot.contentJson)
-  const directorRepository = new DirectorRepository(persisted, replacement.version)
-  const counters = new Map()
-  let event = 0
-  const runDirector = runProjectDirectorService({
-    repository: directorRepository,
-    clock: () => new Date('2026-07-31T09:20:00.000Z'),
-    createId: (kind) => {
-      const next = (counters.get(kind) ?? 0) + 1
-      counters.set(kind, next)
-      return `${kind}-${options.suffix}-${next}`
-    },
-    createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
-    compileBrief: createEvidenceBoundBriefCompiler(),
-  })
-  const directed = await runDirector({
-    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    baseVersionId: replacement.version.id, baseHash: replacement.version.baseHash,
-    actor: proxyActor(),
-    idempotency: { key: `director-after-transcript-rate-replacement-${options.suffix}` },
+  const journey = await replaceThenDirect({
+    head, actor,
+    currentTranscript: { id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash, sourceArtifactId: MASTER_ARTIFACT_ID },
+    replacement: { id: 'transcript-replacement', sourceArtifactId: MASTER_ARTIFACT_ID, transcript: options.replacement },
+    outputReferences: OUTPUT_REFERENCES,
+    sourceRights: { snapshotId: 'rights-rate-master', snapshotHash: 'e'.repeat(64) },
+    replaceClock: () => new Date('2026-10-17T09:10:00.000Z'),
+    directorClock: () => new Date('2026-10-17T09:20:00.000Z'),
+    replaceIds: (kind, ordinal) => `${kind}-retimed-${options.suffix}-${ordinal}`,
+    directorIdSuffix: `-director-${options.suffix}`,
+    idempotency: { replace: `transcript-rate-render-journey-${options.suffix}`, director: `director-after-transcript-rate-replacement-${options.suffix}` },
     reason: 'Dirigir a composicao com a transcricao corrigida e retimada.',
   })
-  const editPlanSnapshot = directed.snapshots.find((item) => item.kind === 'edit-plan')
-  const directedPlan = JSON.parse(editPlanSnapshot.contentJson)
-  assert.equal(editPlanSnapshot.contentHash, calculateVersionHash(directedPlan))
+  const { replacement, persisted, directed, directedPlan, editPlanSnapshot } = journey
   assert.equal(directed.run.qualityReport.status, 'review-required')
   assert.deepEqual(directed.run.qualityReport.faceSafety, {
     status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [],
@@ -855,6 +699,8 @@ function assertWorkerContract(rendered, expected) {
     expected.cues.map(([id, startFrame, endFrame]) => ['FACE_PERCEPTION_UNAVAILABLE', 'hard', id, startFrame, endFrame]),
   )
   assert.equal(rendered.manifest.recipe.parametersHash, calculateCanonicalHash({
+    // W69 (cb868e7f): the pinned subtitle-clock policy is part of the recipe parameters, so a policy change invalidates reuse.
+    assEmissionPolicy: ASS_EMISSION_POLICY,
     inputHash: rendered.expectedInputHash,
     projectVersionId: expected.projectVersionId,
     editPlanSnapshotId: expected.editPlanSnapshotId,
@@ -939,7 +785,7 @@ test('T-FR-233 retimed transcript drives the Director, the real V2 worker and th
     // 1. replace-source-transcript: immutable evidence in, retimed frames out.
     // -----------------------------------------------------------------------
     const journey = await directRetimedPlan({
-      suffix: 'rate', editPlan: compiledEditPlan(), replacement: replacementTranscript,
+      suffix: 'rate', editPlan: compiledEditPlan(), replacement: replacementTranscript, masterPath,
     })
     const { replacement, persisted, directed, directedPlan, editPlanSnapshot } = journey
     assert.equal(replacement.command.type, 'replace-source-transcript')
@@ -1128,6 +974,7 @@ test('T-FR-233 a repeated and reordered timeline keeps every occurrence of the s
       suffix: 'repeat',
       editPlan: compiledEditPlan(REPEAT_CLIPS, REPEAT_DURATION_FRAMES),
       replacement: repeatReplacementTranscript,
+      masterPath,
     })
     const { persisted, directed, directedPlan, editPlanSnapshot } = journey
 

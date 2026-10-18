@@ -1,4 +1,3 @@
-import { assertDirectorSnapshotContent } from '../../src/v2/application/director-snapshot-identity.ts'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -13,19 +12,14 @@ import { enqueueProjectProxyRenderService } from '../../src/v2/application/enque
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { setProjectSubtitleConfigurationService } from '../../src/v2/application/project-subtitle-configurations.ts'
-import { replaceSourceTranscriptService } from '../../src/v2/application/replace-source-transcript.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
-import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
-import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { critiqueOutputFormat, selectExportableVariants } from '../../src/v2/domain/format-quality-critic.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
-import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
-import { rebuildRetiredContractOneVersion } from '../../src/v2/domain/project-version.ts'
 import {
   advancePublicOperationPhase,
   retryOrFailPublicOperation,
@@ -33,15 +27,14 @@ import {
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
-import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain/source-transcript-replacement.ts'
 import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
-import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import {
   LocalArtifactSourceMaterializer,
   LocalMediaUploadStorage,
 } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
+import { replaceThenDirect, sealedMasterHead } from './helpers/retimed-journey-world.mjs'
 
 // ---------------------------------------------------------------------------
 // Wave 9 phase E — combined journeys.
@@ -195,15 +188,6 @@ function transcriptFromSourceFrames(entries) {
 const currentTranscript = transcriptFromSourceFrames([['rascunho', 6, 15]])
 const replacementTranscript = transcriptFromSourceFrames(WORD_SOURCE_FRAMES)
 
-function baseVersion() {
-  return rebuildRetiredContractOneVersion({
-    id: 'version-base', workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    sequence: 4, parentVersionId: 'version-parent',
-    snapshotRefs: { brief: 'snapshot-brief', editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
-    baseHash: 'a'.repeat(64), createdBy: 'client-wave9', createdAt: CREATED_AT,
-  })
-}
-
 function compiledEditPlan() {
   return {
     schemaVersion: 2, state: 'compiled', id: 'edit-plan-base', projectVersionId: 'version-base',
@@ -225,176 +209,46 @@ function compiledEditPlan() {
 }
 
 // --------------------------------------------------------------------------
-// In-memory persistence for the replacement + Director half (identical in shape
-// to the goldens that already ship: only persistence is faked).
+// Replacement + Director half on a sealed world: the parent is a real ProjectVersion3/State3 (the pure W66 builder), the
+// recording is this suite's master, and only persistence is replaced (see helpers/retimed-journey-world.mjs).
 // --------------------------------------------------------------------------
 
-class ReplacementRepository {
-  committed
-  async findIdempotentResult() { return this.committed ?? null }
-  async readContext() {
-    return {
-      currentVersion: baseVersion(), editPlan: compiledEditPlan(), editPlanHash: 'b'.repeat(64),
-      currentTranscript: {
-        id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash,
-        sourceArtifactId: MASTER_ARTIFACT_ID,
-      },
-      replacementTranscript: {
-        id: 'transcript-replacement', transcriptHash: replacementTranscript.transcriptHash,
-        sourceArtifactId: MASTER_ARTIFACT_ID, transcript: replacementTranscript,
-      },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: 'version-base', variantId: '9:16' },
-        { artifactId: 'proxy-16x9', kind: 'proxy', sourceVersionId: 'version-base', variantId: '16:9' },
-      ],
-    }
-  }
-
-  async commitOrReplay(bundle) {
-    const result = {
-      command: bundle.command, version: bundle.version,
-      editPlan: JSON.parse(bundle.snapshot.contentJson), impact: bundle.command.payload.impact,
-      invalidations: createSourceTranscriptArtifactInvalidations({
-        impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt,
-      }),
-      replayed: false, snapshot: bundle.snapshot,
-    }
-    this.committed = { requestFingerprint: bundle.requestFingerprint, result }
-    return result
-  }
-}
-
-class DirectorRepository {
-  constructor(editPlan, currentVersion) {
-    this.snapshotRows = new Map()
-    this.editPlan = editPlan
-    this.currentVersion = currentVersion
-    this.records = new Map()
-  }
-
-  async findIdempotentResult({ workspaceId, projectId, idempotencyKey }) {
-    return this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
-  }
-
-  async readContext({ workspaceId, projectId }) {
-    if (workspaceId !== WORKSPACE_ID || projectId !== PROJECT_ID) return null
-    return {
-      workspaceId,
-      project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
-      currentVersion: this.currentVersion,
-      brief: {
-        objective: 'discovery',
-        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
-      },
-      policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
-      editPlan: this.editPlan,
-      currentDurationFrames: this.editPlan.durationFrames,
-      proxyVariantId: '9:16',
-      sourceRights: {
-        state: 'present', snapshotId: 'rights-wave9-master',
-        snapshotHash: 'e'.repeat(64), status: 'approved', consentStatus: 'not-required',
-      },
-      outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: this.currentVersion.id, variantId: '9:16' },
-        { artifactId: 'proxy-16x9', kind: 'proxy', sourceVersionId: this.currentVersion.id, variantId: '16:9' },
-      ],
-      transcript: {
-        id: 'transcript-replacement', sourceArtifactId: MASTER_ARTIFACT_ID, language: 'pt-BR',
-        provider: 'groq', model: 'whisper-large-v3',
-        transcriptHash: this.editPlan.retimedTranscript.sourceTranscriptHash,
-      },
-    }
-  }
-
-  async commitWithCanonicalSnapshots(scope, prepare) {
-    // Controlled in-memory transaction: explicit canonical store, no PG claim.
-    const rows = new Map(this.snapshotRows)
-    const resolve = async (candidates) => candidates.map((candidate) => {
-      assert.equal(candidate.workspaceId, scope.workspaceId)
-      assert.equal(candidate.projectId, scope.projectId)
-      const key = JSON.stringify([candidate.projectId, candidate.kind, candidate.contentHash])
-      const stored = rows.get(key)
-      if (stored) {
-        assertDirectorSnapshotContent(candidate, stored)
-        return stored
-      }
-      rows.set(key, candidate)
-      return candidate
-    })
-    const bundle = await prepare(resolve)
-    assert.equal(bundle.command.baseVersionId, scope.baseVersionId)
-    assert.equal(bundle.command.baseHash, scope.baseHash)
-    assert.equal(bundle.requestFingerprint, scope.requestFingerprint)
-    const result = await this.commitPreparedBundle(bundle)
-    this.snapshotRows = rows
-    return result
-  }
-
-  async commitPreparedBundle(bundle) {
-    const impact = parseDirectorRunImpact(bundle.command.payload.impact)
-    const result = Object.freeze({
-      run: bundle.run, command: bundle.command, version: bundle.version, impact,
-      invalidations: createDirectorRunInvalidations({ impact, createdAt: bundle.command.createdAt }),
-      snapshots: bundle.snapshots, replayed: false,
-    })
-    this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
-      requestFingerprint: bundle.requestFingerprint, result,
-    })
-    return result
-  }
-}
+const OUTPUT_REFERENCES = (versionId) => [
+  { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: versionId, variantId: '9:16' },
+  { artifactId: 'proxy-16x9', kind: 'proxy', sourceVersionId: versionId, variantId: '16:9' },
+]
 
 /**
- * Runs replacement -> Director ONCE. Both variants render this single persisted
- * snapshot, which is what makes journey 1 ("same StoryPlan/transcript") literal.
+ * Runs replacement -> Director ONCE per master. Both variants render this single persisted
+ * snapshot, which is what makes journey 1 ("same StoryPlan/transcript") literal. The sealed recording carries the real
+ * master's digest and size, so the cache is keyed by that digest (the master is regenerated by every test).
  */
-let directedOnce
-async function directOnce() {
-  if (directedOnce) return directedOnce
-  const replacementRepository = new ReplacementRepository()
-  let replacementIds = 0
-  const replace = replaceSourceTranscriptService({
-    repository: replacementRepository,
-    clock: () => new Date('2026-08-14T09:10:00.000Z'),
-    createId: () => ['edit-command-replace', 'version-retimed', 'snapshot-retimed'][replacementIds++],
-    createEventId: () => '123e4567-e89b-42d3-a456-426614174020',
+const directedByMaster = new Map()
+async function directOnce(masterPath) {
+  const masterBytes = await readFile(masterPath)
+  const masterSha256 = createHash('sha256').update(masterBytes).digest('hex')
+  if (directedByMaster.has(masterSha256)) return directedByMaster.get(masterSha256)
+  const { actor, head } = await sealedMasterHead({
+    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, clientId: 'client-wave9', credentialId: 'credential-wave9',
+    master: { artifactId: MASTER_ARTIFACT_ID, durationSeconds: 6, sourceKey: MASTER_ARTIFACT_KEY,
+      sourceSha256: masterSha256, sourceByteSize: masterBytes.byteLength },
+    plan: compiledEditPlan(), suffix: 'wave9-base',
   })
-  const replacement = await replace({
-    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
-    replacementTranscriptId: 'transcript-replacement',
-    expectedTranscriptHash: replacementTranscript.transcriptHash,
-    actor: proxyActor(),
-    idempotencyKey: 'wave9-combined-transcript-replacement',
-  })
-  const persisted = JSON.parse(replacement.snapshot.contentJson)
-  const directorRepository = new DirectorRepository(persisted, replacement.version)
-  const counters = new Map()
-  let event = 0
-  const runDirector = runProjectDirectorService({
-    repository: directorRepository,
-    clock: () => new Date('2026-08-14T09:20:00.000Z'),
-    createId: (kind) => {
-      const next = (counters.get(kind) ?? 0) + 1
-      counters.set(kind, next)
-      return `${kind}-${next}`
-    },
-    createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
-    compileBrief: createEvidenceBoundBriefCompiler(),
-  })
-  const directed = await runDirector({
-    workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
-    baseVersionId: replacement.version.id, baseHash: replacement.version.baseHash,
-    actor: proxyActor(),
-    idempotency: { key: 'wave9-combined-director-run' },
+  const journey = await replaceThenDirect({
+    head, actor,
+    currentTranscript: { id: 'transcript-current', transcriptHash: currentTranscript.transcriptHash, sourceArtifactId: MASTER_ARTIFACT_ID },
+    replacement: { id: 'transcript-replacement', sourceArtifactId: MASTER_ARTIFACT_ID, transcript: replacementTranscript },
+    outputReferences: OUTPUT_REFERENCES,
+    sourceRights: { snapshotId: 'rights-wave9-master', snapshotHash: 'e'.repeat(64) },
+    replaceClock: () => new Date('2026-10-17T09:10:00.000Z'),
+    directorClock: () => new Date('2026-10-17T09:20:00.000Z'),
+    replaceIds: (kind, ordinal) => `${kind}-wave9-retimed-${ordinal}`,
+    directorIdSuffix: '-wave9-director',
+    idempotency: { replace: 'wave9-combined-transcript-replacement', director: 'wave9-combined-director-run' },
     reason: 'Dirigir uma composicao unica para duas variantes de formato.',
   })
-  const editPlanSnapshot = directed.snapshots.find((item) => item.kind === 'edit-plan')
-  const directedPlan = JSON.parse(editPlanSnapshot.contentJson)
-  assert.equal(editPlanSnapshot.contentHash, calculateVersionHash(directedPlan))
-  directedOnce = { replacement, persisted, directed, directedPlan, editPlanSnapshot }
-  return directedOnce
+  directedByMaster.set(masterSha256, journey)
+  return journey
 }
 
 // --------------------------------------------------------------------------
@@ -803,7 +657,7 @@ function assertRenderedVariant(rendered, expected) {
 
 /** Renders one variant of the single directed snapshot. */
 async function renderVariant(options) {
-  const journey = await directOnce()
+  const journey = await directOnce(options.masterPath)
   const directedBefore = structuredClone(journey.directedPlan)
   const snapshotBefore = structuredClone(journey.editPlanSnapshot)
   assert.equal(journey.directed.run.qualityReport.status, 'review-required')
@@ -837,11 +691,14 @@ async function renderVariant(options) {
  * `revert` has something to return to.
  */
 class SubtitleConfigurationRepository {
-  constructor(version) {
-    this.version = version
+  /** @param parent the sealed bundle the chain starts from; every commit becomes the sealed parent of the next one */
+  constructor(parent) {
+    this.current = parent
     this.history = []
     this.idempotent = new Map()
   }
+
+  get version() { return this.current.version }
 
   async findIdempotent({ workspaceId, projectId, idempotencyKey }) {
     return this.idempotent.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
@@ -851,7 +708,7 @@ class SubtitleConfigurationRepository {
     if (workspaceId !== WORKSPACE_ID || projectId !== PROJECT_ID) return null
     const forVariant = this.history.filter((item) => item.variantId === variantId)
     return {
-      currentVersion: this.version,
+      parent: this.current,
       transcript: replacementTranscript,
       directorPresetId: 'clean-color',
       durationFrames: DURATION_FRAMES,
@@ -863,16 +720,15 @@ class SubtitleConfigurationRepository {
     }
   }
 
-  async commitOrReplay(bundle) {
-    this.version = bundle.version
-    this.history.push(bundle.configuration)
+  async commitOrReplay(input) {
+    const { command, requestFingerprint } = input.bundle.origin
+    this.current = input.bundle
+    this.history.push(input.configuration)
     const result = Object.freeze({
-      command: bundle.command, version: bundle.version,
-      configuration: bundle.configuration, impact: bundle.impact, replayed: false,
+      command, version: input.bundle.version,
+      configuration: input.configuration, impact: input.impact, replayed: false,
     })
-    this.idempotent.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
-      requestFingerprint: bundle.requestFingerprint, result,
-    })
+    this.idempotent.set(`${command.workspaceId}:${command.projectId}:${command.idempotencyKey}`, { requestFingerprint, result })
     return result
   }
 
@@ -896,7 +752,7 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
   const masterPath = join(root, 'wave9-master.mp4')
   try {
     await writeColourMaster(masterPath)
-    const journey = await directOnce()
+    const journey = await directOnce(masterPath)
 
     // --- Journey 1: both variants start from the SAME StoryPlan/transcript ---
     const cues = journey.directedPlan.subtitleTracks.flatMap((track) => track.cues)
@@ -1053,14 +909,14 @@ test('T-WAVE9-E the subtitle configuration chain changes only the preset, never 
   const masterPath = join(root, 'wave9-master.mp4')
   try {
     await writeColourMaster(masterPath)
-    const journey = await directOnce()
+    const journey = await directOnce(masterPath)
 
     // --- The chain: clean-color -> kinetic -> none -> revert ---------------
-    const repository = new SubtitleConfigurationRepository(journey.directed.version)
+    const repository = new SubtitleConfigurationRepository(journey.directed.bundle)
     let counter = 0
     const setSubtitles = setProjectSubtitleConfigurationService({
       repository,
-      clock: () => new Date(`2026-08-14T10:0${counter}:00.000Z`),
+      clock: () => new Date(`2026-10-17T10:0${counter}:00.000Z`),
       createId: (kind) => `${kind}-subtitle-${counter}`,
     })
     const step = async (label, request) => {

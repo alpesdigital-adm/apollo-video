@@ -237,3 +237,25 @@ export function buildEditorialCompositionPrefix(input: Readonly<PreparedEditoria
       ...videoInputs.flatMap((clipInput) => ['-ss', clipInput.ss, '-t', clipInput.t, '-i', clipInput.path]),
       ...placementInputs.flatMap((asset) => ['-i', asset.path])]), videoLabel: composedLabel, audioLabel: 'outa' })
 }
+
+/**
+ * Last stage before libass (`ass-frame-clock/v3`, clock `settb-setpts-consecutive-pts/v1`).
+ * `settb=1/<rate>,setpts=N` publishes the inverse of the rate as the time base and numbers the
+ * frames 0, 1, 2, ... without touching their count, so the clock `vf_subtitles` converts into
+ * milliseconds is a closed form of the frame index and the rate. Whatever time base the composition
+ * ends in (concat publishes 1/1000000, lavfi 1/rate, the overlay inherits) does not reach libass,
+ * and the binary64 skew of that time base cannot move a boundary.
+ *
+ * Why not `fps=<rate>` (ass-frame-clock/v2): it published the same (pts = index, time base 1/rate)
+ * but, on FFmpeg 6.1.1 (the ffmpeg-static build), dropped the final frame after
+ * `overlay=shortest=1` at every rate from 24 to 120 fps (T-FR-227: 899 of 900 frames); FFmpeg 8.1.1
+ * kept it, which is why the v2 pixel proof passed. `eof_action=pass` did not repair it (still short
+ * on 6.1.1, one frame too many on 8.1.1 at 24 and 60 fps). Used by the renderer and by the clock
+ * collector so both observe the same stream. Evidence: docs/quality/w69-materialized-subtitle-clock-v2.md.
+ */
+export function buildPreLibassClockStage(input: { inputLabel: string; outputFps: number }) {
+  if (!Number.isSafeInteger(input.outputFps) || input.outputFps <= 0 || !/^[A-Za-z0-9_]+$/.test(input.inputLabel)) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'The pre-libass clock stage requires an integer rate and a plain label')
+  }
+  return Object.freeze({ filters: Object.freeze([`[${input.inputLabel}]settb=1/${input.outputFps},setpts=N[clocked]`]), outputLabel: 'clocked' as const })
+}

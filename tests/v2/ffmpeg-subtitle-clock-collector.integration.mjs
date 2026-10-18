@@ -59,7 +59,9 @@ function requestFor(vector, source, music, placement, toolchain, deadline, hardE
     profile: { schemaVersion: 'materialized-delivery-profile/v1', id: output.deliveryProfileId, version: 1,
       rendererContractVersion: 'ffmpeg-editorial-output/v1', final: encoding('final'), proxy: encoding('proxy'),
       proxyToFinal: { schemaVersion: 'output-canvas-transform/v1', scaleX: 1, scaleY: 1 },
-      subtitles: { mode: 'burn-in', configuration: { schemaVersion: config.schemaVersion, document: config, hash: calculateOutputCanonicalHash(config) },
+      // The collector observes the pre-libass clock and never reads the delivery mode. Burned-in subtitles above 90 fps no longer
+      // have a sealed OutputSpec (BURN_IN_SUBTITLE_MAX_FPS), so the 100 fps frame-803 evidence vector is sealed as a sidecar output.
+      subtitles: { mode: vector.fps > 90 ? 'sidecar' : 'burn-in', configuration: { schemaVersion: config.schemaVersion, document: config, hash: calculateOutputCanonicalHash(config) },
         fontAssets: toolchain.fonts.map((font) => ({ artifactId: font.artifactId, sha256: font.sha256 })) } }, preset: null,
     createdAt: '2026-10-12T12:00:00.000Z' })
   const specRevision = sealOutputSpecRevision(spec, { kind: 'edit-command', id: 'controlled-command-' + vector.name,
@@ -228,6 +230,10 @@ test('owned product-prefix collector records full observed clocks; emission and 
         const replay = await collector.capture({ ...request, runId: replayAttempt.runId, diagnosticAss: { text: emptyAss, sha256: digest(emptyAss) } }); replayAttempt.traceHash = replay.traceHash; replayAttempt.outcome = 'captured'
         collector.assertReplay(prepared, replay)
         assert.equal(prepared.frames.length, vector.frames); assert.equal(prepared.frames[vector.target].frame, vector.target)
+        // The last stage before libass is settb=1/<rate>,setpts=N (ass-frame-clock/v3): whatever the composition publishes, libass
+        // receives frame k with PTS k in the inverse of the rate, so the observed clock is the closed form the binder uses.
+        for (const frame of prepared.frames) assert.deepEqual({ pts: frame.pts, timeBase: frame.timeBase },
+          { pts: String(frame.frame), timeBase: { numerator: '1', denominator: String(request.prepared.outputFps) } })
         assert.equal(prepared.mp4Clock.frames.length, vector.frames)
         assert.equal(prepared.integration, 'blocked')
         if (vector.name === 'concat-audio-60-frame-6') {
