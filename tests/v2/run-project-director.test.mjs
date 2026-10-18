@@ -17,7 +17,7 @@ import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createPerceptionProducerEnvelope } from '../../src/v2/domain/perception-producer-envelope.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
-import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
+import { createDirectorRunImpact, createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { validateDirectorDecisions } from '../../src/v2/domain/director-run.ts'
 import {
   advancePublicOperationPhase,
@@ -41,6 +41,14 @@ const world = await ingestedWorld({
 const head = recompiledChild(world.parent, world.actor, () => structuredClone(compiledEditorialPlan()),
   { suffix: 'director-base', versionId: 'project-version-4', snapshotId: 'snapshot-edit-4' })
 const baseHash = head.version.baseHash
+const variantIdsOf = (bundle) => bundle.state.document.entries.map((entry) => entry.variantId)
+
+// The same project with TWO outputs (the published variant and a sibling) over the same compiled editorial timeline.
+const twoOutputWorld = await ingestedWorld({
+  actor: world.actor, sourceDurationSeconds: 14, sibling: true,
+})
+const twoOutputHead = recompiledChild(twoOutputWorld.parent, twoOutputWorld.actor, () => structuredClone(compiledEditorialPlan()),
+  { suffix: 'director-base', versionId: 'project-version-4', snapshotId: 'snapshot-edit-4' })
 
 // The same project when the selected B-roll insert was ingested before the master: the head State observes the master
 // alone, and the insert's receipt is the one its own ingest persisted.
@@ -192,11 +200,11 @@ class InMemoryDirectorRepository {
       state: 'present', snapshotId: 'rights-snapshot-master-1',
       snapshotHash: 'c'.repeat(64), status: 'approved', consentStatus: 'not-required',
     }
-    this.outputReferences = options.outputReferences ?? [
-      { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: '9:16' },
-      { artifactId: 'artifact-final-4', kind: 'final', sourceVersionId: 'project-version-4', variantId: '9:16' },
-    ]
     this.parent = options.head ?? head
+    this.outputReferences = options.outputReferences ?? [
+      { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: variantIdsOf(this.parent)[0] },
+      { artifactId: 'artifact-final-4', kind: 'final', sourceVersionId: 'project-version-4', variantId: variantIdsOf(this.parent)[0] },
+    ]
     this.offered = options.offered ?? []
     this.transcript = options.transcript ?? {
       id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR',
@@ -227,7 +235,7 @@ class InMemoryDirectorRepository {
     if (workspaceId !== 'workspace-1' || projectId !== 'project-1') return null
     return {
       workspaceId,
-      project: { id: projectId, objective: this.projectObjective, format: '9:16', locale: 'pt-BR' },
+      project: { id: projectId, objective: this.projectObjective, locale: 'pt-BR' },
       ...(this.latestDirectorObjective
         ? { latestDirectorObjective: this.latestDirectorObjective }
         : {}),
@@ -254,7 +262,7 @@ class InMemoryDirectorRepository {
       policies: { automaticZoom: false, faceProtection: true, guardrails: this.guardrails },
       editPlan: this.baseEditPlan ?? compiledEditorialPlan(this.selectedInsert, this.ctaText),
       currentDurationFrames: 300,
-      proxyVariantId: '9:16',
+      variantIds: variantIdsOf(this.parent),
       sourceRights: this.sourceRights,
       outputReferences: this.outputReferences,
       transcript: this.transcript,
@@ -522,7 +530,8 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.deepEqual(result.impact.changeKinds, ['director-replan'])
   assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
   assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: 300 }])
-  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] }])
+  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: variantIdsOf(head)[0], ranges: [{ startFrame: 0, endFrame: 300 }] }])
+  assert.deepEqual(result.impact.affectedVariantIds, [variantIdsOf(head)[0]])
   assert.deepEqual(result.impact.affectedArtifacts.map((item) => item.artifactId), ['artifact-final-4', 'artifact-proxy-4'])
   assert.equal(result.invalidations.length, 2)
   assert.equal(result.invalidations.every((item) => item.status === 'stale' && item.impactHash === result.impact.impactHash), true)
@@ -839,8 +848,60 @@ test('Director V2 still requests one full proxy without fabricating stale artifa
 
   assert.deepEqual(result.impact.affectedArtifacts, [])
   assert.deepEqual(result.impact.affectedVariantIds, [])
-  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] }])
+  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: variantIdsOf(head)[0], ranges: [{ startFrame: 0, endFrame: 300 }] }])
   assert.deepEqual(result.invalidations, [])
+})
+
+test('W66 multi-output: a Director re-run on a project with two outputs stales the renders of EVERY output and asks one minimal proxy render per output', async () => {
+  const variantIds = variantIdsOf(twoOutputHead)
+  assert.equal(variantIds.length, 2)
+  assert.equal(new Set(variantIds).size, 2)
+  const references = variantIds.flatMap((variantId, index) => [
+    { artifactId: `artifact-proxy-two-outputs-${index}`, kind: 'proxy', sourceVersionId: 'project-version-4', variantId },
+    { artifactId: `artifact-final-two-outputs-${index}`, kind: 'final', sourceVersionId: 'project-version-4', variantId },
+  ])
+  const { repository, service } = fixture({ head: twoOutputHead, outputReferences: references })
+  const input = request({ baseHash: twoOutputHead.version.baseHash })
+  // The Command names no output: a Director re-run replans the one EditPlan every output re-materializes from.
+  assert.equal('variantId' in input, false)
+  const result = await service(input)
+  const sorted = [...variantIds].sort()
+
+  // the child Version carries EVERY entry; each output keeps its own spec revision and spec hash
+  const entries = repository.lastBundle.bundle.state.document.entries
+  assert.deepEqual(entries.map((entry) => entry.variantId), variantIds)
+  for (const [index, entry] of entries.entries()) {
+    assert.equal(entry.outputSpecRevisionId, twoOutputHead.state.document.entries[index].outputSpecRevisionId)
+    assert.equal(entry.specHash, twoOutputHead.state.document.entries[index].specHash)
+  }
+  assert.deepEqual(result.impact.affectedVariantIds, sorted)
+  assert.deepEqual(result.impact.affectedArtifacts.map((item) => [item.kind, item.artifactId, item.variantId]).toSorted(),
+    references.map((item) => [item.kind, item.artifactId, item.variantId]).toSorted())
+  assert.deepEqual(result.impact.minimalRenders, sorted.map((variantId) => ({ kind: 'proxy', variantId, ranges: [{ startFrame: 0, endFrame: 300 }] })))
+  assert.equal(result.invalidations.length, 4)
+  assert.deepEqual([...new Set(result.invalidations.map((item) => item.variantId))].sort(), sorted)
+  assert.equal(repository.lastBundle.event.data.artifactInvalidationCount, 4)
+  assert.deepEqual(parseDirectorRunImpact(JSON.parse(stableSerialize(result.impact))), result.impact)
+  // a stored document that lists a render for one output only (or none) is not accepted back
+  const stored = JSON.parse(stableSerialize(result.impact))
+  assert.throws(() => parseDirectorRunImpact({ ...stored, minimalRenders: stored.minimalRenders.slice(0, 1) }), /not an output of the project/)
+  assert.throws(() => parseDirectorRunImpact({ ...stored, minimalRenders: [] }), /invalid/)
+  assert.throws(() => parseDirectorRunImpact({ ...stored, minimalRenders: [stored.minimalRenders[0], { ...stored.minimalRenders[1], ranges: [{ startFrame: 0, endFrame: 200 }] }] }), /invalid/)
+})
+
+test('W66 multi-output: the Director impact document refuses a render of a stranger and a project with no output', () => {
+  const base = {
+    commandId: 'command-director-two-outputs', baseVersionId: 'version-director-two-outputs-base', resultVersionId: 'version-director-two-outputs-result',
+    sourceTranscriptId: 'transcript-director-two-outputs', sourceTranscriptHash: 'a'.repeat(64),
+    plannerVersion: 'apollo-director-policy/v2', criticVersion: 'apollo-director-critic/v3', affectedEndFrame: 300, renderEndFrame: 280,
+  }
+  const reference = (variantId) => ({ artifactId: `artifact-${variantId}`, kind: 'proxy', sourceVersionId: base.baseVersionId, variantId })
+  const ok = createDirectorRunImpact({ ...base, variantIds: ['variant-wide', 'variant-vertical'], outputReferences: [reference('variant-wide')] })
+  assert.deepEqual(ok.minimalRenders.map((render) => [render.variantId, render.ranges[0].endFrame]), [['variant-vertical', 280], ['variant-wide', 280]])
+  assert.deepEqual(ok.affectedVariantIds, ['variant-wide'])
+  assert.throws(() => createDirectorRunImpact({ ...base, variantIds: ['variant-wide'], outputReferences: [reference('variant-vertical')] }), /not an output of the project/)
+  assert.throws(() => createDirectorRunImpact({ ...base, variantIds: [], outputReferences: [] }), /every output/)
+  assert.throws(() => createDirectorRunImpact({ ...base, variantIds: ['variant-wide', 'variant-wide'], outputReferences: [] }), /duplicated/)
 })
 
 test('Director enqueue allocates one immutable result version and replays before reading mutable project state', async () => {

@@ -5,6 +5,7 @@ import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProjectLutSelection, type ProjectLutSelection, type ProjectLutSelectionRequest } from '../../domain/project-lut-selection.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
@@ -12,7 +13,6 @@ import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat, requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../domain/project-lut-selection-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
@@ -263,33 +263,31 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
     const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
     if (!parent) return null
     const currentVersionId = parent.version.id
-    const format = projectOutputFormat(project, parent)
-        const [resolved, proxyOutputs, finalOutputs] = await Promise.all([
+    // A LUT selection is project-wide: its impact covers EVERY output the sealed State carries, each render attributed to its own.
+    const variantIds = parent.state.document.entries.map((entry) => entry.variantId)
+    const [resolved, proxyOutputs, finalOutputs] = await Promise.all([
       resolve(this.client, { workspaceId: input.workspaceId, requested: input.requested }),
       this.client.v2ProjectProxyRenderOperation.findMany({
         where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
         where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
     const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'current project LUT EditPlan')
     if (editPlan.projectVersionId !== currentVersionId) throw new DomainError('PERSISTENCE_CONFLICT', 'Current project LUT EditPlan identity is invalid')
     const currentDurationFrames = Number(editPlan.durationFrames)
-    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !format) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT render context is incomplete')
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || variantIds.length === 0) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT render context is incomplete')
     if (currentDurationFrames === 0 && (proxyOutputs.length > 0 || finalOutputs.length > 0)) throw new DomainError('PERSISTENCE_CONFLICT', 'Project outputs exist before a renderable timeline')
     return Object.freeze({
       parent,
       ...(resolved.workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision: resolved.workspaceDefaultRevision } : {}),
       ...(resolved.lut ? { resolvedLutVersion: resolved.lut } : {}),
       currentDurationFrames,
-      proxyVariantId: format,
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: format })),
-        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+      variantIds: Object.freeze(variantIds),
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
     })
   }
 
@@ -350,17 +348,14 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
         const [proxyOutputs, finalOutputs] = await Promise.all([
           transaction.v2ProjectProxyRenderOperation.findMany({
             where: { workspaceId: command.workspaceId, projectId: command.projectId, projectVersionId: command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true },
+            select: { outputArtifactId: true, outputVariantId: true },
           }),
           transaction.v2ProjectFinalExportOperation.findMany({
             where: { workspaceId: command.workspaceId, projectId: command.projectId, projectVersionId: command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true, outputAspectRatio: true },
+            select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
           }),
         ])
-        const currentOutputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: command.baseVersionId, variantId: requireProjectOutputFormat(project, input.bundle) })),
-          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: command.baseVersionId, variantId: output.outputAspectRatio })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+        const currentOutputs = renderOutputReferences({ state: input.bundle.state, sourceVersionId: command.baseVersionId, proxies: proxyOutputs, finals: finalOutputs })
         if (stableSerialize(currentOutputs) !== stableSerialize(command.payload.impact.affectedArtifacts)) throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before LUT selection impact commit')
         await commitProjectVersionWithOutputState(transaction, input.bundle)
         await transaction.v2ProjectLutSelection.create({ data: {

@@ -390,3 +390,16 @@ test('an explicit State variant of a copy never cut is still refused with the pu
     { variantId: 'variant-b', aspectRatio: '9:16', blockedReasons: ['fork-target-materialization-required'] }] } })
   await assert.rejects(subject.repository.readCurrentSource({ workspaceId, projectId, variantId: 'variant-b' }), reasonOf('copy-requires-editorial-cut', 'render'))
 })
+
+test('S3-MO the inline authority of an unchanged reuse is read for the output the reuse is for: a State with several outputs that names none is refused, each output answers its own format and seal', async () => {
+  const subject = fixture({ role: 'source-master', rights: { allowedUses: ['rendering'] }, world: twoOutputs })
+  const inline = (variantId) => assertInlineProxySourceAuthority(subject.client, { workspaceId, projectId, projectVersionId: 'version-proxy-rights',
+    editPlanSnapshotId: 'snapshot-proxy-rights', sourceArtifactId: 'artifact-rights-master', sourceManifestId: 'manifest-artifact-rights-master',
+    outputArtifactId: 'output-inline-rights', outputManifestId: 'manifest-inline-rights', ...(variantId === undefined ? {} : { variantId }) })
+  await assert.rejects(inline(undefined), reasonOf('output-variant-required', 'render'))
+  await assert.rejects(inline('variant-unknown'), reasonOf('output-variant-unknown'))
+  const [wide, tall] = [await inline('variant-wide'), await inline('variant-tall')]
+  assert.deepEqual([wide.format, tall.format], ['16:9', '9:16'])
+  assert.deepEqual([wide.outputConsumption.seal.variantId, tall.outputConsumption.seal.variantId], ['variant-wide', 'variant-tall'])
+  assert.notEqual(wide.outputConsumption.sealHash, tall.outputConsumption.sealHash)
+})

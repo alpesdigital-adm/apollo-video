@@ -10,12 +10,23 @@ import { calculateVersionHash } from './version-hash.ts'
 const SEAL_HASH_PATTERN = /^[a-f0-9]{64}$/
 
 /**
- * The State variant an operation's context names, once a later step persists it there; none today (the State's only output). The
- * workers read through it so that step does not touch them again.
+ * The State variant an operation's context names (`outputVariantId`, written at enqueue from the sealed consumption). A context
+ * without it is a legacy row, written before the column existed: it is read with the sole-output rule only (a State with several
+ * outputs is then refused, never guessed). The workers read through it, so the output a render was made for is never re-chosen.
  */
 export function contextVariantSelection(context: object): Readonly<{ variantId?: string }> {
-  const value = (context as { variantId?: unknown }).variantId
+  const value = (context as { outputVariantId?: unknown }).outputVariantId
   return typeof value === 'string' && value.length > 0 ? { variantId: value } : {}
+}
+
+/**
+ * The stable State variant a source was read for (the consumption it was sealed to). A consumer attributes what it persists
+ * (the operation context, the completion of a render) to this, never to an aspect ratio.
+ */
+export function sourceOutputVariantId(source: Readonly<Pick<ProjectProxyRenderSource, 'outputConsumption'>>): string {
+  const variantId = source.outputConsumption?.seal?.variantId
+  assertDomain(typeof variantId === 'string' && variantId.length > 0, 'INVALID_RENDER_INPUT', 'Render input is not sealed to an output variant')
+  return variantId
 }
 
 /** The consumption seal a render input hash is built over. A source without it was not read through the consumption verdict. */

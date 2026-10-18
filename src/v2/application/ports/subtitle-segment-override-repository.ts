@@ -23,8 +23,10 @@ export interface SubtitleSegmentOverrideContext {
   durationFrames: number
   /** Compiled segments of the target variant. An override may only name one of these. */
   segments: readonly Readonly<SubtitleSegmentOverrideCompiledSegment>[]
-  /** Output variants the current EditPlan actually compiles. */
-  variantIds: readonly string[]
+  /**
+   * The renders of the head Version, each attributed to the stable State variant it was made for (`renderOutputReferences`). The
+   * service keeps the target variant's only: the other outputs' renders stay valid.
+   */
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
   /** Head override of this (variant, segment), or null while the segment is inherited. */
   currentOverride: Readonly<SubtitleSegmentOverride> | null

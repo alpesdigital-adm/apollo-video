@@ -36,10 +36,16 @@ export interface ProxyReviewRepository {
     review: Readonly<ProxyReview>
     createdAt: string
   }): Promise<Readonly<PersistedProxyReview>>
+  /**
+   * The newest review of one OUTPUT of a Version (the head when `projectVersionId` is absent). `variantId` is the stable State
+   * variant; it may be omitted ONLY when the Version has exactly one output (a Version with several is refused with
+   * `output-variant-required`, a stranger with `output-variant-unknown`): the review of another output is never returned.
+   */
   findCurrent(input: {
     workspaceId: string
     projectId: string
     projectVersionId?: string
+    variantId?: string
   }): Promise<Readonly<PersistedProxyReview> | null>
   acknowledgeWarnings(input: {
     workspaceId: string

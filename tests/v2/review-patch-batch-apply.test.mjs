@@ -16,10 +16,11 @@ test('T-FR-233 applied review batch persists impact v2, a sealed Version and nor
   const parent = recompiledChild(world.parent, world.actor, reviewedTimeline, { suffix: 'review-batch-base' })
   const { workspaceId, projectId } = parent.version, baseVersionId = parent.version.id
   const planSnapshot = operationalBundlePlanV3(parent)
+  // The renders of the head, each attributed to the stable variant of the world's ONE output.
+  const VARIANT = parent.state.document.entries[0].variantId
   const outputs = [
-    { artifactId: 'artifact-final-9x16', kind: 'final', sourceVersionId: baseVersionId, variantId: '9:16' },
-    { artifactId: 'artifact-proxy-9x16', kind: 'proxy', sourceVersionId: baseVersionId, variantId: '9:16' },
-    { artifactId: 'artifact-final-16x9', kind: 'final', sourceVersionId: baseVersionId, variantId: '16:9' },
+    { artifactId: 'artifact-final-9x16', kind: 'final', sourceVersionId: baseVersionId, variantId: VARIANT },
+    { artifactId: 'artifact-proxy-9x16', kind: 'proxy', sourceVersionId: baseVersionId, variantId: VARIANT },
   ]
   const patch = {
     id: 'patch-batch-impact-1', baseVersionId,
@@ -50,7 +51,7 @@ test('T-FR-233 applied review batch persists impact v2, a sealed Version and nor
         return {
           parent, currentVersion: parent.version,
           editPlan: JSON.parse(planSnapshot.contentJson), editPlanHash: planSnapshot.contentHash, availableAssetIds: ['artifact-source3'],
-          renderVariantIds: ['9:16'], outputReferences: outputs,
+          outputReferences: outputs,
           entries: [], batch,
         }
       },

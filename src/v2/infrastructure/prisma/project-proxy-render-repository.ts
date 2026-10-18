@@ -18,7 +18,8 @@ import {
 } from '../../domain/command-impact.ts'
 import { editCommandRenderPolicy } from '../../domain/edit-command-registry.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './renderable-plan-snapshot-repository.ts'
-import { readSafeReusableProxy } from './proxy-reuse-safety.ts'
+import { readSafeReusableProxy, selectReusableProxyOperation } from './proxy-reuse-safety.ts'
+import { sourceOutputVariantId } from '../../application/project-render-sources.ts'
 import { queryProxySourceProject, hydrateProxySource, hydrateProxyRenderSources, uniqueSourceLink,
   parseProxySourceRecord, parseProxySourceCriticIssues, assertProxySourceLineage, lockProxySourceArtifacts } from './proxy-source-authority.ts'
 import { parseDirectorPerceptionSnapshotUnchecked } from './director-run-repository.ts'
@@ -39,11 +40,14 @@ function parseArray(value: string, field: string): readonly unknown[] {
 
 function assertSealedProxyRecipe(input: Readonly<{
   recipeParameters: Readonly<Record<string, unknown>>
+  /** A project render: the stable State variant it was made for. A renderable snapshot: its LOCALIZATION variant. */
   variantId: string
+  /** A project render: the aspect ratio it drew (the recipe records the same). Absent for a renderable snapshot. */
+  format?: string
   ocrReceipt: Readonly<NonNullable<Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0]['ocrReceipt']>> | null
 }>, operation: Readonly<{ inputHash: string; projectVersionId: string; editPlanSnapshotId: string;
   renderablePlanHash?: string | null; renderableVariantId?: string | null;
-  renderableFormat?: string | null }>,
+  renderableFormat?: string | null; outputVariantId?: string | null }>,
 artifact: Readonly<{ artifactKey: string; sha256: string; byteSize: bigint; mediaType: string; container: string }>,
 manifest: Readonly<{ manifestJson: string; manifestHash: string }>): void {
   const manifestBody = parseProxySourceRecord(manifest.manifestJson, 'project proxy output manifest')
@@ -71,7 +75,10 @@ manifest: Readonly<{ manifestJson: string; manifestHash: string }>): void {
       (operation.renderablePlanHash
         ? (operation.renderableVariantId !== input.variantId ||
           input.recipeParameters.format !== operation.renderableFormat)
-        : input.recipeParameters.format !== input.variantId)) {
+        // A project render: the recipe's format is the aspect ratio of the output, and the output is the one the operation was
+        // persisted for (a legacy row, persisted for none, accepts the sole output it resolves to).
+        : (input.format === undefined || input.recipeParameters.format !== input.format ||
+          (operation.outputVariantId != null && operation.outputVariantId !== input.variantId)))) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy receipt is not sealed by the output recipe')
   }
 }
@@ -249,7 +256,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           ('projectVersionId' in input && detail.projectVersionId !== input.projectVersionId) ||
           (detail.renderablePlanHash
             ? detail.renderableVariantId !== input.variantId
-            : input.recipeParameters.format !== input.variantId) ||
+            : !('format' in input) || input.recipeParameters.format !== input.format) ||
           artifact.workspaceId !== input.workspaceId || artifact.status !== 'available' ||
           manifest.workspaceId !== input.workspaceId || manifest.artifactId !== input.outputArtifactId ||
           review.workspaceId !== input.workspaceId || review.projectId !== input.projectId ||
@@ -284,7 +291,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     input: Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0] |
       Parameters<ProjectProxyRenderRepository['attachCompletedSnapshotOutput']>[0],
     operation: Readonly<{ projectVersionId: string; editPlanSnapshotId: string;
-      sourceArtifactId: string; renderablePlanId?: string | null; renderablePlanHash?: string | null }>,
+      sourceArtifactId: string; renderablePlanId?: string | null; renderablePlanHash?: string | null; outputVariantId?: string | null }>,
   ): Promise<Date> {
     // The operation fence is already held. Project/head and every authoritative
     // source pointer must participate: a plain SELECT in SERIALIZABLE can keep
@@ -304,9 +311,11 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       }
       plan = snapshot.plan
     } else {
+      // The Version is consumed for the output the operation was made for (a legacy row: the State's only output).
       const project = await this.queryProject({ workspaceId: input.workspaceId,
         projectId: input.projectId, projectVersionId: operation.projectVersionId,
-        editPlanSnapshotId: operation.editPlanSnapshotId }, transaction)
+        editPlanSnapshotId: operation.editPlanSnapshotId,
+        ...(operation.outputVariantId ? { variantId: operation.outputVariantId } : {}) }, transaction)
       const version = project?.versions[0]
       if (!project || !version || version.editPlanSnapshot.workspaceId !== input.workspaceId ||
           version.editPlanSnapshot.projectId !== input.projectId) {
@@ -372,6 +381,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         workspaceId: input.workspaceId, projectId: input.projectId,
         planId: detail.renderablePlanId ?? '', planHash: detail.renderablePlanHash,
         format: detail.renderableFormat ?? '',
+        ...(detail.outputVariantId ? { variantId: detail.outputVariantId } : {}),
       }, transaction, completedAt)
       if (!source || source.sourceArtifactId !== detail.sourceArtifactId ||
           source.sourceManifestId !== detail.sourceManifestId) {
@@ -379,7 +389,8 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       }
     } else {
       const project = await this.queryProject({ workspaceId: input.workspaceId,
-        projectId: input.projectId, projectVersionId: detail.projectVersionId }, transaction)
+        projectId: input.projectId, projectVersionId: detail.projectVersionId,
+        ...(detail.outputVariantId ? { variantId: detail.outputVariantId } : {}) }, transaction)
       const source = hydrateProxySource(project, { sourceArtifactId: detail.sourceArtifactId,
         sourceManifestId: detail.sourceManifestId }, completedAt)
       if (!project || project.currentVersionId !== detail.projectVersionId ||
@@ -395,28 +406,21 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     if (!completed) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy completion lost its lease')
   }
 
+  /** The base Version's completed proxy of THE SAME OUTPUT (a render of another output is never offered, whatever its age). */
   private async readReusableProxy(input: {
     workspaceId: string
     projectId: string
     baseVersionId: string
+    outputVariantId: string
     artifactIds?: readonly string[]
   }) {
-    const previous = await this.client.v2ProjectProxyRenderOperation.findFirst({
-      where: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        projectVersionId: input.baseVersionId,
-        ...(input.artifactIds ? { outputArtifactId: { in: [...input.artifactIds] } } : {}),
-        operation: { status: 'succeeded', phase: 'completed' },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { operationId: true, outputArtifactId: true, outputManifestId: true },
-    })
+    const previous = await selectReusableProxyOperation(this.client, input)
     if (!previous) return null
     return readSafeReusableProxy(this.client, {
       workspaceId: input.workspaceId, projectId: input.projectId,
       baseVersionId: input.baseVersionId, operationId: previous.operationId,
       artifactId: previous.outputArtifactId, manifestId: previous.outputManifestId,
+      outputVariantId: input.outputVariantId,
     })
   }
 
@@ -427,6 +431,9 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   ): Promise<Readonly<ProjectProxyRenderSource>> {
     const version = project.versions[0]
     const command = version?.command
+    // The output this source was read for. Impact documents, invalidations and the base proxy all name outputs by their stable
+    // State variant; a render of another output is never narrowed, nor reused, for this one.
+    const outputVariantId = sourceOutputVariantId(source)
     // Range reuse is derived from the canonical registry: only Command types whose
     // declared policy is partial-range may narrow a render to stale ranges.
     if (!version || !command || editCommandRenderPolicy(command.type) !== 'partial-range') return source
@@ -450,6 +457,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         workspaceId,
         projectId: source.projectId,
         baseVersionId: impact.baseVersionId,
+        outputVariantId,
       })
       return Object.freeze({
         ...source,
@@ -464,7 +472,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       })
     }
     const minimalRenders = impact.minimalRenders.filter((render) =>
-      render.kind === 'proxy' && render.variantId === source.format)
+      render.kind === 'proxy' && render.variantId === outputVariantId)
     if (minimalRenders.length !== 1) return source
     const requestedRanges = minimalRenders[0]!.ranges
     const durationFrames = source.editPlan.durationFrames
@@ -507,7 +515,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       }))
     const proxyArtifactIds = invalidations
       .filter((item) =>
-        item.kind === 'proxy' && item.variantId === source.format &&
+        item.kind === 'proxy' && item.variantId === outputVariantId &&
         item.commandId === command.id && item.baseVersionId === impact.baseVersionId &&
         item.resultVersionId === impact.resultVersionId && item.impactHash === impact.impactHash)
       .map((item) => item.artifactId)
@@ -516,6 +524,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       workspaceId,
       projectId: source.projectId,
       baseVersionId: impact.baseVersionId,
+      outputVariantId,
       artifactIds: proxyArtifactIds,
     })
     if (!reusable) return source
@@ -554,8 +563,9 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       ])
       if (!artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project proxy output is inconsistent')
       assertSealedProxyRecipe(input, operation, artifact, manifest)
+      // The Version is consumed for the output the render was made for: the stable variant the worker names.
       const project = await this.queryProject({ workspaceId: input.workspaceId,
-        projectId: input.projectId, projectVersionId: input.projectVersionId }, transaction)
+        projectId: input.projectId, projectVersionId: input.projectVersionId, variantId: input.variantId }, transaction)
       if (!project || project.currentVersionId !== input.projectVersionId) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy result version is no longer current')
       }
@@ -563,7 +573,8 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         sourceManifestId: operation.sourceManifestId }, observedAt)
       if (!source || source.editPlanSnapshotId !== operation.editPlanSnapshotId ||
           source.sourceArtifactId !== operation.sourceArtifactId ||
-          source.sourceManifestId !== operation.sourceManifestId) {
+          source.sourceManifestId !== operation.sourceManifestId ||
+          sourceOutputVariantId(source) !== input.variantId || source.format !== input.format) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy source changed during rendering')
       }
       assertProxySourceLineage(manifest.manifestJson, source)
@@ -689,6 +700,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         workspaceId: input.workspaceId, projectId: input.projectId,
         planId: operation.renderablePlanId, planHash: operation.renderablePlanHash,
         format: operation.renderableFormat!,
+        ...(operation.outputVariantId ? { variantId: operation.outputVariantId } : {}),
       }, transaction, observedAt)
       if (!source || source.projectVersionId !== operation.projectVersionId ||
           source.editPlanSnapshotId !== operation.editPlanSnapshotId ||

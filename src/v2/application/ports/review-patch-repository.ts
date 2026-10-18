@@ -47,7 +47,7 @@ export interface ReviewPatchProposalContext {
   editPlanHash: string
   policies: Readonly<Record<string, unknown>>
   availableAssetIds: readonly string[]
-  renderVariantIds: readonly string[]
+  /** Every render of the current Version (proxy and final), each attributed to the stable State variant it was made for. */
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 

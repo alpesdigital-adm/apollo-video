@@ -323,6 +323,8 @@ export async function proxySourceClock(transaction: Prisma.TransactionClient): P
 export async function assertInlineProxySourceAuthority(transaction: Prisma.TransactionClient, input: {
   workspaceId: string; projectId: string; projectVersionId: string; editPlanSnapshotId: string;
   sourceArtifactId: string; sourceManifestId: string; outputArtifactId: string; outputManifestId: string
+  /** The stable State variant the reuse is for (the output of the child Version); absent means the State's only output. */
+  variantId?: string
 }) {
   // Call only after operation/detail/project/all-source locks. The database clock
   // is refreshed on both admission and the final read after outbox writes.

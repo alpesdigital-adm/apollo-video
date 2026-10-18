@@ -1,6 +1,7 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
-import { assertDomain } from './errors.ts'
+import { assertDomain, DomainError } from './errors.ts'
 import type { ManualGesture, ManualVersionAction } from './manual-editing.ts'
+import { assertRendersBelongToVariants, projectWideVariantIds } from './project-wide-render-impact.ts'
 import type { PatchOperation } from './review-system.ts'
 
 export type CommandImpactDependency =
@@ -312,11 +313,21 @@ function classify(action: ManualVersionAction, operation?: ManualGesture): Reado
   })
 }
 
+/**
+ * The impact of one manual edit (apply, undo, redo, restore, selection).
+ *
+ * A manual edit changes the ONE EditPlan every output of the project re-materializes from, so when it changes what a render shows
+ * the renders of EVERY output go stale and every output needs its own minimal proxy render. `variantId` is the VIEW the edit was
+ * made on (the output whose timeline the editor was looking at): it must be an exact member of the State, and it does not narrow
+ * the impact. `outputVariantIds` are the stable ids of every output of the parent State; `outputReferences` are the renders of the
+ * base Version, each attributed to its output (see `renderOutputReferences`). A selection changes no render and lists none.
+ */
 export function createManualCommandImpact(input: {
   commandId: string
   baseVersionId: string
   resultVersionId: string
   variantId: string
+  outputVariantIds: readonly string[]
   targetId: string
   action: ManualVersionAction
   operation?: ManualGesture
@@ -334,6 +345,11 @@ export function createManualCommandImpact(input: {
     assertDomain(validId(value), 'INVALID_ARGUMENT', `${field} is invalid`)
   }
   const classification = classify(input.action, input.operation)
+  const outputVariantIds = projectWideVariantIds(input.outputVariantIds, classification.renderSemanticsChanged)
+  if (!outputVariantIds.includes(input.variantId)) {
+    throw new DomainError('PRECONDITION_REQUIRED', 'The output a manual edit was made on is not an exact member of the project State',
+      { reason: 'output-variant-unknown' })
+  }
   const affectedRanges = input.action === 'apply'
     ? input.operation?.kind === 'inspect' &&
         Object.keys(input.operation.patch).length === 1 &&
@@ -350,10 +366,9 @@ export function createManualCommandImpact(input: {
         endFrame: Math.max(planDuration(input.beforeEditPlan), planDuration(input.afterEditPlan)),
       })])
   const affectedArtifacts = classification.renderSemanticsChanged
-    ? normalizeCommandImpactOutputReferences(
-        input.outputReferences.filter((output) => output.variantId === input.variantId),
-      )
+    ? normalizeCommandImpactOutputReferences(input.outputReferences)
     : []
+  assertRendersBelongToVariants(affectedArtifacts, outputVariantIds)
   const body = {
     schemaVersion: 'command-impact/v1' as const,
     commandId: input.commandId,
@@ -363,12 +378,10 @@ export function createManualCommandImpact(input: {
     changeKinds: Object.freeze([...classification.changeKinds]),
     dependencyTypes: Object.freeze([...classification.dependencies]),
     affectedRanges: Object.freeze(affectedRanges),
-    affectedVariantIds: Object.freeze(
-      classification.renderSemanticsChanged ? [input.variantId] : [],
-    ),
+    affectedVariantIds: classification.renderSemanticsChanged ? outputVariantIds : Object.freeze([]),
     affectedArtifacts: Object.freeze(affectedArtifacts),
     minimalRenders: Object.freeze(classification.renderSemanticsChanged
-      ? [{ kind: 'proxy' as const, variantId: input.variantId, ranges: affectedRanges }]
+      ? outputVariantIds.map((variantId) => Object.freeze({ kind: 'proxy' as const, variantId, ranges: affectedRanges }))
       : []),
     renderSemanticsChanged: classification.renderSemanticsChanged,
   }
@@ -434,12 +447,34 @@ function reviewPatchFrameRanges(input: {
   return canonicalCommandImpactRanges(ranges)
 }
 
+/**
+ * A format an annotation's application scope names must be an output of the State the patch is applied to: the stable variant ids
+ * of the State are the only formats a project has. Refuses with the published `output-variant-unknown`.
+ */
+export function assertReviewFormatsAreOutputs(outputVariantIds: readonly string[], formatIds: readonly string[]): void {
+  for (const formatId of formatIds) {
+    if (!outputVariantIds.includes(formatId)) {
+      throw new DomainError('PRECONDITION_REQUIRED', 'A format the review annotation names is not an exact member of the project State',
+        { reason: 'output-variant-unknown' })
+    }
+  }
+}
+
+/**
+ * The impact of one applied review patch (single or batch).
+ *
+ * A patch edits the ONE EditPlan every output of the project re-materializes from, so its impact is the renders of EVERY output
+ * (`outputVariantIds`: the stable ids of the parent State; `outputReferences`: the renders of the base Version, each attributed to
+ * its output). The formats the annotations name (`annotationFormatIds`) are checked to be outputs of that State and never narrow
+ * the impact: an annotation scoped to one format is still an edit of the shared plan.
+ */
 export function createReviewPatchCommandImpact(input: {
   commandType?: 'apply-review-patch' | 'apply-review-patch-batch'
   commandId: string
   baseVersionId: string
   resultVersionId: string
-  variantIds: readonly string[]
+  outputVariantIds: readonly string[]
+  annotationFormatIds?: readonly string[]
   operations: readonly Readonly<PatchOperation>[]
   invalidatedRangesMs: readonly (readonly [number, number])[]
   beforeEditPlan: Readonly<Record<string, unknown>>
@@ -451,8 +486,8 @@ export function createReviewPatchCommandImpact(input: {
     baseVersionId: input.baseVersionId,
     resultVersionId: input.resultVersionId,
   })) assertDomain(validId(value), 'INVALID_ARGUMENT', `${field} is invalid`)
-  const variants = Object.freeze([...new Set(input.variantIds.map((item) => item.trim()))].toSorted())
-  assertDomain(variants.length > 0 && variants.every(validId), 'INVALID_ARGUMENT', 'Review patch variants are invalid')
+  const variants = projectWideVariantIds(input.outputVariantIds, true)
+  assertReviewFormatsAreOutputs(variants, input.annotationFormatIds ?? [])
   const beforeFps = Number(input.beforeEditPlan.fps)
   const afterFps = Number(input.afterEditPlan.fps)
   assertDomain(Number.isFinite(beforeFps) && beforeFps > 0 && beforeFps === afterFps, 'INVALID_ARGUMENT', 'Review patch EditPlan FPS is inconsistent')
@@ -475,9 +510,8 @@ export function createReviewPatchCommandImpact(input: {
         endFrame: durationFrames,
       })])
     : reviewedRanges
-  const affectedArtifacts = normalizeCommandImpactOutputReferences(
-    input.outputReferences.filter((output) => variants.includes(output.variantId)),
-  )
+  const affectedArtifacts = normalizeCommandImpactOutputReferences(input.outputReferences)
+  assertRendersBelongToVariants(affectedArtifacts, variants)
   const body = {
     schemaVersion: 'command-impact/v1' as const,
     commandId: input.commandId,

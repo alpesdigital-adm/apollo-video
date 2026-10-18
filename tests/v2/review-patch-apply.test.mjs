@@ -16,15 +16,16 @@ test('T-FR-233 applied review patch persists impact v2, a sealed Version and nor
   const parent = recompiledChild(world.parent, world.actor, reviewedTimeline, { suffix: 'review-base' })
   const { workspaceId, projectId } = parent.version, baseVersionId = parent.version.id
   const planSnapshot = operationalBundlePlanV3(parent)
+  // The renders of the head, each attributed to the stable variant of the world's ONE output.
+  const VARIANT = parent.state.document.entries[0].variantId
   const outputs = [
-    { artifactId: 'artifact-final-9x16', kind: 'final', sourceVersionId: baseVersionId, variantId: '9:16' },
-    { artifactId: 'artifact-proxy-9x16', kind: 'proxy', sourceVersionId: baseVersionId, variantId: '9:16' },
-    { artifactId: 'artifact-final-16x9', kind: 'final', sourceVersionId: baseVersionId, variantId: '16:9' },
+    { artifactId: 'artifact-final-9x16', kind: 'final', sourceVersionId: baseVersionId, variantId: VARIANT },
+    { artifactId: 'artifact-proxy-9x16', kind: 'proxy', sourceVersionId: baseVersionId, variantId: VARIANT },
   ]
   const annotation = {
     id: 'annotation-impact-1', projectVersionId: baseVersionId, frame: 30,
     timeRangeMs: [1000, 1000], screenshotRef: 'screenshot-impact-1', scope: 'point',
-    targetIds: ['subtitle:cue-1'], applicationScope: { kind: 'frame', targetIds: ['subtitle:cue-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: [], global: false },
+    targetIds: ['subtitle:cue-1'], applicationScope: { kind: 'frame', targetIds: ['subtitle:cue-1'], formatIds: [VARIANT], localeIds: ['pt-BR'], recipeIds: [], global: false },
     affectedCount: 1, text: 'Mover legenda', author: { id: world.actor.clientId, name: 'Client', type: 'api-client' }, status: 'open', createdAt,
   }
   const proposal = {
@@ -41,7 +42,7 @@ test('T-FR-233 applied review patch persists impact v2, a sealed Version and nor
         return {
           annotation, parent, currentVersion: parent.version,
           editPlan: JSON.parse(planSnapshot.contentJson), editPlanHash: planSnapshot.contentHash, policies: {}, availableAssetIds: ['artifact-source3'],
-          renderVariantIds: ['9:16'], outputReferences: outputs, proposal,
+          outputReferences: outputs, proposal,
         }
       },
       async commitOrReplay(input) {
@@ -92,11 +93,11 @@ test('T-FR-233 applied review patch persists impact v2, a sealed Version and nor
     async $transaction(callback) {
       return callback({
         v2ReviewPatchProposal: { async findFirst() { return { id: committed.proposalId, status: 'ready', baseVersionId } } },
-        v2Project: { async findFirst() { return { format: '9:16', currentVersion: { id: baseVersionId, sequence: parent.version.sequence, outputStateHash: parent.state.stateHash } } } },
+        v2Project: { async findFirst() { return { format: null, currentVersion: { id: baseVersionId, sequence: parent.version.sequence, outputStateHash: parent.state.stateHash } } } },
         v2ProjectProxyRenderOperation: { async findMany() { return [
-          { outputArtifactId: 'artifact-proxy-9x16' }, { outputArtifactId: 'artifact-proxy-concurrent' },
+          { outputArtifactId: 'artifact-proxy-9x16', outputVariantId: VARIANT }, { outputArtifactId: 'artifact-proxy-concurrent', outputVariantId: VARIANT },
         ] } },
-        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' }] } },
+        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-9x16', outputVariantId: VARIANT, outputAspectRatio: '16:9' }] } },
       })
     },
   })

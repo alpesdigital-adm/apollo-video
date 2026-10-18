@@ -10,7 +10,12 @@ import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
 import { readOutputFormatPreset } from '../../domain/output-format-registry.ts'
+import { outputVariantsOf } from '../../domain/output-consumption.ts'
+import { renderOperationVariantId } from '../../domain/output-variant-references.ts'
 import type { OutputAspectRatio } from '../../domain/output-spec.ts'
+import { sourceOutputVariantId } from '../../application/project-render-sources.ts'
+import { readStoredOutputStateV3 } from './output-state-consumption.ts'
+import { legacyProxyBelongsToOutput } from './proxy-reuse-safety.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
 import { parseDirectorQualityReport } from './director-run-repository.ts'
 import { PrismaPerceptionProducerEnvelopeRepository } from './perception-producer-envelope-repository.ts'
@@ -48,8 +53,13 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     proxyReviewHash?: string
     proxyArtifactId?: string
     outputSpecId: string
+    /** The stable State variant the export is for: the approving proxy review must be the one rendered for THIS output. */
+    outputVariantId: string
     requireCurrent: boolean
   }) {
+    // A review rendered before the column existed (no stated output) is this output's only when the Version has that one output.
+    const legacyReviews = await legacyProxyBelongsToOutput(this.client, { workspaceId: input.workspaceId,
+      projectId: input.projectId, versionId: input.projectVersionId, outputVariantId: input.outputVariantId })
     const project = await this.client.v2Project.findFirst({
       where: {
         id: input.projectId,
@@ -78,6 +88,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           where: {
             projectVersionId: input.projectVersionId,
             outputSpecId: input.outputSpecId,
+            operation: legacyReviews
+              ? { OR: [{ outputVariantId: input.outputVariantId }, { outputVariantId: null }] }
+              : { outputVariantId: input.outputVariantId },
             finalAllowed: true,
             status: 'ready-for-final',
             ...(input.proxyReviewId ? { id: input.proxyReviewId } : {}),
@@ -138,10 +151,26 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     // perception authority, a copy never cut, ...) refuses with its published reason before any approval is looked up.
     const source = await this.sourceReader.readCurrentSource({ workspaceId: input.workspaceId, projectId: input.projectId, purpose: 'final',
       ...(input.variantId === undefined ? {} : { variantId: input.variantId }) })
-    if (!source) return null
-    const approval = await this.readApproval({ ...input, outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
-    if (!source || !approval || source.projectVersionId !== input.projectVersionId) return null
+    if (!source || source.projectVersionId !== input.projectVersionId) return null
+    const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
+      outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
+    if (!approval) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
+  }
+
+  /**
+   * The output a format names in one Version: the stable variant of the only entry whose sealed spec carries that aspect ratio.
+   * `null` when none does; two outputs of one ratio are refused (`output-variant-ambiguous`), exactly as everywhere else. This
+   * is how a caller whose request names a format and not a variant (an export matrix cell) addresses an output without a guess.
+   */
+  async resolveOutputVariantByFormat(input: Parameters<ProjectFinalExportRepository['resolveOutputVariantByFormat']>[0]): Promise<string | null> {
+    const stored = await readStoredOutputStateV3(this.client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: input.projectVersionId })
+    if (!stored) return null
+    const matches = outputVariantsOf(stored.state).filter((variant) => variant.aspectRatio === input.format)
+    if (matches.length > 1) {
+      throw new DomainError('PRECONDITION_REQUIRED', 'Two outputs of this project share one aspect ratio', { reason: 'output-variant-ambiguous' })
+    }
+    return matches[0]?.variantId ?? null
   }
 
   async readImmutableApprovedSource(input: {
@@ -168,8 +197,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       ...(input.requireCurrent === true ? { requireCurrent: true } : {}),
     })
     if (!source) return null
-    const approval = await this.readApproval({ ...input, outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
-    if (!source || !approval) return null
+    const approval = await this.readApproval({ ...input, outputVariantId: sourceOutputVariantId(source),
+      outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
+    if (!approval) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
 
@@ -226,6 +256,13 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.outputManifestId, workspaceId: input.workspaceId, artifactId: input.outputArtifactId } }),
       ])
       if (!operation || !artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project final export is inconsistent')
+      // The invalidations this export resolves are attributed to the output it was made for: its stable State variant (a row written
+      // before the column existed is attributed by its ratio, only when exactly one output of the Version has it).
+      const outputVariantId = operation.outputVariantId ?? await (async () => {
+        const stored = await readStoredOutputStateV3(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: input.projectVersionId })
+        if (!stored) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed project final export has no sealed State')
+        return renderOperationVariantId(stored.state, { outputVariantId: null, outputAspectRatio: operation.outputAspectRatio })
+      })()
       await transaction.v2ProjectMediaAsset.upsert({
         where: { projectId_artifactId_role: { projectId: input.projectId, artifactId: input.outputArtifactId, role: 'final-output' } },
         create: {
@@ -245,7 +282,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           projectId: input.projectId,
           resultVersionId: input.projectVersionId,
           kind: 'final',
-          variantId: operation.outputAspectRatio,
+          variantId: outputVariantId,
           resolutions: { none: { operation: { status: 'succeeded' } } },
         },
         select: { id: true },
@@ -292,6 +329,13 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       select: { projectVersionId: true },
     })
     if (!operation) return
+    // Another output's export of the same Version, queued, running or done, owns the project's status: this export failing is its
+    // own failure (the operation records it), never the project's, or the sibling's completion would find a failed project.
+    const siblings = await this.client.v2ProjectFinalExportOperation.count({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: operation.projectVersionId,
+        operationId: { not: input.operationId }, operation: { status: { notIn: ['failed', 'canceled'] } } },
+    })
+    if (siblings > 0) return
     const project = await this.client.v2Project.updateMany({
       where: {
         id: input.projectId,

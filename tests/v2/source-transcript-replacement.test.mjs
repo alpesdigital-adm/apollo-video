@@ -77,6 +77,10 @@ function plan() {
 // source is 'artifact-source3' (2s by default, 20s when a test needs room for several clips).
 let worldPromise
 const sharedWorld = () => (worldPromise ??= ingestedWorld())
+// The same recording ingested into a project with TWO outputs (one EditPlan, two State entries).
+let twoOutputPromise
+const twoOutputs = () => (twoOutputPromise ??= ingestedWorld({ sibling: true }))
+const variantIdsOf = (parent) => parent.state.document.entries.map((entry) => entry.variantId)
 const parentPlanOf = (parent) => JSON.parse(operationalBundlePlanV3(parent).contentJson)
 
 function replacementContext(parent, replacement, overrides = {}) {
@@ -86,8 +90,8 @@ function replacementContext(parent, replacement, overrides = {}) {
     currentTranscript: { id: editPlan.retimedTranscript.sourceTranscriptId, transcriptHash: editPlan.retimedTranscript.sourceTranscriptHash, sourceArtifactId: 'artifact-source3' },
     replacementTranscript: { id: 'transcript-replacement', transcriptHash: replacement.transcriptHash, sourceArtifactId: 'artifact-source3', transcript: replacement },
     outputReferences: [
-      { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: parent.version.id, variantId: '9:16' },
-      { artifactId: 'final-16x9', kind: 'final', sourceVersionId: parent.version.id, variantId: '16:9' },
+      { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: parent.version.id, variantId: variantIdsOf(parent)[0] },
+      { artifactId: 'final-16x9', kind: 'final', sourceVersionId: parent.version.id, variantId: variantIdsOf(parent)[0] },
     ],
     ...overrides,
   }
@@ -146,7 +150,7 @@ test('T-FR-233 source transcript replacement retimes immutable evidence and bloc
   )
   assert.equal(result.editPlan.retimedTranscript.words.some((word) => word.text === 'depois'), false)
   assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: 60 }])
-  assert.deepEqual(result.impact.affectedVariantIds, ['16:9', '9:16'])
+  assert.deepEqual(result.impact.affectedVariantIds, variantIdsOf(parent))
   assert.equal(result.impact.renderBlockedUntilDirectorRun, true)
   assert.equal(result.invalidations.length, 2)
   assert.ok(result.invalidations.every((item) => item.status === 'stale'))
@@ -167,6 +171,34 @@ test('T-FR-233 source transcript replacement retimes immutable evidence and bloc
   const replay = await execute(request)
   assert.equal(replay.replayed, true)
   assert.equal(replay.version.id, result.version.id)
+})
+
+test('W66 multi-output: a source transcript replacement on a project with two outputs stales the renders of EVERY output, each under its own output', async () => {
+  const { parent, actor } = await twoOutputs()
+  const variantIds = variantIdsOf(parent)
+  assert.equal(variantIds.length, 2)
+  const references = variantIds.flatMap((variantId, index) => [
+    { artifactId: `proxy-two-outputs-${index}`, kind: 'proxy', sourceVersionId: parent.version.id, variantId },
+    { artifactId: `final-two-outputs-${index}`, kind: 'final', sourceVersionId: parent.version.id, variantId },
+  ])
+  const repository = new Repository(parent, replacementTranscript, { outputReferences: references })
+  const request = requestFor(parent, actor, replacementTranscript, 'source-transcript-replacement-two-outputs')
+  // The Command names no output: the replacement retimes the one EditPlan every output re-materializes from.
+  assert.equal('variantId' in request, false)
+  const result = await serviceFor(repository, 'two-outputs')(request)
+  assert.deepEqual(result.impact.affectedVariantIds, [...variantIds].sort())
+  assert.deepEqual(result.impact.affectedArtifacts.map((item) => [item.kind, item.artifactId, item.variantId]).toSorted(),
+    references.map((item) => [item.kind, item.artifactId, item.variantId]).toSorted())
+  assert.equal(result.invalidations.length, 4)
+  assert.deepEqual([...new Set(result.invalidations.map((item) => item.variantId))].sort(), [...variantIds].sort())
+  // the child Version carries EVERY entry, each output keeping its own spec revision and spec hash
+  const entries = result.bundle.state.document.entries
+  assert.deepEqual(entries.map((entry) => entry.variantId), variantIds)
+  for (const [index, entry] of entries.entries()) {
+    assert.equal(entry.outputSpecRevisionId, parent.state.document.entries[index].outputSpecRevisionId)
+    assert.equal(entry.specHash, parent.state.document.entries[index].specHash)
+    assert.equal(entry.consumption.status, 'materialized')
+  }
 })
 
 test('T-FR-233 source transcript replacement fails closed on cross-source and hash drift', async () => {
@@ -417,7 +449,7 @@ class DirectorRepository {
     if (workspaceId !== this.parent.version.workspaceId || projectId !== this.parent.version.projectId) return null
     return {
       workspaceId,
-      project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
+      project: { id: projectId, objective: 'discovery', locale: 'pt-BR' },
       parent: this.parent,
       currentVersion: this.parent.version,
       brief: {
@@ -428,13 +460,13 @@ class DirectorRepository {
       policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
       editPlan: this.editPlan,
       currentDurationFrames: this.editPlan.durationFrames,
-      proxyVariantId: '9:16',
+      variantIds: variantIdsOf(this.parent),
       sourceRights: {
         state: 'present', snapshotId: 'rights-transcript-master',
         snapshotHash: 'd'.repeat(64), status: 'approved', consentStatus: 'not-required',
       },
       outputReferences: [
-        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: this.parent.version.id, variantId: '9:16' },
+        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: this.parent.version.id, variantId: variantIdsOf(this.parent)[0] },
       ],
       transcript: {
         id: this.transcriptId, sourceArtifactId: 'artifact-source3', language: 'pt-BR',

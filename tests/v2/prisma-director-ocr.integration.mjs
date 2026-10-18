@@ -937,7 +937,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
       assert.equal(controlledReview.status, 'blocked')
       const attach = (receipt = ocrReceipt, parameters = recipeParameters) => proxy.attachCompletedOutput({
         workspaceId, operationId: proxyOperationId, projectId: world.projectId,
-        projectVersionId: directed.version.id, variantId: '9:16',
+        projectVersionId: directed.version.id, variantId: '9:16', format: '9:16',
         outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4',
         createdAt: reviewTime, recipeParameters: parameters, ocrReceipt: receipt,
         lease: { owner: 'w65-controlled-worker', attempt: controlledOperation.attempt,
@@ -962,7 +962,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         completedAt: new Date(canceled.completedAt) } })
       await assert.rejects(proxy.attachCompletedOutput({
         workspaceId, operationId: canceledId, projectId: world.projectId,
-        projectVersionId: directed.version.id, variantId: '9:16', outputArtifactId,
+        projectVersionId: directed.version.id, variantId: '9:16', format: '9:16', outputArtifactId,
         outputManifestId, originalFileName: 'controlled-proxy.mp4', createdAt: reviewTime,
         recipeParameters, ocrReceipt, lease: { owner: 'w65-controlled-worker',
           attempt: controlledOperation.attempt, now: new Date().toISOString() },
@@ -994,7 +994,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         data: { leaseOwner: 'w65-controlled-worker' } })
       await assert.rejects(proxy.attachCompletedOutput({
         workspaceId, operationId: proxyOperationId, projectId: world.projectId,
-        projectVersionId: directed.version.id, variantId: '9:16',
+        projectVersionId: directed.version.id, variantId: '9:16', format: '9:16',
         outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4',
         createdAt: reviewTime, recipeParameters, ocrReceipt,
         lease: { owner: 'w65-controlled-worker', attempt: controlledOperation.attempt + 1,
@@ -1029,7 +1029,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
         where: { workspaceId, artifactId: outputArtifactId } }), catalogBeforeReplay)
       await assert.rejects(proxy.attachCompletedOutput({
         workspaceId, operationId: proxyOperationId, projectId: world.projectId,
-        projectVersionId: world.versionId, variantId: '9:16',
+        projectVersionId: world.versionId, variantId: '9:16', format: '9:16',
         outputArtifactId, outputManifestId, originalFileName: 'controlled-proxy.mp4',
         createdAt: reviewTime, recipeParameters, ocrReceipt,
         lease: { owner: 'w65-controlled-worker', attempt: controlledOperation.attempt,
@@ -1139,7 +1139,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
           attachName, cancelName,
           attach: () => new PrismaProjectProxyRenderRepository(attachClient).attachCompletedOutput({
             workspaceId, operationId: raceId, projectId: world.projectId,
-            projectVersionId: directed.version.id, variantId: '9:16',
+            projectVersionId: directed.version.id, variantId: '9:16', format: '9:16',
             outputArtifactId: raceArtifactId, outputManifestId: raceManifestId,
             originalFileName: 'controlled-race-proxy.mp4',
             createdAt: raceReviewTime, recipeParameters: raceParameters,
@@ -1263,7 +1263,7 @@ test('W64 PostgreSQL Director consumes a sealed OCR run, persists scoped refs an
           attach: (client) => new PrismaProjectProxyRenderRepository(client)[snapshotMode
             ? 'attachCompletedSnapshotOutput' : 'attachCompletedOutput']({
             workspaceId, operationId: id, projectId: world.projectId,
-            projectVersionId: snapshotMode ? expiryVersion.id : directed.version.id, variantId: '9:16',
+            projectVersionId: snapshotMode ? expiryVersion.id : directed.version.id, variantId: '9:16', ...(snapshotMode ? {} : { format: '9:16' }),
             outputArtifactId: artifactId, outputManifestId: manifestId,
             originalFileName: `controlled-${label}-proxy.mp4`,
             createdAt: finishedAt, recipeParameters: parameters,

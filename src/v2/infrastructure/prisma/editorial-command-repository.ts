@@ -8,7 +8,8 @@ import { readEditorialMaterializedPlanV3 } from '../../domain/editorial-cut-impa
 import type { EditorialSourceBindingBodyV1, SealedOutputNormalizationV3 } from '../../domain/output-materialization.ts'
 import { PrismaOperationalOutputBundleRepositoryV3 } from './output-version-bundle-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { readOutputNormalizationsV3 } from './output-version-materializer.ts'
+import { readOutputNormalizationsV3, RENDER_OUTPUT_LINK_ROLES } from './output-version-materializer.ts'
+import { readVersionRenderReferences } from './version-render-references.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
@@ -43,7 +44,11 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
     if(project.status==='archived')throw new DomainError('PRECONDITION_REQUIRED','Editorial target is archived')
     const parent=await readPersistedOperationalOutputBundleV3(this.client,{workspaceId:input.workspaceId,projectId:input.projectId,versionId:project.currentVersionId})
     if(!parent)return null
-    if(!parent.state.document.entries.some(e=>e.variantId===input.variantId))throw new DomainError('PRECONDITION_REQUIRED','Editorial stable variant is absent from exact State')
+    // The variant is the VIEW the cut was made on; the cut itself is project-wide, so it only has to be an exact member of the State. A copy
+    // still waiting for its cut is a Creation fork: its State lists the outputs it will take (it has no consumption yet) and the cut is the very
+    // Command that gives them one, so the membership is read from the State document itself.
+    if(!parent.state.document.entries.some(e=>e.variantId===input.variantId))
+      throw new DomainError('PRECONDITION_REQUIRED','Editorial stable variant is absent from exact State',{reason:'output-variant-unknown'})
     const plan=JSON.parse(operationalBundlePlanV3(parent).contentJson)
     if(plan.retimedTranscript?.sourceTranscriptId!==input.transcriptId)throw new DomainError('PRECONDITION_REQUIRED','Editorial transcript is not the actual parent alignment')
     let authority:EditorialSourceBindingBodyV1['authority'];let observations:readonly SealedOutputNormalizationV3[];let manifestRefs:ReadonlyMap<string,{id:string;hash:string}>
@@ -96,7 +101,10 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
       Number(probe.originSeconds.numerator)/Number(probe.originSeconds.denominator)
     if(!Number.isFinite(sourceDurationSeconds)||sourceDurationSeconds<=0||!Number.isFinite(plan.fps)||plan.fps<=0)
       throw new DomainError('PERSISTENCE_CONFLICT','Editorial source clock is invalid')
-    const links=await this.client.v2ProjectMediaAsset.findMany({where:{workspaceId:input.workspaceId,projectId:input.projectId},orderBy:{id:'asc'}})
+    // The inventory of a cut of the project itself is its editorial sources: the proxies and finals rendered from the plan are what the cut
+    // invalidates, not what it consumes (a copy's inventory is its fork derivation's, which names every link it copied).
+    const links=(await this.client.v2ProjectMediaAsset.findMany({where:{workspaceId:input.workspaceId,projectId:input.projectId},orderBy:{id:'asc'}}))
+      .filter(link=>authority.kind!=='same-project-state3'||!RENDER_OUTPUT_LINK_ROLES.includes(link.role))
     const inventory:EditorialSourceBindingBodyV1['inventory'][number][]=[]
     for(const link of links) {
       const artifact=await this.client.v2MediaArtifact.findFirst({where:{id:link.artifactId,workspaceId:input.workspaceId},include:{currentRightsSnapshot:true}}),manifest=manifestRefs.get(link.artifactId)
@@ -104,11 +112,10 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
       inventory.push({linkId:link.id,artifactId:link.artifactId,role:link.role,manifestId:manifest.id,manifestHash:manifest.hash,
         artifactSha256:artifact.sha256,rightsSnapshotId:artifact.currentRightsSnapshotId,rightsHash:artifact.currentRightsSnapshot?.snapshotHash??null,rightsRevision:artifact.rightsRevision})
     }
-    const finals=await this.client.v2ProjectFinalExportOperation.count({where:{projectId:input.projectId,workspaceId:input.workspaceId,projectVersionId:parent.version.id,operation:{status:'succeeded'}}})
-    if(finals)throw new DomainError('PRECONDITION_REQUIRED','Editorial final invalidation lacks explicit stable variant authority')
-    const outputs=await this.client.v2ProjectProxyRenderOperation.findMany({where:{projectId:input.projectId,workspaceId:input.workspaceId,
-      projectVersionId:parent.version.id,operation:{status:'succeeded'}},select:{outputArtifactId:true,renderableVariantId:true}})
-    if(outputs.some(o=>!o.renderableVariantId))throw new DomainError('PRECONDITION_REQUIRED','Editorial proxy lacks explicit stable variant authority')
+    // The cut changes the shared plan, so every render of the current Version goes stale: every output's proxies and its published
+    // finals, each attributed to its own output (a row that cannot be attributed exactly is a PERSISTENCE_CONFLICT, never a guess).
+    const outputReferences=await readVersionRenderReferences(this.client,{workspaceId:input.workspaceId,projectId:input.projectId,
+      versionId:parent.version.id,state:parent.state})
     return Object.freeze({projectId:input.projectId,workspaceId:input.workspaceId,currentVersion:parent.version,parent,
       ...(forkRoot!==null&&forkRoot!==parent?{forkRoot}:{}),transcriptId:t.id,transcript,
       sourceArtifactId:t.sourceArtifactId,sourceDurationSeconds,sourceFps:plan.fps,currentDurationFrames:plan.durationFrames,variantId:input.variantId,
@@ -116,7 +123,7 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
         workspaceId:input.workspaceId,projectId:input.projectId,authority,
         transcript:{id:t.id,workspaceId:t.workspaceId,projectId:t.projectId,sourceArtifactId:t.sourceArtifactId,sourceManifestId:t.sourceManifestId,document:transcript,createdAt:t.createdAt.toISOString()},
         normalizationRefs:normalizations.map(n=>({id:n.document.id,projectId:n.document.projectId,receiptHash:n.receiptHash})),inventory},
-      outputReferences:outputs.map(o=>({artifactId:o.outputArtifactId,kind:'proxy' as const,sourceVersionId:parent.version.id,variantId:o.renderableVariantId!}))})
+      outputReferences})
   }
   async commitOrReplay(input:EditorialCommandCommit):Promise<EditorialCommandResult> {
     const committed=await new PrismaOperationalOutputBundleRepositoryV3(this.client).persistChild({proposal:input.proposal,

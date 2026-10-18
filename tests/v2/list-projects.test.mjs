@@ -272,11 +272,11 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
   for (const [id, version] of [
-    ['apollo.projects.workspace.read', '13.0.0'],
-    ['apollo.projects.workspace.current.read', '12.0.0'],
+    ['apollo.projects.workspace.read', '13.1.0'],
+    ['apollo.projects.workspace.current.read', '12.1.0'],
   ]) {
     assert.equal(capabilities.get(id).version, version)
-    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v13')
+    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v14')
   }
   assert.equal(getPublicSchema('apollo://schemas/project-workspace/v6').ref, 'apollo://schemas/project-workspace/v6')
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
@@ -385,6 +385,32 @@ test('workspace v12 exposes Director review-required without promoting it to app
   inventedApproval.data.directorRuns[0].qualityStatus = 'face-safe-approved'
   assert.equal(validate(inventedApproval), false)
 })
+test('workspace v14 lists the outputs of the current version with the verdict of each purpose and keeps v13 closed', () => {
+  const ajv = addFormats(new Ajv2020({ strict: true, allErrors: true }))
+  const validate = ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v14').schema)
+  const v13 = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-workspace/v13'))[0])
+  assert.equal(validate(v13), false, 'the outputs list is required: absence is not an empty project')
+  const body = structuredClone(publicSchemaExamples(getPublicSchema('apollo://schemas/project-workspace/v14'))[0])
+  assert.equal(validate(body), true, JSON.stringify(validate.errors))
+  assert.equal(body.data.outputs.length, 2, 'the example shows several outputs')
+  assert.equal(ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v13').schema)(body), false, 'v13 stays closed to the new field')
+  const withoutOutputs = structuredClone(body)
+  withoutOutputs.data.outputs = []
+  assert.equal(validate(withoutOutputs), true, 'a project with no output yet publishes an empty list')
+  for (const mutate of [
+    (sample) => { sample.data.outputs[0].variantId = '' },
+    (sample) => { sample.data.outputs[0].consumption.render = { status: 'blocked' } },
+    (sample) => { sample.data.outputs[0].consumption.critic = { status: 'blocked', reason: 'not-a-published-reason' } },
+    (sample) => { sample.data.outputs[0].consumption.final = { status: 'allowed', reason: 'output-variant-required' } },
+    (sample) => { delete sample.data.outputs[0].consumption.final },
+    (sample) => { sample.data.outputs[0].extra = true },
+  ]) {
+    const sample = structuredClone(body)
+    mutate(sample)
+    assert.equal(validate(sample), false)
+  }
+})
+
 test('workspace v13 compiles strictly, requires explicit review availability and preserves historical v12', () => {
   const ajv = addFormats(new Ajv2020({ strict: true, allErrors: true }))
   const validate = ajv.compile(getPublicSchema('apollo://schemas/project-workspace/v13').schema)

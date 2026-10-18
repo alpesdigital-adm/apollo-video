@@ -21,6 +21,7 @@ import { offeredObservationsFor } from './adoptable-observations.ts'
 import { transitionManualEditOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createManualCommandImpact } from '../domain/command-impact.ts'
+import { outputVariantsOf, requireOutputVariant } from '../domain/output-consumption.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -195,11 +196,9 @@ export function applyManualEditService(dependencies: {
       ...(targetVersionId ? { targetVersionId } : {}),
     })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project or restore target was not found')
-    assertDomain(
-      context.renderVariantIds.includes(variantId),
-      'INVALID_ARGUMENT',
-      'Manual edit variant is not configured for this project',
-    )
+    // The variant is the VIEW the edit was made on: the stable id of one output of the State the edit starts from. The plan the edit
+    // changes is shared by every output, so the view only has to be an exact member (unknown and ambiguous are published refusals).
+    requireOutputVariant(context.bundle.state, variantId)
     if (
       context.version.id !== baseVersionId ||
       context.version.baseHash !== request.baseHash ||
@@ -261,6 +260,7 @@ export function applyManualEditService(dependencies: {
       baseVersionId,
       resultVersionId: versionId,
       variantId,
+      outputVariantIds: outputVariantsOf(context.bundle.state).map((output) => output.variantId),
       targetId,
       action: request.action,
       ...(operation ? { operation } : {}),
@@ -291,6 +291,8 @@ export function applyManualEditService(dependencies: {
           : {}),
       },
       type: 'manual-edit',
+      // The scope names the VIEW (the stable variant of the output the edit was made on), which the sealed manual origin and its
+      // database guard require as `outputSpecIds`; the impact of the edit is the renders of every output.
       scope: {
         clipIds: [targetId],
         outputSpecIds: [variantId],

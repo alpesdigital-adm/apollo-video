@@ -320,7 +320,7 @@ function fakeColorPlanWriter(options = {}) {
     targets: state.targets,
     trustedSourceMetadata: { 'artifact-a': METADATA, 'artifact-b': METADATA },
     currentDurationFrames: 240,
-    proxyVariantId: '16:9',
+    variantIds: ['variant-color-match'],
     outputReferences: [],
   })
   const readCurrent = async () => ({

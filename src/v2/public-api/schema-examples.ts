@@ -293,7 +293,7 @@ const subtitleSidecarExample = {
   id: 'subtitle-sidecar-example-1',
   projectId,
   projectVersionId,
-  variantId: '9:16',
+  variantId: 'variant-example-vertical',
   outputKind: 'proxy',
   outputArtifactId: artifactId,
   outputManifestId: 'manifest-example-1',
@@ -5543,11 +5543,13 @@ const perceptionTimeline = { schemaVersion: 1, durationMs: 3_000, observations: 
  * the hash of the registered preset and the impact hash is the hash of a document
  * the declared parser accepts.
  */
+/** The stable State variant id of the vertical output in the multi-output examples (what output-variants.create returns). */
+const EXAMPLE_VERTICAL_VARIANT_ID = 'variant-example-vertical'
 const projectSubtitleConfigurationExample = createProjectSubtitleConfiguration({
   id: 'project-subtitle-configuration-example-1',
   workspaceId, projectId: 'project-example-1',
   baseVersionId: 'project-version-example-1', resultVersionId: 'project-version-example-subtitle-2',
-  commandId: 'project-subtitle-command-example-1', variantId: '9:16',
+  commandId: 'project-subtitle-command-example-1', variantId: EXAMPLE_VERTICAL_VARIANT_ID,
   action: 'set', previousConfigurationId: null,
   requested: { mode: 'manual', presetId: 'caps-stroke', presetVersion: 1 },
   resolved: { enabled: true, ...subtitlePresetReference('caps-stroke') },
@@ -5559,7 +5561,7 @@ const projectSubtitleDisabledConfigurationExample = createProjectSubtitleConfigu
   id: 'project-subtitle-configuration-example-2',
   workspaceId, projectId: 'project-example-1',
   baseVersionId: 'project-version-example-subtitle-2', resultVersionId: 'project-version-example-subtitle-3',
-  commandId: 'project-subtitle-command-example-2', variantId: '9:16',
+  commandId: 'project-subtitle-command-example-2', variantId: EXAMPLE_VERTICAL_VARIANT_ID,
   action: 'revert', previousConfigurationId: projectSubtitleConfigurationExample.id,
   requested: { mode: 'none' },
   resolved: { enabled: false },
@@ -5571,20 +5573,20 @@ const projectSubtitleConfigurationImpactExample = createProjectSubtitleConfigura
   commandId: projectSubtitleConfigurationExample.commandId,
   baseVersionId: projectSubtitleConfigurationExample.baseVersionId,
   resultVersionId: projectSubtitleConfigurationExample.resultVersionId,
-  variantId: '9:16',
+  variantId: EXAMPLE_VERTICAL_VARIANT_ID,
   configurationId: projectSubtitleConfigurationExample.id,
   configurationHash: projectSubtitleConfigurationExample.configurationHash,
   action: 'set', requestedMode: 'manual', origin: 'project',
   resolvedPresetId: 'caps-stroke', resolvedPresetHash: subtitlePresetReference('caps-stroke').presetHash,
   transcriptHash: projectSubtitleConfigurationExample.transcriptHash,
   durationFrames: 2380,
-  affectedArtifacts: [{ artifactId: 'artifact-project-subtitle-proxy-example-1', kind: 'proxy', sourceVersionId: projectSubtitleConfigurationExample.baseVersionId, variantId: '9:16' }],
+  affectedArtifacts: [{ artifactId: 'artifact-project-subtitle-proxy-example-1', kind: 'proxy', sourceVersionId: projectSubtitleConfigurationExample.baseVersionId, variantId: EXAMPLE_VERTICAL_VARIANT_ID }],
 })
 const projectSubtitleDisabledImpactExample = createProjectSubtitleConfigurationImpact({
   commandId: projectSubtitleDisabledConfigurationExample.commandId,
   baseVersionId: projectSubtitleDisabledConfigurationExample.baseVersionId,
   resultVersionId: projectSubtitleDisabledConfigurationExample.resultVersionId,
-  variantId: '9:16',
+  variantId: EXAMPLE_VERTICAL_VARIANT_ID,
   configurationId: projectSubtitleDisabledConfigurationExample.id,
   configurationHash: projectSubtitleDisabledConfigurationExample.configurationHash,
   action: 'revert', requestedMode: 'none', origin: 'disabled',
@@ -5629,7 +5631,7 @@ const subtitleSegmentOverrideExample = createSubtitleSegmentOverride({
   workspaceId, projectId: 'project-example-1',
   baseVersionId: 'project-version-example-subtitle-3', resultVersionId: 'project-version-example-subtitle-4',
   commandId: 'subtitle-segment-command-example-1',
-  variantId: '9:16', segmentId: 'subtitle-cue-example-hook',
+  variantId: EXAMPLE_VERTICAL_VARIANT_ID, segmentId: 'subtitle-cue-example-hook',
   range: { startFrame: 90, endFrame: 150 },
   action: 'set',
   dimensions: [
@@ -5645,7 +5647,7 @@ const subtitleSegmentOverrideResetExample = createSubtitleSegmentOverride({
   workspaceId, projectId: 'project-example-1',
   baseVersionId: 'project-version-example-subtitle-4', resultVersionId: 'project-version-example-subtitle-5',
   commandId: 'subtitle-segment-command-example-2',
-  variantId: '9:16', segmentId: 'subtitle-cue-example-hook',
+  variantId: EXAMPLE_VERTICAL_VARIANT_ID, segmentId: 'subtitle-cue-example-hook',
   range: { startFrame: 90, endFrame: 150 },
   action: 'reset',
   dimensions: [],
@@ -5657,17 +5659,17 @@ const subtitleSegmentOverrideImpactExample = createSubtitleSegmentOverrideComman
   commandId: subtitleSegmentOverrideExample.commandId,
   baseVersionId: subtitleSegmentOverrideExample.baseVersionId,
   resultVersionId: subtitleSegmentOverrideExample.resultVersionId,
-  variantId: '9:16', segmentId: subtitleSegmentOverrideExample.segmentId,
+  variantId: EXAMPLE_VERTICAL_VARIANT_ID, segmentId: subtitleSegmentOverrideExample.segmentId,
   range: subtitleSegmentOverrideExample.range,
   dimensionKinds: ['position', 'text'],
   durationFrames: 2380,
-  outputReferences: [{ artifactId: 'artifact-subtitle-segment-proxy-example-1', kind: 'proxy', sourceVersionId: subtitleSegmentOverrideExample.baseVersionId, variantId: '9:16' }],
+  outputReferences: [{ artifactId: 'artifact-subtitle-segment-proxy-example-1', kind: 'proxy', sourceVersionId: subtitleSegmentOverrideExample.baseVersionId, variantId: EXAMPLE_VERTICAL_VARIANT_ID }],
 })
 const subtitleSegmentOverrideResetImpactExample = createSubtitleSegmentOverrideCommandImpact({
   commandId: subtitleSegmentOverrideResetExample.commandId,
   baseVersionId: subtitleSegmentOverrideResetExample.baseVersionId,
   resultVersionId: subtitleSegmentOverrideResetExample.resultVersionId,
-  variantId: '9:16', segmentId: subtitleSegmentOverrideResetExample.segmentId,
+  variantId: EXAMPLE_VERTICAL_VARIANT_ID, segmentId: subtitleSegmentOverrideResetExample.segmentId,
   range: subtitleSegmentOverrideResetExample.range,
   dimensionKinds: [],
   durationFrames: 2380,
@@ -7423,7 +7425,7 @@ const syntheticPhaseGateExample = {
   recordHash: calculateSyntheticPhaseGateRecordHash(syntheticPhaseGateRecordContent),
 }
 
-export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
+const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/create-project-request/v4': [{ name: 'Projeto sem formato implícito', objective: 'discovery', locale: 'pt-BR' }],
     'apollo://schemas/project-created/v5': [{ data: {
@@ -9945,7 +9947,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
     ],
     'apollo://schemas/export-subtitle-sidecar-request/v1': [
-      { variantId: '9:16', format: 'srt', locale: 'pt-BR' },
+      { variantId: EXAMPLE_VERTICAL_VARIANT_ID, format: 'srt', locale: 'pt-BR' },
     ],
     'apollo://schemas/subtitle-sidecar-exported/v1': [
       {
@@ -13332,10 +13334,10 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/project-lut-selection-impact/v1': [projectLutSelectionImpactExample, projectLutSelectionDeferredImpactExample],
     'apollo://schemas/project-subtitle-configuration-impact/v1': [projectSubtitleConfigurationImpactExample, projectSubtitleDisabledImpactExample],
     'apollo://schemas/project-subtitle-configuration-set-request/v1': [
-      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), variantId: '9:16', mode: 'manual', presetId: 'caps-stroke', presetVersion: 1, reason: 'Fixar o preset aprovado nesta variante.' },
-      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), variantId: '9:16', action: 'set', mode: 'workspace-default' },
-      { baseVersionId: 'project-version-example-subtitle-2', baseHash: 'd'.repeat(64), variantId: '9:16', mode: 'none' },
-      { baseVersionId: 'project-version-example-subtitle-2', baseHash: 'd'.repeat(64), variantId: '9:16', action: 'revert' },
+      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID, mode: 'manual', presetId: 'caps-stroke', presetVersion: 1, reason: 'Fixar o preset aprovado nesta variante.' },
+      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID, action: 'set', mode: 'workspace-default' },
+      { baseVersionId: 'project-version-example-subtitle-2', baseHash: 'd'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID, mode: 'none' },
+      { baseVersionId: 'project-version-example-subtitle-2', baseHash: 'd'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID, action: 'revert' },
     ],
     'apollo://schemas/project-subtitle-configuration-applied/v1': [
       { data: projectSubtitleConfigurationResultExample, meta: { apiVersion: 'v1' } },
@@ -13348,17 +13350,17 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/subtitle-segment-override-impact/v1': [subtitleSegmentOverrideImpactExample, subtitleSegmentOverrideResetImpactExample],
     'apollo://schemas/subtitle-segment-override-apply-request/v1': [
       {
-        baseVersionId: 'project-version-example-subtitle-3', baseHash: 'e'.repeat(64), variantId: '9:16',
+        baseVersionId: 'project-version-example-subtitle-3', baseHash: 'e'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID,
         segmentId: 'subtitle-cue-example-hook',
         dimensions: [{ kind: 'position', anchor: 'upper-third' }, { kind: 'text', text: 'O dono some do negócio em 90 dias.' }],
         protected: true, reason: 'Subir a legenda do gancho para não cobrir o rosto.',
       },
       {
-        baseVersionId: 'project-version-example-subtitle-3', baseHash: 'e'.repeat(64), variantId: '9:16',
+        baseVersionId: 'project-version-example-subtitle-3', baseHash: 'e'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID,
         segmentId: 'subtitle-cue-example-cta', action: 'set', dimensions: [{ kind: 'visibility', visible: false }],
       },
       {
-        baseVersionId: 'project-version-example-subtitle-4', baseHash: 'f'.repeat(64), variantId: '9:16',
+        baseVersionId: 'project-version-example-subtitle-4', baseHash: 'f'.repeat(64), variantId: EXAMPLE_VERTICAL_VARIANT_ID,
         segmentId: 'subtitle-cue-example-hook', action: 'reset',
       },
     ],
@@ -15268,6 +15270,54 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
     ],
   })
+
+// Multi-output (W66 slice S3): the examples of the schema versions that name an output by its stable variant id. Each one is
+// the example of the version it replaces with the variant spelled the new way, so the two never drift apart.
+type ExampleNode = { [key: string]: unknown }
+const clonedExamples = (ref: string): ExampleNode[] => structuredClone([...(BASE_PUBLIC_SCHEMA_EXAMPLES[ref] ?? [])]) as ExampleNode[]
+const exampleNode = (parent: ExampleNode, ...path: readonly string[]): ExampleNode =>
+  path.reduce<ExampleNode>((current, key) => current[key] as ExampleNode, parent)
+const withStableFormatIds = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(withStableFormatIds)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value as ExampleNode).map(([key, item]) =>
+    [key, key === 'formatIds' ? [EXAMPLE_VERTICAL_VARIANT_ID] : withStableFormatIds(item)]))
+}
+const MULTI_OUTPUT_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> = (() => {
+  const annotationRequests = clonedExamples('apollo://schemas/create-review-annotation-request/v2')
+  const reviews = clonedExamples('apollo://schemas/project-review/v3')
+  for (const review of reviews) {
+    const scopeContext = exampleNode(review, 'data', 'scopeContext')
+    scopeContext.variantId = EXAMPLE_VERTICAL_VARIANT_ID
+    scopeContext.variantIds = [EXAMPLE_VERTICAL_VARIANT_ID, 'variant-example-wide']
+  }
+  const finalRequests = clonedExamples('apollo://schemas/project-final-export-request/v1')
+  const workspaces = clonedExamples('apollo://schemas/project-workspace/v13')
+  const allowed = { status: 'allowed' }
+  for (const workspace of workspaces) {
+    exampleNode(workspace, 'data').outputs = [
+      { variantId: EXAMPLE_VERTICAL_VARIANT_ID, aspectRatio: '9:16', consumption: { render: allowed, critic: allowed, final: allowed } },
+      { variantId: 'variant-example-wide', aspectRatio: '16:9', consumption: { render: allowed, critic: allowed, final: { status: 'blocked', reason: 'derived-source-perception-authority-required' } } },
+    ]
+  }
+  return Object.freeze({
+    'apollo://schemas/project-subtitle-configuration-set-request/v2': clonedExamples('apollo://schemas/project-subtitle-configuration-set-request/v1'),
+    'apollo://schemas/subtitle-segment-override-apply-request/v2': clonedExamples('apollo://schemas/subtitle-segment-override-apply-request/v1'),
+    'apollo://schemas/export-subtitle-sidecar-request/v2': clonedExamples('apollo://schemas/export-subtitle-sidecar-request/v1'),
+    'apollo://schemas/apply-project-manual-edit-request/v3': clonedExamples('apollo://schemas/apply-project-manual-edit-request/v2')
+      .map((example) => ({ ...example, variantId: EXAMPLE_VERTICAL_VARIANT_ID })),
+    'apollo://schemas/create-review-annotation-request/v3': annotationRequests.map((example, index) =>
+      withStableFormatIds({ ...example, ...(index === 0 ? { variantId: EXAMPLE_VERTICAL_VARIANT_ID } : {}) })),
+    'apollo://schemas/review-annotation-created/v3': clonedExamples('apollo://schemas/review-annotation-created/v2').map(withStableFormatIds),
+    'apollo://schemas/project-review/v4': reviews.map(withStableFormatIds),
+    'apollo://schemas/project-proxy-render-request/v1': [{}, { variantId: EXAMPLE_VERTICAL_VARIANT_ID }],
+    'apollo://schemas/project-final-export-request/v2': finalRequests.map((example) => ({ ...example, variantId: EXAMPLE_VERTICAL_VARIANT_ID })),
+    'apollo://schemas/project-workspace/v14': workspaces,
+  })
+})()
+
+export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
+  Object.freeze({ ...BASE_PUBLIC_SCHEMA_EXAMPLES, ...MULTI_OUTPUT_SCHEMA_EXAMPLES })
 
 export function publicSchemaExamples(definition: PublicSchemaDefinition): readonly unknown[] {
   return PUBLIC_SCHEMA_EXAMPLES[definition.ref] ?? []

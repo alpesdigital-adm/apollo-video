@@ -58,7 +58,7 @@ import { bindDirectorObjective } from '../../domain/strategic-objective.ts'
 import { parseDesiredAction } from '../../domain/desired-action.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 import { materializeManualEditPlan } from '../../domain/manual-editing.ts'
-import { readSafeReusableProxyReceipt } from './proxy-reuse-safety.ts'
+import { legacyProxyBelongsToOutput, readSafeReusableProxyReceipt } from './proxy-reuse-safety.ts'
 import { assertInlineProxySourceAuthority, lockProxySourceArtifacts } from './proxy-source-authority.ts'
 import { requirePersistedOutputConsumptionV3 } from './output-state-consumption.ts'
 import { editPlanReferencesSource } from './perception-producer-request-context-repository.ts'
@@ -513,6 +513,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
       projectRenderDetail.sourceArtifactId, projectRenderDetail.sourceManifestId, projectRenderDetail.outputArtifactId,
       projectRenderDetail.outputManifestId].every((value) => ID_PATTERN.test(value)) ||
     !SHA256_PATTERN.test(projectRenderDetail.inputHash) || hasPartialProjectReuse ||
+    (projectRenderDetail.outputVariantId !== null && !ID_PATTERN.test(projectRenderDetail.outputVariantId)) ||
     (isProjectReuse && (
       row.status !== 'succeeded' || row.phase !== 'completed' ||
       !ID_PATTERN.test(projectRenderDetail.reusedFromOperationId as string) ||
@@ -537,6 +538,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
     ![finalExportDetail.projectVersionHash, finalExportDetail.qualitySnapshotHash,
       finalExportDetail.proxyReviewHash, finalExportDetail.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
     !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportDetail.outputAspectRatio) ||
+    (finalExportDetail.outputVariantId !== null && !ID_PATTERN.test(finalExportDetail.outputVariantId)) ||
     ![finalExportDetail.outputWidth, finalExportDetail.outputHeight, finalExportDetail.outputFps].every((value) => Number.isSafeInteger(value) && value > 0) ||
     finalExportDetail.outputWidth % 2 !== 0 || finalExportDetail.outputHeight % 2 !== 0 ||
     finalExportDetail.outputCodec !== 'h264' ||
@@ -910,6 +912,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         outputArtifactId: projectRenderDetail!.outputArtifactId,
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
+        ...(projectRenderDetail!.outputVariantId ? { outputVariantId: projectRenderDetail!.outputVariantId } : {}),
       } : isProjectRender ? {
         kind: 'project-proxy-render' as const,
         projectId: projectRenderDetail!.projectId,
@@ -922,6 +925,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
         outputArtifactId: projectRenderDetail!.outputArtifactId,
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
+        ...(projectRenderDetail!.outputVariantId ? { outputVariantId: projectRenderDetail!.outputVariantId } : {}),
         ...(projectRenderDetail!.renderablePlanHash ? { renderableSnapshot: {
           planId: projectRenderDetail!.renderablePlanId!,
           planHash: projectRenderDetail!.renderablePlanHash,
@@ -966,6 +970,7 @@ export function hydratePublicOperationRecord(row: StoredOperation): PublicOperat
           ...(finalExportDetail!.approvalNote ? { note: finalExportDetail!.approvalNote } : {}),
         },
         originalFileName: finalExportDetail!.originalFileName,
+        ...(finalExportDetail!.outputVariantId ? { outputVariantId: finalExportDetail!.outputVariantId } : {}),
       } : isSourceCleanup ? {
         kind: 'source-cleanup' as const,
         projectId: sourceCleanupDetail!.projectId,
@@ -1098,6 +1103,28 @@ export async function persistManyOperationStatusEvents(
   await persistPublicEvents(transaction, events)
 }
 
+/**
+ * A project is in `rendering-final` (or `completed`) because of a final export of its current Version. The project has ONE status,
+ * but a Version has one export per output: another output's export of that very Version is admitted beside it with the status left
+ * as it is, provided a sibling export (queued, running or done) put it there and NO live or finished export of THIS output exists
+ * (an output is exported once per Version, exactly as a single-output project always was).
+ */
+async function admitSiblingFinalExport(transaction: Prisma.TransactionClient, input: Readonly<{
+  workspaceId: string; projectId: string; projectVersionId: string; operationId: string
+  outputVariantId: string; outputAspectRatio: string
+}>): Promise<boolean> {
+  const finals = await transaction.v2ProjectFinalExportOperation.findMany({
+    where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId,
+      operationId: { not: input.operationId }, operation: { status: { notIn: ['failed', 'canceled'] } } },
+    select: { outputVariantId: true, outputAspectRatio: true },
+  })
+  const ofThisOutput = (row: Readonly<{ outputVariantId: string | null; outputAspectRatio: string }>) =>
+    row.outputVariantId === input.outputVariantId || (row.outputVariantId === null && row.outputAspectRatio === input.outputAspectRatio)
+  if (finals.length === 0 || finals.some(ofThisOutput)) return false
+  return await transaction.v2Project.count({ where: { id: input.projectId, workspaceId: input.workspaceId,
+    currentVersionId: input.projectVersionId, status: { in: ['rendering-final', 'completed'] } } }) === 1
+}
+
 async function transitionCurrentProxyProject(
   transaction: Prisma.TransactionClient,
   operation: StoredOperation,
@@ -1112,13 +1139,25 @@ async function transitionCurrentProxyProject(
   // A concurrent admission either finishes first and is visible to `none`, or
   // waits and must revalidate the status after this transition commits.
   await transaction.$queryRaw`SELECT id FROM projects WHERE id = ${context.projectId} FOR UPDATE`
+  // The failure of one output's render does not fail a project whose other output of the same Version is still being rendered:
+  // that render goes on to its own review, which needs the project where it is.
+  const liveSiblings = status === 'failed' && context.outputVariantId
+    ? [{ publicOperations: { none: {
+        type: 'project-proxy-render', status: { in: ['queued', 'running', 'retrying', 'waiting'] },
+        projectProxyRender: { is: { projectVersionId: context.projectVersionId, NOT: { outputVariantId: context.outputVariantId } } },
+      } } }]
+    : []
   const changed = await transaction.v2Project.updateMany({
     where: {
       id: context.projectId, workspaceId: operation.workspaceId,
       currentVersionId: context.projectVersionId, status: { in: [...from] },
+      ...(liveSiblings.length > 0 ? { AND: liveSiblings } : {}),
       publicOperations: { none: {
         type: 'project-proxy-render',
-        projectProxyRender: { is: { projectVersionId: context.projectVersionId } },
+        // A newer render supersedes this one only when it is for the SAME output: the renders of the other outputs of one Version
+        // are siblings, not successors (a legacy row, made for no stated output, is superseded by any newer render of the Version).
+        projectProxyRender: { is: { projectVersionId: context.projectVersionId,
+          ...(context.outputVariantId ? { outputVariantId: context.outputVariantId } : {}) } },
         OR: [{ createdAt: { gt: operation.createdAt } }, { createdAt: operation.createdAt, id: { gt: operation.id } }],
       } },
     },
@@ -1583,6 +1622,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         !validColorPipelineBindings(projectRenderContext.colorPipelineBindings) ||
         projectRenderContext.outputArtifactId !== input.operation.target.id ||
         projectRenderContext.outputManifestId !== mediaTarget?.manifestId ||
+        (projectRenderContext.outputVariantId !== undefined && !ID_PATTERN.test(projectRenderContext.outputVariantId)) ||
         projectRenderContext.originalFileName.trim().length < 1 || projectRenderContext.originalFileName.length > 240
         || (projectRenderContext.renderableSnapshot !== undefined && (
           ![projectRenderContext.renderableSnapshot.planId, projectRenderContext.renderableSnapshot.sourceId, projectRenderContext.renderableSnapshot.variantId].every((value) => ID_PATTERN.test(value)) ||
@@ -1605,6 +1645,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         !SHA256_PATTERN.test(projectReuseContext.inputHash) ||
         projectReuseContext.outputArtifactId !== input.operation.target.id ||
         projectReuseContext.outputManifestId !== mediaTarget?.manifestId ||
+        (projectReuseContext.outputVariantId !== undefined && !ID_PATTERN.test(projectReuseContext.outputVariantId)) ||
         projectReuseContext.originalFileName.trim().length < 1 ||
         projectReuseContext.originalFileName.length > 240
       )) ||
@@ -1621,6 +1662,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         !validColorPipelineBindings(finalExportContext.colorPipelineBindings) ||
         finalExportContext.outputArtifactId !== input.operation.target.id ||
         finalExportContext.outputManifestId !== mediaTarget?.manifestId ||
+        (finalExportContext.outputVariantId !== undefined && !ID_PATTERN.test(finalExportContext.outputVariantId)) ||
         !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportContext.outputSpec.aspectRatio) ||
         ![finalExportContext.outputSpec.width, finalExportContext.outputSpec.height, finalExportContext.outputSpec.fps].every((value) => Number.isSafeInteger(value) && value > 0) ||
         finalExportContext.outputSpec.width % 2 !== 0 || finalExportContext.outputSpec.height % 2 !== 0 ||
@@ -1690,6 +1732,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         let reusedColorPipelineBindingsJson: string | undefined
         let reusedRenderMap: NonNullable<Awaited<ReturnType<typeof readSafeReusableProxyReceipt>>>['map'] | undefined
         let revalidateInlineReuseContext: (() => Promise<void>) | undefined
+        // The stable State variant the persisted verdict admitted for this render or export: the row is written with it.
+        let admittedOutputVariantId: string | undefined
         let ingestUploadKind: 'video' | 'audio' | 'image' | undefined
         let persistedSyntheticRenderContext: SyntheticProductionRenderContext | undefined
         if (syntheticRenderContext) {
@@ -1820,9 +1864,12 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           ingestUploadKind = upload.kind as 'video' | 'audio' | 'image'
         }
         if (projectRenderContext) {
-          // The same persisted `render` verdict the enqueue and the worker applied, on the exact Version the context names.
-          await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
-            projectId: projectRenderContext.projectId, versionId: projectRenderContext.projectVersionId, purpose: 'render' })
+          // The same persisted `render` verdict the enqueue and the worker applied, on the exact Version the context names and for
+          // the output it names (a context without one is the State's only output; a State with several refuses it).
+          const admitted = await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: projectRenderContext.projectId, versionId: projectRenderContext.projectVersionId, purpose: 'render',
+            ...(projectRenderContext.outputVariantId !== undefined ? { variantId: projectRenderContext.outputVariantId } : {}) })
+          admittedOutputVariantId = admitted.seal.variantId
           const [source, renderableSnapshot, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: { id: projectRenderContext.projectId, workspaceId: input.operation.workspaceId },
             include: {
@@ -1861,6 +1908,17 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         }
         if (projectReuseContext) {
+          // The output the unchanged reuse is FOR: the persisted `render` verdict of the child Version (a context without an output
+          // is the State's only output). The base proxy it carries over must be this output's, never another output's.
+          const reuseConsumption = await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: projectReuseContext.projectId, versionId: projectReuseContext.projectVersionId, purpose: 'render',
+            ...(projectReuseContext.outputVariantId !== undefined ? { variantId: projectReuseContext.outputVariantId } : {}) })
+          admittedOutputVariantId = reuseConsumption.seal.variantId
+          const baseProxyLegacy = await legacyProxyBelongsToOutput(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: projectReuseContext.projectId, versionId: projectReuseContext.baseVersionId, outputVariantId: admittedOutputVariantId })
+          const baseProxyOfOutput = baseProxyLegacy
+            ? { OR: [{ outputVariantId: admittedOutputVariantId }, { outputVariantId: null }] }
+            : { outputVariantId: admittedOutputVariantId }
           const [version, baseVersion, reusedOperation, artifact, manifest] = await Promise.all([
             transaction.v2ProjectVersion.findFirst({
               where: {
@@ -1891,6 +1949,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 sourceManifestId: projectReuseContext.sourceManifestId,
                 outputArtifactId: projectReuseContext.outputArtifactId,
                 outputManifestId: projectReuseContext.outputManifestId,
+                ...baseProxyOfOutput,
                 operation: { status: 'succeeded', phase: 'completed' },
               },
               select: { colorPipelineBindingsJson: true },
@@ -1987,6 +2046,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 projectId: projectReuseContext.projectId, projectVersionId: projectReuseContext.baseVersionId,
                 sourceArtifactId: projectReuseContext.sourceArtifactId, sourceManifestId: projectReuseContext.sourceManifestId,
                 outputArtifactId: projectReuseContext.outputArtifactId, outputManifestId: projectReuseContext.outputManifestId,
+                ...baseProxyOfOutput,
                 operation: { status: 'succeeded', phase: 'completed' },
               }, select: { colorPipelineBindingsJson: true } }),
             ])
@@ -2012,6 +2072,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             operationId: projectReuseContext.reusedFromOperationId,
             artifactId: projectReuseContext.outputArtifactId,
             manifestId: projectReuseContext.outputManifestId,
+            outputVariantId: admittedOutputVariantId,
             sourceArtifactId: projectReuseContext.sourceArtifactId,
             plan: basePlan as unknown as Parameters<typeof lockProxySourceArtifacts>[1]['plan'],
           })
@@ -2021,7 +2082,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy reuse map clock differs from unchanged plan')
           }
           await revalidateInlineReuseContext()
-          await assertInlineProxySourceAuthority(transaction, { workspaceId: input.operation.workspaceId, ...projectReuseContext })
+          await assertInlineProxySourceAuthority(transaction, { workspaceId: input.operation.workspaceId, ...projectReuseContext,
+            variantId: admittedOutputVariantId })
           reusedColorPipelineBindingsJson = reusedOperation.colorPipelineBindingsJson
           reusedRenderMap = safeReuse.map
         }
@@ -2029,8 +2091,14 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           // The owner transaction applies the same persisted `final` verdict the enqueue and the worker applied, on the exact
           // Version the context names (the light reader: sealed Version + State rows only, never the audit rebuild). A Version
           // the verdict does not admit for a final export is refused with its published reason before any approval is read.
-          await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
-            projectId: finalExportContext.projectId, versionId: finalExportContext.projectVersionId, purpose: 'final' })
+          const admittedFinal = await requirePersistedOutputConsumptionV3(transaction, { workspaceId: input.operation.workspaceId,
+            projectId: finalExportContext.projectId, versionId: finalExportContext.projectVersionId, purpose: 'final',
+            ...(finalExportContext.outputVariantId !== undefined ? { variantId: finalExportContext.outputVariantId } : {}) })
+          // The OutputSpec this export was approved with is the preset of the output's own aspect ratio, never another output's.
+          if (admittedFinal.aspectRatio !== finalExportContext.outputSpec.aspectRatio) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Final export OutputSpec is not the aspect ratio of the output it is approved for')
+          }
+          admittedOutputVariantId = admittedFinal.seal.variantId
           const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: {
               id: finalExportContext.projectId,
@@ -2358,6 +2426,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               outputArtifactId: context.outputArtifactId,
               outputManifestId: context.outputManifestId,
               originalFileName: context.originalFileName,
+              outputVariantId: admittedOutputVariantId!,
               ...(projectRenderContext?.renderableSnapshot ? {
                 renderablePlanHash: projectRenderContext.renderableSnapshot.planHash,
                 renderablePlanId: projectRenderContext.renderableSnapshot.planId,
@@ -2409,6 +2478,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               outputArtifactId: finalExportContext!.outputArtifactId,
               outputManifestId: finalExportContext!.outputManifestId,
               outputAspectRatio: finalExportContext!.outputSpec.aspectRatio,
+              outputVariantId: admittedOutputVariantId!,
               outputWidth: finalExportContext!.outputSpec.width,
               outputHeight: finalExportContext!.outputSpec.height,
               outputFps: finalExportContext!.outputSpec.fps,
@@ -2432,7 +2502,10 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             },
             data: { status: 'rendering-final' },
           })
-          if (project.count !== 1) {
+          if (project.count !== 1 && !(await admitSiblingFinalExport(transaction, {
+            workspaceId: input.operation.workspaceId, projectId: finalExportContext!.projectId,
+            projectVersionId: finalExportContext!.projectVersionId, operationId: input.operation.id,
+            outputVariantId: admittedOutputVariantId!, outputAspectRatio: finalExportContext!.outputSpec.aspectRatio }))) {
             throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter final rendering from its current status')
           }
         } else if (perceptionContext) {
@@ -2521,7 +2594,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         if (projectReuseContext) {
           if (!revalidateInlineReuseContext) throw new DomainError('PERSISTENCE_CONFLICT', 'Inline reuse context fence is absent')
           await revalidateInlineReuseContext()
-          await assertInlineProxySourceAuthority(transaction, { workspaceId: input.operation.workspaceId, ...projectReuseContext })
+          await assertInlineProxySourceAuthority(transaction, { workspaceId: input.operation.workspaceId, ...projectReuseContext,
+            ...(admittedOutputVariantId !== undefined ? { variantId: admittedOutputVariantId } : {}) })
         }
         return { ...record, replayed: false }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })

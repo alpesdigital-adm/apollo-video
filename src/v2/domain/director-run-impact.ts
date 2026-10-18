@@ -1,6 +1,7 @@
 import { calculateCanonicalHash, stableSerialize } from './canonical-hash.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactRange } from './command-impact.ts'
 import { assertDomain } from './errors.ts'
+import { assertRendersBelongToVariants, isProxyRenderFromStart, projectWideProxyRenders, projectWideVariantIds } from './project-wide-render-impact.ts'
 
 export interface DirectorRunImpactV1 {
   schemaVersion: 'director-run-impact/v1'
@@ -56,12 +57,14 @@ export function createDirectorRunImpact(input: {
   criticVersion: string
   affectedEndFrame: number
   renderEndFrame: number
-  proxyVariantId: string
+  /** Every output of the project (the stable variant ids of its State): a Director re-run replans the one EditPlan they all re-materialize from. */
+  variantIds: readonly string[]
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }): Readonly<DirectorRunImpactV1> {
   assertDomain(Number.isSafeInteger(input.affectedEndFrame) && input.affectedEndFrame > 0, 'INVALID_ARGUMENT', 'affectedEndFrame is invalid')
   assertDomain(Number.isSafeInteger(input.renderEndFrame) && input.renderEndFrame > 0 && input.renderEndFrame <= input.affectedEndFrame, 'INVALID_ARGUMENT', 'renderEndFrame is invalid')
   const baseVersionId = identifier(input.baseVersionId, 'baseVersionId')
+  const variantIds = projectWideVariantIds(input.variantIds, true)
   const seenArtifacts = new Set<string>()
   const outputs = input.outputReferences.map((item, index) => {
     const artifactId = identifier(item.artifactId, `outputReferences[${index}].artifactId`)
@@ -74,8 +77,8 @@ export function createDirectorRunImpact(input: {
     return Object.freeze({ artifactId, sourceVersionId, variantId, kind: item.kind })
   }).sort((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
   const affectedRanges = Object.freeze([Object.freeze({ startFrame: 0, endFrame: input.affectedEndFrame })])
-  const renderRanges = Object.freeze([Object.freeze({ startFrame: 0, endFrame: input.renderEndFrame })])
-  const proxyVariantId = identifier(input.proxyVariantId, 'proxyVariantId')
+  assertRendersBelongToVariants(outputs, variantIds)
+  const renderRange = Object.freeze({ startFrame: 0, endFrame: input.renderEndFrame })
   const body = {
     schemaVersion: 'director-run-impact/v1' as const,
     commandId: identifier(input.commandId, 'commandId'), commandType: 'run-director' as const,
@@ -89,7 +92,7 @@ export function createDirectorRunImpact(input: {
     affectedRanges,
     affectedVariantIds: Object.freeze([...new Set(outputs.map((item) => item.variantId))].sort()),
     affectedArtifacts: Object.freeze(outputs),
-    minimalRenders: Object.freeze([Object.freeze({ kind: 'proxy' as const, variantId: proxyVariantId, ranges: renderRanges })]),
+    minimalRenders: projectWideProxyRenders(variantIds, renderRange),
     renderSemanticsChanged: true as const,
   }
   return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
@@ -107,7 +110,7 @@ export function parseDirectorRunImpact(value: unknown): Readonly<DirectorRunImpa
   assertDomain(actualKeys.length === expectedKeys.length && actualKeys.every((key, index) => key === expectedKeys[index]), 'PERSISTENCE_CONFLICT', 'Stored DirectorRun impact fields are invalid')
   const affected = Array.isArray(impact.affectedRanges) ? impact.affectedRanges[0] : undefined
   const minimal = Array.isArray(impact.minimalRenders) ? impact.minimalRenders[0] : undefined
-  const render = minimal && Array.isArray(minimal.ranges) ? minimal.ranges[0] : undefined
+  const render = isProxyRenderFromStart(minimal) ? minimal.ranges[0] : undefined
   assertDomain(
     impact.schemaVersion === 'director-run-impact/v1' && impact.commandType === 'run-director' &&
     impact.renderSemanticsChanged === true && JSON.stringify(impact.changeKinds) === JSON.stringify(['director-replan']) &&
@@ -115,9 +118,9 @@ export function parseDirectorRunImpact(value: unknown): Readonly<DirectorRunImpa
     Array.isArray(impact.affectedRanges) && impact.affectedRanges.length === 1 && affected?.startFrame === 0 &&
     Number.isSafeInteger(affected?.endFrame) && Number(affected?.endFrame) > 0 &&
     Array.isArray(impact.affectedVariantIds) && Array.isArray(impact.affectedArtifacts) &&
-    Array.isArray(impact.minimalRenders) && impact.minimalRenders.length === 1 && minimal?.kind === 'proxy' &&
-    Array.isArray(minimal?.ranges) && minimal.ranges.length === 1 && render?.startFrame === 0 &&
-    Number.isSafeInteger(render?.endFrame) && Number(render?.endFrame) > 0 && Number(render?.endFrame) <= Number(affected?.endFrame),
+    Array.isArray(impact.minimalRenders) && impact.minimalRenders.length >= 1 && render !== undefined &&
+    Number.isSafeInteger(render.endFrame) && render.endFrame <= Number(affected?.endFrame) &&
+    impact.minimalRenders.every((item) => isProxyRenderFromStart(item) && item.ranges[0]!.endFrame === render.endFrame),
     'PERSISTENCE_CONFLICT',
     'Stored DirectorRun impact is invalid',
   )
@@ -127,7 +130,7 @@ export function parseDirectorRunImpact(value: unknown): Readonly<DirectorRunImpa
     sourceTranscriptId: impact.sourceTranscriptId, sourceTranscriptHash: impact.sourceTranscriptHash,
     plannerVersion: impact.plannerVersion, criticVersion: impact.criticVersion,
     affectedEndFrame: affected!.endFrame, renderEndFrame: render!.endFrame,
-    proxyVariantId: impact.minimalRenders[0]!.variantId, outputReferences: impact.affectedArtifacts,
+    variantIds: impact.minimalRenders.map((item) => item.variantId), outputReferences: impact.affectedArtifacts,
   })
   assertDomain(stableSerialize(recreated) === stableSerialize(impact), 'PERSISTENCE_CONFLICT', 'Stored DirectorRun impact is inconsistent')
   return Object.freeze(impact)

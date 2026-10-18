@@ -30,6 +30,10 @@ const workspaceLogo = Object.freeze({
 // The parent of every Command below is a real sealed Version3/State3 from the shared output world.
 let ingestedPromise
 const ingested = () => (ingestedPromise ??= ingestedWorld())
+// The same recording ingested into a project with TWO outputs (one EditPlan, two State entries).
+let twoOutputPromise
+const twoOutputs = () => (twoOutputPromise ??= ingestedWorld({ sibling: true }))
+const variantIdsOf = (parent) => parent.state.document.entries.map((entry) => entry.variantId)
 
 function memoryRepository(parent, options = {}) {
   const workspaceDefaults = options.workspaceDefaults ?? {
@@ -59,9 +63,9 @@ function memoryRepository(parent, options = {}) {
           content: currentPolicyContent,
         }),
         currentDurationFrames: options.durationFrames ?? JSON.parse(operationalBundlePlanV3(parent).contentJson).durationFrames,
-        proxyVariantId: '9:16',
+        variantIds: variantIdsOf(parent),
         outputReferences: options.outputReferences ?? [{
-          artifactId: 'artifact-project-policy-proxy-1', kind: 'proxy', sourceVersionId: parent.version.id, variantId: '9:16',
+          artifactId: 'artifact-project-policy-proxy-1', kind: 'proxy', sourceVersionId: parent.version.id, variantId: variantIdsOf(parent)[0],
         }],
       })
     },
@@ -152,6 +156,7 @@ test('F1.010 disabling logo and handles creates one immutable Policy Snapshot wi
   assert.deepEqual(result.impact.requiredRecomputations, ['treatment', 'story', 'edit-plan', 'proxy', 'final'])
   assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: frames }])
   assert.equal(result.invalidations.length, 1)
+  assert.deepEqual(result.invalidations.map((invalidation) => invalidation.variantId), variantIdsOf(parent))
   assert.equal(repository.commits[0].event.data.nextRequiredCapability, 'apollo.projects.commands.apply:run-director')
   assert.equal(bundle.origin.audit.credentialId, 'credential-output-http')
   const persisted = JSON.parse(result.policySnapshot.contentJson)
@@ -163,6 +168,34 @@ test('F1.010 disabling logo and handles creates one immutable Policy Snapshot wi
   assert.equal(replay.replayed, true)
   assert.equal(repository.commits.length, 1)
   await assert.rejects(apply(request(parent, actor, { logo: { mode: 'inherit' } })), /different project overrides/)
+})
+
+test('W66 multi-output: project policy overrides on a project with two outputs stale the renders of EVERY output, each under its own output', async () => {
+  const { parent, actor } = await twoOutputs()
+  const variantIds = variantIdsOf(parent)
+  assert.equal(variantIds.length, 2)
+  const references = variantIds.map((variantId, index) => ({ artifactId: `artifact-project-policy-proxy-${index}`, kind: 'proxy', sourceVersionId: parent.version.id, variantId }))
+  const repository = memoryRepository(parent, { outputReferences: references })
+  const overrides = { logo: { mode: 'none' }, professionalName: { mode: 'custom', value: 'Apollo Video' } }
+  const body = request(parent, actor, overrides, { idempotencyKey: 'project-policy-two-outputs-1' })
+  assert.equal('variantId' in body, false)
+  const result = await service(repository)(body)
+  const frames = JSON.parse(operationalBundlePlanV3(parent).contentJson).durationFrames
+
+  // the child Version carries every entry with the spec of each output untouched; only the Policy Snapshot is replaced
+  const state = repository.commits[0].bundle.state.document
+  assert.deepEqual(state.entries.map((entry) => entry.variantId), variantIds)
+  for (const [index, entry] of state.entries.entries()) {
+    assert.equal(entry.outputSpecRevisionId, parent.state.document.entries[index].outputSpecRevisionId)
+    assert.equal(entry.specHash, parent.state.document.entries[index].specHash)
+  }
+  assert.equal(result.impact.renderSemanticsChanged, true)
+  assert.deepEqual(result.impact.affectedVariantIds, [...variantIds].sort())
+  assert.deepEqual(result.impact.affectedArtifacts.map((artifact) => [artifact.artifactId, artifact.variantId]).toSorted(),
+    references.map((reference) => [reference.artifactId, reference.variantId]).toSorted())
+  assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: frames }])
+  assert.equal(result.invalidations.length, 2)
+  assert.deepEqual(result.invalidations.map((invalidation) => invalidation.variantId).toSorted(), [...variantIds].sort())
 })
 
 test('F1.010 changing mode without changing the resolved value persists policy but creates zero render invalidations', async () => {

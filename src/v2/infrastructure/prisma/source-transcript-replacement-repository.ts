@@ -11,6 +11,7 @@ import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import {
@@ -21,7 +22,6 @@ import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 type StoredCommand = Prisma.V2EditCommandGetPayload<{
@@ -157,11 +157,11 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
       this.client.v2MediaTranscript.findFirst({ where: { id: input.replacementTranscriptId, workspaceId: input.workspaceId, projectId: input.projectId } }),
       this.client.v2ProjectProxyRenderOperation.findMany({
         where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
         where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
     if (!current || !replacement) return null
@@ -176,10 +176,8 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
         id: replacement.id, transcriptHash: replacement.transcriptHash,
         sourceArtifactId: replacement.sourceArtifactId, transcript: hydrateTranscript(replacement),
       }),
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: requireProjectOutputFormat(project, parent) })),
-        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+      // A transcript replacement is project-wide: the renders of EVERY output of the sealed State go stale, each attributed to its own.
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
     })
   }
 
@@ -226,13 +224,10 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
           (currentRetimedTranscript.sourceTranscriptHash !== undefined && currentRetimedTranscript.sourceTranscriptHash !== currentTranscript.transcriptHash)
         ) throw new DomainError('VERSION_CONFLICT', 'Current EditPlan transcript changed before commit')
         const [proxyOutputs, finalOutputs] = await Promise.all([
-          transaction.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true } }),
-          transaction.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputAspectRatio: true } }),
+          transaction.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputVariantId: true } }),
+          transaction.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true } }),
         ])
-        const currentOutputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: requireProjectOutputFormat(project, input.bundle) })),
-          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+        const currentOutputs = renderOutputReferences({ state: input.bundle.state, sourceVersionId: bundle.command.baseVersionId, proxies: proxyOutputs, finals: finalOutputs })
         if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before source transcript impact commit')
         await commitProjectVersionWithOutputState(transaction, input.bundle)
         const invalidations = createSourceTranscriptArtifactInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })

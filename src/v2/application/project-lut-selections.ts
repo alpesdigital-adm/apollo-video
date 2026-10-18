@@ -109,7 +109,7 @@ export function setProjectLutSelectionService(dependencies: {
         resolvedLutRecordHash: selection.resolved.lut.recordHash,
       } : {}),
       intensity, durationFrames: context.currentDurationFrames,
-      proxyVariantId: context.proxyVariantId, outputReferences: context.outputReferences,
+      variantIds: context.variantIds, outputReferences: context.outputReferences,
     })
     const payload = Object.freeze({ schemaVersion: 2 as const, ...requested, intensity, impact })
     const command = createEditCommand({ id: commandId, workspaceId, projectId, baseVersionId, baseHash, author: actor.author, type: 'set-project-lut-selection', scope: { project: true }, payload, ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}), idempotencyKey, createdAt })

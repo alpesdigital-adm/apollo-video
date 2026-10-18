@@ -540,7 +540,7 @@ test('T-FR-233 subtitle patch reuses unaffected frames while unknown-face captio
       commandId: 'review-command-subtitle-golden',
       baseVersionId: beforePlan.projectVersionId,
       resultVersionId: afterPlan.projectVersionId,
-      variantIds: ['16:9'], operations: patch.operations,
+      outputVariantIds: ['16:9'], operations: patch.operations,
       invalidatedRangesMs: patch.invalidatedRanges,
       beforeEditPlan: beforePlan, afterEditPlan: afterPlan,
       outputReferences: [{
@@ -657,7 +657,7 @@ test('T-FR-233 materialized B-roll replacement recomposes only its stale range',
       commandId: 'manual-command-range-golden',
       baseVersionId: beforePlan.projectVersionId,
       resultVersionId: afterPlan.projectVersionId,
-      variantId: '16:9', targetId: operation.clipId, action: 'apply', operation,
+      variantId: '16:9', outputVariantIds: ['16:9'], targetId: operation.clipId, action: 'apply', operation,
       beforeEditPlan: beforePlan, afterEditPlan: afterPlan,
       outputReferences: [{
         artifactId: 'artifact-range-base-proxy', kind: 'proxy',

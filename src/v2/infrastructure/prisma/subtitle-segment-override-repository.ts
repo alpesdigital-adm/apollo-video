@@ -10,6 +10,7 @@ import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import {
@@ -18,7 +19,6 @@ import {
 } from '../../domain/subtitle-segment-override.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const include = Prisma.validator<Prisma.V2SubtitleSegmentOverrideInclude>()({ command: true, resultVersion: true })
@@ -209,7 +209,7 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
           projectVersionId: currentVersionId,
           operation: { status: 'succeeded', phase: 'completed' },
         },
-        select: { outputArtifactId: true },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
         where: {
@@ -217,32 +217,16 @@ export class PrismaSubtitleSegmentOverrideRepository implements SubtitleSegmentO
           projectVersionId: currentVersionId,
           operation: { status: 'succeeded', phase: 'completed' },
         },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
       this.readHeadChain(input),
     ])
-    const proxyVariantId = projectOutputFormat(project, parent) ?? input.variantId
-    const declared = Array.isArray(editPlan.outputVariantIds)
-      ? editPlan.outputVariantIds.filter((value): value is string => typeof value === 'string')
-      : []
-    const variantIds = Object.freeze(
-      [...new Set([...declared, proxyVariantId, ...final.map((item) => item.outputAspectRatio)])].toSorted(),
-    )
     return Object.freeze({
       parent,
       durationFrames,
       segments: segmentsOf(editPlan, input.variantId),
-      variantIds,
-      outputReferences: Object.freeze([
-        ...proxy.map((item) => Object.freeze({
-          artifactId: item.outputArtifactId, kind: 'proxy' as const,
-          sourceVersionId: currentVersionId, variantId: proxyVariantId,
-        })),
-        ...final.map((item) => Object.freeze({
-          artifactId: item.outputArtifactId, kind: 'final' as const,
-          sourceVersionId: currentVersionId, variantId: item.outputAspectRatio,
-        })),
-      ]),
+      // Each render of the head Version attributed to the output it was made for (stable State variant ids).
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxy, finals: final }),
       currentOverride: chain.currentOverride,
       previousOverride: chain.previousOverride,
     })

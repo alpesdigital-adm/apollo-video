@@ -57,6 +57,8 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   const repository = new PrismaReviewPatchBatchRepository(client)
   let server
   let authenticatedActor
+  // The annotations name the format they were made on by the STABLE variant of the project's output (the State's id), never the aspect ratio.
+  let stableVariantId
 
 
   const seedAnnotationAndProposal = async ({ versionId, targetId, text, operationText }) => {
@@ -93,7 +95,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     await client.v2ReviewAnnotation.create({ data: {
       id: annotationId, workspaceId, projectId, projectVersionId: versionId, proxyArtifactId: artifactId, proxyHash: artifactHash,
       frame, timeStartMs: frame * 33, timeEndMs: frame * 33, scope: 'point',
-      targetIdsJson: stableSerialize([targetId]), applicationScopeJson: stableSerialize({ kind: 'scene', targetIds: ['scene:clip-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: ['project-proxy-render'], global: false }),
+      targetIdsJson: stableSerialize([targetId]), applicationScopeJson: stableSerialize({ kind: 'scene', targetIds: ['scene:clip-1'], formatIds: [stableVariantId], localeIds: ['pt-BR'], recipeIds: ['project-proxy-render'], global: false }),
       affectedCount: 1, screenshotRef: 'data:image/jpeg;base64,/9j/2Q==', text,
       authorType: 'api-client', authorId: audit.clientId, authorName: audit.clientId, status: 'open',
       ...actorAuditData,
@@ -180,8 +182,8 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     })
     // The project is the sealed world the product builds: the creation Command, one explicit 9:16 output variant, the recording's
     // persisted ingest (with its source rights) and a child Command that adopts that receipt and plays the recording.
-    await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'batch-review', ids: { project: projectId },
-      name: 'Batch Review Project', aspectRatio: '9:16', status: 'reviewing-proxy', at: () => createdAt })
+    stableVariantId = (await seedReviewProject(client, { workspaceId, actor: authenticatedActor, prefix: 'batch-review', ids: { project: projectId },
+      name: 'Batch Review Project', aspectRatio: '9:16', status: 'reviewing-proxy', at: () => createdAt })).variantId
     await persistRecording(client, { workspaceId, projectId, actor: authenticatedActor, slug, durationFrames: 150,
       createdAt: createdAt.toISOString() })
     const initialBundle = await commitSealedChild(client, { workspaceId, projectId, actor: authenticatedActor,

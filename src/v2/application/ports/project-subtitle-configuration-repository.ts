@@ -15,6 +15,7 @@ export interface ProjectSubtitleConfigurationContext {
   directorPresetId: SubtitlePresetId
   workspaceDefault?: Readonly<{ presetId: SubtitlePresetId; revision: number }>
   durationFrames: number
+  /** The renders of the head Version, each attributed to the stable State variant it was made for; the service keeps the target variant's. */
   outputReferences: readonly Readonly<{ artifactId: string; kind: 'proxy' | 'final'; sourceVersionId: string; variantId: string }>[]
   /** Head configuration of this variant, or null while the variant is still inherited. */
   currentConfiguration: Readonly<ProjectSubtitleConfiguration> | null

@@ -147,6 +147,10 @@ export function exportProjectSubtitleSidecarService(dependencies: {
     workspaceId: string
     actor: AuthenticatedExternalActor
     projectId: string
+    /**
+     * The stable State variant of the output whose render the sidecar aligns (never an aspect ratio). It must be an exact member of the
+     * State of the selected Version; the evidence is the proxy or final export made for THAT output.
+     */
     variantId: string
     format: SubtitleSidecarFormat
     locale?: string

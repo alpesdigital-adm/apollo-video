@@ -32,8 +32,8 @@ import {
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { assertManualOutputReferencesV3 } from './output-version-bundle-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat, requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { readVersionRenderReferences } from './version-render-references.ts'
 
 type StoredManualCommand = Prisma.V2EditCommandGetPayload<{
   include: {
@@ -273,26 +273,10 @@ export class PrismaManualEditRepository implements ManualEditRepository {
     })
     if (!currentBundle) return null
     const current = recordFromBundle(currentBundle)
-    const [proxyOutputs, finalOutputs] = await Promise.all([
-      this.client.v2ProjectProxyRenderOperation.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          projectVersionId: current.version.id,
-          operation: { status: 'succeeded', phase: 'completed' },
-        },
-        select: { outputArtifactId: true },
-      }),
-      this.client.v2ProjectFinalExportOperation.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          projectVersionId: current.version.id,
-          operation: { status: 'succeeded', phase: 'completed' },
-        },
-        select: { outputArtifactId: true, outputAspectRatio: true },
-      }),
-    ])
+    // The renders of the current Version, every output's, each attributed to the stable variant it was made for.
+    const outputReferences = await readVersionRenderReferences(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId, versionId: current.version.id, state: currentBundle.state,
+    })
     const targetBundle = input.targetVersionId
       ? await readPersistedOperationalOutputBundleV3(this.client, {
           workspaceId: input.workspaceId, projectId: input.projectId, versionId: input.targetVersionId,
@@ -327,21 +311,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
       availableAssetIds: Object.freeze([
         ...new Set(project.mediaAssets.map((item) => item.artifactId)),
       ]),
-      renderVariantIds: Object.freeze([requireProjectOutputFormat(project, currentBundle)]),
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({
-          artifactId: output.outputArtifactId,
-          kind: 'proxy' as const,
-          sourceVersionId: current.version.id,
-          variantId: requireProjectOutputFormat(project, currentBundle),
-        })),
-        ...finalOutputs.map((output) => Object.freeze({
-          artifactId: output.outputArtifactId,
-          kind: 'final' as const,
-          sourceVersionId: current.version.id,
-          variantId: output.outputAspectRatio,
-        })),
-      ].toSorted((left, right) => left.artifactId.localeCompare(right.artifactId))),
+      outputReferences,
       ...(targetBundle ? { targetVersion: recordFromBundle(targetBundle) } : {}),
       history: Object.freeze(history),
     })
@@ -471,46 +441,12 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           // Selection and restore: the database guard re-derives these references, so the owner's own check runs.
           await assertManualOutputReferencesV3(transaction, input.bundle)
         } else {
-          const [proxyOutputs, finalOutputs] = await Promise.all([
-            transaction.v2ProjectProxyRenderOperation.findMany({
-              where: {
-                workspaceId: bundle.command.workspaceId,
-                projectId: bundle.command.projectId,
-                projectVersionId: bundle.command.baseVersionId,
-                operation: { status: 'succeeded', phase: 'completed' },
-              },
-              select: { outputArtifactId: true },
-            }),
-            transaction.v2ProjectFinalExportOperation.findMany({
-              where: {
-                workspaceId: bundle.command.workspaceId,
-                projectId: bundle.command.projectId,
-                projectVersionId: bundle.command.baseVersionId,
-                operation: { status: 'succeeded', phase: 'completed' },
-              },
-              select: { outputArtifactId: true, outputAspectRatio: true },
-            }),
-          ])
-          const variantId = bundle.command.payload.variantId
+          // The child carries the very outputs (variants and specs) of its parent, so its State attributes the base Version's renders.
           const currentAffectedArtifacts = bundle.impact.renderSemanticsChanged
-            ? normalizeCommandImpactOutputReferences([
-                ...(projectOutputFormat(project, input.bundle) === variantId
-                  ? proxyOutputs.map((output) => ({
-                      artifactId: output.outputArtifactId,
-                      kind: 'proxy' as const,
-                      sourceVersionId: bundle.command.baseVersionId,
-                      variantId,
-                    }))
-                  : []),
-                ...finalOutputs
-                  .filter((output) => output.outputAspectRatio === variantId)
-                  .map((output) => ({
-                    artifactId: output.outputArtifactId,
-                    kind: 'final' as const,
-                    sourceVersionId: bundle.command.baseVersionId,
-                    variantId,
-                  })),
-              ])
+            ? normalizeCommandImpactOutputReferences(await readVersionRenderReferences(transaction, {
+                workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+                versionId: bundle.command.baseVersionId, state: input.bundle.state,
+              }))
             : []
           if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
             throw new DomainError(

@@ -11,6 +11,8 @@ import type {
 import { DomainError } from '../../domain/errors.ts'
 import { assertMediaArtifactManifest, type MediaArtifactManifest } from '../../domain/media-artifact.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
+import { outputVariantsOf, type OutputConsumptionState } from '../../domain/output-consumption.ts'
+import { renderRowIsOfVariant } from '../../domain/render-row-variant.ts'
 import { REVIEW_SCOPE_KINDS, type ReviewScope } from '../../domain/review-system.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
 import {
@@ -207,7 +209,7 @@ export type ReviewPreviewReader = Pick<Prisma.TransactionClient,
 
 /**
  * `variantId` is the stable variant of the State the review is about; absent means the State's only output (several outputs
- * without it are refused with `output-variant-required`).
+ * without it are refused with `output-variant-required`). The proxy a review is about is the render made for that output.
  */
 export type ReviewPreviewInput = Readonly<{ workspaceId: string; projectId: string; projectVersionId?: string; variantId?: string }>
 
@@ -216,21 +218,26 @@ export type ReviewPreviewInput = Readonly<{ workspaceId: string; projectId: stri
  * `critic` purpose: the State of exactly the selected Version (the head, or the historical one asked for), its output (the
  * explicit `variantId`, or the only one), and the format that output carries. A Version whose output cannot be critiqued (a copy no
  * editorial cut has materialized, a project without outputs, several outputs without a variant, a State that fails its seal) is
- * refused with the published reason, before any proxy is looked for.
+ * refused with the published reason, before any proxy is looked for. The proxy is then the render made for that output: another
+ * output's render of the same Version is never offered, and a render of the selected Version is exact only for its own output.
  */
 export async function readReviewPreviewContext(
   client: ReviewPreviewReader,
   input: ReviewPreviewInput,
 ): Promise<Readonly<ReviewPreviewContext> | null> {
   const found = await locateReviewPreview(client, input, (versionId) => requireCriticOutputConsumption(client, {
-    workspaceId: input.workspaceId, projectId: input.projectId, versionId, ...(input.variantId ? { variantId: input.variantId } : {}) }))
+    workspaceId: input.workspaceId, projectId: input.projectId, versionId, ...(input.variantId ? { variantId: input.variantId } : {}) }),
+  (admission) => ({ state: admission.state, variantId: admission.entry.variantId }))
   if (!found) return null
   const { located: { scopeCounts, ...facts }, admission } = found
+  const variantIds = Object.freeze(outputVariantsOf(admission.state).map((variant) => variant.variantId))
   return Object.freeze({
     ...facts,
     formatId: admission.formatId,
+    variantId: admission.entry.variantId,
+    variantIds,
     outputConsumption: Object.freeze({ sealHash: admission.sealHash, seal: admission.seal }),
-    availableScopeCounts: Object.freeze({ ...scopeCounts, formats: 1 }) as ReviewPreviewContext['availableScopeCounts'],
+    availableScopeCounts: Object.freeze({ ...scopeCounts, formats: variantIds.length }) as ReviewPreviewContext['availableScopeCounts'],
   })
 }
 
@@ -253,18 +260,24 @@ export async function readReviewPreviewAvailability(
   return Object.freeze({ currentProjectVersionId, projectVersionId, sourceVersionId, proxyArtifactId, proxyHash, stale })
 }
 
-/** The preview without the facts only the output's admission knows (its format and the format scope count). */
-type LocatedReviewPreview = Omit<ReviewPreviewContext, 'formatId' | 'outputConsumption' | 'availableScopeCounts'> &
+/** The preview without the facts only the output's admission knows (its format, its variant and the format scope count). */
+type LocatedReviewPreview = Omit<ReviewPreviewContext, 'formatId' | 'variantId' | 'variantIds' | 'outputConsumption' | 'availableScopeCounts'> &
   { scopeCounts: Omit<ReviewPreviewContext['availableScopeCounts'], 'formats'> }
+
+/** The output a review of the Version is about: the State of the selected Version and the stable variant admitted from it. */
+type ReviewedOutput = Readonly<{ state: OutputConsumptionState; variantId: string }>
 
 /**
  * Selects the Version and the proxy a review of it is about. `admit` runs as soon as the Version is selected (before any operation
- * or proxy is read): the consumers pass the critic admission, the availability read model passes nothing.
+ * or proxy is read): the consumers pass the critic admission, the availability read model passes nothing. `outputOf` says which
+ * output the admission is about; the renders considered are then that output's only (the availability read model, which names no
+ * output, describes the renders of the Version whatever output they were made for).
  */
 async function locateReviewPreview<Admission>(
   client: ReviewPreviewReader,
   input: Omit<ReviewPreviewInput, 'variantId'>,
   admit: (versionId: string) => Promise<Admission>,
+  outputOf?: (admission: Admission) => ReviewedOutput,
 ): Promise<{ located: LocatedReviewPreview; admission: Admission } | null> {
   const project = await client.v2Project.findFirst({
     where: { id: input.projectId, workspaceId: input.workspaceId },
@@ -289,20 +302,25 @@ async function locateReviewPreview<Admission>(
     : project.versions.find((version) => version.id === project.currentVersionId)
   if (!selectedVersion) return null
   const admission = await admit(selectedVersion.id)
-  const [finalOperations, proxyOperations] = await Promise.all([
+  const output = outputOf?.(admission) ?? null
+  const [allFinalOperations, allProxyOperations] = await Promise.all([
     client.v2ProjectFinalExportOperation.findMany({
       where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
       orderBy: { createdAt: 'desc' },
-      select: { outputArtifactId: true, projectVersionId: true, createdAt: true, operation: { select: { workspaceId: true, projectId: true } } },
+      select: { outputArtifactId: true, projectVersionId: true, outputVariantId: true, outputAspectRatio: true, createdAt: true, operation: { select: { workspaceId: true, projectId: true } } },
     }),
     client.v2ProjectProxyRenderOperation.findMany({
       where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
       orderBy: { createdAt: 'desc' },
-      select: { outputArtifactId: true, projectVersionId: true, createdAt: true, operation: { select: { workspaceId: true, projectId: true } } },
+      select: { outputArtifactId: true, projectVersionId: true, outputVariantId: true, createdAt: true, operation: { select: { workspaceId: true, projectId: true } } },
     }),
   ])
-  if ([...finalOperations, ...proxyOperations].some((record) => record.operation.workspaceId !== input.workspaceId ||
+  if ([...allFinalOperations, ...allProxyOperations].some((record) => record.operation.workspaceId !== input.workspaceId ||
     record.operation.projectId !== input.projectId)) throw new DomainError('PERSISTENCE_CONFLICT', 'Review preview operation belongs to another project')
+  // The renders of the output the review is about: a render names the output it was made for, and another output's render of the
+  // same Version is not the preview of this one (nor does it make this one's preview current).
+  const finalOperations = output ? allFinalOperations.filter((record) => renderRowIsOfVariant(output.state, record, output.variantId)) : allFinalOperations
+  const proxyOperations = output ? allProxyOperations.filter((record) => renderRowIsOfVariant(output.state, record, output.variantId)) : allProxyOperations
   const exactFinal = finalOperations.find((operation) => operation.projectVersionId === selectedVersion.id)
   const exactProxy = proxyOperations.find((operation) => operation.projectVersionId === selectedVersion.id)
   let candidate: ProxyCandidate | null = exactFinal

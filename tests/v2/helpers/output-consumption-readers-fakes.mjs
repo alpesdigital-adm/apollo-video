@@ -105,8 +105,8 @@ export function previewProject({ projectId, workspaceId, versions, currentVersio
 }
 
 /** The review preview's proxy: a succeeded proxy render of each listed Version, over the one artifact. */
-export function proxyRenders({ workspaceId, projectId, versionIds, artifactId = 'artifact-preview' }) {
-  return versionIds.map((projectVersionId) => ({ workspaceId, projectId, outputArtifactId: artifactId, projectVersionId, createdAt: at, operation: { workspaceId, projectId } }))
+export function proxyRenders({ workspaceId, projectId, versionIds, artifactId = 'artifact-preview', variantId = null }) {
+  return versionIds.map((projectVersionId) => ({ workspaceId, projectId, outputArtifactId: artifactId, projectVersionId, outputVariantId: variantId, createdAt: at, operation: { workspaceId, projectId } }))
 }
 
 /** The RenderElementMap row of a rendered artifact (no elements: only the canvas and the hash binding matter to the sidecar). */

@@ -13,6 +13,7 @@ import {
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { parseOptionalVariantId } from '@/v2/public-api/project-output-variant-request-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'projects:write')
     const body = await request.json() as Record<string, unknown>
-    if (Object.keys(body).some((key) => !['projectVersionId', 'projectVersionHash', 'format', 'approval'].includes(key))) {
+    if (Object.keys(body).some((key) => !['projectVersionId', 'projectVersionHash', 'format', 'variantId', 'approval'].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (
@@ -37,6 +38,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       approval.approved !== true ||
       (approval.note !== undefined && typeof approval.note !== 'string')
     ) throw new DomainError('INVALID_ARGUMENT', 'approval must explicitly confirm the final export')
+    // The stable State variant of the output exported; optional only for a project with exactly one output.
+    const variantId = parseOptionalVariantId(body.variantId)
     const { projectId } = await context.params
     const result = await enqueueProjectFinalExportService({
       projects: createProjectFinalExportRepository(),
@@ -51,6 +54,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projectVersionId: body.projectVersionId,
       projectVersionHash: body.projectVersionHash,
       format: body.format,
+      ...(variantId === undefined ? {} : { variantId }),
       approval: { approved: true, ...(typeof approval.note === 'string' ? { note: approval.note } : {}) },
       actor,
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',

@@ -2,6 +2,8 @@ import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { createSubtitleSegmentOverrideCommandImpact } from '../domain/command-impact.ts'
 import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
 import { DomainError } from '../domain/errors.ts'
+import { requireOutputVariant } from '../domain/output-consumption.ts'
+import { referencesOfVariant } from '../domain/output-variant-references.ts'
 import { reidentifiedEditPlanSnapshot, transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import {
   createSubtitleSegmentOverride,
@@ -111,12 +113,10 @@ export function applySubtitleSegmentOverrideService(dependencies: {
     if (currentVersion.id !== baseVersionId || currentVersion.baseHash !== request.baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Subtitle segment override base version is stale')
     }
-    // Fail-closed scope, both halves. A variant the EditPlan does not compile and a
-    // segment that does not exist in it are refused; neither is ever reinterpreted
-    // as "apply everywhere".
-    if (!context.variantIds.includes(variantId)) {
-      throw new DomainError('INVALID_ARGUMENT', 'Subtitle segment override names a variant this project version does not compile')
-    }
+    // Fail-closed scope, both halves. A variant the State of the base Version does not carry (`output-variant-unknown`, or two
+    // outputs of one aspect ratio: `output-variant-ambiguous`) and a segment that does not exist in it are refused; neither is
+    // ever reinterpreted as "apply everywhere". `variantId` is the stable variant of the State.
+    requireOutputVariant(parent.state, variantId)
     const segment = context.segments.find((item) => item.id === segmentId)
     if (!segment) {
       throw new DomainError('INVALID_ARGUMENT', 'Subtitle segment override names a segment this variant does not compile')
@@ -153,7 +153,7 @@ export function applySubtitleSegmentOverrideService(dependencies: {
       range,
       dimensionKinds: subtitleOverride.dimensions.map((dimension) => dimension.kind),
       durationFrames: context.durationFrames,
-      outputReferences: context.outputReferences,
+      outputReferences: referencesOfVariant(context.outputReferences, variantId),
     })
     const author: Readonly<CommandActor> = Object.freeze({
       type: 'api-client',
@@ -165,7 +165,7 @@ export function applySubtitleSegmentOverrideService(dependencies: {
       type: 'apply-subtitle-segment-override',
       // The scope names the variant and the frames, so an operator auditing the log
       // sees the blast radius without opening the impact.
-      scope: { outputSpecIds: [variantId], frameRange: { startFrame: range.startFrame, endFrame: range.endFrame } },
+      scope: { outputVariantIds: [variantId], frameRange: { startFrame: range.startFrame, endFrame: range.endFrame } },
       payload: Object.freeze({
         schemaVersion: 1 as const,
         variantId, segmentId, range,

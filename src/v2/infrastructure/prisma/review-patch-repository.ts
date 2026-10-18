@@ -23,16 +23,18 @@ import { hydrateProjectVersionRowV3, type ProjectVersionRowFacts } from '../../d
 import type { ProjectVersionV3 } from '../../domain/project-version.ts'
 import { createReviewAnnotation, type ReviewAnnotation, type ReviewScope } from '../../domain/review-system.ts'
 import {
+  assertReviewFormatsAreOutputs,
   createCommandArtifactInvalidations,
   normalizeCommandImpactOutputReferences,
   parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
+import { outputVariantsOf } from '../../domain/output-consumption.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
+import { readVersionRenderReferences } from './version-render-references.ts'
 import {
   externalActorAuditData,
   hydrateExternalActorAudit,
@@ -206,32 +208,15 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     const editPlan = parseJson<Record<string, unknown>>(editPlanSnapshot.contentJson, 'review patch EditPlan')
     const policies = parseJson<Record<string, unknown>>(version.policiesSnapshot.contentJson, 'review patch policies')
     const hydratedAnnotation = hydrateReviewAnnotation(annotation)
-    const renderVariantIds = Object.freeze([
-      ...new Set([
-        requireProjectOutputFormat(annotation.project, parent),
-        ...hydratedAnnotation.applicationScope.formatIds,
-      ]),
-    ].toSorted())
-    const [proxyOutputs, finalOutputs] = await Promise.all([
-      this.client.v2ProjectProxyRenderOperation.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          projectVersionId: version.id,
-          operation: { status: 'succeeded', phase: 'completed' },
-        },
-        select: { outputArtifactId: true },
-      }),
-      this.client.v2ProjectFinalExportOperation.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          projectVersionId: version.id,
-          operation: { status: 'succeeded', phase: 'completed' },
-        },
-        select: { outputArtifactId: true, outputAspectRatio: true },
-      }),
-    ])
+    // A patch edits the shared plan: its impact is every output's renders. The formats its annotation names must be outputs of the
+    // State the patch is applied to, and never narrow that impact.
+    assertReviewFormatsAreOutputs(
+      outputVariantsOf(parent.state).map((output) => output.variantId),
+      hydratedAnnotation.applicationScope.formatIds,
+    )
+    const outputReferences = await readVersionRenderReferences(this.client, {
+      workspaceId: input.workspaceId, projectId: input.projectId, versionId: version.id, state: parent.state,
+    })
     return Object.freeze({
       annotation: hydratedAnnotation,
       parent,
@@ -240,25 +225,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       editPlanHash: editPlanSnapshot.contentHash,
       policies: Object.freeze(policies),
       availableAssetIds: Object.freeze([...new Set(annotation.project.mediaAssets.map((asset) => asset.artifactId))]),
-      renderVariantIds,
-      outputReferences: normalizeCommandImpactOutputReferences([
-        ...(renderVariantIds.includes(requireProjectOutputFormat(annotation.project, parent))
-          ? proxyOutputs.map((output) => ({
-              artifactId: output.outputArtifactId,
-              kind: 'proxy' as const,
-              sourceVersionId: version.id,
-              variantId: requireProjectOutputFormat(annotation.project, parent),
-            }))
-          : []),
-        ...finalOutputs
-          .filter((output) => renderVariantIds.includes(output.outputAspectRatio))
-          .map((output) => ({
-            artifactId: output.outputArtifactId,
-            kind: 'final' as const,
-            sourceVersionId: version.id,
-            variantId: output.outputAspectRatio,
-          })),
-      ]),
+      outputReferences: normalizeCommandImpactOutputReferences(outputReferences),
     })
   }
 
@@ -406,35 +373,11 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
           !persistedImpact || persistedImpact.commandType !== 'apply-review-patch' ||
           persistedImpact.impactHash !== bundle.impact.impactHash
         ) throw new DomainError('PERSISTENCE_CONFLICT', 'Review patch command and impact payload are inconsistent')
-        const [proxyOutputs, finalOutputs] = await Promise.all([
-          transaction.v2ProjectProxyRenderOperation.findMany({
-            where: {
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              projectVersionId: bundle.command.baseVersionId,
-              operation: { status: 'succeeded', phase: 'completed' },
-            },
-            select: { outputArtifactId: true },
-          }),
-          transaction.v2ProjectFinalExportOperation.findMany({
-            where: {
-              workspaceId: bundle.command.workspaceId,
-              projectId: bundle.command.projectId,
-              projectVersionId: bundle.command.baseVersionId,
-              operation: { status: 'succeeded', phase: 'completed' },
-            },
-            select: { outputArtifactId: true, outputAspectRatio: true },
-          }),
-        ])
-        const projectVariantId = requireProjectOutputFormat(project, input.bundle)
-        const currentAffectedArtifacts = normalizeCommandImpactOutputReferences([
-          ...(bundle.impact.affectedVariantIds.includes(projectVariantId)
-            ? proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectVariantId }))
-            : []),
-          ...finalOutputs
-            .filter((output) => bundle.impact.affectedVariantIds.includes(output.outputAspectRatio))
-            .map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-        ])
+        // The child carries the very outputs of its parent, so its State attributes the base Version's renders (every output's).
+        const currentAffectedArtifacts = normalizeCommandImpactOutputReferences(await readVersionRenderReferences(transaction, {
+          workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+          versionId: bundle.command.baseVersionId, state: input.bundle.state,
+        }))
         if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
           throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before review patch impact commit')
         }

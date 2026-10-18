@@ -58,7 +58,9 @@ export interface MulticamDirectionCommandContext {
    */
   readonly currentPlan: Readonly<EditorialCutEditPlan | DirectedEditPlan>
   readonly currentDurationFrames: number
-  readonly proxyVariantId: string
+  /** Every output of the project: the stable variant ids of the sealed State the Command's child Version carries. */
+  readonly variantIds: readonly string[]
+  /** The renders of the head Version, each attributed to its own output. */
   readonly outputReferences: readonly Readonly<CommandImpactOutputReference>[]
   readonly mediaLinks: readonly Readonly<MulticamProjectMediaLink>[]
 }

@@ -7,6 +7,7 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { serializeOutputCanonicalJson } from '../../src/v2/domain/output-canonical-policy.ts'
 import { operationalBundlePlanV3 } from '../../src/v2/domain/output-version-bundle.ts'
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
+import { twoOutputIngestedWorld } from './helpers/m1b-two-output-world.mjs'
 import { ingestedRecordings, ingestedWorld, recompiledChild } from './helpers/output-world.mjs'
 import { persistedOutputQueries } from './helpers/persisted-output-client.mjs'
 import { reviewedTimeline } from './helpers/review-timeline.mjs'
@@ -19,10 +20,10 @@ const world = await ingestedWorld({ sourceDurationSeconds: 6 })
 const head = recompiledChild(world.parent, world.actor, reviewedTimeline, { suffix: 'manual-base' })
 const chain = [...world.chain, head]
 const VARIANT = head.state.document.entries[0].variantId
+// The renders of the head, each attributed to the stable variant it was made for (the world has ONE output).
 const outputsOf = (versionId) => [
   { artifactId: 'artifact-final-variant', kind: 'final', sourceVersionId: versionId, variantId: VARIANT },
   { artifactId: 'artifact-proxy-variant', kind: 'proxy', sourceVersionId: versionId, variantId: VARIANT },
-  { artifactId: 'artifact-final-other', kind: 'final', sourceVersionId: versionId, variantId: '16:9' },
 ]
 
 function recordOf(bundle) {
@@ -31,7 +32,7 @@ function recordOf(bundle) {
 }
 
 /** The repository double a service run needs: the sealed head (and an optional target) as the context, the commit captured. */
-function managedRepository(bundle, { target, offered = [], assets = ['artifact-source3'], variant = VARIANT } = {}) {
+function managedRepository(bundle, { target, offered = [], assets = ['artifact-source3'], references } = {}) {
   const captured = { commits: [], requested: [] }
   const repository = {
     async findIdempotentResult() { return null },
@@ -41,8 +42,8 @@ function managedRepository(bundle, { target, offered = [], assets = ['artifact-s
       return offered.filter((offer) => sourceArtifactIds.includes(offer.normalization.document.source.artifactId))
     },
     async readContext() {
-      return { ...recordOf(bundle), availableAssetIds: assets, renderVariantIds: [variant],
-        outputReferences: outputsOf(bundle.version.id), history: [], ...(target ? { targetVersion: recordOf(target) } : {}) }
+      return { ...recordOf(bundle), availableAssetIds: assets,
+        outputReferences: references ?? outputsOf(bundle.version.id), history: [], ...(target ? { targetVersion: recordOf(target) } : {}) }
     },
     async commitOrReplay(input) {
       captured.commits.push(input)
@@ -79,7 +80,7 @@ const replaceClip = { kind: 'replace', clipId: 'clip-1', sourceId: 'artifact-rep
 
 test('T-FR-233 replacing a clip source adopts the persisted receipt of the replacement recording into the child Version', async () => {
   const variant = replacementHead.state.document.entries[0].variantId
-  const options = { offered: replacementWorld.adoptable, assets: ['artifact-source3', 'artifact-replacement'], variant }
+  const options = { offered: replacementWorld.adoptable, assets: ['artifact-source3', 'artifact-replacement'] }
   const { repository, captured } = managedRepository(replacementHead, options)
   const request = (key) => ({ ...requestFor(replacementHead, { action: 'apply', targetId: 'clip-1', operation: replaceClip, idempotencyKey: key }),
     variantId: variant, actor: replacementWorld.actor })
@@ -119,7 +120,12 @@ test('T-FR-233 manual crop persists the impact in payload v2, binds it to the ou
   await assert.rejects(
     () => service(requestFor(head, { action: 'apply', variantId: 'variant-not-configured', targetId: 'clip-1',
       operation: { kind: 'inspect', clipId: 'clip-1', patch: { layout: 'unsafe-scope' } }, idempotencyKey: 'command-impact-invalid-variant' })),
-    (error) => error.code === 'INVALID_ARGUMENT' && /variant/.test(error.message),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'output-variant-unknown',
+  )
+  // An aspect ratio is not an output: the variant of a Command is the stable State variant, never the format string.
+  await assert.rejects(
+    () => service(requestFor(head, { action: 'apply', variantId: '16:9', targetId: 'clip-1', operation: crop, idempotencyKey: 'command-impact-ratio-as-variant' })),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'output-variant-unknown',
   )
 
   // Concurrent output drift is refused before anything is written.
@@ -127,10 +133,12 @@ test('T-FR-233 manual crop persists the impact in payload v2, binds it to the ou
     async $transaction(callback) {
       return callback({
         v2EditCommand: { async findUnique() { return null } },
-        v2Project: { async findFirst() { return { format: VARIANT,
+        v2Project: { async findFirst() { return { format: null,
           currentVersion: { id: head.version.id, baseHash: head.version.baseHash, sequence: head.version.sequence, outputStateHash: head.state.stateHash } } } },
-        v2ProjectProxyRenderOperation: { async findMany() { return [{ outputArtifactId: 'artifact-proxy-variant' }, { outputArtifactId: 'artifact-proxy-concurrent' }] } },
-        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-variant', outputAspectRatio: VARIANT }] } },
+        v2ProjectProxyRenderOperation: { async findMany() { return [
+          { outputArtifactId: 'artifact-proxy-variant', outputVariantId: VARIANT }, { outputArtifactId: 'artifact-proxy-concurrent', outputVariantId: VARIANT },
+        ] } },
+        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-variant', outputVariantId: VARIANT, outputAspectRatio: '16:9' }] } },
       })
     },
   })
@@ -143,7 +151,7 @@ test('T-FR-233 manual crop persists the impact in payload v2, binds it to the ou
     async $transaction(callback) {
       return callback({
         v2EditCommand: { async findUnique() { return null } },
-        v2Project: { async findFirst() { return { format: VARIANT,
+        v2Project: { async findFirst() { return { format: null,
           currentVersion: { id: head.version.id, baseHash: head.version.baseHash, sequence: head.version.sequence, outputStateHash: 'f'.repeat(64) } } } },
       })
     },
@@ -237,25 +245,29 @@ test('T-FR-233 a stored manual Command is hydrated from its sealed Version and r
   await assert.rejects(stored.findIdempotentResult(lookup), /no sealed output state/)
 })
 
-test('T-FR-233 Prisma context discovers only completed proxy/final outputs for the immutable sealed base', async () => {
+test('T-FR-233 Prisma context discovers only completed proxy/final outputs for the immutable sealed base, each attributed to its output', async () => {
   const queries = []
   const versionRows = chain.map((bundle) => ({ id: bundle.version.id, sequence: bundle.version.sequence, parentVersionId: bundle.version.parentVersionId ?? null,
     commandId: bundle.version.commandId ?? null, command: null, createdAt: new Date(bundle.version.createdAt) }))
   const repository = new PrismaManualEditRepository({
     $queryRawUnsafe: persistedOutputQueries(chain),
     v2Project: { async findFirst() { return {
-      id: head.version.projectId, workspaceId: head.version.workspaceId, format: VARIANT, currentVersionId: head.version.id,
+      id: head.version.projectId, workspaceId: head.version.workspaceId, format: null, currentVersionId: head.version.id,
       mediaAssets: [{ artifactId: 'artifact-source3' }], versions: versionRows.toReversed(),
     } } },
-    v2ProjectProxyRenderOperation: { async findMany(query) { queries.push(query); return [{ outputArtifactId: 'artifact-proxy-variant' }] } },
+    v2ProjectProxyRenderOperation: { async findMany(query) { queries.push(query); return [{ outputArtifactId: 'artifact-proxy-variant', outputVariantId: VARIANT }] } },
     v2ProjectFinalExportOperation: { async findMany(query) {
       queries.push(query)
-      return [{ outputArtifactId: 'artifact-final-variant', outputAspectRatio: VARIANT }, { outputArtifactId: 'artifact-final-16x9', outputAspectRatio: '16:9' }]
+      // One final names its output; a final written before the column existed names only its ratio, which is the only output's.
+      return [{ outputArtifactId: 'artifact-final-variant', outputVariantId: VARIANT, outputAspectRatio: '16:9' },
+        { outputArtifactId: 'artifact-final-legacy', outputVariantId: null, outputAspectRatio: '16:9' }]
     } },
   })
   const context = await repository.readContext({ workspaceId: head.version.workspaceId, projectId: head.version.projectId })
-  assert.deepEqual(context.renderVariantIds, [VARIANT])
-  assert.deepEqual(context.outputReferences.map((item) => item.artifactId), ['artifact-final-16x9', 'artifact-final-variant', 'artifact-proxy-variant'])
+  assert.equal('renderVariantIds' in context, false, 'a plan-wide Command has no single format to list')
+  assert.deepEqual(context.outputReferences.map((item) => [item.kind, item.artifactId, item.variantId]), [
+    ['final', 'artifact-final-legacy', VARIANT], ['final', 'artifact-final-variant', VARIANT], ['proxy', 'artifact-proxy-variant', VARIANT],
+  ])
   assert.equal(context.version.id, head.version.id)
   assert.equal(context.bundle.state.stateHash, head.state.stateHash)
   assert.equal(context.editPlanHash, head.editPlanSnapshot.contentHash)

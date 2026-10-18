@@ -1,9 +1,22 @@
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
-import type { ProjectWorkspaceQueryRepository, ProjectWorkspaceMediaRecord, ProjectReviewAvailability } from '../../application/ports/project-workspace-query-repository.ts'
+import type {
+  ProjectWorkspaceQueryRepository,
+  ProjectWorkspaceMediaRecord,
+  ProjectWorkspaceOutput,
+  ProjectWorkspaceOutputPurposeVerdict,
+  ProjectReviewAvailability,
+} from '../../application/ports/project-workspace-query-repository.ts'
 import { readReviewPreviewAvailability, readStoredProjectionManifest } from './review-annotation-repository.ts'
 import { readStoredOutputStateV3 } from './output-state-consumption.ts'
-import { outputEntryAspectRatio, type OutputConsumptionEntry } from '../../domain/output-consumption.ts'
+import {
+  outputConsumptionVerdictV3,
+  outputEntryAspectRatio,
+  publishedConsumptionReason,
+  type OutputConsumptionEntry,
+  type OutputConsumptionPurpose,
+  type OutputConsumptionState,
+} from '../../domain/output-consumption.ts'
 import { readCurrentProxyReview } from './proxy-review-repository.ts'
 import { readPublicOperation } from './public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -84,26 +97,66 @@ function probeFromManifest(manifest: Readonly<MediaArtifactManifest>): ProjectWo
 }
 
 /**
- * The format of a project is the aspect ratio of the only output of the State its head Version seals; a project with several
- * outputs, none, or a head whose State is not a consumable document has no format of its own, and nothing completes the gap (the
- * stored `projects.format` column is not an authority: a project created under contract 6 never had one).
- *
- * This is a description, not a consumption: a copy no editorial cut has materialized, or an entry the State blocks, still carries
- * the format it was copied or configured with, so it is shown with it. A State that fails its own seal is an integrity failure and
- * propagates.
+ * What each consumer purpose answers for one output of a State, as a description: the domain verdict (`outputConsumptionVerdictV3`)
+ * with the reason it publishes when the output is blocked. A critic also needs a format to critique, so an output whose spec carries
+ * no aspect ratio is `output-not-consumable` for it (the same refusal the critic readers publish). Never throws for a blocked
+ * entry; the consumer still evaluates its own fences when it is asked.
  */
-async function readSoleOutputFormat(client: Pick<Prisma.TransactionClient, '$queryRawUnsafe'>,
-  scope: Readonly<{ workspaceId: string; projectId: string; versionId: string }>): Promise<string | null> {
+function describeOutputConsumption(state: OutputConsumptionState, entry: OutputConsumptionEntry, aspectRatio: string | null): ProjectWorkspaceOutput['consumption'] {
+  const describe = (purpose: OutputConsumptionPurpose): ProjectWorkspaceOutputPurposeVerdict => {
+    const verdict = outputConsumptionVerdictV3(state, entry.variantId, purpose)
+    if (verdict.status === 'blocked') return Object.freeze({ status: 'blocked' as const, reason: publishedConsumptionReason(verdict.reasons) })
+    if (purpose === 'critic' && aspectRatio === null) return Object.freeze({ status: 'blocked' as const, reason: 'output-not-consumable' })
+    return Object.freeze({ status: 'allowed' as const })
+  }
+  return Object.freeze({ render: describe('render'), critic: describe('critic'), final: describe('final') })
+}
+
+/**
+ * The outputs of the State the head Version seals, in State order, each with its stable variant, its aspect ratio and what every
+ * consumer purpose would answer for it. A head whose State is not a consumable document (a Creation fork root, or an unsealed
+ * historical Version) has none. The project's own `format` is derived from this list (the ratio of the only output), never from the
+ * stored `projects.format` column, which a project created under contract 6 never had.
+ *
+ * This is a description, not a consumption: a copy no editorial cut has materialized, or an entry the State blocks, is listed with
+ * the format it was copied or configured with and the reason it is blocked. A State that fails its own seal is an integrity
+ * failure and propagates.
+ */
+async function readHeadOutputs(client: Pick<Prisma.TransactionClient, '$queryRawUnsafe'>,
+  scope: Readonly<{ workspaceId: string; projectId: string; versionId: string }>): Promise<readonly ProjectWorkspaceOutput[]> {
   let stored
   try {
     stored = await readStoredOutputStateV3(client, scope)
   } catch (error) {
-    if (error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED') return null
+    if (error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED') return Object.freeze([])
     throw error
   }
-  const entries = stored?.state.document.entries
-  if (!entries || entries.length !== 1) return null
-  return outputEntryAspectRatio(entries[0] as OutputConsumptionEntry)
+  if (!stored) return Object.freeze([])
+  // A Creation fork root (State2) still lists the outputs it was copied with, every purpose blocked by the reason its State records.
+  return Object.freeze(stored.state.document.entries.map((entry) => {
+    const aspectRatio = outputEntryAspectRatio(entry as OutputConsumptionEntry)
+    return Object.freeze({
+      variantId: entry.variantId,
+      ...(aspectRatio === null ? {} : { aspectRatio }),
+      consumption: describeOutputConsumption(stored.state, entry as OutputConsumptionEntry, aspectRatio),
+    })
+  }))
+}
+
+/**
+ * The proxy review the workspace reports for the head Version. A review belongs to one output: with at most one output that is the
+ * Version's review; with several, the first output (State order) that has one is reported, because the workspace only says whether a
+ * report exists to open. The report of a given output is read with that output's `variantId` (`outputs` lists them).
+ */
+async function readHeadProxyReview(client: Parameters<typeof readCurrentProxyReview>[0],
+  scope: Readonly<{ workspaceId: string; projectId: string }>, versionId: string, outputs: readonly ProjectWorkspaceOutput[]) {
+  if (outputs.length === 0) return null
+  if (outputs.length === 1) return readCurrentProxyReview(client, { ...scope, projectVersionId: versionId })
+  for (const output of outputs) {
+    const found = await readCurrentProxyReview(client, { ...scope, projectVersionId: versionId, variantId: output.variantId })
+    if (found) return found
+  }
+  return null
 }
 
 export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQueryRepository {
@@ -153,11 +206,12 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
         project.currentVersion.projectId !== input.projectId || project.currentVersion.workspaceId !== input.workspaceId
       ))) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace current version is inconsistent')
       const requestedVersionId = project.currentVersionId
-      const outputFormat = requestedVersionId ? await readSoleOutputFormat(transaction, { ...input, versionId: requestedVersionId }) : null
+      const outputs = requestedVersionId ? await readHeadOutputs(transaction, { ...input, versionId: requestedVersionId }) : Object.freeze([])
+      const outputFormat = outputs.length === 1 ? outputs[0]!.aspectRatio ?? null : null
       const [preview, report] = requestedVersionId
         ? await Promise.all([
             readReviewPreviewAvailability(transaction, { ...input, projectVersionId: requestedVersionId }),
-            readCurrentProxyReview(transaction, { ...input, projectVersionId: requestedVersionId }),
+            readHeadProxyReview(transaction, input, requestedVersionId, outputs),
           ])
         : [null, null]
       if (preview && (preview.currentProjectVersionId !== requestedVersionId || preview.projectVersionId !== requestedVersionId)) {
@@ -306,6 +360,7 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
           ...(project.locale ? { locale: project.locale } : {}), ...(project.currentVersionId ? { currentVersionId: project.currentVersionId } : {}),
           createdAt: project.createdAt.toISOString(),
         }),
+        outputs,
         ...(project.currentVersion ? { version: Object.freeze({ id: project.currentVersion.id, sequence: project.currentVersion.sequence, baseHash: project.currentVersion.baseHash, createdAt: project.currentVersion.createdAt.toISOString() }) } : {}),
         ...(brief ? { brief: Object.freeze(brief) } : {}),
         ...(editPlan ? { editPlan: Object.freeze({

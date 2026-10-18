@@ -66,6 +66,17 @@ export interface ProjectFinalExportRepository {
     /** The State variant to export; absent means the State's only output. */
     variantId?: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null>
+  /**
+   * The stable variant of the only output of `projectVersionId` whose sealed aspect ratio is `format` (null when none has it; two
+   * outputs of one ratio are refused with `output-variant-ambiguous`). For callers whose request names a format and not a variant
+   * (an export matrix cell): the format of a cell is explicit, so addressing the output by it is exact, never a guess.
+   */
+  resolveOutputVariantByFormat(input: {
+    workspaceId: string
+    projectId: string
+    projectVersionId: string
+    format: string
+  }): Promise<string | null>
   readImmutableApprovedSource(input: {
     workspaceId: string
     projectId: string

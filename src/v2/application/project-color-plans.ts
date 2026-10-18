@@ -194,7 +194,7 @@ export function setProjectColorPlanService(dependencies: {
       colorPlanHash: colorPlan.plan.planHash,
       compiledManifestHash: colorPlan.compiled.manifestHash,
       durationFrames: context.currentDurationFrames,
-      proxyVariantId: context.proxyVariantId,
+      variantIds: context.variantIds,
       outputReferences: context.outputReferences,
     })
     const payload = Object.freeze({

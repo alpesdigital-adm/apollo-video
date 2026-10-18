@@ -1194,7 +1194,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
         affectedEndFrame: Math.max(context.currentDurationFrames, editPlan.durationFrames),
         renderEndFrame: editPlan.durationFrames,
-        proxyVariantId: context.proxyVariantId,
+        variantIds: context.variantIds,
         outputReferences: context.outputReferences,
       })
       const commandPayload: RunDirectorCommandPayload = Object.freeze({

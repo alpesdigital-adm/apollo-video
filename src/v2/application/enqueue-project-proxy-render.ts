@@ -9,7 +9,7 @@ import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import type { RenderablePlanSnapshotRepository } from './ports/renderable-plan-snapshot-repository.ts'
-import { projectProxyRenderInputHash } from './project-render-sources.ts'
+import { projectProxyRenderInputHash, sourceOutputVariantId } from './project-render-sources.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
@@ -94,6 +94,8 @@ export function enqueueRenderableSnapshotProxyRenderService(dependencies: {
         editPlanSnapshotId: source.editPlanSnapshotId, sourceArtifactId: source.sourceArtifactId,
         sourceManifestId: source.sourceManifestId, colorPipelineBindings, inputHash,
         outputArtifactId, outputManifestId,
+        // The output the sealed consumption named (the localization variant below is a different thing).
+        outputVariantId: sourceOutputVariantId(source),
         originalFileName: `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 180)}-${request.origin}-${request.format.replace(':', 'x')}.mp4`,
         renderableSnapshot: { planId, planHash: request.planHash, origin: request.origin, sourceId, sourceHash: request.sourceHash, variantId, format: request.format },
       },
@@ -113,7 +115,11 @@ export function enqueueProjectProxyRenderService(dependencies: {
     workspaceId: string
     projectId: string
     expectedProjectVersionId?: string
-    /** The State variant to render; absent means the State's only output (a State with several outputs is refused, never guessed). */
+    /**
+     * The stable State variant to render. Optional ONLY when the State has exactly one output: with several, a caller that names
+     * none is refused (`output-variant-required`), a stranger is refused (`output-variant-unknown`), and two outputs of one aspect
+     * ratio are refused (`output-variant-ambiguous`). The persisted verdict decides; nothing here chooses an output.
+     */
     variantId?: string
     actor: AuthenticatedExternalActor
     idempotencyKey: string
@@ -181,12 +187,13 @@ export function enqueueProjectProxyRenderService(dependencies: {
         baseVersionId: source.unchangedReuse.baseVersionId,
         reusedFromOperationId: source.unchangedReuse.operationId,
         sourceArtifactId: source.sourceArtifactId, sourceManifestId: source.sourceManifestId,
-        inputHash, outputArtifactId, outputManifestId,
+        inputHash, outputArtifactId, outputManifestId, outputVariantId: sourceOutputVariantId(source),
         originalFileName: `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 200)}-editorial.mp4`,
       } : {
         kind: 'project-proxy-render', projectId, projectVersionId: source.projectVersionId,
         editPlanSnapshotId: source.editPlanSnapshotId, sourceArtifactId: source.sourceArtifactId,
         sourceManifestId: source.sourceManifestId, inputHash, outputArtifactId, outputManifestId,
+        outputVariantId: sourceOutputVariantId(source),
         colorPipelineBindings,
         originalFileName: `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 200)}-editorial.mp4`,
       },

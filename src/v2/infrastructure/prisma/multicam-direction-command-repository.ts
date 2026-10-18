@@ -24,13 +24,13 @@ import {
   parseMulticamDirectionImpact,
 } from '../../domain/multicam-direction-impact.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { rational, type Rational } from '../../domain/session-time.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 /**
@@ -261,7 +261,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
           projectVersionId: versionRow.id,
           operation: { status: 'succeeded', phase: 'completed' },
         },
-        select: { outputArtifactId: true },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
         where: {
@@ -270,7 +270,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
           projectVersionId: versionRow.id,
           operation: { status: 'succeeded', phase: 'completed' },
         },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
     const mediaLinks: Readonly<MulticamProjectMediaLink>[] = assets.map((asset) => {
@@ -301,17 +301,9 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
       currentVersion: parent.version,
       currentPlan: Object.freeze(currentPlan),
       currentDurationFrames,
-      proxyVariantId: requireProjectOutputFormat(project, parent),
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({
-          artifactId: output.outputArtifactId, kind: 'proxy' as const,
-          sourceVersionId: versionRow.id, variantId: requireProjectOutputFormat(project, parent),
-        })),
-        ...finalOutputs.map((output) => Object.freeze({
-          artifactId: output.outputArtifactId, kind: 'final' as const,
-          sourceVersionId: versionRow.id, variantId: output.outputAspectRatio,
-        })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+      // A multicam direction is project-wide: its impact covers EVERY output the sealed State carries, each render attributed to its own.
+      variantIds: Object.freeze(parent.state.document.entries.map((entry) => entry.variantId)),
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: versionRow.id, proxies: proxyOutputs, finals: finalOutputs }),
       mediaLinks: Object.freeze(mediaLinks),
     })
   }
@@ -392,32 +384,28 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
             storedDirectionHash: storedDirection?.directionHash ?? null,
           })
         }
-        const currentOutputs = [
-          ...(await transaction.v2ProjectProxyRenderOperation.findMany({
+        const currentOutputs = renderOutputReferences({
+          state: input.bundle.state,
+          sourceVersionId: bundle.command.baseVersionId,
+          proxies: await transaction.v2ProjectProxyRenderOperation.findMany({
             where: {
               workspaceId: bundle.command.workspaceId,
               projectId: bundle.command.projectId,
               projectVersionId: bundle.command.baseVersionId,
               operation: { status: 'succeeded', phase: 'completed' },
             },
-            select: { outputArtifactId: true },
-          })).map((output) => ({
-            artifactId: output.outputArtifactId, kind: 'proxy' as const,
-            sourceVersionId: bundle.command.baseVersionId, variantId: requireProjectOutputFormat(project, input.bundle),
-          })),
-          ...(await transaction.v2ProjectFinalExportOperation.findMany({
+            select: { outputArtifactId: true, outputVariantId: true },
+          }),
+          finals: await transaction.v2ProjectFinalExportOperation.findMany({
             where: {
               workspaceId: bundle.command.workspaceId,
               projectId: bundle.command.projectId,
               projectVersionId: bundle.command.baseVersionId,
               operation: { status: 'succeeded', phase: 'completed' },
             },
-            select: { outputArtifactId: true, outputAspectRatio: true },
-          })).map((output) => ({
-            artifactId: output.outputArtifactId, kind: 'final' as const,
-            sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio,
-          })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+            select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
+          }),
+        })
         if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
           throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before multicam direction commit')
         }

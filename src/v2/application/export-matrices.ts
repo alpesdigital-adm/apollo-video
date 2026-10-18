@@ -108,11 +108,17 @@ export function createExportMatrixPreflightService(dependencies: {
     const evidence = []
     for (const cell of definition.cells) {
       const outputSpec = readOutputFormatPreset(cell.format).spec
-      const source = await dependencies.projects.readApprovedCurrentSource({
+      // The cell names its output by its format (explicit, and unique per project): the variant is resolved from it, never chosen
+      // by order. A project without an output of that format has no source for the cell.
+      const variantId = await dependencies.projects.resolveOutputVariantByFormat({
+        workspaceId, projectId: cell.projectId, projectVersionId: cell.projectVersionId, format: cell.format,
+      })
+      const source = variantId === null ? null : await dependencies.projects.readApprovedCurrentSource({
         workspaceId,
         projectId: cell.projectId,
         projectVersionId: cell.projectVersionId,
         projectVersionHash: cell.projectVersionHash,
+        variantId,
       })
       let ready = Boolean(source && source.format === cell.format && source.locale === cell.locale)
       let colorPipelineBindings = Object.freeze([]) as Awaited<ReturnType<typeof resolveRenderColorPipelineBindings>>
@@ -251,12 +257,17 @@ export function commitExportMatrixService(dependencies: {
     })
     for (const cell of preflight.preflight.definition.cells) {
       try {
+        const variantId = await dependencies.projects.resolveOutputVariantByFormat({
+          workspaceId, projectId: cell.projectId, projectVersionId: cell.projectVersionId, format: cell.format,
+        })
+        if (variantId === null) throw new DomainError('INVALID_OUTPUT_SPEC', 'Export matrix format is not an output of the project')
         const operation = await enqueue({
           workspaceId,
           projectId: cell.projectId,
           projectVersionId: cell.projectVersionId,
           projectVersionHash: cell.projectVersionHash,
           format: cell.format,
+          variantId,
           approval: request.approval,
           actor: request.actor,
           idempotencyKey: `matrix:${matrix.id}:${cell.id}`,

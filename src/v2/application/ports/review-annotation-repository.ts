@@ -27,6 +27,10 @@ export interface ReviewPreviewContext {
   stale: boolean
   /** The aspect ratio the sealed entry of the previewed Version carries (the one persisted consumption reader's answer). */
   formatId: string
+  /** The stable variant of the State whose output the preview is about (the explicit `variantId`, or the State's only output). */
+  variantId: string
+  /** Every output of the previewed Version's State (the members a format-scoped annotation may name), in State order. */
+  variantIds: readonly string[]
   /** The exact Version, State, variant revision and materialization the preview was admitted from (purpose `critic`). */
   outputConsumption?: Readonly<{ sealHash: string; seal: Readonly<OutputConsumptionSealV3> }>
   localeId: string

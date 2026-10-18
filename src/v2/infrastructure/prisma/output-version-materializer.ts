@@ -4,6 +4,9 @@ import { serializeOutputCanonicalJson } from '../../domain/output-canonical-poli
 import { validateOutputNormalizationV3, type SealedOutputNormalizationV3 } from '../../domain/output-materialization.ts'
 
 type Tx=Pick<Prisma.TransactionClient,'$queryRawUnsafe'>
+/** The roles of the project media links a render leaves behind: the proxy of an output and a published final. They are OUTPUTS of the plan, not
+ * editorial sources, so a cut of the project itself (the renders it makes stale are what it invalidates) never lists them in its source inventory. */
+export const RENDER_OUTPUT_LINK_ROLES:readonly string[]=Object.freeze(['editorial-proxy','final-output'])
 /** The caller owns the transaction and locks operation then Project before this
  * helper. Source artifacts are acquired once in UTF8/C order; normalizations and
  * manifests follow. Neither content hashes nor maps grant rights/quality. */
@@ -139,7 +142,9 @@ export async function readEditorialSourceBindingV1(tx:Prisma.TransactionClient,b
   if(!transcript||transcript.transcriptHash!==d.transcript.document.transcriptHash||transcript.transcriptJson!==stableSerialize(d.transcript.document)||
     transcript.createdAt.toISOString()!==d.transcript.createdAt)throw new DomainError('PERSISTENCE_CONFLICT','Editorial original transcript producer differs')
   const links=await tx.v2ProjectMediaAsset.findMany({where:{projectId:d.projectId,workspaceId:d.workspaceId}})
-  if(options.currentRights&&links.length!==d.inventory.length||d.inventory.some(i=>!links.some(l=>l.id===i.linkId&&l.artifactId===i.artifactId&&l.role===i.role)))
+  // The inventory of a cut of the project itself is its editorial sources: the renders made from the plan (their links) are what the cut makes stale.
+  const expected=d.authority.kind==='same-project-state3'?links.filter(l=>!RENDER_OUTPUT_LINK_ROLES.includes(l.role)):links
+  if(options.currentRights&&expected.length!==d.inventory.length||d.inventory.some(i=>!links.some(l=>l.id===i.linkId&&l.artifactId===i.artifactId&&l.role===i.role)))
     throw new DomainError('PERSISTENCE_CONFLICT','Editorial exact target inventory differs')
   const artifacts=await tx.v2MediaArtifact.findMany({where:{workspaceId:d.workspaceId,id:{in:ids}},include:{currentRightsSnapshot:true}})
   const project=await tx.v2Project.findFirst({where:{id:d.projectId,workspaceId:d.workspaceId},select:{locale:true,status:true}})

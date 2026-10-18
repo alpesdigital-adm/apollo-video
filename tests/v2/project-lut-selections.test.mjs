@@ -35,6 +35,10 @@ const cube = `LUT_3D_SIZE 2
 // The parent of every Command below is a real sealed Version3/State3 from the shared output world.
 let ingestedPromise
 const ingested = () => (ingestedPromise ??= ingestedWorld())
+// The same recording ingested into a project with TWO outputs (the published variant and a sibling): one EditPlan, two State entries.
+let twoOutputPromise
+const twoOutputs = () => (twoOutputPromise ??= ingestedWorld({ sibling: true }))
+const variantIdsOf = (parent) => parent.state.document.entries.map((entry) => entry.variantId)
 async function emptyVariantParent() {
   const world = outputWorld(), root = await world.create(creationRequest(world))
   return { parent: (await world.variant(variantRequest(world, root.bundle))).bundle, actor: world.actor }
@@ -62,8 +66,8 @@ function memoryRepository(parent, context = {}) {
       return {
         parent,
         currentDurationFrames: frames,
-        proxyVariantId: '9:16',
-        outputReferences: [{ artifactId: 'artifact-project-lut-proxy-base', kind: 'proxy', sourceVersionId: parent.version.id, variantId: '9:16' }],
+        variantIds: variantIdsOf(parent),
+        outputReferences: [{ artifactId: 'artifact-project-lut-proxy-base', kind: 'proxy', sourceVersionId: parent.version.id, variantId: variantIdsOf(parent)[0] }],
         ...context,
       }
     },
@@ -136,7 +140,8 @@ test('T-FR-181 workspace default resolves to an exact immutable LUT in a Command
   assert.equal(repository.commits[0].event.type, 'project.version.created')
   assert.deepEqual(result.impact.dependencyTypes, ['visual'])
   assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: parentPlan.durationFrames }])
-  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: parentPlan.durationFrames }] }])
+  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: variantIdsOf(parent)[0], ranges: [{ startFrame: 0, endFrame: parentPlan.durationFrames }] }])
+  assert.deepEqual(result.impact.affectedArtifacts.map((artifact) => artifact.variantId), [variantIdsOf(parent)[0]])
   assert.equal(result.invalidations.length, 1)
   assert.equal(repository.commits[0].event.data.commandImpactHash, result.impact.impactHash)
   assert.equal(repository.commits[0].event.data.createdAt, result.version.createdAt)
@@ -307,6 +312,79 @@ test('T-FR-242 project LUT command hydration rejects a tampered credential audit
   await assert.rejects(repository.findIdempotent(lookup), /command audit/)
 })
 
+test('W66 multi-output: a LUT selection on a project with two outputs lists the renders of EVERY output and one minimal proxy render per output', async () => {
+  const { parent, actor } = await twoOutputs()
+  const variantIds = variantIdsOf(parent)
+  assert.equal(variantIds.length, 2)
+  assert.equal(new Set(variantIds).size, 2)
+  const references = variantIds.map((variantId, index) => ({ artifactId: `artifact-project-lut-proxy-${index}`, kind: 'proxy', sourceVersionId: parent.version.id, variantId }))
+  const repository = memoryRepository(parent, { variantIds, outputReferences: references })
+  // The request names no output: the Command is project-wide.
+  const request = requestFor(parent, actor, { selection: { mode: 'none' }, idempotencyKey: 'project-lut-selection-two-outputs-1' })
+  assert.equal('variantId' in request, false)
+  const result = await service(repository)(request)
+  const frames = durationOf(parent), sorted = [...variantIds].sort()
+
+  // the child Version carries EVERY entry, re-materialized from the one plan, with the spec of each output untouched
+  const state = repository.commits[0].bundle.state.document
+  assert.deepEqual(state.entries.map((entry) => entry.variantId), parent.state.document.entries.map((entry) => entry.variantId))
+  for (const [index, entry] of state.entries.entries()) {
+    const before = parent.state.document.entries[index]
+    assert.equal(entry.outputSpecRevisionId, before.outputSpecRevisionId)
+    assert.equal(entry.specHash, before.specHash)
+    assert.equal(entry.consumption.status, 'materialized')
+  }
+  // the impact: every output, each render under its own output, one minimal proxy render per output over the whole timeline
+  assert.deepEqual(result.impact.affectedVariantIds, sorted)
+  assert.deepEqual(result.impact.affectedArtifacts.map((artifact) => [artifact.artifactId, artifact.variantId]).toSorted(),
+    references.map((reference) => [reference.artifactId, reference.variantId]).toSorted())
+  assert.deepEqual(result.impact.minimalRenders, sorted.map((variantId) => ({ kind: 'proxy', variantId, ranges: [{ startFrame: 0, endFrame: frames }] })))
+  assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: frames }])
+  assert.equal(result.invalidations.length, 2)
+  assert.deepEqual(result.invalidations.map((invalidation) => invalidation.variantId).toSorted(), sorted)
+  // the sealed document survives its own parser, byte for byte
+  assert.equal(parseProjectLutSelectionImpact(JSON.parse(stableSerialize(result.impact))).impactHash, result.impact.impactHash)
+  assert.equal(result.command.payload.impact.impactHash, result.impact.impactHash)
+})
+
+test('W66 multi-output: an output with no render yet still gets its minimal proxy render, whatever order the State lists its outputs in', async () => {
+  const { parent, actor } = await twoOutputs()
+  const variantIds = variantIdsOf(parent)
+  const onlyFirst = [{ artifactId: 'artifact-project-lut-proxy-only', kind: 'proxy', sourceVersionId: parent.version.id, variantId: variantIds[0] }]
+  const forward = await service(memoryRepository(parent, { variantIds, outputReferences: onlyFirst }))(requestFor(parent, actor, { selection: { mode: 'none' }, idempotencyKey: 'project-lut-selection-two-outputs-2' }))
+  const reversed = await service(memoryRepository(parent, { variantIds: [...variantIds].reverse(), outputReferences: onlyFirst }))(requestFor(parent, actor, { selection: { mode: 'none' }, idempotencyKey: 'project-lut-selection-two-outputs-3' }))
+  // a render exists for one output only: it is the only stale artifact, but BOTH outputs need rendering again
+  assert.deepEqual(forward.impact.affectedVariantIds, [variantIds[0]])
+  assert.equal(forward.impact.affectedArtifacts.length, 1)
+  assert.deepEqual(forward.impact.minimalRenders.map((render) => render.variantId), [...variantIds].sort())
+  assert.equal(forward.invalidations.length, 1)
+  assert.deepEqual(reversed.impact.minimalRenders, forward.impact.minimalRenders)
+})
+
+test('W66 multi-output: the impact document refuses a render of a stranger, duplicated variants and a renderable project with no output', () => {
+  const base = {
+    commandId: 'command-lut-two-outputs', baseVersionId: 'version-lut-two-outputs-base', resultVersionId: 'version-lut-two-outputs-result',
+    selectionId: 'selection-lut-two-outputs', selectionHash: 'e'.repeat(64), resolvedMode: 'none', intensity: 1, durationFrames: 90,
+  }
+  const reference = (variantId) => ({ artifactId: `artifact-${variantId}`, kind: 'proxy', sourceVersionId: base.baseVersionId, variantId })
+  const ok = createProjectLutSelectionImpact({ ...base, variantIds: ['variant-wide', 'variant-vertical'], outputReferences: [reference('variant-wide'), reference('variant-vertical')] })
+  assert.deepEqual(ok.minimalRenders.map((render) => render.variantId), ['variant-vertical', 'variant-wide'])
+  assert.throws(() => createProjectLutSelectionImpact({ ...base, variantIds: ['variant-wide'], outputReferences: [reference('variant-vertical')] }), /not an output of the project/)
+  assert.throws(() => createProjectLutSelectionImpact({ ...base, variantIds: ['variant-wide', 'variant-wide'], outputReferences: [] }), /duplicated/)
+  assert.throws(() => createProjectLutSelectionImpact({ ...base, variantIds: [], outputReferences: [] }), /every output/)
+  assert.throws(() => createProjectLutSelectionImpact({ ...base, variantIds: 'variant-wide', outputReferences: [] }), /must be a list/)
+  // before a timeline there is nothing to render and no output may hold a render
+  const deferred = createProjectLutSelectionImpact({ ...base, durationFrames: 0, variantIds: ['variant-wide', 'variant-vertical'], outputReferences: [] })
+  assert.deepEqual(deferred.minimalRenders, [])
+  assert.equal(parseProjectLutSelectionImpact(JSON.parse(stableSerialize(deferred))).impactHash, deferred.impactHash)
+  // a stored document whose minimal renders are not one proxy render per output of the same range is not accepted
+  const stored = JSON.parse(stableSerialize(ok))
+  assert.throws(() => parseProjectLutSelectionImpact({ ...stored, minimalRenders: [stored.minimalRenders[0], { ...stored.minimalRenders[0] }] }), /duplicated/)
+  assert.throws(() => parseProjectLutSelectionImpact({ ...stored, minimalRenders: [stored.minimalRenders[0], { ...stored.minimalRenders[1], ranges: [{ startFrame: 0, endFrame: 45 }] }] }), /invalid/)
+  assert.throws(() => parseProjectLutSelectionImpact({ ...stored, minimalRenders: [] }), /invalid/)
+  assert.throws(() => parseProjectLutSelectionImpact({ ...stored, minimalRenders: stored.minimalRenders.slice(0, 1) }), /not an output of the project/)
+})
+
 test('project LUT impact survives canonical persistence key ordering', () => {
   const impact = createProjectLutSelectionImpact({
     commandId: 'command-lut-persistence',
@@ -317,7 +395,7 @@ test('project LUT impact survives canonical persistence key ordering', () => {
     resolvedMode: 'none',
     intensity: 0.75,
     durationFrames: 180,
-    proxyVariantId: '9:16',
+    variantIds: ['variant-lut-persistence'],
     outputReferences: [],
   })
   const persisted = JSON.parse(stableSerialize(impact))
@@ -339,7 +417,7 @@ test('T-FR-181 public project LUT selection contract is exact and hides persiste
   const impact = createProjectLutSelectionImpact({
     commandId: 'command', baseVersionId: base.id, resultVersionId: 'result', selectionId: selection.id,
     selectionHash: selection.selectionHash, resolvedMode: 'none', intensity: selection.intensity,
-    durationFrames: 180, proxyVariantId: '9:16', outputReferences: [],
+    durationFrames: 180, variantIds: ['variant-lut-presented'], outputReferences: [],
   })
   const presented = presentProjectLutSelectionResult({
     command: { id: 'command', type: 'set-project-lut-selection', baseVersionId: base.id, author: { type: 'api-client', id: 'client' }, createdAt: selection.createdAt },

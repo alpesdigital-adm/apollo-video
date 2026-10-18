@@ -11,7 +11,7 @@ import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
-import { projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { projectFinalRenderInputHash, projectRenderSourcesFingerprint, sourceOutputVariantId } from './project-render-sources.ts'
 import { requirePreflightForActionService } from './preflight-gate.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -50,7 +50,11 @@ export function enqueueProjectFinalExportService(dependencies: {
     projectVersionId: string
     projectVersionHash: string
     format: string
-    /** The State variant to export; absent means the State's only output (a State with several outputs is refused, never guessed). */
+    /**
+     * The stable State variant to export. Optional ONLY when the State has exactly one output (a State with several outputs is
+     * refused with `output-variant-required`, never guessed from `format`). `format` must then be the aspect ratio of that
+     * output's entry: it names the preset, it never selects the output.
+     */
     variantId?: string
     approval: { approved: true; note?: string }
     actor: AuthenticatedExternalActor
@@ -211,6 +215,8 @@ export function enqueueProjectFinalExportService(dependencies: {
           ...(approvalNote ? { note: approvalNote } : {}),
         },
         originalFileName: outputFileName ?? `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 190)}-final-${outputSpec.width}x${outputSpec.height}.mp4`,
+        // The output the `final` verdict was read for: the operation is persisted with it, and the worker reads through it.
+        outputVariantId: sourceOutputVariantId(source),
       },
       idempotencyKey,
       requestFingerprint,

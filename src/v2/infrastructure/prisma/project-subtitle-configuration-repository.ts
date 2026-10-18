@@ -6,6 +6,7 @@ import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProjectSubtitleConfiguration, parseProjectSubtitleConfigurationImpact, type ProjectSubtitleConfiguration } from '../../domain/project-subtitle-configuration.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { SUBTITLE_PRESETS, validateSubtitlePreset, type SubtitleModeRequest, type SubtitlePresetId } from '../../domain/subtitle-system.ts'
@@ -114,13 +115,13 @@ export class PrismaProjectSubtitleConfigurationRepository implements ProjectSubt
     const durationFrames = Number(editPlan.durationFrames)
     if (transcript === undefined || !Number.isSafeInteger(durationFrames) || durationFrames < 0) throw new DomainError('PERSISTENCE_CONFLICT', 'Subtitle render context is incomplete')
     const [proxy, final, chain] = await Promise.all([
-      this.client.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true } }),
-      this.client.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputAspectRatio: true } }),
+      this.client.v2ProjectProxyRenderOperation.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputVariantId: true } }),
+      this.client.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true } }),
       this.readHeadChain({ workspaceId: input.workspaceId, projectId: input.projectId, variantId: input.variantId }),
     ])
     const workspaceDefault = readWorkspaceDefault(policies)
     if (input.requested?.mode === 'workspace-default' && !workspaceDefault) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace subtitle default is not configured with an immutable version')
-    return Object.freeze({ parent, transcript, directorPresetId: directorPresetId as SubtitlePresetId, ...(workspaceDefault ? { workspaceDefault } : {}), durationFrames, outputReferences: Object.freeze([...proxy.map(x => Object.freeze({ artifactId: x.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: project.format ?? input.variantId })), ...final.map(x => Object.freeze({ artifactId: x.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: x.outputAspectRatio }))]), currentConfiguration: chain.currentConfiguration, previousConfiguration: chain.previousConfiguration })
+    return Object.freeze({ parent, transcript, directorPresetId: directorPresetId as SubtitlePresetId, ...(workspaceDefault ? { workspaceDefault } : {}), durationFrames, outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxy, finals: final }), currentConfiguration: chain.currentConfiguration, previousConfiguration: chain.previousConfiguration })
   }
   async readCurrent(input: { workspaceId: string; projectId: string; variantId: string }) {
     const chain = await this.readHeadChain(input)

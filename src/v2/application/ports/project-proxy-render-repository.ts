@@ -177,7 +177,10 @@ export interface ProjectProxyRenderRepository {
     operationId: string
     projectId: string
     projectVersionId: string
+    /** The stable State variant the render was made for (never an aspect ratio): invalidations it resolves are attributed to it. */
     variantId: string
+    /** The aspect ratio the render drew (the sealed entry's); the recipe records the same. */
+    format: string
     outputArtifactId: string
     outputManifestId: string
     originalFileName: string
@@ -191,6 +194,7 @@ export interface ProjectProxyRenderRepository {
     workspaceId: string
     operationId: string
     projectId: string
+    /** The LOCALIZATION variant of the renderable snapshot (`renderableVariantId`); the output is the operation's own `outputVariantId`. */
     variantId: string
     outputArtifactId: string
     outputManifestId: string

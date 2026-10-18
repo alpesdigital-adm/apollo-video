@@ -327,6 +327,7 @@ import { createEditorialCutInvalidations } from '../../domain/editorial-cut-impa
 import { createCommandArtifactInvalidations } from '../../domain/command-impact.ts'
 import { externalActorAuditData } from './external-actor-audit.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
+import { readVersionRenderReferences } from './version-render-references.ts'
 
 function fixedRecompositionV3(before:OperationalOutputBundleWriteV3['proposal'],after:OperationalOutputBundleWriteV3['proposal']) {
   if(!identical(before.allocation,after.allocation) || !identical(before.materializationIds,after.materializationIds) ||
@@ -354,14 +355,12 @@ export async function assertManualOutputReferencesV3(tx:Tx,b:OperationalOutputVe
   if(b.origin.kind!=='inherit-command'&&b.origin.kind!=='restore-command')return
   const c=b.origin.command,impact=c.payload.impact
   if(b.origin.kind==='inherit-command')return // Real select impact contains no affected outputs.
-  const finals=await tx.v2ProjectFinalExportOperation.count({where:{workspaceId:b.version.workspaceId,projectId:b.version.projectId,
-    projectVersionId:c.baseVersionId,operation:{status:'succeeded'}}})
-  if(finals)throw new DomainError('PRECONDITION_REQUIRED','Restore requires explicit stable variant authority for published final outputs')
-  const rows=await tx.v2ProjectProxyRenderOperation.findMany({where:{workspaceId:b.version.workspaceId,projectId:b.version.projectId,
-    projectVersionId:c.baseVersionId,operation:{status:'succeeded'}},select:{outputArtifactId:true,renderableVariantId:true}})
-  if(rows.some(r=>!r.renderableVariantId))throw new DomainError('PRECONDITION_REQUIRED','Restore output lacks explicit stable variant binding')
-  const actual=rows.filter(r=>r.renderableVariantId===c.payload.variantId).map(r=>({artifactId:r.outputArtifactId,kind:'proxy' as const,
-    sourceVersionId:c.baseVersionId,variantId:r.renderableVariantId!}))
+  // A restore, undo or redo returns the plan to an earlier one, and the plan is shared: the renders of EVERY output of the base
+  // Version go stale, proxies and published finals alike. Each is attributed to its own output by the stable variant it was enqueued
+  // with (a legacy row that cannot be attributed exactly is a PERSISTENCE_CONFLICT, never a guess), in the State that Version seals:
+  // the child of a restore carries the outputs of its target, which are not necessarily its parent's.
+  const actual=await readVersionRenderReferences(tx,{workspaceId:b.version.workspaceId,projectId:b.version.projectId,
+    versionId:c.baseVersionId})
   const texts=(values:readonly unknown[])=>values.map(v=>stableSerialize(v)).sort()
   if(stableSerialize(texts(actual))!==stableSerialize(texts(impact!.affectedArtifacts)))
     throw new DomainError('INVALID_COMMAND','Manual output references differ from persisted base outputs')
@@ -378,14 +377,9 @@ async function persistManualInvalidationsV3(tx:Tx,b:OperationalOutputVersionBund
 async function persistEditorialInvalidationsV3(tx:Tx,b:OperationalOutputVersionBundleV3) {
   if(b.origin.kind!=='editorial-cut-command')return
   const c=b.origin.command
-  const finals=await tx.v2ProjectFinalExportOperation.count({where:{workspaceId:b.version.workspaceId,projectId:b.version.projectId,
-    projectVersionId:c.baseVersionId,operation:{status:'succeeded'}}})
-  if(finals)throw new DomainError('PRECONDITION_REQUIRED','Editorial final invalidation needs explicit stable variant authority')
-  const outputs=await tx.v2ProjectProxyRenderOperation.findMany({where:{workspaceId:b.version.workspaceId,projectId:b.version.projectId,
-    projectVersionId:c.baseVersionId,operation:{status:'succeeded'}},select:{outputArtifactId:true,renderableVariantId:true}})
-  if(outputs.some(o=>!o.renderableVariantId))throw new DomainError('PRECONDITION_REQUIRED','Editorial proxy lacks stable variant authority')
-  const actual=outputs.map(o=>({artifactId:o.outputArtifactId,kind:'proxy',sourceVersionId:c.baseVersionId,variantId:o.renderableVariantId}))
-    .map(o=>stableSerialize(o)).sort()
+  // The cut changes the shared plan: every render of the base Version, every output's proxies and published finals, goes stale.
+  const actual=(await readVersionRenderReferences(tx,{workspaceId:b.version.workspaceId,projectId:b.version.projectId,
+    versionId:c.baseVersionId})).map(o=>stableSerialize(o)).sort()
   if(stableSerialize(actual)!==stableSerialize(c.payload.impact.affectedArtifacts.map(o=>stableSerialize(o)).sort()))
     throw new DomainError('VERSION_CONFLICT','Editorial output inventory changed')
   const rows=createEditorialCutInvalidations({impact:c.payload.impact,createdAt:c.createdAt})

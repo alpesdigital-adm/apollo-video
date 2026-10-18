@@ -188,7 +188,9 @@ test('apollo.projects.commands.apply 10.0.0 names the output variant a spoken-co
 
 test('T-FR-236 exposes manual apply, undo, redo and restore result versions as current', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.manual-edits.apply')
-  assert.equal(capability.version, '3.0.0')
+  // 4.0.0: `variantId` is the stable State variant id of the output the edit was made on (the view), not an aspect ratio.
+  assert.equal(capability.version, '4.0.0')
+  assert.equal(capability.inputSchemaRef, 'apollo://schemas/apply-project-manual-edit-request/v3')
   assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-manual-edit-applied/v3')
   assert.equal(getPublicSchema('apollo://schemas/project-manual-edit-applied/v2').ref, 'apollo://schemas/project-manual-edit-applied/v2')
 
@@ -272,6 +274,11 @@ const outputs = [
   { artifactId: 'artifact-final-16x9', kind: 'final', sourceVersionId: baseVersionId, variantId: '16:9' },
 ]
 
+// The outputs the proxy repository tests read: the stable variants of `resultWorld` (variant-9x16) and its sibling, never an aspect ratio.
+const STABLE_VERTICAL = 'variant-9x16'
+const STABLE_WIDE = 'variant-16x9'
+const stableOutputs = outputs.map((item) => ({ ...item, variantId: item.variantId === '9:16' ? STABLE_VERTICAL : STABLE_WIDE }))
+
 function impact(overrides = {}) {
   const beforeEditPlan = plan()
   const operation = { kind: 'inspect', clipId: 'clip-1', patch: { text: 'Texto revisado' } }
@@ -288,6 +295,7 @@ function impact(overrides = {}) {
     baseVersionId,
     resultVersionId,
     variantId: '9:16',
+    outputVariantIds: ['16:9', '9:16'],
     targetId: 'clip-1',
     action: 'apply',
     operation,
@@ -298,24 +306,25 @@ function impact(overrides = {}) {
   })
 }
 
-test('T-FR-233 manual subtitle impact scopes exact range, variant and historical outputs', () => {
+test('T-FR-233 manual subtitle impact scopes the exact range and stales the renders of every output of the shared plan', () => {
   const value = impact()
   assert.equal(value.schemaVersion, 'command-impact/v1')
   assert.deepEqual(value.changeKinds, ['inspect:text'])
   assert.deepEqual(value.dependencyTypes, ['visual'])
   assert.deepEqual(value.affectedRanges, [{ startFrame: 15, endFrame: 45 }])
-  assert.deepEqual(value.affectedVariantIds, ['9:16'])
+  assert.deepEqual(value.affectedVariantIds, ['16:9', '9:16'])
   assert.deepEqual(value.affectedArtifacts.map((item) => item.artifactId), [
-    'artifact-final-9x16', 'artifact-proxy-9x16',
+    'artifact-final-16x9', 'artifact-final-9x16', 'artifact-proxy-9x16',
   ])
-  assert.deepEqual(value.minimalRenders, [{
-    kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 15, endFrame: 45 }],
-  }])
+  assert.deepEqual(value.minimalRenders, [
+    { kind: 'proxy', variantId: '16:9', ranges: [{ startFrame: 15, endFrame: 45 }] },
+    { kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 15, endFrame: 45 }] },
+  ])
   assert.equal(value.impactHash.length, 64)
   const invalidations = createCommandArtifactInvalidations({ impact: value, createdAt })
-  assert.equal(invalidations.length, 2)
+  assert.equal(invalidations.length, 3)
   assert.deepEqual(invalidations.map((item) => [item.artifactId, item.status]), [
-    ['artifact-final-9x16', 'stale'], ['artifact-proxy-9x16', 'stale'],
+    ['artifact-final-16x9', 'stale'], ['artifact-final-9x16', 'stale'], ['artifact-proxy-9x16', 'stale'],
   ])
   assert.ok(invalidations.every((item) => item.resultVersionId === resultVersionId))
   assert.ok(invalidations.every((item) => item.id.length === 64))
@@ -387,7 +396,7 @@ test('T-FR-233 timing impact extends through shifted downstream frames while sel
   assert.deepEqual(createCommandArtifactInvalidations({ impact: selection, createdAt }), [])
 })
 
-test('T-FR-233 crop materializes a normalized clip region and invalidates only its range and variant', () => {
+test('T-FR-233 crop materializes a normalized clip region and invalidates only its range, on every output', () => {
   const crop = { x: 0.2, y: 0.1, width: 0.6, height: 0.8 }
   const afterCrop = materializeManualEditPlan({
     editPlan: plan(),
@@ -406,13 +415,14 @@ test('T-FR-233 crop materializes a normalized clip region and invalidates only i
   assert.deepEqual(value.changeKinds, ['crop'])
   assert.deepEqual(value.dependencyTypes, ['visual'])
   assert.deepEqual(value.affectedRanges, [{ startFrame: 0, endFrame: 90 }])
-  assert.deepEqual(value.affectedVariantIds, ['9:16'])
+  assert.deepEqual(value.affectedVariantIds, ['16:9', '9:16'])
   assert.deepEqual(value.affectedArtifacts.map((item) => item.artifactId), [
-    'artifact-final-9x16', 'artifact-proxy-9x16',
+    'artifact-final-16x9', 'artifact-final-9x16', 'artifact-proxy-9x16',
   ])
-  assert.deepEqual(value.minimalRenders, [{
-    kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 90 }],
-  }])
+  assert.deepEqual(value.minimalRenders, [
+    { kind: 'proxy', variantId: '16:9', ranges: [{ startFrame: 0, endFrame: 90 }] },
+    { kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 90 }] },
+  ])
   assert.throws(
     () => materializeManualEditPlan({
       editPlan: plan(),
@@ -445,11 +455,11 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
   const basePlan = plan()
   const operation = { kind: 'crop', clipId: 'clip-1', crop: { x: 0.2, y: 0, width: 0.6, height: 1 } }
   const afterPlan = materializeManualEditPlan({ editPlan: basePlan, operation, newVersionId: resultVersionId, createdAt,
-    availableAssetIds: ['source-1'], variantId: '9:16' })
-  const cropImpact = createManualCommandImpact({ commandId, baseVersionId, resultVersionId, variantId: '9:16', targetId: 'clip-1',
-    action: 'apply', operation, beforeEditPlan: basePlan, afterEditPlan: afterPlan, outputReferences: outputs })
+    availableAssetIds: ['source-1'], variantId: STABLE_VERTICAL })
+  const cropImpact = createManualCommandImpact({ commandId, baseVersionId, resultVersionId, variantId: STABLE_VERTICAL, outputVariantIds: [STABLE_WIDE, STABLE_VERTICAL], targetId: 'clip-1',
+    action: 'apply', operation, beforeEditPlan: basePlan, afterEditPlan: afterPlan, outputReferences: stableOutputs })
   const committed = {
-    command: { id: commandId, payload: { schemaVersion: 2, action: 'apply', expectedRevision: 1, variantId: '9:16', targetId: 'clip-1', operation, impact: cropImpact } },
+    command: { id: commandId, payload: { schemaVersion: 2, action: 'apply', expectedRevision: 1, variantId: STABLE_VERTICAL, targetId: 'clip-1', operation, impact: cropImpact } },
     version: { snapshotRefs: { editPlan: 'project-snapshot-impact-2' } },
     snapshot: { contentJson: stableSerialize(afterPlan), contentHash: calculateVersionHash(afterPlan) },
   }
@@ -457,7 +467,7 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
     ...item, workspaceId, projectId, dependencyTypesJson: JSON.stringify(item.dependencyTypes),
     affectedRangesJson: JSON.stringify(item.affectedRanges), createdAt: new Date(item.createdAt),
   }))
-  assert.equal(persistedInvalidations.length, 2)
+  assert.equal(persistedInvalidations.length, 3)
   assert.ok(persistedInvalidations.every((item) => item.status === 'stale'))
   assert.ok(persistedInvalidations.every((item) => item.resultVersionId === resultVersionId))
 
@@ -475,7 +485,7 @@ test('T-FR-233 a manual Command result reuses proxy ranges or the unchanged prox
   })
   assert.equal(view.resultVersionId, resultVersionId)
   assert.deepEqual(view.invalidations.map((item) => item.artifactId), [
-    'artifact-final-9x16', 'artifact-proxy-9x16',
+    'artifact-final-16x9', 'artifact-final-9x16', 'artifact-proxy-9x16',
   ])
   assert.deepEqual(invalidationQuery.where, {
     workspaceId, projectId, resultVersionId,
@@ -715,7 +725,8 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
   })
   await repository.attachCompletedOutput({
     workspaceId, operationId: 'operation-proxy-2', projectId,
-    projectVersionId: resultVersionId, variantId: '9:16',
+    // Completion is attributed to the STABLE State variant of the output; the aspect ratio travels apart as `format`.
+    projectVersionId: resultVersionId, variantId: 'variant-9x16', format: '9:16',
     outputArtifactId: 'artifact-proxy-replacement',
     outputManifestId: 'manifest-proxy-replacement',
     originalFileName: 'replacement.mp4', createdAt, recipeParameters, ocrReceipt: null,
@@ -723,7 +734,7 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
   })
   assert.deepEqual(invalidationQuery.where, {
     workspaceId, projectId, resultVersionId,
-    kind: 'proxy', variantId: '9:16',
+    kind: 'proxy', variantId: 'variant-9x16',
     resolutions: { none: { operation: { status: 'succeeded' } } },
   })
   assert.deepEqual(resolutionUpserts.map((entry) => ({
@@ -878,9 +889,10 @@ test('T-FR-233 a moved clip invalidates the continuous downstream timing envelop
   // timing, so the safe impact is one continuous envelope through the end.
   assert.deepEqual(moved.affectedRanges, [{ startFrame: 0, endFrame: 180 }])
   assert.deepEqual(moved.changeKinds, ['move'])
-  assert.deepEqual(moved.minimalRenders, [{
-    kind: 'proxy', variantId: '9:16', ranges: moved.affectedRanges,
-  }])
+  assert.deepEqual(moved.minimalRenders, [
+    { kind: 'proxy', variantId: '16:9', ranges: moved.affectedRanges },
+    { kind: 'proxy', variantId: '9:16', ranges: moved.affectedRanges },
+  ])
   // The persisted round trip keeps affectedRanges and minimalRenders[].ranges
   // hash-identical, so a multi-range impact survives storage unchanged.
   const parsed = parseCommandImpact(JSON.parse(JSON.stringify(moved)))
@@ -899,7 +911,7 @@ test('T-FR-233 completed final export resolves only stale finals for its exact v
     async $transaction(callback) {
       return callback({
         v2ProjectFinalExportOperation: { async findFirst() { return {
-          operationId: 'operation-final-2', outputAspectRatio: '16:9',
+          operationId: 'operation-final-2', outputAspectRatio: '16:9', outputVariantId: 'variant-16x9',
         } } },
         v2MediaArtifact: { async findFirst() { return { id: 'artifact-final-replacement' } } },
         v2MediaArtifactManifest: { async findFirst() { return { id: 'manifest-final-replacement' } } },
@@ -929,7 +941,7 @@ test('T-FR-233 completed final export resolves only stale finals for its exact v
   })
   assert.deepEqual(invalidationQuery.where, {
     workspaceId, projectId, resultVersionId,
-    kind: 'final', variantId: '16:9',
+    kind: 'final', variantId: 'variant-16x9',
     resolutions: { none: { operation: { status: 'succeeded' } } },
   })
   assert.deepEqual(resolutionUpserts.map((entry) => ({
@@ -1030,7 +1042,8 @@ test('T-FR-233 review patch converts millisecond points to frame ranges and fenc
     commandId: 'edit-command-review-impact-1',
     baseVersionId,
     resultVersionId,
-    variantIds: ['9:16'],
+    outputVariantIds: ['16:9', '9:16'],
+    annotationFormatIds: ['9:16'],
     operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1000] }],
     invalidatedRangesMs: [[1000, 1000]],
     beforeEditPlan: plan(),
@@ -1042,16 +1055,16 @@ test('T-FR-233 review patch converts millisecond points to frame ranges and fenc
   assert.deepEqual(value.dependencyTypes, ['visual'])
   assert.deepEqual(value.affectedRanges, [{ startFrame: 30, endFrame: 31 }])
   assert.deepEqual(value.affectedArtifacts.map((item) => item.artifactId), [
-    'artifact-final-9x16', 'artifact-proxy-9x16',
-  ])
+    'artifact-final-16x9', 'artifact-final-9x16', 'artifact-proxy-9x16',
+  ], 'an annotation scoped to one format edits the shared plan: every output is stale')
   assert.deepEqual(parseCommandImpact(JSON.parse(JSON.stringify(value))), value)
-  assert.equal(createCommandArtifactInvalidations({ impact: value, createdAt }).length, 2)
+  assert.equal(createCommandArtifactInvalidations({ impact: value, createdAt }).length, 3)
 
   const trim = createReviewPatchCommandImpact({
     commandId: 'edit-command-review-impact-2',
     baseVersionId,
     resultVersionId,
-    variantIds: ['9:16'],
+    outputVariantIds: ['16:9', '9:16'],
     operations: [{ op: 'trim', targetId: 'clip:clip-1', value: {}, rangeMs: [1000, 2000] }],
     invalidatedRangesMs: [[1000, 2000]],
     beforeEditPlan: plan(),
@@ -1067,7 +1080,7 @@ test('T-FR-233 review patch converts millisecond points to frame ranges and fenc
   ]
   const moved = createReviewPatchCommandImpact({
     commandId: 'edit-command-review-impact-move', baseVersionId, resultVersionId,
-    variantIds: ['9:16'],
+    outputVariantIds: ['16:9', '9:16'],
     operations: [{ op: 'move', targetId: 'clip:clip-1', value: { afterTargetId: 'clip-2' }, rangeMs: [4000, 4000] }],
     invalidatedRangesMs: [[4000, 4000]], beforeEditPlan: plan(), afterEditPlan: movedPlan,
     outputReferences: outputs,
@@ -1076,7 +1089,7 @@ test('T-FR-233 review patch converts millisecond points to frame ranges and fenc
   assert.throws(
     () => createReviewPatchCommandImpact({
       commandId: 'edit-command-review-impact-3', baseVersionId, resultVersionId,
-      variantIds: ['9:16'], operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: {} }],
+      outputVariantIds: ['16:9', '9:16'], operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: {} }],
       invalidatedRangesMs: [[7000, 7000]], beforeEditPlan: plan(), afterEditPlan: plan(resultVersionId), outputReferences: outputs,
     }),
     (error) => error.code === 'INVALID_ARGUMENT' && /outside the timeline/.test(error.message),
@@ -1089,7 +1102,7 @@ test('T-FR-233 batch review preserves disjoint canonical ranges under its own co
     commandId: 'edit-command-review-batch-impact-1',
     baseVersionId,
     resultVersionId,
-    variantIds: ['9:16', '16:9'],
+    outputVariantIds: ['9:16', '16:9'],
     operations: [
       { op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1500] },
       { op: 'update-text', targetId: 'subtitle:cue-2', value: { text: 'Revisado' }, rangeMs: [4000, 4500] },
@@ -1123,9 +1136,9 @@ test('T-FR-233 a review patch result reuses proxy ranges only with the attested 
   }
   const patchedPlan = materializePatchEditPlan({ editPlan: plan(), patch, newVersionId: resultVersionId, createdAt, availableAssetIds: ['source-1'] })
   const reviewImpact = createReviewPatchCommandImpact({
-    commandId: 'edit-command-review-impact-4', baseVersionId, resultVersionId, variantIds: ['9:16'],
+    commandId: 'edit-command-review-impact-4', baseVersionId, resultVersionId, outputVariantIds: [STABLE_WIDE, STABLE_VERTICAL],
     operations: patch.operations, invalidatedRangesMs: patch.invalidatedRanges,
-    beforeEditPlan: plan(), afterEditPlan: patchedPlan, outputReferences: outputs,
+    beforeEditPlan: plan(), afterEditPlan: patchedPlan, outputReferences: stableOutputs,
   })
   const committed = {
     command: { id: 'edit-command-review-impact-4', payload: { schemaVersion: 2, proposalId: 'review-proposal-impact-1', annotationIds: patch.annotationIds, patch, impact: reviewImpact } },
@@ -1134,7 +1147,7 @@ test('T-FR-233 a review patch result reuses proxy ranges only with the attested 
   }
   const result = { impact: reviewImpact, invalidations: createCommandArtifactInvalidations({ impact: reviewImpact, createdAt }) }
   assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 30, endFrame: 31 }])
-  assert.equal(result.invalidations.length, 2)
+  assert.equal(result.invalidations.length, 3)
 
   const persistedInvalidations = result.invalidations.map((invalidation) => ({
     ...invalidation,

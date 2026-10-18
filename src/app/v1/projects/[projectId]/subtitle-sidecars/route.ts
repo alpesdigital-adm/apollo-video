@@ -14,6 +14,7 @@ import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
 import { publicArtifactReference } from '@/v2/public-api/public-media-identity'
+import { parseRequiredVariantId } from '@/v2/public-api/project-output-variant-request-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,16 +56,15 @@ export async function POST(
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new DomainError('INVALID_ARGUMENT', 'A JSON request body is required')
     }
-    if (typeof body.variantId !== 'string' || !body.variantId.trim()) {
-      throw new DomainError('INVALID_ARGUMENT', 'variantId is required')
-    }
+    // The stable State variant of the output whose render the sidecar aligns (required: a sidecar describes one output).
+    const variantId = parseRequiredVariantId(body.variantId)
     const result = await exportProjectSubtitleSidecarService(
       createSubtitleSidecarExportDependencies(),
     )({
       workspaceId: actor.workspaceId,
       actor,
       projectId,
-      variantId: body.variantId.trim(),
+      variantId,
       format: readFormat(body.format, true)!,
       ...(typeof body.locale === 'string' && body.locale.trim() ? { locale: body.locale.trim() } : {}),
       ...(typeof body.projectVersionId === 'string' && body.projectVersionId.trim()

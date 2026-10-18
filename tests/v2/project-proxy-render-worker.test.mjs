@@ -17,13 +17,15 @@ import { ASS_EMISSION_POLICY } from '../../src/v2/domain/ass-emission-policy.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { enqueueProjectProxyRenderService, enqueueRenderableSnapshotProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
-import { createManualCommandImpact } from '../../src/v2/domain/command-impact.ts'
+import { createCommandArtifactInvalidations, createManualCommandImpact } from '../../src/v2/domain/command-impact.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaRenderablePlanSnapshotRepository } from '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+import { requirePersistedOutputConsumptionV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
+import { selectReusableProxyOperation } from '../../src/v2/infrastructure/prisma/proxy-reuse-safety.ts'
 import { PrismaRenderElementMapRepository } from '../../src/v2/infrastructure/prisma/render-element-map-repository.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifact.ts'
@@ -292,7 +294,9 @@ function dependencies(operations, overrides = {}) {
       async readImmutableSource() { return source() },
       async attachCompletedOutput(input) {
         calls.attached += 1
-        assert.equal(input.variantId, '9:16')
+        // Completion is attributed to the STABLE State variant the render was made for; the aspect ratio travels apart as `format`.
+        assert.equal(input.variantId, proxyWorld.consumption('render').seal.variantId)
+        assert.equal(input.format, '9:16')
         assert.equal(input.outputArtifactId, 'artifact-project-proxy-output')
         assert.equal(input.review.proxyArtifactId, input.outputArtifactId)
         attachedReview = input.review
@@ -616,7 +620,10 @@ test('proxy reuse rejects output from the earlier bottom-anchor recipe', async (
   let storedArtifactKey = 'editorial-proxies/reusable.mp4'
   let storedMap = { schemaVersion: 'render-element-map/v1', proxyHash: 'a'.repeat(64),
     fps: 30, durationFrames: 60, canvas: { width: 540, height: 960 }, elements: [] }
+  // The sealed State of the base Version: the reuse is attributed to its output through it (a legacy proxy only when exact).
+  const baseWorld = fakeOutputWorld({ workspaceId: 'workspace-reusable', projectId: 'project-reusable', versionId: 'version-reusable' })
   const repository = new PrismaProjectProxyRenderRepository({
+    $queryRawUnsafe: (...args) => baseWorld.queryRawUnsafe(...args),
     v2ProjectProxyRenderOperation: { async findFirst() { return {
       operationId: 'operation-reusable', outputArtifactId: 'artifact-reusable',
       outputManifestId: 'manifest-reusable',
@@ -639,7 +646,7 @@ test('proxy reuse rejects output from the earlier bottom-anchor recipe', async (
     } } },
   })
   const scope = { workspaceId: 'workspace-reusable', projectId: 'project-reusable',
-    baseVersionId: 'version-reusable' }
+    baseVersionId: 'version-reusable', outputVariantId: 'variant-main' }
   assert.equal((await repository.readReusableProxy(scope))?.artifactId, 'artifact-reusable')
   storedManifest = manifestFor('1.12.0')
   assert.equal(await repository.readReusableProxy(scope), null,
@@ -774,7 +781,9 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
     commandId,
     baseVersionId,
     resultVersionId,
-    variantId: '9:16',
+    // The impact names outputs by their stable State variant: the view the edit was made on, and every output of the parent State.
+    variantId: 'variant-main',
+    outputVariantIds: ['variant-main'],
     targetId: 'clip-1',
     action: 'apply',
     operation: { kind: 'select', clipId: 'clip-1' },
@@ -824,7 +833,7 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   let blockedSource = false, finalRightsBlocked = false, sourceReads = 0
   const lockReads = []
   const childPlan = { ...editPlan, id: `edit-plan-${resultVersionId}`, projectVersionId: resultVersionId, createdAt: now,
-    manualEditing: { schemaVersion: 1, action: 'apply', operation: { kind: 'select', clipId: 'clip-1' }, variantId: '9:16' } }
+    manualEditing: { schemaVersion: 1, action: 'apply', operation: { kind: 'select', clipId: 'clip-1' }, variantId: 'variant-main' } }
   const snapshotRow = (id, document) => ({ id, workspaceId: operation.workspaceId, projectId: operation.projectId,
     kind: 'edit-plan', schemaVersion: 2, contentJson: stableSerialize(document), contentHash: calculateCanonicalHash(document) })
   let projectCasCount = 0
@@ -928,7 +937,7 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
             id: commandId,
             type: 'manual-edit',
             baseVersionId, baseHash: '5'.repeat(64),
-            payloadJson: JSON.stringify({ schemaVersion: 2, action: 'apply', expectedRevision: 10, targetId: 'clip-1', operation: { kind: 'select', clipId: 'clip-1' }, variantId: '9:16', impact }),
+            payloadJson: JSON.stringify({ schemaVersion: 2, action: 'apply', expectedRevision: 10, targetId: 'clip-1', operation: { kind: 'select', clipId: 'clip-1' }, variantId: 'variant-main', impact }),
           },
         } } },
         v2ProjectProxyRenderOperation: {
@@ -1694,8 +1703,8 @@ test('S3 proxy enqueue, snapshot enqueue and worker thread an optional State var
   assert.equal('variantId' in snapshotAsked[0], false)
   assert.notEqual(fingerprints[0], fingerprints[1], 'another State variant is another request')
 
-  // The worker reads through the variant a later step persists in the context (none today).
-  const operations = createOperations(sealed, { variantId: 'variant-tall' })
+  // The worker reads through the variant its operation persisted (`outputVariantId`); a legacy context names none.
+  const operations = createOperations(sealed, { outputVariantId: 'variant-tall' })
   const base = dependencies(operations)
   const workerAsked = []
   base.deps.projects = { ...base.deps.projects, async readImmutableSource(input) { workerAsked.push(input); return sealed } }
@@ -1707,4 +1716,267 @@ test('S3 proxy enqueue, snapshot enqueue and worker thread an optional State var
   plainBase.deps.projects = { ...plainBase.deps.projects, async readImmutableSource(input) { plainAsked.push(input); return source() } }
   await runNextProjectProxyRenderOperationService(plainBase.deps)('worker-project-proxy-no-variant')
   assert.equal('variantId' in plainAsked[0], false, 'absent means the State\'s only output')
+})
+
+// ---------------------------------------------------------------------------
+// Slice S3 multi-output - the render consumers resolve ONE output explicitly and persist which output a render was made for.
+// ---------------------------------------------------------------------------
+
+const moWorkspace = 'workspace-project-proxy-test'
+const moProject = 'project-proxy-test'
+const moVersion = 'project-version-proxy-test'
+const moTwoOutputs = [{ variantId: 'variant-wide', aspectRatio: '16:9' }, { variantId: 'variant-tall', aspectRatio: '9:16' }]
+const moWorld = (entries = moTwoOutputs, versionId = moVersion) => fakeOutputWorld({ workspaceId: moWorkspace, projectId: moProject, versionId, entries })
+const moRefusal = (reason) => (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.reason === reason
+
+/** The source a repository answers for one output: the verdict is the REAL persisted one, read from the sealed rows of the world. */
+async function moSource(world, variantId, purpose = 'render') {
+  const consumption = await requirePersistedOutputConsumptionV3({ $queryRawUnsafe: world.queryRawUnsafe },
+    { workspaceId: moWorkspace, projectId: moProject, versionId: moVersion, purpose, ...(variantId === undefined ? {} : { variantId }) })
+  return Object.freeze({ ...source(), format: consumption.aspectRatio,
+    outputConsumption: Object.freeze({ seal: consumption.seal, sealHash: consumption.sealHash }) })
+}
+
+test('S3-MO proxy enqueue resolves ONE output explicitly: none named, a stranger and two outputs of one ratio are refused; each output persists its own variant, format and input hash', async () => {
+  const persisted = []
+  const enqueueOn = (world) => (variantId, key) => enqueueProjectProxyRenderService({
+    projects: { readCurrentSource: (input) => moSource(world, input.variantId, input.purpose) },
+    colorPipelines: { async listForSource() { return [{ compilation: colorCompilation }] } },
+    operations: { async findReplay() { return null }, async createOrReplay(input) { persisted.push(input); return { ...input, replayed: false } } },
+    clock: () => new Date('2026-09-08T20:15:00.000Z'),
+    createId: (kind) => `${kind}-mo-${persisted.length}`,
+  })({ workspaceId: moWorkspace, projectId: moProject, actor: proxyActor(), idempotencyKey: key, ...(variantId === undefined ? {} : { variantId }) })
+  const world = moWorld()
+  const enqueue = enqueueOn(world)
+  await assert.rejects(enqueue(undefined, 'mo-none'), moRefusal('output-variant-required'))
+  await assert.rejects(enqueue('variant-stranger', 'mo-stranger'), moRefusal('output-variant-unknown'))
+  assert.equal(persisted.length, 0, 'a refused enqueue admits nothing')
+
+  await enqueue('variant-wide', 'mo-wide')
+  await enqueue('variant-tall', 'mo-tall')
+  const [wide, tall] = persisted
+  assert.equal(wide.context.outputVariantId, 'variant-wide')
+  assert.equal(tall.context.outputVariantId, 'variant-tall')
+  assert.notEqual(wide.context.inputHash, tall.context.inputHash, 'each output is its own input')
+  assert.notEqual(wide.requestFingerprint, tall.requestFingerprint)
+  const wideSource = await moSource(world, 'variant-wide'), tallSource = await moSource(world, 'variant-tall')
+  assert.equal(wide.context.inputHash, projectProxyRenderInputHash({ source: wideSource, colorPipelineBindings }), 'the 16:9 hash is the one over its own sealed entry')
+  assert.equal(tall.context.inputHash, projectProxyRenderInputHash({ source: tallSource, colorPipelineBindings }))
+  assert.deepEqual([wideSource.format, tallSource.format], ['16:9', '9:16'])
+  assert.deepEqual([wideSource.outputConsumption.seal.variantId, tallSource.outputConsumption.seal.variantId], ['variant-wide', 'variant-tall'])
+
+  // The unchanged-reuse context is attributed to its output as well.
+  const unchangedReuse = Object.freeze({ schemaVersion: 'project-proxy-unchanged-reuse/v1', commandId: 'command-selection-mo', impactHash: '3'.repeat(64),
+    baseVersionId: 'project-version-proxy-base', operationId: 'operation-base-tall', artifactId: 'artifact-base-tall', manifestId: 'manifest-base-tall',
+    artifactKey: 'k', sha256: '4'.repeat(64), byteSize: 10 })
+  const reuseResult = await enqueueProjectProxyRenderService({
+    projects: { async readCurrentSource() { return Object.freeze({ ...tallSource, unchangedReuseRequired: true, unchangedReuse }) } },
+    colorPipelines: { async listForSource() { throw new Error('colour must not be resolved for an unchanged reuse') } },
+    operations: { async findReplay() { return null }, async createOrReplay(input) { return { ...input, replayed: false } } },
+    clock: () => new Date('2026-09-08T20:15:00.000Z'),
+    createId: (kind) => `${kind}-mo-reuse`,
+  })({ workspaceId: moWorkspace, projectId: moProject, actor: proxyActor(), idempotencyKey: 'mo-reuse', variantId: 'variant-tall' })
+  assert.equal(reuseResult.context.kind, 'project-proxy-reuse')
+  assert.equal(reuseResult.context.outputVariantId, 'variant-tall')
+
+  // Two outputs of one ratio cannot be rendered apart: refused for either, never guessed.
+  persisted.length = 0
+  const clash = enqueueOn(moWorld([{ variantId: 'variant-a', aspectRatio: '9:16' }, { variantId: 'variant-b', aspectRatio: '9:16' }]))
+  await assert.rejects(clash('variant-a', 'mo-clash-a'), moRefusal('output-variant-ambiguous'))
+  await assert.rejects(clash('variant-b', 'mo-clash-b'), moRefusal('output-variant-ambiguous'))
+  assert.equal(persisted.length, 0)
+
+  // One output: the variant is optional and the very same row is persisted (the sole output is named by the seal).
+  persisted.length = 0
+  await enqueueOn(moWorld([{ variantId: 'variant-solo', aspectRatio: '9:16' }]))(undefined, 'mo-solo')
+  assert.equal(persisted[0].context.outputVariantId, 'variant-solo')
+})
+
+test('S3-MO the snapshot proxy persists the OUTPUT it consumed beside the localization variant it renders', async () => {
+  const world = moWorld()
+  const persisted = []
+  const request = { workspaceId: moWorkspace, projectId: moProject, planId: 'plan-localization-test', planHash: '1'.repeat(64), origin: 'localization',
+    sourceId: 'localization-run-test', sourceHash: '2'.repeat(64), variantId: 'localization-variant-test', format: '9:16', actor: proxyActor() }
+  const enqueue = (outputVariantId, key) => enqueueRenderableSnapshotProxyRenderService({
+    snapshots: { async readByPlan() { return { planId: request.planId, planHash: request.planHash, origin: request.origin, sourceId: request.sourceId,
+      sourceHash: request.sourceHash, plan: { localeVariantRefs: [request.variantId] } } } },
+    projects: { readRenderableSnapshotSource: (input) => moSource(world, input.variantId) },
+    colorPipelines: { async listForSource() { return [{ compilation: colorCompilation }] } },
+    operations: { async findReplay() { return null }, async createOrReplay(input) { persisted.push(input); return { ...input, replayed: false } } },
+    clock: () => new Date('2026-09-08T20:15:00.000Z'),
+    createId: (kind) => `${kind}-mo-snapshot`,
+  })({ ...request, ...(outputVariantId === undefined ? {} : { outputVariantId }), idempotencyKey: key })
+  await assert.rejects(enqueue(undefined, 'mo-snapshot-none'), moRefusal('output-variant-required'))
+  await enqueue('variant-tall', 'mo-snapshot-tall')
+  assert.equal(persisted[0].context.outputVariantId, 'variant-tall', 'the State variant (the output)')
+  assert.equal(persisted[0].context.renderableSnapshot.variantId, 'localization-variant-test', 'the localization variant is a different thing and stays')
+  assert.equal(persisted[0].context.renderableSnapshot.format, '9:16')
+})
+
+test('S3-MO proxy workers render each output apart: the source is read for the persisted variant, the renderer gets its own format, and completion is attributed to the stable variant', async () => {
+  const world = moWorld()
+  for (const [variantId, format] of [['variant-wide', '16:9'], ['variant-tall', '9:16']]) {
+    const sealed = await moSource(world, variantId)
+    const operations = createOperations(sealed, { outputVariantId: variantId })
+    const base = dependencies(operations)
+    const asked = [], formats = [], attached = []
+    base.deps.projects = {
+      async readImmutableSource(input) { asked.push(input); return sealed },
+      async attachCompletedOutput(input) {
+        attached.push(input)
+        assert.ok(await operations.repository.succeed({ operationId: input.operationId, leaseOwner: input.lease.owner, attempt: input.lease.attempt, now: input.lease.now }))
+      },
+    }
+    const render = base.deps.renderer.render
+    base.deps.renderer = { ...base.deps.renderer, async render(input) { formats.push(input.format); return render(input) } }
+    const outcome = await runNextProjectProxyRenderOperationService(base.deps)(`worker-mo-${variantId}`)
+    assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' }, variantId)
+    assert.equal(asked[0].variantId, variantId, 'the exact Version is consumed for the output the operation was made for')
+    assert.deepEqual(formats, [format], `${variantId}: the renderer draws its own format`)
+    assert.equal(attached[0].variantId, variantId, 'completion is attributed to the stable variant')
+    assert.equal(attached[0].format, format)
+    assert.equal(attached[0].recipeParameters.format, format, 'the recipe records the aspect ratio of the output')
+  }
+})
+
+test('S3-MO a proxy worker refuses a source that is not the output its operation was made for, before it renders or attaches anything', async () => {
+  const world = moWorld()
+  const wide = await moSource(world, 'variant-wide')
+  const operations = createOperations(wide, { outputVariantId: 'variant-tall' })
+  const base = dependencies(operations)
+  let rendered = 0
+  const render = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer, async render(input) { rendered += 1; return render(input) } }
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() { return wide } }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-mo-wrong-output')
+  assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'failed' })
+  assert.equal(operations.operation.error.code, 'persistence_conflict')
+  assert.deepEqual([rendered, base.calls.persisted, base.calls.attached], [0, 0, 0])
+})
+
+/** Evaluates the equality / `in` / `OR` / nested filters the reuse lookups use against plain rows. */
+function moMatches(row, where) {
+  return Object.entries(where).every(([key, expected]) => {
+    if (key === 'OR') return expected.some((alternative) => moMatches(row, alternative))
+    if (expected !== null && typeof expected === 'object' && 'in' in expected) return expected.in.includes(row[key])
+    if (expected !== null && typeof expected === 'object') return moMatches(row[key] ?? {}, expected)
+    return row[key] === expected
+  })
+}
+
+test('S3-MO a reusable proxy is the base Version proxy of the SAME output: another output render is never offered, a legacy render only to the output it exactly belongs to', async () => {
+  const row = (operationId, outputVariantId, second) => ({ operationId, workspaceId: moWorkspace, projectId: moProject, projectVersionId: moVersion,
+    outputArtifactId: `artifact-${operationId}`, outputManifestId: `manifest-${operationId}`, outputVariantId,
+    createdAt: new Date(Date.UTC(2026, 9, 1, 0, 0, second)), operation: { status: 'succeeded', phase: 'completed' } })
+  const database = (world, rows) => ({ $queryRawUnsafe: world.queryRawUnsafe, v2ProjectProxyRenderOperation: { async findFirst({ where, orderBy, select }) {
+    assert.deepEqual(orderBy, [{ createdAt: 'desc' }, { operationId: 'desc' }])
+    const found = rows.filter((item) => moMatches(item, where)).toSorted((left, right) => right.createdAt - left.createdAt || right.operationId.localeCompare(left.operationId))[0]
+    return found ? Object.fromEntries(Object.keys(select).map((key) => [key, found[key]])) : null
+  } } })
+  const scope = { workspaceId: moWorkspace, projectId: moProject, baseVersionId: moVersion }
+  const two = database(moWorld(), [row('wide', 'variant-wide', 1), row('tall', 'variant-tall', 2), row('legacy', null, 3)])
+  assert.equal((await selectReusableProxyOperation(two, { ...scope, outputVariantId: 'variant-wide' }))?.operationId, 'wide',
+    'the newer render of ANOTHER output (and the newest legacy one) never shadows this output\'s own')
+  assert.equal((await selectReusableProxyOperation(two, { ...scope, outputVariantId: 'variant-tall' }))?.operationId, 'tall')
+  assert.equal(await selectReusableProxyOperation(two, { ...scope, outputVariantId: 'variant-stranger' }), null)
+  assert.equal(await selectReusableProxyOperation(two, { ...scope, outputVariantId: 'variant-wide', artifactIds: ['artifact-tall'] }), null,
+    'an invalidated artifact of the other output is no reuse for this one')
+  const onlyLegacy = database(moWorld(), [row('legacy', null, 1)])
+  assert.equal(await selectReusableProxyOperation(onlyLegacy, { ...scope, outputVariantId: 'variant-wide' }), null, 'a render made for no stated output cannot be attributed in a Version with two outputs')
+  assert.equal(await selectReusableProxyOperation(onlyLegacy, { ...scope, outputVariantId: 'variant-tall' }), null)
+  const solo = database(moWorld([{ variantId: 'variant-solo', aspectRatio: '9:16' }]), [row('legacy', null, 1)])
+  assert.equal((await selectReusableProxyOperation(solo, { ...scope, outputVariantId: 'variant-solo' }))?.operationId, 'legacy', 'one output: the legacy render is its own')
+  assert.equal(await selectReusableProxyOperation(solo, { ...scope, outputVariantId: 'variant-stranger' }), null)
+})
+
+/** The base Version proxies of two outputs, as the safe-reuse reader finds them (manifest + element map), and the repository over them. */
+function moReusableRepository({ present = ['variant-wide', 'variant-tall'] } = {}) {
+  const baseVersionId = 'project-version-proxy-base'
+  const world = moWorld(), baseWorld = moWorld(moTwoOutputs, baseVersionId)
+  const toolDigest = createHash('sha256').update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`).digest('hex')
+  const proxies = present.map((variantId, index) => {
+    const suffix = variantId.replace('variant-', ''), sha = variantId === 'variant-wide' ? 'a'.repeat(64) : 'b'.repeat(64)
+    const manifest = createMediaArtifactManifestV2({ artifactKey: `editorial-proxies/base-${suffix}.mp4`, artifactSha256: sha, byteSize: 4096, mediaType: 'video', container: 'mp4',
+      recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: sha } },
+      sources: [{ artifactKey: 'masters/source.mp4', sha256: 'c'.repeat(64), role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } } }] })
+    const map = { schemaVersion: 'render-element-map/v1', proxyHash: sha, fps: 30, durationFrames: 300, canvas: { width: 540, height: 960 }, elements: [] }
+    return { variantId, sha, manifest, map, artifactId: `artifact-base-${suffix}`, manifestId: `manifest-base-${suffix}`, operationId: `operation-base-${suffix}`,
+      createdAt: new Date(Date.UTC(2026, 9, 1, 0, 0, index)) }
+  })
+  const byArtifact = (artifactId) => proxies.find((proxy) => proxy.artifactId === artifactId)
+  const client = {
+    $queryRawUnsafe: (text, ...params) => params[0] === baseVersionId ? baseWorld.queryRawUnsafe(text, ...params) : world.queryRawUnsafe(text, ...params),
+    v2ProjectProxyRenderOperation: { async findFirst({ where, select }) {
+      const found = proxies.map((proxy) => ({ operationId: proxy.operationId, workspaceId: moWorkspace, projectId: moProject, projectVersionId: baseVersionId,
+        outputArtifactId: proxy.artifactId, outputManifestId: proxy.manifestId, outputVariantId: proxy.variantId, createdAt: proxy.createdAt,
+        operation: { status: 'succeeded', phase: 'completed' } })).filter((row) => moMatches(row, where)).toSorted((left, right) => right.createdAt - left.createdAt)[0]
+      return found ? Object.fromEntries(Object.keys(select).map((key) => [key, found[key]])) : null
+    } },
+    v2MediaArtifact: { async findFirst({ where }) {
+      const proxy = byArtifact(where.id)
+      return proxy && { id: proxy.artifactId, workspaceId: moWorkspace, artifactKey: proxy.manifest.artifact.artifactKey, sha256: proxy.sha, byteSize: 4096n,
+        manifests: [{ id: proxy.manifestId, manifestHash: proxy.manifest.manifestHash, workspaceId: moWorkspace, artifactId: proxy.artifactId, manifestJson: stableSerialize(proxy.manifest) }] }
+    } },
+    v2RenderElementMap: { async findFirst({ where }) {
+      const proxy = byArtifact(where.proxyArtifactId)
+      return proxy && { id: `map-${proxy.artifactId}`, workspaceId: moWorkspace, projectId: moProject, projectVersionId: baseVersionId, proxyArtifactId: proxy.artifactId,
+        proxyHash: proxy.map.proxyHash, mapHash: renderElementMapHash(proxy.map), schemaVersion: proxy.map.schemaVersion, fps: proxy.map.fps,
+        durationFrames: proxy.map.durationFrames, canvasWidth: proxy.map.canvas.width, canvasHeight: proxy.map.canvas.height, elementsJson: '[]',
+        createdAt: new Date('2026-10-09T00:00:00.000Z') }
+    } },
+  }
+  return { world, baseVersionId, repository: new PrismaProjectProxyRenderRepository(client) }
+}
+
+test('S3-MO partial and unchanged reuse carry over the base proxy of the SAME output only, whatever the other output has rendered', async () => {
+  const baseVersionId = 'project-version-proxy-base'
+  const clip = (id, from, to, extra = {}) => Object.freeze({ id, sourceArtifactId: 'artifact-project-proxy-source', sourceInFrame: from, sourceOutFrame: to,
+    timelineInFrame: from, timelineOutFrame: to, rate: 1, ...extra })
+  const planWith = (versionId, crop) => ({ ...source().editPlan, id: `edit-plan-${versionId}`, projectVersionId: versionId, createdAt: '2026-07-31T22:44:00.000Z',
+    videoTracks: [{ kind: 'base-video', clips: [clip('clip-1', 0, 150), clip('clip-2', 150, 300, crop ? { crop } : {})] }] })
+  const cropped = { x: 0.1, y: 0.1, width: 0.8, height: 0.8 }
+  const outputReferences = ['wide', 'tall'].map((suffix) => ({ artifactId: `artifact-base-${suffix}`, kind: 'proxy', sourceVersionId: baseVersionId, variantId: `variant-${suffix}` }))
+  const impactOf = (commandId, operation) => createManualCommandImpact({ commandId, baseVersionId, resultVersionId: moVersion, variantId: 'variant-wide',
+    outputVariantIds: ['variant-wide', 'variant-tall'], targetId: 'clip-2', action: 'apply', operation,
+    beforeEditPlan: planWith(baseVersionId), afterEditPlan: planWith(moVersion, cropped), outputReferences })
+  const project = (commandId, impact, invalidatedVariants) => ({ versions: [{ id: moVersion, command: { id: commandId, type: 'manual-edit', baseVersionId,
+    payloadJson: JSON.stringify({ impact }),
+    artifactInvalidations: createCommandArtifactInvalidations({ impact, createdAt: '2026-10-02T00:00:00.000Z' })
+      .filter((invalidation) => invalidatedVariants.includes(invalidation.variantId))
+      .map((invalidation) => ({ ...invalidation, createdAt: new Date(invalidation.createdAt),
+        dependencyTypesJson: JSON.stringify(invalidation.dependencyTypes), affectedRangesJson: JSON.stringify(invalidation.affectedRanges), resolutions: [] })) } }] })
+
+  // Partial range: a crop of clip-2 makes the renders of BOTH outputs stale on the same range; each reuses its own base proxy.
+  const crop = impactOf('command-crop-mo', { kind: 'crop', clipId: 'clip-2', crop: cropped })
+  assert.deepEqual(crop.minimalRenders.map((render) => render.variantId).toSorted(), ['variant-tall', 'variant-wide'], 'a project-wide edit lists every output')
+  const both = moReusableRepository()
+  for (const [variantId, suffix] of [['variant-wide', 'wide'], ['variant-tall', 'tall']]) {
+    const reused = await both.repository.attachRangeReuse(moWorkspace, project('command-crop-mo', crop, ['variant-wide', 'variant-tall']), await moSource(both.world, variantId))
+    assert.equal(reused.rangeReuse?.artifactId, `artifact-base-${suffix}`, `${variantId}: its own base proxy`)
+    assert.equal(reused.rangeReuse?.baseVersionId, baseVersionId)
+    assert.deepEqual(reused.rangeReuse?.ranges, [{ startFrame: 150, endFrame: 300 }])
+  }
+  // The 9:16 base proxy never stands in for a 16:9 output that has none, and vice versa: a full render, not a wrong reuse.
+  for (const [present, variantId] of [[['variant-tall'], 'variant-wide'], [['variant-wide'], 'variant-tall']]) {
+    const lacking = moReusableRepository({ present })
+    const result = await lacking.repository.attachRangeReuse(moWorkspace, project('command-crop-mo', crop, ['variant-wide', 'variant-tall']), await moSource(lacking.world, variantId))
+    assert.equal(result.rangeReuse, undefined, `${variantId} has no base proxy of its own: no partial reuse`)
+  }
+  // Only the other output's invalidation exists: this output is not narrowed to a range.
+  const stray = await both.repository.attachRangeReuse(moWorkspace, project('command-crop-mo', crop, ['variant-tall']), await moSource(both.world, 'variant-wide'))
+  assert.equal(stray.rangeReuse, undefined, 'the invalidation of the other output narrows nothing')
+
+  // Unchanged reuse (a render-free selection): each output carries over its own base proxy.
+  const select = impactOf('command-select-mo', { kind: 'select', clipId: 'clip-2' })
+  assert.equal(select.renderSemanticsChanged, false)
+  for (const [variantId, suffix] of [['variant-wide', 'wide'], ['variant-tall', 'tall']]) {
+    const reused = await both.repository.attachRangeReuse(moWorkspace, project('command-select-mo', select, []), await moSource(both.world, variantId))
+    assert.equal(reused.unchangedReuseRequired, true)
+    assert.equal(reused.unchangedReuse?.artifactId, `artifact-base-${suffix}`, `${variantId}: its own base proxy`)
+    assert.equal(reused.unchangedReuse?.operationId, `operation-base-${suffix}`)
+  }
+  const missing = moReusableRepository({ present: ['variant-tall'] })
+  const unavailable = await missing.repository.attachRangeReuse(moWorkspace, project('command-select-mo', select, []), await moSource(missing.world, 'variant-wide'))
+  assert.equal(unavailable.unchangedReuseRequired, true)
+  assert.equal(unavailable.unchangedReuse, undefined, 'no 16:9 base proxy: the render-free change is refused at enqueue, never served the 9:16 one')
 })

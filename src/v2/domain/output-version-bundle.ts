@@ -460,7 +460,7 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
     assertDomain(edit.contentJson===stableSerialize(expected),'INVALID_COMMAND','Origin target differs from real manual constructor')
     const before=JSON.parse(operationalBundlePlanV3(parent).contentJson),impact=createManualCommandImpact({
       commandId:origin.command.id,baseVersionId:parent.version.id,resultVersionId:a.resultVersionId,variantId:payload.variantId,
-      targetId:payload.targetId,action:payload.action,...(payload.operation?{operation:payload.operation}:{}),
+      outputVariantIds:parent.state.document.entries.map(e=>e.variantId),targetId:payload.targetId,action:payload.action,...(payload.operation?{operation:payload.operation}:{}),
       beforeEditPlan:before,afterEditPlan:expected,outputReferences:payload.impact!.affectedArtifacts})
     assertDomain(stableSerialize(impact)===stableSerialize(payload.impact),'INVALID_COMMAND','Manual impact differs from real plan effect')
     const sourceNormalizations=source.state.document.schemaVersion==='project-output-state/v3'?

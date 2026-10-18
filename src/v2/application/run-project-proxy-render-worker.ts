@@ -30,7 +30,7 @@ import {
   type EvaluateColorCriticResult,
 } from './color-critic.ts'
 import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
-import { contextVariantSelection, projectProxyRenderInputHash } from './project-render-sources.ts'
+import { contextVariantSelection, projectProxyRenderInputHash, sourceOutputVariantId } from './project-render-sources.ts'
 import { deriveEditorialRenderGeometry } from './derive-editorial-render-geometry.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
@@ -185,6 +185,11 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             requireCurrent: true,
           })
       if (!source) throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable project render source disappeared')
+      // The output this render was made for is the one the operation persisted; a source sealed to another output is no source.
+      const outputVariantId = sourceOutputVariantId(source)
+      if (context.outputVariantId !== undefined && context.outputVariantId !== outputVariantId) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable project render source is not the output its operation was made for')
+      }
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
       const colorPlan = await dependencies.colorPlans.readEffectiveForVersion({
         workspaceId: operation.workspaceId,
@@ -506,8 +511,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             ...completion, variantId: context.renderableSnapshot.variantId, ocrReceipt: null,
           })
         : dependencies.projects.attachCompletedOutput({
+            // `variantId` is the stable State variant the render was made for; `format` is the aspect ratio the recipe records.
             ...completion, projectVersionId: context.projectVersionId,
-            variantId: source.format, ocrReceipt,
+            variantId: outputVariantId, format: source.format, ocrReceipt,
           }))
       await verifyCommittedCompletion()
       stopHeartbeat()

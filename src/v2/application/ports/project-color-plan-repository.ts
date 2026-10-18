@@ -21,7 +21,9 @@ export interface ProjectColorPlanContext {
   targets: readonly Readonly<ColorPlanTarget>[]
   trustedSourceMetadata: Readonly<Record<string, Readonly<ColorMetadata>>>
   currentDurationFrames: number
-  proxyVariantId: string
+  /** Every output of the project: the stable variant ids of the sealed State the Command's child Version carries. */
+  variantIds: readonly string[]
+  /** The renders of the head Version, each attributed to its own output. */
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 

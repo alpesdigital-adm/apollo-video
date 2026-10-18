@@ -314,7 +314,8 @@ function manualInput(parent,{target=null,suffix='select',action=target?'restore'
  const operation=action==='apply'?{kind:'select',clipId:targetId}:undefined
  const plan=action==='apply'?materializeManualEditPlan({editPlan:before,operation,newVersionId:versionId,createdAt,availableAssetIds:[],variantId}):
   materializeManualRestorePlan({targetEditPlan:sourcePlan,action,targetVersionId:target.version.id,newVersionId:versionId,createdAt,variantId})
- const impact=createManualCommandImpact({commandId,baseVersionId:parent.version.id,resultVersionId:versionId,variantId,targetId,action,
+ const impact=createManualCommandImpact({commandId,baseVersionId:parent.version.id,resultVersionId:versionId,variantId,
+  outputVariantIds:parent.state.document.entries.map(e=>e.variantId),targetId,action,
   ...(operation?{operation}:{}),beforeEditPlan:before,afterEditPlan:plan,outputReferences:[]})
  const command=createEditCommand({...scope,id:commandId,type:'manual-edit',baseVersionId:parent.version.id,baseHash:parent.version.baseHash,
   author:{type:'api-client',id:audit.clientId},scope:{clipIds:[targetId],outputSpecIds:[variantId]},

@@ -19,6 +19,7 @@ import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan
 import { createQualityReport, resolveStrategicRubric } from '../../src/v2/domain/strategic-rubric.ts'
 import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { parseFinalExportQuality, PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
+import { requirePersistedOutputConsumptionV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
 import { alteredConsumption, fakeOutputWorld, withConsumption } from './helpers/output-consumption-fakes.mjs'
 import { assertRenderedSubtitleCuesAreReviewed } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import {
@@ -73,7 +74,10 @@ test('final export rejects unknown, legacy and hash-altered face-safety claims',
     hardChecks: { ...quality.hardChecks, subtitlesFaceSafe: true } }
   assert.equal(parse(verified).status, 'approved', 'syntax-only parser does not grant evidence authority')
   const observed = []
+  // The approving proxy review is the one rendered for the exported output: the repository attributes a review through the sealed State.
+  const approvalWorld = fakeOutputWorld({ workspaceId, projectId: 'project-controlled', versionId: 'result-version', entries: [{ variantId: 'variant-controlled', aspectRatio: '9:16' }] })
   const repository = new PrismaProjectFinalExportRepository({
+    $queryRawUnsafe: (...args) => approvalWorld.queryRawUnsafe(...args),
     v2Project: { async findFirst() { return {
       locale: 'pt-BR', versions: [{ id: 'result-version' }],
       directorRuns: [{ id: 'director-run', baseVersionId: 'input-version',
@@ -86,7 +90,7 @@ test('final export rejects unknown, legacy and hash-altered face-safety claims',
   })
   repository.perceptionEvidence = { async read(input) { observed.push(input); return { modality: 'ocr' } } }
   const request = { workspaceId, projectId: 'project-controlled', projectVersionId: 'result-version',
-    projectVersionHash: 'b'.repeat(64), outputSpecId: 'output-spec-controlled', requireCurrent: true }
+    projectVersionHash: 'b'.repeat(64), outputSpecId: 'output-spec-controlled', outputVariantId: 'variant-controlled', requireCurrent: true }
   assert.equal(await repository.readApproval(request), null,
     'an immutable OCR envelope cannot authorize facial safety')
   assert.equal(observed[0].inputVersionId, 'input-version')
@@ -1066,8 +1070,8 @@ test('S3 final export threads an optional State variant to the final verdict (en
   await assert.rejects(repository.readApprovedCurrentSource({ ...at, variantId: 'variant-tall' }),
     (error) => error.details?.reason === 'derived-source-perception-authority-required')
 
-  // The worker reads through the variant a later step persists in the context (none today).
-  for (const [contextOverride, expected] of [[{}, undefined], [{ variantId: 'variant-tall' }, 'variant-tall']]) {
+  // The worker reads through the variant its operation persisted (`outputVariantId`); a legacy context names none.
+  for (const [contextOverride, expected] of [[{}, undefined], [{ outputVariantId: 'variant-main' }, 'variant-main']]) {
     const operations = createOperations()
     const { dependencies } = workerDependencies(operations)
     const workerAsked = []
@@ -1078,4 +1082,161 @@ test('S3 final export threads an optional State variant to the final verdict (en
     assert.equal(workerAsked[0].variantId, expected)
     assert.equal('variantId' in workerAsked[0], expected !== undefined)
   }
+})
+
+// ---------------------------------------------------------------------------
+// Slice S3 multi-output - the final export resolves ONE output explicitly and persists which output it was made for.
+// ---------------------------------------------------------------------------
+
+const moOutputs = [{ variantId: 'variant-wide', aspectRatio: '16:9' }, { variantId: 'variant-tall', aspectRatio: '9:16' }]
+const moWorld = (entries = moOutputs) => fakeOutputWorld({ workspaceId, projectId, versionId: projectVersionId, baseHash: '1'.repeat(64), entries })
+// The verdict publishes its purpose with every refusal except an unknown variant (which is a fact about the request, not the purpose).
+const moRefusal = (reason) => (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' &&
+  error.details.reason === reason && (reason === 'output-variant-unknown' || error.details.purpose === 'final')
+
+/** The source a repository answers for one output: the verdict is the REAL persisted `final` one, read from the sealed rows of the world. */
+async function moFinalSource(world, variantId) {
+  const consumption = await requirePersistedOutputConsumptionV3({ $queryRawUnsafe: world.queryRawUnsafe },
+    { workspaceId, projectId, versionId: projectVersionId, purpose: 'final', ...(variantId === undefined ? {} : { variantId }) })
+  return Object.freeze({ ...approvedSource(), format: consumption.aspectRatio,
+    outputConsumption: Object.freeze({ seal: consumption.seal, sealHash: consumption.sealHash }) })
+}
+
+test('S3-MO final export resolves ONE output explicitly: none named, a stranger, a format that is not the output and two outputs of one ratio are refused; each output persists its own variant and spec', async () => {
+  const persisted = []
+  const enqueueOn = (world) => (variantId, format, key) => enqueueProjectFinalExportService({
+    projects: { readApprovedCurrentSource: (input) => moFinalSource(world, input.variantId) },
+    rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
+    operations: { async findReplay() { return null }, async createOrReplay(input) { persisted.push(input); return { ...input, replayed: false } } },
+    colorPipelines,
+    clock: () => new Date('2026-07-19T01:05:00.000Z'),
+    createId: (kind) => `${kind}-final-mo-${persisted.length}`,
+  })({ workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), format, approval: { approved: true },
+    actor: exportActor(), idempotencyKey: key, ...(variantId === undefined ? {} : { variantId }) })
+  const enqueue = enqueueOn(moWorld())
+  await assert.rejects(enqueue(undefined, '9:16', 'final-mo-none'), moRefusal('output-variant-required'),
+    'a format alone never selects the output of a project with several')
+  await assert.rejects(enqueue('variant-stranger', '9:16', 'final-mo-stranger'), moRefusal('output-variant-unknown'))
+  await assert.rejects(enqueue('variant-wide', '9:16', 'final-mo-format'), (error) => error instanceof DomainError && error.code === 'INVALID_OUTPUT_SPEC',
+    'the format must be the aspect ratio of the output named')
+  assert.equal(persisted.length, 0, 'a refused enqueue admits nothing')
+
+  await enqueue('variant-wide', '16:9', 'final-mo-wide')
+  await enqueue('variant-tall', '9:16', 'final-mo-tall')
+  const [wide, tall] = persisted
+  assert.equal(wide.context.outputVariantId, 'variant-wide')
+  assert.equal(tall.context.outputVariantId, 'variant-tall')
+  assert.equal(wide.context.outputSpec.aspectRatio, '16:9')
+  assert.equal(tall.context.outputSpec.aspectRatio, '9:16')
+  assert.notEqual(wide.context.inputHash, tall.context.inputHash, 'each output is its own input')
+  assert.equal(tall.context.inputHash, finalInputHash(true, await moFinalSource(moWorld(), 'variant-tall')), 'the 9:16 hash is the one over its own sealed entry')
+  assert.equal(wide.context.outputSpec.width, 1920)
+  assert.equal(tall.context.outputSpec.width, 1080)
+
+  persisted.length = 0
+  const clash = enqueueOn(moWorld([{ variantId: 'variant-a', aspectRatio: '9:16' }, { variantId: 'variant-b', aspectRatio: '9:16' }]))
+  await assert.rejects(clash('variant-a', '9:16', 'final-mo-clash'), moRefusal('output-variant-ambiguous'))
+  assert.equal(persisted.length, 0)
+
+  await enqueueOn(moWorld([{ variantId: 'variant-solo', aspectRatio: '9:16' }]))(undefined, '9:16', 'final-mo-solo')
+  assert.equal(persisted[0].context.outputVariantId, 'variant-solo', 'one output: the variant is optional and the same row is persisted')
+})
+
+test('S3-MO the approval of a final export is the proxy review of THAT output: the lookup is filtered by the render the review belongs to', async () => {
+  const lookups = []
+  const repositoryOn = (world) => new PrismaProjectFinalExportRepository({
+    $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+    v2Project: { async findFirst(query) {
+      lookups.push(query.select.proxyReviews.where)
+      return { locale: 'pt-BR', versions: [{ id: projectVersionId }], directorRuns: [], proxyReviews: [] }
+    } },
+  })
+  const request = { workspaceId, projectId, projectVersionId, projectVersionHash: '1'.repeat(64), outputSpecId: 'output-spec-mo', requireCurrent: true }
+  assert.equal(await repositoryOn(moWorld()).readApproval({ ...request, outputVariantId: 'variant-tall' }), null)
+  assert.equal(await repositoryOn(moWorld()).readApproval({ ...request, outputVariantId: 'variant-wide' }), null)
+  assert.deepEqual(lookups.map((where) => where.operation), [{ outputVariantId: 'variant-tall' }, { outputVariantId: 'variant-wide' }],
+    'with several outputs only a review rendered for this very output approves it')
+  lookups.length = 0
+  await repositoryOn(moWorld([{ variantId: 'variant-solo', aspectRatio: '9:16' }])).readApproval({ ...request, outputVariantId: 'variant-solo' })
+  assert.deepEqual(lookups[0].operation, { OR: [{ outputVariantId: 'variant-solo' }, { outputVariantId: null }] },
+    'one output: a review rendered before the output was recorded is still its own')
+  lookups.length = 0
+  await repositoryOn(moWorld([{ variantId: 'variant-solo', aspectRatio: '9:16' }])).readApproval({ ...request, outputVariantId: 'variant-stranger' })
+  assert.deepEqual(lookups[0].operation, { outputVariantId: 'variant-stranger' }, 'a legacy review is never attributed to an output the Version does not have alone')
+})
+
+test('S3-MO the final repository names the output of a format (an export matrix cell) without a guess, and refuses two outputs of one ratio', async () => {
+  const repositoryOn = (world) => new PrismaProjectFinalExportRepository({ $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args) })
+  const at = { workspaceId, projectId, projectVersionId }
+  const repository = repositoryOn(moWorld())
+  assert.equal(await repository.resolveOutputVariantByFormat({ ...at, format: '16:9' }), 'variant-wide')
+  assert.equal(await repository.resolveOutputVariantByFormat({ ...at, format: '9:16' }), 'variant-tall')
+  assert.equal(await repository.resolveOutputVariantByFormat({ ...at, format: '1:1' }), null, 'no output of that format: nothing to export')
+  await assert.rejects(repositoryOn(moWorld([{ variantId: 'variant-a', aspectRatio: '9:16' }, { variantId: 'variant-b', aspectRatio: '9:16' }]))
+    .resolveOutputVariantByFormat({ ...at, format: '9:16' }), (error) => error.details?.reason === 'output-variant-ambiguous')
+  assert.equal(await repository.resolveOutputVariantByFormat({ ...at, projectVersionId: 'project-version-unknown', format: '9:16' }), null)
+})
+
+test('S3-MO a completed final export resolves the invalidations of its own output, and a failed one never fails a project another output of the Version still owns', async () => {
+  const operationRow = (patch = {}) => ({ operationId: 'operation-final-export-test', workspaceId, projectId, projectVersionId, outputArtifactId: 'artifact-final-output',
+    outputManifestId: 'manifest-final-output', outputAspectRatio: '16:9', outputVariantId: 'variant-wide', ...patch })
+  const run = async ({ row, world = moWorld() }) => {
+    const seen = { invalidations: [], resolutions: 0, projectUpdates: 0 }
+    const repository = new PrismaProjectFinalExportRepository({
+      $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+      async $transaction(callback) {
+        return callback({
+          $queryRawUnsafe: (...args) => world.queryRawUnsafe(...args),
+          v2ProjectFinalExportOperation: { async findFirst() { return row } },
+          v2MediaArtifact: { async findFirst() { return { id: 'artifact-final-output' } } },
+          v2MediaArtifactManifest: { async findFirst() { return { id: 'manifest-final-output' } } },
+          v2ProjectMediaAsset: { async upsert() {} },
+          v2CommandArtifactInvalidation: { async findMany(query) { seen.invalidations.push(query.where.variantId); return [{ id: 'invalidation-1' }] } },
+          v2CommandArtifactInvalidationResolution: { async upsert() { seen.resolutions += 1 } },
+          v2Project: { async updateMany() { seen.projectUpdates += 1; return { count: 1 } } },
+        })
+      },
+    })
+    await repository.attachCompletedOutput({ workspaceId, operationId: 'operation-final-export-test', projectId, projectVersionId,
+      outputArtifactId: 'artifact-final-output', outputManifestId: 'manifest-final-output', originalFileName: 'out.mp4', createdAt: '2026-07-19T01:06:00.000Z' })
+    return seen
+  }
+  const stable = await run({ row: operationRow() })
+  assert.deepEqual(stable.invalidations, ['variant-wide'], 'the invalidations are looked up by the STABLE variant, not by the aspect ratio')
+  assert.equal(stable.resolutions, 1)
+  const legacy = await run({ row: operationRow({ outputVariantId: null, outputAspectRatio: '9:16' }) })
+  assert.deepEqual(legacy.invalidations, ['variant-tall'], 'a legacy row is attributed through the State by its ratio, when exactly one output has it')
+  await assert.rejects(run({ row: operationRow({ outputVariantId: null, outputAspectRatio: '1:1' }) }), (error) => error.code === 'PERSISTENCE_CONFLICT',
+    'a legacy row that no single output claims is not attributed to a guess')
+
+  const failureOn = (siblings) => {
+    const seen = { updates: 0 }
+    const repository = new PrismaProjectFinalExportRepository({
+      v2ProjectFinalExportOperation: { async findFirst() { return { projectVersionId } }, async count(query) {
+        assert.deepEqual(query.where.operation, { status: { notIn: ['failed', 'canceled'] } })
+        assert.deepEqual(query.where.operationId, { not: 'operation-final-export-test' })
+        return siblings
+      } },
+      v2Project: { async updateMany() { seen.updates += 1; return { count: 1 } } },
+    })
+    return { seen, run: () => repository.markExportFailed({ workspaceId, operationId: 'operation-final-export-test', projectId }) }
+  }
+  const owned = failureOn(1)
+  await owned.run()
+  assert.equal(owned.seen.updates, 0, 'a sibling export of the Version is queued, running or done: the project keeps its status')
+  const alone = failureOn(0)
+  await alone.run()
+  assert.equal(alone.seen.updates, 1, 'the only export of the Version failing fails the project, as it always did')
+})
+
+test('S3-MO a final worker refuses a source that is not the output its operation was approved for, before it renders or attaches anything', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  const original = operations.repository.claimNext
+  operations.repository.claimNext = async (input) => { const claimed = await original(input); return { ...claimed, context: { ...claimed.context, outputVariantId: 'variant-tall' } } }
+  // approvedSource() is sealed to the world's only output, 'variant-main'.
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-wrong-output')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
+  assert.equal(operations.operation.error.code, 'persistence_conflict')
+  assert.deepEqual([calls.rendered, calls.persisted, calls.attached], [0, 0, 0])
 })

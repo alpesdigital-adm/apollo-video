@@ -125,6 +125,7 @@ function manualImpact(overrides = {}) {
     baseVersionId,
     resultVersionId,
     variantId: '9:16',
+    outputVariantIds: ['9:16'],
     targetId: 'clip-1',
     action: 'apply',
     operation,
@@ -141,7 +142,7 @@ function reviewPatchImpact(commandType) {
     commandId: `edit-command-registry-${commandType}`,
     baseVersionId,
     resultVersionId,
-    variantIds: ['9:16'],
+    outputVariantIds: ['9:16'],
     operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1000] }],
     invalidatedRangesMs: [[1000, 1000]],
     beforeEditPlan: plan(),
@@ -175,7 +176,7 @@ function directorRunImpact() {
     criticVersion: '1.0.0',
     affectedEndFrame: durationFrames,
     renderEndFrame: 120,
-    proxyVariantId: '9:16',
+    variantIds: ['9:16'],
     outputReferences: outputs,
   })
 }
@@ -190,7 +191,7 @@ function lutSelectionImpact(frames = durationFrames) {
     resolvedMode: 'none',
     intensity: 1,
     durationFrames: frames,
-    proxyVariantId: '9:16',
+    variantIds: ['9:16'],
     outputReferences: frames > 0 ? outputs : [],
   })
 }
@@ -204,7 +205,7 @@ function colorPlanImpact(frames = durationFrames) {
     colorPlanHash: hashA,
     compiledManifestHash: hashB,
     durationFrames: frames,
-    proxyVariantId: '9:16',
+    variantIds: ['9:16'],
     outputReferences: frames > 0 ? outputs : [],
   })
 }

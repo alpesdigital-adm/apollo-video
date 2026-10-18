@@ -4,15 +4,75 @@ import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index
 
 import { EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../application/ports/editorial-proxy-renderer.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { DomainError } from '../../domain/errors.ts'
+import { outputVariantsOf } from '../../domain/output-consumption.ts'
 import { validateRenderElementMap, renderElementMapHash, type RenderElement, type RenderElementMap } from '../../domain/review-system.ts'
+import { readStoredOutputStateV3 } from './output-state-consumption.ts'
 
 type Database = PrismaClient | Prisma.TransactionClient
+
+/**
+ * Whether a proxy operation row written without an `outputVariantId` (before the column existed) belongs to `outputVariantId`:
+ * only when the Version it was made for has exactly that one output. A State with several outputs cannot attribute such a row, so
+ * it is never offered to any of them. A Version whose State cannot be read as sealed (a historical one) attributes nothing.
+ */
+export async function legacyProxyBelongsToOutput(database: Database, input: Readonly<{
+  workspaceId: string; projectId: string; versionId: string; outputVariantId: string
+}>): Promise<boolean> {
+  let stored: Awaited<ReturnType<typeof readStoredOutputStateV3>>
+  try {
+    stored = await readStoredOutputStateV3(database, input)
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED') return false
+    throw error
+  }
+  if (!stored) return false
+  const variants = outputVariantsOf(stored.state)
+  return variants.length === 1 && variants[0]!.variantId === input.outputVariantId
+}
+
+/** The `where` that selects the proxy operations of one output of a Version (the legacy, unattributed ones only when exact). */
+async function proxyOperationsOfOutput(database: Database, input: Readonly<{
+  workspaceId: string; projectId: string; versionId: string; outputVariantId: string
+}>) {
+  return (await legacyProxyBelongsToOutput(database, input))
+    ? { OR: [{ outputVariantId: input.outputVariantId }, { outputVariantId: null }] }
+    : { outputVariantId: input.outputVariantId }
+}
+
+/**
+ * The newest completed proxy render of `baseVersionId` made for THIS output: the only proxy a partial or unchanged reuse may carry
+ * over into the same output of a child Version. A render of another output of the same Version is never offered, whatever its age.
+ */
+export async function selectReusableProxyOperation(database: Database, input: Readonly<{
+  workspaceId: string
+  projectId: string
+  baseVersionId: string
+  outputVariantId: string
+  artifactIds?: readonly string[]
+}>) {
+  const ofOutput = await proxyOperationsOfOutput(database, { workspaceId: input.workspaceId, projectId: input.projectId,
+    versionId: input.baseVersionId, outputVariantId: input.outputVariantId })
+  return database.v2ProjectProxyRenderOperation.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      projectVersionId: input.baseVersionId,
+      ...(input.artifactIds ? { outputArtifactId: { in: [...input.artifactIds] } } : {}),
+      ...ofOutput,
+      operation: { status: 'succeeded', phase: 'completed' },
+    },
+    orderBy: [{ createdAt: 'desc' }, { operationId: 'desc' }],
+    select: { operationId: true, outputArtifactId: true, outputManifestId: true },
+  })
+}
 
 /**
  * A conservative cache receipt for the current unknown-face renderer. The recipe
  * and digest identify a declared implementation version, not a binary hash or
  * independently judged pixels. The stored map must attest that no subtitle was
  * drawn. W69 will replace this with a complete materialized pixel receipt.
+ * `outputVariantId`: the output the reuse is FOR; the receipt must be a proxy of that same output.
  */
 type ReusableProxyInput = Readonly<{
   workspaceId: string
@@ -21,14 +81,23 @@ type ReusableProxyInput = Readonly<{
   operationId: string
   artifactId: string
   manifestId: string
+  outputVariantId: string
 }>
 
-async function readReusableProxyReceipt(database: Database, input: ReusableProxyInput, expectedMapId?: string) {
+async function readReusableProxyReceipt(database: Database, input: ReusableProxyInput, expectedMapId?: string,
+  knownLegacy?: boolean) {
+  const ofOutput = knownLegacy === undefined
+    ? await proxyOperationsOfOutput(database, { workspaceId: input.workspaceId, projectId: input.projectId,
+      versionId: input.baseVersionId, outputVariantId: input.outputVariantId })
+    : knownLegacy
+      ? { OR: [{ outputVariantId: input.outputVariantId }, { outputVariantId: null }] }
+      : { outputVariantId: input.outputVariantId }
   const [operation, artifact, mapRow] = await Promise.all([
     database.v2ProjectProxyRenderOperation.findFirst({ where: {
       operationId: input.operationId, workspaceId: input.workspaceId,
       projectId: input.projectId, projectVersionId: input.baseVersionId,
       outputArtifactId: input.artifactId, outputManifestId: input.manifestId,
+      ...ofOutput,
       operation: { status: 'succeeded', phase: 'completed' },
     }, select: { operationId: true } }),
     database.v2MediaArtifact.findFirst({ where: {
@@ -105,14 +174,19 @@ async function readReusableProxyReceipt(database: Database, input: ReusableProxy
 export async function readSafeReusableProxyReceipt(transaction: Prisma.TransactionClient, input: ReusableProxyInput & {
   plan: Parameters<typeof lockProxySourceArtifacts>[1]['plan']; sourceArtifactId: string
 }) {
+  // Plain reads of the sealed State, before any lock: whether an unattributed (legacy) base proxy is exactly this output's.
+  const legacy = await legacyProxyBelongsToOutput(transaction, { workspaceId: input.workspaceId, projectId: input.projectId,
+    versionId: input.baseVersionId, outputVariantId: input.outputVariantId })
   const operation = await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "public_operations"
     WHERE "id" = ${input.operationId} AND "workspaceId" = ${input.workspaceId} AND "projectId" = ${input.projectId}
       AND "status" = 'succeeded' AND "phase" = 'completed' FOR UPDATE`)
   if (operation.length !== 1) return null
+  // The proxy being reused must be the base Version's proxy of THIS output (a render of another output is never reusable here).
   const detail = await transaction.$queryRaw<{ operationId: string }[]>(Prisma.sql`SELECT "operationId" FROM "project_proxy_render_operations"
     WHERE "operationId" = ${input.operationId} AND "workspaceId" = ${input.workspaceId} AND "projectId" = ${input.projectId}
       AND "projectVersionId" = ${input.baseVersionId} AND "outputArtifactId" = ${input.artifactId}
-      AND "outputManifestId" = ${input.manifestId} FOR UPDATE`)
+      AND "outputManifestId" = ${input.manifestId}
+      AND ("outputVariantId" = ${input.outputVariantId} OR ("outputVariantId" IS NULL AND ${legacy}::boolean)) FOR UPDATE`)
   if (detail.length !== 1) return null
   const project = await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "projects"
     WHERE "id" = ${input.projectId} AND "workspaceId" = ${input.workspaceId} FOR UPDATE`)
@@ -126,7 +200,7 @@ export async function readSafeReusableProxyReceipt(transaction: Prisma.Transacti
     WHERE "workspaceId" = ${input.workspaceId} AND "projectId" = ${input.projectId}
       AND "projectVersionId" = ${input.baseVersionId} AND "proxyArtifactId" = ${input.artifactId} FOR SHARE`)
   if (map.length !== 1) return null
-  return readReusableProxyReceipt(transaction, input, map[0]!.id)
+  return readReusableProxyReceipt(transaction, input, map[0]!.id, legacy)
 }
 
 /** External shape remains unchanged; internal map authority never spills into

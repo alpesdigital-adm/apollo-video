@@ -32,6 +32,7 @@ import { assertDirectorSnapshotAuthority, assertDirectorSnapshotContent, bindDir
 import type { StoryPlan } from '../../domain/story-plan.ts'
 import { validateTreatmentPlan, type TreatmentPlan } from '../../domain/treatment-plan.ts'
 import { editorialDerivedBindingV3, operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
@@ -50,7 +51,6 @@ import {
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { readEditorialSourceBindingV1 } from './output-version-materializer.ts'
-import { projectOutputFormat, requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
 import { parseDirectorDecisionLog } from '../../domain/director-decision.ts'
@@ -581,8 +581,9 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       : undefined
     const parent = await readPersistedOperationalOutputBundleV3(this.client, { workspaceId: project.workspaceId, projectId: project.id, versionId: versionRow.id })
     if (!parent) return null
-    const format = projectOutputFormat(project, parent)
-    if (!format) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
+    // A Director re-run is project-wide: its impact covers EVERY output the sealed State carries, each render attributed to its own.
+    const variantIds = parent.state.document.entries.map((entry) => entry.variantId)
+    if (variantIds.length === 0) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
     const editPlan = parseRecord(operationalBundlePlanV3(parent).contentJson, 'current EditPlan') as unknown as EditorialCutEditPlan
     const retimedTranscript = editPlan.retimedTranscript as unknown
     if (typeof retimedTranscript !== 'object' || retimedTranscript === null || !('sourceTranscriptId' in retimedTranscript) || typeof retimedTranscript.sourceTranscriptId !== 'string') {
@@ -629,11 +630,11 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const [proxyOutputs, finalOutputs] = await Promise.all([
       this.client.v2ProjectProxyRenderOperation.findMany({
         where: { workspaceId: project.workspaceId, projectId: project.id, projectVersionId: versionRow.id, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
         where: { workspaceId: project.workspaceId, projectId: project.id, projectVersionId: versionRow.id, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
     const currentDurationFrames = Number(editPlan.durationFrames)
@@ -654,7 +655,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     if (latestOcr && !ocrEnvelope) throw new DomainError('PERSISTENCE_CONFLICT', 'Selected OCR envelope disappeared')
     return Object.freeze({
       workspaceId: project.workspaceId,
-      project: Object.freeze({ id: project.id, objective: projectObjective.id, format, locale: project.locale }),
+      project: Object.freeze({ id: project.id, objective: projectObjective.id, locale: project.locale }),
       ...(latestDirectorObjective ? { latestDirectorObjective } : {}),
       parent,
       currentVersion: parent.version,
@@ -662,7 +663,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       policies: Object.freeze(parseRecord(versionRow.policiesSnapshot.contentJson, 'project policies')),
       editPlan: Object.freeze(editPlan),
       currentDurationFrames,
-      proxyVariantId: format,
+      variantIds: Object.freeze(variantIds),
       sourceRights: master.artifact.currentRightsSnapshot
         ? Object.freeze({
             state: 'present' as const,
@@ -678,10 +679,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
               : {}),
           })
         : Object.freeze({ state: 'missing' as const }),
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: versionRow.id, variantId: format })),
-        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: versionRow.id, variantId: output.outputAspectRatio })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: versionRow.id, proxies: proxyOutputs, finals: finalOutputs }),
       transcript: Object.freeze({
         id: transcriptRow.id,
         sourceArtifactId: transcriptRow.sourceArtifactId,
@@ -1126,17 +1124,14 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const [proxyOutputs, finalOutputs] = await Promise.all([
       transaction.v2ProjectProxyRenderOperation.findMany({
         where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       transaction.v2ProjectFinalExportOperation.findMany({
         where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
-    const currentOutputs = [
-      ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: requireProjectOutputFormat(project, bundle.bundle) })),
-      ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-    ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+    const currentOutputs = renderOutputReferences({ state: bundle.bundle.state, sourceVersionId: bundle.command.baseVersionId, proxies: proxyOutputs, finals: finalOutputs })
     if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
       throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before Director impact commit')
     }

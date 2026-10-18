@@ -54,12 +54,15 @@ export async function GET(
     requireScope(actor, 'projects:read')
     const { projectId } = await context.params
     const projectVersionId = request.nextUrl.searchParams.get('projectVersionId')?.trim() || undefined
+    // The stable State variant of the output whose review is read; optional only for a Version with exactly one output.
+    const variantId = request.nextUrl.searchParams.get('variantId')?.trim() || undefined
     const review = await readProxyReviewService({
       repository: createProxyReviewRepository(),
     })({
       workspaceId: actor.workspaceId,
       projectId,
       ...(projectVersionId ? { projectVersionId } : {}),
+      ...(variantId ? { variantId } : {}),
     })
     return NextResponse.json(
       presentSuccess({ review: presentProxyReview(review) }),

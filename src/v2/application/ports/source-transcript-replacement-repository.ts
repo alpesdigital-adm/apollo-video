@@ -29,6 +29,7 @@ export interface SourceTranscriptReplacementContext {
     sourceArtifactId: string
     transcript: Readonly<MediaTranscript>
   }>
+  /** The renders of the head Version, each attributed to its own output. */
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 

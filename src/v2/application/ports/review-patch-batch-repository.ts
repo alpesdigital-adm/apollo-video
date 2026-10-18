@@ -59,7 +59,7 @@ export interface ReviewPatchBatchProposalContext {
   editPlan: Readonly<Record<string, unknown>>
   editPlanHash: string
   availableAssetIds: readonly string[]
-  renderVariantIds: readonly string[]
+  /** Every render of the current Version (proxy and final), each attributed to the stable State variant it was made for. */
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
   entries: readonly Readonly<{ annotation: Readonly<ReviewAnnotation>; proposal: Readonly<ReviewPatchProposal> }>[]
 }

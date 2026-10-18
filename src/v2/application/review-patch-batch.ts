@@ -11,6 +11,7 @@ import { offeredObservationsFor } from './adoptable-observations.ts'
 import { transitionProjectOutputState } from '../domain/project-output-state-transition.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createReviewPatchCommandImpact, type CommandImpactV1 } from '../domain/command-impact.ts'
+import { outputVariantsOf } from '../domain/output-consumption.ts'
 import {
   compileBatchReview,
   materializePatchEditPlan,
@@ -259,7 +260,12 @@ export function applyReviewPatchBatchService(dependencies: {
       commandId,
       baseVersionId: context.currentVersion.id,
       resultVersionId: versionId,
-      variantIds: context.renderVariantIds,
+      // The batch edits the plan every output re-materializes from: all of the State's outputs go stale. The formats the applied
+      // annotations name are checked to be outputs of that State and never narrow the impact.
+      outputVariantIds: outputVariantsOf(context.parent.state).map((output) => output.variantId),
+      annotationFormatIds: context.entries
+        .filter((entry) => patch.annotationIds.includes(entry.annotation.id))
+        .flatMap((entry) => entry.annotation.applicationScope.formatIds),
       operations: patch.operations,
       invalidatedRangesMs: context.batch.impact!.invalidatedRanges,
       beforeEditPlan: context.editPlan,

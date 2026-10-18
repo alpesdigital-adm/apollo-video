@@ -228,7 +228,7 @@ export function memoryCommands({ world, mediaLinks, offered = PERSISTED_RECEIPTS
         // lends its sealed Version and State, and the cut is sealed on top of them by `sealOnObservedSource`.
         currentPlan: baseDirectedPlan({ versionId: currentVersion.id }),
         currentDurationFrames: 900,
-        proxyVariantId: '9:16',
+        variantIds: HEAD.state.document.entries.map((entry) => entry.variantId),
         outputReferences: Object.freeze([]),
         mediaLinks: Object.freeze(links),
       }

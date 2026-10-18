@@ -690,7 +690,9 @@ function renderHarness(input) {
         assert.equal(attached.operationId, operation.id)
         assert.equal(attached.projectId, context.projectId)
         assert.equal(attached.projectVersionId, context.projectVersionId)
-        assert.equal(attached.variantId, source.format)
+        // Completion is attributed to the STABLE State variant of the output (not to an aspect ratio); the format travels apart.
+        assert.equal(attached.variantId, source.outputConsumption.seal.variantId)
+        assert.equal(attached.format, source.format)
         assert.equal(attached.originalFileName, context.originalFileName)
         assert.equal(attached.createdAt, attached.review.renderCompletedAt)
         assert.equal(attached.outputArtifactId, context.outputArtifactId)

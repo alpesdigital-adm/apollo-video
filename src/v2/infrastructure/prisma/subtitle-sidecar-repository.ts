@@ -11,8 +11,8 @@ import type {
   SubtitleSidecarRepository,
 } from '../../application/ports/subtitle-sidecar-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { outputEntryAspectRatio } from '../../domain/output-consumption.ts'
-import { readStoredOutputStateV3, requirePersistedOutputConsumptionV3, type RequiredOutputConsumptionV3 } from './output-state-consumption.ts'
+import { renderRowsOfVariant } from '../../domain/render-row-variant.ts'
+import { requirePersistedOutputConsumptionV3, type RequiredOutputConsumptionV3 } from './output-state-consumption.ts'
 import {
   renderElementMapHash,
   validateRenderElementMap,
@@ -136,37 +136,8 @@ function toRecord(row: V2ProjectSubtitleSidecar): Readonly<PersistedSubtitleSide
   })
 }
 
-/**
- * The one place that says whether the variant a caller asked for is the output the sealed entry describes. Today the API names an
- * output by its aspect ratio, so the request is compared with the ratio the entry carries; when the request carries the stable
- * variant of the State, this is the only function that changes.
- */
-function requestedVariantIsOutput(requestedVariantId: string, outputAspectRatio: string | null): boolean {
-  return outputAspectRatio !== null && outputAspectRatio === requestedVariantId
-}
-
 const sealOf = (consumption: Readonly<RequiredOutputConsumptionV3>): SidecarOutputConsumptionSeal =>
   Object.freeze({ seal: consumption.seal, sealHash: consumption.sealHash })
-
-/**
- * The sidecar API names an output by its aspect ratio (`variantId` is the ratio of the final export / proxy it aligns to). The
- * consumption reader names an output by its stable variant. This maps the first onto the second from the sealed State of the exact
- * Version and nothing else: no project format, no guess.
- *
- * - `null`: the State has outputs and none carries this ratio, so there is nothing to align for this variant.
- * - `{}`: a State the reader answers for by itself (a Creation fork root or a State without outputs: blocked with the reasons the
- *   State records).
- * - `{ variantId }`: the output that carries the ratio. When two outputs share it, the first is named and the reader refuses the
- *   pair itself (`output-variant-ambiguous`): which of them is meant is the reader's verdict, not a guess made here.
- */
-async function outputVariantOfAspectRatio(client: Pick<PrismaClient, '$queryRawUnsafe'>,
-  scope: Readonly<{ workspaceId: string; projectId: string; versionId: string }>, aspectRatio: string): Promise<Readonly<{ variantId?: string }> | null> {
-  const stored = await readStoredOutputStateV3(client, scope)
-  if (!stored || stored.state.document.schemaVersion !== 'project-output-state/v3' || stored.state.document.entries.length === 0) return {}
-  const matching = stored.state.document.entries.filter((entry) => requestedVariantIsOutput(aspectRatio, outputEntryAspectRatio(entry)))
-  if (matching.length === 0) return null
-  return { variantId: matching[0]!.variantId }
-}
 
 export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepository {
   private readonly client: PrismaClient
@@ -178,9 +149,9 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
   async readRenderedAlignment(input: {
     workspaceId: string
     projectId: string
+    /** The stable variant of the State whose output is aligned. */
     variantId: string
     projectVersionId?: string
-    stateVariantId?: string
   }): Promise<Readonly<RenderedSubtitleAlignmentSource> | null> {
     const project = await this.client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
@@ -197,28 +168,26 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
 
     // The output of exactly this Version (never the head, never the project's format): the one persisted consumption reader
     // admits it for rendering, or refuses with the published reason (a copy no editorial cut has materialized, a Version
-    // without outputs, an unknown or ambiguous variant). The variant asked for must be the aspect ratio that output carries.
+    // without outputs, an unknown or ambiguous variant). `variantId` is the stable variant of that State.
     const scope = { workspaceId: input.workspaceId, projectId: input.projectId, versionId: projectVersionId }
-    const output = input.stateVariantId ? { variantId: input.stateVariantId } : await outputVariantOfAspectRatio(this.client, scope, input.variantId)
-    if (output === null) return null
-    const rendered = await requirePersistedOutputConsumptionV3(this.client, { ...scope, ...output, purpose: 'render' })
-    if (!requestedVariantIsOutput(input.variantId, rendered.aspectRatio)) return null
+    const rendered = await requirePersistedOutputConsumptionV3(this.client, { ...scope, variantId: input.variantId, purpose: 'render' })
+    const outputVariantId = rendered.entry.variantId
 
-    // A final export is the stronger evidence of what the audience sees, so it
-    // wins whenever one exists for the requested variant.
-    const [final, proxy] = await Promise.all([
-      this.client.v2ProjectFinalExportOperation.findFirst({
+    // The renders of this Version made for THIS output (selected by the output they name, never by Version alone: the other
+    // outputs of the Version have renders of their own). A final export is the stronger evidence of what the audience sees, so
+    // it wins whenever one exists for the requested output.
+    const [finals, proxies] = await Promise.all([
+      this.client.v2ProjectFinalExportOperation.findMany({
         where: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           projectVersionId,
-          outputAspectRatio: input.variantId,
           operation: { status: 'succeeded', phase: 'completed' },
         },
         orderBy: [{ createdAt: 'desc' }],
         include: { editPlanSnapshot: true },
       }),
-      this.client.v2ProjectProxyRenderOperation.findFirst({
+      this.client.v2ProjectProxyRenderOperation.findMany({
         where: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
@@ -229,6 +198,8 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
         include: { editPlanSnapshot: true },
       }),
     ])
+    const final = renderRowsOfVariant(rendered.state, finals, outputVariantId)[0] ?? null
+    const proxy = renderRowsOfVariant(rendered.state, proxies, outputVariantId)[0] ?? null
     const render = final
       ? {
           kind: 'final' as const,
@@ -278,7 +249,7 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
       projectVersionId,
       projectVersionSequence: version.sequence,
       isCurrentVersion: project.currentVersionId === projectVersionId,
-      variantId: input.variantId,
+      variantId: outputVariantId,
       outputKind: render.kind,
       outputArtifactId: render.outputArtifactId,
       outputManifestId: render.outputManifestId,

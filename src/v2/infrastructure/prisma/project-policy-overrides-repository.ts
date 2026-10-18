@@ -22,11 +22,11 @@ import {
 } from '../../domain/project-overrides.ts'
 import { createProjectSnapshot } from '../../domain/project-snapshot.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRow, hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat, requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import {
   editCommandExternalActorAuditData,
@@ -265,19 +265,20 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
     if (!parent) return null
     const editPlan = parseRecord(operationalBundlePlanV3(parent).contentJson, 'project policy EditPlan')
     const currentDurationFrames = Number(editPlan.durationFrames)
-    const format = projectOutputFormat(project, parent)
-    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !format) {
+    // Policy overrides are project-wide: the impact covers EVERY output the sealed State carries, each render attributed to its own.
+    const variantIds = parent.state.document.entries.map((entry) => entry.variantId)
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || variantIds.length === 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Project policy render context is incomplete')
     }
     const currentVersionId = parent.version.id
     const [proxyOutputs, finalOutputs] = await Promise.all([
       this.client.v2ProjectProxyRenderOperation.findMany({
         where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true },
+        select: { outputArtifactId: true, outputVariantId: true },
       }),
       this.client.v2ProjectFinalExportOperation.findMany({
         where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-        select: { outputArtifactId: true, outputAspectRatio: true },
+        select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
       }),
     ])
     if (currentDurationFrames === 0 && (proxyOutputs.length > 0 || finalOutputs.length > 0)) {
@@ -294,11 +295,8 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
         content: policy.content,
       }),
       currentDurationFrames,
-      proxyVariantId: format,
-      outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: format })),
-        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
-      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+      variantIds: Object.freeze(variantIds),
+      outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
     })
   }
 
@@ -359,17 +357,14 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
         const [proxyOutputs, finalOutputs] = await Promise.all([
           transaction.v2ProjectProxyRenderOperation.findMany({
             where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true },
+            select: { outputArtifactId: true, outputVariantId: true },
           }),
           transaction.v2ProjectFinalExportOperation.findMany({
             where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-            select: { outputArtifactId: true, outputAspectRatio: true },
+            select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
           }),
         ])
-        const outputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: requireProjectOutputFormat(project, input.bundle) })),
-          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
-        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+        const outputs = renderOutputReferences({ state: input.bundle.state, sourceVersionId: bundle.command.baseVersionId, proxies: proxyOutputs, finals: finalOutputs })
         const expectedAffectedOutputs = bundle.command.payload.impact.renderSemanticsChanged ? outputs : []
         if (stableSerialize(expectedAffectedOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
           throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before policy impact commit')

@@ -35,7 +35,7 @@ export interface RenderedSubtitleAlignmentSource {
   cueTexts: Readonly<Record<string, string>>
   /**
    * The exact Version, State, variant revision and materialization the alignment was admitted from: always the `render`
-   * admission, and the `final` one too when the evidence is a final export. `variantId` above is the aspect ratio that entry carries.
+   * admission, and the `final` one too when the evidence is a final export. `variantId` above is that entry's stable State variant.
    */
   outputConsumption?: Readonly<{ render: SidecarOutputConsumptionSeal; final?: SidecarOutputConsumptionSeal }>
 }
@@ -68,18 +68,16 @@ export interface PersistedSubtitleSidecar {
 
 export interface SubtitleSidecarRepository {
   /**
-   * Resolves the exact rendered alignment for one variant. `projectVersionId`
-   * omitted means the current version; an explicit historical version is honored
-   * and reported through `isCurrentVersion`.
+   * Resolves the exact rendered alignment for one output. `variantId` is the stable variant of the State of the selected Version
+   * (an unknown one is refused `output-variant-unknown`, two outputs of one aspect ratio `output-variant-ambiguous`); the render
+   * evidence is the proxy or final export made for THAT output, never the Version's other outputs'. `projectVersionId` omitted
+   * means the current version; an explicit historical version is honored and reported through `isCurrentVersion`.
    */
   readRenderedAlignment(input: {
     workspaceId: string
     projectId: string
-    /** Today the aspect ratio of the output the render evidence is keyed by. */
     variantId: string
     projectVersionId?: string
-    /** The stable variant of the State whose output is aligned; absent means the one carrying `variantId`'s ratio. */
-    stateVariantId?: string
   }): Promise<Readonly<RenderedSubtitleAlignmentSource> | null>
   findIdempotent(input: {
     workspaceId: string

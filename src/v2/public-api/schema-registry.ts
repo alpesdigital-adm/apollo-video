@@ -27,6 +27,7 @@ import {
   MVP_CORE_EVIDENCE_RESOURCE_TYPES,
 } from '../domain/mvp-core-gate.ts'
 import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
+import { PUBLISHED_CONSUMPTION_REASONS } from '../domain/output-consumption.ts'
 import { SUBTITLE_SEGMENT_OVERRIDE_ANCHORS } from '../domain/subtitle-segment-override.ts'
 import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
 import { PROVIDER_CALLBACK_REJECTIONS } from '../domain/provider-job-callback.ts'
@@ -16800,7 +16801,7 @@ const gateArtifactSchema = {
   },
 }
 
-export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+const PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS: readonly PublicSchemaDefinition[] = [
   defineSchema('create-project-request', 4, 'Create empty output-bound project root', {
     type: 'object', additionalProperties: false, required: ['name', 'objective'],
     properties: { name: { type: 'string', minLength: 1, maxLength: 120 }, objective: strategicObjectiveSchema,
@@ -28787,6 +28788,195 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       $id: { type: 'string', pattern: '^apollo://schemas/' },
       title: { type: 'string' },
     },
+  }),
+]
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Multi-output contract (W66 slice S3). A project holds several outputs (9:16, 16:9, ...). Everything that names one of them
+// names its STABLE State variant id (the `variantId` that `output-variants.create` returns), never an aspect ratio. Aspect
+// ratio is unique per State: two outputs of one ratio are refused `output-variant-ambiguous`. A published schema never
+// changes under its ref, so every schema below is a new version derived from the one it replaces (the old refs stay).
+// ---------------------------------------------------------------------------------------------------------------------
+
+type SchemaNode = { [key: string]: unknown }
+
+function schemaNode(parent: SchemaNode, ...path: readonly string[]): SchemaNode {
+  let current = parent
+  for (const key of path) {
+    const next = current[key]
+    assertDomain(
+      typeof next === 'object' && next !== null && !Array.isArray(next),
+      'INVALID_PUBLIC_SCHEMA',
+      'Derived public schema path is missing',
+      { path: path.join('.') },
+    )
+    current = next as SchemaNode
+  }
+  return current
+}
+
+function derivedSchema(
+  from: string,
+  to: Readonly<{ id: string; version: number; title: string }>,
+  patch: (body: SchemaNode) => void,
+): PublicSchemaDefinition {
+  const source = PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS.find((definition) => definition.ref === from)
+  assertDomain(source !== undefined, 'INVALID_PUBLIC_SCHEMA', 'Derived public schema has no source', { from })
+  const { $schema: _dialect, $id: _id, title: _title, ...contract } = source!.schema as SchemaNode
+  const body = structuredClone(contract) as SchemaNode
+  patch(body)
+  return defineSchema(to.id, to.version, to.title, body)
+}
+
+const STABLE_VARIANT_ID_DESCRIPTION =
+  'Stable output variant id of the project: the variantId that apollo.projects.output-variants.create returns and ' +
+  'apollo.projects.workspace.current.read lists in outputs. It names exactly one output and is never an aspect ratio. A project ' +
+  'cannot address two outputs of one aspect ratio apart (output-variant-ambiguous).'
+
+const reviewApplicationScopeSchemaV3 = {
+  ...reviewApplicationScopeSchema,
+  properties: {
+    ...reviewApplicationScopeSchema.properties,
+    formatIds: {
+      ...reviewApplicationScopeSchema.properties.formatIds,
+      description: 'Stable output variant ids of the reviewed Version State this annotation applies to. The reviewed output ' +
+        'is always included; a global format scope may name any members of that State.',
+    },
+  },
+}
+
+const reviewAnnotationSchemaV3 = {
+  ...reviewAnnotationSchemaV2,
+  properties: { ...reviewAnnotationSchemaV2.properties, applicationScope: reviewApplicationScopeSchemaV3 },
+}
+
+const reviewScopeContextSchemaV2 = {
+  ...reviewScopeContextSchema,
+  required: [...reviewScopeContextSchema.required, 'variantId', 'variantIds'],
+  properties: {
+    ...reviewScopeContextSchema.properties,
+    formatId: { ...idSchema, description: 'Aspect ratio of the reviewed output (display only; scopes name outputs by variantId).' },
+    variantId: { ...idSchema, description: 'Stable variant id of the reviewed output.' },
+    variantIds: {
+      type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: idSchema,
+      description: 'Every output of the reviewed Version State: the members a format-scoped annotation may name.',
+    },
+  },
+}
+
+const PURPOSE_VERDICT_REASONS = [...PUBLISHED_CONSUMPTION_REASONS]
+const workspaceOutputPurposeSchema = {
+  oneOf: [
+    { type: 'object', additionalProperties: false, required: ['status'], properties: { status: { const: 'allowed' } } },
+    {
+      type: 'object', additionalProperties: false, required: ['status', 'reason'],
+      properties: { status: { const: 'blocked' }, reason: { enum: PURPOSE_VERDICT_REASONS } },
+    },
+  ],
+}
+
+const workspaceOutputsSchema = {
+  type: 'array', maxItems: 20,
+  description: 'Every output of the current Version State, in State order, with what each consumer purpose answers for it ' +
+    '(a description: the consumer decides when it is asked).',
+  items: {
+    type: 'object', additionalProperties: false, required: ['variantId', 'consumption'],
+    properties: {
+      variantId: { ...idSchema, description: STABLE_VARIANT_ID_DESCRIPTION },
+      aspectRatio: { type: 'string', minLength: 3, maxLength: 16, description: 'Aspect ratio the output spec carries; absent when it carries none.' },
+      consumption: {
+        type: 'object', additionalProperties: false, required: ['render', 'critic', 'final'],
+        properties: { render: workspaceOutputPurposeSchema, critic: workspaceOutputPurposeSchema, final: workspaceOutputPurposeSchema },
+      },
+    },
+  },
+}
+
+const variantIdProperty = (description: string) => ({ ...idSchema, description })
+
+export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  ...PUBLIC_SCHEMAS_THROUGH_OUTPUT_VARIANTS,
+  derivedSchema('apollo://schemas/project-subtitle-configuration-set-request/v1', {
+    id: 'project-subtitle-configuration-set-request', version: 2,
+    title: 'Set one closed subtitle mode for ONE output of the project (named by its stable variant id), or revert it',
+  }, (body) => {
+    schemaNode(body, 'properties').variantId = variantIdProperty(`${STABLE_VARIANT_ID_DESCRIPTION} Only this output's renders go stale.`)
+  }),
+  derivedSchema('apollo://schemas/subtitle-segment-override-apply-request/v1', {
+    id: 'subtitle-segment-override-apply-request', version: 2,
+    title: 'Move position, style, text or visibility for ONE subtitle segment of ONE output (named by its stable variant id), or reset it',
+  }, (body) => {
+    schemaNode(body, 'properties').variantId = variantIdProperty(`${STABLE_VARIANT_ID_DESCRIPTION} Only this output's renders go stale.`)
+  }),
+  derivedSchema('apollo://schemas/export-subtitle-sidecar-request/v1', {
+    id: 'export-subtitle-sidecar-request', version: 2, title: 'Subtitle sidecar export request for one output',
+  }, (body) => {
+    schemaNode(body, 'properties').variantId = {
+      type: 'string', minLength: 1, maxLength: 128,
+      description: `${STABLE_VARIANT_ID_DESCRIPTION} The sidecar aligns the proxy or final render made for this output.`,
+    }
+  }),
+  derivedSchema('apollo://schemas/apply-project-manual-edit-request/v2', {
+    id: 'apply-project-manual-edit-request', version: 3,
+    title: 'Apply a normalized crop or another scoped manual edit, or restore an immutable version, from one output view',
+  }, (body) => {
+    schemaNode(body, 'properties').variantId = variantIdProperty(
+      'Stable output variant id of the output the edit was made on (the view). It must be an exact member of the base Version State. ' +
+      'The edit changes the shared EditPlan, so the renders of every output of the project go stale, not only this one.')
+  }),
+  derivedSchema('apollo://schemas/create-review-annotation-request/v2', {
+    id: 'create-review-annotation-request', version: 3,
+    title: 'Create project review annotation request for one output, scoped by stable variant ids',
+  }, (body) => {
+    const properties = schemaNode(body, 'properties')
+    properties.variantId = variantIdProperty(
+      `${STABLE_VARIANT_ID_DESCRIPTION} The annotation critiques this output's proxy. Optional only when the Version has exactly one output; ` +
+      'with several, naming none is refused (output-variant-required).')
+    properties.applicationScope = { ...reviewApplicationScopeSchemaV3, required: [] }
+  }),
+  defineSchema('review-annotation-created', 3, 'Review annotation creation response with application scope in stable variant ids',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['annotation', 'replayed'],
+      properties: { annotation: reviewAnnotationSchemaV3, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('project-review', 4, 'Project review of one output with stable variant scope context',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['session', 'versions', 'scopeContext', 'scenes', 'annotations'],
+      properties: {
+        session: reviewSessionSchemaV2,
+        versions: { type: 'array', minItems: 1, maxItems: 1000, items: reviewVersionSchemaV2 },
+        scopeContext: reviewScopeContextSchemaV2,
+        scenes: { type: 'array', maxItems: 1000, items: reviewSceneSchema },
+        annotations: { type: 'array', maxItems: 100, items: reviewAnnotationSchemaV3 },
+      },
+    }),
+  ),
+  defineSchema('project-proxy-render-request', 1, 'Optional body of a project proxy render enqueue', {
+    type: 'object', additionalProperties: false,
+    properties: {
+      variantId: variantIdProperty(`${STABLE_VARIANT_ID_DESCRIPTION} The proxy is rendered for this output. Optional only when the ` +
+        'project has exactly one output; with several, naming none is refused (output-variant-required).'),
+    },
+  }),
+  derivedSchema('apollo://schemas/project-final-export-request/v1', {
+    id: 'project-final-export-request', version: 2, title: 'Approve and export one output of the current project version',
+  }, (body) => {
+    const properties = schemaNode(body, 'properties')
+    properties.variantId = variantIdProperty(`${STABLE_VARIANT_ID_DESCRIPTION} The final is exported for this output. Optional only ` +
+      'when the project has exactly one output; with several, naming none is refused (output-variant-required).')
+    properties.format = {
+      ...(properties.format as SchemaNode),
+      description: 'Aspect ratio preset of the export. It must equal the aspect ratio of the output named by variantId; it never selects the output.',
+    }
+  }),
+  derivedSchema('apollo://schemas/project-workspace/v13', {
+    id: 'project-workspace', version: 14, title: 'Project workspace with the outputs of the current Version',
+  }, (body) => {
+    const data = schemaNode(body, 'properties', 'data')
+    data.required = [...(data.required as string[]), 'outputs']
+    schemaNode(data, 'properties').outputs = workspaceOutputsSchema
   }),
 ])
 

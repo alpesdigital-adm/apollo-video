@@ -23,12 +23,12 @@ import {
   parseProjectColorPlanImpact,
 } from '../../domain/project-color-plan-impact.ts'
 import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { renderOutputReferences } from '../../domain/output-variant-references.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 const colorPlanInclude = Prisma.validator<Prisma.V2ProjectColorPlanInclude>()({
@@ -254,8 +254,9 @@ async function readContext(client: DbClient, input: { workspaceId: string; proje
   if (!project?.currentVersionId) return null
   const parent = await readPersistedOperationalOutputBundleV3(client, { workspaceId: input.workspaceId, projectId: input.projectId, versionId: project.currentVersionId })
   if (!parent) return null
-  const format = projectOutputFormat(project, parent)
-  if (!format) return null
+  // A ColorPlan is project-wide: its impact covers EVERY output the sealed State carries, each render attributed to its own.
+  const variantIds = parent.state.document.entries.map((entry) => entry.variantId)
+  if (variantIds.length === 0) return null
   const currentVersionId = parent.version.id
   const editPlan = parse(operationalBundlePlanV3(parent).contentJson, 'project ColorPlan EditPlan')
   const targets = targetsFromEditPlan(editPlan)
@@ -263,11 +264,11 @@ async function readContext(client: DbClient, input: { workspaceId: string; proje
   const [proxyOutputs, finalOutputs, colorCompilations] = await Promise.all([
     client.v2ProjectProxyRenderOperation.findMany({
       where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-      select: { outputArtifactId: true },
+      select: { outputArtifactId: true, outputVariantId: true },
     }),
     client.v2ProjectFinalExportOperation.findMany({
       where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded', phase: 'completed' } },
-      select: { outputArtifactId: true, outputAspectRatio: true },
+      select: { outputArtifactId: true, outputVariantId: true, outputAspectRatio: true },
     }),
     client.v2ColorPipelineCompilation.findMany({
       where: {
@@ -325,11 +326,8 @@ async function readContext(client: DbClient, input: { workspaceId: string; proje
     targets,
     trustedSourceMetadata: Object.freeze(trustedSourceMetadata),
     currentDurationFrames,
-    proxyVariantId: format,
-    outputReferences: Object.freeze([
-      ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: format })),
-      ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
-    ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+    variantIds: Object.freeze(variantIds),
+    outputReferences: renderOutputReferences({ state: parent.state, sourceVersionId: currentVersionId, proxies: proxyOutputs, finals: finalOutputs }),
   })
 }
 

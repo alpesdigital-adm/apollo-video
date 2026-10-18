@@ -129,11 +129,16 @@ test('W66 PostgreSQL readers: an ordinary single-output project is read through 
     const workspace = await new PrismaProjectWorkspaceQueryRepository(db).read(scope)
     assert.equal(workspace.project.format, '4:5')
     assert.equal(workspace.reviewAvailability.annotations.state, 'available')
+    // The workspace lists the output by its stable variant with the verdict of each purpose.
+    assert.deepEqual(workspace.outputs, [{ variantId: project.world.variantId, aspectRatio: '4:5',
+      consumption: { render: { status: 'allowed' }, critic: { status: 'allowed' }, final: { status: 'allowed' } } }])
 
     // The review preview and an annotation: the same ratio, and a critic seal of the exact Version, State and variant.
     const annotations = new PrismaReviewAnnotationRepository(db)
     const preview = await annotations.readPreviewContext(scope)
     assert.equal(preview.formatId, '4:5')
+    assert.equal(preview.variantId, project.world.variantId)
+    assert.deepEqual([...preview.variantIds], [project.world.variantId])
     assert.equal(preview.availableScopeCounts.formats, 1)
     assert.equal(preview.outputConsumption.seal.purpose, 'critic')
     assert.equal(preview.outputConsumption.seal.projectVersionId, head.version.id)
@@ -145,17 +150,18 @@ test('W66 PostgreSQL readers: an ordinary single-output project is read through 
     assert.equal(created.replayed, false)
     assert.equal(created.annotation.projectVersionId, head.version.id)
 
-    // The sidecar aligns that render, for the ratio the sealed entry carries and for no other.
+    // The sidecar aligns that render, for the stable variant of the output the sealed entry belongs to and for no other.
     const sidecars = new PrismaSubtitleSidecarRepository(db)
-    const alignment = await sidecars.readRenderedAlignment({ ...scope, variantId: '4:5' })
+    const alignment = await sidecars.readRenderedAlignment({ ...scope, variantId: project.world.variantId })
     assert.equal(alignment.outputKind, 'proxy')
     assert.equal(alignment.outputArtifactId, render.artifactId)
     assert.equal(alignment.projectVersionId, head.version.id)
     assert.equal(alignment.outputConsumption.render.seal.purpose, 'render')
     assert.equal(alignment.outputConsumption.render.seal.variantId, project.world.variantId)
-    assert.equal(await sidecars.readRenderedAlignment({ ...scope, variantId: '16:9' }), null)
-    assert.equal((await sidecars.readRenderedAlignment({ ...scope, variantId: '4:5', stateVariantId: project.world.variantId })).outputArtifactId, render.artifactId)
-    await assert.rejects(() => sidecars.readRenderedAlignment({ ...scope, variantId: '4:5', stateVariantId: 'no-such-variant' }), refused('output-variant-unknown'))
+    assert.equal(alignment.variantId, project.world.variantId, 'the alignment names the stable variant, not the ratio')
+    // An aspect ratio is not an output: the old spelling of the variant, and a stranger, are refused with the published reason.
+    await assert.rejects(() => sidecars.readRenderedAlignment({ ...scope, variantId: '4:5' }), refused('output-variant-unknown'))
+    await assert.rejects(() => sidecars.readRenderedAlignment({ ...scope, variantId: 'no-such-variant' }), refused('output-variant-unknown'))
 
     // The quality iteration context: the format of the sealed output of the reviewed Version, sealed for critic.
     const quality = new PrismaQualityIterationRepository(db)
@@ -176,7 +182,7 @@ test('W66 PostgreSQL readers: an ordinary single-output project is read through 
     assert.equal(older.stale, true)
     assert.equal(older.outputConsumption.seal.projectVersionId, head.version.id)
     assert.equal(older.outputConsumption.seal.outputStateHash, head.state.stateHash)
-    const olderAlignment = await sidecars.readRenderedAlignment({ ...scope, variantId: '4:5', projectVersionId: head.version.id })
+    const olderAlignment = await sidecars.readRenderedAlignment({ ...scope, variantId: project.world.variantId, projectVersionId: head.version.id })
     assert.equal(olderAlignment.projectVersionId, head.version.id)
     assert.equal(olderAlignment.isCurrentVersion, false)
     assert.equal(olderAlignment.outputConsumption.render.seal.projectVersionId, head.version.id)
@@ -186,10 +192,10 @@ test('W66 PostgreSQL readers: an ordinary single-output project is read through 
     const sibling = await seedReviewProject(db, { workspaceId, actor: project.actor, prefix: 'w66rd-sib', ids: { project: `w66rd-${run}-sib-project` },
       name: 'Readers sibling', aspectRatio: '9:16' })
     await assert.rejects(() => requirePersistedOutputConsumptionV3(db, { ...scope, versionId: sibling.head.version.id, purpose: 'critic' }), refused('output-version-missing'))
-    assert.equal(await sidecars.readRenderedAlignment({ ...scope, variantId: '4:5', projectVersionId: sibling.head.version.id }), null)
+    assert.equal(await sidecars.readRenderedAlignment({ ...scope, variantId: project.world.variantId, projectVersionId: sibling.head.version.id }), null)
     const sister = await ordinaryProject(db, { run, tag: 'sis', aspectRatio: '9:16' })
     assert.equal(await annotations.readPreviewContext({ ...scope, projectVersionId: sister.head.version.id }), null)
-    assert.equal(await sidecars.readRenderedAlignment({ ...scope, variantId: '4:5', projectVersionId: sister.head.version.id }), null)
+    assert.equal(await sidecars.readRenderedAlignment({ ...scope, variantId: project.world.variantId, projectVersionId: sister.head.version.id }), null)
     await assert.rejects(() => requirePersistedOutputConsumptionV3(db, { ...scope, versionId: sister.head.version.id, purpose: 'critic' }), refused('output-version-missing'))
     await assert.rejects(() => requirePersistedOutputConsumptionV3(db, { workspaceId: sister.workspaceId, projectId, versionId: head.version.id, purpose: 'critic' }),
       refused('output-version-missing'))
@@ -218,13 +224,15 @@ test('W66 PostgreSQL readers: a copy no editorial cut materialized is refused wi
     const annotations = new PrismaReviewAnnotationRepository(db)
     const sidecars = new PrismaSubtitleSidecarRepository(db)
     const quality = new PrismaQualityIterationRepository(db)
+    // The copy's own stable variant (the copy re-identifies every output it was copied with).
+    const copyVariantId = (await new PrismaOperationalOutputBundleRepositoryV3(db).read({ ...copyScope, versionId: configured.version.id })).state.document.entries[0].variantId
     // The copy's head is the configuration child (every entry blocked); the Creation fork root before it is blocked too.
     for (const [label, versionId] of [['fork root', copy.version.id], ['configuration child', configured.version.id]]) {
       for (const purpose of ['render', 'critic', 'final']) {
         await assert.rejects(() => requirePersistedOutputConsumptionV3(db, { ...copyScope, versionId, purpose }), refused('copy-requires-editorial-cut'), `${label}/${purpose}`)
       }
       await assert.rejects(() => annotations.readPreviewContext({ ...copyScope, projectVersionId: versionId }), refused('copy-requires-editorial-cut'), `${label}/preview`)
-      await assert.rejects(() => sidecars.readRenderedAlignment({ ...copyScope, variantId: '4:5', projectVersionId: versionId }), refused('copy-requires-editorial-cut'), `${label}/sidecar`)
+      await assert.rejects(() => sidecars.readRenderedAlignment({ ...copyScope, variantId: copyVariantId, projectVersionId: versionId }), refused('copy-requires-editorial-cut'), `${label}/sidecar`)
     }
     await assert.rejects(() => annotations.readPreviewContext(copyScope), refused('copy-requires-editorial-cut'))
 
@@ -315,6 +323,7 @@ test('W66 PostgreSQL readers: a cut copy is critiqued and rendered, and its fina
     const preview = await annotations.readPreviewContext(copyScope)
     assert.ok(preview, 'the cut copy has a proxy to review')
     assert.equal(preview.formatId, ratio)
+    assert.equal(preview.variantId, configuredBundle.state.document.entries[0].variantId, 'the cut copy keeps the output the configuration child named')
     assert.equal(preview.outputConsumption.seal.purpose, 'critic')
     assert.equal(preview.outputConsumption.seal.projectVersionId, versionId)
     const created = await createProjectReviewAnnotationService({ repository: annotations, clock: () => new Date(), createId: randomUUID })(
@@ -322,7 +331,7 @@ test('W66 PostgreSQL readers: a cut copy is critiqued and rendered, and its fina
     assert.equal(created.annotation.projectVersionId, versionId)
 
     // The sidecar aligns the proxy of the cut copy, and the quality context is sealed for critic.
-    const alignment = await new PrismaSubtitleSidecarRepository(db).readRenderedAlignment({ ...copyScope, variantId: ratio })
+    const alignment = await new PrismaSubtitleSidecarRepository(db).readRenderedAlignment({ ...copyScope, variantId: preview.variantId })
     assert.equal(alignment.outputKind, 'proxy')
     assert.equal(alignment.outputArtifactId, render.artifactId)
     assert.equal(alignment.outputConsumption.render.seal.projectVersionId, versionId)

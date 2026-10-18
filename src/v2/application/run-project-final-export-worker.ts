@@ -23,7 +23,7 @@ import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-ma
 import type { ProjectColorPlanRepository } from './ports/project-color-plan-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
-import { contextVariantSelection, projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { contextVariantSelection, projectFinalRenderInputHash, projectRenderSourcesFingerprint, sourceOutputVariantId } from './project-render-sources.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { deriveEditorialRenderGeometry } from './derive-editorial-render-geometry.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
@@ -205,6 +205,10 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         requireCurrent: true,
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
+      // The output this export was approved for is the one the operation persisted; a source sealed to another output is no source.
+      if (context.outputVariantId !== undefined && context.outputVariantId !== sourceOutputVariantId(source)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable final export source is not the output its operation was approved for')
+      }
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
       failureStage = 'color-plan'
       const colorPlan = await dependencies.colorPlans.readEffectiveForVersion({

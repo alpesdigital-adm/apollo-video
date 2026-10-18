@@ -1314,7 +1314,8 @@ ${editorialDiagnostic}`)
     assert.equal(directorContext.transcript.id, replacementTranscriptId)
     assert.equal(directorContext.transcript.transcriptHash, replacementTranscript.transcriptHash)
     assert.equal(directorContext.currentDurationFrames, replacementPlan.durationFrames)
-    assert.equal(directorContext.proxyVariantId, '9:16')
+    assert.deepEqual(directorContext.variantIds, ['9:16'])
+    assert.equal('proxyVariantId' in directorContext, false)
     assert.deepEqual(directorContext.outputReferences, [])
     const directorBaseProxyOperationId = `manual-director-base-proxy-${suffix}`
     const directorProxyMetadata = await prepareControlledProxyMetadata({ mode: 'new-controlled-base',
