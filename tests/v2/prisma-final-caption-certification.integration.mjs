@@ -345,10 +345,13 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
     const bottom = bands.bottom
     const tolerance = { x: CAPTION_BAND_TOLERANCE_PX / width, y: CAPTION_BAND_TOLERANCE_PX / height }
     const pixelFacts = { burned: [], quiet: [], omitted: [] }
+    // A and B are separate lossy encodes (the rate control of one sees a filter graph the other does not), so "no caption" is the
+    // critic's own measure - no run of pixels whose luma moved by more than the codec noise - not byte equality.
     for (const number of OUT_OF_CUE_FRAMES) {
       const [withCue, control] = await Promise.all([frame(A.delivered, number, width, height), frame(B.delivered, number, width, height)])
-      assert.equal(sameBytes(withCue, control), true, `A and B are pixel-identical outside the cue (frame ${number})`)
-      pixelFacts.quiet.push(number)
+      const measured = captionFootprintOf(withCue, control, width, height)
+      assert.equal(measured.footprint, null, `A has no caption outside the cue (frame ${number}, ${measured.changedPixels} changed pixels)`)
+      pixelFacts.quiet.push({ frame: number, changedPixels: measured.changedPixels, byteIdentical: sameBytes(withCue, control) })
     }
     for (const number of IN_CUE_FRAMES) {
       const [withCue, control] = await Promise.all([frame(A.delivered, number, width, height), frame(B.delivered, number, width, height)])
@@ -364,10 +367,11 @@ test('T-W65B final export through the real gate: a certified cue is burned and c
     const everyFrame = [...OUT_OF_CUE_FRAMES, ...IN_CUE_FRAMES, 30, 89]
     for (const number of everyFrame) {
       const [withOmitted, control] = await Promise.all([frame(C.delivered, number, width, height), frame(D.delivered, number, width, height)])
-      assert.equal(sameBytes(withOmitted, control), true, `C and D are pixel-identical (frame ${number}): nothing was drawn for the omitted cue`)
-      pixelFacts.omitted.push(number)
+      const measured = captionFootprintOf(withOmitted, control, width, height)
+      assert.equal(measured.footprint, null, `C has no caption (frame ${number}, ${measured.changedPixels} changed pixels): nothing was drawn for the omitted cue`)
+      pixelFacts.omitted.push({ frame: number, changedPixels: measured.changedPixels, byteIdentical: sameBytes(withOmitted, control) })
     }
-    // the plan did not merely get lucky: the delivered pixels of C also equal D's byte for byte when the encoder is deterministic
+    // Informational: with no drawn cue the two filter graphs are the same, so an encoder that is deterministic gives the same bytes.
     const identicalBytes = C.output.sha256 === D.output.sha256
 
     if (evidenceDir) {
