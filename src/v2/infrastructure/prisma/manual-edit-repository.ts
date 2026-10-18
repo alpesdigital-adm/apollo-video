@@ -32,7 +32,7 @@ import {
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { assertManualOutputReferencesV3 } from './output-version-bundle-repository.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat } from './project-output-format.ts'
+import { projectOutputFormat, requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 type StoredManualCommand = Prisma.V2EditCommandGetPayload<{
@@ -327,13 +327,13 @@ export class PrismaManualEditRepository implements ManualEditRepository {
       availableAssetIds: Object.freeze([
         ...new Set(project.mediaAssets.map((item) => item.artifactId)),
       ]),
-      renderVariantIds: Object.freeze([projectOutputFormat(project, currentBundle) ?? '9:16']),
+      renderVariantIds: Object.freeze([requireProjectOutputFormat(project, currentBundle)]),
       outputReferences: Object.freeze([
         ...proxyOutputs.map((output) => Object.freeze({
           artifactId: output.outputArtifactId,
           kind: 'proxy' as const,
           sourceVersionId: current.version.id,
-          variantId: projectOutputFormat(project, currentBundle) ?? '9:16',
+          variantId: requireProjectOutputFormat(project, currentBundle),
         })),
         ...finalOutputs.map((output) => Object.freeze({
           artifactId: output.outputArtifactId,

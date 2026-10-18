@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { creationRequest, outputWorld, variantRequest } from './helpers/output-world.mjs'
 
-const { projectOutputFormat, resolveProjectOutputFormat } = await import('../../src/v2/infrastructure/prisma/project-output-format.ts')
+const { projectOutputFormat, requireProjectOutputFormat, resolveProjectOutputFormat } = await import('../../src/v2/infrastructure/prisma/project-output-format.ts')
 
 async function headWithVariants(count) {
   const world = outputWorld()
@@ -65,4 +65,16 @@ test('a copy answers with the geometry its fork revision was copied with', async
   assert.equal(projectOutputFormat({ format: null }, { state: { document: { entries: [{ spec: fork }, { spec: fork }] } } }), null, 'two outputs stay ambiguous')
   assert.equal(projectOutputFormat({ format: null }, { state: { document: { entries: [{ spec: { schemaVersion: 'output-spec-revision/v3', effectiveSpec: {} } }] } } }), null)
   assert.equal(await resolveProjectOutputFormat(stateClient([fork]), { ...project, format: null }, 'version-copy-1'), '9:16')
+})
+
+// A child Command that attributes proxy and final outputs by format refuses a project with no single format: it never guesses a ratio.
+test('requireProjectOutputFormat answers the single format and refuses the ambiguous with the published reason', async () => {
+  assert.equal(requireProjectOutputFormat({ format: null }, await headWithVariants(1)), '16:9')
+  assert.equal(requireProjectOutputFormat({ format: '9:16' }, await headWithVariants(0)), '9:16', 'a stored format still wins')
+  const refused = (bundle) => assert.throws(() => requireProjectOutputFormat({ format: null }, bundle),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'output-variant-required')
+  refused(await headWithVariants(0))
+  const spec = { schemaVersion: 'output-spec-revision/v3', effectiveSpec: { output: { aspectRatio: '9:16' } } }
+  refused({ state: { document: { entries: [{ spec }, { spec }] } } })
+  refused({ state: { document: { entries: [{ spec: { output: {} } }] } } })
 })

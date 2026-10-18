@@ -31,7 +31,7 @@ import {
 import { persistPublicEvents } from './public-event-outbox.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat } from './project-output-format.ts'
+import { requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import {
   externalActorAuditData,
@@ -208,7 +208,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     const hydratedAnnotation = hydrateReviewAnnotation(annotation)
     const renderVariantIds = Object.freeze([
       ...new Set([
-        projectOutputFormat(annotation.project, parent) ?? '9:16',
+        requireProjectOutputFormat(annotation.project, parent),
         ...hydratedAnnotation.applicationScope.formatIds,
       ]),
     ].toSorted())
@@ -242,12 +242,12 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       availableAssetIds: Object.freeze([...new Set(annotation.project.mediaAssets.map((asset) => asset.artifactId))]),
       renderVariantIds,
       outputReferences: normalizeCommandImpactOutputReferences([
-        ...(renderVariantIds.includes(projectOutputFormat(annotation.project, parent) ?? '9:16')
+        ...(renderVariantIds.includes(requireProjectOutputFormat(annotation.project, parent))
           ? proxyOutputs.map((output) => ({
               artifactId: output.outputArtifactId,
               kind: 'proxy' as const,
               sourceVersionId: version.id,
-              variantId: projectOutputFormat(annotation.project, parent) ?? '9:16',
+              variantId: requireProjectOutputFormat(annotation.project, parent),
             }))
           : []),
         ...finalOutputs
@@ -426,7 +426,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
             select: { outputArtifactId: true, outputAspectRatio: true },
           }),
         ])
-        const projectVariantId = projectOutputFormat(project, input.bundle) ?? '9:16'
+        const projectVariantId = requireProjectOutputFormat(project, input.bundle)
         const currentAffectedArtifacts = normalizeCommandImpactOutputReferences([
           ...(bundle.impact.affectedVariantIds.includes(projectVariantId)
             ? proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectVariantId }))

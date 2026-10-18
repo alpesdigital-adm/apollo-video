@@ -26,7 +26,7 @@ import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRow, hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat } from './project-output-format.ts'
+import { projectOutputFormat, requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import {
   editCommandExternalActorAuditData,
@@ -367,7 +367,7 @@ export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOver
           }),
         ])
         const outputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectOutputFormat(project, input.bundle) ?? '9:16' })),
+          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: requireProjectOutputFormat(project, input.bundle) })),
           ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
         ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
         const expectedAffectedOutputs = bundle.command.payload.impact.renderSemanticsChanged ? outputs : []

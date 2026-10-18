@@ -50,7 +50,7 @@ import {
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
 import { readEditorialSourceBindingV1 } from './output-version-materializer.ts'
-import { projectOutputFormat } from './project-output-format.ts'
+import { projectOutputFormat, requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
 import { parseDirectorDecisionLog } from '../../domain/director-decision.ts'
@@ -1134,7 +1134,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       }),
     ])
     const currentOutputs = [
-      ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectOutputFormat(project, bundle.bundle) ?? '9:16' })),
+      ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: requireProjectOutputFormat(project, bundle.bundle) })),
       ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
     ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
     if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {

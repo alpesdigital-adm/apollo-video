@@ -21,7 +21,7 @@ import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { hydrateEditCommandExternalActorAudit } from './edit-command-actor-audit.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
-import { projectOutputFormat } from './project-output-format.ts'
+import { requireProjectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 
 type StoredCommand = Prisma.V2EditCommandGetPayload<{
@@ -177,7 +177,7 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
         sourceArtifactId: replacement.sourceArtifactId, transcript: hydrateTranscript(replacement),
       }),
       outputReferences: Object.freeze([
-        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: projectOutputFormat(project, parent) ?? '9:16' })),
+        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: currentVersionId, variantId: requireProjectOutputFormat(project, parent) })),
         ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: currentVersionId, variantId: output.outputAspectRatio })),
       ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
     })
@@ -230,7 +230,7 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
           transaction.v2ProjectFinalExportOperation.findMany({ where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } }, select: { outputArtifactId: true, outputAspectRatio: true } }),
         ])
         const currentOutputs = [
-          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectOutputFormat(project, input.bundle) ?? '9:16' })),
+          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: requireProjectOutputFormat(project, input.bundle) })),
           ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
         ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
         if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before source transcript impact commit')

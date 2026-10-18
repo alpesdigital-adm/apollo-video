@@ -1,4 +1,5 @@
 import type { Prisma } from '../../../../generated/prisma-v2/index.js'
+import { DomainError } from '../../domain/errors.ts'
 
 /** Any sealed bundle of the project (a creation root, an operational head or the child about to replace it): it only needs its State's entries. */
 type BundleWithState = Readonly<{ state: Readonly<{ document: Readonly<{ entries: readonly Readonly<{ spec: unknown }>[] }> }> }>
@@ -18,6 +19,20 @@ export function projectOutputFormat(project: Readonly<{ format: string | null }>
   const entries = bundle.state.document.entries
   if (entries.length !== 1) return null
   return specAspectRatio(entries[0]!.spec)
+}
+
+/**
+ * `projectOutputFormat` for a caller that cannot go on without one: a project with several outputs (or none, or an output whose
+ * spec names no aspect ratio) has no single format, and a child Command that attributes proxy and final outputs by format must
+ * refuse that project with the reason an operator can act on, never attribute its outputs to a guessed ratio.
+ */
+export function requireProjectOutputFormat(project: Readonly<{ format: string | null }>, bundle: BundleWithState): string {
+  const format = projectOutputFormat(project, bundle)
+  if (format === null) {
+    throw new DomainError('PRECONDITION_REQUIRED', 'This project has no single output format: name the output the Command applies to',
+      { reason: 'output-variant-required' })
+  }
+  return format
 }
 
 /**
