@@ -12,6 +12,7 @@ import type { ColorPipelineCompilation } from '../domain/color-pipeline-compilat
 import { createDirectedAudioTimelineHash, type DirectedEditPlan } from '../domain/director-run.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
+import { validateRenderPlacementPlan, type RenderPlacementPlan } from '../domain/render-placement-plan.ts'
 import { DomainError } from '../domain/errors.ts'
 import { assertRenderInputSpec, type MaterializedRenderInputAsset, type MaterializedRenderInputV1 } from '../domain/render-input.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
@@ -94,7 +95,17 @@ function editorialProps(input: MaterializedRenderInputV1) {
   const colorPlan = props.colorPlan === null ? null : parseProjectColorPlan(props.colorPlan)
   if ((colorPlan?.plan.planHash ?? null) !== props.colorPlanHash ||
     (colorPlan?.compiled.manifestHash ?? null) !== props.compiledColorPlanManifestHash) invalid('Editorial final ColorPlan identity changed')
-  return { editPlan, clips, musicTracks, sourceAssets, compilations, lutBindings, colorPlan,
+  // W65: the final persists the placement its captions were decided with; a reconstruction draws exactly those cues in
+  // exactly those bands. A final from before that has none (and could not have had captions).
+  const placementPlan = props.placementPlan === undefined || props.placementPlan === null ? null : props.placementPlan as unknown as Readonly<RenderPlacementPlan>
+  if (placementPlan) {
+    validateRenderPlacementPlan(placementPlan)
+    if (placementPlan.format !== input.output.aspectRatio || placementPlan.canvas.width !== input.output.width ||
+        placementPlan.canvas.height !== input.output.height || placementPlan.durationFrames !== input.output.durationInFrames) {
+      invalid('Editorial final placement plan does not describe this output')
+    }
+  }
+  return { editPlan, clips, musicTracks, sourceAssets, compilations, lutBindings, colorPlan, placementPlan,
     expectedSha256: props.expectedOutputSha256, expectedByteSize: Number(props.expectedOutputByteSize),
     audioTimelineHash: props.audioTimelineHash }
 }
@@ -202,7 +213,9 @@ export class FfmpegEditorialRenderInputRenderer implements RenderInputRenderer {
       }
       if (props.lutBindings.length === 1) lutPaths[props.lutBindings[0]!.artifactId] = byAssetId.get(props.lutBindings[0]!.assetId)!
       const editPlan = props.editPlan
-      const subtitleCues = emittedSubtitleTracks(editPlan.subtitleTracks).flatMap((track) => track.cues)
+      const emittedCues = emittedSubtitleTracks(editPlan.subtitleTracks).flatMap((track) => track.cues)
+      const plannedCueIds = props.placementPlan?.subtitleAnchorPlan ? new Set(props.placementPlan.subtitleAnchorPlan.decisions.map((decision) => decision.cueId)) : null
+      const subtitleCues = plannedCueIds ? emittedCues.filter((cue) => plannedCueIds.has(cue.id)) : emittedCues
       const render = await this.renderer.render({
         operationId, renderKind: 'final',
         sources: props.sourceAssets.map((asset) => ({ artifactId: asset.artifactId, path: byAssetId.get(asset.id)!, mediaType: asset.kind as 'video' | 'audio',
@@ -210,6 +223,7 @@ export class FfmpegEditorialRenderInputRenderer implements RenderInputRenderer {
         lutPaths, ...(props.colorPlan ? { colorPlan: props.colorPlan } : {}), clips: props.clips,
         audioTimelineHash: props.audioTimelineHash, fps: input.output.fps, format: input.output.aspectRatio,
         outputSpec: { width: input.output.width, height: input.output.height, fps: input.output.fps }, subtitleCues,
+        ...(props.placementPlan ? { placementPlan: props.placementPlan } : {}),
         transitions: 'transitions' in editPlan ? editPlan.transitions : [],
         ...(props.musicTracks[0] ? { backgroundMusic: props.musicTracks[0] } : {}),
         ...('composition' in editPlan && editPlan.composition ? { composition: editPlan.composition } : {}),

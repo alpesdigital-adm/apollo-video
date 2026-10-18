@@ -33,10 +33,14 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
 // rate from 24 to 120 fps); the v3 stage gives libass the same (pts = frame index, time base 1/rate) and never changes the
 // frame count. Proxy recipe 1.16.0 and final recipe 1.11.0: a proxy or final of the v2 stage is one frame short on that
 // FFmpeg and must not be reused.
+// 1.16.0 (W65): the renderer accepts `subtitle-anchor-plan/v3`, so a cue whose band is certified on the variant's canvas is
+// DRAWN where the plan put it (it used to be suppressed unconditionally), and it rebuilds the caption projection from the
+// sources it probed and refuses a plan decided on anything else. Proxy recipe 1.17.0 and final recipe 1.12.0: the same cue
+// list now produces different pixels, so a proxy or final of 1.15.0/1.16.0/1.11.0 must not be reused for it.
 // These affect pixels; renderer digest and both recipe versions invalidate previous reuse.
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.15.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.16.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.11.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.16.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.17.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.12.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {

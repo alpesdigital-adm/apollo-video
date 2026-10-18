@@ -26,6 +26,10 @@ import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { projectFinalRenderInputHash, projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
+import type { OutputAspectRatio } from '../domain/output-spec.ts'
+import { validateRenderPlacementPlan } from '../domain/render-placement-plan.ts'
+import { planCaptionPlacement } from './plan-caption-placement.ts'
+import type { FaceWindowEvidenceReader } from './ports/face-window-evidence-reader.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 import {
@@ -67,6 +71,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
   sources: ArtifactSourceMaterializer
+  /** W65. The sealed face windows of the approved Version; without them no cue over the picture can be certified. */
+  faceEvidence?: FaceWindowEvidenceReader
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -257,7 +263,14 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       failureStage = 'rights'
       await assertRights(renderSourceIds, source.locale)
       failureStage = 'input-validation'
-      const subtitleCues = emittedSubtitleTracks(source.editPlan.subtitleTracks).flatMap((track) => track.cues)
+      // Same rule as the proxy: an explicitly disabled style never leaks the EditPlan's cues into FFmpeg.
+      const cueTracks = emittedSubtitleTracks(source.editPlan.subtitleTracks).filter((track) => track.cues.length > 0)
+      const subtitleResolution = source.subtitleResolution
+      const subtitleCues = subtitleResolution?.enabled === false ? [] : cueTracks.flatMap((track) => track.cues)
+      const subtitlePresetId = subtitleResolution?.enabled ? subtitleResolution.presetId : subtitleCues.length ? cueTracks[0]?.presetId : null
+      if (subtitleCues.length && (!subtitlePresetId || cueTracks.some((track) => track.presetId !== subtitlePresetId))) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle cues require one consistent persisted preset')
+      }
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       const musicTracks = 'audioTracks' in source.editPlan && Array.isArray(source.editPlan.audioTracks) ? source.editPlan.audioTracks : []
@@ -265,6 +278,29 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ? createDirectedAudioTimelineHash({ fps: source.editPlan.fps, clips, musicTracks })
         : createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
       if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before final render')
+      // W65. The final decides its captions the way the proxy does, on the FINAL canvas, from the sealed face windows of the
+      // approved Version. A cue that cannot be certified is not burned (the renderer never draws it), and a delivered final
+      // must not silently lose a caption the approved proxy had: any hard issue stops the export before the encode.
+      const { placementPlan } = await planCaptionPlacement({ clock, ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}) }, {
+        workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
+        format: source.format as OutputAspectRatio,
+        canvas: { width: context.outputSpec.width, height: context.outputSpec.height },
+        editPlan: source.editPlan, clips, ...(composition ? { composition } : {}),
+        renderSources: source.renderSources.map((asset) => ({
+          artifactId: asset.artifactId, sha256: asset.sha256, mediaType: asset.mediaType, ...(asset.probe ? { probe: asset.probe } : {}),
+        })),
+        subtitleCues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+        subtitlePresetId, placementElements: [],
+        ...(source.trustedOcr ? { trustedOcr: source.trustedOcr } : {}),
+        primarySourceArtifactId: source.sourceArtifactId,
+        faceEvidenceAllowed: true,
+      })
+      validateRenderPlacementPlan(placementPlan)
+      const hardCaptionIssues = placementPlan.subtitleAnchorPlan?.issues.filter((issue) => issue.severity === 'hard') ?? []
+      if (hardCaptionIssues.length > 0) {
+        throw new DomainError('INVALID_RENDER_INPUT',
+          `Final export has ${hardCaptionIssues.length} caption(s) that could not be placed (${[...new Set(hardCaptionIssues.map((issue) => issue.code))].join(', ')}); review is required`)
+      }
       await enter('rendering')
       failureStage = 'source-materialization'
       const materializedSources = await Promise.all(source.renderSources.map((asset) =>
@@ -292,6 +328,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         format: source.format,
         outputSpec: context.outputSpec,
         subtitleCues,
+        placementPlan,
         transitions,
         ...(musicTracks[0] ? { backgroundMusic: musicTracks[0] } : {}),
         ...(composition ? { composition } : {}),
@@ -449,6 +486,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             cubeHash: asset.cubeHash,
             intensity: asset.intensity,
           })),
+          // The placement the encode was decided with: a reconstruction renders the same captions in the same bands.
+          placementPlan: placementPlan.subtitleAnchorPlan ? placementPlan : null,
           expectedOutputSha256: rendered.sha256,
           expectedOutputByteSize: rendered.byteSize,
           ffmpegBinarySha256: rendered.ffmpegBinarySha256 ?? null,
@@ -490,6 +529,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             projectLutSelectionHash: materializedLut.selectionHash,
             materializedCubeHash: materializedLut.materializedCubeHash ?? null,
             materializedCubeHashes: materializedLut.materializedCubeHashes ?? [],
+            placementPlanHash: placementPlan.subtitleAnchorPlan ? placementPlan.placementPlanHash : null,
+            subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null,
           },
         },
         sources: [

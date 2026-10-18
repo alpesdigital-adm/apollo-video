@@ -49,6 +49,12 @@ export interface ProjectRenderSourceAsset {
   mediaType: 'video' | 'audio'
   container: string
   role: 'source-master' | 'selected-insert' | 'approved-music'
+  /**
+   * Observed dimensions of the stored video (its manifest probe). The caption planner projects the source frame onto the
+   * variant's canvas with them; without them the projection is unavailable and every band is unknown. Deliberately NOT part
+   * of `projectRenderSourcesFingerprint`: the enqueue identity of a render does not move because a probe became known.
+   */
+  probe?: Readonly<{ width: number; height: number }>
 }
 
 export interface ProjectProxyRenderSource {

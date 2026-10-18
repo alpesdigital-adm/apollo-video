@@ -148,8 +148,9 @@ function approvedSource() {
       id: 'edit-plan-final-export-test',
       projectVersionId,
       fps: 30.000000097244733,
+      durationFrames: 300,
       movementPolicy: Object.freeze({ automaticZoom: false, protectedOpeningFrames: 120 }),
-      subtitleTracks: Object.freeze([{ cues: Object.freeze([
+      subtitleTracks: Object.freeze([{ presetId: 'clean-color', cues: Object.freeze([
         Object.freeze({ id: 'cue-final-1', startFrame: 0, endFrame: 60, text: 'Legenda final segura', anchor: 'bottom' }),
       ]) }]),
       transitions: Object.freeze([]),
@@ -180,6 +181,9 @@ function approvedSource() {
       mediaType: 'video',
       container: 'mp4',
       role: 'source-master',
+      // Observed dimensions: with them the caption planner can project the picture onto the 9:16 canvas, where the bottom band
+      // lies over the blurred copy and is certified by geometry (W65). Without them the cue would be review-required.
+      probe: Object.freeze({ width: 1280, height: 720 }),
     })]),
     originalFileName: 'gravacao-bruta.mp4',
   })
@@ -666,4 +670,48 @@ test('final export worker converges content deduplication under the active lease
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
   assert.equal(calls.converged, 1)
   assert.equal(calls.attached, 1)
+})
+
+test('W65 final worker decides its captions on the FINAL canvas and persists the placement its encode was decided with', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  let rendered = null, persisted = null
+  const render = dependencies.renderer.render
+  dependencies.renderer.render = async (input) => { rendered = input; return render(input) }
+  const persist = dependencies.artifacts.persistOrReplay
+  dependencies.artifacts.persistOrReplay = async (input) => { persisted = input; return persist(input) }
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-captions')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
+  assert.equal(calls.rendered, 1)
+  const plan = rendered.placementPlan
+  assert.equal(plan.schemaVersion, 'render-placement-plan/v3')
+  assert.deepEqual({ ...plan.canvas }, { width: 1080, height: 1920 })
+  assert.equal(plan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v3')
+  const decision = plan.subtitleAnchorPlan.decisions[0]
+  assert.equal(decision.cueId, 'cue-final-1'); assert.equal(decision.disposition, 'placed'); assert.equal(decision.anchor, 'bottom')
+  assert.equal(plan.subtitleAnchorPlan.faceClearance.faceSafety, 'unknown')
+  // the encode's placement is part of the RenderInput the final can be reconstructed from, and of its recipe identity
+  const props = JSON.parse(persisted.renderInput.canonicalJson).props
+  assert.equal(props.placementPlan.placementPlanHash, plan.placementPlanHash)
+  const parameters = JSON.parse(persisted.recipeParameters.canonicalJson)
+  assert.equal(parameters.placementPlanHash, plan.placementPlanHash)
+  assert.equal(parameters.subtitleAnchorPlanHash, plan.subtitleAnchorPlan.anchorPlanHash)
+})
+
+test('W65 final worker stops before the encode when a caption cannot be certified: nothing is burned, nothing is published', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  // a portrait master on the portrait canvas: every band is over the picture and no face window exists for it
+  const base = approvedSource()
+  dependencies.projects.readImmutableApprovedSource = async () => Object.freeze({
+    ...base, renderSources: Object.freeze(base.renderSources.map((asset) => Object.freeze({ ...asset, probe: Object.freeze({ width: 720, height: 1280 }) }))),
+  })
+  let recorded
+  const originalRecord = dependencies.projects.recordAttempt
+  dependencies.projects.recordAttempt = async (input) => { recorded = input; await originalRecord(input) }
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-unplaced')
+  assert.equal(outcome.status, 'failed')
+  assert.equal(recorded.error.code, 'invalid_render_input')
+  assert.equal(recorded.error.stage, 'input-validation')
+  assert.equal(calls.rendered, 0); assert.equal(calls.persisted, 0); assert.equal(calls.attached, 0)
 })

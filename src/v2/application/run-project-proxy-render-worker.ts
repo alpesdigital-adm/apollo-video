@@ -7,7 +7,9 @@ import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createDirectedAudioTimelineHash } from '../domain/director-run.ts'
 import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
-import { createRenderPlacementPlan, validateRenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
+import { validateRenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
+import { planCaptionPlacement, plannedCaptionsOverKeptFrames } from './plan-caption-placement.ts'
+import type { FaceWindowEvidenceReader } from './ports/face-window-evidence-reader.ts'
 import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
 import { requireSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../domain/subtitle-system.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
@@ -61,6 +63,11 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
   sources: ArtifactSourceMaterializer
+  /**
+   * W65. The sealed face windows of the Version being rendered. Optional: without it no source has evidence, so every band
+   * over the picture is unknown and its cue is not drawn.
+   */
+  faceEvidence?: FaceWindowEvidenceReader
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -262,33 +269,28 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
         timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
       }))
-      // Only the repository-resolved, scoped OCR envelope can supply text obstacles.
-      // It does not establish facial coverage; every cue stays review-required.
-      const perceptionTimeline = source.trustedOcr?.timeline
-      const placementPlan = createRenderPlacementPlan({
+      const { placementPlan } = await planCaptionPlacement({ clock, ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}) }, {
+        workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
         format: source.format as OutputAspectRatio,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
-        durationFrames,
-        // The subtitle band is reserved from the *resolved* preset, so a CTA is never solved into
-        // the rows the subtitles already own — and never from a rectangle authored here.
-        subtitlePresetId,
-        elements: placementElements,
-        ...(subtitleCues.length ? {
-          subtitleAnchor: {
-            fps: source.editPlan.fps,
-            cues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
-            faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
-            ...(source.trustedOcr ? { ocrEvidence: {
-              envelopeId: source.trustedOcr.envelopeId,
-              envelopeHash: source.trustedOcr.envelopeHash,
-              inputVersionId: source.trustedOcr.inputVersionId,
-              timeMapHash: source.trustedOcr.timeMapHash,
-            } } : {}),
-            ...(perceptionTimeline ? { perceptionTimeline } : {}),
-          },
-        } : {}),
+        editPlan: source.editPlan, clips, ...(composition ? { composition } : {}),
+        renderSources: source.renderSources.map((asset) => ({
+          artifactId: asset.artifactId, sha256: asset.sha256, mediaType: asset.mediaType, ...(asset.probe ? { probe: asset.probe } : {}),
+        })),
+        ...(source.reframePlan ? { reframePlan: source.reframePlan } : {}),
+        subtitleCues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+        // The subtitle band is reserved from the *resolved* preset, so a CTA is never solved into the rows the subtitles
+        // already own - and never from a rectangle authored here.
+        subtitlePresetId, placementElements,
+        // Only the repository-resolved, scoped OCR envelope can supply text obstacles. It does not establish facial
+        // coverage: that comes from the sealed face windows of this Version, or the cue is not drawn.
+        ...(source.trustedOcr ? { trustedOcr: source.trustedOcr } : {}),
+        primarySourceArtifactId: source.sourceArtifactId,
+        faceEvidenceAllowed: !context.renderableSnapshot,
       })
       validateRenderPlacementPlan(placementPlan)
+      // The kept ranges of a reuse are base bytes without any caption; a plan that draws one over them needs the full render.
+      const rangeReuse = source.rangeReuse && !plannedCaptionsOverKeptFrames(placementPlan, source.rangeReuse.ranges) ? source.rangeReuse : undefined
       const ocrReceipt = source.trustedOcr ? Object.freeze({
         envelopeId: source.trustedOcr.envelopeId,
         envelopeHash: source.trustedOcr.envelopeHash,
@@ -321,12 +323,12 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           sha256: asset.sha256,
           byteSize: asset.byteSize,
         })))
-      const materializedRangeReuse = source.rangeReuse
+      const materializedRangeReuse = rangeReuse
         ? await dependencies.sources.materialize({
             operationId: operation.id,
-            artifactKey: source.rangeReuse.artifactKey,
-            sha256: source.rangeReuse.sha256,
-            byteSize: source.rangeReuse.byteSize,
+            artifactKey: rangeReuse.artifactKey,
+            sha256: rangeReuse.sha256,
+            byteSize: rangeReuse.byteSize,
           })
         : undefined
       const render = () => dependencies.renderer.render({
@@ -346,9 +348,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         transitions, ...(composition ? { composition } : {}),
         placementPlan,
         ...(reframePlan ? { reframePlan } : {}),
-        ...(source.rangeReuse ? {
+        ...(rangeReuse ? {
           rangeReuse: {
-            ...source.rangeReuse,
+            ...rangeReuse,
             path: materializedRangeReuse!.path,
           },
         } : {}),
@@ -457,16 +459,16 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         colorPipelineBindings: context.colorPipelineBindings,
         colorPlanHash: colorPlan?.plan.planHash ?? null,
         compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null,
-        rangeReuse: source.rangeReuse ? {
-          schemaVersion: source.rangeReuse.schemaVersion,
-          commandId: source.rangeReuse.commandId,
-          impactHash: source.rangeReuse.impactHash,
-          baseVersionId: source.rangeReuse.baseVersionId,
-          ranges: source.rangeReuse.ranges,
-          artifactId: source.rangeReuse.artifactId,
-          manifestId: source.rangeReuse.manifestId,
-          sha256: source.rangeReuse.sha256,
-          byteSize: source.rangeReuse.byteSize,
+        rangeReuse: rangeReuse ? {
+          schemaVersion: rangeReuse.schemaVersion,
+          commandId: rangeReuse.commandId,
+          impactHash: rangeReuse.impactHash,
+          baseVersionId: rangeReuse.baseVersionId,
+          ranges: rangeReuse.ranges,
+          artifactId: rangeReuse.artifactId,
+          manifestId: rangeReuse.manifestId,
+          sha256: rangeReuse.sha256,
+          byteSize: rangeReuse.byteSize,
         } : null,
         projectLutSelectionId: materializedLut.selectionId,
         projectLutSelectionHash: materializedLut.selectionHash,
@@ -494,9 +496,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             role: asset.role,
             execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
           })),
-          ...(source.rangeReuse ? [{
-            artifactKey: source.rangeReuse.artifactKey,
-            sha256: source.rangeReuse.sha256,
+          ...(rangeReuse ? [{
+            artifactKey: rangeReuse.artifactKey,
+            sha256: rangeReuse.sha256,
             role: 'reused-proxy-range',
             execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
           }] : []),
@@ -511,7 +513,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       })
       const persisted = await dependencies.artifacts.persistOrReplay({
         workspaceId: operation.workspaceId, artifactId: context.outputArtifactId, manifestId: context.outputManifestId,
-        lineageIds: [...source.renderSources, ...(source.rangeReuse ? [source.rangeReuse] : [])].map((asset, index) =>
+        lineageIds: [...source.renderSources, ...(rangeReuse ? [rangeReuse] : [])].map((asset, index) =>
           `lineage-${createHash('sha256')
             .update(`${operation.workspaceId}:${context.inputHash}:${asset.artifactId}:${index}`)
             .digest('hex')}`),

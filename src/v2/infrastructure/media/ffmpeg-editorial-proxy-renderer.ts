@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 
 import type { EditorialProxyRenderer } from '../../application/ports/editorial-proxy-renderer.ts'
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
+import { createCaptionProjection } from '../../domain/caption-canvas-projection.ts'
 import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { assertAssCueText, assertAssFrameInterval, assFrameClockBinder, type AssBoundaryBinder } from '../../domain/ass-emission-policy.ts'
@@ -554,6 +555,30 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
           throw new DomainError('INVALID_RENDER_INPUT', 'A reframe trajectory requires a real-time clip')
         }
         reframeRangeByClipId.set(clip.id, range)
+      }
+    }
+    // W65. A caption that was PLACED was placed on a projection of the sources onto this canvas. The renderer rebuilds that
+    // projection from the sources it actually probed, its clips, crops/reframe and composition, and refuses a plan decided on
+    // anything else: dimensions, staging frame, crop or layout that differ would put the caption somewhere the plan did not
+    // measure. A plan that draws nothing needs no projection, so only a plan with a drawn cue is held to it.
+    const anchorForProjection = input.placementPlan?.subtitleAnchorPlan
+    if (anchorForProjection?.schemaVersion === 'subtitle-anchor-plan/v3' && anchorForProjection.faceClearance.projectionHash !== null &&
+        anchorForProjection.decisions.some((decision) => decision.anchor !== null)) {
+      let rebuilt: string | null = null
+      try {
+        rebuilt = createCaptionProjection({
+          layout: { canvas: { width, height }, composition: input.composition ?? null },
+          sources: videoProbes.map(({ artifactId, probe }) => ({ artifactId, width: probe.width, height: probe.height })),
+          clips: input.clips.map((clip) => ({
+            id: clip.id, sourceArtifactId: clip.sourceArtifactId,
+            timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+            ...(clip.crop ? { crop: clip.crop } : {}),
+            ...(reframeRangeByClipId.has(clip.id) ? { reframe: reframeRangeByClipId.get(clip.id)! } : {}),
+          })),
+        }).projectionHash
+      } catch { rebuilt = null }
+      if (rebuilt !== anchorForProjection.faceClearance.projectionHash) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'The caption projection of the placement plan does not describe the sources of this render')
       }
     }
     const backgroundMusic = input.backgroundMusic

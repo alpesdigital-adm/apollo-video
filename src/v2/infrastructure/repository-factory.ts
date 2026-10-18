@@ -2800,6 +2800,8 @@ export function createProjectProxyRenderWorker(
     colorPipelines: createColorPipelineCompilationRepository(),
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
+    // W65. The sealed face windows the caption planner reads (scoped to the workspace, project, Version and source).
+    faceEvidence: createFaceWindowEnvelopeRepository(),
     // F4.014. The colour verdict is taken on the bytes this worker just wrote
     // and lands on the review it is about to persist. Assembled here because it
     // needs the three things a worker has no business knowing: where FFmpeg is,
@@ -2871,6 +2873,7 @@ export function createProjectFinalExportWorker(
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
     sources: createArtifactSourceMaterializer(environment),
+    faceEvidence: createFaceWindowEnvelopeRepository(),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),

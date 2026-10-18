@@ -35,6 +35,7 @@ import { DomainError } from '../../src/v2/domain/errors.ts'
 import { artifactOutputStoragePrefix } from '../../src/v2/domain/artifact-storage-identity.ts'
 import { contentAddressedArtifactKey } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { buildMeasurement } from './wave20-fixtures.mjs'
+import { sealedWindow } from './helpers/face-envelope-v2.mjs'
 
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
@@ -426,7 +427,7 @@ test('snapshot proxy worker rehydrates the fenced plan and attaches without muta
   assert.equal(snapshotAttached, 1)
   assert.equal(immutableSource.subtitleResolution, undefined)
   assert.equal(renderedInput.subtitleCues.length, 1)
-  assert.equal(renderedInput.placementPlan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
+  assert.equal(renderedInput.placementPlan.subtitleAnchorPlan.schemaVersion, 'subtitle-anchor-plan/v3')
   const decision = subtitleAnchorDecisionFor(renderedInput.placementPlan.subtitleAnchorPlan, 'cue-1')
   assert.equal(decision.suppressed, true)
   assert.equal(decision.anchor, null)
@@ -1284,7 +1285,7 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
   )
   const anchorPlan = matched.render().placementPlan.subtitleAnchorPlan
   assert.ok(anchorPlan, 'the worker must hand the renderer a decided anchor plan')
-  assert.equal(anchorPlan.schemaVersion, 'subtitle-anchor-plan/v2')
+  assert.equal(anchorPlan.schemaVersion, 'subtitle-anchor-plan/v3')
   assert.equal(anchorPlan.perceptionTimelineHash, null)
   assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').anchor, null)
   assert.equal(subtitleAnchorDecisionFor(anchorPlan, 'cue-1').issues[0].code, 'FACE_PERCEPTION_UNAVAILABLE')
@@ -1462,4 +1463,112 @@ test('T-F4.014 an approved colour adds nothing to the review and still releases 
   assert.equal(run.review.finalAllowed, false)
   assert.equal(run.runtime.calls.cleaned, 1)
   assert.equal(run.runtime.rows.size, 1, 'the approving verdict is recorded too')
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// W65: captions are decided on the variant's canvas from the sealed face windows of the Version being rendered.
+// ---------------------------------------------------------------------------------------------------------------------
+const portraitMasterSource = (extra = {}) => Object.freeze({
+  ...source(),
+  // a 9:16 master on the 9:16 canvas: the picture fills the frame, so every caption band lies over it and needs evidence
+  renderSources: Object.freeze(source().renderSources.map((asset) => Object.freeze({ ...asset, probe: Object.freeze({ width: 720, height: 1280 }) }))),
+  subtitleResolution: Object.freeze({
+    presetId: 'kinetic', presetHash: subtitlePresetHash('kinetic'),
+    registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true,
+    presetSnapshot: materializeSubtitlePresetSnapshot('kinetic'),
+  }),
+  ...extra,
+})
+const SEALED_SCOPE = Object.freeze({
+  workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test', projectVersionId: 'project-version-proxy-test',
+  sourceArtifactId: 'artifact-project-proxy-source', sourceSha256: 'c'.repeat(64),
+})
+const faceWindow = (rowsAt, overrides = {}) => sealedWindow({ start: 0, end: 300, rowsAt, overrides: { ...SEALED_SCOPE, ...overrides } })
+const FAR_FACE = [0.9, 0.0, 0.0, 0.03, 0.05]
+
+async function runCaptionWorker(immutableSource, envelopes) {
+  const operations = createOperations(immutableSource)
+  const requests = []
+  const base = dependencies(operations, envelopes ? {
+    faceEvidence: { async listWindows(input) { requests.push(input); return envelopes.map((envelope) => ({ envelope })) } },
+  } : {})
+  base.deps.projects = { ...base.deps.projects, async readImmutableSource() { return immutableSource } }
+  let rendered = null
+  const originalRender = base.deps.renderer.render
+  base.deps.renderer = { ...base.deps.renderer, async render(input) { rendered = input; return originalRender(input) } }
+  let manifest = null
+  base.deps.artifacts = {
+    async persistOrReplay(input) { manifest = input.manifest; return { artifactId: input.artifactId, manifestId: input.manifestId, replayed: false } },
+  }
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-w65-captions')
+  return { outcome, rendered, review: base.attachedReview(), manifest, requests }
+}
+
+test('W65 proxy worker: a cue is drawn only where the sealed face windows of this Version certify its band', async () => {
+  // no reader wired: every band over the picture is unknown, the cue is not drawn, and the review is blocked
+  const unknown = await runCaptionWorker(portraitMasterSource(), undefined)
+  assert.deepEqual(unknown.outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
+  const unknownPlan = unknown.rendered.placementPlan.subtitleAnchorPlan
+  assert.equal(unknownPlan.schemaVersion, 'subtitle-anchor-plan/v3')
+  assert.equal(subtitleAnchorDecisionFor(unknownPlan, 'cue-1').disposition, 'review-required')
+  assert.equal(unknown.review.status, 'blocked')
+  assert.ok(unknown.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
+
+  // a clean, complete, authenticated stream for this exact Version and source certifies the preferred band
+  const clean = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE])])
+  assert.equal(clean.requests.length, 1)
+  assert.deepEqual({ ...clean.requests[0], now: undefined },
+    { workspaceId: SEALED_SCOPE.workspaceId, projectId: SEALED_SCOPE.projectId, projectVersionId: SEALED_SCOPE.projectVersionId,
+      sourceArtifactId: SEALED_SCOPE.sourceArtifactId, fromTimelineFrame: 0, toTimelineFrame: 75, now: undefined, limit: 200 })
+  const cleanDecision = subtitleAnchorDecisionFor(clean.rendered.placementPlan.subtitleAnchorPlan, 'cue-1')
+  assert.equal(cleanDecision.disposition, 'placed'); assert.equal(cleanDecision.anchor, 'bottom')
+  assert.ok(!clean.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' || issue.code === 'NO_SAFE_SUBTITLE_REGION'))
+  // the placement identity is bound into the recipe: the evidence moves the hash
+  assert.notEqual(clean.manifest.recipe.parametersHash, unknown.manifest.recipe.parametersHash)
+
+  // a detected face under the bottom of the frame moves the caption up, onto a band that is certified clear
+  const faceBelow = await runCaptionWorker(portraitMasterSource(), [faceWindow((frame) => (frame === 30 ? [[0.9, 0.2, 0.74, 0.8, 0.96]] : [FAR_FACE]))])
+  const movedDecision = subtitleAnchorDecisionFor(faceBelow.rendered.placementPlan.subtitleAnchorPlan, 'cue-1')
+  assert.equal(movedDecision.bandAssessments.bottom.face.state, 'occupied')
+  assert.equal(movedDecision.disposition, 'placed'); assert.notEqual(movedDecision.anchor, 'bottom')
+
+  // evidence of another Version is not evidence of this one
+  const foreign = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE], { projectVersionId: 'project-version-elsewhere' })])
+  assert.equal(subtitleAnchorDecisionFor(foreign.rendered.placementPlan.subtitleAnchorPlan, 'cue-1').disposition, 'review-required')
+  assert.equal(foreign.review.status, 'blocked')
+})
+
+test('W65 proxy worker: without the source dimensions nothing is projected; on a 16:9 master the 9:16 bottom band is certified by geometry', async () => {
+  const noDimensions = await runCaptionWorker(Object.freeze({ ...portraitMasterSource(), renderSources: source().renderSources }), [faceWindow(() => [FAR_FACE])])
+  const plan = noDimensions.rendered.placementPlan.subtitleAnchorPlan
+  assert.equal(plan.faceClearance.projectionHash, null)
+  assert.equal(subtitleAnchorDecisionFor(plan, 'cue-1').disposition, 'review-required')
+  assert.equal(noDimensions.requests.length, 0)
+  // 1280x720 on the 9:16 canvas is a strip; the bottom band is over the blurred copy and no source pixel is under it
+  const landscapeMaster = portraitMasterSource({
+    renderSources: Object.freeze(source().renderSources.map((asset) => Object.freeze({ ...asset, probe: Object.freeze({ width: 1280, height: 720 }) }))),
+  })
+  const geometry = await runCaptionWorker(landscapeMaster, undefined)
+  const decision = subtitleAnchorDecisionFor(geometry.rendered.placementPlan.subtitleAnchorPlan, 'cue-1')
+  assert.equal(decision.disposition, 'placed'); assert.equal(decision.anchor, 'bottom')
+  assert.equal(decision.bandAssessments.bottom.face.evaluations[0].kind, 'geometry-outside-foreground')
+  assert.equal(geometry.rendered.placementPlan.subtitleAnchorPlan.faceClearance.faceSafety, 'unknown')
+})
+
+test('W65 proxy worker: a reused range cannot carry a caption the plan draws, so the render is done in full', async () => {
+  const reuse = Object.freeze({
+    schemaVersion: 'project-proxy-range-reuse/v1', commandId: 'manual-command-w65-reuse', impactHash: '7'.repeat(64),
+    baseVersionId: 'project-version-proxy-base', ranges: Object.freeze([Object.freeze({ startFrame: 30, endFrame: 60 })]),
+    artifactId: 'artifact-project-proxy-base', manifestId: 'manifest-project-proxy-base',
+    artifactKey: 'workspaces/project-proxy-test/editorial-proxies/w65-base.mp4', sha256: '8'.repeat(64), byteSize: 16_384,
+  })
+  // the cue is [0,60) and only [30,60) is re-rendered: a drawn caption over the kept [0,30) would be missing from the reused bytes
+  const placed = await runCaptionWorker(portraitMasterSource({ rangeReuse: reuse }), [faceWindow(() => [FAR_FACE])])
+  assert.equal(subtitleAnchorDecisionFor(placed.rendered.placementPlan.subtitleAnchorPlan, 'cue-1').disposition, 'placed')
+  assert.equal(placed.rendered.rangeReuse, undefined)
+  assert.ok(!placed.manifest.sources.some((entry) => entry.role === 'reused-proxy-range'))
+  // an undrawn cue leaves the reuse alone
+  const suppressed = await runCaptionWorker(portraitMasterSource({ rangeReuse: reuse }), undefined)
+  assert.equal(suppressed.rendered.rangeReuse.artifactId, 'artifact-project-proxy-base')
+  assert.ok(suppressed.manifest.sources.some((entry) => entry.role === 'reused-proxy-range'))
 })
