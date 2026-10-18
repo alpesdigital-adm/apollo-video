@@ -631,8 +631,10 @@ function assertRenderedVariant(rendered, expected) {
   assert.equal(rendered.lease, undefined)
   if (rendered.renderInput.subtitleCues.length) {
     const anchor = rendered.renderInput.placementPlan.subtitleAnchorPlan
-    assert.equal(anchor.schemaVersion, 'subtitle-anchor-plan/v2')
-    assert.deepEqual(anchor.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' })
+    // No source dimensions and no face window reach this worker: the projection is unavailable and every band is unknown.
+    assert.equal(anchor.schemaVersion, 'subtitle-anchor-plan/v3')
+    assert.equal(anchor.faceClearance.faceSafety, 'unknown')
+    assert.equal(anchor.faceClearance.projectionHash, null)
     assert.deepEqual(anchor.decisions.map((item) => [item.cueId, item.startFrame, item.endFrame, item.anchor, item.bounds, item.suppressed]),
       rendered.renderInput.subtitleCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, null, null, true]))
     assert.equal(rendered.review.status, 'blocked')

@@ -670,9 +670,9 @@ function assertWorkerContract(rendered, expected) {
   assert.equal(rendered.manifest.recipe.id, 'editorial-proxy')
   assert.equal(rendered.manifest.recipe.version, EDITORIAL_PROXY_RECIPE_VERSION)
   // The planned cues reserve the clean-color band even without a style
-  // resolution. The runtime v2 anchor plan records unknown face coverage and
-  // suppresses every cue. Geometry hashing is structural evidence; pixels below
-  // independently establish that no caption was emitted.
+  // resolution. This worker has neither the source dimensions nor a face window, so the v3 anchor plan records that
+  // the projection is unavailable, every band unknown, and withholds every cue. Geometry hashing is structural
+  // evidence; pixels below independently establish that no caption was emitted.
   const outputPreset = readOutputFormatPreset('9:16')
   const placementPlan = createRenderPlacementPlan({
     format: '9:16',
@@ -683,13 +683,14 @@ function assertWorkerContract(rendered, expected) {
     subtitleAnchor: {
       fps: FPS,
       cues: expected.cues.map(([id, startFrame, endFrame]) => ({ id, startFrame, endFrame })),
-      faceSafety: { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' },
+      faceClearance: { projection: null, projectionUnavailableReason: 'SOURCE_DIMENSIONS_UNKNOWN', evidence: [], perceptionSourceArtifactId: MASTER_ARTIFACT_ID },
     },
   })
   assert.deepEqual(rendered.renderInput.placementPlan, placementPlan)
   const anchor = rendered.renderInput.placementPlan.subtitleAnchorPlan
-  assert.equal(anchor.schemaVersion, 'subtitle-anchor-plan/v2')
-  assert.deepEqual(anchor.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE' })
+  assert.equal(anchor.schemaVersion, 'subtitle-anchor-plan/v3')
+  assert.equal(anchor.faceClearance.faceSafety, 'unknown')
+  assert.equal(anchor.faceClearance.projectionHash, null)
   assert.deepEqual(
     anchor.decisions.map((item) => [item.cueId, item.startFrame, item.endFrame, item.anchor, item.bounds, item.suppressed]),
     expected.cues.map(([id, startFrame, endFrame]) => [id, startFrame, endFrame, null, null, true]),

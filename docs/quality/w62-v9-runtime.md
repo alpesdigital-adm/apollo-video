@@ -89,11 +89,15 @@ Executado nesta árvore, sem banco, sem OpenVINO real:
 
 ## O que NÃO foi executado
 
-1. **Suítes PostgreSQL.** `tests/v2/prisma-face-window.integration.mjs` (3 testes) foi escrita e carrega, mas
-   não foi rodada. Precisa de execução supervisionada em cluster descartável com a migração
-   `20261018120000_face_window_v9_profile` aplicada: `npm run test:integration:face-window-db`. A migração
-   também nunca foi aplicada a um banco.
-2. **Composição sob tsx.** `npm run test:integration:face-window-composition` passa localmente, mas não é passo de CI.
+1. **Suítes PostgreSQL - rodadas em 18/10/2026, com um limite.** Sob o lock global e o harness supervisionado
+   (`BASE/run-local-pg-w62-v9.mjs`, cluster descartável na porta 55571, zero backends, cluster parado e porta livre no
+   pós-voo), evidência `BASE/w62-pg-runs/w62-v9-pg-6d5d366e`: `migrate deploy` aplicou
+   `20261018120000_face_window_v9_profile` (exit 0), `prisma-face-window.integration.mjs` 3/3, composição sob tsx 1/1 e,
+   como regressão, `prisma-face-producer.integration.mjs` 5 passam + 1 pulado (o caso do YuNet real exige o still licenciado).
+   **Limite:** a migração foi aplicada a um banco limpo; **não** foi exercitada sobre tabelas que já tenham linhas
+   (`face_producer_operations`/`face_producer_envelopes` legadas). As colunas novas têm `DEFAULT` e as CHECKs aceitam o
+   valor legado por construção, mas isso é raciocínio, não execução.
+2. **Composição sob tsx.** `npm run test:integration:face-window-composition` passa localmente (e passou no harness acima), mas não é passo de CI.
 3. **Runtime real.** O pipeline completo com OpenVINO real, FFmpeg real e vídeo real não foi executado nesta árvore.
 4. **Paridade em Linux** (abaixo).
 5. **Medição em vídeo real** (abaixo).
