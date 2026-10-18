@@ -246,3 +246,25 @@ subtitle-anchor 6/6, subtitle-styles 1/1, style-tokens 1/1, proof-mode goldens 1
 mudança, em 47467ff7: editorial-renderer 8/9 (`w69-physical-suites-v1-2e497d0d`), igual em f7ee0b05 menos o estágio
 (`...-58726aee`: 9/9), e o candidato `settb+setpts` já fechava 9/9 + coletor + anchor + prova de pixels
 (`...-4e5274df`, `w69-ass-binder-pixels-candidate-settb-9b8afe43`).
+
+### As seis suítes físicas que já falhavam antes do W69 (65c4bdda, 18/10/2026)
+
+Sidecar pipeline, output-formats, render-geometry (T-FR-171), transcript-rate, wave9 e wave10 reprovavam igualmente em
+f7ee0b05 (`w69-physical-suites-v1-58726aee`): dirigiam Versions de contrato 1 já aposentadas e fixtures anteriores à regra
+do renderer (`ffmpeg-editorial-proxy-renderer.ts`: cue renderizada exige `subtitle-anchor-plan/v2` completo, com uma decisão
+por cue). Nada foi afrouxado.
+
+- Sidecar, output-formats e render-geometry passam a entregar um plano de revisão com cobertura facial desconhecida. Enquanto
+  a cobertura é desconhecida o runtime suprime a legenda (zero pixels, nenhum elemento `subtitle` no mapa); as asserções
+  positivas de pixel de legenda viraram asserções de zero pixel (regra W65), e a geometria positiva continua nos goldens do
+  anchor. O sidecar usa o alinhamento controlado, montado com `buildRenderElementMap` sobre o hash do MP4 real, e afirma que o
+  runtime não emitiu elemento de legenda; o que segue físico é bytes, hash, storage, linhagem, grants e adulteração.
+- Transcript-rate, wave9 e wave10 constroem as Versions pelo mundo selado puro (`outputWorld`/`ingestedWorld`/`recompiledChild`)
+  em `tests/v2/helpers/retimed-journey-world.mjs`: a gravação é o master da suíte (id, chave, digest e tamanho reais) e os
+  repositórios de substituição, Director, configuração de legenda e override de segmento recebem bundles selados (`parent`,
+  `bundle.origin`). Os parâmetros de receita esperados passaram a incluir o `assEmissionPolicy` que o worker grava desde cb868e7f.
+- Execução (lock global, runner supervisionado, `w69-physical-suites-v1-f3fbab19`): sidecar 14/14 (inclui "a historical version
+  yields its own sidecar and is reported as not current", que confirma a guarda de 47467ff7), transcript-rate 2/2,
+  output-formats 1/1, render-geometry 3/3, wave9 3/3, wave10 2/2. Nenhum golden foi rebaselinado.
+- CI: transcript-rate roda no job de qualidade; sidecar-pipeline, output-formats, render-geometry, wave9 e wave10 seguem
+  declaradas não executadas em `KNOWN_UNRUN_SUITES` (nenhum workflow as roda).
