@@ -9,6 +9,7 @@ import type { NormalizedBounds, OutputAspectRatio } from '../domain/output-spec.
 import type { PerceptionTimeline } from '../domain/perception-timeline.ts'
 import { createRenderPlacementPlan, type RenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
 import type { RenderReframePlanV1 } from '../domain/render-reframe-plan.ts'
+import { FINAL_CAPTION_ANCHOR_POLICY } from '../domain/final-caption-certification.ts'
 import { DEFAULT_SUBTITLE_ANCHOR_POLICY } from '../domain/subtitle-anchor-plan.ts'
 import type { SubtitlePresetId } from '../domain/subtitle-system.ts'
 import type { FaceWindowEvidenceReader } from './ports/face-window-evidence-reader.ts'
@@ -56,6 +57,12 @@ export type CaptionPlacementInput = Readonly<{
   primarySourceArtifactId: string
   /** False for renderable snapshots: their plan is not the Version's EditPlan, so the Version's windows do not describe it. */
   faceEvidenceAllowed: boolean
+  /**
+   * What a cue that cannot be certified costs (W65b). `block` (the default): the cue is not drawn and the reason is a HARD issue,
+   * so the render cannot be approved. `omit-and-list`: the cue is not drawn and the reason is a WARNING that lists it as a review
+   * item, so the rest of the video can be approved and delivered without it (the final's rule).
+   */
+  uncertifiedCues?: 'block' | 'omit-and-list'
 }>
 
 export type CaptionPlacementResult = Readonly<{
@@ -139,6 +146,7 @@ export async function planCaptionPlacement(
       subtitleAnchor: {
         fps: input.editPlan.fps,
         cues: input.subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+        ...(input.uncertifiedCues === 'omit-and-list' ? { policy: FINAL_CAPTION_ANCHOR_POLICY } : {}),
         faceClearance: {
           projection,
           ...(reason ? { projectionUnavailableReason: reason } : {}),

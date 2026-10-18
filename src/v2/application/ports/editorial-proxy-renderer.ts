@@ -37,10 +37,13 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
 // DRAWN where the plan put it (it used to be suppressed unconditionally), and it rebuilds the caption projection from the
 // sources it probed and refuses a plan decided on anything else. Proxy recipe 1.17.0 and final recipe 1.12.0: the same cue
 // list now produces different pixels, so a proxy or final of 1.15.0/1.16.0/1.11.0 must not be reused for it.
+// 1.13.0 (final recipe only, W65b): a final records the caption certification it was admitted under - the pinned policy digest and
+// the receipt of what was burned (and how each band was certified) and what was omitted and listed for review - and its pre-render
+// identity binds that policy. The renderer and the pixels do not change, so the renderer version and the proxy recipe stay.
 // These affect pixels; renderer digest and both recipe versions invalidate previous reuse.
 export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.16.0'
 export const EDITORIAL_PROXY_RECIPE_VERSION = '1.17.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.12.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.13.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {

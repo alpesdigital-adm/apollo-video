@@ -109,8 +109,14 @@ export interface SubtitleAnchorDecisionV1 {
 export interface SubtitleAnchorPolicyV1 {
   /** Minimum frames a decision must hold before another change is considered stable. */
   minFramesBetweenChanges: number
-  /** What to do when every band is blocked. Never "draw it anyway". */
-  onNoSafeRegion: 'suppress-cue' | 'fail-closed'
+  /**
+   * What to do when every band is blocked. Never "draw it anyway".
+   * - `suppress-cue`: the cue is not drawn and the reason is a HARD issue (the render cannot be approved);
+   * - `omit-and-list` (W65b, `subtitle-anchor-plan/v3` only): the cue is not drawn and the reason is a WARNING that lists it as
+   *   a review item, so the rest of the render can be approved and delivered without it;
+   * - `fail-closed`: planning throws.
+   */
+  onNoSafeRegion: 'suppress-cue' | 'omit-and-list' | 'fail-closed'
 }
 
 export interface SubtitleAnchorPlanBase {

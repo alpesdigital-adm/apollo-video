@@ -28,7 +28,11 @@ import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
 import { emittedSubtitleTracks } from '../domain/subtitle-emission-tracks.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { validateRenderPlacementPlan } from '../domain/render-placement-plan.ts'
+import {
+  certifyFinalCaptions, describeFinalCaptionCertification, FINAL_CAPTION_CERTIFICATION_POLICY_SHA256, type FinalPixelCheck,
+} from '../domain/final-caption-certification.ts'
 import { planCaptionPlacement } from './plan-caption-placement.ts'
+import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
 import type { FaceWindowEvidenceReader } from './ports/face-window-evidence-reader.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
@@ -73,6 +77,11 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   sources: ArtifactSourceMaterializer
   /** W65. The sealed face windows of the approved Version; without them no cue over the picture can be certified. */
   faceEvidence?: FaceWindowEvidenceReader
+  /**
+   * W65b. Confirms, on the delivered MP4, that every burned caption is where the plan put it. A final that burns at least one
+   * caption is refused (before the encode) without it: a caption is never delivered on the strength of the plan alone.
+   */
+  captionPixelCritic?: CaptionPixelCritic
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -278,9 +287,11 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ? createDirectedAudioTimelineHash({ fps: source.editPlan.fps, clips, musicTracks })
         : createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
       if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before final render')
-      // W65. The final decides its captions the way the proxy does, on the FINAL canvas, from the sealed face windows of the
-      // approved Version. A cue that cannot be certified is not burned (the renderer never draws it), and a delivered final
-      // must not silently lose a caption the approved proxy had: any hard issue stops the export before the encode.
+      // W65/W65b. The final decides its captions the way the proxy does, on the FINAL canvas, from the sealed face windows of the
+      // approved Version. A cue that cannot be certified in a free band is OMITTED (the renderer never draws it) and LISTED as a
+      // review item in the receipt, never silently dropped: that is the sanctioned remedy, not a failure. What stops the export
+      // before the encode is anything else - a hard issue, a band that is not free-certified under a placed cue, or a burned
+      // caption that nothing would confirm in the delivered pixels.
       const { placementPlan } = await planCaptionPlacement({ clock, ...(dependencies.faceEvidence ? { faceEvidence: dependencies.faceEvidence } : {}) }, {
         workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
         format: source.format as OutputAspectRatio,
@@ -294,12 +305,23 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ...(source.trustedOcr ? { trustedOcr: source.trustedOcr } : {}),
         primarySourceArtifactId: source.sourceArtifactId,
         faceEvidenceAllowed: true,
+        uncertifiedCues: 'omit-and-list',
       })
       validateRenderPlacementPlan(placementPlan)
       const hardCaptionIssues = placementPlan.subtitleAnchorPlan?.issues.filter((issue) => issue.severity === 'hard') ?? []
       if (hardCaptionIssues.length > 0) {
         throw new DomainError('INVALID_RENDER_INPUT',
           `Final export has ${hardCaptionIssues.length} caption(s) that could not be placed (${[...new Set(hardCaptionIssues.map((issue) => issue.code))].join(', ')}); review is required`)
+      }
+      // Everything about the plan that does not need pixels. `completed` with no issues stands for "the delivered pixels agree".
+      const preflight = certifyFinalCaptions({ plan: placementPlan, pixelCheck: { measurement: 'completed', issues: [] } })
+      if (!preflight.admissible) {
+        throw new DomainError('INVALID_RENDER_INPUT', `Final export captions are not certified (${preflight.failures.slice(0, 3).join('; ')})`)
+      }
+      const burnedCaptions = preflight.receipt.burned.length
+      if (burnedCaptions > 0 && !dependencies.captionPixelCritic) {
+        throw new DomainError('INVALID_RENDER_INPUT',
+          `Final export would burn ${burnedCaptions} caption(s) but no caption pixel critic is available to confirm them in the delivered pixels`)
       }
       await enter('rendering')
       failureStage = 'source-materialization'
@@ -311,7 +333,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           byteSize: asset.byteSize,
         })))
       failureStage = 'render'
-      const render = () => dependencies.renderer.render({
+      const renderRequest: Parameters<typeof dependencies.renderer.render>[0] = {
         operationId: operation.id,
         renderKind: 'final',
         sources: source.renderSources.map((asset, index) => ({
@@ -333,7 +355,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ...(musicTracks[0] ? { backgroundMusic: musicTracks[0] } : {}),
         ...(composition ? { composition } : {}),
         signal: abortController.signal,
-      })
+      }
+      const render = () => dependencies.renderer.render(renderRequest)
       const rendered = dependencies.telemetry
         ? await runPublicOperationSpan({
             telemetry: dependencies.telemetry,
@@ -348,6 +371,32 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       await enter('verifying')
       failureStage = 'output-verification'
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
+      // ---- W65b. Where the burned captions really are, measured on the bytes that were rendered ----
+      // The control is the same encode without the cues; a final that burns nothing has nothing to confirm. Unlike the proxy, a
+      // critic that was wired and could not measure does NOT leave a deliverable behind: the caption is not confirmed.
+      let pixelCheck: FinalPixelCheck | null = null
+      if (burnedCaptions > 0) {
+        const controlOperationId = `${operation.id}-caption-control`
+        try {
+          const verification = await dependencies.captionPixelCritic!.verify({
+            plan: placementPlan, deliveredPath: rendered.outputPath, signal: abortController.signal,
+            renderControl: async () => {
+              const control = await dependencies.renderer.render({ ...renderRequest, operationId: controlOperationId, subtitleCues: [] })
+              return { path: control.outputPath }
+            },
+          })
+          pixelCheck = Object.freeze({
+            measurement: verification.measurement === 'completed' ? 'completed' as const : 'failed' as const,
+            issues: verification.issues,
+          })
+        } catch (error) {
+          if (abortController.signal.aborted) throw error
+          pixelCheck = Object.freeze({ measurement: 'failed' as const, issues: [] })
+        } finally {
+          await dependencies.renderer.cleanup(controlOperationId).catch(() => undefined)
+        }
+      }
+      const certification = certifyFinalCaptions({ plan: placementPlan, pixelCheck })
       const expectedFrames = clips.reduce(
         (total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame,
         0,
@@ -401,6 +450,13 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             rendered.renderElementMap.durationFrames === expectedFrames &&
             Math.abs(rendered.renderElementMap.fps - context.outputSpec.fps) <= 0.01,
           message: 'RenderElementMap must match final output identity and timing.',
+        },
+        {
+          code: 'FINAL_CAPTION_CERTIFICATION',
+          passed: certification.admissible,
+          message: certification.admissible
+            ? describeFinalCaptionCertification(certification.receipt)
+            : `Burned captions are not certified: ${certification.failures.slice(0, 3).join('; ')}`.slice(0, 500),
         },
       ]
       if (validators.some((validator) => !validator.passed)) {
@@ -531,6 +587,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             materializedCubeHashes: materializedLut.materializedCubeHashes ?? [],
             placementPlanHash: placementPlan.subtitleAnchorPlan ? placementPlan.placementPlanHash : null,
             subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null,
+            // W65b. What was burned, how each band was certified, and what was omitted and listed for review.
+            captionCertificationPolicySha256: FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
+            captionCertification: certification.receipt,
           },
         },
         sources: [

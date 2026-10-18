@@ -204,19 +204,23 @@ export function deriveCueDecisionV3(input: Readonly<{
       assessments[anchor].blockerIds)
   } else {
     assertDomain(
-      policy.onNoSafeRegion === 'suppress-cue',
+      policy.onNoSafeRegion === 'suppress-cue' || policy.onNoSafeRegion === 'omit-and-list',
       'INVALID_RENDER_INPUT', `No safe subtitle region for cue ${cue.id}`, { cueId: cue.id },
     )
+    // `omit-and-list` (W65b) keeps the cue out of the pixels exactly like `suppress-cue` does, but lists it as a review item
+    // (a warning) instead of making the render unapprovable (a hard issue): the rest of the video can be delivered without it.
+    const severity = policy.onNoSafeRegion === 'omit-and-list' ? 'warning' as const : 'hard' as const
+    const listed = severity === 'warning' ? ' It was omitted from the render and is listed for review.' : ''
     if (anyUnknown) {
       disposition = 'review-required'
       const reasons = unique(SUBTITLE_ANCHOR_PREFERENCE.flatMap((candidate) => assessments[candidate].face.state === 'unknown' ? assessments[candidate].face.reasons : []))
-      addIssue('FACE_PERCEPTION_UNAVAILABLE', 'hard',
-        `Facial clearance could not be certified for any band during cue ${cue.id} (${reasons.slice(0, 6).join(', ') || 'no reason recorded'}); the cue was not drawn and needs review.`,
+      addIssue('FACE_PERCEPTION_UNAVAILABLE', severity,
+        `Facial clearance could not be certified for any band during cue ${cue.id} (${reasons.slice(0, 6).join(', ') || 'no reason recorded'}); the cue was not drawn and needs review.${listed}`,
         [...blockingIds, ...notFreeFaceIds])
     } else {
       disposition = 'blocked'
-      addIssue('NO_SAFE_SUBTITLE_REGION', 'hard',
-        `Every subtitle band collides with protected evidence during cue ${cue.id}; the cue was suppressed instead of covering it.`,
+      addIssue('NO_SAFE_SUBTITLE_REGION', severity,
+        `Every subtitle band collides with protected evidence during cue ${cue.id}; the cue was suppressed instead of covering it.${listed}`,
         [...blockingIds, ...notFreeFaceIds])
     }
   }
@@ -282,7 +286,7 @@ export function createSubtitleAnchorPlanV3(input: Readonly<{
   const policy = Object.freeze({ ...DEFAULT_SUBTITLE_ANCHOR_POLICY, ...input.policy })
   assertDomain(
     Number.isSafeInteger(policy.minFramesBetweenChanges) && policy.minFramesBetweenChanges >= 0 &&
-    (policy.onNoSafeRegion === 'suppress-cue' || policy.onNoSafeRegion === 'fail-closed'),
+    (policy.onNoSafeRegion === 'suppress-cue' || policy.onNoSafeRegion === 'omit-and-list' || policy.onNoSafeRegion === 'fail-closed'),
     'INVALID_RENDER_INPUT', 'Subtitle anchor policy is invalid',
   )
   assertDomain(input.perceptionTimeline === undefined
@@ -422,7 +426,7 @@ export function validateSubtitleAnchorPlanV3(plan: Readonly<SubtitleAnchorPlanV3
   const policy = plan.policy
   assertDomain(
     Number.isSafeInteger(policy.minFramesBetweenChanges) && policy.minFramesBetweenChanges >= 0 &&
-    (policy.onNoSafeRegion === 'suppress-cue' || policy.onNoSafeRegion === 'fail-closed'),
+    (policy.onNoSafeRegion === 'suppress-cue' || policy.onNoSafeRegion === 'omit-and-list' || policy.onNoSafeRegion === 'fail-closed'),
     'INVALID_RENDER_INPUT', 'Subtitle anchor policy is invalid',
   )
   let previous: SubtitleAnchor | null = null

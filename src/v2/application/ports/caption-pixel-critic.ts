@@ -17,6 +17,12 @@ export interface PixelFaceVetoDetector {
 export interface CaptionPixelVerification {
   issues: readonly Readonly<CaptionPixelIssueV1>[]
   samples: readonly Readonly<CaptionFootprintSample>[]
+  /**
+   * `completed`: the critic measured the delivered frames (and found whatever `issues` says). `failed`: it could not take its
+   * measurement, and `issues` then only says so. A proxy waits for a person in that case; a FINAL never burns a caption that
+   * was not confirmed in pixels (W65b).
+   */
+  measurement: 'completed' | 'failed'
 }
 
 /**

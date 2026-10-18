@@ -2879,6 +2879,10 @@ export function createProjectFinalExportWorker(
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
     sources: createArtifactSourceMaterializer(environment),
     faceEvidence: createFaceWindowEnvelopeRepository(),
+    // W65b. A final that burns a caption is refused without this: the caption is confirmed on the delivered pixels (C1) or it is
+    // not delivered. No independent face veto detector is wired, so each burned cue also records FACE_PIXEL_CHECK_UNAVAILABLE in
+    // the receipt - a warning that never turns an unknown into a pass.
+    captionPixelCritic: new FfmpegCaptionPixelCritic(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),

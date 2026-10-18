@@ -6,7 +6,12 @@ export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSour
   directorRunId: string
   qualitySnapshotId: string
   qualitySnapshotHash: string
-  qualityStatus: 'approved' | 'approved-with-warnings'
+  qualityStatus: 'approved' | 'approved-with-warnings' | 'review-required'
+  /**
+   * Why the Director's report is admissible for a final (W65b): a verified face safety (legacy), or the per-cue caption
+   * certification the final worker performs on what it burns. Neither ever sets a global face safety.
+   */
+  admissionBasis: 'verified-face-safety' | 'per-cue-caption-certification'
   qualityScore: number
   proxyReviewId: string
   proxyReviewHash: string

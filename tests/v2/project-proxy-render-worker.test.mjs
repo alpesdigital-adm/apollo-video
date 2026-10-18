@@ -360,9 +360,10 @@ test('project proxy worker materializes, attaches and settles the exact immutabl
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
   assert.deepEqual(operations.operation.result.resource, operations.operation.target)
-  assert.equal(attachedReview()?.status, 'blocked')
-  assert.equal(attachedReview()?.finalAllowed, false)
-  assert.ok(attachedReview()?.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
+  // W65b: the cue that could not be certified is omitted and LISTED as a review item (a warning to acknowledge), not a block
+  assert.equal(attachedReview()?.status, 'warning-ack-required')
+  assert.equal(attachedReview()?.finalAllowed, false, 'until the reviewer has acknowledged the listed cues')
+  assert.ok(attachedReview()?.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
   assert.deepEqual(calls, { attached: 1, cleaned: 1, lutCleaned: 1, persisted: 1, mapped: 1, reviewed: 1, cataloged: 1 })
 })
 
@@ -1254,11 +1255,11 @@ test('T-FR-173 project proxy worker does not trust manually supplied perception 
     let review = null
     base.deps.projects.attachCompletedOutput = async (input) => {
       review = input.review
-      assert.equal(review.status, 'blocked')
+      assert.equal(review.status, 'warning-ack-required')
       assert.equal(review.finalAllowed, false)
-      assert.equal(review.formatQuality?.exportAllowed, false)
+      assert.equal(review.formatQuality?.exportAllowed, true, 'the listed cue is a warning of the format report, not a block')
       assert.ok(review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' &&
-        issue.severity === 'hard' && issue.evidenceRange.startFrame === 0 && issue.evidenceRange.endFrame === 60))
+        issue.severity === 'warning' && issue.evidenceRange.startFrame === 0 && issue.evidenceRange.endFrame === 60))
       return attachWithFinalization(input)
     }
     base.deps.perceptionTimelines = { async findLatest() { return persisted(projectVersionId) } }
@@ -1415,7 +1416,8 @@ test('T-F4.014 a colour rejection reaches the proxy review as a hard issue and b
   assert.ok(hard.length >= 1, `the rejection never reached the review: ${JSON.stringify(run.review.criticIssues)}`)
   assert.ok(hard.some((issue) => issue.code === 'COLOR_CRITIC_REJECTED' &&
     issue.evidenceIds.some((ref) => ref.startsWith('color-critic-report:'))))
-  assert.ok(hard.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
+  assert.ok(run.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'),
+    'the cue that could not be certified is listed beside the colour rejection')
   assert.equal(run.review.status, 'blocked')
   assert.equal(run.review.finalAllowed, false)
   // The critic's intermediates and crops are released with the renderer's.
@@ -1429,7 +1431,7 @@ test('T-F4.014 a critic that was wired and could not run leaves a warning, not a
   assert.equal(warnings.length, 1)
   assert.equal(warnings[0].severity, 'warning')
   assert.match(warnings[0].message, /was not judged/)
-  assert.equal(run.review.status, 'blocked', 'the colour warning cannot override unknown facial safety')
+  assert.equal(run.review.status, 'warning-ack-required', 'the colour warning is not an approval: it, and the listed cue, wait for an acknowledgement')
   assert.equal(run.review.finalAllowed, false)
   assert.equal(run.runtime.calls.cleaned, 1, 'a failed evaluation still wrote intermediates')
 })
@@ -1444,7 +1446,7 @@ test('T-F4.014 a rejection whose report could not be written still blocks, and s
   const hard = run.review.criticIssues.filter((issue) => issue.severity === 'hard')
   assert.ok(hard.length >= 1, `a lost row must not lose the rejection: ${JSON.stringify(run.review.criticIssues)}`)
   assert.ok(hard.some((issue) => issue.code === 'COLOR_CRITIC_REJECTED'))
-  assert.ok(hard.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
+  assert.ok(run.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
   const unrecorded = run.review.criticIssues.filter((issue) => issue.code === 'COLOR_CRITIC_REPORT_UNRECORDED')
   assert.equal(unrecorded.length, 1)
   assert.match(unrecorded[0].message, /could not be recorded/)
@@ -1459,7 +1461,7 @@ test('T-F4.014 an approved colour adds nothing to the review and still releases 
   assert.equal(run.outcome.status, 'succeeded')
   assert.ok(run.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE'))
   assert.ok(run.review.criticIssues.every((issue) => issue.code !== 'COLOR_CRITIC_REJECTED'))
-  assert.equal(run.review.status, 'blocked')
+  assert.equal(run.review.status, 'warning-ack-required', 'an approved colour leaves only the listed cue to acknowledge')
   assert.equal(run.review.finalAllowed, false)
   assert.equal(run.runtime.calls.cleaned, 1)
   assert.equal(run.runtime.rows.size, 1, 'the approving verdict is recorded too')
@@ -1505,14 +1507,15 @@ async function runCaptionWorker(immutableSource, envelopes) {
 }
 
 test('W65 proxy worker: a cue is drawn only where the sealed face windows of this Version certify its band', async () => {
-  // no reader wired: every band over the picture is unknown, the cue is not drawn, and the review is blocked
+  // no reader wired: every band over the picture is unknown, the cue is not drawn and is LISTED for review (W65b)
   const unknown = await runCaptionWorker(portraitMasterSource(), undefined)
   assert.deepEqual(unknown.outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
   const unknownPlan = unknown.rendered.placementPlan.subtitleAnchorPlan
   assert.equal(unknownPlan.schemaVersion, 'subtitle-anchor-plan/v3')
   assert.equal(subtitleAnchorDecisionFor(unknownPlan, 'cue-1').disposition, 'review-required')
-  assert.equal(unknown.review.status, 'blocked')
-  assert.ok(unknown.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
+  assert.equal(unknownPlan.policy.onNoSafeRegion, 'omit-and-list')
+  assert.equal(unknown.review.status, 'warning-ack-required')
+  assert.ok(unknown.review.criticIssues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
 
   // a clean, complete, authenticated stream for this exact Version and source certifies the preferred band
   const clean = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE])])
@@ -1535,7 +1538,7 @@ test('W65 proxy worker: a cue is drawn only where the sealed face windows of thi
   // evidence of another Version is not evidence of this one
   const foreign = await runCaptionWorker(portraitMasterSource(), [faceWindow(() => [FAR_FACE], { projectVersionId: 'project-version-elsewhere' })])
   assert.equal(subtitleAnchorDecisionFor(foreign.rendered.placementPlan.subtitleAnchorPlan, 'cue-1').disposition, 'review-required')
-  assert.equal(foreign.review.status, 'blocked')
+  assert.equal(foreign.review.status, 'warning-ack-required')
 })
 
 test('W65 proxy worker: without the source dimensions nothing is projected; on a 16:9 master the 9:16 bottom band is certified by geometry', async () => {

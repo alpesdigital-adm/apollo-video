@@ -971,9 +971,19 @@ Sem percepção facial verificada, o Diretor persiste `review-required`,
 `faceSafety.status=unknown`, razão explícita e lista vazia de evidence refs.
 `subtitlesFaceSafe=false` nesse caso; posição `bottom` e flag de proteção são
 somente intenção de layout. A métrica estratégica de legibilidade cobre
-limites textuais, não ausência de colisão facial. A UI e API mostram a revisão;
-o repositório de exportação final exige aprovação e evidência facial verificada.
-Um proxy pode servir à revisão, sem promover o resultado a aprovado. Snapshots
+limites textuais, não ausência de colisão facial. A UI e API mostram a revisão.
+O repositório de exportação final admite esse relatório (`review-required`,
+`faceSafety=unknown`) somente quando a incerteza facial é a única ressalva: gate
+estratégico aprovado, todos os hard checks (exceto `subtitlesFaceSafe`) verdadeiros e
+nenhuma issue `hard`. A segurança facial **continua desconhecida**; o que o final
+garante é por legenda queimada: banda `free-certified` no canvas final (evidência
+confiável ou geometria) confirmada pelo crítico de pixels C1 sobre o MP4 entregue. A
+legenda que não puder ser certificada é omitida (não queimada) e listada como item de
+revisão no recibo e no registro da tentativa. A política é `final-caption-certification/v1`,
+fixada por digest na identidade pré-render (veja
+`docs/quality/w65b-final-caption-certification.md`). Um relatório que declare
+`faceSafety.status=verified` mantém o requisito anterior de evidência de percepção
+facial. Um proxy pode servir à revisão, sem promover o resultado a aprovado. Snapshots
 antigos sem esse campo não são prova de segurança para nova exportação.
 As capabilities `apollo.projects.perception.read` e `.put` passam a 2.0.0,
 com respostas `perception-range-response/v2` e

@@ -295,6 +295,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         ...(source.trustedOcr ? { trustedOcr: source.trustedOcr } : {}),
         primarySourceArtifactId: source.sourceArtifactId,
         faceEvidenceAllowed: !context.renderableSnapshot,
+        // W65b. The proxy is what the final is approved from, so it plans under the final's rule: a cue that cannot be certified
+        // is left out and LISTED (a warning the reviewer acknowledges), instead of making the whole proxy unapprovable.
+        uncertifiedCues: 'omit-and-list',
       })
       validateRenderPlacementPlan(placementPlan)
       // The kept ranges of a reuse are base bytes without any caption; a plan that draws one over them needs the full render.

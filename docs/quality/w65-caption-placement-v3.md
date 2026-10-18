@@ -54,8 +54,8 @@ Reuso: os bytes reaproveitados de uma faixa vêm de um proxy-base sem legenda (o
 quadro mantido não é satisfeito por eles; o worker faz o render completo.
 
 O final decide no canvas **final**, grava `placementPlan` no RenderInput (a reconstrução desenha as mesmas cues nas mesmas bandas) e para
-antes do encode se houver problema `hard`. O gate de aprovação do final continua exigindo `faceSafety` do Diretor `verified`, que este
-recorte nunca concede.
+antes do encode se houver problema `hard`. (W65b: o gate de aprovação do final deixou de exigir um `faceSafety` `verified` que nada concede;
+a regra por legenda queimada, o recibo e a omissão de legendas não certificadas estão em `docs/quality/w65b-final-caption-certification.md`.)
 
 ## 5. Versões
 

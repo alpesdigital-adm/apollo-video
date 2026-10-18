@@ -8,6 +8,7 @@ import type {
 } from '../../application/ports/project-final-export-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { admitDirectorQualityForFinal } from '../../domain/final-caption-certification.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
 import { readOutputFormatPreset } from '../../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../../domain/output-spec.ts'
@@ -105,21 +106,28 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       contentSchemaVersion: directorRun.qualitySnapshot.schemaVersion,
       objective: directorRun.objective, rubricRef: directorRun.rubricRef,
     })
-    if (!['approved', 'approved-with-warnings'].includes(quality.status)) return null
-    if (quality.faceSafety.status !== 'verified') return null
-    for (const reference of quality.faceSafety.evidenceRefs) {
-      const evidence = await this.perceptionEvidence.read({ id: reference,
-        workspaceId: input.workspaceId, projectId: input.projectId,
-        inputVersionId: directorRun.baseVersionId, now: new Date() })
-      // OCR is source-authenticated but carries no facial clearance. No face producer is authorized yet.
-      if (!evidence || String(evidence.modality) !== 'face') return null
+    // W65b. A global facial safety is never granted (the Director's claim stays `unknown`), so the admission is decided on what
+    // the final burns: `per-cue-caption-certification` admits the report the Director really produces when the unknown face claim
+    // is its ONLY reservation, and the worker then certifies every burned cue and omits the rest. A report that DOES claim a
+    // verified face safety keeps the original requirement: every evidence ref must be a face perception envelope of the run.
+    const admission = admitDirectorQualityForFinal(quality)
+    if (!admission.admitted) return null
+    if (admission.basis === 'verified-face-safety') {
+      for (const reference of quality.faceSafety.evidenceRefs) {
+        const evidence = await this.perceptionEvidence.read({ id: reference,
+          workspaceId: input.workspaceId, projectId: input.projectId,
+          inputVersionId: directorRun.baseVersionId, now: new Date() })
+        // OCR is source-authenticated but carries no facial clearance. No face producer is authorized yet.
+        if (!evidence || String(evidence.modality) !== 'face') return null
+      }
     }
     return Object.freeze({
       locale: project.locale ?? 'pt-BR',
       directorRunId: directorRun.id,
       qualitySnapshotId: directorRun.qualitySnapshotId,
       qualitySnapshotHash: directorRun.qualitySnapshot.contentHash,
-      qualityStatus: quality.status as 'approved' | 'approved-with-warnings',
+      qualityStatus: quality.status as 'approved' | 'approved-with-warnings' | 'review-required',
+      admissionBasis: admission.basis,
       qualityScore: quality.score,
       proxyReviewId: proxyReview.id,
       proxyReviewHash: proxyReview.reviewHash,

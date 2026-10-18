@@ -14,10 +14,12 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { proveCatalogOutputBrowser } from './helpers/catalog-output-browser-proof.mjs'
 import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
 
-// The persisted Director quality is review-required with unknown face safety.
-// The public API must reject it. A separately injected, test-only approval port
-// exercises export mechanics with real PostgreSQL, FFmpeg and artifact storage;
-// this is not an end-to-end approval or facial-safety claim.
+// The persisted Director quality is review-required with unknown face safety, and it stays that way for the whole test.
+// W65b: unknown face safety no longer refuses an export by itself - the gate admits that report and the worker certifies
+// every BURNED caption (prisma-final-caption-certification.integration.mjs proves that chain). What the public API must
+// still refuse is a report that is not honest about everything else. A separately injected, test-only approval port
+// exercises the export mechanics (catalog, download, reconstruction) with real PostgreSQL, FFmpeg and artifact storage;
+// this is not a facial-safety claim.
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
 const ffmpegStatic = require('ffmpeg-static')
@@ -695,7 +697,9 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     const finalExportRepository = new PrismaProjectFinalExportRepository(client)
     const approvalInput = { workspaceId, projectId, projectVersionId, projectVersionHash,
       outputSpecId: 'preset-9x16', requireCurrent: true }
-    assert.equal(await finalExportRepository.readApproval(approvalInput), null)
+    const admittedApproval = await finalExportRepository.readApproval(approvalInput)
+    assert.equal(admittedApproval?.qualityStatus, 'review-required', 'the report is admitted as it is: face safety is not being claimed')
+    assert.equal(admittedApproval?.admissionBasis, 'per-cue-caption-certification')
     const forgedReport = { ...qualityReport, status: 'approved' }
     await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
       contentJson: stableSerialize(forgedReport), contentHash: calculateVersionHash(forgedReport),
@@ -705,7 +709,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
       contentJson: stableSerialize(qualityReport), contentHash: calculateVersionHash(qualityReport),
     } })
-    assert.equal(await finalExportRepository.readApproval(approvalInput), null)
+    assert.equal((await finalExportRepository.readApproval(approvalInput))?.admissionBasis, 'per-cue-caption-certification')
     const sourceReader = new PrismaProjectProxyRenderRepository(client)
     let preflightSource
     try { preflightSource = await sourceReader.readCurrentSource({ workspaceId, projectId }) }
@@ -776,6 +780,11 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
       format: '9:16',
       approval: { approved: true, note: 'Controlled request; real quality remains review-required.' },
     }
+    // W65b: the API refuses what the gate refuses. Unknown face safety is no longer that; a hard check that failed still is.
+    const dishonestReport = { ...qualityReport, hardChecks: { ...qualityReport.hardChecks, timelineContinuous: false } }
+    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
+      contentJson: stableSerialize(dishonestReport), contentHash: calculateVersionHash(dishonestReport),
+    } })
     const reviewBlockedResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
       method: 'POST',
       headers: { authorization, 'content-type': 'application/json',
@@ -788,6 +797,9 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, type: 'project-final-export' } }), 0)
     assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
+    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
+      contentJson: stableSerialize(qualityReport), contentHash: calculateVersionHash(qualityReport),
+    } })
 
     // From here on only this test-owned port supplies a controlled approval to
     // the application services. It validates the same PG lineage and immutable
@@ -1013,8 +1025,10 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     assert.equal(operationResponse.status, 200, JSON.stringify(operationPayload))
     assert.equal(operationPayload.data.operation.status, 'succeeded')
     assert.equal(operationPayload.data.operation.attempt, 2)
-    assert.equal(await finalExportRepository.readApproval(approvalInput), null,
+    const approvalAfter = await finalExportRepository.readApproval(approvalInput)
+    assert.equal(approvalAfter?.qualityStatus, 'review-required',
       'mechanical completion must not upgrade the persisted unknown-face report')
+    assert.equal(approvalAfter?.admissionBasis, 'per-cue-caption-certification')
     const completedProject = await client.v2Project.findUnique({ where: { id: projectId } })
     assert.equal(completedProject?.status, 'completed')
 

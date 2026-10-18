@@ -9,6 +9,7 @@ import { buildPreLibassClockStage } from '../../src/v2/infrastructure/media/ffmp
 import { EDITORIAL_FINAL_RECIPE_VERSION, EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { projectFinalRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
+import { FINAL_CAPTION_CERTIFICATION_POLICY_SHA256 } from '../../src/v2/domain/final-caption-certification.ts'
 
 test('ASS boundaries are centiseconds inside the libass window of the closed stage clock, half-open', () => {
   for (const [fps, startCs, endCs] of [[30, 3n, 6n], [60, 1n, 3n], [100, 1n, 2n]]) {
@@ -116,14 +117,23 @@ test('pre-render identity pins emission policy and cannot replay old arithmetic'
   assert.equal(ASS_EMISSION_POLICY.clock, 'settb-setpts-consecutive-pts/v1')
   assert.equal(ASS_EMISSION_POLICY.unrepresentable, 'typed-refusal-before-render')
   const inputs = { projectId: 'p', projectVersionId: 'v', outputSpec: { fps: 30 } }
+  // W65b: the final-caption certification policy is pinned in the same identity, by its digest.
+  const captionCertificationPolicySha256 = FINAL_CAPTION_CERTIFICATION_POLICY_SHA256
   const oldHash = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs })
-  const expected = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs, assEmissionPolicy: ASS_EMISSION_POLICY })
-  const reprobated = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs,
+  const expected = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs, assEmissionPolicy: ASS_EMISSION_POLICY, captionCertificationPolicySha256 })
+  const reprobated = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs, captionCertificationPolicySha256,
     assEmissionPolicy: { ...ASS_EMISSION_POLICY, version: 'ass-frame-clock/v1' } })
+  const withoutCaptionPolicy = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs, assEmissionPolicy: ASS_EMISSION_POLICY })
+  const otherCaptionPolicy = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs, assEmissionPolicy: ASS_EMISSION_POLICY,
+    captionCertificationPolicySha256: 'e'.repeat(64) })
   assert.equal(projectFinalRenderInputHash(inputs), expected)
   assert.notEqual(expected, oldHash)
   assert.notEqual(expected, reprobated)
+  assert.notEqual(expected, withoutCaptionPolicy)
+  assert.notEqual(expected, otherCaptionPolicy)
   assert.equal(projectFinalRenderInputHash({ ...inputs, assEmissionPolicy: { version: 'old' } }), expected)
+  assert.equal(projectFinalRenderInputHash({ ...inputs, captionCertificationPolicySha256: 'e'.repeat(64) }), expected,
+    'a caller cannot choose the certification policy the identity is bound to')
 })
 
 test('renderer rejects a valid global CTA rebased into an unrepresentable 120 fps local clock before source I/O', async () => {
@@ -153,5 +163,5 @@ test('the pre-libass stage closes the clock without the fps filter, which droppe
 test('renderer and recipe versions moved past the previous contracts (fps stage, v2-only captions) so older renders are never reused', () => {
   assert.equal(FFMPEG_EDITORIAL_RENDERER_VERSION, '1.16.0')
   assert.equal(EDITORIAL_PROXY_RECIPE_VERSION, '1.17.0')
-  assert.equal(EDITORIAL_FINAL_RECIPE_VERSION, '1.12.0')
+  assert.equal(EDITORIAL_FINAL_RECIPE_VERSION, '1.13.0', 'W65b: a final records its caption certification receipt and policy; the pixels did not move')
 })

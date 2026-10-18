@@ -105,11 +105,11 @@ export class FfmpegCaptionPixelCritic implements CaptionPixelCritic {
           ? await this.faceVeto.detect({ width, height, rgb: controlFrames[index]! }) : undefined
         samples.push(Object.freeze({ frame, footprint: measured.footprint, changedPixels: measured.changedPixels, ...(faceBoxes ? { faceBoxes } : {}) }))
       }
-      return Object.freeze({ issues: evaluateCaptionPixels({ plan, samples, faceVeto }), samples: Object.freeze(samples) })
+      return Object.freeze({ issues: evaluateCaptionPixels({ plan, samples, faceVeto }), samples: Object.freeze(samples), measurement: 'completed' as const })
     } catch (error) {
       if (request.signal?.aborted) throw error
       // A critic that was wired and could not measure leaves the proxy waiting for a person; it does not fail the render.
-      return Object.freeze({ issues: evaluateCaptionPixels({ plan, samples: [], faceVeto, measurementFailed: true }), samples: Object.freeze([]) })
+      return Object.freeze({ issues: evaluateCaptionPixels({ plan, samples: [], faceVeto, measurementFailed: true }), samples: Object.freeze([]), measurement: 'failed' as const })
     }
   }
 }

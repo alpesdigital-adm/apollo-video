@@ -1,5 +1,6 @@
 import { assertDomain } from '../domain/errors.ts'
 import { ASS_EMISSION_POLICY } from '../domain/ass-emission-policy.ts'
+import { FINAL_CAPTION_CERTIFICATION_POLICY_SHA256 } from '../domain/final-caption-certification.ts'
 import type {
   ProjectProxyRenderSource,
   ProjectRenderSourceAsset,
@@ -7,10 +8,15 @@ import type {
 import type { RenderColorPipelineBinding } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
 
-/** Enqueue and worker share the exact pre-render identity. The policy is input,
- * never an output receipt hash: no MP4 -> receipt -> input hash cycle. */
+/** Enqueue and worker share the exact pre-render identity. The policies are input,
+ * never an output receipt hash: no MP4 -> receipt -> input hash cycle. The final-caption certification policy (W65b) is pinned
+ * here by its digest: an operation queued under another policy fails the worker's recomputation instead of being certified
+ * under rules nobody approved it with. */
 export function projectFinalRenderInputHash(input: Readonly<Record<string, unknown>>): string {
-  return calculateVersionHash({ ...input, kind: 'project-final-export/v1', assEmissionPolicy: ASS_EMISSION_POLICY })
+  return calculateVersionHash({
+    ...input, kind: 'project-final-export/v1', assEmissionPolicy: ASS_EMISSION_POLICY,
+    captionCertificationPolicySha256: FINAL_CAPTION_CERTIFICATION_POLICY_SHA256,
+  })
 }
 
 export function projectRenderSourcesFingerprint(
