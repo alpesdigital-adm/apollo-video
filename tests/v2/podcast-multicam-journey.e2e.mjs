@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -311,9 +312,12 @@ test(
     const versionId = 'podcast-multicam-e2e-version-1'
     const masterTrackId = 'track-master-audio'
     const cameraTrackIds = Object.freeze({ a: 'track-camera-a', b: 'track-camera-b' })
-    const masterArtifactId = 'artifact-master-audio'
-    const cameraArtifactIds = Object.freeze({ a: 'artifact-camera-a', b: 'artifact-camera-b' })
-    const cardTwoArtifactId = 'artifact-camera-b-card-2'
+    // Artifact ids are global to the database and sealed rows are never deleted, so a second suite in one database that names
+    // 'artifact-camera-a' would collide: these carry the invocation.
+    const runTag = randomUUID().replaceAll('-', '').slice(0, 10)
+    const masterArtifactId = `artifact-master-audio-${runTag}`
+    const cameraArtifactIds = Object.freeze({ a: `artifact-camera-a-${runTag}`, b: `artifact-camera-b-${runTag}` })
+    const cardTwoArtifactId = `artifact-camera-b-card-2-${runTag}`
     // The episode was recorded in the PAST, and that is load-bearing rather
     // than decorative: `evaluateRenderedProxy` refuses a proxy whose completion
     // predates the upload it was rendered from (`render-workflow.ts:221`), and
