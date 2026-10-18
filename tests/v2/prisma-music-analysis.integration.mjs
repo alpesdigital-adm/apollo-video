@@ -9,6 +9,7 @@ import test from "node:test";
 import ffmpegStatic from "ffmpeg-static";
 import { NextRequest } from "next/server";
 import { PrismaClient } from "../../generated/prisma-v2/index.js";
+import { registerPlayableVideo } from "./helpers/misc-pg-sources.mjs";
 const exec = promisify(execFile);
 
 test(
@@ -86,53 +87,43 @@ test(
         clientId,
         createdAt: now,
       });
-      await prisma.v2MediaArtifact.createMany({
-        data: [
-          {
-            id: artifactId,
-            workspaceId,
-            artifactKey,
-            mediaType: "audio",
-            container: "wav",
-            sha256,
-            byteSize: bytes.length,
-            status: "available",
-            createdAt: now,
-          },
-          {
-            id: videoId,
-            workspaceId,
-            artifactKey: "video/base.mp4",
-            mediaType: "video",
-            container: "mp4",
-            sha256: "b".repeat(64),
-            byteSize: 100,
-            status: "available",
-            createdAt: now,
-          },
-        ],
+      // The music is an available audio artifact the analysis reads; the base video is a real observed recording (its ingest
+      // receipt and approved rights), because a sealed Version only plays sources an ingest persisted.
+      await prisma.v2MediaArtifact.create({
+        data: {
+          id: artifactId,
+          workspaceId,
+          artifactKey,
+          mediaType: "audio",
+          container: "wav",
+          sha256,
+          byteSize: bytes.length,
+          status: "available",
+          createdAt: now,
+        },
       });
-      await prisma.v2ProjectMediaAsset.createMany({
-        data: [
-          {
-            id: randomUUID(),
-            workspaceId,
-            projectId,
-            artifactId,
-            role: "source-audio",
-            originalFileName: "beat.wav",
-            createdAt: now,
-          },
-          {
-            id: randomUUID(),
-            workspaceId,
-            projectId,
-            artifactId: videoId,
-            role: "source-master",
-            originalFileName: "base.mp4",
-            createdAt: now,
-          },
-        ],
+      await prisma.v2ProjectMediaAsset.create({
+        data: {
+          id: randomUUID(),
+          workspaceId,
+          projectId,
+          artifactId,
+          role: "source-audio",
+          originalFileName: "beat.wav",
+          createdAt: now,
+        },
+      });
+      await registerPlayableVideo(prisma, {
+        workspaceId,
+        projectId,
+        clientId,
+        artifactId: videoId,
+        artifactKey: "video/base.mp4",
+        sha256: "b".repeat(64),
+        byteSize: 100,
+        probe: { width: 320, height: 180, duration: 3, fps: 25 },
+        originalFileName: "base.mp4",
+        createdAt: now,
       });
       await h.seedBaseProjectVersion({
         prisma,
@@ -311,15 +302,6 @@ test(
         const { disconnectV2PostgresClient } =
           await import("../../src/v2/infrastructure/prisma-postgres/client.ts");
         await disconnectV2PostgresClient();
-        const where = { workspaceId };
-        await prisma.v2Project.updateMany({
-          where,
-          data: { currentVersionId: null },
-        });
-        await prisma.v2MediaArtifact.updateMany({
-          where,
-          data: { currentRightsSnapshotId: null },
-        });
       } catch (cleanupError) {
         if (testFailure)
           throw new AggregateError(

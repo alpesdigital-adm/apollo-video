@@ -9,6 +9,8 @@ import {
   createProjectRow,
   seedBaseProjectVersion,
 } from "./helpers/capture-journey.mjs";
+import { registerPlayableVideo } from "./helpers/misc-pg-sources.mjs";
+import { commitSealedChild, testActor } from "./helpers/pg-output-world.mjs";
 
 const {
   PrismaMusicAnalysisRepository,
@@ -47,7 +49,6 @@ test(
       videoId = `video-${suffix}`,
       now = new Date();
     const where = { workspaceId };
-    let testFailure;
     try {
       await createWorkspaceRow({
         prisma,
@@ -73,35 +74,42 @@ test(
         clientId,
         createdAt: now,
       });
-      for (const [id, mediaType, container] of [
-        [musicId, "audio", "wav"],
-        [videoId, "video", "mp4"],
-      ]) {
-        await prisma.v2MediaArtifact.create({
-          data: {
-            id,
-            workspaceId,
-            artifactKey: `${id}.${container}`,
-            mediaType,
-            container,
-            sha256: "a".repeat(64),
-            byteSize: 100n,
-            status: "available",
-            createdAt: now,
-          },
-        });
-        await prisma.v2ProjectMediaAsset.create({
-          data: {
-            id: randomUUID(),
-            workspaceId,
-            projectId,
-            artifactId: id,
-            role: mediaType === "video" ? "source-master" : "source-audio",
-            originalFileName: `${id}.${container}`,
-            createdAt: now,
-          },
-        });
-      }
+      // The music is an available audio artifact the analysis reads; the base video is a real observed recording (its ingest
+      // receipt and approved rights), because a sealed Version only plays sources an ingest persisted.
+      await prisma.v2MediaArtifact.create({
+        data: {
+          id: musicId,
+          workspaceId,
+          artifactKey: `${musicId}.wav`,
+          mediaType: "audio",
+          container: "wav",
+          sha256: "a".repeat(64),
+          byteSize: 100n,
+          status: "available",
+          createdAt: now,
+        },
+      });
+      await prisma.v2ProjectMediaAsset.create({
+        data: {
+          id: randomUUID(),
+          workspaceId,
+          projectId,
+          artifactId: musicId,
+          role: "source-audio",
+          originalFileName: `${musicId}.wav`,
+          createdAt: now,
+        },
+      });
+      await registerPlayableVideo(prisma, {
+        workspaceId,
+        projectId,
+        clientId,
+        artifactId: videoId,
+        sha256: "a".repeat(64),
+        byteSize: 100,
+        probe: { width: 320, height: 180, duration: 8, fps: 25 },
+        createdAt: now,
+      });
       await seedBaseProjectVersion({
         prisma,
         workspaceId,
@@ -115,6 +123,17 @@ test(
         transcriptId: `transcript-${suffix}`,
         createdAt: now,
       });
+      // A sealed project always has a head, so "the head moved" is a real move: to a sibling Version committed on the same
+      // parent (stored, head left where it was), and back.
+      const sibling = await commitSealedChild(prisma, {
+        workspaceId,
+        projectId,
+        actor: testActor({ workspaceId, clientId, credentialId: `${clientId}-seed`, environment: "production" }),
+        suffix: `${suffix}-moved-head`,
+        moveHead: false,
+      });
+      const moveHead = (currentVersionId) =>
+        prisma.v2Project.update({ where: { id: projectId }, data: { currentVersionId } });
       const rightsRepository = new PrismaAssetRightsRepository(prisma);
       const setRights = setAssetRightsService({
         repository: rightsRepository,
@@ -250,10 +269,7 @@ test(
         }),
         (error) => error.code === "IDEMPOTENCY_PAYLOAD_MISMATCH",
       );
-      await prisma.v2Project.update({
-        where: { id: projectId },
-        data: { currentVersionId: null },
-      });
+      await moveHead(sibling.version.id);
       assert.equal(
         (await compile({ ...request, runId: "ignored-new-server-id" }))
           .replayed,
@@ -262,10 +278,7 @@ test(
       await assert.rejects(
         compile({ ...request, idempotencyKey: "stale-new-request" }),
       );
-      await prisma.v2Project.update({
-        where: { id: projectId },
-        data: { currentVersionId: versionId },
-      });
+      await moveHead(versionId);
       const authority = new PrismaMusicMontagePlanningAuthority(prisma);
       const racingCompile = compileMusicLedMontageService({
         runs,
@@ -273,10 +286,7 @@ test(
         authority: {
           async resolveCurrent(input) {
             const resolved = await authority.resolveCurrent(input);
-            await prisma.v2Project.update({
-              where: { id: projectId },
-              data: { currentVersionId: null },
-            });
+            await moveHead(sibling.version.id);
             return resolved;
           },
         },
@@ -294,10 +304,7 @@ test(
         1,
         "a stale publication must not leave a renderable snapshot behind",
       );
-      await prisma.v2Project.update({
-        where: { id: projectId },
-        data: { currentVersionId: versionId },
-      });
+      await moveHead(versionId);
       await setRights({
         workspaceId,
         artifactId: musicId,
@@ -335,29 +342,8 @@ test(
         where: { id: first.run.id },
         data: { runJson: stored.runJson },
       });
-    } catch (error) {
-      testFailure = error;
-      throw error;
     } finally {
-      try {
-        await prisma.v2Project.updateMany({
-          where,
-          data: { currentVersionId: null },
-        });
-        await prisma.v2MediaArtifact.updateMany({
-          where,
-          data: { currentRightsSnapshotId: null },
-        });
-      } catch (cleanupError) {
-        if (testFailure)
-          throw new AggregateError(
-            [testFailure, cleanupError],
-            "Music PostgreSQL proof and cleanup both failed",
-          );
-        throw cleanupError;
-      } finally {
-        await prisma.$disconnect();
-      }
+      await prisma.$disconnect();
     }
   },
 );

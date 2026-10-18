@@ -58,13 +58,14 @@ test('W36 persisted project event feed is authenticated, workspace-scoped, commi
 
   const client = new PrismaClient()
   const extraClients = []
-  const workspaceA = 'w36-feed-workspace-a'
-  const workspaceB = 'w36-feed-workspace-b'
-  const workspaceIds = [workspaceA, workspaceB]
-  const writerId = 'w36-feed-writer-a'
-  const readerOnlyId = 'w36-feed-noscope-a'
-  const deniedId = 'w36-feed-denied-a'
-  const writerBId = 'w36-feed-writer-b'
+  // Project rows are sealed and append-only, so nothing is cleaned up: every identity carries this invocation's run id.
+  const run = randomUUID().replaceAll('-', '').slice(0, 10)
+  const workspaceA = `w36-feed-workspace-a-${run}`
+  const workspaceB = `w36-feed-workspace-b-${run}`
+  const writerId = `w36-feed-writer-a-${run}`
+  const readerOnlyId = `w36-feed-noscope-a-${run}`
+  const deniedId = `w36-feed-denied-a-${run}`
+  const writerBId = `w36-feed-writer-b-${run}`
   let server
   let serverDiagnostics = ''
 
@@ -131,12 +132,13 @@ test('W36 persisted project event feed is authenticated, workspace-scoped, commi
       return { status: response.status, body: await response.json() }
     }
     const createProject = async (issued, name, idempotencyKey) => {
+      // 6.0.0 creation: no format (a project has no output until a variant is created), answered with the project at creation.
       const response = await post(bearer(issued), '/v1/projects', idempotencyKey, {
-        name, objective: 'discovery', format: '9:16', locale: 'pt-BR',
+        name, objective: 'discovery', locale: 'pt-BR',
         briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto e natural.',
       })
-      assert.equal(response.status, 201)
-      return response.body.data.project
+      assert.equal(response.status, 201, JSON.stringify(response.body))
+      return response.body.data.projectAtCreation
     }
     const rename = async (issued, projectId, baseRevision, name, idempotencyKey) => {
       const response = await post(bearer(issued), `/v1/projects/${projectId}/rename`, idempotencyKey, { baseRevision, name })

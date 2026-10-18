@@ -417,7 +417,8 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     }
     const concurrentWinner = concurrentResults.find((result) => result.status === 'fulfilled')
     const concurrentLoser = concurrentResults.find((result) => result.status === 'rejected')
-    assert.ok(concurrentWinner)
+    assert.ok(concurrentWinner, `no concurrent creation committed: ${JSON.stringify(concurrentResults.map((result) =>
+      result.status === 'rejected' ? { code: result.reason?.code, message: String(result.reason?.message).slice(0, 400) } : result.status))}`)
     assert.equal(concurrentWinner.value.replayed, false)
     assert.ok(concurrentLoser)
     assert.equal(concurrentLoser.reason instanceof DomainError, true)

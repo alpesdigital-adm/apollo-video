@@ -92,42 +92,25 @@ test('PostgreSQL seals manual perception origin and rejects stale or altered rec
   const databaseUrl = new URL(process.env.V2_DATABASE_URL)
   assert.ok(['localhost', '127.0.0.1', '::1', '[::1]'].includes(databaseUrl.hostname))
   const { PrismaClient } = await import('../../generated/prisma-v2/index.js')
+  const { seedSealedProject, testActor } = await import('./helpers/pg-output-world.mjs')
   const client = new PrismaClient()
   const suffix = randomUUID().slice(0, 12)
   const workspaceId = `perception-pg-${suffix}`
   const clientId = `perception-client-${suffix}`
   const projectId = `perception-project-${suffix}`
-  const versionId = `perception-version-${suffix}`
   const createdAt = new Date('2026-08-12T21:00:00.000Z')
-  const snapshotIds = ['brief', 'edit-plan', 'policies'].map((kind) => `perception-${kind}-${suffix}`)
   try {
     await client.v2Workspace.create({ data: { id: workspaceId, slug: workspaceId, name: 'Perception PG test' } })
     await client.v2ApiClient.create({ data: {
       id: clientId, workspaceId, name: 'Perception test client',
       allowedEnvironmentsJson: '["production"]', scopeGrantsJson: '["projects:write"]', createdBy: 'test',
     } })
-    await client.v2Project.create({ data: {
-      id: projectId, workspaceId, name: 'Perception test project', objective: 'discovery', format: '9:16',
-      createdByType: 'api-client', createdById: clientId,
-    } })
-    for (const [index, kind] of ['brief', 'edit-plan', 'policies'].entries()) {
-      const content = { kind, test: true }
-      await client.v2ProjectSnapshot.create({ data: {
-        id: snapshotIds[index], workspaceId, projectId, kind, schemaVersion: 1,
-        contentJson: JSON.stringify(content), contentHash: calculateCanonicalHash(content), createdAt,
-      } })
-    }
-    await client.v2ProjectVersion.create({ data: {
-      id: versionId, workspaceId, projectId, sequence: 1,
-      briefSnapshotId: snapshotIds[0], editPlanSnapshotId: snapshotIds[1], policiesSnapshotId: snapshotIds[2],
-      baseHash: 'a'.repeat(64), createdBy: clientId, createdAt,
-    } })
-    const auditContext = createExternalAuditContext({
-      clientId, credentialId: `perception-credential-${suffix}`, workspaceId, environment: 'production',
-    })
-    const actor = Object.freeze({ ...auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
-      clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
-      clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext })
+    const actor = testActor({ workspaceId, clientId, credentialId: `perception-credential-${suffix}`, environment: 'production', scopes: ['projects:write'] })
+    // A Version cannot be inserted by hand: the project and the head Version come from the real creation (creation Command, then
+    // one explicit output variant). The timeline binds the head Version's identity.
+    const sealed = await seedSealedProject(client, { workspaceId, actor, prefix: 'perception', ids: { project: projectId },
+      name: 'Perception test project', objective: 'discovery', at: () => createdAt })
+    const versionId = sealed.head.version.id
     const repository = new PrismaPerceptionTimelineRepository(client)
     const put = putPerceptionTimelineService({ repository, clock: () => createdAt, createId: () => `perception-record-${suffix}` })
     const fixture = PERCEPTION_GOLDEN_FIXTURES.talkingHead

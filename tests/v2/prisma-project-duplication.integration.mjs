@@ -6,7 +6,8 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
-import { resetDisposableDatabase } from './helpers/disposable-database.mjs'
+import { createProjectWithVariant } from './helpers/explicit-project-http.mjs'
+import { registerPlayableVideo } from './helpers/misc-pg-sources.mjs'
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -58,7 +59,7 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
   const { createApiAccessAuditContext } = await import(
     '../../src/v2/domain/api-access-control.ts'
   )
-  const { createProjectCreationCommand } = await import(
+  const { validateProjectCreationOutputCommandV2 } = await import(
     '../../src/v2/domain/project-creation-command.ts'
   )
   const { PrismaApiClientRepository } = await import(
@@ -78,7 +79,6 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
   let serverLogs = ''
 
   try {
-    await resetDisposableDatabase(client)
     await client.v2Workspace.createMany({
       data: [
         {
@@ -140,54 +140,55 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
     await waitForServer(baseUrl, server)
 
     const authorization = `Bearer ${issued.token}`
-    const createResponse = await fetch(`${baseUrl}/v1/projects`, {
-      method: 'POST',
-      headers: {
-        authorization,
-        'content-type': 'application/json',
-        'idempotency-key': `duplication-source-${suffix}`,
-      },
-      body: JSON.stringify({
+    // The 6.0.0 creation: the project is born without any output, and its head is the explicit variant created on top of it.
+    const call = async (path, body, key) => {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
+        body: JSON.stringify(body),
+      })
+      const payload = await response.json()
+      assert.ok([200, 201].includes(response.status), `${JSON.stringify(payload)}\n${serverLogs.slice(-4_000)}`)
+      return payload.data
+    }
+    const source = await createProjectWithVariant(call, {
+      project: {
         name: 'Original imutável',
         objective: 'discovery',
-        format: '9:16',
         locale: 'pt-BR',
         briefing: 'Descoberta com enquadramento seguro e sem texto sobre o rosto.',
-      }),
+      },
+      aspectRatio: '9:16',
+      key: `duplication-source-${suffix}`,
     })
-    const createPayload = await createResponse.json()
-    assert.equal(
-      createResponse.status,
-      201,
-      `${JSON.stringify(createPayload)}\n${serverLogs.slice(-4_000)}`,
-    )
-    const sourceProject = createPayload.data.project
-    const sourceVersion = createPayload.data.version
+    const sourceProject = source.created.projectAtCreation
+    const sourceVersion = source.version
 
-    await client.v2MediaArtifact.create({
-      data: {
-        id: artifactId,
-        workspaceId,
-        artifactKey: `duplication/${artifactId}.mp4`,
-        sha256: 'a'.repeat(64),
-        byteSize: 12_345n,
-        mediaType: 'video',
-        container: 'mp4',
-        status: 'available',
-        createdAt,
-      },
+    // The shared master is a registered source (artifact, manifest and project link) with approved rights: the duplication
+    // pins one exact manifest per linked artifact and evaluates the artifact's current rights for the copy's purpose.
+    await registerPlayableVideo(client, {
+      workspaceId,
+      projectId: sourceProject.id,
+      clientId: issued.client.id,
+      artifactId,
+      artifactKey: `duplication/${artifactId}.mp4`,
+      sha256: 'a'.repeat(64),
+      byteSize: 12_345,
+      probe: { width: 360, height: 640, duration: 4, fps: 30 },
+      originalFileName: 'master-original.mp4',
+      createdAt,
+      receipt: false,
     })
-    await client.v2ProjectMediaAsset.create({
-      data: {
-        id: randomUUID(),
-        workspaceId,
-        projectId: sourceProject.id,
-        artifactId,
-        role: 'source-master',
-        originalFileName: 'master-original.mp4',
-        createdAt,
-      },
+
+    // Copy-on-write: whatever the duplication, its replays and the copy of the copy do, the original's rows never move.
+    const plain = (value) => JSON.parse(JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item))
+    const readSourceRows = async () => plain({
+      project: await client.v2Project.findUnique({ where: { id: sourceProject.id } }),
+      versions: await client.v2ProjectVersion.findMany({ where: { projectId: sourceProject.id }, orderBy: { sequence: 'asc' } }),
+      snapshots: await client.v2ProjectSnapshot.findMany({ where: { projectId: sourceProject.id }, orderBy: { id: 'asc' } }),
+      editCommands: await client.v2EditCommand.count({ where: { projectId: sourceProject.id } }),
     })
+    const sourceRowsBefore = await readSourceRows()
 
     const duplicateBody = {
       expectedVersionId: sourceVersion.id,
@@ -425,57 +426,21 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
       JSON.stringify(await crossWorkspaceResponse.json()),
     )
 
-    // The copy is a first-class version: Commands run on it, the original does not move,
-    // and the recorded duplication result stays replayable afterwards.
-    const plain = (value) => JSON.parse(JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item))
-    const readSourceRows = async () => plain({
-      project: await client.v2Project.findUnique({ where: { id: sourceProject.id } }),
-      versions: await client.v2ProjectVersion.findMany({ where: { projectId: sourceProject.id }, orderBy: { sequence: 'asc' } }),
-      snapshots: await client.v2ProjectSnapshot.findMany({ where: { projectId: sourceProject.id }, orderBy: { id: 'asc' } }),
-      editCommands: await client.v2EditCommand.count({ where: { projectId: sourceProject.id } }),
-    })
     const post = (path, key, body) => fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': key },
       body: JSON.stringify(body),
     })
-    const sourceRowsBefore = await readSourceRows()
-    const lutOnCopy = await post(
-      `/v1/projects/${duplicateProjectId}/lut-selection`,
-      `duplicate-copy-lut-${suffix}`,
-      {
-        baseVersionId: duplicateVersionId,
-        baseHash: duplicatePayload.data.version.baseHash,
-        selection: { mode: 'none' },
-      },
-    )
-    const lutOnCopyPayload = await lutOnCopy.json()
-    assert.equal(
-      lutOnCopy.status,
-      201,
-      `${JSON.stringify(lutOnCopyPayload)}\n${serverLogs.slice(-4_000)}`,
-    )
-    assert.equal(lutOnCopyPayload.data.version.sequence, 2)
-    const policyOnCopy = await post(
-      `/v1/projects/${duplicateProjectId}/policy-overrides`,
-      `duplicate-copy-policy-${suffix}`,
-      {
-        baseVersionId: lutOnCopyPayload.data.version.id,
-        baseHash: lutOnCopyPayload.data.version.baseHash,
-        overrides: { gradePreset: { mode: 'custom', value: 'cinema' } },
-        reason: 'Second Command on the copy.',
-      },
-    )
-    const policyOnCopyPayload = await policyOnCopy.json()
-    assert.equal(policyOnCopy.status, 201, JSON.stringify(policyOnCopyPayload))
-    assert.deepEqual(
-      await readSourceRows(),
-      sourceRowsBefore,
-      'Commands on the copy never touch the original',
-    )
+    // Retired: "Commands run on the copy" (a LUT selection, then a policy override, on the copy's head Version) and the same Command on
+    // the copy of the copy. A copy's head is a Creation2 fork whose State is blocked ('fork-target-materialization-required'), and no
+    // child Version may be built on it: buildOperationalOutputVersionBundleV3 (output-version-bundle.ts) refuses with
+    // PRECONDITION_REQUIRED "Fork2 content requires target transcript/perception/geometry authority before child3", which the public
+    // API answers 428 for POST /v1/projects/{copy}/output-variants (the single-output flows would also find no aspect ratio on the
+    // inherited output, project-output-format.ts). Nothing in 6.0.0 grants a fork that authority yet, so no Command is reachable.
     assert.equal(
       await client.v2EditCommand.count({ where: { projectId: duplicateProjectId } }),
-      2,
+      0,
+      'a duplicate is a Creation Command, not an edit: it starts with no edit Command of its own',
     )
 
     const replayAfterCommands = await post(
@@ -505,8 +470,7 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
     )
     assert.equal(mismatchAfterCommands.status, 409)
 
-    // A copy of an already-commanded version: its EditPlan keeps the base plan name while
-    // projectVersionId names the version. The second-generation copy is rebound and commandable.
+    // A copy of a copy: its EditPlan names the new version and the lineage points at the copy, not at the original.
     const copyProject = await client.v2Project.findUniqueOrThrow({ where: { id: duplicateProjectId } })
     const copyCurrentVersion = await client.v2ProjectVersion.findUniqueOrThrow({
       where: { id: copyProject.currentVersionId },
@@ -522,16 +486,13 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
     )
     const secondPayload = await secondResponse.json()
     assert.equal(secondResponse.status, 201, JSON.stringify(secondPayload))
-    const secondLut = await post(
-      `/v1/projects/${secondPayload.data.project.id}/lut-selection`,
-      `duplicate-second-lut-${suffix}`,
-      {
-        baseVersionId: secondPayload.data.version.id,
-        baseHash: secondPayload.data.version.baseHash,
-        selection: { mode: 'none' },
-      },
+    assert.equal(secondPayload.data.version.forkedFromProjectId, duplicateProjectId)
+    assert.equal(secondPayload.data.version.forkedFromVersionId, copyCurrentVersion.id)
+    assert.deepEqual(
+      await readSourceRows(),
+      sourceRowsBefore,
+      'Duplicating, replaying and copying the copy never touch the original',
     )
-    assert.equal(secondLut.status, 201, JSON.stringify(await secondLut.json()))
 
     const creationCommands = await client.v2ProjectCreationCommand.findMany({
       where: { workspaceId },
@@ -555,42 +516,19 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
       environment: 'production',
       authenticationKind: 'bearer',
     })
-    const validatedDuplicateCommand = createProjectCreationCommand({
-      id: duplicateCommand.id,
-      workspaceId,
-      action: 'duplicate',
-      projectId: duplicateProjectId,
-      versionId: duplicateVersionId,
-      sourceProjectId: sourceProject.id,
-      sourceVersionId: sourceVersion.id,
-      audit: expectedAudit,
-      requestFingerprint: duplicateCommand.requestFingerprint,
-      createdAt: duplicateCommand.createdAt.toISOString(),
-    })
+    // The stored Command is the Creation2 document: the domain re-derives every seal from its content (payload, request and Command
+    // hashes, the actor audit) and must arrive at the hash the row stores.
+    const validatedDuplicateCommand = validateProjectCreationOutputCommandV2(JSON.parse(duplicateCommand.commandJson))
+    assert.equal(validatedDuplicateCommand.id, duplicateCommand.id)
+    assert.equal(validatedDuplicateCommand.projectId, duplicateProjectId)
+    assert.equal(validatedDuplicateCommand.versionId, duplicateVersionId)
+    assert.equal(validatedDuplicateCommand.requestFingerprint, duplicateCommand.requestFingerprint)
+    assert.equal(validatedDuplicateCommand.audit.contextHash, expectedAudit.contextHash)
     assert.equal(duplicateCommand.actorContextHash, expectedAudit.contextHash)
     assert.equal(duplicateCommand.commandHash, validatedDuplicateCommand.commandHash)
 
-    await client.v2ProjectCreationCommand.update({
-      where: { id: duplicateCommand.id },
-      data: { actorCredentialId: `tampered-${suffix}` },
-    })
-    const tamperedReplayResponse = await fetch(
-      `${baseUrl}/v1/projects/${sourceProject.id}/duplicates`,
-      {
-        method: 'POST',
-        headers: {
-          authorization,
-          'content-type': 'application/json',
-          'idempotency-key': duplicationKey,
-        },
-        body: JSON.stringify(duplicateBody),
-      },
-    )
-    assert.equal(
-      tamperedReplayResponse.status,
-      409,
-      JSON.stringify(await tamperedReplayResponse.json()),
-    )
+    // Retired: corrupting the stored duplicate Command's audit column (UPDATE project_creation_commands) and expecting the replay to
+    // answer 409. project_creation_commands is append-only (BEFORE UPDATE OR DELETE trigger), so the contradiction cannot be stored.
   } finally {
     if (server && server.exitCode === null) {
       server.kill()
@@ -599,7 +537,6 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
         new Promise((resolve) => setTimeout(resolve, 5_000)),
       ])
     }
-    await resetDisposableDatabase(client).catch(() => {})
     await client.$disconnect()
   }
 })

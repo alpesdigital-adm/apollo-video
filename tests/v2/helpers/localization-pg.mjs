@@ -10,8 +10,6 @@ import {
 
 const { createMediaTranscript } =
   await import("../../../src/v2/domain/media-transcript.ts");
-const { createProductionBrief } =
-  await import("../../../src/v2/domain/production-brief.ts");
 const { createProductionBatch, deriveBatchStatus } =
   await import("../../../src/v2/domain/production-batch.ts");
 const {
@@ -207,20 +205,8 @@ export async function createLocalizationPgFixture(
       transcriptId,
       createdAt: now,
     });
-    const brief = {
-      schemaVersion: 1,
-      productionBrief: createProductionBrief({
-        ownerText:
-          "Público: operadores. Oferta: vídeo localizado. Tom: direto.",
-      }),
-    };
-    await prisma.v2ProjectSnapshot.update({
-      where: { id: `${projectId}-snapshot-brief` },
-      data: {
-        contentJson: stableSerialize(brief),
-        contentHash: calculateCanonicalHash(brief),
-      },
-    });
+    // The creation Command seals the project's brief snapshot (append-only: no UPDATE can reach it). Nothing the localization
+    // flow reads depends on the brief's owner text, so the fixture keeps the brief the product itself created.
     if (explicitNoLut) {
       const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({
         where: { id: baseVersionId },
