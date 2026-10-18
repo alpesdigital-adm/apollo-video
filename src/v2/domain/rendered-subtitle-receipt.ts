@@ -143,7 +143,7 @@ export function createRenderedSubtitleReceipt(input: {
     scriptEvents.length === input.drawnCues.length,
   'INVALID_RENDER_INPUT', 'Subtitle receipt does not cover exactly the emitted ASS events')
   const seen = new Set<string>()
-  // The receipt binds the timestamps to the clock the subtitles filter saw (ass-frame-clock/v2): the
+  // The receipt binds the timestamps to the clock the subtitles filter saw (ass-frame-clock/v3): the
   // centisecond of each boundary is derived again here, never accepted from the event line.
   const binder = scriptEvents.length ? assFrameClockBinder(input.outputSpec.fps, input.map.durationFrames) : null
   // Per-document ASS line uniqueness; this is not cross-request replay state.

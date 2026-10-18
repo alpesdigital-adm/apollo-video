@@ -30,7 +30,7 @@ export interface ClockTimeBase { numerator: string; denominator: string }
 
 const MIN_I64 = -(BigInt(1) << BigInt(63)), MAX_I64 = (BigInt(1) << BigInt(63)) - BigInt(1)
 const MAX_I32 = BigInt(2147483647)
-/** `fps=<rate>` is parsed by `av_parse_video_rate` with this bound on each term. */
+/** A frame rate is parsed as `av_parse_video_rate` parses it (what `fps=<rate>` accepts), with this bound on each term. */
 const MAX_FRAME_RATE_TERM = BigInt(1001000)
 
 const check = (value: unknown, message: string, details: Record<string, unknown> = {}) =>
@@ -185,12 +185,13 @@ export function frameRateTimeBase(fps: AssFrameRate): Readonly<ClockTimeBase> {
   return Object.freeze({ numerator: String(den), denominator: String(num) })
 }
 
-/** Closed-form clock of a stream whose last stage before libass is `fps=<rate>`:
- * the filter publishes the inverse of the reduced rate as time base and numbers
- * the frames consecutively from the first PTS, so frame k carries PTS k. The
+/** Closed-form clock of a stream whose last stage before libass is `settb=1/<rate>,setpts=N`:
+ * the stage publishes the inverse of the (reduced) rate as time base and numbers
+ * the frames 0, 1, 2, ..., so frame k carries PTS k. The product's stage takes integer rates only;
+ * the model also reduces rational ones. The
  * first-frame predecessor is -1 ms and the end bound is the first centisecond
  * after the last frame; nothing exists beyond either. */
-export function createFpsStageAssBoundaryBinder(input: { fps: AssFrameRate; frameCount: number }): AssBoundaryBinder {
+export function createClosedClockAssBoundaryBinder(input: { fps: AssFrameRate; frameCount: number }): AssBoundaryBinder {
   const timeBase = frameRateTimeBase(input.fps)
   check(integer(input.frameCount) && input.frameCount > 0, 'ASS clock requires a positive frame count')
   const nowMsAt = (frame: number) => derivePinnedLibassNowMs(String(frame), timeBase)

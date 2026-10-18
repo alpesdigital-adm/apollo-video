@@ -433,7 +433,7 @@ export class FfmpegSubtitleClockCollector implements SubtitleClockCollector {
         for (const file of parent.files) await authenticate({ path: resolve(registered.directory, file.filename), ...file })
         globalOrigin = parent.frames[input.fragment.globalStartFrame]!
       }
-      // Observe exactly what libass receives: the renderer places `fps=<rate>` (ass-frame-clock/v2) last before the filter.
+      // Observe exactly what libass receives: the renderer places `settb=1/<rate>,setpts=N` (ass-frame-clock/v3) last before the filter.
       const prefix = validated.prefix, clockStage = buildPreLibassClockStage({ inputLabel: prefix.videoLabel, outputFps: input.prepared.outputFps })
       const graph = [...prefix.filters, ...clockStage.filters, '[' + clockStage.outputLabel + ']showinfo@apollo_preass[clock_preass]']
       const escape = (path: string) => path.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")

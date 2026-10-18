@@ -6,10 +6,11 @@ import { ASS_EMISSION_POLICY, assFrameClockBinder, assertAssFrameInterval, asser
 import { isAssBoundaryUnrepresentable } from '../../src/v2/domain/libass-clock-model.ts'
 import { FfmpegEditorialProxyRenderer, assertEditorialAssEmission, buildAssSubtitles } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { buildPreLibassClockStage } from '../../src/v2/infrastructure/media/ffmpeg-editorial-composition-graph.ts'
+import { EDITORIAL_FINAL_RECIPE_VERSION, EDITORIAL_PROXY_RECIPE_VERSION, FFMPEG_EDITORIAL_RENDERER_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { projectFinalRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 
-test('ASS boundaries are centiseconds inside the libass window of the fps-stage clock, half-open', () => {
+test('ASS boundaries are centiseconds inside the libass window of the closed stage clock, half-open', () => {
   for (const [fps, startCs, endCs] of [[30, 3n, 6n], [60, 1n, 3n], [100, 1n, 2n]]) {
     assertAssFrameInterval(1, 2, fps, 6)
     assert.deepEqual(assFrameClockBinder(fps, 6).interval(1, 2), { startCs, endCs })
@@ -105,13 +106,14 @@ test('buildAssSubtitles binds each fragment to its own clock and refuses an unre
 })
 
 test('the pre-libass clock stage is the fps filter on the composed stream', () => {
-  assert.deepEqual(buildPreLibassClockStage({ inputLabel: 'placed', outputFps: 60 }), { filters: ['[placed]fps=60[clocked]'], outputLabel: 'clocked' })
+  assert.deepEqual(buildPreLibassClockStage({ inputLabel: 'placed', outputFps: 60 }), { filters: ['[placed]settb=1/60,setpts=N[clocked]'], outputLabel: 'clocked' })
   for (const outputFps of [0, -1, 29.97, Number.NaN]) assert.throws(() => buildPreLibassClockStage({ inputLabel: 'composed', outputFps }))
   assert.throws(() => buildPreLibassClockStage({ inputLabel: 'a;b', outputFps: 30 }))
 })
 
 test('pre-render identity pins emission policy and cannot replay old arithmetic', () => {
-  assert.equal(ASS_EMISSION_POLICY.version, 'ass-frame-clock/v2')
+  assert.equal(ASS_EMISSION_POLICY.version, 'ass-frame-clock/v3')
+  assert.equal(ASS_EMISSION_POLICY.clock, 'settb-setpts-consecutive-pts/v1')
   assert.equal(ASS_EMISSION_POLICY.unrepresentable, 'typed-refusal-before-render')
   const inputs = { projectId: 'p', projectVersionId: 'v', outputSpec: { fps: 30 } }
   const oldHash = calculateVersionHash({ kind: 'project-final-export/v1', ...inputs })
@@ -135,4 +137,21 @@ test('renderer rejects a valid global CTA rebased into an unrepresentable 120 fp
     rangeReuse: { schemaVersion: 'project-proxy-range-reuse/v1', path: join(tmpdir(), 'apollo-clock-base-does-not-exist.mp4'),
       sha256: 'a'.repeat(64), byteSize: 111, ranges: [{ startFrame: 1, endFrame: 4 }] },
   }), (error) => isAssBoundaryUnrepresentable(error) && /not representable/.test(error.message) && error.details.frame === 1)
+})
+
+test('the pre-libass stage closes the clock without the fps filter, which dropped the final frame on FFmpeg 6.1.1', () => {
+  // Evidence: BASE/w69-clock-stage-candidates-v1-b40105d5 and docs/quality/w69-materialized-subtitle-clock-v2.md. On
+  // ffmpeg-static 6.1.1 `fps=<rate>` after concat/overlay(shortest) lost the last frame at 24..120 fps (T-FR-227: 899/900).
+  for (const outputFps of [24, 25, 30, 50, 60, 90, 100, 120]) {
+    const { filters, outputLabel } = buildPreLibassClockStage({ inputLabel: 'composed', outputFps })
+    assert.deepEqual(filters, [`[composed]settb=1/${outputFps},setpts=N[clocked]`])
+    assert.equal(outputLabel, 'clocked')
+    assert.equal(filters.some((filter) => /(^|[,\]])fps=/.test(filter)), false)
+  }
+})
+
+test('renderer and recipe versions moved past the fps-stage contract so renders of the old stage are never reused', () => {
+  assert.equal(FFMPEG_EDITORIAL_RENDERER_VERSION, '1.15.0')
+  assert.equal(EDITORIAL_PROXY_RECIPE_VERSION, '1.16.0')
+  assert.equal(EDITORIAL_FINAL_RECIPE_VERSION, '1.11.0')
 })

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  AssBoundaryUnrepresentableError, assCentisecondTimestamp, createAssBoundaryBinder, createFpsStageAssBoundaryBinder,
+  AssBoundaryUnrepresentableError, assCentisecondTimestamp, createAssBoundaryBinder, createClosedClockAssBoundaryBinder,
   derivePinnedLibassNowMs, frameRateTimeBase, isAssBoundaryUnrepresentable, legalAssCentisecondPreimage,
 } from '../../src/v2/domain/libass-clock-model.ts'
 
@@ -48,7 +48,7 @@ test('cause: how often the exact-rational boundary of v1 is late, by frame rate 
 const FPS = [24, 25, 30, 48, 50, 60, 100, 120, 240]
 const FRAMES = 120
 const CLOCKS = [
-  ['fps-stage', (fps) => ({ num: 1, den: fps, pts: (frame) => frame })],
+  ['closed-stage', (fps) => ({ num: 1, den: fps, pts: (frame) => frame })],
   ['concat-1e6', (fps) => ({ num: 1, den: 1000000, pts: (frame) => Math.round(frame * 1e6 / fps) })],
   ['mpegts-90k', (fps) => ({ num: 1, den: 90000, pts: (frame) => Math.round(frame * 90000 / fps) })],
 ]
@@ -100,7 +100,7 @@ test('binder is sound and complete against an independent libass visibility orac
     }
   }
   assert.ok(representable > 100000 && refused > 1000, `representable=${representable} refused=${refused}`)
-  // Rates up to 60 fps have a window of at least 16 ms per frame: every interval is representable in the fps-stage clock.
+  // Rates up to 60 fps have a window of at least 16 ms per frame: every interval is representable in the closed stage clock.
   for (const fps of [24, 25, 30, 48, 50, 60]) assert.equal(refusedByFps.get(fps) ?? 0, 0, `${fps} fps never refuses`)
   assert.ok(refusedByFps.get(120) > 0 && refusedByFps.get(240) > refusedByFps.get(120))
 })
@@ -119,7 +119,7 @@ test('adjacent intervals partition the frames: shared boundary, no gap and no ov
 })
 
 test('rates above 60 fps are not banned: they fail closed per interval with a typed refusal and are proven unrepresentable', () => {
-  const at120 = createFpsStageAssBoundaryBinder({ fps: 120, frameCount: 12 })
+  const at120 = createClosedClockAssBoundaryBinder({ fps: 120, frameCount: 12 })
   assert.deepEqual([...Array(5).keys()].map((frame) => at120.nowMs(frame)), [0n, 8n, 16n, 25n, 33n])
   assert.throws(() => at120.interval(1, 2), (error) => isAssBoundaryUnrepresentable(error) &&
     error.refusal === 'no-centisecond-in-frame-window' && error.details.frame === 1 &&
@@ -127,14 +127,14 @@ test('rates above 60 fps are not banned: they fail closed per interval with a ty
   assert.deepEqual(at120.interval(2, 3), { startCs: 1n, endCs: 2n })
   assert.deepEqual(at120.interval(0, 12), { startCs: 0n, endCs: 10n }) // last frame at 91 ms, end bound 101 ms
   // 240 fps constructs, binds the representable windows and refuses the others; no frame-rate ceiling exists in the model.
-  const at240 = createFpsStageAssBoundaryBinder({ fps: 240, frameCount: 48 })
+  const at240 = createClosedClockAssBoundaryBinder({ fps: 240, frameCount: 48 })
   let ok = 0, refused = 0
   for (let start = 0; start < 48; start += 1) for (let end = start + 1; end <= 48; end += 1) {
     try { at240.interval(start, end); ok += 1 } catch (error) { assert.ok(isAssBoundaryUnrepresentable(error)); refused += 1 }
   }
   assert.ok(ok > 0 && refused > ok, `240 fps ok=${ok} refused=${refused}`)
   assert.deepEqual(at240.interval(0, 48), { startCs: 0n, endCs: 20n })
-  assert.doesNotThrow(() => createFpsStageAssBoundaryBinder({ fps: 1000, frameCount: 3 }))
+  assert.doesNotThrow(() => createClosedClockAssBoundaryBinder({ fps: 1000, frameCount: 3 }))
 })
 
 test('collapsed milliseconds are a typed refusal too, and malformed input stays an ordinary domain error', () => {
@@ -147,8 +147,8 @@ test('collapsed milliseconds are a typed refusal too, and malformed input stays 
   assert.equal(assCentisecondTimestamp(360123n), '1:00:01.23')
 })
 
-test('fps-stage clock: explicit domain bounds, rational rates and invalid rates', () => {
-  const binder = createFpsStageAssBoundaryBinder({ fps: 30, frameCount: 6 })
+test('closed stage clock: explicit domain bounds, rational rates and invalid rates', () => {
+  const binder = createClosedClockAssBoundaryBinder({ fps: 30, frameCount: 6 })
   assert.equal(binder.boundary(0), 0n)
   assert.deepEqual(binder.interval(1, 2), { startCs: 3n, endCs: 6n })
   assert.equal(binder.boundary(6), 17n + 0n) // first centisecond after the last frame (166 ms + 10 ms)
@@ -160,22 +160,22 @@ test('fps-stage clock: explicit domain bounds, rational rates and invalid rates'
   assert.deepEqual(frameRateTimeBase(60), { numerator: '1', denominator: '60' })
   assert.deepEqual(frameRateTimeBase({ numerator: 30000, denominator: 1001 }), { numerator: '1001', denominator: '30000' })
   assert.deepEqual(frameRateTimeBase({ numerator: 60000, denominator: 2002 }), { numerator: '1001', denominator: '30000' })
-  const ntsc = createFpsStageAssBoundaryBinder({ fps: { numerator: 30000, denominator: 1001 }, frameCount: 12 })
+  const ntsc = createClosedClockAssBoundaryBinder({ fps: { numerator: 30000, denominator: 1001 }, frameCount: 12 })
   assert.deepEqual(ntsc.interval(1, 2), { startCs: 3n, endCs: 6n })
   for (const bad of [0, -1, 29.97, Number.NaN, Infinity, null, undefined, { numerator: 30, denominator: 0 },
     { numerator: 1002001, denominator: 1 }, { numerator: 30000.5, denominator: 1001 }, '30'])
     assert.throws(() => frameRateTimeBase(bad), (error) => error.code === 'INVALID_RENDER_INPUT', String(bad))
-  assert.throws(() => createFpsStageAssBoundaryBinder({ fps: 30, frameCount: 0 }), (error) => error.code === 'INVALID_RENDER_INPUT')
+  assert.throws(() => createClosedClockAssBoundaryBinder({ fps: 30, frameCount: 0 }), (error) => error.code === 'INVALID_RENDER_INPUT')
 })
 
 test('a fragment rebased to a local clock is bound again: a global interval representable at 120 fps can be refused locally', () => {
-  const global = createFpsStageAssBoundaryBinder({ fps: 120, frameCount: 60 })
+  const global = createClosedClockAssBoundaryBinder({ fps: 120, frameCount: 60 })
   // Global [5,6) is representable (centiseconds 4..5, window of frame 5 is (33, 41] ms).
   const globalInterval = global.interval(5, 6)
   assert.deepEqual(globalInterval, { startCs: 4n, endCs: 5n })
   // A fragment that starts at global frame 4 restarts its clock at 0: the same cue is local [1, 2), whose window
   // (0, 8] ms contains no centisecond. It is refused locally although it was representable globally.
-  const local = createFpsStageAssBoundaryBinder({ fps: 120, frameCount: 56 })
+  const local = createClosedClockAssBoundaryBinder({ fps: 120, frameCount: 56 })
   assert.throws(() => local.interval(1, 2), (error) => isAssBoundaryUnrepresentable(error) && error.details.frame === 1)
   // And the global centiseconds are wrong on the local clock: they would light local frame 5, not local frame 1.
   const localNow = Array.from({ length: 56 }, (_unused, frame) => Number(local.nowMs(frame)))

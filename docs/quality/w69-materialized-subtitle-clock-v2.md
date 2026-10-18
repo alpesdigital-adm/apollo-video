@@ -124,7 +124,8 @@ o relógio fechado abaixo; a prova de solidez e completude contra um oráculo in
 da visibilidade libass cobre todos os intervalos [a,b) de 120 frames em 24–240 fps e três
 time_bases (`tests/v2/libass-clock-binder-model.test.mjs`).
 
-**Normalização explícita (`ass-frame-clock/v2`).** O último estágio antes da libass passa a
+**Normalização explícita (`ass-frame-clock/v2`; o estágio foi substituído em `ass-frame-clock/v3`, seção
+"Estágio final do relógio" abaixo).** O último estágio antes da libass passou a
 ser `fps=<taxa>`: o filtro publica o inverso da taxa reduzida como time_base e numera os
 frames consecutivamente a partir do primeiro PTS, então o `now` da libass é função fechada
 de (índice, taxa) e o time_base de saída da composição (concat 1/1000000, lavfi 1/taxa,
@@ -156,7 +157,7 @@ SUBTITLE_BURN_IN_FPS_UNSUPPORTED`, `details.mode = burn-in`, `details.fps` e `de
 1..120 fps: o relógio do sidecar é o do MP4, em milissegundos exatos (receita 1.2.0).
 
 **Por que 90.** É a maior taxa com representabilidade medida de 100% das fronteiras e dos cues
-de um frame (24–90 fps, relógio fechado `ass-frame-clock/v2`). A 100 fps já existe frame que
+de um frame (24–90 fps, relógio fechado `ass-frame-clock/v2`/`v3`; o par entregue à libass é o mesmo). A 100 fps já existe frame que
 nenhum centissegundo separa (frame 803, provado nos pixels) e a 120 fps o modelo perde um
 sexto das fronteiras e um terço dos cues de um frame. As taxas 91–99 não foram medidas
 separadamente; o corte em 90 não afirma nada sobre elas, só deixa de oferecê-las.
@@ -209,3 +210,36 @@ os pares de 24–120 fps incluindo 23,976/29,97/59,94, cues adjacentes compartil
 milissegundo da fronteira, e uma taxa que não separa frames consecutivos em milissegundos
 recusa o cue (faixa não positiva) em vez de publicar um errado
 (`tests/v2/subtitle-sidecar-frame-clock.test.mjs`, com oráculo de player independente).
+
+## Estágio final do relógio: `settb=1/<taxa>,setpts=N` em vez de `fps` (`ass-frame-clock/v3`, 18/10/2026)
+
+**Achado.** A primeira rodada das suítes físicas em 47467ff7 (`BASE/w69-physical-suites-v1-2e497d0d`) reprovou
+`T-FR-227` do renderer editorial: o proxy de 30 s saía com 899 quadros em vez de 900. No commit anterior
+(f7ee0b05, `BASE/w69-physical-suites-v1-58726aee`) a mesma suíte passa 9/9; as demais falhas daquela rodada eram
+anteriores ao W69 e iguais em f7ee0b05. A prova de pixels v6 passara porque usa o FFmpeg 8.1.1 pinado; as suítes usam o
+`ffmpeg-static`, que é o **6.1.1** (Gyan essentials 2023).
+
+**Causa.** No 6.1.1, `fps=<taxa>` colocado depois de `concat` + `overlay=shortest=1` descarta o último quadro, em todas
+as taxas medidas (24, 25, 30, 50, 60, 90, 100, 120; `BASE/w69-clock-stage-candidates-v1-b40105d5`). A reprodução do grafo exato
+do T-FR-227, com e sem o estágio, isola o estágio: sem ele 900 quadros, com ele 899 (`BASE/w69-fps-stage-diagnosis-v2-27d318a0`).
+No 8.1.1 o mesmo estágio mantém a contagem.
+
+**O que não resolve.** `fps=<taxa>:eof_action=pass` conserta o grafo do T-FR-227 mas não a matriz sintética no 6.1.1 e, no
+8.1.1, **acrescenta** um quadro a 24 e a 60 fps (149 de 148; 365 de 364); `start_time=0` não muda nada; `round=up` não é
+uma garantia, só um resultado (`BASE/w69-fps-eof-action-v1-7db6c2a3`).
+
+**Escolha.** `settb=1/<taxa>,setpts=N`: publica o inverso da taxa como time base e numera os quadros 0, 1, 2, ... sem
+tocar na contagem. A libass recebe o mesmo par (PTS = índice, time base 1/taxa) que o `fps` entregava, então o binder, a
+tabela de representabilidade e a prova de pixels continuam valendo sem mudança de arquitetura. Em todas as taxas e nas duas
+builds a contagem é exata e o PTS na saída do estágio é igual ao índice do quadro (`showinfo`). O custo é que o estágio não
+repara um fluxo que chegue irregular; o renderer já normaliza cada clipe com `fps=<taxa>` na entrada do grafo, e o fluxo
+composto é CFR (o `-r` da saída continua aplicado).
+
+**Versões.** Política `ass-frame-clock/v3` (clock `settb-setpts-consecutive-pts/v1`), renderer 1.15.0, receita de proxy 1.16.0
+e de final 1.11.0: um proxy ou final do estágio `fps` fica um quadro curto nessa build e não pode ser reaproveitado. O
+coletor observa o mesmo estágio (`buildPreLibassClockStage`).
+
+**Verificação física no commit que adota o estágio** (sob o lock global, evidência add-only em `BASE`):
+prova de pixels com receita nova, editorial-renderer 9/9 (T-FR-227 completo, 30/60/120 s, proxy e final), coletor,
+subtitle-anchor, subtitle-styles, style-tokens, proof-mode goldens e subtitle-vtt-native; caminhos em
+`docs/quality/w69-materialized-subtitle-clock-v2.md` na seção seguinte quando a rodada termina.

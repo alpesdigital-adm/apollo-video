@@ -1,23 +1,25 @@
 import { assertDomain } from './errors.ts'
-import { LIBASS_NOW_CONVERSION_POLICY, createFpsStageAssBoundaryBinder,
+import { LIBASS_NOW_CONVERSION_POLICY, createClosedClockAssBoundaryBinder,
   type AssBoundaryBinder, type AssFrameRate } from './libass-clock-model.ts'
 
 export type { AssBoundaryBinder, AssFrameRate }
 
-/** v2 replaces the reprobated exact-rational v1 arithmetic. FFmpeg vf_subtitles
+/** v3 keeps the v2 binder and changes only the stage that closes the clock. v2 replaced the
+ * reprobated exact-rational v1 arithmetic. FFmpeg vf_subtitles
  * hands libass `trunc(pts * q2d * 1000)` in binary64, not the exact frame time;
  * libass events are half-open in milliseconds and ASS stores centiseconds. The
  * boundary of a frame is therefore an integer centisecond inside the window
  * `previousNow < 10*cs <= currentNow` of the clock the subtitles filter really
  * sees, never the centisecond of the ideal time, and an empty window is a typed
  * refusal. The clock is closed-form because the last stage before the filter is
- * `fps=<rate>`: the frames are numbered consecutively in the inverse of the
- * reduced rate. A representable global interval does not authorize a
+ * `settb=1/<rate>,setpts=N`: the frames are numbered consecutively in the inverse
+ * of the rate (v2 used `fps=<rate>`, which lost the last frame on FFmpeg 6.1.1;
+ * see ffmpeg-editorial-composition-graph.ts). A representable global interval does not authorize a
  * clipped/rebased fragment: every fragment is bound again in its own clock.
  * Model, cause and proofs: libass-clock-model.ts. */
 export const ASS_EMISSION_POLICY = Object.freeze({
-  version: 'ass-frame-clock/v2',
-  clock: 'fps-stage-consecutive-pts/v1',
+  version: 'ass-frame-clock/v3',
+  clock: 'settb-setpts-consecutive-pts/v1',
   conversion: LIBASS_NOW_CONVERSION_POLICY,
   boundary: 'libass-now-preimage-maximum-centisecond',
   domain: 'first-minus-one-ms-last-plus-ten-ms',
@@ -30,7 +32,7 @@ export const ASS_EMISSION_POLICY = Object.freeze({
 export function assFrameClockBinder(fps: AssFrameRate, durationFrames: number): AssBoundaryBinder {
   assertDomain(Number.isSafeInteger(durationFrames) && durationFrames > 0,
     'INVALID_RENDER_INPUT', 'ASS clock requires a positive fragment frame count')
-  return createFpsStageAssBoundaryBinder({ fps, frameCount: durationFrames })
+  return createClosedClockAssBoundaryBinder({ fps, frameCount: durationFrames })
 }
 
 /** Validates a half-open frame interval of a fragment against its own clock. */

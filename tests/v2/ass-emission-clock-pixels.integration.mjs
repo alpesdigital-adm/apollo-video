@@ -143,7 +143,7 @@ function preLibassClockFilter(fps) {
   const [stage] = buildPreLibassClockStage({ inputLabel: 'in', outputFps: fps }).filters
   return stage.replace(/^\[in\]/, '').replace(/\[clocked\]$/, '')
 }
-function assertFpsStageClock(clock, fps) {
+function assertClosedStageClock(clock, fps) {
   assert.ok(clock.timeBases.length > 0 && clock.timeBases.every((tb) => tb.numerator === '1' && tb.denominator === String(fps)),
     'The observed pre-libass time base must be the inverse of the rate')
   assert.ok(clock.frames.length > 0 && clock.frames.every((frame) => frame.pts === String(frame.frame)),
@@ -193,7 +193,7 @@ function renderPixels(binary, root, fps, file, { indices = [0, 1, 2, 3, 4, 5], p
     'FFmpeg output exceeds the combined raw/log budget')
   const log = execution.stderr.toString('utf8')
   const observedClock = observedPreLibassClock(log, indices)
-  assertFpsStageClock(observedClock, fps)
+  assertClosedStageClock(observedClock, fps)
   const clockFrames = observedClock.frames
   assert.ok(clockFrames.length <= bufferBudget.maxProcessedFrames &&
     clockFrames.every((frame) => frame.frame < bufferBudget.maxProcessedFrames),
@@ -224,7 +224,7 @@ test('W69 pinned FFmpeg pixels prove exact subtitle and CTA frame coverage at 30
     font: { path: fontPath, approvedSha256: fontSha256, family: fontFamily, face: fontFace },
     source: { generator: `lavfi color=c=0x202020:s=${WIDTH}x${HEIGHT}`, frameCount: FRAMES, pixelFormat: 'rgb24' },
     configuration: { threads: 1, filterThreads: 1, vsync: 0, filter: 'subtitles=filename=<fixture>:fontsdir=fonts',
-      preLibassClockStage: 'fps=<rate> immediately before showinfo and subtitles, as buildPreLibassClockStage places it in the renderer',
+      preLibassClockStage: 'settb=1/<rate>,setpts=N immediately before showinfo and subtitles, as buildPreLibassClockStage places it in the renderer',
       diagnosticFilter: 'showinfo immediately before subtitles; same clock graph and coverage expectations',
       executionBudget: { absoluteMs: ABSOLUTE_BUDGET_MS, perProcessMs: PROCESS_BUDGET_MS, scope: 'version query plus all original and additional pixel executions' } },
     emissionPolicy: ASS_EMISSION_POLICY, pixelCapturePolicy: PIXEL_CAPTURE_POLICY,

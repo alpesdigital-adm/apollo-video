@@ -100,7 +100,7 @@ function isFiniteNormalized(value: number): boolean {
 
 /**
  * Highest output rate at which burned-in subtitles are accepted. The ASS timeline has a 10 ms (one centisecond)
- * resolution and libass shows an event on `start <= now < end` in milliseconds; with the closed `fps=<rate>` clock
+ * resolution and libass shows an event on `start <= now < end` in milliseconds; with the closed pre-libass clock
  * every frame boundary and every one-frame cue is representable from 24 to 90 fps (100%), while 100 fps already has
  * frames no centisecond can separate (frame 803 of the pixel proof) and 120 fps loses a sixth of the boundaries and
  * a third of the one-frame cues. Rates above this are not refused by the clock model, which refuses per interval and

@@ -306,7 +306,7 @@ export function createMaterializedAssClockLookup(input: MaterializedSubtitleCloc
   const clock = requireMaterializedSubtitleClock(input)
   const now = clock.frames.map(frameMs)
   // One implementation of the representable-interval binder serves this observed
-  // clock and the closed-form fps-stage clock (see libass-clock-model.ts).
+  // clock and the closed-form clock of the pre-libass stage (see libass-clock-model.ts).
   const { boundary, interval } = createAssBoundaryBinder({ frameCount: now.length, nowMsAt: (frame) => now[frame]!,
     beforeFirstNowMs: signed(clock.fragment.domain.beforeFirstNowMs), endExclusiveNowMs: signed(clock.fragment.domain.endExclusiveNowMs) })
   return Object.freeze({ clock, boundary, interval })

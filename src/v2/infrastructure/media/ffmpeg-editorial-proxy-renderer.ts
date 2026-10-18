@@ -664,8 +664,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
           }),
           'utf8',
         )
-        // The last stage before libass numbers the frames in the inverse of the rate, so the clock the
-        // ASS boundaries were bound to is the clock the subtitles filter sees (ass-frame-clock/v2).
+        // The last stage before libass (settb + setpts=N) numbers the frames in the inverse of the rate, so the clock the
+        // ASS boundaries were bound to is the clock the subtitles filter sees (ass-frame-clock/v3).
         const clock = buildPreLibassClockStage({ inputLabel: composedLabel, outputFps })
         filters.push(...clock.filters, `[${clock.outputLabel}]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
       } else filters.push(`[${composedLabel}]null[outv]`)
