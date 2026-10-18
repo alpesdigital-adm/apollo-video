@@ -147,3 +147,13 @@ pixels (esgotando os pares de centissegundos vizinhos) e não uma proibição.
 **Fragmentos.** Cada fragmento clipado/rebaseado reinicia o relógio em 0 e é ligado de novo:
 no modelo, o cue global [5,6) a 120 fps é representável (4..5 cs) e o mesmo cue local [1,2)
 após rebase de 4 frames não é.
+
+**Sidecars SRT/VTT.** O relógio dos sidecars é o do MP4 (frame `k` apresentado em `k/taxa`),
+não o da libass. Um player mostra o cue em `t` sse `start <= t < end`; arredondar ao
+milissegundo mais próximo (regra 1.1.0) começava o cue depois do seu próprio primeiro frame
+(30 fps, frame 2 = 66,67 ms virava 67 ms) e terminava o cue um frame tarde. A receita 1.2.0
+usa o piso exato (inteiros, taxa canônica em micro-hertz): cobre exatamente [a,b) em todos
+os pares de 24–120 fps incluindo 23,976/29,97/59,94, cues adjacentes compartilham o
+milissegundo da fronteira, e uma taxa que não separa frames consecutivos em milissegundos
+recusa o cue (faixa não positiva) em vez de publicar um errado
+(`tests/v2/subtitle-sidecar-frame-clock.test.mjs`, com oráculo de player independente).
