@@ -1,4 +1,4 @@
-import { assertDomain } from './errors.ts'
+import { assertDomain, DomainError } from './errors.ts'
 
 export const OUTPUT_ASPECT_RATIOS = ['9:16', '16:9', '4:5', '1:1', '21:9'] as const
 
@@ -96,6 +96,40 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
 
 function isFiniteNormalized(value: number): boolean {
   return Number.isFinite(value) && value >= 0 && value < 0.5
+}
+
+/**
+ * Highest output rate at which burned-in subtitles are accepted. The ASS timeline has a 10 ms (one centisecond)
+ * resolution and libass shows an event on `start <= now < end` in milliseconds; with the closed `fps=<rate>` clock
+ * every frame boundary and every one-frame cue is representable from 24 to 90 fps (100%), while 100 fps already has
+ * frames no centisecond can separate (frame 803 of the pixel proof) and 120 fps loses a sixth of the boundaries and
+ * a third of the one-frame cues. Rates above this are not refused by the clock model, which refuses per interval and
+ * proves it in pixels; they are refused here, where the OutputSpec and its subtitle delivery meet, so the user gets one
+ * typed answer before any render instead of a cue that cannot be drawn. Outputs without burned-in subtitles keep the
+ * full 1..120 range (a sidecar's clock is the MP4's own, in exact milliseconds).
+ */
+export const BURN_IN_SUBTITLE_MAX_FPS = 90 as const
+export const BURN_IN_SUBTITLE_FPS_UNSUPPORTED = 'SUBTITLE_BURN_IN_FPS_UNSUPPORTED' as const
+
+/** Typed refusal: burned-in subtitles were requested for an output rate they cannot be drawn at. */
+export class BurnInSubtitleFpsUnsupportedError extends DomainError {
+  readonly reason = BURN_IN_SUBTITLE_FPS_UNSUPPORTED
+  constructor(fps: number) {
+    super('INVALID_OUTPUT_SPEC',
+      `Burned-in subtitles are supported up to ${BURN_IN_SUBTITLE_MAX_FPS} fps; this output is ${fps} fps. ` +
+      'Use a subtitle sidecar or no subtitles at this rate, or lower the output rate.',
+      { reason: BURN_IN_SUBTITLE_FPS_UNSUPPORTED, mode: 'burn-in', fps, maxFps: BURN_IN_SUBTITLE_MAX_FPS })
+    this.name = 'BurnInSubtitleFpsUnsupportedError'
+  }
+}
+export const isBurnInSubtitleFpsUnsupported = (error: unknown): error is BurnInSubtitleFpsUnsupportedError =>
+  error instanceof BurnInSubtitleFpsUnsupportedError
+
+/** Throws the typed refusal when `mode` burns subtitles into an output faster than the supported rate. */
+export function assertSubtitleDeliverySupportedAtFps(mode: 'none' | 'burn-in' | 'sidecar', fps: number): void {
+  if (mode === 'burn-in' && !(Number.isInteger(fps) && fps <= BURN_IN_SUBTITLE_MAX_FPS)) {
+    throw new BurnInSubtitleFpsUnsupportedError(fps)
+  }
 }
 
 export function validateOutputSpec(input: OutputSpecInput): void {

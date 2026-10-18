@@ -140,9 +140,61 @@ cues de um frame representáveis (janela de pelo menos 10 ms); 100 fps: 99,7% e 
 (frame 803 recusado: `now` 8020 e 8029 não contêm centissegundo); 120 fps: 83,3% e 66,7%;
 144 fps: 69,4% e 38,9%; 240 fps: 41,7% e 0% (cue de um frame nunca é representável).
 Com o time_base 1/1000000 do concat, 100 fps cairia para 77,0% e 53,9%: o estágio `fps`
-é parte da correção. Não há teto de taxa na política; o teto 1..120 do OutputSpec é regra
-de produto separada. Taxa genuinamente irrepresentável é recusa por intervalo, provada nos
-pixels (esgotando os pares de centissegundos vizinhos) e não uma proibição.
+é parte da correção. O modelo do relógio não tem teto de taxa: uma taxa genuinamente
+irrepresentável é recusa por intervalo, provada nos pixels (esgotando os pares de
+centissegundos vizinhos). O teto de produto para legenda queimada está na seção seguinte.
+
+## Legenda queimada acima de 90 fps é recusada na validação (decisão de 17/10/2026)
+
+**Regra.** Um OutputSpec cujo perfil de entrega queima legenda (`profile.subtitles.mode =
+burn-in`) só existe até 90 fps (`BURN_IN_SUBTITLE_MAX_FPS`). Acima disso a recusa é tipada e
+acontece antes de qualquer renderização, relógio, cache ou leitura de repositório:
+`DomainError` de código `INVALID_OUTPUT_SPEC` com `details.reason =
+SUBTITLE_BURN_IN_FPS_UNSUPPORTED`, `details.mode = burn-in`, `details.fps` e `details.maxFps`
+(`BurnInSubtitleFpsUnsupportedError`, `isBurnInSubtitleFpsUnsupported`, em
+`src/v2/domain/output-spec.ts`). Saídas sem legenda queimada (`none`) e com sidecar mantêm
+1..120 fps: o relógio do sidecar é o do MP4, em milissegundos exatos (receita 1.2.0).
+
+**Por que 90.** É a maior taxa com representabilidade medida de 100% das fronteiras e dos cues
+de um frame (24–90 fps, relógio fechado `ass-frame-clock/v2`). A 100 fps já existe frame que
+nenhum centissegundo separa (frame 803, provado nos pixels) e a 120 fps o modelo perde um
+sexto das fronteiras e um terço dos cues de um frame. As taxas 91–99 não foram medidas
+separadamente; o corte em 90 não afirma nada sobre elas, só deixa de oferecê-las.
+
+**Onde é aplicada.** (1) `parseCreateProjectOutputVariantBody`, a porta pública de
+`POST /v1/projects/{projectId}/output-variants`, antes de ler o projeto; (2)
+`createOutputSpecRevisionBody`, que todo caminho que cria, revisa, bifurca, sela ou reidrata
+uma revisão de OutputSpec atravessa (comando de variante, estado de saída, bifurcação,
+relógio materializado e coletor), antes de qualquer verificação de configuração ou fonte. Não
+há mudança de schema público (a restrição é entre campos, como `proxy.fps = output.fps`, e
+já era imposta em tempo de execução), então não há versão de schema nem de capability a subir;
+o texto da capability `apollo.projects.output-variants.create` foi atualizado.
+
+**Testes.** `tests/v2/burn-in-subtitle-fps.test.mjs` varre 1..120 fps nos três modos, prova a
+precedência da recusa, o caminho de selagem e o caminho público; cada ponto de aplicação tem
+mutação que o teste detecta. Três testes do relógio materializado e o fixture do coletor
+usavam burn-in a 100/120 fps só para exercitar o relógio; passaram a selar essas entradas como
+`sidecar` (o relógio não lê o modo), mantendo todas as asserções de recusa por intervalo, e o
+teste ganhou a asserção de que o spec de burn-in a 120 fps não existe mais.
+
+## Sidecar de uma versão histórica (decisão de 17/10/2026)
+
+`POST /v1/projects/{projectId}/subtitle-sidecars` aceita `projectVersionId` de uma versão que
+não é mais a corrente. O sidecar dela é derivado só do render dela: mesma variante, mesmo
+RenderInput, mesmo snapshot de EditPlan e mesmo cue map, nunca do head atual. A resposta traz
+`projectVersion.current = false`. O serviço recusa, com `SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH`
+e antes de ler artefato, preparar arquivo, promover ou persistir (`details.reason =
+render-binding-mismatch`), qualquer resolução que não seja o render que o pedido nomeia
+(outro projeto, outra variante, outra versão); as verificações de checksum do MP4, receita do
+manifesto, RenderInput do manifesto, hash do cue map, igualdade texto-cue e o veredito de
+revisão (`render-blocked`, `review-missing`) valem igual para versão corrente e histórica. A
+condição de corrente é lida na hora da exportação e não entra no lineage: o mesmo render gera o
+mesmo sidecar endereçado por conteúdo esteja a versão no head ou não. A listagem devolve o
+`projectVersionId` de cada sidecar; compará-lo com a versão corrente do projeto é feito pelo
+cliente (a listagem não persiste nem recalcula "corrente"). Testes:
+`tests/v2/subtitle-sidecar-historical.test.mjs` (sem FFmpeg) e, com MP4 real,
+`T-FR-175 a historical version yields its own sidecar` em
+`tests/v2/subtitle-sidecar-pipeline.integration.mjs`.
 
 **Fragmentos.** Cada fragmento clipado/rebaseado reinicia o relógio em 0 e é ligado de novo:
 no modelo, o cue global [5,6) a 120 fps é representável (4..5 cs) e o mesmo cue local [1,2)

@@ -1,7 +1,7 @@
 import { calculateOutputCanonicalHash, OUTPUT_CANONICAL_POLICY_VERSION,
   serializeOutputCanonicalJson, validateOutputCanonicalPolicy, type OutputCanonicalPolicy } from './output-canonical-policy.ts'
 import { assertDomain } from './errors.ts'
-import { createOutputSpec, type OutputSpec } from './output-spec.ts'
+import { assertSubtitleDeliverySupportedAtFps, createOutputSpec, type OutputSpec } from './output-spec.ts'
 
 export type OutputJson = null | boolean | number | string | readonly OutputJson[] |
   { readonly [key: string]: OutputJson }
@@ -194,6 +194,8 @@ export function createOutputSpecRevisionBody(
   'INVALID_OUTPUT_SPEC', 'Proxy-to-final transform must be materialized from exact canvases')
   assertDomain(['none', 'burn-in', 'sidecar'].includes(profile.subtitles.mode),
     'INVALID_OUTPUT_SPEC', 'Subtitle delivery mode must be explicit')
+  // Before any configuration, font or render is looked at: the mode and the rate alone decide this, with a typed reason.
+  assertSubtitleDeliverySupportedAtFps(profile.subtitles.mode, output.fps)
   if (profile.subtitles.mode === 'none') {
     assertDomain(profile.subtitles.configuration === null && profile.subtitles.fontAssets.length === 0,
       'INVALID_OUTPUT_SPEC', 'Disabled subtitle policy must have no implicit configuration/fonts')
