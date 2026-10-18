@@ -1110,6 +1110,8 @@ model V2OutputVariant {
 
   project   V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: Restrict)
   revisions V2OutputSpecRevision[]
+  proxyOperations       V2ProjectProxyRenderOperation[] @relation("ProxyOperationOutputVariant")
+  finalExportOperations V2ProjectFinalExportOperation[] @relation("FinalExportOutputVariant")
 
   @@unique([id, projectId, workspaceId], map: "output_variants_scope_key")
   @@index([workspaceId, projectId])
@@ -3939,6 +3941,7 @@ model V2ProjectProxyRenderOperation {
   renderableSourceHash      String?  @db.Char(64)
   renderableVariantId       String?  @db.VarChar(160)
   renderableFormat          String?  @db.VarChar(16)
+  outputVariantId           String?  @db.VarChar(128)
   reusedFromOperationId     String?  @db.VarChar(128)
   reuseCommandId            String?  @db.VarChar(128)
   reuseImpactHash           String?  @db.Char(64)
@@ -3951,6 +3954,7 @@ model V2ProjectProxyRenderOperation {
   version          V2ProjectVersion                @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   editPlanSnapshot V2ProjectSnapshot               @relation("ProjectProxyEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   renderableSnapshot V2RenderablePlanSnapshot?     @relation("RenderableSnapshotProxyOperations", fields: [workspaceId, renderablePlanHash], references: [workspaceId, planHash], onDelete: Restrict)
+  outputVariant    V2OutputVariant?                @relation("ProxyOperationOutputVariant", fields: [outputVariantId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
   sourceArtifact   V2MediaArtifact                 @relation("ProjectProxySourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   sourceManifest   V2MediaArtifactManifest         @relation("ProjectProxySourceManifest", fields: [sourceManifestId, sourceArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
   review           V2ProxyReview?
@@ -3966,6 +3970,7 @@ model V2ProjectProxyRenderOperation {
   @@index([workspaceId, sourceArtifactId])
   @@index([workspaceId, outputArtifactId])
   @@index([workspaceId, reusedFromOperationId])
+  @@index([workspaceId, projectId, outputVariantId], map: "pp_render_ops_variant_idx")
   @@map("project_proxy_render_operations")
 }
 
@@ -4075,6 +4080,7 @@ model V2ProjectFinalExportOperation {
   outputArtifactId          String   @db.VarChar(128)
   outputManifestId          String   @db.VarChar(128)
   outputAspectRatio         String   @db.VarChar(16)
+  outputVariantId           String?  @db.VarChar(128)
   outputWidth               Int
   outputHeight              Int
   outputFps                 Int
@@ -4094,6 +4100,7 @@ model V2ProjectFinalExportOperation {
   project          V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   version          V2ProjectVersion              @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   directorRun      V2DirectorRun                 @relation(fields: [directorRunId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  outputVariant    V2OutputVariant?              @relation("FinalExportOutputVariant", fields: [outputVariantId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, onUpdate: Restrict)
   editPlanSnapshot V2ProjectSnapshot             @relation("FinalExportEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   qualitySnapshot  V2ProjectSnapshot             @relation("FinalExportQualitySnapshot", fields: [qualitySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   proxyArtifact    V2MediaArtifact               @relation("FinalExportProxyArtifact", fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -4109,6 +4116,7 @@ model V2ProjectFinalExportOperation {
   @@index([workspaceId, outputArtifactId])
   @@index([workspaceId, directorRunId])
   @@index([workspaceId, proxyReviewId])
+  @@index([workspaceId, projectId, outputVariantId], map: "pf_export_ops_variant_idx")
   @@map("project_final_export_operations")
 }
 

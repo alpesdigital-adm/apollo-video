@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { OUTPUT_CONSUMPTION_PURPOSES, PUBLISHED_CONSUMPTION_REASONS, outputConsumptionSealHashV3, outputConsumptionSealV3, outputConsumptionVerdictV3,
-  outputEntryAspectRatio, publishedConsumptionReason } from '../../src/v2/domain/output-consumption.ts'
+  outputEntryAspectRatio, outputVariantsOf, publishedConsumptionReason, requireOutputVariant } from '../../src/v2/domain/output-consumption.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 
 // The verdict reads only a State's shape, so these are the minimal State documents it can see. Real bundles are proven by the PG suites.
+const RATIOS = { 'variant-1': '9:16', 'variant-2': '16:9' }
+const specOf = (variantId) => ({ output: { aspectRatio: RATIOS[variantId] ?? '1:1' } })
 const materialized = (variantId, schemaVersion = 'output-materialization/v1') => ({
-  variantId, outputSpecRevisionId: `revision-${variantId}`, specHash: 'a'.repeat(64),
+  variantId, outputSpecRevisionId: `revision-${variantId}`, specHash: 'a'.repeat(64), spec: specOf(variantId),
   consumption: { status: 'materialized', materialization: { materializationHash: 'b'.repeat(64), document: { id: `materialization-${variantId}`, schemaVersion } } },
 })
-const blockedEntry = (variantId, reasons) => ({ variantId, outputSpecRevisionId: `revision-${variantId}`, specHash: 'a'.repeat(64), consumption: { status: 'blocked', reasons } })
+const blockedEntry = (variantId, reasons) => ({ variantId, outputSpecRevisionId: `revision-${variantId}`, specHash: 'a'.repeat(64), spec: specOf(variantId), consumption: { status: 'blocked', reasons } })
 const version = { id: 'version-1', baseHash: 'c'.repeat(64) }
 const state3 = (entries, sourceDependencies = null) => ({ stateHash: 'd'.repeat(64),
   document: { schemaVersion: 'project-output-state/v3', id: 'state-1', entries, sourceDependencies } })
@@ -49,7 +51,7 @@ test('policy: a cut copy is consumable to render and critic, and its final expor
 test('the variant is exact: an unknown variant is refused, and "the only output" is never guessed when there are several', () => {
   const bundle = state3([materialized('variant-1'), materialized('variant-2')])
   assert.throws(() => outputConsumptionVerdictV3(bundle, 'variant-9', 'render'),
-    (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'output-variant-required')
+    (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED' && error.details.reason === 'output-variant-unknown')
   assert.deepEqual(outputConsumptionVerdictV3(bundle, undefined, 'render'), { status: 'blocked', reasons: ['output-variant-required'] })
   assert.equal(outputConsumptionVerdictV3(state3([materialized('variant-1')]), undefined, 'render').status, 'allowed')
 })
@@ -101,4 +103,23 @@ test('the format of an output is the aspect ratio its sealed spec carries: its o
   assert.equal(outputEntryAspectRatio(fork), '1:1')
   assert.equal(outputEntryAspectRatio({ ...materialized('variant-1'), spec: { output: {} } }), null)
   assert.equal(outputEntryAspectRatio({ ...materialized('variant-1'), spec: { output: { aspectRatio: '' } } }), null)
+})
+
+// Two outputs of one project: each resolves by its own stable variant and nothing is guessed between them.
+const withRatio = (variantId, aspectRatio) => ({ ...materialized(variantId), spec: { output: { aspectRatio } } })
+test('several outputs resolve apart by their stable variant, and two outputs of one aspect ratio are refused as ambiguous', () => {
+  const two = state3([withRatio('variant-vertical', '9:16'), withRatio('variant-wide', '16:9')])
+  for (const purpose of OUTPUT_CONSUMPTION_PURPOSES) {
+    assert.equal(outputConsumptionVerdictV3(two, 'variant-vertical', purpose).entry.variantId, 'variant-vertical')
+    assert.equal(outputConsumptionVerdictV3(two, 'variant-wide', purpose).entry.variantId, 'variant-wide')
+    assert.deepEqual(outputConsumptionVerdictV3(two, undefined, purpose), { status: 'blocked', reasons: ['output-variant-required'] })
+  }
+  assert.deepEqual(outputVariantsOf(two), [{ variantId: 'variant-vertical', aspectRatio: '9:16' }, { variantId: 'variant-wide', aspectRatio: '16:9' }])
+  assert.equal(requireOutputVariant(two, 'variant-wide').aspectRatio, '16:9')
+  assert.throws(() => requireOutputVariant(two, 'variant-none'), (error) => error.details.reason === 'output-variant-unknown')
+  const clash = state3([withRatio('variant-a', '9:16'), withRatio('variant-b', '9:16')])
+  assert.deepEqual(outputConsumptionVerdictV3(clash, 'variant-a', 'render'), { status: 'blocked', reasons: ['output-variant-ambiguous'] })
+  assert.throws(() => requireOutputVariant(clash, 'variant-b'), (error) => error.details.reason === 'output-variant-ambiguous')
+  assert.deepEqual(outputVariantsOf(creation(['fork-target-materialization-required'])), [])
+  assert.throws(() => requireOutputVariant(state3([{ ...materialized('variant-1'), spec: { output: {} } }]), 'variant-1'), (error) => error.details.reason === 'output-not-consumable')
 })

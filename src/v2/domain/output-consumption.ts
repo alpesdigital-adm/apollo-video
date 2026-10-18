@@ -51,14 +51,43 @@ export function outputConsumptionVerdictV3(state: OutputConsumptionState, varian
     entry = entries[0]
   } else {
     entry = entries.find((candidate) => candidate.variantId === variantId)
-    if (!entry) throw new DomainError('PRECONDITION_REQUIRED', 'Requested stable variant is not an exact State member', { reason: 'output-variant-required' })
+    if (!entry) throw new DomainError('PRECONDITION_REQUIRED', 'Requested stable variant is not an exact State member', { reason: 'output-variant-unknown' })
   }
   if (entry!.consumption.status === 'blocked') return Object.freeze({ status: 'blocked', reasons: Object.freeze([...entry!.consumption.reasons]) })
   if (purpose === 'final' && entry!.consumption.materialization.document.schemaVersion === 'editorial-derived-materialization/v1' &&
     document.sourceDependencies !== null) {
     return Object.freeze({ status: 'blocked', reasons: Object.freeze(['derived-source-perception-authority-required']) })
   }
+  const ratio = outputEntryAspectRatio(entry!)
+  if (ratio !== null && entries.some((other) => other !== entry && outputEntryAspectRatio(other) === ratio)) {
+    return Object.freeze({ status: 'blocked', reasons: Object.freeze(['output-variant-ambiguous']) })
+  }
   return Object.freeze({ status: 'allowed', entry: entry! })
+}
+
+/** One output of a State: the stable variant and the aspect ratio its sealed spec carries (the key the render pipeline and the presets use). */
+export type OutputVariantRef = Readonly<{ variantId: string; aspectRatio: string | null }>
+
+/** Every output of a State, in State order. A Creation fork root has no consumable output and answers an empty list. */
+export function outputVariantsOf(state: OutputConsumptionState): readonly OutputVariantRef[] {
+  if (state.document.schemaVersion === 'project-output-state/v2') return Object.freeze([])
+  return Object.freeze(state.document.entries.map((entry) => Object.freeze({ variantId: entry.variantId, aspectRatio: outputEntryAspectRatio(entry) })))
+}
+
+/**
+ * The output a variant-specific Command or consumer names. The variant must be an exact member of the State (`output-variant-unknown`
+ * otherwise) and its aspect ratio must be unique in it (`output-variant-ambiguous`: until presets are keyed by variant, two outputs
+ * of one ratio cannot be rendered, exported or invalidated apart). Never guesses: a caller that names no variant asks the verdict.
+ */
+export function requireOutputVariant(state: OutputConsumptionState, variantId: string): OutputVariantRef & Readonly<{ aspectRatio: string }> {
+  const variants = outputVariantsOf(state)
+  const found = variants.find((candidate) => candidate.variantId === variantId)
+  if (!found) throw new DomainError('PRECONDITION_REQUIRED', 'Requested stable variant is not an exact State member', { reason: 'output-variant-unknown' })
+  if (found.aspectRatio === null) throw new DomainError('PRECONDITION_REQUIRED', 'The output names no aspect ratio', { reason: 'output-not-consumable' })
+  if (variants.some((other) => other !== found && other.aspectRatio === found.aspectRatio)) {
+    throw new DomainError('PRECONDITION_REQUIRED', 'Two outputs of this project share one aspect ratio', { reason: 'output-variant-ambiguous' })
+  }
+  return found as OutputVariantRef & Readonly<{ aspectRatio: string }>
 }
 
 /**
@@ -117,5 +146,6 @@ export function publishedConsumptionReason(reasons: readonly string[]): string {
 /** The closed set of reasons a consumption refusal publishes (the presenter's allowlist includes exactly these). */
 export const PUBLISHED_CONSUMPTION_REASONS = Object.freeze([
   COPY_REQUIRES_EDITORIAL_CUT_REASON, 'derived-source-perception-authority-required', 'empty-project', 'output-variant-required',
-  'normalization-required', 'audio-authority-required', 'output-not-consumable', 'output-version-missing',
+  'output-variant-unknown', 'output-variant-ambiguous', 'normalization-required', 'audio-authority-required', 'output-not-consumable',
+  'output-version-missing',
 ] as const)
