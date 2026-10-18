@@ -31,7 +31,7 @@ import { createProjectSnapshot, type ProjectSnapshot } from '../../domain/projec
 import { assertDirectorSnapshotAuthority, assertDirectorSnapshotContent, bindDirectorSnapshotIdentities } from '../../application/director-snapshot-identity.ts'
 import type { StoryPlan } from '../../domain/story-plan.ts'
 import { validateTreatmentPlan, type TreatmentPlan } from '../../domain/treatment-plan.ts'
-import { operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
+import { editorialDerivedBindingV3, operationalBundlePlanV3 } from '../../domain/output-version-bundle.ts'
 import { childCommandOf } from '../../domain/project-output-state-transition.ts'
 import { hydrateProjectVersionRowV3 } from '../../domain/project-version-row.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
@@ -49,6 +49,7 @@ import {
 } from '../../domain/strategic-objective.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { readPersistedOperationalOutputBundleV3 } from './output-state-consumption.ts'
+import { readEditorialSourceBindingV1 } from './output-version-materializer.ts'
 import { projectOutputFormat } from './project-output-format.ts'
 import { commitProjectVersionWithOutputState, settleDeferredOutputGuards } from './project-version-commit.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
@@ -587,14 +588,24 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     if (typeof retimedTranscript !== 'object' || retimedTranscript === null || !('sourceTranscriptId' in retimedTranscript) || typeof retimedTranscript.sourceTranscriptId !== 'string') {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan has no valid transcript selection')
     }
-    const transcriptRow = await this.client.v2MediaTranscript.findFirst({
+    const ownTranscriptRow = await this.client.v2MediaTranscript.findFirst({
       where: {
         id: retimedTranscript.sourceTranscriptId,
         projectId: project.id,
         workspaceId: project.workspaceId,
       },
     })
+    // A cut copy owns no transcript row: its transcript is the original producer's, sealed in the editorial binding its cut bound.
+    const boundTranscript = editorialDerivedBindingV3(parent)?.document.transcript
+    const transcriptRow = ownTranscriptRow ?? (boundTranscript !== undefined && boundTranscript.id === retimedTranscript.sourceTranscriptId
+      ? Object.freeze({ id: boundTranscript.id, sourceArtifactId: boundTranscript.sourceArtifactId, language: boundTranscript.document.language,
+        provider: boundTranscript.document.provider, model: boundTranscript.document.model, transcriptHash: boundTranscript.document.transcriptHash })
+      : null)
     if (!transcriptRow) return null
+    // The observed transcript's words, in transcript order: what lets the Director name the words of every caption it generates.
+    const transcriptWords: readonly Readonly<{ word: string; start: number; end: number }>[] = ownTranscriptRow !== null
+      ? (JSON.parse(ownTranscriptRow.transcriptJson) as { words: readonly Readonly<{ word: string; start: number; end: number }>[] }).words
+      : boundTranscript!.document.words
     if (master.artifactId !== transcriptRow.sourceArtifactId) throw new DomainError('PERSISTENCE_CONFLICT', 'Current transcript does not belong to the project source master')
     const planTranscriptHash = 'sourceTranscriptHash' in retimedTranscript
       ? String(retimedTranscript.sourceTranscriptHash)
@@ -678,6 +689,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         provider: transcriptRow.provider,
         model: transcriptRow.model,
         transcriptHash: transcriptRow.transcriptHash,
+        words: Object.freeze(transcriptWords.map((word) => Object.freeze({ word: word.word, start: word.start, end: word.end }))),
       }),
       ...(ocrEnvelope ? { ocrEnvelope } : {}),
     })
@@ -999,7 +1011,21 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         role: 'source-master',
       } }),
     ])
-    if (!project?.currentVersion || !transcript || !sourceMaster) throw new DomainError('PERSISTENCE_CONFLICT', 'Director source evidence disappeared before commit')
+    // A cut copy owns no transcript row: the transcript the Director was built on is the original producer's, sealed in the editorial
+    // binding every entry of the head State carries (the binding is re-read against the original rows).
+    let transcriptHeld = transcript !== null
+    if (!transcriptHeld && project?.currentVersion) {
+      const head = await readPersistedOperationalOutputBundleV3(transaction, { workspaceId: bundle.command.workspaceId,
+        projectId: bundle.command.projectId, versionId: project.currentVersion.id })
+      const binding = head === null ? null : editorialDerivedBindingV3(head)
+      if (binding !== null) {
+        await readEditorialSourceBindingV1(transaction, binding, { lock: false, currentRights: false })
+        const bound = binding.document.transcript
+        transcriptHeld = bound.id === bundle.sourceEvidence.transcriptId && bound.sourceArtifactId === bundle.sourceEvidence.sourceArtifactId &&
+          bound.document.transcriptHash === bundle.sourceEvidence.transcriptHash
+      }
+    }
+    if (!project?.currentVersion || !transcriptHeld || !sourceMaster) throw new DomainError('PERSISTENCE_CONFLICT', 'Director source evidence disappeared before commit')
     const latestOcr = await transaction.v2PerceptionProducerEnvelope.findFirst({
       where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
         projectVersionId: bundle.command.baseVersionId,

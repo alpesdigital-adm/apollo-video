@@ -131,7 +131,7 @@ export async function readPersistedForkCreationOutputBundleV3(client: Reader,
 }
 
 
-import { buildOperationalOutputVersionBundleV3, type OperationalOutputVersionBundleV3, type OperationalOutputParentV3 } from '../../domain/output-version-bundle.ts'
+import { buildOperationalOutputVersionBundleV3, editorialDerivedBindingV3, type OperationalOutputVersionBundleV3, type OperationalOutputParentV3 } from '../../domain/output-version-bundle.ts'
 import { readOutputNormalizationsV3, readEditorialSourceBindingV1 } from './output-version-materializer.ts'
 type OperationalAnchorCacheV3={rows:Map<string,Readonly<OperationalOutputParentV3>|null>;visiting:Set<string>}
 async function readOperationalAnchorV3(client:Reader,input:Readonly<{workspaceId:string;projectId:string;versionId:string}>,cache:OperationalAnchorCacheV3) {
@@ -201,10 +201,12 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
     const origin=stored.origin,target=origin.kind==='restore-command'?
       await readOperationalAnchorV3(client,{...input,versionId:origin.target.versionId},cache):null
     const ns=stored.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?e.consumption.materialization.document.normalizations:[])
-    if(origin.kind==='editorial-cut-command')await readEditorialSourceBindingV1(client as Prisma.TransactionClient,
-      origin.command.payload.sourceBinding,{lock:false,currentRights:false})
-    const actual=origin.kind==='editorial-cut-command'?
-      (await Promise.all(origin.command.payload.sourceBinding.document.normalizationRefs.map(ref=>readOutputNormalizationsV3(client,{
+    // A cut copy (the cut itself, and every child that carries its binding) is built from the receipts that binding names, which
+    // live in the original project; a project's own State is built from the receipts it persisted itself.
+    const binding=origin.kind==='editorial-cut-command'?origin.command.payload.sourceBinding:editorialDerivedBindingV3(stored)
+    if(binding!==null)await readEditorialSourceBindingV1(client as Prisma.TransactionClient,binding,{lock:false,currentRights:false})
+    const actual=binding!==null?
+      (await Promise.all(binding.document.normalizationRefs.map(ref=>readOutputNormalizationsV3(client,{
         workspaceId:input.workspaceId,projectId:ref.projectId,ids:[ref.id],lock:false})))).flat():
       await readStoredOrderNormalizations(client,{workspaceId:input.workspaceId,projectId:input.projectId,
         ids:[...new Set(ns.map(n=>n.document.id))]})
@@ -214,10 +216,14 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
     const forkRootId=origin.kind==='editorial-cut-command'&&origin.command.payload.sourceBinding.document.authority.kind==='fork-derivation3'?
       origin.command.payload.sourceBinding.document.authority.forkRootVersionId:null
     const forkRoot=forkRootId!==null&&forkRootId!==parent.version.id?await readOperationalAnchorV3(client,{...input,versionId:forkRootId},cache):null
+    // A renderable compile publishes a row beside its Version: the reconstruction rebuilds the State's alternate plan from that stored row.
+    const renderableSnapshot=origin.kind==='renderable-compile-command'?
+      await readRenderableSnapshotFactsV3(client,{workspaceId:input.workspaceId,projectId:input.projectId,snapshotId:origin.command.payload.snapshot.id}):null
     const fresh=buildOperationalOutputVersionBundleV3({allocation:{workspaceId:input.workspaceId,projectId:input.projectId,
       resultVersionId:input.versionId,stateId:stored.state.document.id,parentVersionId:parent.version.id,sequence:stored.version.sequence,
       createdBy:stored.version.createdBy,createdAt:stored.version.createdAt},parent,origin,restoreTarget:target,
       ...(forkRoot&&forkRoot.schemaVersion==='project-creation-output-bundle/v2'?{forkRoot}:{}),
+      ...(renderableSnapshot===null?{}:{renderableSnapshot}),
       editPlanSnapshot:stored.editPlanSnapshot,normalizations:actual,materializationIds,
       // A child Command's replaced non-output snapshots are born with its Version; the origin declares which.
       ...(origin.kind==='child-command'?{replacementSnapshots:stored.snapshots.filter(s=>(origin.replaces as readonly string[]).includes(s.kind))}:{})})
@@ -232,6 +238,16 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
   }
 }
 import { stableSerialize as stableSerializeOperational } from '../../domain/canonical-hash.ts'
+import type { V2RenderablePlanSnapshotFacts } from '../../domain/project-fork-derivation.ts'
+/** The stored row of a renderable plan snapshot, as the facts the bundle builder validates. */
+async function readRenderableSnapshotFactsV3(client:Reader,input:Readonly<{workspaceId:string;projectId:string;snapshotId:string}>):Promise<Readonly<V2RenderablePlanSnapshotFacts>> {
+  const rows=await client.$queryRawUnsafe<Array<Omit<V2RenderablePlanSnapshotFacts,'createdAt'>&{createdAt:Date}>>(
+    'SELECT id,"workspaceId","projectId","projectVersionId","planId",origin,"sourceId","sourceHash","sourceVersion",fps,"durationFrames","clipCount","planJson","planHash","createdAt" FROM renderable_plan_snapshots WHERE id=$1 AND "workspaceId"=$2 AND "projectId"=$3',
+    input.snapshotId,input.workspaceId,input.projectId)
+  if(rows.length!==1)throw new Error('The renderable plan snapshot the Version binds is missing')
+  const row=rows[0]
+  return Object.freeze({...row,createdAt:row.createdAt.toISOString()})
+}
 /**
  * The receipts a State materialized, in the order that State lists them. The store answers in its own order; a State lists its
  * inherited observations before the ones a child adopted, so the order is part of what the reconstruction must reproduce.

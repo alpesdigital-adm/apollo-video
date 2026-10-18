@@ -149,6 +149,12 @@ export interface DirectedSubtitleCue {
   endFrame: number
   text: string
   anchor: SubtitleAnchor
+  /**
+   * Indices (into the observed transcript's words) of the words this cue was generated from. Present only on a cue whose text
+   * still is those words: an editorial cut that ends inside the cue rebuilds its text from them, so a review patch that edits the
+   * text drops them.
+   */
+  sourceWordIndices?: readonly number[]
 }
 
 export interface DirectedTransition {
@@ -249,6 +255,10 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'ove
   desiredActionRef: Readonly<DesiredActionReference>
   overlayTracks: readonly Readonly<DirectedCtaOverlay>[]
   subtitleTracks: readonly Readonly<{
+    /** Present when the cues carry the transcript words they were generated from (the same shape as the ingest cue track). */
+    schemaVersion?: 'source-transcript-cue-track/v1'
+    sourceTranscriptId?: string
+    sourceTranscriptHash?: string
     id: string
     kind: 'captions'
     presetId: SubtitlePresetId

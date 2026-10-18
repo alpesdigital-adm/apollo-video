@@ -796,6 +796,8 @@ export function materializePatchEditPlan(input: {
       if (value.text !== undefined) {
         assertDomain(Boolean(match!.cue), 'INVALID_ARGUMENT', 'Subtitle text patch must target one cue')
         match!.cue!.text = String(value.text).trim()
+        // The text is the reviewer's now, not the transcript words': an editorial cut must never rebuild it from them.
+        delete match!.cue!.sourceWordIndices
       }
       if (value.anchor !== undefined) {
         if (match!.cue) match!.cue.anchor = value.anchor

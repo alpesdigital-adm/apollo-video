@@ -5,7 +5,7 @@ import type { EditCommand } from './edit-command.ts'
 import { CHILD_COMMAND_TRANSITIONS, CHILD_REPLACEABLE_SNAPSHOT_KINDS, COPY_REQUIRES_EDITORIAL_CUT_REASON, isForkInheritableCommandType,
   type AdoptableObservationV3, type AdoptedObservationV3, type ChildReplaceableSnapshotKind } from './output-child-command.ts'
 import { validateOutputNormalizationV3, type SealedOutputNormalizationV3 } from './output-materialization.ts'
-import { buildOperationalOutputVersionBundleV3, forkAuthorityPendingV3, operationalBundlePlanV3, type OperationalOutputParentV3,
+import { buildOperationalOutputVersionBundleV3, editorialDerivedBindingV3, forkAuthorityPendingV3, operationalBundlePlanV3, type OperationalOutputParentV3,
   type OperationalOutputVersionBundleV3 } from './output-version-bundle.ts'
 import type { OutputOriginAllocation } from './output-version-origin.ts'
 import type { PersistedManualEditPayload } from './manual-editing.ts'
@@ -100,6 +100,22 @@ export function observedNormalizationsFor(parent: OperationalOutputParentV3, pla
   })
 }
 
+/**
+ * The observations a child of a cut copy is materialized from. The copy's authority is its editorial binding: it names every
+ * receipt the cut bound, and a materialization under it carries all of them. A new plan may consume only sources those receipts
+ * observe (the copy owns no recording of its own to adopt): one it does not is refused naming the artifact.
+ */
+export function derivedObservationsFor(parent: OperationalOutputParentV3, plan: Readonly<Record<string, unknown>>): Readonly<{
+  normalizations: readonly SealedOutputNormalizationV3[]
+  adoptions: readonly AdoptedObservationV3[]
+}> {
+  if (plan.durationFrames === 0) return Object.freeze({ normalizations: Object.freeze([]), adoptions: Object.freeze([]) })
+  const missing = unobservedSourceArtifactIds(parent, plan)
+  assertDomain(missing.length === 0, 'PRECONDITION_REQUIRED',
+    'The new EditPlan consumes sources the editorial authority of this copy does not observe', { sourceArtifactIds: missing })
+  return Object.freeze({ normalizations: Object.freeze([...parentNormalizationsV3(parent)]), adoptions: Object.freeze([]) })
+}
+
 /** Every normalization observation the parent State already materialized. */
 export function parentNormalizationsV3(parent: OperationalOutputParentV3): readonly SealedOutputNormalizationV3[] {
   if (parent.state.document.schemaVersion !== 'project-output-state/v3') return []
@@ -150,6 +166,7 @@ export function transitionProjectOutputState(input: Readonly<{
   const materializationIds = plan.durationFrames === 0 || awaitsEditorialCut ? {} :
     Object.fromEntries(variantIds.map((variantId) => [variantId, input.createMaterializationId()]))
   const observed = awaitsEditorialCut ? Object.freeze({ normalizations: Object.freeze([]), adoptions: Object.freeze([]) }) :
+    editorialDerivedBindingV3(input.parent) !== null ? derivedObservationsFor(input.parent, plan) :
     observedNormalizationsFor(input.parent, plan, input.adoptable)
   return buildOperationalOutputVersionBundleV3({
     allocation: input.allocation,

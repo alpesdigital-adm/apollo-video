@@ -252,25 +252,49 @@ function observedTranscriptStatements(words: readonly Readonly<{ text: string }>
   return Object.freeze(statements.filter(Boolean))
 }
 
+/**
+ * Which word of the observed transcript a retimed word is: the one with the same text and the same source times. A word the
+ * transcript has twice, or not at all, has no index (a cue made of it carries no authority rather than a guessed one).
+ */
+function transcriptWordIndexer(words: readonly Readonly<{ word: string; start: number; end: number }>[] | undefined):
+  ((word: Readonly<{ text: string; sourceStartSeconds: number; sourceEndSeconds: number }>) => number | null) | null {
+  if (words === undefined) return null
+  const key = (text: string, start: number, end: number) => `${text}\u0000${start}\u0000${end}`
+  const indices = new Map<string, number | null>()
+  words.forEach((word, index) => {
+    const k = key(word.word, word.start, word.end)
+    indices.set(k, indices.has(k) ? null : index)
+  })
+  return (word) => indices.get(key(word.text, word.sourceStartSeconds, word.sourceEndSeconds)) ?? null
+}
+
 function buildSubtitleCues(input: {
   words: readonly Readonly<{
     text: string
+    sourceStartSeconds: number
+    sourceEndSeconds: number
     timelineStartFrame: number
     timelineEndFrame: number
   }>[]
   durationFrames: number
   fps: number
+  /** When present, every cue names the transcript words it is made of; if any word cannot be named, no cue does. */
+  indexOf?: ((word: Readonly<{ text: string; sourceStartSeconds: number; sourceEndSeconds: number }>) => number | null) | null
 }): readonly Readonly<DirectedSubtitleCue>[] {
   const cues: DirectedSubtitleCue[] = []
   let group: typeof input.words = []
   let previousEndFrame = 0
+  let named = input.indexOf !== null && input.indexOf !== undefined
   const flush = () => {
     if (group.length === 0) return
     const text = group.map((word) => word.text).join(' ').replace(/\s+/g, ' ').trim()
     const startFrame = Math.max(previousEndFrame, group[0]!.timelineStartFrame)
     const endFrame = Math.min(input.durationFrames, Math.max(startFrame + 1, group.at(-1)!.timelineEndFrame))
     if (text && startFrame < endFrame) {
-      cues.push({ id: `subtitle-cue-${cues.length + 1}`, startFrame, endFrame, text, anchor: 'bottom' })
+      const indices = input.indexOf ? group.map((word) => input.indexOf!(word)) : []
+      if (indices.some((index) => index === null)) named = false
+      cues.push({ id: `subtitle-cue-${cues.length + 1}`, startFrame, endFrame, text, anchor: 'bottom',
+        ...(named ? { sourceWordIndices: Object.freeze(indices as number[]) } : {}) })
       previousEndFrame = endFrame
     }
     group = []
@@ -289,7 +313,12 @@ function buildSubtitleCues(input: {
     if (/[.!?]$/.test(word.text) || group.length >= 5) flush()
   }
   flush()
-  return Object.freeze(cues.map((cue) => Object.freeze(cue)))
+  // All or nothing: a track whose cues are only partly named would be trusted for the cues that are and refused for the others.
+  return Object.freeze(cues.map((cue) => {
+    if (named) return Object.freeze(cue)
+    const { sourceWordIndices: _dropped, ...unnamed } = cue
+    return Object.freeze(unnamed)
+  }))
 }
 
 function buildStoryPlan(input: {
@@ -959,10 +988,12 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       ...(briefCompilation?.compiled.assumptions ?? []),
       ...(mediaOnlyTreatment?.assumptions ?? []),
     ])])
+    const indexOf = transcriptWordIndexer(context.transcript.words)
     const generatedSubtitleCues = buildSubtitleCues({
       words: context.editPlan.retimedTranscript.words,
       durationFrames: context.editPlan.durationFrames,
       fps: context.editPlan.fps,
+      indexOf,
     })
     // Confirmed review Commands own their caption text. Replanning must assess
     // that text afresh instead of silently replacing it from the transcript.
@@ -1018,6 +1049,12 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         anchor: 'bottom' as const, faceProtection: true as const, maxLines: 2 as const,
         maxCharactersPerBlock: SUBTITLE_MAX_CHARACTERS, cues: subtitleCues,
         desiredActionRef,
+        // The same cue track shape the ingest compiles: an editorial cut that ends inside one of these captions rebuilds the part
+        // that remains from the transcript words the cue names, and refuses a cue that names none.
+        ...(indexOf !== null && subtitleCues.some((cue) => cue.sourceWordIndices !== undefined)
+          ? { schemaVersion: 'source-transcript-cue-track/v1' as const, sourceTranscriptId: context.transcript.id,
+            sourceTranscriptHash: context.transcript.transcriptHash }
+          : {}),
       })]),
       effectTracks: Object.freeze([]),
       transitions,

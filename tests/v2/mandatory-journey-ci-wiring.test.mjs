@@ -767,7 +767,7 @@ const KNOWN_UNRUN_SUITES = [
   {
     file: 'tests/v2/prisma-manual-edit.integration.mjs',
     reason: `${NO_SCRIPT}; docs/REQUIREMENTS-TRACEABILITY.md cites it for FR-233 and says in the same paragraph that it was never executed`,
-    citedBy: ['docs/REQUIREMENTS-TRACEABILITY.md'],
+    citedBy: ['docs/REQUIREMENTS-TRACEABILITY.md', 'docs/quality/w66-version-overlay-integration-v1.md'],
   },
   { file: 'tests/v2/prisma-montage-alternative.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/prisma-mvp-core-gate.integration.mjs', reason: PHASE_1_3 },
@@ -824,11 +824,12 @@ const KNOWN_UNRUN_SUITES = [
   // (frozen source and inputs, disposable cluster, backend accounting). CI seeds are not yet canonical,
   // so wiring them waits for the writer cutover; the supervised results are the proof until then.
   { file: 'tests/v2/disposable-database.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  { file: 'tests/v2/director-copy-editorial-cut.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
   { file: 'tests/v2/prisma-deferred-commit-semantics.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/project-child-adoption.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
   { file: 'tests/v2/project-creation-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/project-list-format-facet.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
-  { file: 'tests/v2/project-operational-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG },
+  { file: 'tests/v2/project-operational-output-bundle.pg.integration.mjs', reason: W66_SUPERVISED_PG, citedBy: ['docs/quality/w66-version-overlay-integration-v1.md'] },
   { file: 'tests/v2/project-output-commands.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   { file: 'tests/v2/project-output-state.pg.integration.mjs', reason: W66_SUPERVISED_PG },
   // W69 subtitle clock proofs need an externally pinned toolchain or a real Chromium; there is no

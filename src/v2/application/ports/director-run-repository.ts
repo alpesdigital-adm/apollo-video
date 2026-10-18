@@ -52,6 +52,11 @@ export interface DirectorRunContext {
     provider: string
     model: string
     transcriptHash: string
+    /**
+     * The observed transcript's words, in transcript order. With them the Director names, for every caption cue it generates,
+     * the transcript words the cue is made of (`sourceWordIndices`); without them its cues carry no such authority.
+     */
+    words?: readonly Readonly<{ word: string; start: number; end: number }>[]
   }>
   /** Absent means no server-produced OCR envelope exists for this input version. */
   ocrEnvelope?: Readonly<PerceptionProducerEnvelope>

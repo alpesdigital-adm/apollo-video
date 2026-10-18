@@ -219,14 +219,16 @@ export async function createEditorialForkFixture({actor,transcript,sourceDuratio
  * One child of a fork copy that only configures it (a LUT selection by default): the Command re-identifies the copy's plan, so the copy keeps
  * the fork's posture. `parent` is the Creation fork or an earlier configuration child; the result is the sealed child bundle.
  */
-export function forkCopyConfigurationChild(parent,{actor,suffix='lut',type='set-project-lut-selection',payload,replacementSnapshots=[],createdAt='2026-07-18T20:10:00.000Z'}) {
+export function forkCopyConfigurationChild(parent,{actor,suffix='lut',type='set-project-lut-selection',payload,replacementSnapshots=[],createdAt='2026-07-18T20:10:00.000Z',mutatePlan}) {
  const audit=materializeActorAuditContext(actor),scope={workspaceId:parent.version.workspaceId,projectId:parent.version.projectId},versionId='version-copy-'+suffix
  const command=createEditCommand({...scope,id:'command-copy-'+suffix,baseVersionId:parent.version.id,baseHash:parent.version.baseHash,
   author:{type:'api-client',id:audit.clientId},type,scope:{project:true},payload:payload??{schemaVersion:2,mode:'none',intensity:1},
   idempotencyKey:'copy-child-'+suffix,createdAt})
  return transitionProjectOutputState({parent,command,audit,requestFingerprint:calculateCanonicalHash({copyChild:suffix}),
   allocation:{...scope,resultVersionId:versionId,stateId:'state-copy-'+suffix,parentVersionId:parent.version.id,sequence:parent.version.sequence+1,createdBy:audit.clientId,createdAt},
-  editPlanSnapshot:reidentifiedEditPlanSnapshot(parent,{snapshotId:'snapshot-copy-'+suffix,versionId,createdAt}),replacementSnapshots,
-  createMaterializationId:()=>{throw new Error('A copy without target authority materializes nothing')}})
+  editPlanSnapshot:mutatePlan?(()=>{const base=reidentifiedEditPlanSnapshot(parent,{snapshotId:'snapshot-copy-'+suffix,versionId,createdAt}),next=mutatePlan(JSON.parse(base.contentJson))
+   return createProjectSnapshot({...base,contentJson:stableSerialize(next),contentHash:calculateCanonicalHash(next)})})():
+   reidentifiedEditPlanSnapshot(parent,{snapshotId:'snapshot-copy-'+suffix,versionId,createdAt}),replacementSnapshots,
+  createMaterializationId:(()=>{let n=0;return ()=>'materialization-copy-'+suffix+'-'+(++n)})()})
 }
 export const controlledNormalization=normalization

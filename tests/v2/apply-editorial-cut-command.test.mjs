@@ -6,7 +6,7 @@ import {
   compileInitialSourceEditPlan,
 } from '../../src/v2/application/apply-editorial-cut-command.ts'
 import { createEditorialForkFixture, editorialFixturePhaseStart, forkCopyConfigurationChild, traceEditorialFixtureAsync } from './helpers/operational-editorial-fixture.mjs'
-import { buildOperationalOutputVersionBundleV3, forkAuthorityPendingV3 } from '../../src/v2/domain/output-version-bundle.ts'
+import { buildOperationalOutputVersionBundleV3, editorialDerivedBindingV3, forkAuthorityPendingV3 } from '../../src/v2/domain/output-version-bundle.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
@@ -503,17 +503,26 @@ class ConfiguredCopyRepository extends InMemoryEditorialCommandRepository {
   }
 }
 
+// The editorial cut of a copy that was configured by two children first; shared by the cases below (the cut costs seconds).
+let cutCopyPromise
+function cutCopy() {
+  return cutCopyPromise ??= (async () => {
+    const world = await sharedEditorialWorld(), actor = editorialActor()
+    const lut = forkCopyConfigurationChild(world.fork.bundle, { actor, suffix: 'cut-lut' })
+    const color = forkCopyConfigurationChild(lut, { actor, suffix: 'cut-color', type: 'set-project-color-plan', payload: { schemaVersion: 1 } })
+    assert.ok(forkAuthorityPendingV3(color))
+    const repository = new ConfiguredCopyRepository(world, color)
+    let event = 0, counter = 0
+    const service = applyEditorialCutCommandService({ repository, clock: () => new Date('2026-07-18T21:00:00.000Z'),
+      createId: (kind) => `${kind}-configured-copy-${++counter}`, createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}` })
+    const result = await service(request({ baseVersionId: color.version.id, baseHash: color.version.baseHash,
+      variantId: world.context.variantId, sourceTranscriptId: world.context.transcriptId }))
+    return { world, actor, color, repository, result }
+  })()
+}
+
 test('an editorial cut over a copy that was only configured binds the Creation fork authority and materializes the copy', async () => {
-  const world = await sharedEditorialWorld(), actor = editorialActor()
-  const lut = forkCopyConfigurationChild(world.fork.bundle, { actor, suffix: 'cut-lut' })
-  const color = forkCopyConfigurationChild(lut, { actor, suffix: 'cut-color', type: 'set-project-color-plan', payload: { schemaVersion: 1 } })
-  assert.ok(forkAuthorityPendingV3(color))
-  const repository = new ConfiguredCopyRepository(world, color)
-  let event = 0, counter = 0
-  const service = applyEditorialCutCommandService({ repository, clock: () => new Date('2026-07-18T21:00:00.000Z'),
-    createId: (kind) => `${kind}-configured-copy-${++counter}`, createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}` })
-  const result = await service(request({ baseVersionId: color.version.id, baseHash: color.version.baseHash,
-    variantId: world.context.variantId, sourceTranscriptId: world.context.transcriptId }))
+  const { world, color, repository, result } = await cutCopy()
   const bundle = result.outputBundle
   assert.equal(bundle.state.document.transition, 'editorial-cut')
   assert.equal(bundle.version.parentVersionId, color.version.id)
@@ -530,4 +539,58 @@ test('an editorial cut over a copy that was only configured binds the Creation f
   const { forkRoot: _fork, ...withoutRoot } = repository.lastBundle.proposal
   assert.throws(() => buildOperationalOutputVersionBundleV3(withoutRoot), (error) => error.code === 'PRECONDITION_REQUIRED' && /Creation fork/.test(error.message))
   assert.equal(buildOperationalOutputVersionBundleV3(repository.lastBundle.proposal).state.stateHash, bundle.state.stateHash)
+})
+
+// A cut copy is a project like any other once it has its authority: the normal Commands are its children. They are materialized
+// from the very receipts the cut bound, under the cut's binding carried (never rebound) to each new Version.
+test('a cut copy takes the normal children under the editorial authority of its cut', async () => {
+  const { actor, result } = await cutCopy()
+  const cut = result.outputBundle
+  const cutBinding = editorialDerivedBindingV3(cut)
+  assert.notEqual(cutBinding, null)
+  const identity = ['id', 'parentVersionId', 'parentStateId', 'parentStateHash', 'resultVersionId', 'createdAt']
+  const withoutIdentity = (document) => Object.fromEntries(Object.entries(document).filter(([key]) => !identity.includes(key)))
+  const clipPlan = (plan) => ({ ...plan, videoTracks: plan.videoTracks.map((track, index) => index === 0 ? { ...track,
+    clips: track.clips.map((clip, at) => at === 0 ? { ...clip, crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 } } : clip) } : track) })
+  const children = []
+  let parent = cut
+  for (const spec of [
+    { suffix: 'derived-lut' },
+    { suffix: 'derived-color', type: 'set-project-color-plan', payload: { schemaVersion: 1 } },
+    { suffix: 'derived-subtitle', type: 'set-project-subtitle-mode', payload: { schemaVersion: 1 } },
+    { suffix: 'derived-patch', type: 'apply-review-patch', payload: { schemaVersion: 1 }, mutatePlan: clipPlan },
+  ]) {
+    const child = forkCopyConfigurationChild(parent, { actor, ...spec })
+    children.push(child)
+    parent = child
+  }
+  assert.deepEqual(children.map((child) => child.version.sequence), [cut.version.sequence + 1, cut.version.sequence + 2, cut.version.sequence + 3, cut.version.sequence + 4])
+  for (const [index, child] of children.entries()) {
+    const before = index === 0 ? cut : children[index - 1]
+    assert.equal(child.state.document.transition, 'inherit')
+    assert.equal(forkAuthorityPendingV3(child), false)
+    const binding = editorialDerivedBindingV3(child)
+    assert.notEqual(binding, null, 'every entry carries the binding')
+    assert.deepEqual(withoutIdentity(binding.document), withoutIdentity(editorialDerivedBindingV3(before).document),
+      'authority, transcript, receipts and inventory are the parent\'s, unchanged')
+    assert.equal(binding.document.parentVersionId, before.version.id)
+    assert.equal(binding.document.parentStateHash, before.state.stateHash)
+    assert.equal(binding.document.resultVersionId, child.version.id)
+    assert.equal(binding.document.authority.forkRootVersionId, cutBinding.document.authority.forkRootVersionId)
+    for (const [entryIndex, entry] of child.state.document.entries.entries()) {
+      assert.equal(entry.consumption.status, 'materialized')
+      assert.equal(entry.consumption.materialization.document.schemaVersion, 'editorial-derived-materialization/v1')
+      assert.deepEqual(entry.spec, before.state.document.entries[entryIndex].spec, 'the literal fork revision is kept')
+      assert.equal(stableSerialize(entry.consumption.materialization.document.normalizations),
+        stableSerialize(before.state.document.entries[entryIndex].consumption.materialization.document.normalizations), 'the very same receipts')
+      assert.equal(entry.consumption.materialization.document.planSnapshotId, child.editPlanSnapshot.id)
+    }
+  }
+  const patched = children[3].state.document.entries[0].consumption.materialization.document
+  assert.deepEqual(patched.clips[0].crop, { x: 0.1, y: 0.1, width: 0.8, height: 0.8 }, 'a recompiling child materializes its new plan')
+  // A plan may consume only what the cut's receipts observe; a copy owns no recording to adopt.
+  assert.throws(() => forkCopyConfigurationChild(cut, { actor, suffix: 'derived-unobserved', type: 'apply-review-patch', payload: { schemaVersion: 1 },
+    mutatePlan: (plan) => ({ ...plan, videoTracks: plan.videoTracks.map((track) => ({ ...track,
+      clips: track.clips.map((clip) => ({ ...clip, sourceArtifactId: 'artifact-not-observed-by-the-cut' })) })) }) }),
+  (error) => error.code === 'PRECONDITION_REQUIRED' && error.details.sourceArtifactIds.includes('artifact-not-observed-by-the-cut'))
 })

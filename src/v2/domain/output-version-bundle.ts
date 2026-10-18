@@ -259,7 +259,7 @@ export function validateCreationOutputVersionBundleV2(input: CreationOutputVersi
 import { createProjectOutputStateV3, type ProjectOutputStateV3, type ProjectOutputStateBodyV3, type OutputStateEntryV3 } from './project-output-state.ts'
 import { createProjectVersionV3, outputBoundVersionHashBodyV3, type ProjectVersionV3 } from './project-version.ts'
 import { validateOperationalOutputOriginV3, type OperationalOutputOriginV3, type OutputOriginAllocation } from './output-version-origin.ts'
-import { materializeOutputV3, materializeEditorialDerivedOutputV1, createEditorialSourceBindingV1, type MaterializationPlanV3, type SealedOutputNormalizationV3 } from './output-materialization.ts'
+import { materializeOutputV3, materializeEditorialDerivedOutputV1, createEditorialSourceBindingV1, type EditorialSourceBindingV1, type MaterializationPlanV3, type SealedOutputNormalizationV3 } from './output-materialization.ts'
 import { createOutputPlanAuthority } from './project-output-state.ts'
 import { materializeManualEditPlan, materializeManualRestorePlan } from './manual-editing.ts'
 import { createManualCommandImpact } from './command-impact.ts'
@@ -303,6 +303,32 @@ export function forkAuthorityPendingV3(bundle:OperationalOutputParentV3):boolean
   const entries=bundle.state.document.entries
   return entries.length>0&&entries.every(e=>e.consumption.status==='blocked'&&e.consumption.reasons.length===1&&
     e.consumption.reasons[0]===FORK_TARGET_MATERIALIZATION_REASON)
+}
+/**
+ * The editorial source binding that every entry of a cut copy's State carries (the authority its editorial cut bound to
+ * the target); null for any other State, including a State whose entries do not all carry the very same binding.
+ */
+export function editorialDerivedBindingV3(bundle:OperationalOutputParentV3):Readonly<EditorialSourceBindingV1>|null {
+  if(bundle.schemaVersion!=='operational-output-version-bundle/v3'||bundle.state.document.entries.length===0)return null
+  let found:Readonly<EditorialSourceBindingV1>|null=null
+  for(const e of bundle.state.document.entries) {
+    if(e.consumption.status!=='materialized'||e.consumption.materialization.document.schemaVersion!=='editorial-derived-materialization/v1')return null
+    const binding=e.consumption.materialization.document.sourceBinding
+    if(found!==null&&found.bindingHash!==binding.bindingHash)return null
+    found=binding
+  }
+  return found
+}
+/**
+ * The binding a child of a cut copy carries: its parent's authority, source observations, transcript and target inventory
+ * unchanged, re-identified for the Version it is born with. A child never gains, loses or rebinds authority; only an
+ * editorial cut does. The id is derived, so the same child always carries the same binding.
+ */
+export function carryEditorialSourceBindingV1(prior:Readonly<EditorialSourceBindingV1>,parent:OperationalOutputParentV3,a:OutputOriginAllocation):Readonly<EditorialSourceBindingV1> {
+  return createEditorialSourceBindingV1({...prior.document,
+    id:'editorial-source-binding-'+createHash('sha256').update('carry:'+a.resultVersionId+':'+prior.bindingHash,'utf8').digest('hex').slice(0,48),
+    parentVersionId:parent.version.id,parentStateId:parent.state.document.id,parentStateHash:parent.state.stateHash,
+    resultVersionId:a.resultVersionId,createdAt:a.createdAt})
 }
 export function operationalBundlePlanV3(bundle:OperationalOutputParentV3): Readonly<ProjectSnapshot> {
   if(bundle.schemaVersion==='project-creation-output-bundle/v2') {
@@ -535,6 +561,10 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
       ...(origin.kind==='child-command'?{adoptions:JSON.parse(stableSerialize(origin.adoptions)) as OutputJson}:{})}
   }
   const ids=new Set<string>()
+  // A child of a cut copy keeps the editorial authority its parent was given: its entries are materialized from the same observed
+  // receipts under the parent's binding, re-identified for this Version. Selection, restore, undo/redo, new outputs and ingest never reach this path.
+  const priorBinding=origin.kind==='child-command'?editorialDerivedBindingV3(parent):null
+  const carried=priorBinding===null?null:carryEditorialSourceBindingV1(priorBinding,parent,a)
   for(const e of entries) {
     const id=input.materializationIds[e.variantId]
     if(inheritsForkPosture) {
@@ -550,7 +580,9 @@ export function buildOperationalOutputVersionBundleV3(input:BuildOperationalOutp
       requireOutputId(id,'materializationId');assertDomain(!ids.has(id),'INVALID_PROJECT_VERSION','Materialization allocation reused');ids.add(id)
       e.consumption={status:'materialized',materialization:origin.kind==='editorial-cut-command'?materializeEditorialDerivedOutputV1({id,workspaceId:a.workspaceId,projectId:a.projectId,
         resultVersionId:a.resultVersionId,planSnapshotId:edit.id,planHash:edit.contentHash,plan:p,spec:e.spec,
-        normalizations:input.normalizations,createdAt:a.createdAt,sourceBinding:origin.command.payload.sourceBinding}):materializeOutputV3({id,workspaceId:a.workspaceId,projectId:a.projectId,
+        normalizations:input.normalizations,createdAt:a.createdAt,sourceBinding:origin.command.payload.sourceBinding}):carried!==null?materializeEditorialDerivedOutputV1({id,workspaceId:a.workspaceId,projectId:a.projectId,
+        resultVersionId:a.resultVersionId,planSnapshotId:edit.id,planHash:edit.contentHash,plan:p,spec:e.spec,
+        normalizations:input.normalizations,createdAt:a.createdAt,sourceBinding:carried}):materializeOutputV3({id,workspaceId:a.workspaceId,projectId:a.projectId,
         resultVersionId:a.resultVersionId,planSnapshotId:edit.id,planHash:edit.contentHash,plan:p,spec:(assertDomain(e.spec.schemaVersion==='output-spec-revision/v1','PRECONDITION_REQUIRED','Non-editorial child requires its declared revision contract'),e.spec),
         normalizations:input.normalizations,createdAt:a.createdAt})}
     }

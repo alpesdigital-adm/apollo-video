@@ -198,6 +198,11 @@ class InMemoryDirectorRepository {
     ]
     this.parent = options.head ?? head
     this.offered = options.offered ?? []
+    this.transcript = options.transcript ?? {
+      id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR',
+      provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
+    }
+    this.baseEditPlan = options.editPlan
     this.requested = []
     this.records = new Map()
   }
@@ -247,15 +252,12 @@ class InMemoryDirectorRepository {
         productionBrief: createProductionBrief({ ownerText: this.ownerText }),
       },
       policies: { automaticZoom: false, faceProtection: true, guardrails: this.guardrails },
-      editPlan: compiledEditorialPlan(this.selectedInsert, this.ctaText),
+      editPlan: this.baseEditPlan ?? compiledEditorialPlan(this.selectedInsert, this.ctaText),
       currentDurationFrames: 300,
       proxyVariantId: '9:16',
       sourceRights: this.sourceRights,
       outputReferences: this.outputReferences,
-      transcript: {
-        id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR',
-        provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
-      },
+      transcript: this.transcript,
       ...(this.ocrEnvelope ? { ocrEnvelope: this.ocrEnvelope } : {}),
     }
   }
@@ -1381,4 +1383,96 @@ test('Director snapshot owner retries only exact serialization codes and exhaust
     assert.equal(calls, expectedCalls, label)
     assert.equal(prepared, 0, label)
   }
+})
+
+// ---- The Director names the transcript words of the captions it generates, so an editorial cut can end inside one ----
+async function directorCueWorld(transcriptWords) {
+  const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
+  const base = compiledEditorialPlan()
+  const words = transcriptWords ?? base.retimedTranscript.words.map((word) => ({ word: word.text, start: word.sourceStartSeconds, end: word.sourceEndSeconds }))
+  const transcript = createMediaTranscript({ language: 'pt-BR', text: words.map((word) => word.word).join(' '), words,
+    segments: [{ id: 0, start: words[0].start, end: words.at(-1).end, text: words.map((word) => word.word).join(' ') }], provider: 'groq', model: 'whisper-large-v3' })
+  const editPlan = Object.freeze({ ...base, retimedTranscript: Object.freeze({ ...base.retimedTranscript, sourceTranscriptHash: transcript.transcriptHash }) })
+  const { service } = fixture({ editPlan, transcript: { id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR',
+    provider: 'groq', model: 'whisper-large-v3', transcriptHash: transcript.transcriptHash, words: transcript.words } })
+  return { transcript, result: await service(request()) }
+}
+
+test('the Director names the transcript words of every caption cue it generates, in the ingest cue track shape', async () => {
+  const { transcript, result } = await directorCueWorld()
+  const [track] = result.run.editPlan.subtitleTracks
+  assert.equal(track.schemaVersion, 'source-transcript-cue-track/v1')
+  assert.equal(track.sourceTranscriptId, 'transcript-1')
+  assert.equal(track.sourceTranscriptHash, transcript.transcriptHash)
+  assert.ok(track.cues.length > 1)
+  for (const cue of track.cues) {
+    assert.ok(Array.isArray(cue.sourceWordIndices) && cue.sourceWordIndices.length > 0, cue.id)
+    assert.equal(cue.sourceWordIndices.map((index) => transcript.words[index].word).join(' '), cue.text, 'the cue is exactly those words')
+  }
+  assert.equal(new Set(track.cues.flatMap((cue) => cue.sourceWordIndices)).size, track.cues.flatMap((cue) => cue.sourceWordIndices).length, 'no word twice')
+})
+
+test('without the observed transcript words, or with a word the transcript cannot name, no cue claims authority', async () => {
+  const plain = await fixture().service(request())
+  assert.equal(plain.run.editPlan.subtitleTracks[0].schemaVersion, undefined)
+  assert.ok(plain.run.editPlan.subtitleTracks[0].cues.every((cue) => cue.sourceWordIndices === undefined))
+  const base = compiledEditorialPlan()
+  const words = base.retimedTranscript.words.map((word) => ({ word: word.text, start: word.sourceStartSeconds, end: word.sourceEndSeconds }))
+  const missingOne = words.filter((_, index) => index !== 3)
+  const { result } = await directorCueWorld(missingOne)
+  const [track] = result.run.editPlan.subtitleTracks
+  assert.equal(track.schemaVersion, undefined, 'a track is trusted whole or not at all')
+  assert.ok(track.cues.every((cue) => cue.sourceWordIndices === undefined))
+})
+
+test('an editorial cut that ends inside a Director caption rebuilds the part that remains from the transcript words', async () => {
+  const { createEditorialSourceBindingV1 } = await import('../../src/v2/domain/output-materialization.ts')
+  const { materializeEditorialCutPlanV3 } = await import('../../src/v2/domain/editorial-cut-impact.ts')
+  const { transcript, result } = await directorCueWorld()
+  // The fixture's base plan declares retained ranges that do not match its clips; the cut then reads the ranges from the clips.
+  const before = structuredClone(result.run.editPlan)
+  delete before.editorial.retainedSourceRanges
+  const binding = createEditorialSourceBindingV1({ schemaVersion: 'editorial-source-binding/v1', canonicalPolicyVersion: 'output-canonical-json/v1',
+    id: 'binding-director-cut-1', workspaceId: 'workspace-1', projectId: 'project-1', parentVersionId: result.version.id, parentStateId: 'state-parent-1',
+    parentStateHash: 'd'.repeat(64), resultVersionId: 'version-director-cut-1',
+    authority: { kind: 'same-project-state3', sourceProjectId: 'project-1', sourceVersionId: result.version.id, sourceBaseHash: 'e'.repeat(64),
+      sourceStateId: 'state-source-1', sourceStateHash: 'f'.repeat(64), forkRootVersionId: null, forkRootStateId: null, forkRootStateHash: null,
+      derivationId: null, derivationHash: null },
+    transcript: { id: 'transcript-1', workspaceId: 'workspace-1', projectId: 'project-1', sourceArtifactId: 'artifact-source3',
+      sourceManifestId: 'manifest-source3', document: transcript, createdAt: '2026-07-18T20:00:00.000Z' },
+    normalizationRefs: [{ id: 'normalization-1', projectId: 'project-1', receiptHash: '1'.repeat(64) }],
+    inventory: [{ linkId: 'link-1', artifactId: 'artifact-source3', role: 'source-master', manifestId: 'manifest-1', manifestHash: '2'.repeat(64),
+      artifactSha256: '3'.repeat(64), rightsSnapshotId: null, rightsHash: null, rightsRevision: 0 }],
+    createdAt: '2026-07-18T22:30:00.000Z' })
+  // "Seja bem-vindo." is one cue: removing the first word leaves "bem-vindo." in the same cue.
+  const first = before.retimedTranscript.words[0]
+  const after = materializeEditorialCutPlanV3({ before, sourceBinding: binding, versionId: 'version-director-cut-1', planId: 'plan-director-cut-1',
+    commandId: 'command-director-cut-1', createdAt: binding.document.createdAt,
+    exclusions: [{ sourceStartSeconds: first.sourceStartSeconds, sourceEndSeconds: first.sourceEndSeconds, ruleIds: ['rule-first-word'] }] })
+  const cue = after.subtitleTracks[0].cues[0]
+  assert.equal(cue.text, 'bem-vindo.')
+  assert.deepEqual(cue.sourceWordIndices, [1])
+  assert.equal(after.subtitleTracks[0].schemaVersion, 'source-transcript-cue-track/v1')
+  // The same cut is refused for a Director plan that predates the authority: the refusal stays fail-closed.
+  const legacy = structuredClone(before)
+  delete legacy.subtitleTracks[0].schemaVersion
+  for (const legacyCue of legacy.subtitleTracks[0].cues) delete legacyCue.sourceWordIndices
+  assert.throws(() => materializeEditorialCutPlanV3({ before: legacy, sourceBinding: binding, versionId: 'version-director-cut-1', planId: 'plan-director-cut-1',
+    commandId: 'command-director-cut-1', createdAt: binding.document.createdAt,
+    exclusions: [{ sourceStartSeconds: first.sourceStartSeconds, sourceEndSeconds: first.sourceEndSeconds, ruleIds: ['rule-first-word'] }] }),
+  (error) => error.code === 'PRECONDITION_REQUIRED' && /Partially cut cue/.test(error.message))
+})
+
+test('a review patch that edits a caption drops the transcript words it no longer follows, and only on that cue', async () => {
+  const { materializePatchEditPlan } = await import('../../src/v2/domain/review-system.ts')
+  const { result } = await directorCueWorld()
+  const [first, second] = result.run.editPlan.subtitleTracks[0].cues
+  assert.ok(Array.isArray(first.sourceWordIndices) && Array.isArray(second.sourceWordIndices), 'both cues name their words before the patch')
+  const patched = materializePatchEditPlan({ editPlan: result.run.editPlan, newVersionId: 'version-patched-1', createdAt: '2026-07-18T23:00:00.000Z',
+    availableAssetIds: [], patch: { id: 'patch-1', baseVersionId: result.version.id, annotationIds: ['annotation-1'],
+      operations: [{ op: 'update-text', targetId: `subtitle:${first.id}`, value: { text: 'Texto revisado' } }] } })
+  const [editedCue, otherCue] = patched.subtitleTracks[0].cues
+  assert.equal(editedCue.text, 'Texto revisado')
+  assert.equal(editedCue.sourceWordIndices, undefined, 'the reviewer\'s text is not the transcript words\'')
+  assert.deepEqual(otherCue.sourceWordIndices, second.sourceWordIndices, 'an untouched cue keeps its words')
 })
