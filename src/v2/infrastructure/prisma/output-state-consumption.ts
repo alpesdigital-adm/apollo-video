@@ -206,8 +206,8 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
     const actual=origin.kind==='editorial-cut-command'?
       (await Promise.all(origin.command.payload.sourceBinding.document.normalizationRefs.map(ref=>readOutputNormalizationsV3(client,{
         workspaceId:input.workspaceId,projectId:ref.projectId,ids:[ref.id],lock:false})))).flat():
-      await readOutputNormalizationsV3(client,{workspaceId:input.workspaceId,projectId:input.projectId,
-        ids:[...new Set(ns.map(n=>n.document.id))],lock:false})
+      await readStoredOrderNormalizations(client,{workspaceId:input.workspaceId,projectId:input.projectId,
+        ids:[...new Set(ns.map(n=>n.document.id))]})
     const materializationIds=Object.fromEntries(stored.state.document.entries.flatMap(e=>e.consumption.status==='materialized'?
       [[e.variantId,e.consumption.materialization.document.id]]:[]))
     const fresh=buildOperationalOutputVersionBundleV3({allocation:{workspaceId:input.workspaceId,projectId:input.projectId,
@@ -217,15 +217,39 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
       // A child Command's replaced non-output snapshots are born with its Version; the origin declares which.
       ...(origin.kind==='child-command'?{replacementSnapshots:stored.snapshots.filter(s=>(origin.replaces as readonly string[]).includes(s.kind))}:{})})
     if(serializeOutputCanonicalJson(JSON.parse(stableSerializeOperational(fresh)))!==serializeOutputCanonicalJson(stored))
-      throw new Error('Reconstructed operational bundle differs')
+      throw new Error(`Reconstructed operational bundle differs at ${bundleDifferences(JSON.parse(serializeOutputCanonicalJson(JSON.parse(stableSerializeOperational(fresh)))),JSON.parse(serializeOutputCanonicalJson(stored))).join('; ')||'$'}`)
     return fresh
   } catch(error) {
     if(error instanceof DomainError&&['PRECONDITION_REQUIRED','ASSET_RIGHTS_BLOCKED'].includes(error.code))throw error
     if(error&&typeof error==='object'&&'code' in error&&/^P[0-9]{4}$/.test(String(error.code)))throw error
-    throw new DomainError('PERSISTENCE_CONFLICT','Stored operational output bundle failed factual reconstruction')
+    // The internal reason travels in the message (it is never published: the presenter answers a bare persistence conflict).
+    throw new DomainError('PERSISTENCE_CONFLICT',`Stored operational output bundle failed factual reconstruction: ${error instanceof Error?error.message:String(error)}`.slice(0,2400))
   }
 }
 import { stableSerialize as stableSerializeOperational } from '../../domain/canonical-hash.ts'
+/**
+ * The receipts a State materialized, in the order that State lists them. The store answers in its own order; a State lists its
+ * inherited observations before the ones a child adopted, so the order is part of what the reconstruction must reproduce.
+ */
+async function readStoredOrderNormalizations(client:Reader,input:Readonly<{workspaceId:string;projectId:string;ids:readonly string[]}>) {
+  const read=await readOutputNormalizationsV3(client,{...input,lock:false})
+  const byId=new Map(read.map(n=>[n.document.id,n]))
+  return input.ids.flatMap(id=>{const found=byId.get(id);return found?[found]:[]})
+}
+/** The paths (keys in order, at most eight) at which two canonical documents differ: only what makes a reconstruction mismatch diagnosable. */
+function bundleDifferences(left:unknown,right:unknown,path='$',found:string[]=[]):string[] {
+  if(found.length>=8||Object.is(left,right))return found
+  if(typeof left==='string'&&typeof right==='string'&&left.startsWith('{')&&right.startsWith('{')) {
+    try { return bundleDifferences(JSON.parse(left),JSON.parse(right),path,found) } catch { /* not JSON text: compared as a value below */ }
+  }
+  if(typeof left!=='object'||typeof right!=='object'||left===null||right===null) {
+    found.push(`${path} (${JSON.stringify(left)?.slice(0,100)} vs ${JSON.stringify(right)?.slice(0,100)})`)
+    return found
+  }
+  const a=left as Record<string,unknown>,b=right as Record<string,unknown>
+  for(const key of [...new Set([...Object.keys(a),...Object.keys(b)])].sort())bundleDifferences(a[key],b[key],`${path}.${key}`,found)
+  return found
+}
 export type PersistedOutputConsumptionV3=Readonly<
   {status:'blocked';outputContractVersion:2|3;outputStateId:string;outputStateHash:string;reasons:readonly string[]} |
   {status:'materialized';outputContractVersion:3;bundle:OperationalOutputVersionBundleV3;

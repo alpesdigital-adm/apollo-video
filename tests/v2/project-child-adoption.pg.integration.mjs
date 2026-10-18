@@ -265,6 +265,17 @@ test('W66 PostgreSQL child Commands adopt persisted observed receipts of other r
     }, transactionOptions), (error) => String(error.meta?.message ?? error.message).includes('W66v3 adopted observation rights are not current'), '3e')
     assert.deepEqual(await residue(reused.bundle), reusedBefore, '3e left nothing')
     assert.deepEqual(await residue(guarded.bundle), before, 'the guard cases left the head and the history where they were')
+
+    // ---- 4. a State lists the observations it inherits before the ones its child adopted, whatever their ids: a receipt that sorts
+    // BEFORE the inherited one must read back as it was written (the store answers in its own order, the reconstruction in the State's).
+    recordings['cam-0'] = await persistRecording('cam-0')
+    const ordered = await sealChild('ordered', ['cam-0', 'cam-a'], recordings)
+    assert.deepEqual(ordered.bundle.origin.adoptions.map((a) => a.sourceArtifactId), [recordings['cam-0'].names.sourceArtifactId])
+    const listed = ordered.bundle.state.document.entries[0].consumption.materialization.document.normalizations.map((n) => n.document.source.artifactId)
+    assert.deepEqual(listed, [recordings['cam-a'].names.sourceArtifactId, recordings['cam-0'].names.sourceArtifactId], 'inherited first, adopted after: not sorted')
+    await commit(ordered.parent, ordered.bundle)
+    const orderedStored = await readPersistedOperationalOutputBundleV3(db, { ...scope, versionId: ordered.bundle.version.id })
+    assert.equal(orderedStored.version.baseHash, ordered.bundle.version.baseHash)
   } finally {
     await db.$disconnect()
   }

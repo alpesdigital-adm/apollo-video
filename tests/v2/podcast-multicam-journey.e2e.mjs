@@ -368,59 +368,7 @@ test(
     // still be refused. Same value the four synthetic journeys use.
     process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
 
-    const clean = async () => {
-      await prisma.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
-      await prisma.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } })
-      await prisma.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null } })
-      for (const table of [
-        prisma.v2ColorCriticProposedDelta, prisma.v2ColorCriticIssue,
-        prisma.v2ColorCriticDimensionResult, prisma.v2ColorCriticReportMeasurement,
-        prisma.v2ColorCriticReport,
-        prisma.v2MatchPlanIssue, prisma.v2MatchNonComparableRange,
-        prisma.v2MatchRangeOverride, prisma.v2CameraMatchTransform,
-        prisma.v2MatchPlanMeasurement, prisma.v2MulticamMatchPlanHead,
-        prisma.v2MulticamMatchPlan,
-        prisma.v2ColorMeasurementComponent, prisma.v2ColorMeasurementDimension,
-        prisma.v2CameraColorMeasurement,
-        prisma.v2MulticamAngleScoreComponent, prisma.v2MulticamAngleCandidate,
-        prisma.v2MulticamShotAlternative, prisma.v2MulticamShotDecision,
-        prisma.v2MulticamDirectionHead, prisma.v2MulticamDirection,
-        prisma.v2MulticamObservation, prisma.v2MulticamEvidenceSet,
-        prisma.v2SpeakerDiarizationSegment, prisma.v2SpeakerDiarizationRun,
-        prisma.v2LongFormIndexWorkflow, prisma.v2MediaTranscript,
-        prisma.v2SyncDiagnosticHead, prisma.v2SyncDiagnostic,
-        prisma.v2CaptureSessionProtocol, prisma.v2CaptureProtocolEvaluation,
-        prisma.v2CaptureTrackCoverage, prisma.v2CaptureClockMapPiece, prisma.v2CaptureClockMap,
-        prisma.v2CaptureSyncEvidence, prisma.v2CaptureSyncRun, prisma.v2CaptureSessionClock,
-        prisma.v2CaptureSessionHead, prisma.v2CaptureSessionVersion,
-        prisma.v2ProxyReviewDecision, prisma.v2ProxyReview, prisma.v2RenderElementMap,
-        prisma.v2ProjectProxyRenderOperation,
-        prisma.v2ProjectColorPlanHead, prisma.v2ProjectColorPlan,
-        prisma.v2ProjectLutSelectionHead, prisma.v2ProjectLutSelection,
-        prisma.v2CommandArtifactInvalidation, prisma.v2PublicEventOutbox,
-        prisma.v2EditCommand, prisma.v2ProjectVersion, prisma.v2ProjectSnapshot,
-        prisma.v2ColorPipelineCompilation, prisma.v2MediaColorProbe,
-        prisma.v2ProjectMediaAsset, prisma.v2PublicOperation,
-        prisma.v2AutomaticCatalogRecord, prisma.v2AssetUseDecision,
-        prisma.v2AssetRightsChange,
-        // The render's own manifest records what it was derived from, and the
-        // lineage row outlives the operation that wrote it: deleting manifests
-        // first violates `media_artifact_lineage_manifestId_workspaceId_fkey`.
-        prisma.v2MediaArtifactLineage,
-        prisma.v2MediaArtifactManifest, prisma.v2AssetRightsSnapshot, prisma.v2MediaArtifact,
-        prisma.v2Project, prisma.v2UiSession, prisma.v2WorkspaceUiPrincipal,
-        prisma.v2WorkspaceMember, prisma.v2ApiCredential, prisma.v2ApiClient,
-      ]) {
-        await table.deleteMany({ where: { workspaceId } })
-      }
-    }
-
     t.after(async () => {
-      try {
-        await clean()
-      } catch (error) {
-        console.log(`podcast cleanup reported: ${error?.message ?? error}`)
-      }
       await closeJourneyObjectStore(objectStore).catch((error) => {
         console.log(`podcast object storage cleanup reported: ${error?.message ?? error}`)
       })
@@ -429,7 +377,10 @@ test(
       })
       await prisma.$disconnect()
     })
-    await clean()
+    // Sealed rows are append-only, so this journey cannot clear a previous run: its identities are fixed, and it is single-use per
+    // database (a workflow gives it a fresh one). Say so here instead of failing later on a unique constraint.
+    assert.equal(await prisma.v2Workspace.count({ where: { id: workspaceId } }), 0,
+      'this journey needs a fresh database: its workspace already exists and sealed rows are never deleted')
 
     // ---- the four recordings ----------------------------------------------
     // One room, four microphones. The recorder hears the whole afternoon at
