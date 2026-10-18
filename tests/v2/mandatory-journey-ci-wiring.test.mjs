@@ -745,7 +745,7 @@ const W69_PINNED_TOOLCHAIN = 'W69 subtitle clock proof that needs an externally 
  * reason that has nothing to do with coverage.
  */
 const KNOWN_UNRUN_SUITES = [
-  { file: 'tests/v2/prisma-face-window.integration.mjs', reason: W62_SUPERVISED_PG, citedBy: ['docs/quality/w62-v9-runtime.md', 'docs/quality/w65-caption-placement-v3.md'] },
+  { file: 'tests/v2/prisma-face-window.integration.mjs', reason: W62_SUPERVISED_PG, citedBy: ['docs/quality/w62-v9-runtime.md', 'docs/quality/w65-caption-placement-v3.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },
   { file: 'tests/v2/face-window-composition.integration.mjs', reason: W62_TSX_COMPOSITION, citedBy: ['docs/quality/w62-v9-runtime.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },
   { file: 'tests/v2/prisma-caption-placement.integration.mjs', reason: W65_SUPERVISED_PG, citedBy: ['docs/quality/w65-caption-placement-v3.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },
   { file: 'tests/v2/caption-placement-pixels.integration.mjs', reason: W65_PIXELS, citedBy: ['docs/quality/w65-caption-placement-v3.md', 'docs/quality/w65b-source-keyed-face-evidence.md'] },
