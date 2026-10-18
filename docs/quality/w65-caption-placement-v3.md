@@ -72,6 +72,24 @@ Renderer 1.16.0, receita de proxy 1.17.0, receita de final 1.12.0: a mesma lista
   moldura verde, o rosto pela cor dentro dela e a legenda pelos glifos, sem importar o crítico; a projeção é conferida contra o retângulo da
   imagem e contra o rosto medidos.
 
+## 6.1 Evidência (18/10/2026, sob o lock global; caminhos em `BASE`)
+
+- Suítes físicas, runner oficial, ramo em `e7da6eb7` (as 13 da W69, incluindo as seis migradas): collector 1/1, sidecar 14/14,
+  editorial-renderer 9/9, subtitle-anchor 6/6, subtitle-styles 1/1, style-tokens 1/1, proof-mode-goldens 12/12, transcript-rate 2/2,
+  output-formats 1/1, render-geometry 3/3, wave9 3/3, wave10 2/2, subtitle-vtt-native 1/1 - `w69-physical-suites-v1-d9bf2027`.
+  A primeira rodada (`...-42445ce1`, `a19b91e7`) reprovou subtitle-styles, style-tokens e proof-mode-goldens por ambiente (a árvore
+  não tinha as dependências do Remotion; corrigido com a junction `remotion/node_modules`) e transcript-rate, wave9 e wave10 por
+  produto: comparavam um plano v2 montado à mão; agora esperam o plano v3 do worker (sem dimensões de fonte nem janela de rosto,
+  projeção indisponível, todas as bandas `unknown`).
+- Pixels W65: `caption-placement-pixels.integration.mjs` 11/11 - `w69-dev-w65final-pixels-0092fc2b`.
+- Reconstrução do final com legendas (mesmos bytes a partir do plano gravado; sem plano ou com plano alterado, recusa):
+  `ffmpeg-editorial-render-input-reconstruction.test.mjs` 2/2 - `w69-dev-w65s4-reconstruct-63b98f9c`.
+- PostgreSQL (harness supervisionado `run-local-pg-w65.mjs`, pós-voo limpo): `prisma-caption-placement.integration.mjs` 1/1 e regressão
+  `prisma-face-window.integration.mjs` 3/3 - `w65-pg-runs/w65-final-pg-20254b2d`.
+- Unitárias relacionadas (916 testes, 911 passam, 5 pulados), `tsc` (só os 17 erros de módulo `remotion` do ambiente), ESLint,
+  lint de arquitetura, `api:v1:validate` e `api:parity --check`: o contrato público não mudou (os códigos de qualidade de formato
+  não são enumerados nele), logo não há baseline a regenerar.
+
 ## 7. Limites declarados
 
 - Na amostra de desenvolvimento em imagens paradas, uma banda ocupada foi julgada livre em 3/26 imagens (limiar 0,50) e 1/26 (0,10): `free-certified` é evidência amostrada, não prova.
