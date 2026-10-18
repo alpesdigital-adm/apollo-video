@@ -34,7 +34,7 @@ import { PrismaMediaArtifactRepository } from '../../src/v2/infrastructure/prism
 import { PrismaMediaTransferRepository } from '../../src/v2/infrastructure/prisma/media-transfer-repository.ts'
 import { PrismaAssetRightsRepository } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
 import { assetRightsRevision } from '../../src/v2/domain/asset-rights.ts'
-import { readPersistedOutputConsumptionV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
+import { readPersistedOutputConsumptionV3, requirePersistedOutputConsumptionV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
 import { runNextMediaIngestOperationService } from '../../src/v2/application/run-media-ingest-worker.ts'
 import { createProjectService } from '../../src/v2/application/create-project.ts'
 import { applyEditorialCutCommandService } from '../../src/v2/application/apply-editorial-cut-command.ts'
@@ -1028,10 +1028,26 @@ END; $w66_diagnostic$`)
    assert.deepEqual(editorial.retainedSourceRanges,[{sourceStartSeconds:0,sourceEndSeconds:1},{sourceStartSeconds:1.8,sourceEndSeconds:2}])
    assert.equal(editorial.impact.schemaVersion,'editorial-cut-impact/v2');assert.deepEqual(editorial.impact.affectedVariantIds,[forkEntry.variantId])
    emitEditorialFlush({phase:'readback-start'})
+   // Policy (S3): a cut copy's transcript and geometry are sealed by the cut, so render and critic consume it; the target has no
+   // perception (face) authority of its own yet, so the final export stays blocked until it does.
    for(const purpose of ['render','critic','final']) {
     const observed=await readPersistedOutputConsumptionV3(db,{...forkScope,versionId:editorial.version.id,variantId:forkEntry.variantId,purpose})
-    assert.equal(observed.status,'blocked');assert.deepEqual(observed.reasons,['derived-source-perception-authority-required'])
-    assert.equal(observed.outputStateId,editorialBundle.state.document.id);assert.equal(observed.outputStateHash,editorialBundle.state.stateHash)
+    if(purpose==='final') {
+     assert.equal(observed.status,'blocked');assert.deepEqual(observed.reasons,['derived-source-perception-authority-required'])
+     assert.equal(observed.outputStateId,editorialBundle.state.document.id);assert.equal(observed.outputStateHash,editorialBundle.state.stateHash)
+    } else {
+     assert.equal(observed.status,'materialized',purpose)
+     assert.equal(observed.bundle.state.stateHash,editorialBundle.state.stateHash);assert.equal(observed.entry.variantId,forkEntry.variantId)
+    }
+    const required=await requirePersistedOutputConsumptionV3(db,{...forkScope,versionId:editorial.version.id,purpose})
+    .then((value)=>({value}),(error)=>({error}))
+    if(purpose==='final') {
+     assert.equal(required.error?.code,'PRECONDITION_REQUIRED');assert.equal(required.error.details.reason,'derived-source-perception-authority-required')
+    } else {
+     assert.equal(required.error,undefined,String(required.error?.message));assert.equal(required.value.seal.purpose,purpose)
+     assert.equal(required.value.seal.projectVersionId,editorial.version.id);assert.equal(required.value.seal.outputStateHash,editorialBundle.state.stateHash)
+     assert.equal(required.value.seal.variantId,forkEntry.variantId);assert.match(required.value.sealHash,/^[0-9a-f]{64}$/)
+    }
    }
    assert.equal(serializeOutputCanonicalJson(await operationalRepo.read({...forkScope,versionId:editorial.version.id})),serializeOutputCanonicalJson(editorialBundle))
    assert.equal(serializeOutputCanonicalJson(await creationRepo.read({...forkScope,versionId:fork.version.id})),beforeEditorial.fork)

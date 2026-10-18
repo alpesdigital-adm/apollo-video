@@ -22,7 +22,7 @@ import { createMediaArtifactManifestV2 } from '../../src/v2/domain/media-artifac
 import { setAssetRightsService } from '../../src/v2/application/set-asset-rights.ts'
 import { PrismaAssetRightsRepository } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
 import { PrismaCreationOutputBundleRepositoryV2 } from '../../src/v2/infrastructure/prisma/output-version-bundle-repository.ts'
-import { requirePersistedOutputConsumptionV2 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
+import { requirePersistedOutputConsumptionV3 } from '../../src/v2/infrastructure/prisma/output-state-consumption.ts'
 
 // Full-bundle SQL/adapter contract only. Metadata-controlled source rows are not
 // physical source normalization, rendering, critic approval or product cutover.
@@ -556,7 +556,7 @@ test('W66 Creation2 full bundle COMMIT/readback and immutable nonempty fork fact
    await assertCommittedCreationEvents(db,input,proposal)
    const replay=await repository.persist(input);assert.equal(replay.replayed,true);assert.deepEqual(await targetCounts(db,proposal),counts)
    await assertCommittedCreationEvents(db,input,proposal)
-   for(const purpose of ['render','critic','final'])await assert.rejects(()=>requirePersistedOutputConsumptionV2(db,{workspaceId:world.workspaceId,projectId:proposal.projectId,versionId:proposal.versionId,purpose}),e=>e.code==='PRECONDITION_REQUIRED')
+   for(const purpose of ['render','critic','final'])await assert.rejects(()=>requirePersistedOutputConsumptionV3(db,{workspaceId:world.workspaceId,projectId:proposal.projectId,versionId:proposal.versionId,purpose}),e=>e.code==='PRECONDITION_REQUIRED'&&typeof e.details.reason==='string')
   })
   await t.test('nonempty fork commits candidate clip cue music crop with actual source rows and zero acceptance transfer',async(forkTest)=>{
    const proposal=await forkCommand(db,source,sourceRoot,[master,music]),sourceBefore=await db.v2ProjectVersion.findUniqueOrThrow({where:{id:source.version.id}}),snapshotsBefore=await db.v2ProjectSnapshot.findMany({where:{projectId:source.projectId}})
@@ -589,7 +589,7 @@ test('W66 Creation2 full bundle COMMIT/readback and immutable nonempty fork fact
     assert.deepEqual(await db.v2PublicEventOutbox.findMany({where:{workspaceId:world.workspaceId,id:{in:input.eventIds}},orderBy:{id:'asc'}}),eventsBefore)
     assert.deepEqual(await targetCounts(db,proposal),countsBefore)
    })
-   for(const purpose of ['render','critic','final'])await assert.rejects(()=>requirePersistedOutputConsumptionV2(db,{workspaceId:world.workspaceId,projectId:proposal.projectId,versionId:proposal.versionId,purpose}),e=>e.code==='PRECONDITION_REQUIRED')
+   for(const purpose of ['render','critic','final'])await assert.rejects(()=>requirePersistedOutputConsumptionV3(db,{workspaceId:world.workspaceId,projectId:proposal.projectId,versionId:proposal.versionId,purpose}),e=>e.code==='PRECONDITION_REQUIRED'&&typeof e.details.reason==='string')
   })
   await t.test('missing final head: required flush rejects; omitted flush diagnoses failed driver and fail-closed product',async()=>{
    for(const omitFlush of [false,true]) {

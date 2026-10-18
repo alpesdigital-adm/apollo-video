@@ -3,8 +3,7 @@ import { createHash } from 'node:crypto'
 import { DomainError } from '../../domain/errors.ts'
 import { creationProjectMetadataV2, validateProjectCreationOutputCommandV2, type ProjectCreationOutputCommandV2 } from '../../domain/project-creation-command.ts'
 import { buildCreationOutputVersionBundleV2, validateCreationOutputVersionBundleV2, type CreationOutputVersionBundleV2 } from '../../domain/output-version-bundle.ts'
-import { requireOutputStateConsumableV2 } from '../../domain/project-output-state.ts'
-import { serializeOutputCanonicalJson } from '../../domain/output-canonical-policy.ts'
+import { calculateOutputCanonicalHash, serializeOutputCanonicalJson } from '../../domain/output-canonical-policy.ts'
 
 type Reader = Pick<PrismaClient | Prisma.TransactionClient, '$queryRawUnsafe'>
 export async function readPersistedCreationOutputBundleV2(client: Reader,
@@ -97,13 +96,6 @@ export async function readPersistedCreationOutputBundleV2(client: Reader,
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored contract-two output bundle failed factual document validation')
   }
 }
-export async function requirePersistedOutputConsumptionV2(client: Reader,
-  input: Readonly<{ workspaceId: string; projectId: string; versionId: string; purpose: 'render' | 'critic' | 'final' }>): Promise<never> {
-  const bundle = await readPersistedCreationOutputBundleV2(client, input)
-  if (!bundle) throw new DomainError('PRECONDITION_REQUIRED', 'Requested output Version2 is missing')
-  return requireOutputStateConsumableV2(bundle.state, input.purpose)
-}
-
 /** A fork receipt owns only its immutable creation facts. Later media/Commands
  * may extend either project; replay never compares those mutable collections
  * to the receipt or claims its Version is the current head. */
@@ -238,6 +230,9 @@ export async function readPersistedOperationalOutputBundleV3(client:Reader,input
   }
 }
 import { stableSerialize as stableSerializeOperational } from '../../domain/canonical-hash.ts'
+import { OUTPUT_CONSUMPTION_PURPOSES, outputConsumptionVerdictV3, outputConsumptionSealV3, outputConsumptionSealHashV3, outputEntryAspectRatio, publishedConsumptionReason,
+  type OutputConsumptionEntry, type OutputConsumptionPurpose, type OutputConsumptionSealV3, type OutputConsumptionState, type OutputConsumptionVersion } from '../../domain/output-consumption.ts'
+import type { ProjectOutputStateV2, ProjectOutputStateV3 } from '../../domain/project-output-state.ts'
 import type { V2RenderablePlanSnapshotFacts } from '../../domain/project-fork-derivation.ts'
 /** The stored row of a renderable plan snapshot, as the facts the bundle builder validates. */
 async function readRenderableSnapshotFactsV3(client:Reader,input:Readonly<{workspaceId:string;projectId:string;snapshotId:string}>):Promise<Readonly<V2RenderablePlanSnapshotFacts>> {
@@ -278,24 +273,78 @@ export type PersistedOutputConsumptionV3=Readonly<
 >
 /** Geometry/clock dependency admission only. No critic approval, render permit
  * or final publication is inferred. Runtime consumers must also evaluate their
- * current rights/lease/quality fences inside their owner transaction. */
+ * current rights/lease/quality fences inside their owner transaction. The verdict itself is the domain's
+ * (`outputConsumptionVerdictV3`); this audit read rebuilds the exact bundle first and applies it. */
 export async function readPersistedOutputConsumptionV3(client:Reader,input:Readonly<{
-  workspaceId:string;projectId:string;versionId:string;variantId:string;purpose:'render'|'critic'|'final'
+  workspaceId:string;projectId:string;versionId:string;variantId:string;purpose:OutputConsumptionPurpose
 }>):Promise<PersistedOutputConsumptionV3> {
-  if(!['render','critic','final'].includes(input.purpose))throw new DomainError('PERSISTENCE_CONFLICT','Unknown output consumption purpose')
+  if(!(OUTPUT_CONSUMPTION_PURPOSES as readonly string[]).includes(input.purpose))throw new DomainError('PERSISTENCE_CONFLICT','Unknown output consumption purpose')
   const b=await readPersistedOperationalOutputBundleV3(client,input)
   if(!b)throw new DomainError('PRECONDITION_REQUIRED','Requested operational output Version missing')
-  if(b.schemaVersion==='project-creation-output-bundle/v2')return Object.freeze({status:'blocked',outputContractVersion:2,
-    outputStateId:b.state.document.id,outputStateHash:b.state.stateHash,reasons:(b.state.document.consumption as Extract<typeof b.state.document.consumption,{reasons:unknown}>).reasons})
-  const e=b.state.document.entries.find(e=>e.variantId===input.variantId)
-  if(!e)throw new DomainError('PRECONDITION_REQUIRED','Requested stable variant is not an exact State member')
-  if(e.consumption.status==='blocked')return Object.freeze({status:'blocked',outputContractVersion:3,
-    outputStateId:b.state.document.id,outputStateHash:b.state.stateHash,reasons:e.consumption.reasons})
-  // A target-owned reuse binding proves transcript/observed geometry only.
-  // The retained fork lineage still lacks target perception/visual authority;
-  // every purpose observes the same block, never implied critic/final approval.
-  if(e.consumption.materialization.document.schemaVersion==='editorial-derived-materialization/v1'&&b.state.document.sourceDependencies!==null)
-    return Object.freeze({status:'blocked',outputContractVersion:3,outputStateId:b.state.document.id,outputStateHash:b.state.stateHash,
-      reasons:Object.freeze(['derived-source-perception-authority-required'])})
-  return Object.freeze({status:'materialized',outputContractVersion:3,bundle:b,entry:e})
+  const verdict=outputConsumptionVerdictV3(b.state,input.variantId,input.purpose)
+  if(verdict.status==='blocked')return Object.freeze({status:'blocked',outputContractVersion:b.schemaVersion==='project-creation-output-bundle/v2'?2:3,
+    outputStateId:b.state.document.id,outputStateHash:b.state.stateHash,reasons:verdict.reasons})
+  return Object.freeze({status:'materialized',outputContractVersion:3,bundle:b as OperationalOutputVersionBundleV3,entry:verdict.entry})
+}
+
+/** The sealed State a Version carries, read from its own rows: the State row must be the one the Version row seals, byte for byte. */
+export type StoredOutputStateV3=Readonly<{version:OutputConsumptionVersion;state:OutputConsumptionState}>
+/**
+ * The cheap read every consumer can afford inside its owner transaction (a handful of rows, no reconstruction): the Version row and
+ * the State row it seals. The State is append-only and database-guarded when written, so the row is as authoritative as the
+ * bundle that produced it; the full rebuild (`readPersistedOperationalOutputBundleV3`) stays the audit read.
+ */
+export async function readStoredOutputStateV3(client:Reader,input:Readonly<{workspaceId:string;projectId:string;versionId:string}>):Promise<StoredOutputStateV3|null> {
+  const rows=await client.$queryRawUnsafe<Array<{outputContractVersion:number;baseHash:string;outputStateId:string|null;outputStateHash:string|null;
+    stateJson:string|null;stateHash:string|null;schemaVersion:string|null}>>(
+    'SELECT v."outputContractVersion",v."baseHash",v."outputStateId",v."outputStateHash",s."stateJson",s."stateHash",s."schemaVersion" FROM project_versions v LEFT JOIN project_output_states s ON s.id=v."outputStateId" AND s."resultVersionId"=v.id AND s."projectId"=v."projectId" AND s."workspaceId"=v."workspaceId" WHERE v.id=$1 AND v."projectId"=$2 AND v."workspaceId"=$3',
+    input.versionId,input.projectId,input.workspaceId)
+  if(rows.length===0)return null
+  if(rows.length!==1)throw new DomainError('PERSISTENCE_CONFLICT','Stored output Version identity is ambiguous')
+  const row=rows[0]!
+  if(row.outputContractVersion!==2&&row.outputContractVersion!==3)
+    throw new DomainError('PRECONDITION_REQUIRED','Unsealed historical Version is audit only',{reason:'output-not-consumable'})
+  const expectedSchema=row.outputContractVersion===2?'project-output-state/v2':'project-output-state/v3'
+  if(row.stateJson===null||row.stateHash===null||row.schemaVersion!==expectedSchema||row.outputStateHash!==row.stateHash)
+    throw new DomainError('PERSISTENCE_CONFLICT','Stored output State differs from the State its Version seals')
+  let document:ProjectOutputStateV2['document']|ProjectOutputStateV3['document']
+  try { document=JSON.parse(row.stateJson) } catch { throw new DomainError('PERSISTENCE_CONFLICT','Stored output State is not valid JSON') }
+  if(document.schemaVersion!==expectedSchema||document.resultVersionId!==input.versionId||document.projectId!==input.projectId||document.workspaceId!==input.workspaceId||
+    document.id!==row.outputStateId||serializeOutputCanonicalJson(document)!==row.stateJson||calculateOutputCanonicalHash(document)!==row.stateHash)
+    throw new DomainError('PERSISTENCE_CONFLICT','Stored output State failed its own seal')
+  return Object.freeze({version:Object.freeze({id:input.versionId,baseHash:row.baseHash}),
+    state:Object.freeze({document,stateHash:row.stateHash}) as OutputConsumptionState})
+}
+
+export type RequiredOutputConsumptionV3=Readonly<{
+  version:OutputConsumptionVersion
+  state:Readonly<ProjectOutputStateV3>
+  entry:OutputConsumptionEntry
+  /** The aspect ratio the entry's sealed spec carries (null when it carries none): the one answer for "what format is this output". */
+  aspectRatio:string|null
+  seal:OutputConsumptionSealV3
+  sealHash:string
+}>
+/**
+ * The single place every consumer asks "may I consume this output?". It reads the exact Version (never the head, never the
+ * project's format), applies the domain verdict for the purpose and answers either the exact State, entry and seal to put in the
+ * consumer's context and input hash, or a PRECONDITION_REQUIRED whose `details.reason` names why (published by the presenter).
+ * `variantId` absent means the State's only output. `reconstruct: true` rebuilds the whole bundle first (the audit read); the
+ * default reads the sealed rows, which is what an owner transaction can afford.
+ */
+export async function requirePersistedOutputConsumptionV3(client:Reader,input:Readonly<{
+  workspaceId:string;projectId:string;versionId:string;variantId?:string;purpose:OutputConsumptionPurpose;reconstruct?:boolean
+}>):Promise<RequiredOutputConsumptionV3> {
+  if(!(OUTPUT_CONSUMPTION_PURPOSES as readonly string[]).includes(input.purpose))throw new DomainError('PERSISTENCE_CONFLICT','Unknown output consumption purpose')
+  const stored=input.reconstruct===true?await (async()=>{
+    const b=await readPersistedOperationalOutputBundleV3(client,input)
+    return b?Object.freeze({version:Object.freeze({id:b.version.id,baseHash:b.version.baseHash}),state:b.state as OutputConsumptionState}):null
+  })():await readStoredOutputStateV3(client,input)
+  if(!stored)throw new DomainError('PRECONDITION_REQUIRED','Requested operational output Version missing',{reason:'output-version-missing'})
+  const verdict=outputConsumptionVerdictV3(stored.state,input.variantId,input.purpose)
+  if(verdict.status==='blocked')throw new DomainError('PRECONDITION_REQUIRED','Output is not consumable for this purpose',
+    {reason:publishedConsumptionReason(verdict.reasons),purpose:input.purpose,outputStateId:stored.state.document.id,reasons:verdict.reasons})
+  const state=stored.state as Readonly<ProjectOutputStateV3>
+  const seal=outputConsumptionSealV3(stored.version,state,verdict.entry,input.purpose)
+  return Object.freeze({version:stored.version,state,entry:verdict.entry,aspectRatio:outputEntryAspectRatio(verdict.entry),seal,sealHash:outputConsumptionSealHashV3(seal)})
 }

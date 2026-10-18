@@ -1,5 +1,6 @@
 import type { DomainError } from '../domain/errors.ts'
 import { PUBLIC_ERROR_CATALOG } from './public-error-catalog.ts'
+import { PUBLISHED_CONSUMPTION_REASONS } from '../domain/output-consumption.ts'
 
 function boundedStrings(value: unknown, maximum: number, maximumLength = 256): string[] | null {
   if (
@@ -151,7 +152,7 @@ function presentMissingTool(details: Readonly<Record<string, unknown>>) {
  * The closed set of reasons a precondition refusal publishes, each one a stable code a client can branch on and an operator can
  * act on. Anything else a domain throw put in `details` stays internal.
  */
-const PUBLISHED_PRECONDITION_REASONS = Object.freeze(new Set(['copy-requires-editorial-cut']))
+const PUBLISHED_PRECONDITION_REASONS: ReadonlySet<string> = new Set(PUBLISHED_CONSUMPTION_REASONS)
 
 function presentPreconditionReason(details: Readonly<Record<string, unknown>>) {
   return typeof details.reason === 'string' && PUBLISHED_PRECONDITION_REASONS.has(details.reason)
