@@ -1130,7 +1130,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     id: 'apollo.projects.subtitle-sidecars.export',
     version: '1.0.0',
     title: 'Export an SRT or VTT subtitle sidecar',
-    description: 'Derives one sidecar strictly from the cue alignment persisted for the rendered artifact of an exact ProjectVersion and variant, validates monotonicity, ranges, overlaps, encoding and line breaks, and persists it as a content-addressed artifact whose manifest carries the version, variant, MP4, RenderInput and cue map lineage. Replaying the same request returns the same artifact instead of a second file.',
+    description: 'Derives one sidecar strictly from the cue alignment persisted for the rendered artifact of an exact ProjectVersion and variant, validates monotonicity, ranges, overlaps, encoding and line breaks, and persists it as a content-addressed artifact whose manifest carries the version, variant, MP4, RenderInput and cue map lineage. Replaying the same request returns the same artifact instead of a second file. A render whose review is blocked, or that no review judged, is refused with SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH (details.reason render-blocked or review-missing) before any byte is staged or stored.',
     exposure: 'public',
     operationKind: 'command',
     authMode: 'required',

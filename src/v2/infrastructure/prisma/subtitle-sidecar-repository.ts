@@ -22,6 +22,8 @@ import {
   type SubtitleSidecarFormat,
 } from '../../domain/subtitle-sidecar.ts'
 
+const PROXY_REVIEW_STATUSES = ['blocked', 'warning-ack-required', 'ready-for-final'] as const
+
 function parseObject(value: string, field: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value) as unknown
@@ -193,6 +195,7 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
           outputArtifactId: final.outputArtifactId,
           outputManifestId: final.outputManifestId,
           renderInputHash: final.inputHash,
+          reviewWhere: { id: final.proxyReviewId } as const,
           editPlanSnapshotId: final.editPlanSnapshotId,
           editPlanHash: final.editPlanSnapshot.contentHash,
           editPlanJson: final.editPlanSnapshot.contentJson,
@@ -204,6 +207,7 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
             outputArtifactId: proxy.outputArtifactId,
             outputManifestId: proxy.outputManifestId,
             renderInputHash: proxy.inputHash,
+            reviewWhere: { operationId: proxy.operationId } as const,
             editPlanSnapshotId: proxy.editPlanSnapshotId,
             editPlanHash: proxy.editPlanSnapshot.contentHash,
             editPlanJson: proxy.editPlanSnapshot.contentJson,
@@ -211,7 +215,7 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
         : null
     if (!render) return null
 
-    const [artifact, mapRow] = await Promise.all([
+    const [artifact, mapRow, reviewRow] = await Promise.all([
       this.client.v2MediaArtifact.findFirst({
         where: { id: render.outputArtifactId, workspaceId: input.workspaceId },
         select: { id: true, artifactKey: true, sha256: true, status: true },
@@ -224,8 +228,15 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
           proxyArtifactId: render.outputArtifactId,
         },
       }),
+      this.client.v2ProxyReview.findFirst({
+        where: { ...render.reviewWhere, workspaceId: input.workspaceId, projectId: input.projectId },
+        select: { status: true, finalAllowed: true, reviewHash: true },
+      }),
     ])
     if (!artifact || !mapRow) return null
+    if (reviewRow && !PROXY_REVIEW_STATUSES.includes(reviewRow.status as (typeof PROXY_REVIEW_STATUSES)[number])) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review status is invalid')
+    }
 
     return Object.freeze({
       projectId: input.projectId,
@@ -245,6 +256,13 @@ export class PrismaSubtitleSidecarRepository implements SubtitleSidecarRepositor
       renderElementMapHash: mapRow.mapHash,
       map: mapOf(mapRow),
       cueTexts: cueTextsOf(render.editPlanJson),
+      review: reviewRow
+        ? Object.freeze({
+            status: reviewRow.status as (typeof PROXY_REVIEW_STATUSES)[number],
+            finalAllowed: reviewRow.finalAllowed,
+            reviewHash: reviewRow.reviewHash,
+          })
+        : null,
     })
   }
 

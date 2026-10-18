@@ -1422,6 +1422,7 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
       renderElementMapHash: mapHash,
       map: overriddenPortrait.elementMap,
       cueTexts,
+      review: { status: 'ready-for-final', finalAllowed: true, reviewHash: 'd'.repeat(64) },
     })
     const alignments = new Map([[`${applied.version.id}:${OVERRIDE_VARIANT}`, alignment]])
     alignments.set(`head:${OVERRIDE_VARIANT}`, alignment)

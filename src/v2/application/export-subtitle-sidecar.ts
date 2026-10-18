@@ -134,6 +134,22 @@ async function assertAlignmentMatchesArtifact(
   return { artifact: artifact!, manifest: manifest!, map }
 }
 
+/**
+ * A render the review blocked, or one no review ever judged, is not a deliverable: no sidecar is derived,
+ * staged, promoted or persisted for it. Runs before any byte is produced, like the artifact checks below.
+ */
+function assertReviewAllowsSidecar(review: RenderedSubtitleAlignmentSource['review']): void {
+  if (review === null) {
+    throw new DomainError('SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+      'The render carries no review verdict; no sidecar is published for it', { reason: 'review-missing' })
+  }
+  if (review.status === 'blocked') {
+    throw new DomainError('SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+      'The render was blocked by its review; no sidecar is published for it',
+      { reason: 'render-blocked', reviewStatus: review.status, reviewHash: review.reviewHash })
+  }
+}
+
 export function exportProjectSubtitleSidecarService(dependencies: {
   sidecars: SubtitleSidecarRepository
   artifacts: MediaArtifactQueryRepository
@@ -181,6 +197,7 @@ export function exportProjectSubtitleSidecarService(dependencies: {
         'No rendered output with a persisted cue alignment exists for this project version and variant',
       )
     }
+    assertReviewAllowsSidecar(alignment.review)
     const verified = await assertAlignmentMatchesArtifact(
       dependencies.artifacts,
       input.workspaceId,

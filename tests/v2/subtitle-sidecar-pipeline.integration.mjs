@@ -273,6 +273,8 @@ function alignmentOf(rendered, storedOutput, overrides = {}) {
     renderElementMapHash: renderElementMapHash(rendered.renderElementMap),
     map: rendered.renderElementMap,
     cueTexts: Object.fromEntries(FIXTURE_CUES.map((cue) => [cue.id, cue.text])),
+    // Controlled verdict of the render's own review; the Postgres reader takes it from the persisted review row.
+    review: { status: 'ready-for-final', finalAllowed: true, reviewHash: 'd'.repeat(64) },
     ...overrides,
   }
 }
