@@ -145,6 +145,27 @@ const CARD_EXPECTATIONS = {
   failed: { tone: 'danger', color: 'text-[#e08b8b]', badge: 'Requer atenção', action: 'inspect-error', button: 'Ver erro →' },
 }
 
+// W65b (final-caption-certification/v1, docs/quality/w65b-final-caption-certification.md section 3). The Director's report reaches the
+// review as the warning it really is (face safety unknown), and a caption that cannot be certified is OMITTED and LISTED instead of
+// being a hard stop: the review of a real render asks the operator to acknowledge the warnings (`warning-ack-required`) and the project
+// waits in `reviewing-proxy`. It is no longer `blocked`, and the project no longer goes to `revising`: only a hard issue does that, and
+// these runs have none. The final stays refused (`finalAllowed` false) until the warnings are acknowledged. What a review of a real
+// render says is asserted whole, so a review that is blocked again, that carries a hard issue, that is already acknowledged, or that has
+// lost a reason the run is known to produce, fails here.
+const LISTED_REVIEW_STATUS = 'warning-ack-required'
+const LISTED_PROJECT_STATUS = 'reviewing-proxy'
+function assertListedReview(review, label, { requiredWarnings = [] } = {}) {
+  assert.equal(review.status, LISTED_REVIEW_STATUS, `${label}: the review of an uncertified face claim asks for an acknowledgement`)
+  assert.equal(review.finalAllowed, false, `${label}: the final stays refused until the warnings are acknowledged`)
+  assert.equal(review.warningsAcknowledged, false, `${label}: nobody acknowledged them`)
+  const issues = [...JSON.parse(review.technicalIssuesJson), ...JSON.parse(review.criticIssuesJson)]
+  const seen = JSON.stringify(issues.map((issue) => [issue.code, issue.severity]))
+  assert.deepEqual(issues.filter((issue) => issue.severity === 'hard'), [], `${label}: no hard issue: ${seen}`)
+  for (const code of requiredWarnings) {
+    assert.ok(issues.some((issue) => issue.code === code && issue.severity === 'warning'), `${label}: ${code} is listed as a warning: ${seen}`)
+  }
+}
+
 // Fixed existing imports only; preparation never calls a repository, provider or worker factory.
 const RUNTIME_IMPORTS = [
   ['public-operation', '../../../src/v2/infrastructure/prisma/public-operation-repository.ts', ['PrismaPublicOperationRepository']],
@@ -1319,7 +1340,7 @@ export async function runDashboardRuntimeJourney(input) {
         messageBytes: firstProxyRow.errorMessage === null ? 0 : Buffer.byteLength(firstProxyRow.errorMessage) } }
     assert.deepEqual(firstProxyOutcome, { operationId: proxyId, status: 'succeeded' },
       JSON.stringify(evidence.firstProxyWorkerDiagnostic))
-    await observe({ stage: 'review', status: 'revising', operationId: proxyId, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    await observe({ stage: 'review', status: LISTED_PROJECT_STATUS, operationId: proxyId, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     for (const path of [`/v1/projects/${projectId}/annotations`, `/v1/projects/${projectId}/proxy-reviews`]) {
       assert.ok(evidence.browserRequests.some((record) => record.method === 'GET' && record.path === path &&
         record.stage === 'review' && record.status === 200 && record.bodyState === 'captured' && record.transportState === 'finished'),
@@ -1328,19 +1349,17 @@ export async function runDashboardRuntimeJourney(input) {
     evidence.reviewAvailabilityProof.afterWorker = { operationId: proxyId, annotationsStatus: 200, proxyReviewStatus: 200,
       scope: 'availability-only; stored face safety remains unknown and final export blocked' }
     const replay = await post(`/v1/projects/${projectId}/proxy-renders`, undefined, `runtime-proxy-${suffix}`, 202)
-    assert.equal(replay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'revising')
+    assert.equal(replay.replayed, true); assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, LISTED_PROJECT_STATUS)
     const review = await client.v2ProxyReview.findFirstOrThrow({ where: { workspaceId, projectId, operationId: proxyId } })
-    assert.equal(review.status, 'blocked')
-    assert.equal(review.finalAllowed, false)
-    assert.ok(JSON.parse(review.criticIssuesJson).some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
-    assert.ok(JSON.parse(review.criticIssuesJson).some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
-    evidence.proxyEditorialState = { projectStatus: 'revising', reviewStatus: review.status,
+    // The burned captions were measured on the delivered pixels, and no independent veto detector is wired: the review says so.
+    assertListedReview(review, 'main proxy review', { requiredWarnings: ['FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED', 'FACE_PIXEL_CHECK_UNAVAILABLE'] })
+    evidence.proxyEditorialState = { projectStatus: LISTED_PROJECT_STATUS, reviewStatus: review.status,
       finalAllowed: review.finalAllowed, faceSafety: 'unknown', origin: 'postgres+production-proxy-review-repository' }
     const proxyArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: review.proxyArtifactId } })
     const annotation = await post(`/v1/projects/${projectId}/annotations`, { projectVersionId, proxyArtifactId: proxyArtifact.id,
       proxyHash: proxyArtifact.sha256, frame: 0, timeRangeMs: [0, 100], scope: 'point', targetIds: [],
       screenshotRef: await annotationScreenshot(proxyArtifact, 'annotation-main-frame-0'), text: 'Controlled runtime inspection; preserve framing.' }, `runtime-annotation-${suffix}`, 201)
-    await pipeline.observe({ stage: 'annotation', projectId, annotationId: annotation.annotation.id, expectedEventTypes: ['annotation.created'], expectedState: 'revising' })
+    await pipeline.observe({ stage: 'annotation', projectId, annotationId: annotation.annotation.id, expectedEventTypes: ['annotation.created'], expectedState: LISTED_PROJECT_STATUS })
     // A copy (fork) of the project references every artifact it links, the rendered proxy included, and each needs current rights that
     // allow the editing use: the proxy render stores its output without a grant, so the owner grants it, exactly as for the master.
     {
@@ -1368,9 +1387,9 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId } }), artifactCount)
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, 'revising')
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).status, LISTED_PROJECT_STATUS)
     evidence.publicFinalAdmission = { status: 422, code: publicRejection.error.code,
-      projectId, projectStatus: 'revising', finalOperations: 0, attempts: 0, catalogRecords: 0, artifactsCreated: 0 }
+      projectId, projectStatus: LISTED_PROJECT_STATUS, finalOperations: 0, attempts: 0, catalogRecords: 0, artifactsCreated: 0 }
 
     const reviewSeal = (row) => stableSerialize({ projectVersionId: row.projectVersionId,
       operationId: row.operationId, proxyArtifactId: row.proxyArtifactId, proxyManifestId: row.proxyManifestId,
@@ -1574,14 +1593,14 @@ export async function runDashboardRuntimeJourney(input) {
     assert.deepEqual(await effects(), effectsBefore)
     assert.deepEqual(await client.v2Project.findUniqueOrThrow({ where: { id: projectId } }), projectBefore)
     assert.deepEqual(await client.v2DirectorRun.findUniqueOrThrow({ where: { id: identity.directorRunId } }), runBefore)
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: principal.projectId } })).status, 'revising')
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: principal.projectId } })).status, LISTED_PROJECT_STATUS)
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, projectId: principal.projectId, type: 'project-final-export' } }), 0)
     assert.equal(await client.v2ProjectFinalExportOperation.count({ where: { workspaceId, projectId: principal.projectId } }), 0)
     assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId, operation: { projectId: principal.projectId } } }), 0)
     assert.equal((await client.v2ProjectSnapshot.findUniqueOrThrow({ where: { id: principal.qualityId } })).contentJson, principal.qualityJson)
     assert.equal(reviewSeal(await client.v2ProxyReview.findUniqueOrThrow({ where: { id: principal.reviewId } })), principal.reviewSeal)
     evidence.publicFinalAdmissionAfterRejectedClaim = { status: 422, code: rejectedAgainBody.error.code,
-      projectId: principal.projectId, projectStatus: 'revising', finalOperationsForMain: 0,
+      projectId: principal.projectId, projectStatus: LISTED_PROJECT_STATUS, finalOperationsForMain: 0,
       additionalOperations: 0, additionalArtifacts: 0, storedQualityStatus: 'review-required', faceSafety: 'unknown' }
     }
     for (const operationId of [proxyId]) {
@@ -1759,9 +1778,9 @@ export async function runDashboardRuntimeJourney(input) {
     assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: isoId } })).status, 'rendering-proxy')
     await delay(1100)
     assert.deepEqual(await proxyWorker(`runtime-recovered-worker-${suffix}`, { workspaceId, operationId: failedRow.id, signal }), { operationId: failedRow.id, status: 'succeeded' })
-    await observe({ stage: 'isolated-review', id: isoId, status: 'revising', operationId: failedRow.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    await observe({ stage: 'isolated-review', id: isoId, status: LISTED_PROJECT_STATUS, operationId: failedRow.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     const isolatedReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: failedRow.id } })
-    assert.equal(isolatedReview.status, 'blocked'); assert.equal(isolatedReview.finalAllowed, false)
+    assertListedReview(isolatedReview, 'isolated proxy review', { requiredWarnings: ['FACE_PIXEL_CHECK_UNAVAILABLE'] })
     const isolatedArtifact = await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: isolatedReview.proxyArtifactId } })
     const isolatedAnnotation = await post(`/v1/projects/${isoId}/annotations`, {
       projectVersionId: selected.version.id, proxyArtifactId: isolatedArtifact.id, proxyHash: isolatedArtifact.sha256,
@@ -1769,8 +1788,8 @@ export async function runDashboardRuntimeJourney(input) {
       screenshotRef: await annotationScreenshot(isolatedArtifact, 'annotation-isolated-frame-0'), text: 'Ajustar enquadramento central.',
     }, `runtime-iso-annotation-${suffix}`, 201)
     await pipeline.observe({ stage: 'isolated-annotation', projectId: isoId, annotationId: isolatedAnnotation.annotation.id,
-      expectedEventTypes: ['annotation.created'], expectedState: 'revising' })
-    const proposal = await post(`/v1/projects/${isoId}/patch-proposals`, { annotationId: isolatedAnnotation.annotation.id }, `runtime-proposal-${suffix}`, 201)
+      expectedEventTypes: ['annotation.created'], expectedState: LISTED_PROJECT_STATUS })
+    const proposal =await post(`/v1/projects/${isoId}/patch-proposals`, { annotationId: isolatedAnnotation.annotation.id }, `runtime-proposal-${suffix}`, 201)
     assert.equal(proposal.proposal.status, 'ready')
     const applied = await post(`/v1/projects/${isoId}/patch-proposals/${proposal.proposal.id}/apply`, { confirmed: true }, `runtime-patch-${suffix}`, 201)
     assert.equal((await client.v2ReviewAnnotation.findUniqueOrThrow({ where: { id: isolatedAnnotation.annotation.id } })).status, 'applied')
@@ -1778,8 +1797,8 @@ export async function runDashboardRuntimeJourney(input) {
       expectedEventTypes: ['annotation.resolved'], expectedState: 'rendering-proxy' })
     assert.deepEqual(await proxyWorker(`runtime-patch-worker-${suffix}`, { workspaceId, operationId: applied.operation.id, signal }), { operationId: applied.operation.id, status: 'succeeded' })
     const patchedReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: applied.operation.id } })
-    assert.equal(patchedReview.status, 'blocked'); assert.equal(patchedReview.finalAllowed, false)
-    await observe({ stage: 'patched-review', id: isoId, status: 'revising', operationId: applied.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    assertListedReview(patchedReview, 'patched proxy review', { requiredWarnings: ['FACE_PIXEL_CHECK_UNAVAILABLE'] })
+    await observe({ stage: 'patched-review', id: isoId, status: LISTED_PROJECT_STATUS, operationId: applied.operation.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     // Exhaust actual durable claims without any status seed or mutation. Each
     // abandoned claim owns a short lease; the next runtime claim settles it.
     const abandoned = await post(`/v1/projects/${isoId}/lut-selection`, {
@@ -1806,8 +1825,8 @@ export async function runDashboardRuntimeJourney(input) {
     await delay(1100)
     assert.deepEqual(await proxyWorker(`runtime-retry-worker-${suffix}`, { workspaceId, operationId: exhausted.id, signal }), { operationId: exhausted.id, status: 'succeeded' })
     const retriedReview = await client.v2ProxyReview.findUniqueOrThrow({ where: { operationId: exhausted.id } })
-    assert.equal(retriedReview.status, 'blocked'); assert.equal(retriedReview.finalAllowed, false)
-    await observe({ stage: 'retried-review', id: isoId, status: 'revising', operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
+    assertListedReview(retriedReview, 'retried proxy review', { requiredWarnings: ['FACE_PIXEL_CHECK_UNAVAILABLE'] })
+    await observe({ stage: 'retried-review', id: isoId, status: LISTED_PROJECT_STATUS, operationId: exhausted.id, phase: 'completed', completed: 4, eventTypes: ['operation.status.changed'] })
     // Advance the version through the real Command service while an older
     // admitted task still owns a lease. No newer admission masks this CAS test.
     const staleVersionJob = await post(`/v1/projects/${isoId}/lut-selection`, {
