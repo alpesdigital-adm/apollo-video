@@ -275,6 +275,10 @@ export async function verifyProducerPublishFences({ db, world, repository, Repos
         const leaseRow = await db.v2PublicOperation.findUniqueOrThrow({ where: { id: operationId } })
         console.log(`producer-publish-fence ${label}-head commitFenceChildVersionMs=${commitMs} ` +
           `leaseRemainingMs=${leaseRow.leaseExpiresAt ? leaseRow.leaseExpiresAt.getTime() - afterCommit.getTime() : 'none'}`)
+        // Off by default. A run that sets it shows, on purpose, what the probe reports when the lease is gone before the publisher
+        // races (the probe is stricter with it, never looser).
+        const demonstrationDelayMs = Number(process.env.APOLLO_FENCE_HEAD_EXTRA_DELAY_MS ?? 0)
+        if (demonstrationDelayMs > 0) await new Promise((done) => setTimeout(done, demonstrationDelayMs))
         lockedTable = 'projects'; lockedId = world.projectId
         whileLocked = (tx) => tx.v2Project.update({ where: { id: world.projectId },
           data: { currentVersionId: childVersionId } })
