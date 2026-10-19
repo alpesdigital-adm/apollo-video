@@ -106,6 +106,19 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      # The observed-frame probe of the media ingest (`stream_side_data` in its -show_entries) needs an ffprobe newer than the 4.0.2 that
+      # `ffprobe-static` bundles on every platform ("No match for section 'stream_side_data'"). The deployment image uses the
+      # distribution's /usr/bin/ffprobe for the same reason, and the supervised local harness prefers the ffprobe on PATH; the runner
+      # had only the bundled one, so every ingest through the real worker ended `render_output_invalid`. ffmpeg itself stays the pinned
+      # ffmpeg-static, and the steps that record the bundled binaries' provenance keep naming them explicitly.
+      - name: Use the distribution ffprobe, as the deployment image does
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          test -x /usr/bin/ffprobe
+          echo "FFPROBE_PATH=/usr/bin/ffprobe" >> "$GITHUB_ENV"
+          /usr/bin/ffprobe -version | head -1
+
       - name: Build unprivileged CI pidfd addon
         timeout-minutes: 2
         run: bash scripts/validation/build-perception-pidfd.sh
@@ -1275,6 +1288,19 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+
+      # The observed-frame probe of the media ingest (`stream_side_data` in its -show_entries) needs an ffprobe newer than the 4.0.2 that
+      # `ffprobe-static` bundles on every platform ("No match for section 'stream_side_data'"). The deployment image uses the
+      # distribution's /usr/bin/ffprobe for the same reason, and the supervised local harness prefers the ffprobe on PATH; the runner
+      # had only the bundled one, so every ingest through the real worker ended `render_output_invalid`. ffmpeg itself stays the pinned
+      # ffmpeg-static, and the steps that record the bundled binaries' provenance keep naming them explicitly.
+      - name: Use the distribution ffprobe, as the deployment image does
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          test -x /usr/bin/ffprobe
+          echo "FFPROBE_PATH=/usr/bin/ffprobe" >> "$GITHUB_ENV"
+          /usr/bin/ffprobe -version | head -1
 
       - name: Start isolated PostgreSQL and MinIO
         run: |
