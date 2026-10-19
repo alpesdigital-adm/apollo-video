@@ -10,6 +10,26 @@ const bindings = new Map()
 const key = (value) => `${value.pid}:${value.starttime}`
 const live = (value) => value && !['Z', 'X', 'x'].includes(value.state)
 
+/**
+ * Calls `onDeadline` once the wall clock has reached `deadlineAt`, and never before; returns its canceller.
+ *
+ * Every caller compares Date.now() with the same absolute deadline right after its timeout fires (`containObservedIdentities` decides on it whether
+ * another identity may still be attempted). A Node timer armed for `deadlineAt - Date.now()` can fire before Date.now() reaches `deadlineAt`: libuv
+ * counts in whole milliseconds from a clock it caches at the start of the loop iteration, so it fires up to a few milliseconds early. This timer
+ * re-arms for what is left, so the timeout and the comparison cannot disagree.
+ */
+export function onWallClockDeadline(deadlineAt, onDeadline) {
+  let handle, cancelled = false
+  const arm = () => {
+    if (cancelled) return
+    const remaining = deadlineAt - Date.now()
+    if (remaining <= 0) onDeadline()
+    else handle = setTimeout(arm, remaining)
+  }
+  arm()
+  return () => { cancelled = true; clearTimeout(handle) }
+}
+
 export async function withPidfdLoadBudget(action, { deadlineAt = Date.now() + 3500 } = {}) {
   assert.ok(Number.isFinite(deadlineAt) && deadlineAt > Date.now(), 'Addon load deadline exhausted before action')
   const controller = new AbortController()
@@ -107,14 +127,14 @@ export async function openObservedPidfd(expected, { readIdentity, deadlineAt, ve
   const token = binding.open(expected.pid) // Attach BEFORE any PID/starttime recheck.
   let closed = false
   const close = () => { if (!closed) { closed = true; return binding.close(token) } return false }
-  let timer
+  let stopDeadline
   try {
-    const remaining = Math.min(deadlineAt, verifyDeadlineAt) - Date.now()
-    assert.ok(remaining > 0, 'Pidfd verification budget exhausted before read')
+    const verifyEnd = Math.min(deadlineAt, verifyDeadlineAt)
+    assert.ok(verifyEnd - Date.now() > 0, 'Pidfd verification budget exhausted before read')
     // The deadline is inside the owner of the token. An outer Promise.race
     // cannot leave a late identity read holding an unreturned native handle.
     const current = await Promise.race([Promise.resolve().then(() => readIdentity(expected.pid)),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Pidfd identity recheck timed out')), remaining) })])
+      new Promise((_, reject) => { stopDeadline = onWallClockDeadline(verifyEnd, () => reject(new Error('Pidfd identity recheck timed out'))) })])
     assert.ok(deadlineAt > Date.now(), 'Pidfd verification exceeded its deadline')
     if (!current || key(current) !== key(expected) || !live(current)) {
       close()
@@ -129,7 +149,7 @@ export async function openObservedPidfd(expected, { readIdentity, deadlineAt, ve
         return binding.signal(token, requested)
       } }
   } catch (error) { close(); throw error }
-  finally { clearTimeout(timer) }
+  finally { stopDeadline?.() }
 }
 
 export async function signalViaPidfd(expected, requested, { readIdentity, deadlineAt, binding, loadBinding } = {}) {

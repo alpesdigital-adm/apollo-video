@@ -35,7 +35,8 @@ test('pidfd wrapper closes on recycled, terminal, failed and timed-out rechecks 
   assert.equal(calls.length, before, 'Expired budget must not open a descriptor')
 })
 
-test('aggregate deadline closes the real wrapper token on a pending read without a late signal', async () => {
+// One scenario, two clocks: the aggregate cleanup deadline is 100 ms, the second identity's read never answers and the third must never be tried.
+async function aggregateDeadlineScenario() {
   const calls = [], children = [10, 11, 12].map((pid) => ({ pid, starttime: String(pid), state: 'S' }))
   const binding = { open(pid) { calls.push(['open', pid]); return { pid } },
     close(token) { calls.push(['close', token.pid]); return true },
@@ -59,6 +60,18 @@ test('aggregate deadline closes the real wrapper token on a pending read without
   finishRead(); await Promise.resolve(); await Promise.resolve()
   assert.equal(calls.filter(([kind]) => kind === 'signal').length, 1, 'Late read must never signal')
   assert.equal(calls.filter(([kind]) => kind === 'open').length, calls.filter(([kind]) => kind === 'close').length)
+}
+
+test('aggregate deadline closes the real wrapper token on a pending read without a late signal', aggregateDeadlineScenario)
+
+// Node fires a timer up to a few milliseconds before Date.now() reaches the deadline it was armed for (libuv counts whole milliseconds from a
+// clock cached at the start of the loop iteration). The CI run that failed this suite with reads 3 !== 2 had exactly that: the recheck timeout
+// fired early, Date.now() was still before the aggregate deadline, and a third identity was attempted with nothing left. Model it with timers that
+// fire 40 ms early (far more than the real case, so that the platform timer granularity cannot hide it).
+test('aggregate deadline holds when every timer fires before the wall clock reaches its deadline', async () => {
+  const realSetTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (callback, delay, ...rest) => realSetTimeout(callback, Math.max(0, Number(delay) - 40), ...rest)
+  try { await aggregateDeadlineScenario() } finally { globalThis.setTimeout = realSetTimeout }
 })
 
 test('addon load abort owns its deadline and cannot promote a late load to native open', async () => {
