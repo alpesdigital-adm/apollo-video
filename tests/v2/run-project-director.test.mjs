@@ -358,6 +358,7 @@ function fixture(options = {}) {
     compileBrief: createEvidenceBoundBriefCompiler(),
     ...(options.faceWindows ? { faceWindows: options.faceWindows } : {}),
     ...(options.materializeSnapshot ? { materializeSnapshot: options.materializeSnapshot } : {}),
+    ...(options.warn ? { warn: options.warn } : {}),
   })
   return { repository, service }
 }
@@ -1770,12 +1771,31 @@ test('W64 a caller\'s observation set changes nothing: it is not an input of the
 
 test('W64 the result Version is materialized after the commit and never before it; a failure there is not the run\'s failure; a replay asks nothing', async () => {
   const materialized = []
-  const { repository, service } = fixture({ materializeSnapshot: async (input) => { materialized.push(input); throw new Error('storage hiccup') } })
+  const warnings = []
+  const { repository, service } = fixture({ warn: (event) => warnings.push(event),
+    materializeSnapshot: async (input) => { materialized.push(input); throw new DomainError('PERSISTENCE_CONFLICT', 'storage hiccup with a secret=hunter2') } })
   const first = await service(request())
+  // not silent: one structured warning names the run and the Version and the kind of failure, never the message
+  assert.deepEqual(warnings, [{ level: 'warn', kind: 'director-snapshot-materialization-failed', workspaceId: 'workspace-1', projectId: 'project-1',
+    directorRunId: first.run.id, projectVersionId: first.version.id, errorName: 'DomainError', errorCode: 'PERSISTENCE_CONFLICT' }])
+  assert.equal(JSON.stringify(warnings).includes('hunter2'), false)
   assert.deepEqual(materialized, [{ workspaceId: 'workspace-1', projectId: 'project-1', projectVersionId: first.version.id }])
   assert.equal(repository.currentVersion.id, first.version.id, 'the run is sealed whatever the materialization did')
   assert.equal((await service(request())).replayed, true)
   assert.equal(materialized.length, 1)
+  assert.equal(warnings.length, 1, 'a replay neither materializes nor warns')
+  // a log sink that throws, or a failure that is not an Error, does not fail a sealed run either; the default sink is one JSON line on console.warn
+  const lines = []
+  const original = console.warn
+  console.warn = (line) => lines.push(line)
+  try {
+    const plain = fixture({ materializeSnapshot: async () => { throw 'not an error' } })
+    await plain.service(request())
+    const throwing = fixture({ warn: () => { throw new Error('sink down') }, materializeSnapshot: async () => { throw new Error('x') } })
+    assert.ok((await throwing.service(request())).run.id)
+  } finally { console.warn = original }
+  assert.equal(lines.length, 1)
+  assert.deepEqual([JSON.parse(lines[0]).kind, JSON.parse(lines[0]).errorName, JSON.parse(lines[0]).errorCode], ['director-snapshot-materialization-failed', 'NonError', null])
   const refused = []
   const failing = fixture({ materializeSnapshot: async (input) => { refused.push(input) } })
   await assert.rejects(failing.service(request({ baseHash: 'c'.repeat(64), idempotency: { key: 'director-stale-materialize' } })), (error) => error.code === 'VERSION_CONFLICT')

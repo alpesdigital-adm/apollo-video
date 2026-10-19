@@ -150,6 +150,8 @@ export interface RunProjectDirectorDependencies {
    * read answers `SNAPSHOT_NOT_MATERIALIZED` for that Version until something writes it.
    */
   materializeSnapshot?: (input: Readonly<{ workspaceId: string; projectId: string; projectVersionId: string }>) => Promise<unknown>
+  /** Where the structured warning of a failed best-effort materialization goes (default: `console.warn` of one JSON line). */
+  warn?: (event: Readonly<Record<string, unknown>>) => void
 }
 
 function normalizedIdentifier(value: string, field: string): string {
@@ -1450,8 +1452,19 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     if (!committed.replayed && dependencies.materializeSnapshot) {
       try {
         await dependencies.materializeSnapshot({ workspaceId, projectId, projectVersionId: committed.version.id })
-      } catch {
+      } catch (error) {
         // Best effort by design (see the dependency): the run is sealed, and an unwritten snapshot reads as SNAPSHOT_NOT_MATERIALIZED.
+        // It is not silent: one structured warning names the run and the Version and the kind of failure - never the message, which
+        // may carry data the log must not.
+        const emit = dependencies.warn ?? ((event: Readonly<Record<string, unknown>>) => { console.warn(JSON.stringify(event)) })
+        try {
+          emit(Object.freeze({
+            level: 'warn', kind: 'director-snapshot-materialization-failed', workspaceId, projectId, directorRunId,
+            projectVersionId: committed.version.id,
+            errorName: error instanceof Error ? error.name : 'NonError',
+            errorCode: error instanceof DomainError ? error.code : null,
+          }))
+        } catch { /* a failing log sink must not fail a sealed run either */ }
       }
     }
     return committed

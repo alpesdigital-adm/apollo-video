@@ -22,7 +22,7 @@ import {
   type DecisionBandPolicyRef,
   type DecisionConfidence,
 } from './decision-confidence.ts'
-import { parseDecisionPerceptionEvidence, type DecisionPerceptionEvidence } from './director-evidence-rubric.ts'
+import { parseDecisionPerceptionEvidence, requiredModalitiesFor, type DecisionPerceptionEvidence } from './director-evidence-rubric.ts'
 import type { DirectorPerceptionEvidenceReport } from './director-perception-evidence.ts'
 
 interface RetimedTranscriptWord {
@@ -453,6 +453,13 @@ export function validateDirectorDecisions(
           evidenceRefs.includes(perceptionEvidence.snapshot.id),
         'PERSISTENCE_CONFLICT',
         'Director decision perception evidence is not about this decision or does not name its snapshot as evidence',
+      )
+      // Exactly what the rubric demands of this decision: an insert that proposes footage stands on rights, one that proposes none on nothing.
+      const demanded = requiredModalitiesFor(decisionType, decision.choice === 'use_selected_insert')
+      assertDomain(
+        perceptionEvidence.required.length === demanded.length && demanded.every((modality, index) => modality === perceptionEvidence!.required[index]),
+        'PERSISTENCE_CONFLICT',
+        'Director decision perception evidence does not require what the rubric demands of the decision',
       )
       confidenceBand = classifyConfidenceV2(decisionType, confidenceDetail, perceptionEvidence.tier)
     } else {

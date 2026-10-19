@@ -8,7 +8,7 @@ import addFormats from 'ajv-formats'
 
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { PUBLIC_SCHEMAS, getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
-import { publicSchemaDocument } from '../../src/v2/public-api/schema-examples.ts'
+import { publicSchemaDocument, publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
 import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 
 /**
@@ -45,10 +45,13 @@ test('W64 the legacy observation-set schema is registered and reachable from not
   assert.ok(Object.hasOwn(getPublicSchema(legacy).schema.properties, 'observationSet'))
   assert.deepEqual(FOUNDATION_CAPABILITIES.filter((capability) => refsOfCapability(capability).includes(legacy)).map((capability) => capability.id), [])
   const reframe = FOUNDATION_CAPABILITIES.find((capability) => capability.id === 'apollo.projects.reframe-plans.create')
-  assert.equal(reframe.inputSchemaRef, 'apollo://schemas/reframe-plan-request/v2')
-  const v2 = getPublicSchema(reframe.inputSchemaRef).schema
-  assert.deepEqual(Object.keys(v2.properties).sort(), ['baseVersionId', 'format'])
-  assert.equal(v2.additionalProperties, false)
+  // whichever version the registry currently publishes for the capability: never the legacy one, never one that declares an observation set,
+  // and closed to every field it does not name
+  assert.notEqual(reframe.inputSchemaRef, legacy)
+  assert.ok(/^apollo:\/\/schemas\/reframe-plan-request\/v[2-9][0-9]*$/u.test(reframe.inputSchemaRef), reframe.inputSchemaRef)
+  const current = getPublicSchema(reframe.inputSchemaRef).schema
+  assert.equal(Object.hasOwn(current.properties, 'observationSet'), false)
+  assert.equal(current.additionalProperties, false)
   // published as a component (the registry is published whole), described by no operation
   assert.equal(JSON.stringify(createOpenApiDocument().paths).includes('ReframePlanRequestV1'), false)
   for (const schema of PUBLIC_SCHEMAS) {
@@ -63,17 +66,17 @@ test('W64 no capability accepts an observation set, and the Director and reframe
     const declared = [...keysOf(getPublicSchema(capability.inputSchemaRef).schema)].filter((path) => path.endsWith('/observationSet'))
     assert.deepEqual(declared, [], `${capability.id} must not declare an observationSet`)
   }
-  const poisoned = {
-    'apollo.projects.reframe-plans.create': { baseVersionId: 'project-version-1', format: '9:16', observationSet: { id: 'caller-observations' } },
-    'apollo.projects.director-runs.enqueue': { baseVersionId: 'project-version-1', baseHash: 'a'.repeat(64), objective: 'discovery', observationSet: { id: 'caller-observations' } },
-  }
-  for (const [id, body] of Object.entries(poisoned)) {
+  // The clean body is the published example of the schema the capability CURRENTLY names (so a new version of the request keeps the proof
+  // meaningful); the poisoned body is that same body plus an observation set, and must be refused for that field and no other.
+  for (const id of ['apollo.projects.reframe-plans.create', 'apollo.projects.director-runs.enqueue']) {
     const capability = FOUNDATION_CAPABILITIES.find((candidate) => candidate.id === id)
-    const validate = ajv.compile(publicSchemaDocument(getPublicSchema(capability.inputSchemaRef)))
-    assert.equal(validate(body), false, `${id} must refuse a body with an observationSet`)
+    const definition = getPublicSchema(capability.inputSchemaRef)
+    const validate = ajv.compile(publicSchemaDocument(definition))
+    const [clean] = publicSchemaExamples(definition)
+    assert.equal(validate(clean), true, `${id} accepts its published example: ${JSON.stringify(validate.errors)}`)
+    const poisoned = { ...clean, observationSet: { id: 'caller-observations' } }
+    assert.equal(validate(poisoned), false, `${id} must refuse a body with an observationSet`)
     assert.ok(validate.errors.some((error) => error.keyword === 'additionalProperties' && error.params.additionalProperty === 'observationSet'), id)
-    const { observationSet: _dropped, ...clean } = body
-    assert.equal(validate(clean), true, `${id} accepts the same body without it: ${JSON.stringify(validate.errors)}`)
   }
   const commands = FOUNDATION_CAPABILITIES.find((capability) => capability.id === 'apollo.projects.commands.apply')
   const validateCommand = ajv.compile(publicSchemaDocument(getPublicSchema(commands.inputSchemaRef)))
@@ -110,13 +113,31 @@ test('W64 the Director path never reads a caller observations, a manual percepti
     const text = await readFile(file, 'utf8')
     for (const pattern of forbidden) assert.equal(pattern.test(text), false, `${file} must not match ${pattern}`)
   }
-  // the legacy parser has no importer inside src: nothing outside its own module can reach createReframePlan(observationSet)
+  // The caller-observation entry points of the legacy module (the parser of a caller's set and the planner that consumes it) have no
+  // importer inside src. Other helpers of the module (crop geometry the reframe trajectory reuses) are not entry points of a caller's observations.
+  const entryPoints = ['createReframePlan', 'parseReframeObservationSet']
   let importers = []
   try {
-    importers = execFileSync('git', ['grep', '-l', '-E', "from '[^']*/reframe-plan(\\.ts)?'", '--', 'src'], { encoding: 'utf8' })
-      .split('\n').filter(Boolean)
+    importers = execFileSync('git', ['grep', '-l', '-E', "from '[^']*/reframe-plan(\\.ts)?'", '--', 'src'], { encoding: 'utf8' }).split('\n').filter(Boolean)
   } catch (error) {
     if (error.status !== 1) throw error // 1 = no match at all
   }
-  assert.deepEqual(importers.filter((file) => file !== 'src/v2/domain/reframe-plan.ts'), [])
+  const offenders = []
+  const named = /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'[^']*\/reframe-plan(?:\.ts)?'/gu
+  const whole = /import\s+\*\s+as\s+\w+\s+from\s*'[^']*\/reframe-plan(?:\.ts)?'/u
+  for (const file of importers.filter((item) => item !== 'src/v2/domain/reframe-plan.ts')) {
+    const text = await readFile(file, 'utf8')
+    for (const match of text.matchAll(named)) {
+      const names = match[1].split(',').map((name) => name.trim().replace(/^type\s+/u, '').split(/\s+as\s+/u)[0])
+      if (names.some((name) => entryPoints.includes(name))) offenders.push(file)
+    }
+    assert.equal(whole.test(text), false, `${file} must not import the module whole`)
+  }
+  // Since W66r exactly one module uses them: the SERVER-owned variant planner, which builds its observation set from sealed server face
+  // evidence and re-reads a stored one only after requiring the server-owned schema (`reframe-observations/v2`). A new importer of a
+  // caller-observation entry point has to be looked at and added here on purpose.
+  assert.deepEqual([...new Set(offenders)], ['src/v2/domain/variant-reframe-plan.ts'])
+  const planner = await readFile('src/v2/domain/variant-reframe-plan.ts', 'utf8')
+  assert.ok(planner.includes("observationSet.schemaVersion === 'reframe-observations/v2', 'INVALID_RENDER_INPUT', 'Reframe plan record observations must be server-owned'"))
+  assert.ok(planner.includes('projectFaceEvidenceToReframeObservations'), 'its observations are projected from sealed face evidence')
 })

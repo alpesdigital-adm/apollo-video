@@ -460,6 +460,13 @@ export function parseDecisionPerceptionEvidence(value: unknown): DecisionPercept
   const modalities = (item.modalities as unknown[]).map(parseModality)
   const expectedTier = modalities.length === 0 ? 'high' : weakestTier(modalities.map((entry) => entry.tier))
   const required = item.required as EvidenceModality[]
+  // The rubric, not the record, says what a decision type stands on: a record that sealed itself with fewer requirements (a crop that
+  // requires nothing is `high`) is refused whatever its seal. An insert may stand on nothing only when it proposes nothing; the decision
+  // that carries the record checks which of the two it is (`validateDirectorDecisions`).
+  const legal = [requiredModalitiesFor(item.decisionType as EvidenceGatedDecisionType, false), requiredModalitiesFor(item.decisionType as EvidenceGatedDecisionType, true)]
+  if (!legal.some((expected) => expected.length === required.length && expected.every((modality, index) => modality === required[index]))) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored decision perception evidence does not require what the rubric demands of its decision type')
+  }
   if (item.tier !== expectedTier || modalities.length !== required.length ||
       modalities.some((entry, index) => entry.modality !== required[index])) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored decision perception evidence tier or modalities are inconsistent')

@@ -102,7 +102,7 @@ de novo sob a chave da nova versão (a chave inclui a versão, como o brief mand
 - `apollo.projects.perception.snapshot.read` 1.0.0 → **2.0.0**: só leitura (404 `SNAPSHOT_NOT_MATERIALIZED` quando a Version toca algo e não tem snapshot; 428 se não toca nada, como antes;
   direitos e bytes das fontes reverificados a cada leitura; o hash do snapshot se reverifica contra a própria linha). Código novo `SNAPSHOT_NOT_MATERIALIZED` (404) altera, aditivamente,
   o enum dos `error-envelope` v3–v5 (a baseline os registra).
-- Totais: 392 capabilities, 709 schemas (eram 707).
+- Totais na W64 sozinha: 392 capabilities, 709 schemas (eram 707); **na árvore fundida com a W66r: 395 capabilities, 716 schemas** (`api:v1:validate`; a baseline regenerada da árvore fundida é idêntica à que a fusão já trazia).
 
 ## Escrita do snapshot (fora do caminho de leitura)
 
@@ -119,6 +119,18 @@ O contexto lê o rights snapshot corrente de toda fonte do plano; o critic exige
 No commit, dentro da transação, `evaluateSourceRightsCertainty` é aplicado de novo a cada fonte: não certa ⇒ `ASSET_RIGHTS_BLOCKED` (definitivo);
 certa porém em outro snapshot de direitos ⇒ `PERSISTENCE_CONFLICT` (o worker tenta de novo). Os leitores dos produtores só reverificam direitos de fontes
 que têm envelope; esta checagem é para todas, e é a que a prova PG isola (fonte sem envelope).
+
+## Fusão com a W66r (reframe com trajetória)
+
+Depois da validação a branch recebeu `origin/claude/w66r-reframe-trajectory` (merge sem conflito textual). A W66r passou a usar `createReframePlan`/`parseReframeObservationSet`
+no planejador **de propriedade do servidor** (`variant-reframe-plan.ts`, observações projetadas da evidência de rosto selada e relidas só com o schema
+`reframe-observations/v2`), e moveu a capability de reframe para `reframe-plan-request/v3`. A prova negativa foi reescrita sem enfraquecer a garantia: lê a ref da capability no
+registro, usa o exemplo publicado do schema como corpo limpo, exige que o corpo com `observationSet` seja recusado só por esse campo, e o único importador permitido dos pontos de entrada de
+observações de caller é o planejador do servidor (qualquer outro importador reprova o teste).
+
+Correções pedidas na validação: (1) `parseDecisionPerceptionEvidence` compara `required` com o que a rubrica exige do tipo, e `validateDirectorDecisions` com o da escolha (insert com
+footage exige `rights`, sem footage exige nada); um registro auto-selado com `required: []` não vira `auto-apply`. (2) A falha da materialização pós-commit emite um aviso estruturado
+(`director-snapshot-materialization-failed`: run, Version, nome e código do erro; nunca a mensagem) por `console.warn` ou pela dependência `warn`, sem falhar a run selada.
 
 ## Prova negativa do `observationSet`
 
@@ -155,6 +167,9 @@ Mutação (editar a regra, rodar as suítes de domínio, restaurar e conferir `g
 | gate de direitos do critic: `every` → `some` | 1 falha |
 | modalidade `rights`: um source certo basta | 1 falha |
 | teto do rosto removido (rosto pode ser `high`) | 2 falhas |
+| (pós-validação) `parseDecisionPerceptionEvidence` deixa de checar `required` contra a rubrica | 1 falha |
+| (pós-validação) `validateDirectorDecisions` deixa de checar `required` contra a escolha (insert) | 1 falha |
+| (pós-validação) o aviso de materialização falha deixa de ser emitido | 1 falha |
 | (PG) re-verificação de direitos no commit desligada | sobreviveu na 1ª forma da prova; morto depois (ver acima) |
 
 Gates: `typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate` (320 tabelas, 1429 índices, 1112 FKs: **nenhuma migração**), `api:v1:validate` (392 capabilities, 709 schemas),

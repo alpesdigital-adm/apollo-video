@@ -377,6 +377,37 @@ test('W64 stored decisions are re-read strictly: policy, evidence seal, tier, ba
   'a v1 decision cannot claim evidence tiers')
 })
 
+test('W64 a record cannot seal itself with fewer requirements than the rubric demands of its decision type', () => {
+  const snapshotId = serverPerceptionSnapshotId(sha('c'))
+  const snapshot = snapshotOf({})
+  const seal = (record) => { const { evidenceHash: _dropped, ...body } = record; return { ...body, evidenceHash: calculateCanonicalHash(body) } }
+  const conflict = (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT'
+  const crop = JSON.parse(JSON.stringify(assessDecisionEvidence({ decisionId: 'decision-layout-1', decisionType: 'crop', snapshot, snapshotId, rangesMs: whole })))
+  assert.deepEqual(crop.required, ['face'])
+  // a crop that requires nothing is vacuously high; re-sealed so that every other rule holds, only the requirement is wrong
+  const hollow = seal({ ...crop, required: [], modalities: [], tier: 'high' })
+  assert.throws(() => parseDecisionPerceptionEvidence(hollow), conflict)
+  // the caption's three, in any lesser form
+  const caption = JSON.parse(JSON.stringify(assessDecisionEvidence({ decisionId: 'decision-caption-1', decisionType: 'caption', snapshot, snapshotId, rangesMs: whole })))
+  const lesser = seal({ ...caption, required: ['ocr'], modalities: caption.modalities.filter((item) => item.modality === 'ocr'), tier: caption.modalities.find((item) => item.modality === 'ocr').tier })
+  assert.throws(() => parseDecisionPerceptionEvidence(lesser), conflict)
+  assert.throws(() => parseDecisionPerceptionEvidence(seal({ ...caption, required: [...caption.required].reverse(), modalities: [...caption.modalities].reverse() })), conflict, 'nor another order')
+  assert.doesNotThrow(() => parseDecisionPerceptionEvidence(caption))
+  // through a decision: the requirement must also be the one of ITS choice (an insert that proposes footage stands on rights, not on nothing)
+  const none = JSON.parse(JSON.stringify(assessDecisionEvidence({ decisionId: 'decision-insert-1', decisionType: 'insert', snapshot, snapshotId, rangesMs: whole, inserted: false })))
+  assert.deepEqual(none.required, [])
+  const decision = (choice, evidence) => ({ id: 'decision-insert-1', category: 'insert', choice, reason: 'y', confidence: 1, alternatives: ['z'], evidenceRefs: ['ref-9-aaa', snapshotId],
+    bandPolicy: { schemaVersion: 'confidence-band-policy/v2', policyHash: CONFIDENCE_BAND_POLICY_V2_SHA256 }, perceptionEvidence: evidence })
+  const filler = ['narrative', 'movement', 'transition'].map((category, index) => ({ id: `decision-${category}-1`, category, choice: 'x', reason: 'y', confidence: 0.9,
+    alternatives: ['z'], evidenceRefs: [`ref-${index}-aaa`], bandPolicy: { schemaVersion: 'confidence-band-policy/v2', policyHash: CONFIDENCE_BAND_POLICY_V2_SHA256 } }))
+  assert.doesNotThrow(() => validateDirectorDecisions([...filler, decision('no_insert', none)]))
+  assert.throws(() => validateDirectorDecisions([...filler, decision('use_selected_insert', none)]), conflict, 'a selected insert whose record requires nothing would grade auto-apply')
+  const rights = assessDecisionEvidence({ decisionId: 'decision-insert-1', decisionType: 'insert', snapshot, snapshotId, rangesMs: whole, inserted: true,
+    rights: [evaluateSourceRightsCertainty('a', { state: 'present', snapshotId: 'rights-1', snapshotHash: sha('d'), status: 'approved', consentStatus: 'not-required' }, new Date())] })
+  assert.doesNotThrow(() => validateDirectorDecisions([...filler, decision('use_selected_insert', rights)]))
+  assert.throws(() => validateDirectorDecisions([...filler, decision('no_insert', rights)]), conflict, 'and an omitted insert does not claim rights it did not use')
+})
+
 test('W64 the oracle: stored evidence re-derived from its snapshot must be byte-identical, and a tier the snapshot does not support fails', () => {
   const snapshotId = serverPerceptionSnapshotId(sha('c'))
   const snapshot = snapshotOf({ ocr: { ranges: [[0, DURATION]], observations: [observation('ocr', 'ocr-1', 0, DURATION, 0.9)] } }, { inputs: [{ kind: 'ocr', envelopeId: 'ocr-envelope-1' }] })
