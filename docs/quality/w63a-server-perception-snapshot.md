@@ -136,4 +136,31 @@ Suítes (todas fora do CI hospedado, declaradas em `KNOWN_UNRUN_SUITES`; rodam n
 - `tests/v2/server-perception-snapshot-http.integration.mjs` — a rota, em processo, com autenticação real: 200 + esquema publicado, recorte, 404/401/403/422/428, PUT manual separado.
 - `tests/v2/server-perception-snapshot-server.integration.mjs` — a mesma rota num `next start` real (build de produção), esquema servido pela própria API e OpenAPI.
 
-(Os run ids e as contagens de cada execução estão na seção seguinte.)
+### Execuções (harness `run-local-pg-s2d.mjs`, cluster descartável por invocação, lock global, pós-voo limpo)
+
+| run id | o que | resultado |
+| --- | --- | --- |
+| `w63a-final2-3a0c809a` (`--build`, migração aplicada do zero) | `prisma-server-perception-snapshot` 4 testes; `prisma-director-server-perception` 1; `server-perception-snapshot-http` 1; `server-perception-snapshot-server` (Next real, build de produção) 1; regressão: `director-copy-editorial-cut.pg` 1, `multi-output-project-wide.pg` 1, `prisma-director-ocr` 6 (inclui o teste W64 com OCR real: 32 s), `prisma-manual-edit` 1 | 16/16 passam; `success: true`, pós-voo limpo (cluster parado, zero backends) |
+| `w63a-vs2-47940039` | `prisma-vertical-smoke` isolada | 1/1 passa |
+| `w63a-reg1-b46a34c2` e `w63a-final-53a1cae4` | rodadas anteriores (mesmo código) | as suítes W63a e a regressão passaram; `a1-manual` precisa de `--build` (falhou sem ele, passou com ele); a suíte real-server falhou por um nome de cabeçalho errado no TESTE (corrigido) |
+
+Interferência anterior à W63a, medida na linha de base (`origin/main` 9b03d7bf, run `w63a-base2-51fbab8c`): `prisma-vertical-smoke` roda o worker de proxy
+render, que reivindica a PRÓXIMA operação da fila do cluster; executada no mesmo cluster depois de `prisma-manual-edit` ela falha com
+"Project proxy worker returned no persisted failure detail", com ou sem esta mudança (N=1 na linha de base, N=2 no branch: `w63a-final-53a1cae4`
+e `w63a-vs1-01df846d` passos b/c repetidos no mesmo cluster). Sozinha passa (`w63a-vs2-47940039`, `w63a-vs1-01df846d` passo a, `w63a-reg1-b46a34c2`). O CI
+roda cada suíte num banco novo.
+
+Domínio e contrato (sem banco): `npm test` completo no commit final: 3591 testes, 3578 passam, 0 falham, 13 pulados (os pulados já existiam). Gates:
+`typecheck`, `lint`, `lint:code`, `lint:whitespace`, `db:v2:validate` (320 tabelas, 1429 índices, 1112 FKs), `api:v1:validate` (392 capabilities, 707 schemas),
+`api:parity:validate`: todos exit 0.
+
+### Teste de mutação (três regras), com as suítes de domínio
+
+| regra quebrada (editada e restaurada) | resultado |
+| --- | --- |
+| `coverageState`: `complete` quando `observedMs > 0` | 9 testes falham (7 do snapshot, 2 do `perception-timeline`) |
+| `complete` por empréstimo: um tipo sem evidência herda as faixas de `shot` | 1 falha ("nunca vira complete porque outro tipo tem cobertura") |
+| verificação do selo do OCR reduzida a "o construtor aceita" | 1 falha (envelope violado deve ser recusado) |
+| verificador sem o vínculo observação → input listado | 0 falhas na 1ª versão do teste (a mutação SOBREVIVEU: o teste também tropeçava num hash de timeline desatualizado); teste reforçado (re-sela todos os hashes, só o vínculo recusa) → 1 falha; o mesmo reforço no caso forjado do PG |
+| verificador sem a regra `object` ausente | 1 falha |
+| montador sem `object` fixo ausente (`NO_VERIFIED_DETECTOR`) | 5 falhas |
