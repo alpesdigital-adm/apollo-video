@@ -908,12 +908,14 @@ function assertRenderedVariant(rendered, expected) {
   assert.deepEqual(anchor.decisions.map((item) => [item.cueId, item.startFrame, item.endFrame, item.anchor, item.bounds, item.suppressed]),
     rendered.renderInput.subtitleCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, null, null, true]))
   assert.equal(anchor.perceptionTimelineHash, null)
-  assert.equal(rendered.review.status, 'blocked')
+  // W65b: the proxy plans under the final's rule, so the withheld cues are listed warnings: the review waits for their
+  // acknowledgement ('warning-ack-required') and the final stays closed until then. The cues are still not drawn.
+  assert.equal(rendered.review.status, 'warning-ack-required')
   assert.equal(rendered.review.finalAllowed, false)
   assert.equal(rendered.elementMap.elements.some((element) => element.type === 'subtitle'), false)
   const faceIssues = rendered.review.criticIssues.filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE')
   assert.deepEqual(faceIssues.map((issue) => [issue.severity, issue.evidenceRange.startFrame, issue.evidenceRange.endFrame, issue.elementIds[0]]),
-    rendered.renderInput.subtitleCues.map((cue) => ['hard', cue.startFrame, cue.endFrame, `subtitle:${cue.id}`]))
+    rendered.renderInput.subtitleCues.map((cue) => ['warning', cue.startFrame, cue.endFrame, `subtitle:${cue.id}`]))
   assert.deepEqual(rendered.phases, ['rendering', 'verifying', 'persisting'])
   assert.equal(rendered.enqueuedContext.inputHash, rendered.expectedInputHash)
   assert.equal(rendered.renderInput.format, expected.format)
@@ -1046,7 +1048,7 @@ test('T-WAVE10 controlled presets/overrides and real proxy; unknown suppresses c
       assert.equal(decision.bounds, null)
       assert.equal(decision.suppressed, true)
       assert.deepEqual([...decision.eligibleAnchors], [])
-      assert.ok(decision.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
+      assert.ok(decision.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
     }
     // Pixels independently show suppression at every planned cue instant.
     for (const [cueId] of EXPECTED_CUES) {
@@ -1477,7 +1479,7 @@ test('T-WAVE10 tampered presets/anchors fail closed; caller perception cannot au
     assertRenderedVariant(forgedEvidence, { operationId: 'operation-tamper-perception-evidence', format: OVERRIDE_VARIANT })
     assert.equal(forgedEvidence.perceptionReadCalls, 0)
     assert.equal(forgedEvidence.renderCalls, 1)
-    assert.equal(forgedEvidence.review.status, 'blocked')
+    assert.equal(forgedEvidence.review.status, 'warning-ack-required')
     for (const [cueId] of EXPECTED_CUES) assert.equal(glyphTotal(
       frameAt(forgedEvidence.stored.path, CUE_SAMPLE_SECONDS[cueId], OVERRIDE_VARIANT), OVERRIDE_VARIANT), 0)
 

@@ -21,6 +21,7 @@ import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeli
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
+import { FINAL_CAPTION_ANCHOR_POLICY } from '../../src/v2/domain/final-caption-certification.ts'
 import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
 import {
   advancePublicOperationPhase,
@@ -683,6 +684,8 @@ function assertWorkerContract(rendered, expected) {
     subtitleAnchor: {
       fps: FPS,
       cues: expected.cues.map(([id, startFrame, endFrame]) => ({ id, startFrame, endFrame })),
+      // W65b: the proxy plans under the final's rule, so the withheld cue is a listed warning, not a hard stop.
+      policy: FINAL_CAPTION_ANCHOR_POLICY,
       faceClearance: { projection: null, projectionUnavailableReason: 'SOURCE_DIMENSIONS_UNKNOWN', evidence: [], perceptionSourceArtifactId: MASTER_ARTIFACT_ID },
     },
   })
@@ -697,7 +700,7 @@ function assertWorkerContract(rendered, expected) {
   )
   assert.deepEqual(
     anchor.issues.map((item) => [item.code, item.severity, item.cueId, item.evidenceRange.startFrame, item.evidenceRange.endFrame]),
-    expected.cues.map(([id, startFrame, endFrame]) => ['FACE_PERCEPTION_UNAVAILABLE', 'hard', id, startFrame, endFrame]),
+    expected.cues.map(([id, startFrame, endFrame]) => ['FACE_PERCEPTION_UNAVAILABLE', 'warning', id, startFrame, endFrame]),
   )
   assert.equal(rendered.manifest.recipe.parametersHash, calculateCanonicalHash({
     // W69 (cb868e7f): the pinned subtitle-clock policy is part of the recipe parameters, so a policy change invalidates reuse.
@@ -750,14 +753,16 @@ function assertWorkerContract(rendered, expected) {
   assert.equal(rendered.review.spec.width, 540)
   assert.equal(rendered.review.spec.height, 960)
   assert.deepEqual(rendered.review.technicalIssues, [])
-  assert.equal(rendered.review.status, 'blocked')
+  // W65b: the withheld cues are listed warnings. The review waits for their acknowledgement and the final stays closed until then.
+  assert.equal(rendered.review.status, 'warning-ack-required')
   assert.equal(rendered.review.finalAllowed, false)
   const faceIssues = rendered.review.criticIssues.filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE')
   assert.deepEqual(faceIssues.map((issue) => [issue.severity, issue.targetId, ...issue.rangeMs]),
-    expected.cues.map(([id, startFrame, endFrame]) => ['hard', `subtitle:${id}`,
+    expected.cues.map(([id, startFrame, endFrame]) => ['warning', `subtitle:${id}`,
       Math.round(startFrame / FPS * 1000), Math.round(endFrame / FPS * 1000)]))
-  assert.equal(rendered.review.formatQuality.status, 'blocked')
-  assert.equal(rendered.review.formatQuality.exportAllowed, false)
+  assert.equal(rendered.review.criticIssues.some((issue) => issue.severity === 'hard'), false, 'nothing else stops this proxy')
+  assert.equal(rendered.review.formatQuality.status, 'warning')
+  assert.equal(rendered.review.formatQuality.exportAllowed, true)
   assert.equal(rendered.elementMap.elements.some((item) => item.type === 'subtitle'), false)
   assert.equal(rendered.review.timeToFirstProxyMs >= 1_800_000, true)
   assert.deepEqual(rendered.attached, {

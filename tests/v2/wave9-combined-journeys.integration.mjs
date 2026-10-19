@@ -637,7 +637,9 @@ function assertRenderedVariant(rendered, expected) {
     assert.equal(anchor.faceClearance.projectionHash, null)
     assert.deepEqual(anchor.decisions.map((item) => [item.cueId, item.startFrame, item.endFrame, item.anchor, item.bounds, item.suppressed]),
       rendered.renderInput.subtitleCues.map((cue) => [cue.id, cue.startFrame, cue.endFrame, null, null, true]))
-    assert.equal(rendered.review.status, 'blocked')
+    // W65b: the proxy plans under the final's rule, so an uncertifiable cue is a listed warning ('warning-ack-required'); only a hard
+    // issue of the variant itself (a protected subject that is not visible) keeps it 'blocked'. Either way the final stays closed.
+    assert.equal(rendered.review.status, expected.reviewStatus ?? 'warning-ack-required')
     assert.equal(rendered.review.finalAllowed, false)
     assert.equal(rendered.elementMap.elements.some((element) => element.type === 'subtitle'), false)
   }
@@ -808,7 +810,7 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
     )
     console.log(`journey 2 placementPlanHash 9:16=${portraitPlacement.placementPlanHash.slice(0, 12)} 16:9=${landscapePlacement.placementPlanHash.slice(0, 12)}; reframePlanHash 9:16=${portraitReframe.reframePlanHash.slice(0, 12)} 16:9=${landscapeReframe.reframePlanHash.slice(0, 12)}`)
 
-    assertRenderedVariant(portrait, { operationId: 'operation-portrait', format: '9:16' })
+    assertRenderedVariant(portrait, { operationId: 'operation-portrait', format: '9:16', reviewStatus: 'blocked' })
     assertRenderedVariant(landscape, { operationId: 'operation-landscape', format: '16:9' })
 
     // --- Journey 3: the 9:16 blocker is localized ---------------------------
@@ -820,7 +822,7 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
     const unavailable = portraitIssues.filter((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE')
     assert.deepEqual(unavailable.map((issue) => [issue.severity, issue.outputSpecId, issue.placementPlanHash,
       issue.reframePlanHash, issue.format, issue.evidenceRange.startFrame, issue.evidenceRange.endFrame, issue.elementIds[0]]),
-    EXPECTED_CUES.map(([id, startFrame, endFrame]) => ['hard', portraitPreset.spec.id, portraitPlacement.placementPlanHash,
+    EXPECTED_CUES.map(([id, startFrame, endFrame]) => ['warning', portraitPreset.spec.id, portraitPlacement.placementPlanHash,
       portraitReframe.reframePlanHash, '9:16', startFrame, endFrame, `subtitle:${id}`]))
     assert.deepEqual([...unavailable[0].rangeMs], [200, 1_333])
     const notVisible = portraitIssues.find((issue) => issue.code === 'SUBJECT_NOT_VISIBLE')
@@ -834,13 +836,15 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
     assert.equal(portrait.review.formatQuality.exportAllowed, false)
     assert.equal(portrait.review.status, 'blocked')
     assert.equal(portrait.review.finalAllowed, false)
-    assert.equal(landscape.review.formatQuality.status, 'blocked')
-    assert.equal(landscape.review.formatQuality.exportAllowed, false)
-    assert.ok(landscape.review.criticIssues.every((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'hard'))
-    assert.equal(landscape.review.status, 'blocked')
+    // The 16:9 output has no hard issue of its own: its withheld cues are listed warnings, so the format is exportable with warnings
+    // and the review waits for their acknowledgement. The 9:16 output keeps its hard subject-visibility stop.
+    assert.equal(landscape.review.formatQuality.status, 'warning')
+    assert.equal(landscape.review.formatQuality.exportAllowed, true)
+    assert.ok(landscape.review.criticIssues.every((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE' && issue.severity === 'warning'))
+    assert.equal(landscape.review.status, 'warning-ack-required')
     assert.equal(landscape.review.finalAllowed, false)
-    // Both renders succeed while each output retains its blocked editorial
-    // verdict. Technical execution does not establish final approval.
+    // Both renders succeed while each output keeps its own editorial verdict (9:16 blocked, 16:9 waiting for the listed warnings to be
+    // acknowledged). Technical execution does not establish final approval.
     assert.equal(portrait.operation.status, 'succeeded')
     assert.equal(landscape.operation.status, 'succeeded')
 
@@ -885,15 +889,15 @@ test('T-WAVE9-E variants share one StoryPlan and own geometry; unknown face cove
     assert.equal(reports[0].reportHash, portrait.review.formatQuality.reportHash)
     assert.equal(reports[1].reportHash, landscape.review.formatQuality.reportHash)
     const decision = selectExportableVariants(reports)
-    assert.deepEqual([...decision.approvedOutputSpecIds], [])
-    assert.deepEqual([...decision.blockedOutputSpecIds], [landscapePreset.spec.id, portraitPreset.spec.id])
+    assert.deepEqual([...decision.approvedOutputSpecIds], [landscapePreset.spec.id])
+    assert.deepEqual([...decision.blockedOutputSpecIds], [portraitPreset.spec.id])
     assert.deepEqual(
-      decision.decisions.map((item) => [item.format, item.status, item.exportAllowed, [...item.blockingCodes]]),
+      decision.decisions.map((item) => [item.format, item.status, item.exportAllowed, [...item.blockingCodes], [...item.warningCodes]]),
       // `selectExportableVariants` returns decisions in canonical outputSpecId
       // order, so 16:9 precedes 9:16 regardless of the input order.
       [
-        ['16:9', 'blocked', false, ['FACE_PERCEPTION_UNAVAILABLE']],
-        ['9:16', 'blocked', false, ['FACE_PERCEPTION_UNAVAILABLE', 'SUBJECT_NOT_VISIBLE']],
+        ['16:9', 'warning', true, [], ['FACE_PERCEPTION_UNAVAILABLE']],
+        ['9:16', 'blocked', false, ['SUBJECT_NOT_VISIBLE'], ['FACE_PERCEPTION_UNAVAILABLE']],
       ],
     )
     t.diagnostic(JSON.stringify({ proofScope: 'controlled-worker-render-mechanics', faceSafety: 'unknown',
