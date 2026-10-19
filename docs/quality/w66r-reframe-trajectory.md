@@ -145,6 +145,7 @@ Contagens e ids literais; "N" é 1 por cena (stand-in determinístico: sem dispe
 | GT, 1ª tentativa | run `w66r-gt-1-74890e9d` | 1 de 9 (8 falhas): o oráculo lia o canvas inteiro e o fundo borrado, não a banda 16:9; corrigido no oráculo, nenhum limite relaxado |
 | PG + API (2 testes, `tests/v2/reframe-trajectory.pg.integration.mjs`) | harness (tsx), run `w66r-pg-5-15203dbf` | 2 de 2 passaram |
 | PG, tentativas anteriores | `w66r-pg-1-55aef31c`, `w66r-pg-2-f3ceaf31`, `w66r-pg-3-5881803a`, `w66r-pg-4-6a2bb5cd` | falhas de fixture/expectativa, e um defeito do produto achado e corrigido: o GET de overrides de outro workspace respondia 200 (agora 404 `PROJECT_NOT_FOUND`; proporção como variante = 428) |
+| GT + PG na árvore final (código de `81c7ba4f`; só documentação depois) | harness, run `w66r-final-1-a01a7a28` | GT 9 de 9; PG 2 de 2 |
 
 Medidas do run `w66r-gt-2-4e383d43` (150 frames por cena, todos decodificados): nas 7 cenas rastreadas ou de fallback sem issue de falha, **0 frame
 falhou**; erro máximo da janela medida contra o RenderInput 0,86 px de fonte (limite 3), erro máximo de posição do sujeito 3,06 px (limite 6),
