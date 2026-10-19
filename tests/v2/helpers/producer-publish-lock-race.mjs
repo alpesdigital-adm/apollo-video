@@ -78,8 +78,12 @@ export async function runProducerPublishLockRace({ db, label, lockedTable, locke
     }, { timeout: 15_000, maxWait: 5_000 })
     await Promise.race([entered.promise, held])
     attempted = Promise.resolve().then(() => publish(contender))
-    // Prevent an early rejection becoming unhandled while the lock waiter is observed.
-    attempted.catch(() => {})
+    // Prevent an early rejection becoming unhandled while the lock waiter is observed. The outcome is kept so that a publisher
+    // that never waits can say WHY it did not (it settled early, and with what), instead of the probe only reporting the silence.
+    let publisherOutcome = 'still running'
+    attempted.then(() => { publisherOutcome = 'resolved' }, (error) => {
+      publisherOutcome = `rejected ${String(error?.code ?? error?.name)}: ${String(error?.message).slice(0, 160)}`
+    })
     const deadline = Date.now() + 6_000
     let observed = false
     while (Date.now() < deadline) {
@@ -87,7 +91,7 @@ export async function runProducerPublishLockRace({ db, label, lockedTable, locke
       if (rows[0]?.waitType === 'Lock') { observed = true; break }
       await new Promise((done) => setTimeout(done, 25))
     }
-    assert.equal(observed, true, `${label}: publisher never reached the PostgreSQL lock wait`)
+    assert.equal(observed, true, `${label}: publisher never reached the PostgreSQL lock wait (publisher: ${publisherOutcome})`)
     const [{ lockObservedAt }] = await db.$queryRaw`
       SELECT clock_timestamp() AS "lockObservedAt"`
     const window = afterWait ? await afterWait(db) : null
