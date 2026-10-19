@@ -22,10 +22,15 @@ import { readPublicOperation } from './public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { MediaArtifactManifest } from '../../domain/media-artifact.ts'
 import {
+  CONFIDENCE_BAND_POLICY_V2_SHA256,
   classifyConfidence,
+  classifyConfidenceV2,
   createDecisionConfidence,
+  isEvidenceGatedType,
   type ConfidenceDecisionType,
+  type ConfidenceDecisionTypeV2,
 } from '../../domain/decision-confidence.ts'
+import { parseDecisionPerceptionEvidence } from '../../domain/director-evidence-rubric.ts'
 import { PROJECT_STATUSES, type ProjectStatus } from '../../domain/project.ts'
 import { parseProductionBrief } from '../../domain/production-brief.ts'
 import { parseBriefCompilation } from '../../application/compile-brief.ts'
@@ -68,8 +73,20 @@ export function projectConfidenceUncertainties(values: readonly unknown[]) {
       if (confidence.confidenceHash !== (detail as Record<string, unknown>).confidenceHash) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Director decision confidence hash is invalid')
       }
-      const type = record.decisionType as ConfidenceDecisionType
-      const band = classifyConfidence(type, confidence)
+      const type = record.decisionType as ConfidenceDecisionTypeV2
+      // W64. A decision graded by confidence-band-policy/v2 is graded on (tier, confidence); one that is not, by v1 as ever.
+      const policy = record.bandPolicy as Record<string, unknown> | undefined
+      let band
+      if (policy === undefined) {
+        band = classifyConfidence(type as ConfidenceDecisionType, confidence)
+      } else {
+        if (policy.schemaVersion !== 'confidence-band-policy/v2' || policy.policyHash !== CONFIDENCE_BAND_POLICY_V2_SHA256) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Director decision was graded by an unknown band policy')
+        }
+        band = isEvidenceGatedType(type)
+          ? classifyConfidenceV2(type, confidence, parseDecisionPerceptionEvidence(record.perceptionEvidence).tier)
+          : classifyConfidenceV2(type, confidence)
+      }
       if (band === 'auto-apply') return []
       if (record.confidenceBand !== band || typeof record.id !== 'string' || typeof record.choice !== 'string') {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Director decision confidence projection is invalid')

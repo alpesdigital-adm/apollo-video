@@ -19,6 +19,7 @@ import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createDirectorRunImpact, createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { validateDirectorDecisions } from '../../src/v2/domain/director-run.ts'
+import { CONFIDENCE_BAND_POLICY_V2_SHA256 } from '../../src/v2/domain/decision-confidence.ts'
 import {
   advancePublicOperationPhase,
   cancelPublicOperation,
@@ -210,6 +211,11 @@ class InMemoryDirectorRepository {
       id: 'transcript-1', sourceArtifactId: 'artifact-source3', language: 'pt-BR',
       provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
     }
+    // W64. The rights of the insert's source, as the real reader states them for every source the plan plays (the master's are `sourceRights`).
+    this.insertRights = options.insertRights ?? {
+      state: 'present', snapshotId: 'rights-snapshot-insert-1',
+      snapshotHash: 'd'.repeat(64), status: 'approved', consentStatus: 'not-required',
+    }
     this.baseEditPlan = options.editPlan
     this.requested = []
     this.records = new Map()
@@ -222,6 +228,8 @@ class InMemoryDirectorRepository {
   }
 
   get currentVersion() { return this.parent.version }
+
+  currentPlan() { return this.baseEditPlan ?? compiledEditorialPlan(this.selectedInsert, this.ctaText) }
 
   async findIdempotentResult({ workspaceId, projectId, idempotencyKey, actorContextHash }) {
     const record = this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
@@ -260,10 +268,13 @@ class InMemoryDirectorRepository {
         productionBrief: createProductionBrief({ ownerText: this.ownerText }),
       },
       policies: { automaticZoom: false, faceProtection: true, guardrails: this.guardrails },
-      editPlan: this.baseEditPlan ?? compiledEditorialPlan(this.selectedInsert, this.ctaText),
+      editPlan: this.currentPlan(),
       currentDurationFrames: 300,
       variantIds: variantIdsOf(this.parent),
       sourceRights: this.sourceRights,
+      timelineSourceRights: [...new Set(this.currentPlan().videoTracks.flatMap((track) => track.clips.flatMap((clip) =>
+        [clip.sourceArtifactId, ...(clip.audioSourceArtifactId ? [clip.audioSourceArtifactId] : [])])))].sort()
+        .map((artifactId) => ({ artifactId, rights: artifactId === this.transcript.sourceArtifactId ? this.sourceRights : this.insertRights })),
       outputReferences: this.outputReferences,
       transcript: this.transcript,
       ...(this.ocrEnvelope ? { ocrEnvelope: this.ocrEnvelope } : {}),
@@ -500,8 +511,11 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.decisions.some((decision) => decision.choice === 'no_effect'), true)
   assert.equal(result.run.decisions.some((decision) => decision.choice === 'no_insert'), true)
   const layoutConfidence = result.run.decisions.find((decision) => decision.id === 'decision-layout-inset')
-  assert.equal(layoutConfidence.decisionType, 'generation')
+  // W64: the layout decision IS the crop decision of confidence-band-policy/v2 (it was typed `generation` under v1), graded on (tier, confidence).
+  assert.equal(layoutConfidence.decisionType, 'crop')
   assert.equal(layoutConfidence.confidenceBand, 'review')
+  assert.deepEqual(layoutConfidence.bandPolicy, { schemaVersion: 'confidence-band-policy/v2', policyHash: CONFIDENCE_BAND_POLICY_V2_SHA256 })
+  assert.equal(layoutConfidence.perceptionEvidence.tier, 'absent', 'no face evidence exists in this controlled context')
   assert.equal(layoutConfidence.confidenceDetail.value, layoutConfidence.confidence)
   assert.equal(layoutConfidence.confidenceDetail.calibrationVersion, 'director-confidence-2026-08-v1')
   assert.match(layoutConfidence.confidenceDetail.confidenceHash, /^[a-f0-9]{64}$/)
@@ -516,7 +530,7 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.deepEqual(result.run.qualityReport.faceSafety, { status: 'unknown', reasonCode: 'FACE_PERCEPTION_UNAVAILABLE', evidenceRefs: [] })
   assert.equal(result.run.qualityReport.hardChecks.subtitlesFaceSafe, false)
   assert.ok(result.run.qualityReport.issues.some((issue) => issue.code === 'FACE_PERCEPTION_UNAVAILABLE_REVIEW_REQUIRED'))
-  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v3')
+  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v4')
   assert.equal(result.run.qualityReport.strategic.rubric.id, 'awareness-discovery')
   assert.equal(result.run.qualityReport.strategic.rubric.threshold, 68)
   assert.equal(result.run.qualityReport.strategic.rubric.purpose, 'editorial-quality-proxy')
@@ -525,7 +539,7 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.qualityReport.strategic.evidence.length, 6)
   assert.equal(result.run.qualityReport.score, result.run.qualityReport.strategic.score / 100)
   assert.equal(Object.entries(result.run.qualityReport.hardChecks).filter(([key]) => key !== 'subtitlesFaceSafe').every(([, value]) => value), true)
-  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 3)
+  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 4)
   assert.equal(repository.lastBundle.event.type, 'project.version.created')
   assert.deepEqual(result.impact.changeKinds, ['director-replan'])
   assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])

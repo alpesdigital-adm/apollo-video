@@ -26,6 +26,74 @@ export const CONFIDENCE_BAND_POLICY = Object.freeze({
   generation: Object.freeze({ autoApply: 0.86, review: 0.62 }),
 })
 
+/**
+ * W64. How much of what a decision stands on was actually examined, per the Director's evidence rubric
+ * (`director-evidence-rubric.ts`): `high` is complete (dense) sealed coverage from a producer whose confidence is measured and at or
+ * above the floor, `partial` is some of the range examined or evidence below what `high` needs, `absent` is nothing examined. The tier
+ * is a property of the evidence, never of the planner's own confidence in its choice.
+ */
+export const EVIDENCE_TIERS = Object.freeze(['high', 'partial', 'absent'] as const)
+export type EvidenceTier = (typeof EVIDENCE_TIERS)[number]
+
+/** The decision types `confidence-band-policy/v2` adds: each stands on perception, so its band is a function of (tier, confidence). */
+export const EVIDENCE_GATED_DECISION_TYPES = Object.freeze(['crop', 'caption', 'insert'] as const)
+export type EvidenceGatedDecisionType = (typeof EVIDENCE_GATED_DECISION_TYPES)[number]
+export type ConfidenceDecisionTypeV2 = ConfidenceDecisionType | EvidenceGatedDecisionType
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object') {
+    for (const child of Object.values(value)) deepFreeze(child)
+    Object.freeze(value)
+  }
+  return value
+}
+
+/**
+ * `confidence-band-policy/v2` (W64). The v1 types keep exactly their v1 thresholds (a run born under v1 stays graded by
+ * `CONFIDENCE_BAND_POLICY`; this policy never re-grades it). `crop`, `caption` and `insert` are evidence-gated:
+ *
+ * - `block` when the confidence is below `review`: the decision stands on less than the type tolerates;
+ * - `onAbsent` when nothing was examined (tier `absent`) and the confidence is at least `review`: never `auto-apply`. The two
+ *   evidence-gated types that propose a reviewable DRAFT (`crop`: the Director's only crop is the non-destructive 16:9 inset on a
+ *   blurred source; `caption`: the reserved bottom region) answer `review`, because a human can still inspect and correct them and
+ *   blocking would stop every run whose face detector has not looked yet. `insert` answers `block`: an insert adds footage the owner's
+ *   master does not hold, and without certain rights nothing may stand on it;
+ * - `auto-apply` only for tier `high` with a confidence of at least `autoApply`; any other tier at or above `review` is `review`.
+ *
+ * `rights` stays integral (1/1) and ignores the tier: certainty, or block. Every threshold is a design prior; no labelled corpus (W63b)
+ * exists to calibrate them, and changing one changes `CONFIDENCE_BAND_POLICY_V2_SHA256`.
+ */
+export const CONFIDENCE_BAND_POLICY_V2 = deepFreeze({
+  schemaVersion: 'confidence-band-policy/v2' as const,
+  transcription: { autoApply: 0.92, review: 0.7 },
+  cut: { autoApply: 0.88, review: 0.65 },
+  'asset-selection': { autoApply: 0.85, review: 0.6 },
+  'narrative-reorder': { autoApply: 0.9, review: 0.75 },
+  rights: { autoApply: 1, review: 1 },
+  generation: { autoApply: 0.86, review: 0.62 },
+  crop: { autoApply: 0.8, review: 0.62, onAbsent: 'review' as const },
+  caption: { autoApply: 0.8, review: 0.7, onAbsent: 'review' as const },
+  insert: { autoApply: 0.9, review: 0.65, onAbsent: 'block' as const },
+  parameterBasis: {
+    'crop|caption|insert.autoApply': 'design-prior-unmeasured',
+    'crop|caption|insert.review': 'design-prior-unmeasured (crop = generation floor, caption = transcription floor)',
+    'crop|caption|insert.onAbsent': 'owner-rule: absent evidence is never auto-apply; draft types review, insert blocks',
+    'v1 types': 'unchanged from confidence-band-policy/v1',
+  },
+})
+export type ConfidenceBandPolicyV2 = typeof CONFIDENCE_BAND_POLICY_V2
+export const CONFIDENCE_BAND_POLICY_V2_SHA256: string = calculateCanonicalHash(CONFIDENCE_BAND_POLICY_V2)
+export const CONFIDENCE_BAND_POLICY_V1_SHA256: string = calculateCanonicalHash(CONFIDENCE_BAND_POLICY)
+
+/** Which policy graded a decision. Absent on a decision born before W64: such a decision is graded by v1, exactly as it was. */
+export type DecisionBandPolicyRef = Readonly<
+  | { schemaVersion: 'confidence-band-policy/v2'; policyHash: string }
+>
+
+export function isEvidenceGatedType(type: string): type is EvidenceGatedDecisionType {
+  return (EVIDENCE_GATED_DECISION_TYPES as readonly string[]).includes(type)
+}
+
 const REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$/
 const REASON = /^[A-Z][A-Z0-9_]{2,63}$/
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._/-]{2,127}$/
@@ -88,6 +156,37 @@ export function classifyConfidence(
   return canonical.value >= threshold.autoApply
     ? 'auto-apply'
     : canonical.value >= threshold.review ? 'review' : 'block'
+}
+
+/**
+ * The band `confidence-band-policy/v2` gives a decision. The evidence-gated types (`crop`, `caption`, `insert`) need the tier of the
+ * evidence they stand on and refuse to be graded without it: a missing tier is a bug of the caller, never "high". Every other type
+ * is graded exactly as v1 grades it (the tier is ignored), and `rights` is integral.
+ */
+export function classifyConfidenceV2(
+  type: ConfidenceDecisionTypeV2,
+  confidence: Readonly<DecisionConfidence>,
+  tier?: EvidenceTier,
+): ConfidenceBand {
+  const canonical = createDecisionConfidence(confidence)
+  if (canonical.confidenceHash !== confidence.confidenceHash) {
+    throw new DomainError('INVALID_ARGUMENT', 'Decision confidence hash is invalid')
+  }
+  if (type === 'rights') return canonical.value === 1 ? 'auto-apply' : 'block'
+  if (!isEvidenceGatedType(type)) {
+    const threshold = CONFIDENCE_BAND_POLICY_V2[type as ConfidenceDecisionType]
+    if (!threshold) throw new DomainError('INVALID_ARGUMENT', 'Decision confidence type is invalid')
+    return canonical.value >= threshold.autoApply
+      ? 'auto-apply'
+      : canonical.value >= threshold.review ? 'review' : 'block'
+  }
+  if (tier === undefined || !(EVIDENCE_TIERS as readonly string[]).includes(tier)) {
+    throw new DomainError('INVALID_ARGUMENT', 'An evidence-gated decision needs the tier of its evidence')
+  }
+  const rule = CONFIDENCE_BAND_POLICY_V2[type]
+  if (canonical.value < rule.review) return 'block'
+  if (tier === 'absent') return rule.onAbsent
+  return tier === 'high' && canonical.value >= rule.autoApply ? 'auto-apply' : 'review'
 }
 
 export function relevantUncertainty(items: readonly Readonly<{

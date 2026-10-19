@@ -11,12 +11,19 @@ import { createEditorialAudioTimelineHash } from './production-modes.ts'
 import type { QualityReport as StrategicQualityReport } from './strategic-rubric.ts'
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import {
+  CONFIDENCE_BAND_POLICY_V2_SHA256,
   classifyConfidence,
+  classifyConfidenceV2,
   createDecisionConfidence,
+  isEvidenceGatedType,
   type ConfidenceBand,
   type ConfidenceDecisionType,
+  type ConfidenceDecisionTypeV2,
+  type DecisionBandPolicyRef,
   type DecisionConfidence,
 } from './decision-confidence.ts'
+import { parseDecisionPerceptionEvidence, type DecisionPerceptionEvidence } from './director-evidence-rubric.ts'
+import type { DirectorPerceptionEvidenceReport } from './director-perception-evidence.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -106,10 +113,20 @@ export interface DirectorDecision {
   reason: string
   evidenceRefs: readonly string[]
   confidence: number
-  decisionType: ConfidenceDecisionType
+  decisionType: ConfidenceDecisionTypeV2
   confidenceDetail: Readonly<DecisionConfidence>
   confidenceBand: ConfidenceBand
   alternatives: readonly string[]
+  /**
+   * W64. The band policy that graded this decision. Absent on a decision born before the evidence rubric: it is graded by
+   * `confidence-band-policy/v1` exactly as it was, and never by v2.
+   */
+  bandPolicy?: Readonly<DecisionBandPolicyRef>
+  /**
+   * W64. The evidence a crop, caption or insert decision (policy v2) stands on: the snapshot, the sealed envelopes and observations,
+   * the tier per modality and the weakest of them. Present on exactly the evidence-gated decisions of a v2 run.
+   */
+  perceptionEvidence?: Readonly<DecisionPerceptionEvidence>
 }
 
 export type DirectorDecisionInput = Omit<
@@ -207,8 +224,8 @@ export interface DirectorQualityIssue {
   correctable: boolean
 }
 
-export interface DirectorQualityReport {
-  schemaVersion: 'director-quality-report/v3'
+/** Fields every quality report version carries. */
+export interface DirectorQualityReportBase {
   id: string
   desiredActionRef: Readonly<DesiredActionReference>
   status: 'approved' | 'approved-with-warnings' | 'review-required' | 'blocked'
@@ -231,6 +248,20 @@ export interface DirectorQualityReport {
   criticVersion: string
   evaluatedAt: string
 }
+
+/** A report born before the evidence rubric (W64): no perception evidence section. Still readable, never written. */
+export interface DirectorQualityReportV3 extends DirectorQualityReportBase {
+  schemaVersion: 'director-quality-report/v3'
+  perceptionEvidence?: undefined
+}
+
+/** W64. The report whose critic states, per modality and per crop/caption/insert decision, how much perception stood behind the plan. */
+export interface DirectorQualityReportV4 extends DirectorQualityReportBase {
+  schemaVersion: 'director-quality-report/v4'
+  perceptionEvidence: Readonly<DirectorPerceptionEvidenceReport>
+}
+
+export type DirectorQualityReport = DirectorQualityReportV3 | DirectorQualityReportV4
 
 export function hasConsistentFaceSafetyClaim(value: Readonly<Record<string, unknown>>): boolean {
   const faceSafety = value.faceSafety as Record<string, unknown> | null
@@ -360,6 +391,21 @@ const decisionTypeByCategory: Readonly<Record<DirectorDecisionCategory, Confiden
   angle: 'cut',
 })
 
+/**
+ * `confidence-band-policy/v2` (W64): the layout decision IS the crop decision, the subtitle decision IS the caption decision and the
+ * insert decision becomes an evidence-gated insert, each graded on (tier, confidence). Every other category keeps its v1 type.
+ */
+const decisionTypeByCategoryV2: Readonly<Record<DirectorDecisionCategory, ConfidenceDecisionTypeV2>> = Object.freeze({
+  ...decisionTypeByCategory,
+  layout: 'crop',
+  subtitle: 'caption',
+  insert: 'insert',
+})
+
+export function decisionTypeFor(category: DirectorDecisionCategory, bandPolicyV2: boolean): ConfidenceDecisionTypeV2 {
+  return (bandPolicyV2 ? decisionTypeByCategoryV2 : decisionTypeByCategory)[category]
+}
+
 export function validateDirectorDecisions(
   input: readonly (DirectorDecisionInput | DirectorDecision)[],
 ): readonly Readonly<DirectorDecision>[] {
@@ -386,8 +432,35 @@ export function validateDirectorDecisions(
       reasonCodes: [`DIRECTOR_${decision.category.toUpperCase()}`],
       calibrationVersion: 'director-confidence-2026-08-v1',
     })
-    const decisionType = decisionTypeByCategory[decision.category]
     const persisted = decision as Partial<DirectorDecision>
+    // W64. A decision graded by policy v2 says so; one that does not is graded by v1, exactly as it always was.
+    const bandPolicy = persisted.bandPolicy
+    const v2 = bandPolicy !== undefined
+    assertDomain(
+      !v2 || (bandPolicy.schemaVersion === 'confidence-band-policy/v2' && bandPolicy.policyHash === CONFIDENCE_BAND_POLICY_V2_SHA256 &&
+        Object.keys(bandPolicy).sort().join('|') === 'policyHash|schemaVersion'),
+      'PERSISTENCE_CONFLICT',
+      'Director decision was graded by a band policy this build does not know',
+    )
+    const decisionType = decisionTypeFor(decision.category, v2)
+    let perceptionEvidence: DecisionPerceptionEvidence | undefined
+    let confidenceBand: ConfidenceBand
+    if (v2 && isEvidenceGatedType(decisionType)) {
+      assertDomain(persisted.perceptionEvidence !== undefined, 'PERSISTENCE_CONFLICT', 'An evidence-gated Director decision carries no perception evidence')
+      perceptionEvidence = parseDecisionPerceptionEvidence(persisted.perceptionEvidence)
+      assertDomain(
+        perceptionEvidence.decisionId === decision.id && perceptionEvidence.decisionType === decisionType &&
+          evidenceRefs.includes(perceptionEvidence.snapshot.id),
+        'PERSISTENCE_CONFLICT',
+        'Director decision perception evidence is not about this decision or does not name its snapshot as evidence',
+      )
+      confidenceBand = classifyConfidenceV2(decisionType, confidenceDetail, perceptionEvidence.tier)
+    } else {
+      assertDomain(persisted.perceptionEvidence === undefined, 'PERSISTENCE_CONFLICT', 'A Director decision that is not evidence-gated carries perception evidence')
+      confidenceBand = v2
+        ? classifyConfidenceV2(decisionType, confidenceDetail)
+        : classifyConfidence(decisionType as ConfidenceDecisionType, confidenceDetail)
+    }
     const hasPersistedConfidence = persisted.decisionType !== undefined ||
       persisted.confidenceDetail !== undefined || persisted.confidenceBand !== undefined
     if (hasPersistedConfidence) {
@@ -396,7 +469,7 @@ export function validateDirectorDecisions(
         : undefined
       assertDomain(
         persisted.decisionType === decisionType &&
-          persisted.confidenceBand === classifyConfidence(decisionType, confidenceDetail) &&
+          persisted.confidenceBand === confidenceBand &&
           storedConfidence !== undefined &&
           storedConfidence.confidenceHash === persisted.confidenceDetail?.confidenceHash &&
           storedConfidence.confidenceHash === confidenceDetail.confidenceHash,
@@ -408,9 +481,10 @@ export function validateDirectorDecisions(
       ...decision,
       decisionType,
       confidenceDetail,
-      confidenceBand: classifyConfidence(decisionType, confidenceDetail),
+      confidenceBand,
       evidenceRefs,
       alternatives: Object.freeze([...decision.alternatives]),
+      ...(perceptionEvidence ? { perceptionEvidence } : {}),
     })
   }))
 }

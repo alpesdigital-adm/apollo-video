@@ -2,6 +2,7 @@ import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError } from '../domain/errors.ts'
 import { FACE_EVIDENCE_POLICY, FACE_EVIDENCE_POLICY_SHA256, faceSampleIntervalFrames, faceWindowFrames } from '../domain/face-evidence-policy.ts'
+import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import type { FaceSourceWindowRequestContextRepository } from './ports/face-source-window-request-context.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
@@ -21,14 +22,36 @@ export function enqueueFaceSourceWindowRunService(dependencies: {
   createOperationId: () => string
   clock?: () => Date
 }) {
-  const clock = dependencies.clock ?? (() => new Date())
+  const enqueue = enqueueFaceSourceWindowRunAsAudit(dependencies)
   return async (request: {
     workspaceId: string; projectId: string; sourceArtifactId: string
     window: Readonly<{ startSourceFrame: number; endSourceFrame: number }>
     actor: AuthenticatedExternalActor; idempotencyKey: string; traceId?: string
   }) => {
     requireScope(request.actor, 'projects:write')
-    const audit = materializeActorAuditContext(request.actor)
+    const { actor, ...rest } = request
+    return enqueue({ ...rest, audit: materializeActorAuditContext(actor) })
+  }
+}
+
+/**
+ * The same admission, for a caller that holds the audit of the credential that acted rather than the live actor: the Director worker
+ * (W64) asks for the face windows its plan needs AS the actor that asked for the run, from the credential audit the run was admitted
+ * under. Scope was checked when that run was admitted; everything else - identity, window bounds, rights, replay - is checked here.
+ */
+export function enqueueFaceSourceWindowRunAsAudit(dependencies: {
+  context: FaceSourceWindowRequestContextRepository
+  operations: PublicOperationRepository
+  createOperationId: () => string
+  clock?: () => Date
+}) {
+  const clock = dependencies.clock ?? (() => new Date())
+  return async (request: {
+    workspaceId: string; projectId: string; sourceArtifactId: string
+    window: Readonly<{ startSourceFrame: number; endSourceFrame: number }>
+    audit: Readonly<ApiAccessAuditContext>; idempotencyKey: string; traceId?: string
+  }) => {
+    const audit = request.audit
     if (audit.workspaceId !== request.workspaceId ||
         [request.workspaceId, request.projectId, request.sourceArtifactId].some((id) => !ID.test(id))) {
       throw new DomainError('AUTH_INVALID', 'Face source window request identity is invalid')

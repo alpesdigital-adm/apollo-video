@@ -11,7 +11,9 @@ import { runProjectDirectorService } from '@/v2/application/run-project-director
 import { DomainError } from '@/v2/domain/errors'
 import {
   createColorPipelineCompilationRepository,
+  createDirectorFaceWindowRequester,
   createDirectorRunRepository,
+  createDirectorSnapshotMaterializer,
   createEditorialCommandRepository,
   createProjectProxyRenderRepository,
   createPublicOperationRepository,
@@ -115,6 +117,8 @@ export async function POST(
         createId: (kind) => `${kind}-${randomUUID()}`,
         createEventId: randomUUID,
         compileBrief: createEvidenceBoundBriefCompiler(),
+        faceWindows: createDirectorFaceWindowRequester(),
+        materializeSnapshot: createDirectorSnapshotMaterializer(),
       })({
         workspaceId: actor.workspaceId,
         projectId,

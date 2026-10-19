@@ -47,7 +47,7 @@ const timeMapOf = (clips, sourceArtifactId) => clips.filter((clip) => clip.sourc
 
 /** A sealed OCR envelope sampling the given TIMELINE frames of a single-source timeline (interval 1, so any frame is on grid). */
 export function ocrEnvelope({ clips = wholeClips(), frames = [0, 30], text = (frame) => `Texto ${frame}`, empty = false, id = 'ocr-envelope-1',
-  sourceSha256 = sha('b'), overrides = {} } = {}) {
+  sourceSha256 = sha('b'), confidence = 0.76, overrides = {} } = {}) {
   const sourceArtifactId = clips[0].sourceArtifactId
   const durationFrames = durationOf(clips)
   const samples = frames.toSorted((a, b) => a - b).map((timelineFrame) => {
@@ -55,7 +55,7 @@ export function ocrEnvelope({ clips = wholeClips(), frames = [0, 30], text = (fr
     const sourceFrame = clip.sourceInFrame + (timelineFrame - clip.timelineInFrame)
     return { sourcePts: sourceFrame * TICKS_PER_FRAME, sourcePtsEvidenceHash: sha('9'), sourceFrame, timelineFrame,
       imageSha256: digest(`image-${timelineFrame}`),
-      ocr: empty ? [] : [{ text: text(timelineFrame), language: 'por', box: [0.1, 0.75, 0.3, 0.1], confidence: 0.76 }] }
+      ocr: empty ? [] : [{ text: text(timelineFrame), language: 'por', box: [0.1, 0.75, 0.3, 0.1], confidence }] }
   })
   const gaps = []
   let cursor = 0
