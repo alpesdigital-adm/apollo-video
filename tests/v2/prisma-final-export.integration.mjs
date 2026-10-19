@@ -684,10 +684,15 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
       approval: { approved: true, note: 'Controlled request; real quality remains review-required.' },
     }
     // W65b: the API refuses what the gate refuses. Unknown face safety is no longer that; a hard check that failed still is.
+    // A stored snapshot is never edited (a trigger refuses the UPDATE): the dishonest report is a second quality-report snapshot, INSERTED, and the
+    // Director run (a mutable pointer) is pointed at it for the one request and put back afterwards. The extra row stays, as every sealed row does.
     const dishonestReport = { ...qualityReport, hardChecks: { ...qualityReport.hardChecks, timelineContinuous: false } }
-    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
-      contentJson: stableSerialize(dishonestReport), contentHash: calculateVersionHash(dishonestReport),
+    const dishonestSnapshotId = `final-export-dishonest-quality-${suffix}`
+    await client.v2ProjectSnapshot.create({ data: {
+      id: dishonestSnapshotId, workspaceId, projectId, kind: 'quality-report', schemaVersion: 3,
+      contentJson: stableSerialize(dishonestReport), contentHash: calculateVersionHash(dishonestReport), createdAt,
     } })
+    await client.v2DirectorRun.update({ where: { id: directorRunId }, data: { qualitySnapshotId: dishonestSnapshotId } })
     const reviewBlockedResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/exports`, {
       method: 'POST',
       headers: { authorization, 'content-type': 'application/json',
@@ -700,9 +705,7 @@ test('T-FR-231 rejects unknown face safety through the API and verifies controll
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId, type: 'project-final-export' } }), 0)
     assert.equal(await client.v2ProjectFinalExportAttempt.count({ where: { workspaceId } }), 0)
     assert.equal(await client.v2AutomaticCatalogRecord.count({ where: { workspaceId } }), 0)
-    await client.v2ProjectSnapshot.update({ where: { id: qualitySnapshotId }, data: {
-      contentJson: stableSerialize(qualityReport), contentHash: calculateVersionHash(qualityReport),
-    } })
+    await client.v2DirectorRun.update({ where: { id: directorRunId }, data: { qualitySnapshotId } })
 
     // From here on only this test-owned port supplies a controlled approval to
     // the application services. It validates the same PG lineage and immutable
