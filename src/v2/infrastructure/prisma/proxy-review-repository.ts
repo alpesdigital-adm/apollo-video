@@ -21,6 +21,7 @@ import { outputVariantsOf } from '../../domain/output-consumption.ts'
 import { readStoredOutputStateV3 } from './output-state-consumption.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { mp4EvidenceSealMismatches, type Mp4EvidenceSealV1 } from '../../domain/mp4-pixel-quality.ts'
 import { projectStatusTransitionSources } from '../../domain/project.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
@@ -99,6 +100,28 @@ function parseIssueArray(value: string, field: string): readonly Readonly<ProxyQ
 const geometryHash = (value: unknown): boolean =>
   value === undefined || value === null || (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))
 
+const MP4_EVIDENCE_KEYS = Object.freeze([
+  'schemaVersion', 'reportSchemaVersion', 'reportHash', 'reportFileSha256', 'artifactSha256', 'artifactByteSize', 'renderInputHash', 'workspaceId', 'projectId',
+  'projectVersionId', 'variantId', 'outputSpecId', 'operationId', 'policySha256', 'oracleModelDigests', 'sampledFrames', 'totalFrames', 'verdict',
+].toSorted())
+
+/** W67. The seal of the MP4 critic's report travels with the format verdict; it is read back exactly as it was written or the verdict is invalid. */
+function parseMp4Evidence(value: unknown): Readonly<Mp4EvidenceSealV1> | undefined {
+  if (value === undefined) return undefined
+  const seal = value as Record<string, unknown>
+  const digests = seal?.oracleModelDigests
+  if (
+    typeof seal !== 'object' || seal === null || Array.isArray(seal) || Object.keys(seal).toSorted().join('|') !== MP4_EVIDENCE_KEYS.join('|') ||
+    !Array.isArray(digests) || digests.length < 1 || digests.length > 8 ||
+    digests.some((entry) => typeof entry !== 'object' || entry === null || Object.keys(entry).toSorted().join('|') !== 'binSha256|id|scoreFloor|xmlSha256' ||
+      typeof entry.id !== 'string' || typeof entry.scoreFloor !== 'number' || !/^[a-f0-9]{64}$/.test(String(entry.xmlSha256)) || !/^[a-f0-9]{64}$/.test(String(entry.binSha256))) ||
+    mp4EvidenceSealMismatches(seal as unknown as Mp4EvidenceSealV1).length > 0 ||
+    !Number.isSafeInteger(seal.artifactByteSize) || !Number.isSafeInteger(seal.sampledFrames) || !Number.isSafeInteger(seal.totalFrames) ||
+    !['passed', 'warning', 'blocked'].includes(String(seal.verdict))
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy MP4 evidence seal is invalid')
+  return Object.freeze({ ...(seal as unknown as Mp4EvidenceSealV1) })
+}
+
 function parseFormatQuality(value: string | null): Readonly<ProxyReview>['formatQuality'] {
   if (value === null) return undefined
   const candidate = parseJson(value, 'proxy format quality verdict') as Record<string, unknown>
@@ -120,6 +143,7 @@ function parseFormatQuality(value: string | null): Readonly<ProxyReview>['format
     exportAllowed: candidate.exportAllowed,
     explanation: candidate.explanation,
     reportHash: candidate.reportHash,
+    ...(candidate.mp4Evidence !== undefined ? { mp4Evidence: parseMp4Evidence(candidate.mp4Evidence)! } : {}),
   })
 }
 

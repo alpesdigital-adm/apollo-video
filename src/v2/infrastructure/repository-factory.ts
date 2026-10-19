@@ -520,6 +520,9 @@ import { PrismaFaceWindowEnvelopeRepository } from './prisma/face-window-envelop
 import { PrismaFaceSourceWindowRepository } from './prisma/face-source-window-repository.ts'
 import { PrismaFaceSourceWindowRequestContextRepository } from './prisma/face-source-window-request-context-repository.ts'
 import { FfmpegCaptionPixelCritic } from './media/ffmpeg-caption-pixel-critic.ts'
+import { FfmpegMp4PixelCritic } from './media/ffmpeg-mp4-pixel-critic.ts'
+import { OpenvinoPixelOracle } from './perception/openvino-pixel-oracle.ts'
+import type { Mp4PixelCritic } from '../application/ports/mp4-pixel-critic.ts'
 import { faceWorkerPlatformAccepted } from '../domain/face-producer-registry.ts'
 import { YunetCpuFaceDetector } from './perception/yunet-cpu-face-detector.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
@@ -2904,6 +2907,9 @@ export function createProjectProxyRenderWorker(
     // (the candidate's licence is pending), so every placed cue also carries FACE_PIXEL_CHECK_UNAVAILABLE: a warning that never
     // turns an unknown into a pass.
     captionPixelCritic: new FfmpegCaptionPixelCritic(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+    // W67. The independent critic of the delivered MP4 (two detectors + feature registration, control encodes). Wired only when the private
+    // OpenVINO runtime is configured; without it the proxy ships the plan's decisions unverified in pixels, as before.
+    ...optionalMp4PixelCritic(environment, artifactRoot),
     // F4.014. The colour verdict is taken on the bytes this worker just wrote
     // and lands on the review it is about to persist. Assembled here because it
     // needs the three things a worker has no business knowing: where FFmpeg is,
@@ -2982,6 +2988,8 @@ export function createProjectFinalExportWorker(
     // not delivered. No independent face veto detector is wired, so each burned cue also records FACE_PIXEL_CHECK_UNAVAILABLE in
     // the receipt - a warning that never turns an unknown into a pass.
     captionPixelCritic: new FfmpegCaptionPixelCritic(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+    // W67. When the private OpenVINO runtime is configured, a blocked variant (or a critic that cannot read the file) is never promoted.
+    ...optionalMp4PixelCritic(environment, artifactRoot),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
@@ -3414,6 +3422,33 @@ export function createColorCriticEvaluator(environment: NodeJS.ProcessEnv = proc
  * them into separate factory calls is what let a deployment wire the judging
  * and leave a full re-encode of every source on disk after every render.
  */
+const PIXEL_ORACLE_VARIABLES = Object.freeze([
+  'APOLLO_V2_PIXEL_ORACLE_PYTHON', 'APOLLO_V2_PIXEL_ORACLE_PYTHON_SHA256', 'APOLLO_V2_PIXEL_ORACLE_MODULES', 'APOLLO_V2_PIXEL_ORACLE_V9_MODEL_DIR',
+  'APOLLO_V2_PIXEL_ORACLE_RETAIL_MODEL_DIR', 'APOLLO_V2_PIXEL_ORACLE_BRIDGE', 'APOLLO_V2_PIXEL_ORACLE_BRIDGE_SHA256',
+] as const)
+
+/**
+ * W67. The MP4 pixel critic of a worker, or nothing when no deployment variable names the private OpenVINO runtime. A deployment that
+ * names some of them and not all is misconfigured and fails closed: a half-wired critic would be a critic nobody can tell is off.
+ */
+export function optionalMp4PixelCritic(environment: NodeJS.ProcessEnv, artifactRoot: string): { mp4PixelCritic?: Mp4PixelCritic } {
+  const values = PIXEL_ORACLE_VARIABLES.map((name) => environment[name]?.trim())
+  if (values.every((value) => !value)) return {}
+  if (values.some((value) => !value)) {
+    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `The MP4 pixel critic needs all of ${PIXEL_ORACLE_VARIABLES.join(', ')}`)
+  }
+  const [python, pythonSha256, modules, v9ModelDirectory, retailModelDirectory, bridgePath, bridgeSha256] = values as [string, string, string, string, string, string, string]
+  const oracle = new OpenvinoPixelOracle({
+    pythonExecutable: python, pythonExecutableSha256: pythonSha256, pythonModulePath: modules, v9ModelDirectory, retailModelDirectory, bridgePath, bridgeSha256,
+  })
+  return {
+    mp4PixelCritic: new FfmpegMp4PixelCritic({
+      oracle, workRoot: environment.APOLLO_V2_MP4_CRITIC_WORK_ROOT?.trim() || join(resolve(artifactRoot), '.mp4-critic-work'),
+      ...(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+    }),
+  }
+}
+
 export function createColorCriticRuntime(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),

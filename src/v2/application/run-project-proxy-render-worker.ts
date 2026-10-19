@@ -10,6 +10,8 @@ import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { plannedCaptionsOverKeptFrames } from './plan-caption-placement.ts'
 import type { FaceSourceWindowEvidenceReader } from './ports/face-source-window-evidence-reader.ts'
 import type { CaptionPixelCritic } from './ports/caption-pixel-critic.ts'
+import type { Mp4PixelCritic } from './ports/mp4-pixel-critic.ts'
+import { persistMp4QualityReport, verifyDeliveredMp4, type DeliveredMp4Verification } from './verify-delivered-mp4.ts'
 import { evaluateCaptionPixels, type CaptionPixelIssueV1 } from '../domain/caption-pixel-verdict.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
@@ -73,6 +75,12 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
    * cue, its issues land on the review; if it cannot run, that is a warning, never a pass.
    */
   captionPixelCritic?: CaptionPixelCritic
+  /**
+   * W67. The independent critic of the delivered MP4: it decodes every frame, measures captions, CTA, safe area, subject and density on the
+   * pixels against control encodes of the same input, and seals a report. Its hard issues block THIS output only; if it is wired and cannot
+   * run, the review is a warning (never a pass). Optional: a deployment without it ships the plan's decisions unverified in pixels.
+   */
+  mp4PixelCritic?: Mp4PixelCritic
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -427,6 +435,23 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           await dependencies.renderer.cleanup(controlOperationId).catch(() => undefined)
         }
       }
+      // ---- W67. What the pixels of the delivered file say, read by the independent critic and sealed ----
+      let mp4Verification: DeliveredMp4Verification | undefined
+      if (dependencies.mp4PixelCritic) {
+        mp4Verification = await verifyDeliveredMp4({
+          critic: dependencies.mp4PixelCritic, renderer: dependencies.renderer, renderRequest, deliveredPath: rendered.outputPath,
+          identity: {
+            workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId, variantId: outputVariantId,
+            outputSpecId: outputPreset.spec.id, format: source.format, operationId: operation.id, renderInputHash: context.inputHash,
+          },
+          outputSpec: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height, safeArea: outputPreset.spec.safeArea },
+          renderSources: source.renderSources, sourcePaths: materializedSources.map((materialized) => materialized.path), clips,
+          overlays: { captions: drawsCaptions, cta: ctaOverlays.length > 0 }, controlOperationPrefix: operation.id, signal: abortController.signal,
+        })
+        if (mp4Verification.measurement === 'completed') {
+          await persistMp4QualityReport({ storage: dependencies.storage, workspaceId: operation.workspaceId, report: mp4Verification.verification.report })
+        }
+      }
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({ workspaceId: operation.workspaceId, sourcePath: rendered.outputPath, sha256: rendered.sha256, extension: 'mp4', prefix: artifactOutputStoragePrefix('editorial-proxy', context.outputArtifactId) })
       const toolDigest = createHash('sha256')
@@ -532,7 +557,10 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
               subtitleSafeRegion: source.editPlan.composition.subtitleSafeRegion,
             }
           : {}),
-        criticIssues: [...(source.criticIssues ?? []), ...colorCriticIssues],
+        criticIssues: [...(source.criticIssues ?? []), ...colorCriticIssues, ...(mp4Verification?.measurement === 'failed' ? [Object.freeze({
+          code: 'MP4_PIXEL_CRITIC_UNAVAILABLE', severity: 'warning' as const, category: 'technical' as const,
+          message: `The MP4 pixel critic could not read the delivered file (${mp4Verification.failureCode}); its pixels were not independently verified.`, correctable: false,
+        })] : [])],
         // The critic runs on the rendered proxy, after the geometry above was materialized, and
         // every issue it produces is bound to the exact plans that produced these frames.
         formatCritic: {
@@ -548,6 +576,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           // blocks this output instead of shipping a subtitle over a face.
           subtitleAnchorPlan: placementPlan.subtitleAnchorPlan,
           ...(captionPixelIssues.length ? { captionPixelIssues } : {}),
+          ...(mp4Verification?.measurement === 'completed' ? { mp4PixelIssues: mp4Verification.verification.issues, mp4Evidence: mp4Verification.evidence } : {}),
         },
       })
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')

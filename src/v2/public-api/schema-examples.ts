@@ -1205,6 +1205,23 @@ const {
   formatQuality: _legacyProxyFormatQuality,
   ...proxyReviewExampleWithoutOutput
 } = proxyReviewExample
+const proxyReviewExampleV3 = {
+  ...proxyReviewExample,
+  formatQuality: {
+    ...proxyReviewExample.formatQuality,
+    mp4Evidence: {
+      schemaVersion: 'mp4-evidence-seal/v1', reportSchemaVersion: 'mp4-quality-report/v1', reportHash: 'e'.repeat(64), reportFileSha256: 'f'.repeat(64),
+      artifactSha256: '8'.repeat(64), artifactByteSize: 4194304, renderInputHash: '9'.repeat(64), workspaceId: 'workspace-example-1', projectId: 'project-example-1',
+      projectVersionId: 'project-version-example-1', variantId: 'variant-example-9x16', outputSpecId: 'preset-9x16', operationId: 'operation-example-proxy-1',
+      policySha256: '7'.repeat(64),
+      oracleModelDigests: [
+        { id: 'omz-face-detection-0204-v9', xmlSha256: '1'.repeat(64), binSha256: '2'.repeat(64), scoreFloor: 0.5 },
+        { id: 'omz-face-detection-retail-0004', xmlSha256: '3'.repeat(64), binSha256: '4'.repeat(64), scoreFloor: 0.5 },
+      ],
+      sampledFrames: 300, totalFrames: 300, verdict: 'warning',
+    },
+  },
+}
 const proxyReviewExampleV1 = {
   ...proxyReviewExampleWithoutOutput,
   criticIssues: proxyReviewExample.criticIssues.map(({ outputSpecId: _o, outputPresetHash: _p, placementPlanHash: _l, reframePlanHash: _f, format: _a, evidenceRange: _r, elementIds: _e, evidenceIds: _v, ...issue }) => issue),
@@ -14418,6 +14435,9 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
     'apollo://schemas/project-proxy-review-response/v2': [
       { data: { review: proxyReviewExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/project-proxy-review-response/v3': [
+      { data: { review: proxyReviewExampleV3 }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/project-proxy-review-warning-acknowledgement-request/v1': [
       {
         action: 'acknowledge-warnings',
@@ -14457,6 +14477,16 @@ const BASE_PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> 
       {
         data: {
           review: { ...proxyReviewExample, status: 'ready-for-final', warningsAcknowledged: true, finalAllowed: true, reviewHash: 'b'.repeat(64), revision: 2, acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt } },
+          decision: { id: 'proxy-review-decision-example-1', proxyReviewId: proxyReviewExample.id, action: 'acknowledge-warnings', actor: { type: 'api-client', id: clientId }, baseReviewHash: proxyReviewExample.reviewHash, resultReviewHash: 'b'.repeat(64), createdAt },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-proxy-review-warning-acknowledgement-result/v3': [
+      {
+        data: {
+          review: { ...proxyReviewExampleV3, status: 'ready-for-final', warningsAcknowledged: true, finalAllowed: true, reviewHash: 'b'.repeat(64), revision: 2, acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt } },
           decision: { id: 'proxy-review-decision-example-1', proxyReviewId: proxyReviewExample.id, action: 'acknowledge-warnings', actor: { type: 'api-client', id: clientId }, baseReviewHash: proxyReviewExample.reviewHash, resultReviewHash: 'b'.repeat(64), createdAt },
           replayed: false,
         },

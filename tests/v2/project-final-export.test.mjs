@@ -1504,3 +1504,123 @@ test('W65b the gate still refuses everything the Director report does not honest
   const stale = new PrismaProjectFinalExportRepository({ $queryRawUnsafe: (...args) => wrongRun.world.queryRawUnsafe(...args), v2Project: { async findFirst() { return { locale: 'pt-BR', versions: [], directorRuns: [], proxyReviews: [] } } } })
   assert.equal(await stale.readApproval(wrongRun.request), null, 'no matching version, run or ready-for-final proxy review')
 })
+
+// ---- W67: the independent MP4 critic gates the promotion of THIS variant ----
+const { createMp4QualityReport: createMp4Report, MP4_PIXEL_CRITIC_POLICY: MP4_POLICY } = await import('../../src/v2/domain/mp4-pixel-quality.ts')
+const { pixelOracleModelPins: oraclePins } = await import('../../src/v2/domain/pixel-face-oracle.ts')
+
+/**
+ * A stand-in MP4 critic that seals a report for what the request says it is judging. `overFaceFrames` are frames whose caption ink
+ * touches a face (a hard issue); `identityOverrides` lets a test present the report of another variant or file.
+ */
+function fakeMp4Critic({ overFaceFrames = [], identityOverrides = {}, artifactSha256 = '6'.repeat(64), throws = false } = {}) {
+  const critic = {
+    requests: [], controls: [],
+    async verify(request) {
+      critic.requests.push(request)
+      if (throws) throw new Error('the critic exploded')
+      for (const kind of ['overlays-off', 'captions-off', 'cta-off']) critic.controls.push((await request.renderControl(kind)).path)
+      const frames = 300
+      const samples = Array.from({ length: frames }, (_unused, frameIndex) => {
+        const over = overFaceFrames.includes(frameIndex)
+        return {
+          sampleId: `sample-${frameIndex}`, frameIndex, ptsTicks: frameIndex * 512, frameSha256: 'a'.repeat(64),
+          caption: over ? { pixels: 4000, bbox: { x0: 100, y0: 800, x1: 900, y1: 860 }, touchesCanvasEdge: false } : { pixels: 0, bbox: null, touchesCanvasEdge: false },
+          cta: { pixels: 0, bbox: null, touchesCanvasEdge: false }, inkDensity: over ? 0.02 : 0,
+          oracle: { state: 'observed', outputFaceCount: 1, sourceFaceCount: 1 }, registration: null,
+          protectedRegions: [{ origin: 'oracle-0204-v9', box: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 }, captionInkPixels: over ? 60 : 0, ctaInkPixels: 0 }],
+          subject: { state: 'measured', visibleFraction: 1, outputConfirmed: true, projected: { x0: 0.3, y0: 0.3, x1: 0.5, y1: 0.5 } },
+        }
+      })
+      const report = createMp4Report({
+        identity: { ...request.identity, ...identityOverrides },
+        artifact: { sha256: artifactSha256, byteSize: 8192, container: 'mov,mp4,m4a,3gp,3g2,mj2', videoCodec: 'h264', pixelFormat: 'yuv420p', width: request.outputSpec.width, height: request.outputSpec.height, frameRate: { num: 30, den: 1 }, timeBase: { num: 1, den: 15360 }, frameCount: frames, durationTicks: frames * 512 },
+        decode: { status: 'complete', framesExpected: frames, framesDecoded: frames, frameListSha256: 'e'.repeat(64), stderrSha256: 'd'.repeat(64), ffmpegBinarySha256: null },
+        outputSpec: request.outputSpec, controls: [], noiseProbe: null,
+        oracle: { protocol: 'apollo-pixel-oracle/v1', models: oraclePins(), bridgeSha256: '1'.repeat(64), pythonSha256: '2'.repeat(64), runtime: {}, registration: MP4_POLICY.registration, perSample: [] },
+        samples,
+      })
+      return { report, issues: report.issues }
+    },
+  }
+  return critic
+}
+
+function wireMp4Critic(dependencies, critic) {
+  dependencies.mp4PixelCritic = critic
+  const stored = []
+  const promote = dependencies.storage.promoteDerived
+  dependencies.storage.promoteDerived = async (input) => {
+    if (input.prefix === 'mp4-quality-reports') { stored.push(input); return { key: `workspaces/${input.prefix}/${input.sha256}.json`, sha256: input.sha256, byteSize: 1 } }
+    return promote(input)
+  }
+  return stored
+}
+const mp4Validator = (attempt) => attempt.validators.find((validator) => validator.code === 'FINAL_MP4_CRITIC')
+
+test('W67 a final whose MP4 critic blocks the variant is not promoted, attached or cataloged; the sealed report is kept as evidence', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  const seen = capture(dependencies)
+  const critic = fakeMp4Critic({ overFaceFrames: [10, 11, 12] })
+  const stored = wireMp4Critic(dependencies, critic)
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-mp4-blocked')
+  assert.equal(outcome.status, 'failed')
+  assert.equal(seen.attempt.status, 'failed')
+  assert.equal(seen.attempt.error.code, 'render_output_invalid'); assert.equal(seen.attempt.error.stage, 'output-verification')
+  const validator = mp4Validator(seen.attempt)
+  assert.equal(validator.passed, false)
+  assert.match(validator.message, /blocked this variant \(SUBTITLE_FACE_OVERLAP_IN_PIXELS\); report [a-f0-9]{64} stored as workspaces\/mp4-quality-reports\//)
+  assert.equal(calls.persisted, 0); assert.equal(calls.attached, 0); assert.equal(calls.cataloged, 0); assert.equal(calls.mapped, 0)
+  assert.equal(stored.length, 1, 'the evidence is stored for a blocked variant; its MP4 is not')
+  // the critic judged THIS operation's file for THIS output, with the three controls of the same input
+  const [request] = critic.requests
+  assert.deepEqual([request.identity.operationId, request.identity.outputSpecId, request.identity.format, request.identity.projectVersionId], ['operation-final-export-test', 'preset-9x16', '9:16', projectVersionId])
+  assert.deepEqual(request.overlays, { captions: true, cta: false })
+  assert.equal(request.deliveredPath, join(tmpdir(), 'apollo-final-export-output.mp4'))
+  const controlRenders = seen.rendered.filter((input) => input.operationId.includes('-mp4-'))
+  assert.deepEqual(controlRenders.map((input) => [input.operationId.split('-mp4-')[1], input.subtitleCues.length, input.ctaOverlays?.length ?? 0]), [['overlays-off', 0, 0], ['captions-off', 0, 0], ['cta-off', 1, 0]])
+})
+
+test('W67 a final whose MP4 critic does not block it is promoted, and the attempt records the sealed report it stands on', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  const seen = capture(dependencies)
+  const stored = wireMp4Critic(dependencies, fakeMp4Critic())
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-mp4-passed')
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
+  assert.equal(seen.attempt.status, 'promoted')
+  const validator = mp4Validator(seen.attempt)
+  assert.equal(validator.passed, true)
+  assert.match(validator.message, /MP4 critic did not block this variant; report [a-f0-9]{64} stored as /)
+  assert.equal(calls.persisted, 1); assert.equal(calls.attached, 1); assert.equal(calls.cataloged, 1)
+  assert.equal(stored.length, 1)
+})
+
+test('W67 a critic that could not read the file, or that reports another variant, another file or another operation, never lets a final through', async () => {
+  for (const [label, critic] of [
+    ['critic threw', fakeMp4Critic({ throws: true })],
+    ['report of another file', fakeMp4Critic({ artifactSha256: '0'.repeat(64) })],
+    ['report of another output spec', fakeMp4Critic({ identityOverrides: { outputSpecId: 'preset-16x9', format: '16:9' } })],
+  ]) {
+    const operations = createOperations()
+    const { calls, dependencies } = workerDependencies(operations)
+    const seen = capture(dependencies)
+    wireMp4Critic(dependencies, critic)
+    const outcome = await runNextProjectFinalExportOperationService(dependencies)(`worker-final-export-mp4-${label.length}`)
+    assert.equal(outcome.status, 'failed', label)
+    assert.equal(calls.persisted, 0, label); assert.equal(calls.attached, 0, label); assert.equal(calls.cataloged, 0, label)
+    assert.ok(seen.attempt === null || seen.attempt.status === 'failed', label)
+  }
+})
+
+test('W67 without an MP4 critic wired the final is exactly what it was: nothing is gated and no control is rendered', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  const seen = capture(dependencies)
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-mp4-absent')
+  assert.equal(outcome.status, 'succeeded')
+  assert.equal(mp4Validator(seen.attempt), undefined)
+  assert.equal(seen.rendered.filter((input) => input.operationId.includes('-mp4-')).length, 0)
+  assert.equal(calls.persisted, 1)
+})
